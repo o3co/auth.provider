@@ -126,6 +126,20 @@ it("adds the witness-backfill entry when mfa-witnessing is composed", async () =
 	expect(await read(target, "src/witness-backfill.ts")).toContain('from "@o3co/x-mfa-witnessing"');
 });
 
+it("adds the passkey-backfill entry when passkey-witnessing is composed, settling through passkeyBackfill", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/passkey-witnessing"], fakePackages(), readme);
+
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts["passkey-backfill"]).toBe(
+		"node --env-file-if-exists=.env src/passkey-backfill.ts",
+	);
+	expect(manifest.scripts["witness-backfill"]).toBeUndefined();
+	const entry = await read(target, "src/passkey-backfill.ts");
+	expect(entry).toContain('import { passkeyBackfill } from "@o3co/x-passkey-witnessing"');
+	expect(entry).toContain('["marked", "held", "none", "pending", "inconsistent"]');
+});
+
 it("refuses a target that holds anything, and writes nothing", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeFile(join(target, "kept"), "");

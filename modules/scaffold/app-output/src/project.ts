@@ -96,6 +96,16 @@ const entries: readonly {
 			answers: '"marked", "held", "none", "unclaimed", "inconsistent"',
 		},
 	},
+	{
+		script: "passkey-backfill",
+		file: "src/passkey-backfill.ts",
+		template: "backfill.ts.template",
+		runs: "@mod/passkey-witnessing",
+		fill: {
+			contract: "passkeyBackfill",
+			answers: '"marked", "held", "none", "pending", "inconsistent"',
+		},
+	},
 ];
 
 /**
