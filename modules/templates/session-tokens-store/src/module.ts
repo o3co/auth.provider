@@ -41,7 +41,7 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "session-tokens-store", section }, (m) => [
+export default defineModule({ name: "session-tokens-store", section, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => issued),
 	m.contribute(spaces).by(() => indexed),
 	m.contribute(spaces).by(() => pending),
