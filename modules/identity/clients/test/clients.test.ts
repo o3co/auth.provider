@@ -1,6 +1,7 @@
 import type { HttpRequest } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module, Unavailable } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { testScryptHash } from "@mod/secret-hash/testing";
 import { describe, expect, it } from "vitest";
@@ -25,7 +26,7 @@ const grants: Section<{ allowed: string[] }> = {
 	name: "grants",
 	schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
 };
-const grantsModule = defineModule({ name: "grants-owner" }, (m) => [
+const grantsModule = defineModule({ name: "grants-owner", takes: [] }, (m) => [
 	m.contribute(metadataSections).by(() => grants),
 ]);
 
@@ -54,7 +55,7 @@ async function boot(extra: readonly Module[] = [], list = registered): Promise<C
 }
 
 const method = (name: string, parts: Partial<AuthMethod> = {}) =>
-	defineModule({ name }, (m) => [
+	defineModule({ name, takes: [] }, (m) => [
 		m.contribute(authMethods).by(() => ({
 			name,
 			claimed: () => undefined,
@@ -63,7 +64,7 @@ const method = (name: string, parts: Partial<AuthMethod> = {}) =>
 		})),
 	]);
 const source = (find: (id: string) => unknown) =>
-	defineModule({ name: "source" }, (m) => [
+	defineModule({ name: "source", takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id: string) => find(id) as ClientRecord | undefined,
 		})),
@@ -184,7 +185,7 @@ describe("clients", () => {
 
 	describe("a section's boot check", () => {
 		const checked = (seen: unknown[], holders: unknown[] = []) =>
-			defineModule({ name: "checked-owner" }, (m) => [
+			defineModule({ name: "checked-owner", takes: [] }, (m) => [
 				m.contribute(metadataSections).by(() => ({
 					name: "checked",
 					schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
@@ -636,7 +637,7 @@ describe("clients", () => {
 
 	it("asks the sources in turn until one names the client", async () => {
 		const remote = { kind: "public" as const, method: "none", sections: {} };
-		const later = defineModule({ name: "later" }, (m) => [
+		const later = defineModule({ name: "later", takes: [] }, (m) => [
 			m.contribute(clientSources).by(() => ({
 				find: async (id: string) => (id === "later" ? { id, ...remote } : undefined),
 			})),
@@ -661,4 +662,10 @@ it("registers no clients, and a client no sections, that the operator leaves out
 	expect(clientsModule.section?.parse({})).toEqual({ registered: [] });
 	const written = { id: "c", kind: "public", method: "none" };
 	expect(clientRecord.parse(written)).toEqual({ ...written, sections: {} });
+});
+
+it("takes every handle its takes name", async () => {
+	const modules = [clientsModule, secretHashModule, grantsModule];
+	const config = { ...kernelConfig(), clients: { registered } };
+	expect(await takesUnused({ modules, config })).toEqual({});
 });
