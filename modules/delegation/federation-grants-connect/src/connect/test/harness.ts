@@ -150,7 +150,7 @@ export async function connector(
 		exchange: (x) => script.exchange(x) as ReturnType<Delegation["exchange"]>,
 	} as Delegation;
 	const holders = options.holders ?? {};
-	const stubs = defineModule({ name: "stubs" }, (m) => [
+	const stubs = defineModule({ name: "stubs", takes: [grantsBrowsers, routes] }, (m) => [
 		m.provide(upstreams).by(() => ({
 			of: (idp) => (idp === "corp" && !script.withdrawn ? { delegation } : undefined),
 		})),
@@ -175,7 +175,7 @@ export async function connector(
 		shards: 1,
 		perShard: 1,
 	});
-	const tripStore = defineModule({ name: "trips" }, (m) => [
+	const tripStore = defineModule({ name: "trips", takes: [] }, (m) => [
 		m
 			.provide(roundTripStore)
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),

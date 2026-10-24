@@ -45,6 +45,8 @@ export function upstreamAccountWith(p: UpstreamAccountParts) {
 
 export type UpstreamAccounts = ReturnType<typeof upstreamAccountWith>;
 
+export const upstreamAccountTakes = [users] as const;
+
 /** The upstream account check over the users the assembly gives and the identity check in force. */
 export const upstreamAccountOver = async (
 	c: BuildContext<unknown>,
