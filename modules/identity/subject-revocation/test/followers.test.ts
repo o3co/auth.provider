@@ -14,7 +14,7 @@ const collectOrder = ["b", "a", "c"];
 /** Followers that note each call, and what the boundary already said when it came. */
 function following(failing: readonly string[] = []) {
 	const calls: { name: string; subject: string; keepDelegations: boolean; seen: string }[] = [];
-	const module = defineModule({ name: "followers" }, (m) =>
+	const module = defineModule({ name: "followers", takes: [revocations] }, (m) =>
 		collectOrder.map((name) =>
 			m.contribute(revocationFollowers).by((c) => {
 				const boundaries = c.late(revocations);
@@ -35,7 +35,7 @@ function following(failing: readonly string[] = []) {
 const compositions = {
 	"subject-revocation": () => {
 		const stores = memoryBoundaries();
-		const store = defineModule({ name: "boundaries" }, (m) => [
+		const store = defineModule({ name: "boundaries", takes: [] }, (m) => [
 			m.provide(boundaryStore).by(() => stores.boundaries),
 		]);
 		return { modules: [revocationModule, store], down: stores.down };
