@@ -26,7 +26,7 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 	const byFamily = memoryRecords<never>(now, size).keyedSets(caps.issuedAccess);
 	const down = { families: unavailableSwitch<FamilyStore>("family store") };
 	let meanwhile: ((id: string) => Promise<void>) | undefined;
-	const module = defineModule({ name: "refresh-stores" }, (m) => [
+	const module = defineModule({ name: "refresh-stores", takes: [] }, (m) => [
 		m.provide(familyStore).by((c) => {
 			clock = c.clock.now;
 			const { create: save, read, change } = kept.records;

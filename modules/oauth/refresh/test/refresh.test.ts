@@ -29,7 +29,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
@@ -94,7 +94,9 @@ function collecting<T>(name: string, point: ExtensionPoint<T>) {
 	const seen = contract<readonly T[]>(name);
 	return {
 		seen,
-		module: defineModule({ name }, (m) => [m.provide(seen).by((c) => c.collect(point))]),
+		module: defineModule({ name, takes: [point] }, (m) => [
+			m.provide(seen).by((c) => c.collect(point)),
+		]),
 	};
 }
 const grantsSeen = collecting("grants-seen", grants);
@@ -107,24 +109,25 @@ const issuedAccess = async (t: Tokens, grant: AccessGrant, limits?: IssueLimits)
 	if (issued.kind !== "issued") throw new Error(issued.reason);
 	return issued.access;
 };
-async function serve(
-	options: {
-		revocation?: "denylist" | "unsupported";
-		lifetime?: number;
-		/** An access token's own lifetime, in seconds, when not tokens' default. */
-		accessLifetime?: number;
-		/** Whether a confidential client's families are bound too. */
-		bindConfidential?: boolean;
-		extra?: Module[];
-		caps?: { sessionFamilies: number; issuedAccess: number };
-	} = {},
-) {
+type Options = {
+	revocation?: "denylist" | "unsupported";
+	lifetime?: number;
+	/** An access token's own lifetime, in seconds, when not tokens' default. */
+	accessLifetime?: number;
+	/** Whether a confidential client's families are bound too. */
+	bindConfidential?: boolean;
+	extra?: Module[];
+	caps?: { sessionFamilies: number; issuedAccess: number };
+};
+
+/** What `serve` assembles, with the stand-ins it reaches into. */
+function assembly(options: Options = {}) {
 	const simulated = simulatedStore();
 	const audited = auditStandIn();
 	const stores = memoryStores(options.caps);
 	const down = { tokens: unavailableSwitch<Tokens>("tokens") };
 	const both = ["authorization_code", "refresh_token"];
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			switchedModule(
@@ -177,7 +180,13 @@ async function serve(
 			}),
 		},
 		runtime,
-	});
+	};
+	return { input, audited, stores, down };
+}
+
+async function serve(options: Options = {}) {
+	const { input, audited, stores, down } = assembly(options);
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const { session } = await app.get(sessions).complete(testRequest(), {
@@ -269,7 +278,7 @@ async function serve(
 }
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing" }, (m) => [
+const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -532,7 +541,7 @@ describe("refresh tokens", () => {
 
 	it("stop working while the session falls short of a requirement to be used, as a closed one does", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ name: "short-to-use" }, (m) => [
+		const requirement = defineModule({ name: "short-to-use", takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "mfa",
 				judges: ["use"],
@@ -579,7 +588,7 @@ describe("refresh tokens", () => {
 
 	it("issue nothing a contributed policy refuses, and leave the token usable once it allows again", async () => {
 		const denying = { on: false };
-		const policy = defineModule({ name: "deny-alice" }, (m) => [
+		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -600,7 +609,7 @@ describe("refresh tokens", () => {
 
 	it("tell the policies a refresh continues a grant they already let through", async () => {
 		const seen: { grantType: string; continuing?: true }[] = [];
-		const watching = defineModule({ name: "watching" }, (m) => [
+		const watching = defineModule({ name: "watching", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "watching",
 				judge: async (request) => {
@@ -703,7 +712,7 @@ describe("refresh tokens", () => {
 	/** Serves with the refresh addition at hand, and the redemptions codes started. */
 	const takingBack = async () => {
 		const redemptions: string[] = [];
-		const spy = defineModule({ name: "spy" }, (m) => [
+		const spy = defineModule({ name: "spy", takes: [] }, (m) => [
 			m.contribute(additions).by(() => ({
 				field: "spy",
 				issue: async (redeemed) => {
@@ -1170,4 +1179,11 @@ it("reads a family's lifetime with its unit, in whole seconds, a day unless set"
 	expect([{}, { lifetime: "2h" }].map(lifetimeOf)).toEqual([86_400, 7200]);
 	const refused = [{ "lifetime-seconds": 60 }, { lifetime: 3600 }, { "sweep-interval": 30 }];
 	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
+});
+
+it("takes all its module names, its confidential clients' families bound or not", async () => {
+	for (const bindConfidential of [false, true]) {
+		const { input } = assembly({ bindConfidential });
+		expect(await takesUnused(input), String(bindConfidential)).toEqual({});
+	}
 });
