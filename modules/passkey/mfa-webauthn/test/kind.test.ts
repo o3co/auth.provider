@@ -1,5 +1,5 @@
 import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds, type Opened, type Verified } from "@mod/mfa-extensions";
 import { type AttributesAnswer, subjectAttributes } from "@mod/subject-attributes";
 import webauthnModule from "@mod/webauthn/module";
@@ -28,7 +28,7 @@ const known = (values: Record<string, unknown>): AttributesAnswer => ({
 	vouched: true,
 	attributes: values,
 });
-const attributesStandIn = defineModule({ name: "subject-attributes" }, (m) => [
+const attributesStandIn = defineModule({ name: "subject-attributes", takes: [] }, (m) => [
 	m.provide(subjectAttributes).by(() => ({
 		of: async (subject) => attributes.get(subject) ?? { kind: "unknown" },
 	})),
@@ -36,23 +36,32 @@ const attributesStandIn = defineModule({ name: "subject-attributes" }, (m) => [
 const credentialIdOf = (factor: Opened) => (factor.state as { id: string }).id;
 const handleOf = (secret: string) => (JSON.parse(secret) as { handle: string }).handle;
 
+/** The kind's composition: the kind, webauthn, a stand-in for the attributes, a reader of the kinds. */
+const composition = (settings: Record<string, unknown> = {}) => ({
+	modules: [
+		attributesStandIn,
+		webauthnModule,
+		kindModule,
+		defineModule({ name: "reader", takes: [factorKinds] }, (m) => [
+			m.provide(kinds).by((c) => c.collect(factorKinds)),
+		]),
+	],
+	config: {
+		...kernelConfig(),
+		...webauthnConfig(),
+		"mfa-webauthn": settings,
+	},
+	runtime,
+});
+
 async function boot(settings: Record<string, unknown> = {}) {
-	const app = await assemble({
-		modules: [
-			attributesStandIn,
-			webauthnModule,
-			kindModule,
-			defineModule({ name: "reader" }, (m) => [m.provide(kinds).by((c) => c.collect(factorKinds))]),
-		],
-		config: {
-			...kernelConfig(),
-			...webauthnConfig(),
-			"mfa-webauthn": settings,
-		},
-		runtime,
-	});
+	const app = await assemble(composition(settings));
 	return app.get(kinds)[0] as FactorKind;
 }
+
+it("takes all it names", async () => {
+	expect(await takesUnused(composition())).toEqual({});
+});
 
 /** Binds a credential of the authenticator as a binding's first proof does. */
 async function bound(
