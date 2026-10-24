@@ -3,6 +3,16 @@ export interface Refusal {
 	readonly reason: string;
 }
 
+/** Whether a thrown value carries `mark`, false where reading it throws (a revoked proxy, a trap that throws). */
+const marked = (error: unknown, mark: symbol): boolean =>
+	readThrown(
+		() =>
+			typeof error === "object" &&
+			error !== null &&
+			(error as { readonly [key: symbol]: unknown })[mark] === true,
+		false,
+	);
+
 /** The mark a refused boot carries, the same in every copy of the kernel a bundle may hold. */
 const bootRefusedMark = Symbol.for("@mod/kernel.boot-refused");
 
@@ -15,13 +25,9 @@ export class BootRefused extends Error {
 		this.name = "BootRefused";
 		this.refusals = Object.freeze([...refusals]);
 	}
-	/** Whether `error` is a refused boot, by its mark rather than its class, so two copies of the kernel agree. */
+	/** Whether `error` is a refused boot, by its mark rather than its class, so two copies of the kernel agree; it never throws. */
 	static is(error: unknown): error is BootRefused {
-		return (
-			typeof error === "object" &&
-			error !== null &&
-			(error as { readonly [bootRefusedMark]?: unknown })[bootRefusedMark] === true
-		);
+		return marked(error, bootRefusedMark);
 	}
 }
 
@@ -65,11 +71,27 @@ export class BuildRefused extends Error {
 }
 
 /**
+ * What `read` makes of a thrown value, or `otherwise` where reading it throws: a thrown value is
+ * anyone's, its getters and proxy traps included, so the kernel reads one only through this.
+ */
+export function readThrown<T>(read: () => T, otherwise: T): T {
+	try {
+		return read();
+	} catch {
+		return otherwise;
+	}
+}
+
+/** The type a warn line names for a thrown value: its name, or `unknown` where reading it throws. */
+export const thrownKind = (error: unknown): string =>
+	readThrown(() => (error instanceof Error ? String(error.name) : typeof error), "unknown");
+
+/**
  * The refusal a thrown value is, read once and never throwing: one marked, whose where and reason
  * are each a diagnostic line; none for any other, or one whose reading throws.
  */
 export function buildRefusalOf(error: unknown): Refusal | undefined {
-	try {
+	return readThrown(() => {
 		if (typeof error !== "object" || error === null) return undefined;
 		const told = error as {
 			readonly [buildRefusedMark]?: unknown;
@@ -81,9 +103,7 @@ export function buildRefusalOf(error: unknown): Refusal | undefined {
 		return isDiagnostic(where, whereMax) && isDiagnostic(reason, reasonMax)
 			? { where, reason }
 			: undefined;
-	} catch {
-		return undefined;
-	}
+	}, undefined);
 }
 
 /** Thrown by refuse and refuseAll inside a factory; assembly records its refusals. Never leaves the kernel. */
@@ -108,11 +128,7 @@ export class Unavailable extends Error {
 	}
 }
 
-/** Whether `error` is an outage, by its mark rather than its class, so two copies of the kernel agree. */
+/** Whether `error` is an outage, by its mark rather than its class, so two copies of the kernel agree; it never throws. */
 export function isUnavailable(error: unknown): error is Unavailable {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		(error as { readonly [unavailableMark]?: unknown })[unavailableMark] === true
-	);
+	return marked(error, unavailableMark);
 }

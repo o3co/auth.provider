@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BootRefused } from "../src/contract.ts";
+import { unreadable } from "./refusals.ts";
 
 describe("BootRefused.is", () => {
 	it("tells a refused boot by the mark every copy of the kernel puts on it, never by its class", () => {
@@ -10,6 +11,10 @@ describe("BootRefused.is", () => {
 			refusals: [{ where: "kernel", reason: "no" }],
 		});
 		expect(BootRefused.is(elsewhere)).toBe(true);
+	});
+
+	it("answers false, never throwing, for a value whose mark cannot be read", () => {
+		for (const value of unreadable()) expect(BootRefused.is(value)).toBe(false);
 	});
 
 	it("takes nothing else for a refused boot: a name alone, a mark of another value, or no object", () => {

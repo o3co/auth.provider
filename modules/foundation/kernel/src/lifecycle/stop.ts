@@ -1,6 +1,6 @@
+import { thrownKind } from "../refusal/refusal.ts";
 import type { Log } from "../runtime/runtime.ts";
 import type { periodic } from "./every.ts";
-import { kindOf } from "./kind.ts";
 
 /** A module's stop hook, run with a signal that aborts at the deadline. */
 export type StopHook = {
@@ -39,7 +39,7 @@ export async function stopWithin(
 					log.warn("kernel.stop_failed", {
 						module: hook.module,
 						outcome: "failed",
-						kind: kindOf(error),
+						kind: thrownKind(error),
 						...marked,
 					});
 				});

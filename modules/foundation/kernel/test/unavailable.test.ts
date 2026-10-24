@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isUnavailable, Unavailable } from "../src/contract.ts";
+import { unreadable } from "./refusals.ts";
 
 describe("isUnavailable", () => {
 	it("tells an outage by the mark every copy of the kernel puts on it, never by its class", () => {
@@ -20,5 +21,9 @@ describe("isUnavailable", () => {
 		for (const value of [named, other, new Error("x"), "Unavailable", null, undefined, 0]) {
 			expect(isUnavailable(value), String(value)).toBe(false);
 		}
+	});
+
+	it("answers false, never throwing, for a value whose mark cannot be read", () => {
+		for (const value of unreadable()) expect(isUnavailable(value)).toBe(false);
 	});
 });

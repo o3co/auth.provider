@@ -10,3 +10,13 @@ export async function refusalsOf(run: Promise<unknown>): Promise<readonly Refusa
 	}
 	throw new Error("expected a refusal");
 }
+
+/** Values whose very reading throws: a revoked proxy, and one whose get trap throws. */
+export function unreadable(): unknown[] {
+	const revoked = Proxy.revocable({}, {});
+	revoked.revoke();
+	const trap = () => {
+		throw new Error("unreadable");
+	};
+	return [revoked.proxy, new Proxy({}, { get: trap })];
+}
