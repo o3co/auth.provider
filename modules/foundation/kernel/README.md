@@ -11,13 +11,14 @@
 
 ## Offers
 - `defineModule`: name, section schema (zod, the library that reads sections), multi-instance declaration (a boolean, or a function asked only with a section that passed), provisions and contributions. `contract` (optionally `takenBy`, the names of the modules that may take it) and `extensionPoint` (exactly one / at least one / any number / keyed) make the handles.
-- `assemble`: answers `get`, `start` and `stop(deadlineMs?)` (without one, `stop-deadline`), or rejects with `BootRefused` (one module may raise several refusals), refused after its builds once their stop hooks ran (`lifecycle`'s rollback); `BootRefused.is` tells one by a mark every copy of the kernel shares, never by its class.
+- `assemble`: answers `get`, `start` and `stop(deadlineMs?)` (without one, `stop-deadline`), or rejects with `BootRefused` (one module may raise several refusals), refused after its builds once their stop hooks ran (`lifecycle`'s rollback).
 - `stop`: after the periodic tasks, runs the stop hooks in reverse order, each given a signal that aborts at the deadline; the hooks left are then called without waiting. A hook may also run without `start()`, on a refused assembly: it ends what its build started.
 - Build context: the runtime, `section`, `get`, `collect`, `late` (a function giving a contract's interface once assembly succeeds), `readinessReport`, `onStart`, `onStop`, `every`, `refuse` and `refuseAll`.
 - `readinessReport(deadlineMs)`: runs every probe (a contributed check of one resource, keyed by name at `probes`) at once, joining a check still running, and gives each probe's name and whether it passed. `ready` only if all pass within the caller's deadline; once stop begins, `unready` with all down. A check is aborted once no caller waits.
 - `every(intervalMs, task)`: runs `task(signal)` from start at a whole interval of ms from 1 to 2^31−1, never two at once; a failed run is logged and the next follows; stop aborts a running one and waits for it.
-- `Unavailable`: a dependency gave no answer, as distinct from a negative answer; `isUnavailable` tells one by a mark every copy of the kernel shares (`Symbol.for`), never by its class. `deepFreeze` freezes a value from outside once, to the leaves. `sameSecret` compares two secrets (strings as UTF-8, or bytes) in constant time when their byte lengths match, and answers false otherwise.
-- Runtime contracts: clock, randomness, and a log with one method per level (trace to fatal). Sinks come from `logSinks` (any number).
+- Refusals and outages (internal module `refusal`): `BootRefused` and `Unavailable`, each told by a mark every copy of the kernel shares.
+- `deepFreeze` freezes a value from outside once, to the leaves. `sameSecret` compares two secrets (strings as UTF-8, or bytes) in constant time when their byte lengths match, and answers false otherwise.
+- Runtime contracts (internal module `runtime`, whose card holds the log's invariants): clock, randomness, and a log with one method per level (trace to fatal). Sinks come from `logSinks` (any number).
 - Section `kernel`: `deployment` (`single` or `multi`, no default), `logging.level` (a level or `silent`, default `info`) and `stop-deadline` (`1s` to `1h` in whole seconds, default `30s`; an orchestrator's grace period must be longer).
   - `kernelSection` is its schema, with a description of each key for operators; the kernel reads the section through it as a module's is read.
   - `kernelConfig` builds it, single unless told otherwise.
@@ -32,8 +33,6 @@
 - A module a contract's `takenBy` does not name that takes it by `get` or `late` refuses boot, even when it catches the throw. `Assembly.get`, the composition root's, is not bound, and it binds the modules of a trusted assembly, never hostile code in the same process.
 - Sections are frozen to the leaves. Contributions are frozen one level, since library values they hold keep state.
 - A failed periodic run, probe or stop hook is one warn line naming it, with the error's type, never its text. A stop hook past the deadline is one too.
-- Lines below the level reach no sink; the rest reach every sink in module order, skipping one that throws. Sinks are built first; lines logged meanwhile are dropped.
-- A log call never throws, so no caller wraps one in try. A test's runtime keeps its own log.
 
 ## Depends on
 - None (external libraries only)

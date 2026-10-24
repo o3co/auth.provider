@@ -1,6 +1,6 @@
 import type { Contract } from "./handles.ts";
 import type { Module } from "./module.ts";
-import { Unavailable } from "./refusal.ts";
+import { Unavailable } from "./refusal/refusal.ts";
 import {
 	type Log,
 	type LogFields,

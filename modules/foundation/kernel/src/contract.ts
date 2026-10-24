@@ -25,7 +25,7 @@ export {
 	type Parts,
 	type Provision,
 } from "./module.ts";
-export { BootRefused, isUnavailable, type Refusal, Unavailable } from "./refusal.ts";
+export { BootRefused, isUnavailable, type Refusal, Unavailable } from "./refusal/refusal.ts";
 export { logSinks } from "./runtime/log.ts";
 export type {
 	Clock,

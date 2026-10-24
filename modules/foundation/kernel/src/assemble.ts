@@ -11,7 +11,7 @@ import {
 } from "./lifecycle/readiness.ts";
 import { type StopHook, stopWithin } from "./lifecycle/stop.ts";
 import type { BuildContext, Module } from "./module.ts";
-import { BootRefused, type Refusal, RefusalSignal } from "./refusal.ts";
+import { BootRefused, type Refusal, RefusalSignal } from "./refusal/refusal.ts";
 import { guardedLog, logSinks, routedLog } from "./runtime/log.ts";
 import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime/runtime.ts";
 

@@ -13,7 +13,9 @@ Internal module of `kernel`: the clock, randomness and log every module is given
 - `logSinks`, `thresholds` and `Threshold`; `routedLog` (level, clock, the sinks once built) and `guardedLog` (a test's log, made never to throw).
 
 ## Invariants
-- A log call never throws. Lines reach every sink in module order, skipping one that throws; lines logged before the sinks are built are dropped.
+- A log call never throws, so no caller wraps one in try.
+- Lines below the level reach no sink; the rest reach every sink in module order, skipping one that throws. Sinks are built first; lines logged meanwhile are dropped.
+- A test's runtime keeps its own log.
 
 ## Depends on
 - None; the package's handles
