@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { readBundles } from "../contract.ts";
 import { outsideScene } from "../outside-scene/contract.ts";
 import { packedOf, packRelease, zodOf } from "../release/contract.ts";
 import { releaseOf } from "../workspace.ts";
+import { sweptRun } from "./containers/container.ts";
 import { helperScene } from "./helpers.ts";
 import { dockerMissing, images, overridesFile } from "./image.ts";
 
@@ -24,7 +26,7 @@ const say = (text: string) => process.stdout.write(`${text}\n`);
 const problems: string[] = [];
 
 // No boot is skipped: without Docker the release is not checked as it is deployed.
-const missing = dockerMissing();
+const missing = await dockerMissing();
 if (missing) {
 	console.error(
 		`release:check boots each app in its image, and Docker is not reachable: ${missing}`,
@@ -129,7 +131,9 @@ throw new Error("booted with no configuration");
 	say("by hand: failed");
 }
 
-const run = images(`release-check-${process.pid}`, { dir: tarballs, byName: overrides }, scratch);
+// Each launch its own: no name, nor label, of an earlier check's is ever this one's.
+const runName = `release-check-${randomUUID()}`;
+const run = images(runName, { dir: tarballs, byName: overrides }, scratch);
 
 const tsc = join(root, "node_modules", ".bin", "tsc");
 for (const name of patterns().map((pattern) => pattern.name)) {
@@ -164,7 +168,7 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 			],
 			{ cwd: app, stdio: "pipe" },
 		);
-		const image = run.build(app, name);
+		const image = await run.build(app, name);
 		say(`${name}: ${await run.booted(app, image)}`);
 		// The resolver's helpers as a deployment constrains them, on one pattern's image.
 		if (name === "simple-web") {
@@ -182,7 +186,13 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 	}
 }
 
-run.remove();
+// The cleanup the check stands by: every container of this run, one whose making showed late too.
+try {
+	await sweptRun(runName);
+} catch (error) {
+	problems.push(`containers: ${error instanceof Error ? error.message : String(error)}`);
+}
+await run.remove();
 
 const zod = zodOf(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"));
 try {

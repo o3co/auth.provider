@@ -18,9 +18,9 @@
 - The release check refuses a tarball without its `LICENSE`.
 - The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet.
 - Without Docker, the release check exits 1 at once: no boot is skipped.
-- The processes a container takes are read from its cgroup: v2's count, or v1's, under its pids controller.
-- Every docker command goes through `docker.ts`, within a deadline (a minute; a build, or an install in a container, fifteen), its client killed past it, so the check fails rather than waits; a booted app's `docker run` is waited on within the boot's own (a minute to be ready, each look five seconds, 30 seconds to end).
-- A container is gone only where Docker answers that it is not there: stopping or removing one gone is no failure, and inspecting tells it gone by that answer alone; any other failure of Docker's fails the check. One that does not end within 30 seconds is removed and fails the check, so no boot waits on it for ever.
+- The processes a container takes are read from its cgroup (`cgroup`): v2's count, or v1's under its pids controller, only where v2's file is not there; any other failure, Docker's included, is thrown.
+- Every docker command, and each container, goes through `containers`: a command within a minute (a build fifteen); the install's container and each boot's run under one deadline (fifteen minutes; three for a boot, a minute of it to be ready or end, failing where it does neither, each look five seconds) and are removed at the end, however the work ends.
+- Each launch of the check is a run of its own, named by a random id, so no name or label of an earlier one is ever its own; it sweeps its run's containers by label at its end, a container still there a problem told. What a killed check left is removed by hand while no check runs (`containers`' card).
 
 ## Depends on
 - The package's build; `create-app` (its patterns), `trial` (the layer each image boots on); pnpm, to pack and install; Docker, to build and run images.

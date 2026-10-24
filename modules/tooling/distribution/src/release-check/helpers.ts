@@ -1,9 +1,9 @@
 /** The resolver's helper processes in an app's image, run as a deployment constrains it. */
-import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { gone, pidsCurrent } from "./container.ts";
-import { docker } from "./docker.ts";
+import { pidsCurrent } from "./cgroup.ts";
+import type { Container } from "./containers/container.ts";
+import { docker } from "./containers/docker.ts";
 
 /** The part of `images` a scene drives: booting the image with constraints, a look while ready. */
 interface Booting {
@@ -11,24 +11,25 @@ interface Booting {
 		app: string,
 		image: string,
 		constraints?: readonly string[],
-		whileReady?: (container: string) => void,
+		whileReady?: (container: Container) => Promise<void>,
 	): Promise<string>;
 }
 
-const inside = (container: string, ...command: string[]) => docker(["exec", container, ...command]);
+const inside = (c: Container, ...command: string[]) => c.on("exec", ...command);
 /** The command lines of the container's processes. */
-const processes = (container: string) => inside(container, "ps", "-o", "pid,args").split("\n");
-const helpers = (container: string) => processes(container).filter((p) => p.includes("helper.mjs"));
-const isGone = (container: string) => gone(() => docker(["inspect", container]));
+const processes = async (c: Container) => (await inside(c, "ps", "-o", "pid,args")).split("\n");
+const helpers = async (c: Container) =>
+	(await processes(c)).filter((p) => p.includes("helper.mjs"));
 
 /** The image's outbound run once more in the container: the status of the app's readiness at `localhost`, for IPv4 where it listens. */
-const lookedUp = (container: string, port: string) =>
-	inside(
-		container,
-		"node",
-		"--input-type=module",
-		"-e",
-		`import { assemble, kernelConfig } from "@o3co/auth-provider-foundation/kernel";
+const lookedUp = async (c: Container, port: string) =>
+	(
+		await inside(
+			c,
+			"node",
+			"--input-type=module",
+			"-e",
+			`import { assemble, kernelConfig } from "@o3co/auth-provider-foundation/kernel";
 import { outbound } from "@o3co/auth-provider-foundation/outbound";
 import outboundModule from "@o3co/auth-provider-foundation/outbound/module";
 const pair = "localhost:${port}";
@@ -36,29 +37,30 @@ const app = await assemble({ modules: [outboundModule], config: { ...kernelConfi
 const answer = await app.get(outbound).fetch("http://" + pair + "/readyz").then((a) => String(a.status), (e) => "failed: " + (e?.failure ?? e?.name));
 await app.stop();
 process.stdout.write(answer);`,
+		)
 	).trim();
 
 /** The one port the image exposes. */
-const portOf = (image: string) =>
+const portOf = async (image: string) =>
 	Object.keys(
-		JSON.parse(docker(["image", "inspect", "--format", "{{json .Config.ExposedPorts}}", image])),
+		JSON.parse(
+			await docker(
+				["image", "inspect", "--format", "{{json .Config.ExposedPorts}}", image],
+				60_000,
+			),
+		),
 	)[0]?.split("/")[0] ?? "";
 
-/**
- * Boots the image read-only, under a process limit and Docker's default seccomp profile, with its
- * two helpers running and a name resolved through them within those limits; measures what the app takes resolving in its own process, and refuses boot
- * under exactly that limit, as no helper can start; and ends the container, leaving nothing, once
- * the app's own process is killed.
- */
+/** The helpers scene, as `release-check`'s card tells it: limited, refused as measured, ended with its app. */
 export async function helperScene(run: Booting, app: string, image: string): Promise<string> {
 	// Room for the app and its helpers, and for one more process of outbound and its helpers.
 	const constrained = ["--read-only", "--tmpfs", "/tmp", "--pids-limit", "128"];
-	const port = portOf(image);
+	const port = await portOf(image);
 	let running = 0;
 	let reached = "";
-	const ready = await run.booted(app, image, constrained, (c) => {
-		running = helpers(c).length;
-		reached = lookedUp(c, port);
+	const ready = await run.booted(app, image, constrained, async (c) => {
+		running = (await helpers(c)).length;
+		reached = await lookedUp(c, port);
 	});
 	if (ready !== "ready" || running !== 2 || reached !== "200") {
 		throw new Error(
@@ -75,8 +77,8 @@ export async function helperScene(run: Booting, app: string, image: string): Pro
 		"APP_CONFIG=config/in-process.conf,config/local.conf,config/application.conf",
 	];
 	let taken = 0;
-	const own = await run.booted(app, image, inProcess, (c) => {
-		taken = pidsCurrent((path) => inside(c, "cat", path));
+	const own = await run.booted(app, image, inProcess, async (c) => {
+		taken = await pidsCurrent((path) => inside(c, "cat", path));
 	});
 	if (own !== "ready" || !(taken > 0)) throw new Error(`in-process: ${own}, ${taken} processes`);
 	const refused = await run.booted(app, image, ["--pids-limit", String(taken)]);
@@ -85,18 +87,15 @@ export async function helperScene(run: Booting, app: string, image: string): Pro
 	}
 
 	let ended = false;
-	await run.booted(app, image, [], (c) => {
+	await run.booted(app, image, [], async (c) => {
 		// The app's own node, not the init (Tini) that started it, nor a helper.
-		const main = processes(c).find(
+		const main = (await processes(c)).find(
 			(p) => /^\s*\d+\s+(\{[^}]*\}\s+)?node\s/.test(p) && !p.includes("helper.mjs"),
 		);
 		const pid = main?.trim().split(/\s+/)[0];
 		if (pid === undefined) throw new Error("the app's process is not found");
-		inside(c, "kill", "-9", pid);
-		for (let waited = 0; waited < 10_000 && !ended; waited += 100) {
-			ended = isGone(c);
-			execFileSync("sleep", ["0.1"]);
-		}
+		await inside(c, "kill", "-9", pid);
+		ended = await c.until(async () => !(await c.state())?.running, 100, 10_000);
 	});
 	if (!ended) throw new Error("the container outlived its app's process");
 	return `read-only and limited, resolving through its helpers; refused as measured (${taken}); ended with its app`;
