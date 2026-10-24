@@ -1,7 +1,8 @@
 import { type Ceremonies, type Credential, challengeOf, type Verification } from "@mod/webauthn";
+import type { KeptChallenges } from "../challenges/challenges.ts";
 import type { RegistrationRefusal, Registrations } from "../contract.ts";
 import type { Asked } from "../holders/holders.ts";
-import type { Emptied, KeptChallenges, KeptPasskeys } from "../records.ts";
+import type { Emptied, KeptPasskeys } from "../records.ts";
 
 export interface RegistrationParts {
 	readonly ceremonies: Ceremonies;

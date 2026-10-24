@@ -1,6 +1,7 @@
 import { audit } from "@mod/audit";
 import { type BuildContext, contract, defineModule } from "@mod/kernel";
 import { ceremonies, freshHandle } from "@mod/webauthn";
+import { keptChallenges } from "./challenges/challenges.ts";
 import {
 	challengeStore,
 	passkeyHolders,
@@ -11,7 +12,7 @@ import {
 } from "./contract.ts";
 import { holdersOver } from "./holders/holders.ts";
 import { passkeysOver } from "./passkeys.ts";
-import { type KeptPasskeys, keptChallenges, keptPasskeys } from "./records.ts";
+import { type KeptPasskeys, keptPasskeys } from "./records.ts";
 import { registrationsOver } from "./registration/registrations.ts";
 import { type Settings, section } from "./section.ts";
 
