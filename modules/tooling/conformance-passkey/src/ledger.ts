@@ -1,17 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { fakeHttp, type Party } from "@mod/conformance";
 
-const calls = [
-	"/passkey-witness/read",
-	"/passkey-witness/enroll",
-	"/passkey-witness/withdraw",
-	"/passkey-witness/clear",
-];
+const calls = ["/passkey-witness/read", "/passkey-witness/enroll", "/passkey-witness/withdraw"];
 
 /**
  * A ledger answering passkey-witness-http's calls as an operator's keeps them: a mark per subject,
- * set only where none is, read with its token, withdrawn only by its token, cleared whatever it holds; and the section
- * that points an app at it.
+ * set only where none is, read with its token, and withdrawn only by its token (passkey-witness-http
+ * calls no clear); and the section that points an app at it.
  */
 export async function witnessLedger(): Promise<Party> {
 	const credential = randomBytes(32).toString("hex");
@@ -30,12 +25,8 @@ export async function witnessLedger(): Promise<Party> {
 			if (!marks.has(subject)) marks.set(subject, String(given.token));
 			return { json: { owner: marks.get(subject) === given.token } };
 		}
-		// One row per subject: a withdraw compares the token and deletes on that row alone.
-		if (asked.path === "/passkey-witness/withdraw") {
-			if (marks.get(subject) === given.token) marks.delete(subject);
-			return { status: 204 };
-		}
-		marks.delete(subject);
+		// The withdraw, one row per subject: it compares the token and deletes on that row alone.
+		if (marks.get(subject) === given.token) marks.delete(subject);
 		return { status: 204 };
 	});
 	const at = (path: string) => `${ledger.base}${path}`;
@@ -46,7 +37,6 @@ export async function witnessLedger(): Promise<Party> {
 				"read-url": at("/passkey-witness/read"),
 				"enroll-url": at("/passkey-witness/enroll"),
 				"withdraw-url": at("/passkey-witness/withdraw"),
-				"clear-url": at("/passkey-witness/clear"),
 				credential,
 			},
 		},
