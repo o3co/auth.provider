@@ -67,15 +67,7 @@ interface Pending {
 const isWayBack = (kind: FactorKind) => !kind.counts && !guessing(kind);
 
 /** mfa's decisions: the members of the three contracts it provides, one implementation in each app. */
-/**
- * What mfa reads besides `FactorReading`'s members, until mfa-reading's contract names it: how many
- * of the subject's counting factors are written and do not stand.
- */
-export interface UnclaimedReading {
-	unclaimedWritten(subject: string): Promise<number>;
-}
-
-export type Decisions = FactorReading & UnclaimedReading & FactorBinding & FactorManaging;
+export type Decisions = FactorReading & FactorBinding & FactorManaging;
 
 export function factorDecisions(p: FactorParts): Decisions {
 	const wayBack = (factor: Factor) => {

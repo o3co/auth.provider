@@ -27,7 +27,7 @@ import {
 	witnessing,
 } from "@mod/mfa-extensions";
 import { factorManaging } from "@mod/mfa-managing";
-import { type FactorReading, factorReading } from "@mod/mfa-reading";
+import { factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
@@ -37,7 +37,7 @@ import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
 import { enforcers, proofSteps } from "../src/contract.ts";
-import type { Decisions, UnclaimedReading } from "../src/factors.ts";
+import type { Decisions } from "../src/factors.ts";
 import mfaModule from "../src/module.ts";
 import { claimKeyOf, listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
@@ -263,7 +263,7 @@ async function serve(
 	stop = () => app.stop(1000);
 	// mfa's three faces, as one for these tests.
 	const decided: Decisions = {
-		...(app.get(factorReading) as FactorReading & UnclaimedReading),
+		...app.get(factorReading),
 		...app.get(factorBinding),
 		...app.get(factorManaging),
 	};
