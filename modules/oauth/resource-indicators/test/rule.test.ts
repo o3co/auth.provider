@@ -1,22 +1,23 @@
 import { type TargetRule, targetRules } from "@mod/grants";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import resourceIndicators from "../src/module.ts";
 
 /** The rules composed, as token-endpoint collects them. */
 const composed = contract<readonly TargetRule[]>("test.composed-rules");
-const probe = defineModule({ name: "probe" }, (m) => [
+const probe = defineModule({ name: "probe", takes: [targetRules] }, (m) => [
 	m.provide(composed).by((c) => c.collect(targetRules)),
 ]);
 let rule: TargetRule;
+const input = {
+	modules: [probe, resourceIndicators],
+	// Many instances: the rule keeps nothing, so the module never refuses them.
+	config: kernelConfig({ deployment: "multi" }),
+	runtime: quietRuntime(),
+};
 beforeAll(async () => {
-	const app = await assemble({
-		modules: [probe, resourceIndicators],
-		// Many instances: the rule keeps nothing, so the module never refuses them.
-		config: kernelConfig({ deployment: "multi" }),
-		runtime: quietRuntime(),
-	});
+	const app = await assemble(input);
 	const [only, ...more] = app.get(composed);
 	if (!only || more.length > 0) throw new Error("one rule expected");
 	rule = only;
@@ -75,4 +76,8 @@ describe("resource-indicators", () => {
 			expect(verdictFor({ resource }), JSON.stringify(resource)).toEqual(refused);
 		}
 	});
+});
+
+it("takes nothing, as it declares", async () => {
+	expect(await takesUnused(input)).toEqual({});
 });

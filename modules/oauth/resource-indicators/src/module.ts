@@ -1,7 +1,7 @@
 import { targetRules } from "@mod/grants";
 import { defineModule } from "@mod/kernel";
 
-export default defineModule({ name: "resource-indicators", replicaSafe: true }, (m) => [
+export default defineModule({ name: "resource-indicators", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const resource = param("resource");
