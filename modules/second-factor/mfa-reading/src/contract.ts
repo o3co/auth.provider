@@ -47,6 +47,8 @@ export interface FactorReading {
 	countingWritten(subject: string): Promise<boolean>;
 	/** How the subject's factors of a counting kind stand as written, not judged against the witness: `counting` where one counts as `countingWritten` reads it, `unclaimed` where some are written and none counts (a unique value's claim missing or not yet made), `none` where none is written. */
 	writtenStanding(subject: string): Promise<"counting" | "unclaimed" | "none">;
+	/** How many of the subject's factors of a counting kind are written and do not stand as `countingWritten` reads them (a unique value's claim missing or another's), one beside a factor that stands included. */
+	unclaimedWritten(subject: string): Promise<number>;
 	/** Whether every session needs a second factor to be used (`mode = required`). */
 	secondFactorRequired(): boolean;
 	/** What a login asks of the subject: nothing, a proof of a factor, or a first binding. */

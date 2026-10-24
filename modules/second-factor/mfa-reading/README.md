@@ -9,7 +9,8 @@
 
 ## Offers
 - `factorReading` (`mfa.factor-reading`), provided by `mfa`:
-  - Reading: `held`; `countingHeld` (judged against the witness, given where it is asked, `mfa-extensions`' `Asked`); `countingWritten` (as written, a unique value's claimed); `writtenStanding` (as written: counting / unclaimed, written and none claimed / none); `secondFactorRequired`; `asks` (nothing / proof / binding); `guessable`; `guessableBoundAfter` (whether every factor of a guessable kind was bound after a time; an unknown kind, or a record with no time, as bound before).
+  - Reading: `held`; `countingHeld` (judged against the witness, given where it is asked, `mfa-extensions`' `Asked`); `secondFactorRequired`; `asks` (nothing / proof / binding); `guessable`; `guessableBoundAfter` (whether every factor of a guessable kind was bound after a time; an unknown kind, or a record with no time, as bound before).
+  - Reading as written, not judged against the witness: `countingWritten` (a unique value's claimed); `writtenStanding` (counting / unclaimed, written and none claimed / none); `unclaimedWritten` (how many counting factors are written and not claimed, beside a claimed one included).
   - Proving: `challenge` (sent with the kind, what to show and the challenge sealed / none / limited / refused with the kind, and `contact-changed` when the kind gives it / unknown); `prove`, given the sealed challenge (valid with amr / invalid / replayed / raced).
 - `Shown`, `Fence` (compared, never computed with), `Proved`, `Challenged`.
 

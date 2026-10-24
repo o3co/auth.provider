@@ -202,6 +202,13 @@ export function factorDecisions(p: FactorParts): Decisions {
 		},
 		countingWritten: (subject) => countsNow(subject),
 		writtenStanding,
+		unclaimedWritten: async (subject) => {
+			let left = 0;
+			for (const factor of counting(await records.list(subject), p.kinds)) {
+				if (!(await stands(subject, factor))) left += 1;
+			}
+			return left;
+		},
 		secondFactorRequired: () => p.required,
 		asks: async (subject) => {
 			const all = await records.list(subject);

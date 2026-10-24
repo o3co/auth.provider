@@ -3,6 +3,7 @@ import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { flowParts } from "@mod/mfa-flows";
 import { factorManaging } from "@mod/mfa-managing";
+import { factorReading } from "@mod/mfa-reading";
 import { mfaReset } from "@mod/mfa-reset";
 import resetModule from "@mod/mfa-reset/module";
 import passkeyReset from "@mod/passkey-reset/module";
@@ -73,6 +74,8 @@ async function composed({ withBridge = true } = {}) {
 				}) as never,
 		),
 		m.provide(audit).by(() => ({ record: (event) => void events.push(event), lost: () => ({}) })),
+		// mfa-reset reads the factors too, to tell whom to reset; nothing here asks it.
+		m.provide(factorReading).by(() => ({ unclaimedWritten: async () => 0 }) as never),
 	]);
 	const modules: Module[] = [
 		store.module,

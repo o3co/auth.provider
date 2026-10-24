@@ -1,4 +1,6 @@
 /** A deployment's project from a list of modules: configuration from their fragments, the image and a guide. */
+
+import { entriesOf } from "./entries/contract.ts";
 import {
 	applicationConf,
 	envExample,
@@ -12,7 +14,6 @@ import {
 import { type Beside, besideRelease } from "./outside/contract.ts";
 import type { Card, Packages, Release } from "./packages.ts";
 import {
-	entriesOf,
 	filled,
 	mainSource,
 	manifestOf,

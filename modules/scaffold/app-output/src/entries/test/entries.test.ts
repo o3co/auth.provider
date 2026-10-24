@@ -1,9 +1,10 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { configFiles, entriesOf, kernel } from "../src/project.ts";
+import { configFiles, kernel } from "../../project.ts";
+import { entriesOf } from "../contract.ts";
 
 /** Stand-ins for the kernel (with config-files' `loadConfig`) and mfa-witnessing, as packages the written script imports. */
 const fakes: Record<string, Record<string, string>> = {
@@ -31,8 +32,8 @@ export async function assemble({ runtime }) {
 	if (process.env.REFUSE) throw new (await import("fake-kernel-copy")).BootRefused([{ where: "a.b", reason: "why" }]);
 	// Without the script's own runtime, the composed sink would write this line.
 	(runtime?.log ?? { warn: (event) => process.stdout.write(\`LOG \${event}\\n\`) }).warn("fake.assembled");
-	const { backfill } = await import("fake-witnessing");
-	return { get: () => backfill, stop: async () => {} };
+	const { backfill, candidates } = await import("fake-witnessing");
+	return { get: (asked) => (asked === "resetCandidates" ? candidates : backfill), stop: async () => {} };
 }`,
 	},
 	"fake-kernel-copy": {
@@ -47,6 +48,15 @@ export class BootRefused extends Error {
 import { appendFileSync } from "node:fs";
 export const witnessBackfill = "witnessBackfill";
 export const passkeyBackfill = "passkeyBackfill";
+export const resetCandidates = "resetCandidates";
+export const candidates = {
+	unclaimed: async (subject) => {
+		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
+		if (subject === "down") throw Object.assign(new Error("down for alice"), { name: "Unavailable" });
+		if (subject === "boom") throw new Error("secret of alice");
+		return subject.startsWith("claimless") ? 2 : 0;
+	},
+};
 export const backfill = {
 	settle: async (subject) => {
 		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
@@ -77,7 +87,31 @@ async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill
 	const { files } = await entriesOf([runs], importOf, (path) => `node ${path}`);
 	await mkdir(join(target, "src"));
 	await writeFile(join(target, file), files[file] ?? "");
-	return (input: string, env: Record<string, string> = {}) => {
+	/** A run whose standard output is read only after a while, as a slow pipe reads it. */
+	const slowly = (input: string) =>
+		new Promise<{ stdout: string; stderr: string; status: number | null }>((resolve) => {
+			const env = { ...process.env, SEEN: join(target, `seen-${Math.random()}`) };
+			const child = spawn(process.execPath, [file], { cwd: target, env });
+			let stdout = "";
+			let stderr = "";
+			child.stderr.on("data", (chunk) => {
+				stderr += chunk;
+			});
+			child.stdout.on("data", (chunk) => {
+				stdout += chunk;
+			});
+			// Held back for a while, as a slow reader holds the pipe full.
+			child.stdout.pause();
+			setTimeout(() => child.stdout.resume(), 3000);
+			// Ended only once read: what the script handed on before it exited, and nothing it dropped.
+			let status: number | null = null;
+			child.on("exit", (code) => {
+				status = code;
+			});
+			child.stdout.on("end", () => child.on("close", () => resolve({ stdout, stderr, status })));
+			child.stdin.end(input);
+		});
+	const run = (input: string, env: Record<string, string> = {}) => {
 		const seen = join(target, `seen-${Math.random()}`);
 		const run = spawnSync(process.execPath, [file], {
 			cwd: target,
@@ -94,6 +128,7 @@ async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill
 				.map((line) => JSON.parse(line)),
 		}));
 	};
+	return Object.assign(run, { slowly });
 }
 
 it("settles each line as it was sent, skipping only empty lines, and counts a line longer than a subject as failed", async () => {
@@ -178,3 +213,32 @@ it("writes the passkey backfill alike: its own answers counted in its order, pen
 	const settled = await run("registering\nfirst\n");
 	expect(settled.status).toBe(0);
 });
+
+it("names, one a line on standard output, only the subjects given whose factor stands for nothing, and counts on standard error", async () => {
+	const run = await script("@mod/mfa-reset", "src/unclaimed-factors.ts");
+	const done = await run("claimless-1\nfirst\n\nclaimless 2\ndown\nlast\n");
+	expect(done.seen).toEqual(["claimless-1", "first", "claimless 2", "down", "last"]);
+	expect(done.stdout).toBe("claimless-1\nclaimless 2\n");
+	expect(done.stderr).toBe("named 2 clear 2 failed 1\n");
+	expect(done.status).toBe(1);
+	const clean = await run("first\n");
+	expect([clean.stdout, clean.stderr, clean.status]).toEqual(["", "named 0 clear 1 failed 0\n", 0]);
+	// An unexpected failure stops it, telling nothing of the failure.
+	const broken = await run("boom\nclaimless-3\n");
+	expect([broken.stdout, broken.stderr, broken.status]).toEqual([
+		"",
+		"named 0 clear 0 failed 1\n",
+		1,
+	]);
+	// A refused boot exits 78, naming nothing.
+	const refused = await run("claimless-4\n", { REFUSE: "1" });
+	expect([refused.stdout, refused.status]).toEqual(["", 78]);
+});
+
+it("hands on every subject it names before it exits, though the pipe it writes to is read slowly", async () => {
+	const run = await script("@mod/mfa-reset", "src/unclaimed-factors.ts");
+	const subjects = Array.from({ length: 10_000 }, (_, i) => `claimless-${i}-${"x".repeat(100)}`);
+	const done = await run.slowly(`${subjects.join("\n")}\n`);
+	expect(done.stdout.split("\n").filter((line) => line !== "")).toEqual(subjects);
+	expect([done.stderr, done.status]).toEqual(["named 10000 clear 0 failed 0\n", 0]);
+}, 60_000);

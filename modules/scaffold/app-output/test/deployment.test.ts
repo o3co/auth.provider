@@ -140,6 +140,19 @@ it("adds the passkey-backfill entry when passkey-witnessing is composed, settlin
 	expect(entry).toContain('["marked", "held", "none", "pending", "inconsistent"]');
 });
 
+it("adds the unclaimed-factors entry where mfa-reset is composed, asking resetCandidates", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/mfa-reset"], fakePackages(), readme);
+
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts["unclaimed-factors"]).toBe(
+		"node --env-file-if-exists=.env src/unclaimed-factors.ts",
+	);
+	expect(await read(target, "src/unclaimed-factors.ts")).toContain(
+		'import { resetCandidates } from "@o3co/x-mfa-reset"',
+	);
+});
+
 it("refuses a target that holds anything, and writes nothing", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeFile(join(target, "kept"), "");

@@ -3,7 +3,7 @@
 ## Responsibilities
 - Writes a generated project: a deployment of the modules it is given, with its configuration from their fragments, the environment's and the local layer's examples, an image and the operator's guide.
 - Maps each fragment's keys to the environment and the local layer, through the internal module `fragments`: the boundary that keeps module words out of the environment's.
-- Holds what every generated project shares: the target's check, the package name check, the manifest, the app's entry and its entries besides `start` (`reseal`, `witness-backfill`, `passkey-backfill`).
+- Holds what every generated project shares: the target's check, the package name check, the manifest, the app's entry and its entries besides `start`, through the internal module `entries`.
 - States what it takes from where the packages come from (`Packages`); the caller implements it.
 
 ## Not here
@@ -28,10 +28,6 @@
 - A name not an npm package is refused by `namesPackages`, before anything is written.
 - The manifest names the pnpm the workspace builds with, and the app also depends on `zod` at the packages' version.
 - A scalar its owner's example gives in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer; the guide and the env example say such a value goes in the local layer.
-- With `seal` composed, the project has a `reseal` script: the same modules, built and never started, running their resealers.
-- With `mfa-witnessing` composed, the project has a `witness-backfill` script, built and never started the same way. It settles each subject read from standard input, one a line, empty lines skipped, each other line used as sent, through `witnessBackfill`, and writes only how many were marked, held, none, unclaimed, inconsistent, unknown (an answer it does not know) and failed (unavailable), never a subject.
-- The `witness-backfill` script exits 0 where none failed and none was unknown, else 1, and 78 on a refused boot, told by the kernel's mark as the app's is.
-- With `passkey-witnessing` composed, the project has a `passkey-backfill` script, read and exiting as `witness-backfill` does, through `passkeyBackfill`: it writes only how many were marked, held, none, pending, inconsistent, unknown and failed.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
 - The image follows Node 24's latest, neither patch nor digest pinned, so a build takes Node's security fixes over repeating the last build; it pins corepack by version, installs the locked production dependencies in a stage of their own, and runs node under `tini` as a user other than root.
 - Only an app composing `http` is given its port and interface in the image and the guide, and only one composing `http-ops` is checked for liveness (`/_healthcheck`, after a start period) or told of its endpoints.
