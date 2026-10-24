@@ -2172,6 +2172,9 @@ importers:
       '@mod/mfa-managing':
         specifier: workspace:*
         version: link:../../second-factor/mfa-managing
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-reading
       '@mod/passkeys':
         specifier: workspace:*
         version: link:../passkeys

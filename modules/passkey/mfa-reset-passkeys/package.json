@@ -21,6 +21,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/mfa-flows": "workspace:*",
 		"@mod/mfa-managing": "workspace:*",
+		"@mod/mfa-reading": "workspace:*",
 		"@mod/passkeys": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/store": "workspace:*",
