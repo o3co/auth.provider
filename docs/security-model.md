@@ -10,6 +10,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 - [Requests and proxies](#requests-and-proxies)
 - [Browsers: sessions, cookies and CSRF](#browsers-sessions-cookies-and-csrf)
 - [Tokens](#tokens)
+- [Client authentication](#client-authentication)
 - [Sender-constrained tokens](#sender-constrained-tokens)
 - [Rate limits](#rate-limits)
 - [Upstream identity providers](#upstream-identity-providers)
@@ -134,6 +135,15 @@ Each promise below holds across every module composed. Each names what keeps it 
   - With `subject-check = none`, a revoked subject's access tokens live until they expire.
 - **Claims a grant adds:** a grant may add claims to the access tokens it issues (`AccessGrant.claims`). The signature covers the whole token, so a resource server cannot tell which claims the provider wrote and which a grant added. Reserved names only keep a grant from overwriting what the provider writes and what a specification gives a meaning; they make no added claim trustworthy. An added claim is what the grant composed asserts: composing a grant entrusts it with what its tokens say. Only `tokens` signs an access token (`at+jwt`); `keys.sign` refuses that type, and `keys.verify` too, so every access token is checked by `verifyAccess`. `verifyAccess` refuses as none of its own a token whose `exp` comes before its `iat`, whose `iat` is over 60 seconds ahead of the clock, or with over a day between them.
   - A refreshed or exchanged token carries no added claim, so an added claim cannot carry a restriction that must hold on: a resource server never reads a missing one as no restriction.
+
+## Client authentication
+
+- **Guaranteed:**
+  - A client assertion (`private_key_jwt`) is taken only when its `aud` is the issuer identifier as one string, at every endpoint that authenticates clients, judged before its `jti` is spent. An assertion a client made for another authorization server that names this server's token endpoint is refused (FAPI 2.0 Security Profile §5.3.2.1).
+  - Each assertion is taken once per client and `jti`.
+- **Left to you:**
+  - `sections.client-assertion.accept-loose-audience`, set for a client still sending the token endpoint's URL or a list as `aud`. While it is set, an assertion that client gave another authorization server naming this server's token endpoint can be used here first, within what the client is allowed, client credentials included. Each such assertion is logged as the warning `client-assertion.loose_audience`; remove the setting once that client sends the issuer.
+  - Clients putting the issuer identifier they checked, as one string, in their assertions' `aud`, and checking that the `issuer` of the metadata they discover is the URL they asked for (FAPI 2.0 Security Profile §5.3.3.1). Checking the issuer does not keep a malicious server's metadata from naming another server's endpoints; the issuer as `aud` does.
 
 ## Sender-constrained tokens
 

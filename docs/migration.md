@@ -21,6 +21,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.5](#from-0180-rc5)
 - [From 0.18.0](#from-0180)
 - [From 0.18.1](#from-0181)
+- [From 0.18.5](#from-0185)
 - [From 0.18 to 0.19](#from-018-to-019)
 - [Operational notes](#operational-notes)
 
@@ -833,6 +834,14 @@ What changed since rc.5. Coming from an earlier release candidate, read the sect
 
 - **A generated app's `witness-backfill` script**: where the kernel is bundled twice, a refused boot is now written and exits 78, as the app's entry does, where it was thrown on as a crash. In an app generated before, change the line `if (!(error instanceof BootRefused)) throw error;` in `src/witness-backfill.ts` to `if (!BootRefused.is(error)) throw error;`, or generate the app again.
 - **A `plain-internal` pair whose name also answers an IPv6 address that does not reach**, as ECS Service Connect writes in the hosts file: 0.18.1 refused it as `plain-public`. Name the pair in `outbound.plain-ipv4` as well, and its name is resolved to IPv4 alone. An earlier version refuses boot on a configuration naming `outbound.plain-ipv4`, so a rollback takes the setting out with it.
+
+## From 0.18.5
+
+- **A client assertion (`private_key_jwt`) names the issuer alone.** Its `aud` must be the issuer identifier (`issuer.url`) as one string. One whose `aud` is the token endpoint's URL, or a list (`["<issuer>"]` included), is refused with `401 invalid_client`, logged as `client-assertion.refused` with the reason `audience`, and its `jti` is not spent. 0.18.5 took either URL, alone or in a list. A client that uses the same key and client id at another authorization server can be led, by that server's metadata, to sign an assertion for this server's token endpoint and hand it over there; whoever holds it could use it here first (the OpenID Foundation's notice of January 2025 on `private_key_jwt`).
+  - A client that sends the issuer as a string changes nothing. Keys, client ids, stored state and issued tokens are not affected.
+  - A client that sends the token endpoint's URL or a list changes what it signs, for every endpoint it authenticates at: the token endpoint, introspection, revocation, device authorization and federation grants.
+  - Until it does, set `sections.client-assertion.accept-loose-audience = true` in that client's registration. Its assertions are then taken as 0.18.5 took them, each logged as the warning `client-assertion.loose_audience` with the client's id, and the client stays open to the attack above. Remove the setting once the warning stops; it is temporary and goes in a later release.
+  - A rollback to 0.18.5 refuses boot on a registration that carries `accept-loose-audience`, as a key its section does not know: take the setting out with the rollback.
 
 ## From 0.18 to 0.19
 

@@ -94,7 +94,7 @@ const assertion = () =>
 	new SignJWT({
 		iss: "app",
 		sub: "app",
-		aud: tokenUrl,
+		aud: issuer,
 		exp: Math.floor(Date.now() / 1000) + 60,
 		jti: `j-${Math.random()}`,
 	})

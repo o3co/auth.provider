@@ -38,8 +38,15 @@ function clientsSection(part: OauthPart): Record<string, unknown> {
 					...(c.defaultScopes ? { "default-scopes": c.defaultScopes } : {}),
 					audiences: c.audiences ?? [],
 				},
-				...(c.keys ? { "client-assertion": { keys: c.keys } } : {}),
-				...(c.jwksUri ? { "client-assertion": { "jwks-uri": c.jwksUri } } : {}),
+				...(c.keys || c.jwksUri
+					? {
+							"client-assertion": {
+								...(c.keys ? { keys: c.keys } : {}),
+								...(c.jwksUri ? { "jwks-uri": c.jwksUri } : {}),
+								...(c.looseAudience ? { "accept-loose-audience": true } : {}),
+							},
+						}
+					: {}),
 				// A client that receives authorization answers is set up for the code flow.
 				...(c.redirectUris
 					? {
