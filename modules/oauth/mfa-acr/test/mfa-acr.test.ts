@@ -1,6 +1,6 @@
 import { acrEntries, isAmrSets } from "@mod/acr";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { secondFactorAmr } from "@mod/mfa-extensions";
 import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { expect, it } from "vitest";
@@ -8,13 +8,13 @@ import bridge from "../src/module.ts";
 
 const runtime = quietRuntime();
 const offered = contract<() => unknown>("test.offered");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [acrEntries] }, (m) => [
 	m.provide(offered).by(async (c) => {
 		const entries = await c.collect(acrEntries);
 		return () => entries;
 	}),
 ]);
-const secondFactors = defineModule({ name: "factors-stand-in" }, (m) => [
+const secondFactors = defineModule({ name: "factors-stand-in", takes: [] }, (m) => [
 	m.provide(factorReading).by(() => ({}) as FactorReading),
 ]);
 
@@ -30,4 +30,9 @@ it("offers the acr met by a second factor, only where second factors are compose
 	await expect(
 		assemble({ modules: [bridge, reader], config: kernelConfig(), runtime }),
 	).rejects.toThrow(BootRefused);
+});
+
+it("takes all it names", async () => {
+	const input = { modules: [secondFactors, bridge, reader], config: kernelConfig(), runtime };
+	expect(await takesUnused(input)).toEqual({});
 });
