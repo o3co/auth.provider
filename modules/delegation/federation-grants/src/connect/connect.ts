@@ -1,14 +1,5 @@
-import { type Audit, audit, declaredAudit } from "@mod/audit";
-import { type Clients, clients } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
-import {
-	type BuildContext,
-	type Clock,
-	contract,
-	isUnavailable,
-	type Log,
-	type Random,
-} from "@mod/kernel";
+import { type BuildContext, contract, isUnavailable, type Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import { type Sessions, sessions } from "@mod/session";
 import { type RoundTrips, roundTrips, type Taken } from "@mod/upstream-round-trip";
@@ -20,59 +11,25 @@ import {
 	type Upstreams,
 	upstreams,
 } from "@mod/upstreams";
-import { z } from "zod";
-import events from "../audit-events.ts";
-import {
-	connectionsIn,
-	credentialsFrom,
-	type Grant,
-	type Intent,
-	type Judge,
-	type Listing,
-	permits,
-	type Records,
-	retentionMs,
-	returnsTo,
-	type Step,
-	secretFrom,
-} from "../grant/grant.ts";
-import { shared } from "../grant/shared.ts";
+import { type Back, type GrantIntents, grantIntents, type IntentRef } from "../browser.ts";
 import { browserBase } from "../intents/intents.ts";
 import { connectionName, type Settings } from "../section.ts";
-import {
-	type GrantStore,
-	grantStore,
-	type PendingIntents,
-	pendingIntents,
-	type StepStore,
-	stepStore,
-} from "../store.ts";
 import {
 	type UpstreamAccounts,
 	upstreamAccountOver,
 } from "../upstream-account/upstream-account.ts";
 
+export { browserBase } from "../intents/intents.ts";
+
 export interface ConnectParts {
 	readonly sessions: Sessions;
-	readonly clients: Clients;
 	readonly upstreamAccount: UpstreamAccounts;
 	readonly upstreams: Upstreams;
-	readonly grants: GrantStore;
-	readonly steps: StepStore;
 	readonly trips: RoundTrips;
-	readonly pending: PendingIntents;
-	readonly records: Records;
-	readonly judge: Judge;
-	readonly listed: Listing;
-	readonly audit: Audit;
+	readonly intents: GrantIntents;
 	readonly settings: Settings;
-	readonly origin: string;
-	readonly clock: Clock;
-	readonly random: Random;
 	readonly log: Log;
 }
-
-export { browserBase } from "../intents/intents.ts";
 
 const plain = (status: number, text: string): HttpResponse => ({
 	status,
@@ -92,14 +49,19 @@ const see = (location: string): HttpResponse => ({
 const stale = () => plain(400, "This request has expired or has already been used. Start again.");
 /** Each connection's round trip, by the name its cookie takes. */
 const tripName = (connection: string) => `federation-grants.${connection}`;
-/** What a connection's round trip carries for its callback: the grant, its intent and the session that decided. */
-const carried = z.strictObject({ grant: z.string(), intent: z.string(), session: z.string() });
 const withCookies = (answer: HttpResponse, cookies: readonly string[]): HttpResponse => ({
 	...answer,
 	cookies: [...(answer.cookies ?? []), ...cookies],
 });
 const invalid = () =>
 	json(400, { error: "invalid_request", error_description: "the request is not valid" });
+/** Where the intents send the browser back, or the stale answer where they send it nowhere. */
+const backTo = (back: Back) => (back.kind === "back" ? see(back.location) : stale());
+/** The request's source, as the audit takes it. */
+const sourceOf = (request: HttpRequest) => {
+	const source = determinedSource(request);
+	return source ? { source } : {};
+};
 
 /** A start as the upstream takes it: where to send the browser, refused as a value, or not askable now. */
 const startOf = (delegation: Delegation | undefined, start: DelegationStart) => {
@@ -128,116 +90,28 @@ const exchangedBy = async (delegation: Delegation, exchange: DelegatedExchange) 
 
 /** The browser half: the link a client sends the user to, the question, the user's decision, and the upstream's callback. */
 export function connectWith(p: ConnectParts) {
-	const { records, settings } = p;
-	const secret = secretFrom(p.random);
-	const connections = connectionsIn(settings, p.upstreams);
-	const callbackOf = (name: string) => `${p.origin}${browserBase}/callback/${name}`;
-	const audited = declaredAudit(p.audit, events);
-	/** Audits a connection that failed, by its outcome. */
-	const auditFailure = (grant: Grant, outcome: string, request: HttpRequest) => {
-		const from = determinedSource(request);
-		audited.record("federation.grant.authorization_failed", {
-			subject: grant.subject,
-			attributes: {
-				client: grant.client,
-				connection: grant.connection,
-				outcome,
-				...(from ? { source: from } : {}),
-			},
-		});
-	};
+	const { intents, settings } = p;
 
-	/** The grant and its intent, while the intent is the grant's current one, not ended and within its time. */
-	const liveIntent = async (step: Pick<Step, "grant" | "intent"> | undefined) => {
-		if (!step) return undefined;
-		const grant = records.grantOf(await p.grants.read(step.grant));
-		const intent = grant?.intent;
-		if (!grant || !intent || intent.id !== step.intent || intent.ended) return undefined;
-		if (intent.endsAt <= p.clock.now() || grant.status === "revoked") return undefined;
-		return { grant, intent };
-	};
-	/** Changes the intent only while it is still the grant's current one. */
-	const changeIntent = (
-		grant: Grant,
-		intent: Intent,
-		next: (intent: Intent) => Intent | undefined,
-	) =>
-		p.grants.change(grant.id, (stored) => {
-			const now = records.grantOf(stored);
-			if (!now?.intent || now.intent.id !== intent.id || now.intent.ended) return undefined;
-			const changed = next(now.intent);
-			return changed && { value: records.stored({ ...now, intent: changed }) };
-		});
-	/** The intent's last trip to raise the session, if any. */
-	const tripOf = (stepped: Intent["stepped"]) => (stepped === true ? { at: 0 } : stepped);
-	/** A trip is due unless the last was for the same requirement, in a login no later than it. */
-	const mayStep = (stepped: Intent["stepped"], requirement: string, authenticatedAt: number) => {
-		const last = tripOf(stepped);
-		return (
-			!last ||
-			!("requirement" in last) ||
-			last.requirement !== requirement ||
-			authenticatedAt > last.at
-		);
-	};
-	/** Marks the intent's trip to raise the session for `requirement`; true only for the request that marked it. */
-	const stepUpOnce = async (
-		grant: Grant,
-		intent: Intent,
-		requirement: string,
-		authenticatedAt: number,
-	) => {
-		if (!mayStep(intent.stepped, requirement, authenticatedAt)) return false;
-		const trip = { requirement, at: p.clock.now() };
-		const marked = await changeIntent(grant, intent, (i) =>
-			mayStep(i.stepped, requirement, authenticatedAt) ? { ...i, stepped: trip } : undefined,
-		);
-		const before = tripOf(records.grantOf(marked?.before)?.intent?.stepped);
-		const after = tripOf(records.grantOf(marked?.after)?.intent?.stepped);
-		const ours = (t: typeof after) =>
-			t !== undefined &&
-			"requirement" in t &&
-			t.requirement === trip.requirement &&
-			t.at === trip.at;
-		return ours(after) && !ours(before);
-	};
-	/** Takes a step once: answers it as it was, or none when it was taken already or does not match. */
-	const take = async (
-		secretText: string,
-		kind: Step["kind"],
-		matches: (step: Step) => boolean = () => true,
-	) => {
-		const changed = await p.steps.change(secretText, (stored) => {
-			const step = records.stepOf(stored);
-			if (!step || step.kind !== kind || step.taken || !matches(step)) return undefined;
-			return { value: records.storedStep({ ...step, taken: true }) };
-		});
-		const before = records.stepOf(changed?.before);
-		const after = records.stepOf(changed?.after);
-		return before && !before.taken && after?.taken ? before : undefined;
-	};
 	/** The session at use level, as the intent's subject; a short one is told whose it is first. */
-	const entered = async (request: HttpRequest, grant: Grant) => {
+	const entered = async (request: HttpRequest, subject: string) => {
 		const other = { kind: "other" } as const;
 		const entry = await p.sessions.enterFor(request, "use");
-		if (entry.kind === "entered")
-			return entry.session.context.subject === grant.subject ? entry : other;
+		if (entry.kind === "entered") return entry.session.context.subject === subject ? entry : other;
 		if (entry.kind !== "short") return entry;
 		// A short entry names no subject: the level that grants nothing tells whose session it is.
 		const bare = await p.sessions.enterFor(request, "none");
 		if (bare.kind !== "entered") return { kind: "unknown" } as const;
 		const { context } = bare.session;
-		return context.subject === grant.subject ? { ...entry, context } : other;
+		return context.subject === subject ? { ...entry, context } : other;
 	};
 
 	const connect = async (request: HttpRequest): Promise<HttpResponse> => {
 		const handle = request.query.single("request");
-		const step = handle ? records.stepOf(await p.steps.read(handle)) : undefined;
-		const found = step?.kind === "link" ? await liveIntent(step) : undefined;
-		if (!handle || !found) return stale();
-		const { grant, intent } = found;
-		const self = `${p.origin}${browserBase}/connect?request=${handle}`;
-		const entry = await entered(request, grant);
+		const found = handle ? await intents.linked(handle) : undefined;
+		if (!handle || found?.kind !== "linked") return stale();
+		const { ref, view } = found;
+		const self = intents.connectUrl(handle);
+		const entry = await entered(request, view.subject);
 		if (entry.kind === "absent") {
 			const page = settings["login-page"];
 			if (!page) return plain(401, "Sign in, then open this link again.");
@@ -247,19 +121,16 @@ export function connectWith(p: ConnectParts) {
 		}
 		if (entry.kind === "other") return plain(403, "This request was made for another account.");
 		if (entry.kind === "unknown") {
-			auditFailure(grant, "reauthentication_required", request);
+			intents.noted(ref, "reauthentication_required", sourceOf(request));
 			return plain(403, "Sign in again to continue.");
 		}
 		// Told only to the subject's own session, so a link's holder learns nothing of the client.
-		const client = await p.clients.find(grant.client);
-		if (!permits(client, grant.connection) || !connections.of(grant.connection)) {
-			return plain(403, "This connection is not available.");
-		}
+		if (!(await intents.available(ref))) return plain(403, "This connection is not available.");
 		if (entry.kind === "short") {
 			const page = settings["step-up-page"];
 			const { requirement, context } = entry;
-			if (!page || !(await stepUpOnce(grant, intent, requirement, context.authenticatedAt))) {
-				auditFailure(grant, "reauthentication_required", request);
+			if (!page || !(await intents.steppedUp(ref, requirement, context.authenticatedAt))) {
+				intents.noted(ref, "reauthentication_required", sourceOf(request));
 				return plain(403, "Sign in again to continue.");
 			}
 			const raise = new URL(page);
@@ -269,35 +140,20 @@ export function connectWith(p: ConnectParts) {
 		}
 		// The first browser to take a question holds the intent; another is told to start again.
 		const session = entry.session.id;
-		if (intent.session !== undefined && intent.session !== session) return stale();
-		const bound = await changeIntent(grant, intent, (i) =>
-			i.session === undefined ? { ...i, session } : i.session === session ? i : undefined,
-		);
-		if (records.grantOf(bound?.after)?.intent?.session !== session) return stale();
-		const challenge = secret();
-		const question = {
-			format: 1,
-			kind: "question",
-			grant: grant.id,
-			intent: intent.id,
-			session,
-		} as const;
-		await p.steps.create(
-			challenge,
-			records.storedStep(question),
-			Math.max(1, intent.endsAt - p.clock.now()),
-		);
+		if (view.session !== undefined && view.session !== session) return stale();
+		const bound = await intents.bound(ref, session);
+		if (bound.kind !== "bound") return stale();
 		// Boot refuses connections without a page, and a grant whose connection is gone returned above.
 		const page = new URL(settings.page ?? "");
-		page.searchParams.set("challenge", challenge);
+		page.searchParams.set("challenge", bound.challenge);
 		return see(page.href);
 	};
 
 	/** A question still open, asked of this browser's session for the intent's subject. */
-	const asked = async (request: HttpRequest, step: Step | undefined) => {
-		const found = step?.kind === "question" && !step.taken ? await liveIntent(step) : undefined;
-		if (!step || !found) return { kind: "refused", answer: invalid() } as const;
-		const entry = await entered(request, found.grant);
+	const asked = async (request: HttpRequest, challenge: string) => {
+		const found = await intents.asked(challenge);
+		if (found.kind !== "asked") return { kind: "refused", answer: invalid() } as const;
+		const entry = await entered(request, found.view.subject);
 		if (entry.kind === "absent") {
 			return {
 				kind: "refused",
@@ -307,7 +163,7 @@ export function connectWith(p: ConnectParts) {
 				}),
 			} as const;
 		}
-		if (entry.kind !== "entered" || entry.session.id !== step.session) {
+		if (entry.kind !== "entered" || entry.session.id !== found.view.session) {
 			return {
 				kind: "refused",
 				answer: json(403, {
@@ -316,7 +172,7 @@ export function connectWith(p: ConnectParts) {
 				}),
 			} as const;
 		}
-		if (!permits(await p.clients.find(found.grant.client), found.grant.connection)) {
+		if (!(await intents.permitted(found.ref))) {
 			return {
 				kind: "refused",
 				answer: json(403, {
@@ -325,50 +181,41 @@ export function connectWith(p: ConnectParts) {
 				}),
 			} as const;
 		}
-		return { kind: "asked", ...found } as const;
+		return found;
 	};
 
 	const question = async (request: HttpRequest): Promise<HttpResponse> => {
 		const challenge = request.query.single("challenge");
 		if (!challenge)
 			return json(400, { error: "invalid_request", error_description: "challenge is required" });
-		const read = await asked(request, records.stepOf(await p.steps.read(challenge)));
+		const read = await asked(request, challenge);
 		if (read.kind === "refused") return read.answer;
-		const { grant, intent } = read;
-		const resource = connections.of(grant.connection)?.resource;
+		const { view } = read;
 		return json(200, {
 			challenge,
-			client_id: grant.client,
-			connection: grant.connection,
-			scopes: intent.scopes,
-			...(resource ? { resource } : {}),
-			grant_expires_in: intent.lifetimeMs / 1000,
+			client_id: view.client,
+			connection: view.connection,
+			scopes: view.scopes,
+			...(view.resource ? { resource: view.resource } : {}),
+			grant_expires_in: view.grantLifetimeMs / 1000,
 			continues_after_logout: true,
-			expires_in: Math.max(0, Math.floor((intent.endsAt - p.clock.now()) / 1000)),
+			expires_in: Math.floor(view.expiresInMs / 1000),
 		});
 	};
 
-	/** Sends the browser back to the intent's return URI, with the grant, the client's state and what came of it. */
-	const back = (intent: Intent, grant: Grant, error?: string) => {
-		const to = new URL(intent.returnUri);
-		to.searchParams.set("grant_id", grant.id);
-		to.searchParams.set("state", intent.state);
-		if (error) to.searchParams.set("error", error);
-		return see(to.href);
-	};
-	/** Ends the intent with why, audits it, and sends the browser back with the error, if the client still lists the return. */
+	/** Ends the intent with why, audited, and sends the browser back with the error, if the client still lists the return. */
 	const fail = async (
 		request: HttpRequest,
-		grant: Grant,
-		intent: Intent,
+		ref: IntentRef,
 		error: string,
-		outcome = error,
-	) => {
-		await changeIntent(grant, intent, (i) => ({ ...i, ended: error }));
-		auditFailure(grant, outcome, request);
-		if (!returnsTo(await p.clients.find(grant.client), intent.returnUri)) return stale();
-		return back(intent, grant, error);
-	};
+		outcome?: string,
+	): Promise<HttpResponse> =>
+		backTo(
+			await intents.failed(ref, error, {
+				...(outcome === undefined ? {} : { outcome }),
+				...sourceOf(request),
+			}),
+		);
 
 	const decide = async (request: HttpRequest): Promise<HttpResponse> => {
 		const challenge = request.form.single("challenge");
@@ -376,41 +223,41 @@ export function connectWith(p: ConnectParts) {
 		if (!challenge)
 			return json(400, { error: "invalid_request", error_description: "challenge is required" });
 		if (decision !== "accept" && decision !== "deny") return invalid();
-		const read = await asked(request, records.stepOf(await p.steps.read(challenge)));
+		const read = await asked(request, challenge);
 		if (read.kind === "refused") return read.answer;
-		const { grant, intent } = read;
+		const { ref } = read;
 		if (decision === "deny") {
-			if (!(await take(challenge, "question"))) return invalid();
-			return fail(request, grant, intent, "access_denied");
+			const denied = await intents.denied(ref, challenge, sourceOf(request));
+			return denied.kind === "invalid" ? invalid() : backTo(denied);
 		}
-		const resource = connections.of(grant.connection)?.resource;
+		const start = intents.starting(ref);
 		// Begun, and its start built, before the question is spent, so a start that cannot be asked
 		// now leaves the question open; the round trip begun then is left to its lifetime.
 		const trip = await p.trips.begin({
-			name: tripName(grant.connection),
-			carried: { grant: grant.id, intent: intent.id, session: intent.session ?? "" },
-			lifetimeMs: Math.max(1, intent.endsAt - p.clock.now()),
+			name: tripName(read.view.connection),
+			carried: start?.carried ?? {},
+			lifetimeMs: start?.lifetimeMs ?? 1,
 		});
-		const started = startOf(connections.configured(grant.connection)?.delegation, {
+		const started = startOf(start && p.upstreams.of(start.idp)?.delegation, {
 			state: trip.state,
 			nonce: trip.nonce,
 			challenge: trip.challenge,
 			challengeMethod: trip.challengeMethod,
-			redirectUri: callbackOf(grant.connection),
-			scopes: intent.scopes,
-			...(resource ? { resource } : {}),
+			redirectUri: start?.redirectUri ?? intents.callbackUrl(read.view.connection),
+			scopes: start?.scopes ?? read.view.scopes,
+			...(start?.resource ? { resource: start.resource } : {}),
 		});
 		if (started.kind === "unavailable") {
-			auditFailure(grant, "upstream_unavailable", request);
+			intents.noted(ref, "upstream_unavailable", sourceOf(request));
 			return json(503, {
 				error: "temporarily_unavailable",
 				error_description: "upstream_unavailable",
 			});
 		}
-		if (!(await take(challenge, "question"))) return invalid();
+		if (!(await intents.accepted(challenge))) return invalid();
 		if (started.kind === "refused") {
 			// The upstream will not start this delegation: the intent ends, and the client is told.
-			return fail(request, grant, intent, "grant_not_authorizable", "upstream_refused_start");
+			return fail(request, ref, "grant_not_authorizable", "upstream_refused_start");
 		}
 		return withCookies(see(started.location), [trip.cookie]);
 	};
@@ -418,16 +265,14 @@ export function connectWith(p: ConnectParts) {
 	/** The checks a callback runs before it activates, each answering the error the browser is sent back with. */
 	const verified = async (
 		request: HttpRequest,
-		grant: Grant,
-		intent: Intent,
-		step: Pick<Step, "session">,
+		ref: IntentRef,
+		subject: string,
+		session: string,
 	) => {
-		const entry = await entered(request, grant);
-		if (entry.kind !== "entered" || entry.session.id !== step.session)
+		const entry = await entered(request, subject);
+		if (entry.kind !== "entered" || entry.session.id !== session)
 			return "reauthentication_required";
-		if (await p.judge.intentRevoked(grant, intent)) return "access_denied";
-		if (intent.kind === "reauthorization" && (await p.judge.revoked(grant))) return "access_denied";
-		return undefined;
+		return intents.stillValid(ref);
 	};
 
 	/** A taken round trip's callback, at the connection it was made for. */
@@ -436,106 +281,53 @@ export function connectWith(p: ConnectParts) {
 		name: string,
 		taken: Extract<Taken, { kind: "taken" }>,
 	): Promise<HttpResponse> => {
-		const kept = carried.safeParse(taken.carried);
-		const step = kept.success ? kept.data : undefined;
-		const found = step ? await liveIntent(step) : undefined;
-		if (!step || !found) return stale();
-		const { grant, intent } = found;
-		const configured = connections.configured(name);
-		if (!configured) return fail(request, grant, intent, "grant_not_authorizable");
-		const { connection, delegation } = configured;
-		const refused = await verified(request, grant, intent, step);
-		if (refused) return fail(request, grant, intent, refused);
+		const resumed = await intents.resumed(taken.carried);
+		if (resumed.kind === "stale") return stale();
+		if (resumed.kind === "unconfigured")
+			return fail(request, resumed.ref, "grant_not_authorizable");
+		const { ref, view } = resumed;
+		const delegation = p.upstreams.of(view.idp)?.delegation;
+		if (view.connection !== name || !delegation) {
+			return fail(request, ref, "grant_not_authorizable");
+		}
+		const refused = await verified(request, ref, view.subject, view.session);
+		if (refused) return fail(request, ref, refused);
 		const code = request.query.single("code");
 		if (request.query.repeated().length > 0 || request.query.has("error") || !code) {
-			return fail(
-				request,
-				grant,
-				intent,
-				request.query.has("error") ? "access_denied" : "upstream_error",
-			);
+			return fail(request, ref, request.query.has("error") ? "access_denied" : "upstream_error");
 		}
 		const exchanged = await exchangedBy(delegation, {
 			code,
 			verifier: taken.verifier,
-			redirectUri: callbackOf(name),
+			redirectUri: intents.callbackUrl(name),
 			nonce: taken.nonce,
 			iss: request.query.single("iss"),
-			scopes: intent.scopes,
-			...(connection.resource ? { resource: connection.resource } : {}),
+			scopes: view.scopes,
+			...(view.resource ? { resource: view.resource } : {}),
 		});
-		if (exchanged.kind === "failed") return fail(request, grant, intent, exchanged.error);
+		if (exchanged.kind === "failed") return fail(request, ref, exchanged.error);
 		const { login } = exchanged;
 		const upstream = { issuer: String(login.issuer), subject: String(login.subject) };
-		const account = await p.upstreamAccount.refusal(grant, intent, connection.idp, upstream);
-		if (account) return fail(request, grant, intent, account);
-		const now = p.clock.now();
-		const read = credentialsFrom(login.tokens, {
-			now,
-			maxAccessMs: connection["max-access-token-lifetime"] * 1000,
-			shown: intent.scopes,
-		});
-		if (read.kind === "refused") return fail(request, grant, intent, read.why);
+		const account = await p.upstreamAccount.refusal(
+			{ subject: view.subject, upstream: view.expected.held },
+			{ expectedUpstream: view.expected.subject },
+			view.idp,
+			upstream,
+		);
+		if (account) return fail(request, ref, account);
+		const judged = intents.judged(ref, login.tokens);
+		if (judged.kind === "refused") return fail(request, ref, judged.why);
 		// Checked again just before the activation: the upstream leg may have taken long.
-		const again = await verified(request, grant, intent, step);
-		if (again) return fail(request, grant, intent, again);
-		const changed = await p.grants.change(grant.id, (stored) => {
-			const was = records.grantOf(stored);
-			if (
-				!was?.intent ||
-				was.intent.id !== intent.id ||
-				was.intent.ended ||
-				was.intent.endsAt <= now ||
-				was.status === "revoked"
-			)
-				return undefined;
-			const { reason: _cleared, ...rest } = was;
-			const next: Grant = {
-				...rest,
-				status: "active",
-				scopes: intent.scopes,
-				authorizedAt: now,
-				expiresAt: now + intent.lifetimeMs,
+		const again = await verified(request, ref, view.subject, view.session);
+		if (again) return fail(request, ref, again);
+		return backTo(
+			await intents.activated(ref, {
 				upstream,
-				intent: { ...intent, ended: "connected" },
-				version: secret(),
-				rotations: { from: now, count: 0 },
-			};
-			return {
-				value: records.stored({ ...next, sealed: records.seal(next, read.credentials) }),
-				lifetimeMs: intent.lifetimeMs + retentionMs,
-			};
-		});
-		if (
-			records.grantOf(changed?.after)?.intent?.ended !== "connected" ||
-			records.grantOf(changed?.before)?.intent?.id !== intent.id
-		) {
-			return fail(request, grant, intent, "grant_not_authorizable");
-		}
-		const from = determinedSource(request);
-		const kind =
-			intent.kind === "initial" ? "federation.grant.authorized" : "federation.grant.reauthorized";
-		audited.record(kind, {
-			subject: grant.subject,
-			attributes: {
-				client: grant.client,
-				connection: grant.connection,
-				outcome: p.upstreamAccount.check,
-				...(from ? { source: from } : {}),
-			},
-		});
-		// The grant is active: what is left only tidies, and does not undo it.
-		if (intent.kind === "initial") {
-			try {
-				await p.pending.remove(`${grant.client}\n${grant.subject}`, grant.id);
-			} catch (error) {
-				const failure = error instanceof Error ? error.name : typeof error;
-				p.log.warn("federation-grants.pending_remove_failed", { kind: failure });
-			}
-		}
-		await p.listed(grant, intent.lifetimeMs + retentionMs);
-		if (!returnsTo(await p.clients.find(grant.client), intent.returnUri)) return stale();
-		return back(intent, grant);
+				tokens: judged.tokens,
+				identityCheck: p.upstreamAccount.check,
+				...sourceOf(request),
+			}),
+		);
 	};
 
 	/** Answers the browser half's routes; anything unavailable is a plain 503. */
@@ -549,10 +341,7 @@ export function connectWith(p: ConnectParts) {
 				p.log.error("federation-grants.browser_unavailable", { path: request.path.slice(0, 100) });
 				// Audited as a failed connection, though which grant is not known here; best effort.
 				try {
-					const from = determinedSource(request);
-					audited.record("federation.grant.authorization_failed", {
-						attributes: { outcome: "unavailable", ...(from ? { source: from } : {}) },
-					});
+					intents.unanswered(sourceOf(request));
 				} catch {}
 				return plain(503, "This service is unavailable. Try again later.");
 			}
@@ -580,18 +369,11 @@ export const browser = contract<ReturnType<typeof connectWith>>("federation-gran
 /** The browser half over the contracts the assembly gives. */
 export const connectOver = async (c: BuildContext<Settings>) =>
 	connectWith({
-		...(await c.get(shared)),
 		sessions: await c.get(sessions),
-		clients: await c.get(clients),
 		upstreamAccount: await upstreamAccountOver(c),
 		upstreams: await c.get(upstreams),
-		grants: await c.get(grantStore),
-		steps: await c.get(stepStore),
 		trips: await c.get(roundTrips),
-		pending: await c.get(pendingIntents),
-		audit: await c.get(audit),
+		intents: await c.get(grantIntents),
 		settings: c.section,
-		clock: c.clock,
-		random: c.random,
 		log: c.log,
 	});
