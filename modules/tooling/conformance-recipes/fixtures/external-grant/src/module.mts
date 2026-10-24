@@ -30,6 +30,6 @@ const example = (issuerUrl: string): Grant => ({
 	},
 });
 
-export default defineModule({ name: "example-grant" }, (m) => [
+export default defineModule({ name: "example-grant", takes: [issuer] }, (m) => [
 	m.contribute(grants).by(async (c) => example((await c.get(issuer)).url)),
 ]);
