@@ -134,6 +134,12 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `passkey.reset` | `by`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's passkey reset gets past its input, finished or not (`complete`) |
 
+## @mod/passkey-witnessing
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.enrollment_inconsistent` | `at` | the witness marks a subject holding no passkey, so the passkey store may have lost them; `at` is where it was found: `held`, `registration`, `removal`, `reset` or `settle` |
+
 ## @mod/passkeys
 
 | Kind | Attributes | Recorded when |
