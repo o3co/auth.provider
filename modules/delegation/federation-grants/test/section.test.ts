@@ -66,7 +66,6 @@ describe("federation-grants' section: its times", () => {
 			"lodge-window": 60,
 			"sweep-interval": 3600,
 			"keep-on-subject-revocation": false,
-			"identity-check": "required",
 			requests: 60,
 			window: 60,
 		});

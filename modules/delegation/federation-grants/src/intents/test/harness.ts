@@ -82,7 +82,6 @@ export async function intents(options: { readonly settings?: Record<string, unkn
 		runtime,
 	});
 	const settings = section.parse({
-		page: `${origin}/consent-page`,
 		connections: { cal: { idp: "corp", scopes, "max-access-token-lifetime": "1h" } },
 		...options.settings,
 	});

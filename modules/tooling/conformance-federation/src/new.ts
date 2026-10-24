@@ -43,10 +43,14 @@ function settingsOf(idp: IdpScene): Record<string, unknown> {
 	}
 }
 
-/** Federation grants' own section: the page, the connections and, where the scene sets it, the lodging limit. */
-const grantsSection = (at: GrantsPart) => ({
+/** The browser half's section: the page that asks the user and, where the scene sets it, the login page. */
+const browserSection = (at: GrantsPart) => ({
 	page: at.page,
 	...(at.loginPage ? { "login-page": at.loginPage } : {}),
+});
+
+/** Federation grants' own section: the connections and, where the scene sets it, the lodging limit. */
+const grantsSection = (at: GrantsPart) => ({
 	connections: Object.fromEntries(
 		at.connections.map((c) => [
 			c.name,
@@ -71,7 +75,7 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 		...(part.idps.some((idp) => idp.type === "google") ? ["@mod/idp-google"] : []),
 		...(part.idps.some((idp) => idp.type === "apple") ? ["@mod/idp-apple"] : []),
 		...(part.keepsUpstreamTokens ? ["@mod/federation-tokens"] : []),
-		...(part.grants ? ["@mod/federation-grants"] : []),
+		...(part.grants ? ["@mod/federation-grants", "@mod/federation-grants-connect"] : []),
 	],
 	store: "volatile",
 	config: {
@@ -84,7 +88,12 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 		...(modules.includes("@mod/seal")
 			? { seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } } }
 			: {}),
-		...(part.grants ? { "federation-grants": grantsSection(part.grants) } : {}),
+		...(part.grants
+			? {
+					"federation-grants": grantsSection(part.grants),
+					"federation-grants-connect": browserSection(part.grants),
+				}
+			: {}),
 		...(part.linkStepUpPage ? { "federation-link": { "step-up-page": part.linkStepUpPage } } : {}),
 		// Every upstream is named so outbound reaches it, and those on plain http at loopback as such.
 		outbound: {

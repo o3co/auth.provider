@@ -155,7 +155,7 @@ describe("the link", () => {
 		const kept = await before.lodge();
 		const after = await connector({
 			stores: before.stores,
-			settings: {
+			grants: {
 				connections: { mail: { idp: "corp", scopes, "max-access-token-lifetime": "1h" } },
 			},
 		});

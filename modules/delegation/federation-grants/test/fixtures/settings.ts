@@ -9,18 +9,12 @@ export const sectionCases = [
 		settings: { connections: { "-cal": conn } },
 		ok: false,
 	},
-	{ name: "a page at http", settings: { page: "http://issuer.example/page" }, ok: false },
-	{
-		name: "the pages at http on a loopback host",
-		settings: {
-			page: "http://localhost:3000/page",
-			"login-page": "http://127.0.0.1:3000/login",
-			"step-up-page": "http://[::1]:3000/raise",
-		},
-		ok: true,
-	},
-	{ name: "a login page at http", settings: { "login-page": "http://a.example/x" }, ok: false },
-	{ name: "a step-up page at http", settings: { "step-up-page": "http://a.example/x" }, ok: false },
+	// The browser half's, in federation-grants-connect's section since it moved out.
+	...(["page", "login-page", "step-up-page", "identity-check"] as const).map((key) => ({
+		name: `${key}, the browser half's`,
+		settings: { [key]: key === "identity-check" ? "none" : "https://issuer.example/x" },
+		ok: false,
+	})),
 	{
 		name: "an access token's longest life past a day",
 		settings: { connections: { cal: { ...conn, "max-access-token-lifetime": "86401s" } } },
@@ -33,9 +27,9 @@ export const sectionCases = [
 /** A composition the boot refuses, and the refusal as `where: reason`. */
 export const bootCases = [
 	{
-		name: "connections without the page that asks the user",
-		settings: { page: undefined },
-		refused: "federation-grants: connections need the page that asks the user",
+		name: "no browser half to answer its browser routes",
+		browserHalf: null,
+		refused: "federation-grants.browsers: needs exactly one contribution (0)",
 	},
 	{
 		name: "connections without the public origin",
@@ -58,9 +52,4 @@ export const bootCases = [
 		settings: { window: "60" },
 		refused: "federation-grants.window: duration must name its unit",
 	},
-	...(["page", "login-page", "step-up-page"] as const).map((key) => ({
-		name: `a ${key} at http on a host not a loopback one`,
-		settings: { [key]: "http://issuer.example/x" },
-		refused: `federation-grants.${key}: a URL: http only on a loopback host`,
-	})),
 ] as const;

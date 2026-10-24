@@ -16,18 +16,13 @@ import type { Module } from "@mod/kernel";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
-import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
-import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
-import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
-import { roundTripStore, type StoredRoundTrip } from "@mod/upstream-round-trip";
-import roundTripModule from "@mod/upstream-round-trip/module";
 import {
 	type DelegatedExchange,
 	type Delegation,
@@ -37,7 +32,8 @@ import {
 	type UpstreamTokens,
 	upstreams,
 } from "@mod/upstreams";
-import { type Users, users } from "@mod/users";
+import { grantIntents, grantsBrowsers } from "../src/contract.ts";
+import { browserStandIn } from "../src/intents/test/stand-in.ts";
 import federationGrants from "../src/module.ts";
 import { type FederationGrantsSettings, federationGrantsConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
@@ -59,16 +55,6 @@ export interface Scripted {
 	withdrawn: boolean;
 }
 
-/** A requirement a session falls short of to be used, and at every level while `every` is set. */
-export const shortToUse = (short = { every: false }): EntryRequirement => ({
-	name: "mfa",
-	judges: ["use", "credentials"],
-	admits: async (_context, level) =>
-		level === "use" || short.every
-			? { kind: "short", answer: { error: "mfa_required" } }
-			: { kind: "admit" },
-});
-
 /** Tokens an upstream gives, bearer with a refresh token and five minutes, unless a test says. */
 export const upstreamTokens = (more: Partial<Record<keyof UpstreamTokens, unknown>> = {}) =>
 	({
@@ -89,6 +75,20 @@ export const upstreamLogin = (tokens: unknown = upstreamTokens(), subject = "u-a
 });
 
 const probed = contract<readonly Route[]>("test.routes");
+
+const unanswered = async (): Promise<HttpResponse> => ({ status: 501, headers: {} });
+/**
+ * The browser half contributed, so the browser routes answer without federation-grants' own: each a
+ * plain 501. The harness walks intents with `intents`' `browserStandIn` instead.
+ */
+const unansweredBrowser = defineModule({ name: "browser-stand-in" }, (m) => [
+	m.contribute(grantsBrowsers).by(() => ({
+		connect: unanswered,
+		question: unanswered,
+		decide: unanswered,
+		callback: unanswered,
+	})),
+]);
 
 type Answer = {
 	status: number;
@@ -122,8 +122,6 @@ const read = (response: HttpResponse): Answer => {
 export async function harness(
 	options: {
 		readonly settings?: Partial<FederationGrantsSettings>;
-		readonly requirements?: readonly EntryRequirement[];
-		readonly holders?: Readonly<Record<string, string | "down">>;
 		/** The resource the connection `cal` is for. */
 		readonly resource?: string;
 		/** The public origin; none for `null`. */
@@ -134,6 +132,8 @@ export async function harness(
 		readonly seal?: Readonly<Record<string, unknown>>;
 		/** Modules composed beside federation-grants. */
 		readonly modules?: readonly Module[];
+		/** The module contributing the browser half, the stand-in unless said; none for `null`. */
+		readonly browserHalf?: Module | null;
 	} = {},
 ) {
 	let now = 1_800_000_000_000;
@@ -170,24 +170,10 @@ export async function harness(
 			return next ?? ({ kind: "refreshed", tokens: fresh } as UpstreamRefresh);
 		},
 	};
-	const holders = options.holders ?? {};
 	const stubs = defineModule({ name: "stubs" }, (m) => [
 		m.provide(upstreams).by(() => ({
 			of: (idp) => (idp === "corp" && !script.withdrawn ? { delegation } : undefined),
 		})),
-		m.provide(users).by(
-			() =>
-				({
-					byUpstream: async (_idp: string, subject: string) => {
-						const holder = holders[subject];
-						if (holder === "down") throw new Unavailable("ledger");
-						return holder === undefined
-							? { kind: "none" }
-							: { kind: "user", user: { subject: holder, attributes: {} } };
-					},
-				}) as unknown as Users,
-		),
-		...(options.requirements ?? []).map((r) => m.contribute(entryRequirements).by(() => r)),
 		m.provide(probed).by((c) => c.collect(routes)),
 	]);
 	const worker = (id: string) =>
@@ -196,24 +182,14 @@ export async function harness(
 			method: "client_secret_basic",
 			sections: { "federation-grants": { connections: ["cal"], "return-uris": [back] } },
 		});
-	const keptTrips = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-	const tripStore = defineModule({ name: "trips" }, (m) => [
-		m.provide(roundTripStore).by(() => ({
-			save: keptTrips.records.create,
-			update: keptTrips.records.change,
-		})),
-	]);
 	const app = await assemble({
 		modules: [
 			http,
 			clientsModule,
 			secretHashModule,
 			sessionStandIn,
-			sessionRequirements,
 			csrfStandIn,
 			cookiesModule,
-			tripStore,
-			roundTripModule,
 			subjectRevocationStandIn,
 			rateLimitStandIn,
 			recorded.module,
@@ -221,6 +197,7 @@ export async function harness(
 			stores.module,
 			stubs,
 			federationGrants,
+			...(options.browserHalf === null ? [] : [options.browserHalf ?? unansweredBrowser]),
 			...(options.modules ?? []),
 		],
 		config: {
@@ -236,7 +213,6 @@ export async function harness(
 				}),
 			]),
 			...federationGrantsConfig({
-				page: `${origin}/consent-page`,
 				connections: {
 					cal: {
 						idp: "corp",
@@ -299,47 +275,21 @@ export async function harness(
 			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() });
 		return (done.cookies[0] ?? "").split(";")[0] ?? "";
 	};
-	const browse = async (
-		method: "GET" | "POST",
-		path: string,
-		cookie: string,
-		params: Record<string, string> = {},
-	) => {
-		const values = new Map(Object.entries(params).map(([k, v]) => [k, [v]]));
-		const request = testRequest({
-			method,
-			path,
-			headers: new Map([["cookie", cookie]]),
-			...(method === "GET" ? { query: values } : { form: values }),
-		});
-		return read(await routeOf(method, path).handle(request));
-	};
-	const location = (answer: Answer) => new URL(answer.headers.location ?? "", origin);
-
-	/** Opens a lodged grant's link in a browser: the link, the answer, and the challenge it carries. */
+	const intents = app.get(grantIntents);
+	const walk = browserStandIn(intents, {
+		delegation,
+		page: `${origin}/consent-page`,
+		exchange: (code) => script.exchange({ code } as DelegatedExchange),
+	});
+	/** Opens the link a client's call answered in a browser, binding the intent to its session: the answer, and the challenge. */
 	const open = async (lodged: Answer, cookie: string) => {
 		const link = new URL(String(lodged.json?.connect_uri));
-		const request = link.searchParams.get("request") ?? "";
-		const opened = await browse("GET", link.pathname, cookie, { request });
-		return {
-			link,
-			request,
-			opened,
-			challenge: location(opened).searchParams.get("challenge") ?? "",
-		};
+		const carrying = testRequest({ headers: new Map([["cookie", cookie]]) });
+		const session = await app.get(sessions).enter(carrying);
+		return { link, ...(await walk.open(link.searchParams.get("request") ?? "", session?.id)) };
 	};
-	/** The round trip's cookie each browser holds, by its session cookie, as a browser keeps the last set. */
-	const jar = new Map<string, string>();
-	/** Decides a challenge in a browser: the answer, and the upstream state it carries. */
-	const decide = async (challenge: string, cookie: string, decision = "accept") => {
-		const answered = await browse("POST", "/session/federation-grants/consent", cookie, {
-			challenge,
-			decision,
-		});
-		const set = answered.cookies.find((c) => c.includes("federation-grants."));
-		if (set) jar.set(cookie, set.split(";")[0] ?? "");
-		return { answered, state: location(answered).searchParams.get("state") ?? "" };
-	};
+	const decide = (challenge: string, _cookie: string, decision = "accept") =>
+		walk.decide(challenge, decision);
 
 	/** Lodges an intent, and walks a browser of `subject` through the link and the question to the upstream. */
 	const started = async (more: Record<string, unknown> = {}, cookie?: string) => {
@@ -351,13 +301,7 @@ export async function harness(
 		return { id, browser, lodged, opened, challenge, answered, state };
 	};
 	/** The upstream's return to the callback, as the browser brings it. */
-	const callback = (state: string, browser: string, code = "code-1") =>
-		browse(
-			"GET",
-			"/session/federation-grants/callback/cal",
-			[browser, jar.get(browser) ?? ""].filter(Boolean).join("; "),
-			{ state, code },
-		);
+	const callback = (state: string, _browser: string, code = "code-1") => walk.callback(state, code);
 	/** A grant made active: the whole flow with what the upstream's exchange answers. */
 	const connected = async (tokens: Partial<Record<keyof UpstreamTokens, unknown>> = {}) => {
 		script.exchange = async () => upstreamLogin(upstreamTokens(tokens));
@@ -365,10 +309,12 @@ export async function harness(
 		const done = await callback(flow.state, flow.browser);
 		return { ...flow, done };
 	};
+	const location = (answer: Answer) => new URL(answer.headers.location ?? "", origin);
 
 	return {
 		app,
 		stores,
+		intents,
 		script,
 		asked,
 		events: recorded.events,
@@ -379,7 +325,6 @@ export async function harness(
 		lodge,
 		grantCall,
 		login,
-		browse,
 		location,
 		open,
 		decide,

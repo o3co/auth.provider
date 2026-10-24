@@ -1,5 +1,12 @@
+import {
+	type Back,
+	type GrantIntents,
+	type GrantsBrowser,
+	grantIntents,
+	type IntentRef,
+} from "@mod/federation-grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
-import { type BuildContext, contract, isUnavailable, type Log } from "@mod/kernel";
+import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import { type Sessions, sessions } from "@mod/session";
 import { type RoundTrips, roundTrips, type Taken } from "@mod/upstream-round-trip";
@@ -11,22 +18,11 @@ import {
 	type Upstreams,
 	upstreams,
 } from "@mod/upstreams";
-import {
-	type Back,
-	type GrantIntents,
-	type GrantsBrowser,
-	grantIntents,
-	grantsBrowsers,
-	type IntentRef,
-} from "../browser.ts";
-import { browserBase } from "../intents/intents.ts";
-import { connectionName, name, type Settings } from "../section.ts";
+import { name, type Settings } from "../section.ts";
 import {
 	type UpstreamAccounts,
 	upstreamAccountOver,
 } from "../upstream-account/upstream-account.ts";
-
-export { browserBase } from "../intents/intents.ts";
 
 export interface ConnectParts {
 	readonly sessions: Sessions;
@@ -96,7 +92,7 @@ const exchangedBy = async (delegation: Delegation, exchange: DelegatedExchange) 
 };
 
 /** The browser half: the link a client sends the user to, the question, the user's decision, and the upstream's callback. */
-export function connectWith(p: ConnectParts) {
+export function connectWith(p: ConnectParts): GrantsBrowser {
 	const { intents, settings } = p;
 
 	/** The session at use level, as the intent's subject; a short one is told whose it is first. */
@@ -358,8 +354,8 @@ export function connectWith(p: ConnectParts) {
 		question: guarded(question),
 		decide: guarded(decide),
 		callback: guarded(async (request) => {
-			const name = request.path.slice(`${browserBase}/callback/`.length);
-			if (!connectionName.safeParse(name).success) return plain(404, "Not found.");
+			const name = intents.callbackOf(request.path);
+			if (name === undefined) return plain(404, "Not found.");
 			// Taken before any code is used, and only at the connection it was made for.
 			const state = request.query.single("state");
 			const taken = await p.trips.take(request, tripName(name), state);
@@ -370,34 +366,18 @@ export function connectWith(p: ConnectParts) {
 	};
 }
 
-/** The browser half the package's routes answer through, built once for them. */
-export const browser = contract<GrantsBrowser>("federation-grants.browser");
-
 /** The browser half over the contracts the assembly gives; connections refuse boot without the page that asks the user. */
 export const connectOver = async (c: BuildContext<Settings>) => {
-	if (Object.keys(c.section.connections).length > 0 && !c.section.page)
+	const intents = await c.get(grantIntents);
+	if (intents.connected && !c.section.page)
 		c.refuse(name, "connections need the page that asks the user");
 	return connectWith({
 		sessions: await c.get(sessions),
-		upstreamAccount: await upstreamAccountOver(c),
+		upstreamAccount: await upstreamAccountOver(c, c.section["identity-check"]),
 		upstreams: await c.get(upstreams),
 		trips: await c.get(roundTrips),
-		intents: await c.get(grantIntents),
+		intents,
 		settings: c.section,
 		log: c.log,
 	});
-};
-
-/**
- * Until the browser half is its own package's (TODO 96): the one contributed, else this module's;
- * two or more is no browser half at all.
- */
-export const browserAmong = <T>(contributed: readonly T[]): T | "none" | "many" =>
-	contributed.length > 1 ? "many" : (contributed[0] ?? "none");
-
-/** The browser half contributed, else this module's, built (and its page asked for) only then. */
-export const browserFrom = async (c: BuildContext<Settings>): Promise<GrantsBrowser> => {
-	const chosen = browserAmong(await c.collect(grantsBrowsers));
-	if (chosen === "many") return c.refuse(name, "more than one browser half is contributed");
-	return chosen === "none" ? connectOver(c) : chosen;
 };

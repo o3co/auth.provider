@@ -6,7 +6,7 @@ Internal module of `federation-grants`: a grant's intent through the browser, as
 - Offers the browser half each step of an intent as one change of the grant and its steps, or one read of them: the records, sealing, retention, listing and audit stay here.
 
 ## Not here
-- Sessions, the round trip, the upstream's start and exchange, and whose upstream account a callback reached: the browser half's. When an intent is lodged or renewed (`api`).
+- Sessions, the round trip, the upstream's start and exchange, and whose upstream account a callback reached: the browser half's (`federation-grants-connect`). When an intent is lodged or renewed (`api`).
 
 ## Offers
 - `intentsWith` (clients, upstreams, the store interfaces, `grant`'s parts, audit, settings, origin, runtime) and `intentsOver` (the build context) → `grantIntents`, the package's contract for the browser half; `browserBase`.

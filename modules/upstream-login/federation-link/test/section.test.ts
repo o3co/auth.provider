@@ -2,7 +2,7 @@ import { urlSetting } from "@mod/url-setting";
 import { expect, it } from "vitest";
 import { section } from "../src/section.ts";
 
-/** The page setting federation-grants' `step-up-page` is too, so both refuse a page in the same words. */
+/** The page setting federation-grants-connect's `step-up-page` is too, so both refuse a page in the same words. */
 const page = urlSetting({ schemes: ["https"], loopbackHttp: true });
 
 it("takes a step-up page over https, or http on a loopback host, and none by default", () => {
@@ -16,7 +16,7 @@ it("takes a step-up page over https, or http on a loopback host, and none by def
 	}
 });
 
-it("refuses a page as federation-grants' step-up page does, in the same words", () => {
+it("refuses a page as federation-grants-connect's step-up page does, in the same words", () => {
 	for (const url of [
 		"http://as.example/raise",
 		"ftp://as.example/raise",

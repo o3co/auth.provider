@@ -21,7 +21,7 @@ import {
 	secretFrom,
 } from "../grant/grant.ts";
 import { shared } from "../grant/shared.ts";
-import type { Settings } from "../section.ts";
+import { connectionName, type Settings } from "../section.ts";
 import {
 	type GrantStore,
 	grantStore,
@@ -142,14 +142,14 @@ export function intentsWith(p: IntentsParts): GrantIntents {
 	};
 
 	return {
-		legacySettings: {
-			...(settings.page === undefined ? {} : { page: settings.page }),
-			...(settings["login-page"] === undefined ? {} : { loginPage: settings["login-page"] }),
-			...(settings["step-up-page"] === undefined ? {} : { stepUpPage: settings["step-up-page"] }),
-			identityCheck: settings["identity-check"],
-		},
+		connected: Object.keys(settings.connections).length > 0,
 		connectUrl: (handle) => `${p.origin}${browserBase}/connect?request=${handle}`,
 		callbackUrl,
+		callbackOf: (path) => {
+			const prefix = `${browserBase}/callback/`;
+			const named = path.startsWith(prefix) ? path.slice(prefix.length) : undefined;
+			return named !== undefined && connectionName.safeParse(named).success ? named : undefined;
+		},
 		linked: async (handle) => {
 			const step = records.stepOf(await p.steps.read(handle));
 			const found = step?.kind === "link" ? await liveIntent(step) : undefined;

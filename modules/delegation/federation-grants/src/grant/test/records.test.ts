@@ -31,10 +31,7 @@ describe("a grant's records", () => {
 			{ format: 2, kind: "link", grant: id, intent } as never,
 			60_000,
 		);
-		const opened = await h.browse("GET", "/session/federation-grants/connect", await h.login(), {
-			request: "odd",
-		});
-		expect(opened.status).toBe(400);
+		expect((await h.intents.linked("odd")).kind).toBe("stale");
 	});
 
 	it("lodges a grant whose listing failed, logging only the kind of failure", async () => {

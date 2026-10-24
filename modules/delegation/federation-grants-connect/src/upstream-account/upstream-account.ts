@@ -1,12 +1,9 @@
+import type { UpstreamAccount } from "@mod/federation-grants";
 import type { BuildContext } from "@mod/kernel";
 import { type Users, users } from "@mod/users";
 import type { Settings } from "../section.ts";
 
-/** An upstream account, as the issuer and subject an upstream login names. */
-export interface UpstreamAccount {
-	readonly issuer: string;
-	readonly subject: string;
-}
+export type { UpstreamAccount };
 
 /** Why a connection's upstream account is not one the grant's subject may connect. */
 export type AccountRefusal = "account_mismatch" | "identity_unverifiable" | "identity_conflict";
@@ -48,6 +45,8 @@ export function upstreamAccountWith(p: UpstreamAccountParts) {
 
 export type UpstreamAccounts = ReturnType<typeof upstreamAccountWith>;
 
-/** The upstream account check over the users the assembly gives and the section's identity check. */
-export const upstreamAccountOver = async (c: BuildContext<Settings>) =>
-	upstreamAccountWith({ users: await c.get(users), check: c.section["identity-check"] });
+/** The upstream account check over the users the assembly gives and the identity check in force. */
+export const upstreamAccountOver = async (
+	c: BuildContext<unknown>,
+	check: Settings["identity-check"],
+) => upstreamAccountWith({ users: await c.get(users), check });

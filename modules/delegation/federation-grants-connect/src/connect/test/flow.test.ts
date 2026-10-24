@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+	type Answer,
 	back,
-	harness,
+	connector as harness,
 	origin,
-	said,
 	scopes,
 	shortToUse,
 	upstreamLogin,
 	upstreamTokens,
-} from "../../../test/harness.ts";
+} from "./harness.ts";
+
+/** An answer in a line: its status, the error and its description. */
+const said = (answer: Answer) =>
+	[answer.status, answer.json?.error, answer.json?.error_description]
+		.filter((part) => part !== undefined)
+		.join(" ");
 
 describe("a connection in the browser, through the assembled module", () => {
 	it("answers an upstream whose authorization URL throws at once as unavailable, leaving the question open", async () => {
@@ -40,18 +46,18 @@ describe("a connection in the browser, through the assembled module", () => {
 		const failed = h.events.filter((e) => e.kind === "federation.grant.authorization_failed");
 		expect(failed.map((e) => e.attributes?.outcome)).toEqual(["upstream_refused_start"]);
 		h.script.startRefused = false;
-		expect((await h.open(flow.lodged, flow.browser)).opened.status).toBe(400);
+		expect((await h.open(flow.link, flow.browser)).opened.status).toBe(400);
 		expect((await h.grantCall(flow.id, "status")).json?.status).toBe("pending");
 	});
 
 	it("refuses the link to another account's session, and the question and callback to another browser", async () => {
 		const h = await harness();
 		const lodged = await h.lodge();
-		expect((await h.open(lodged, await h.login("bob"))).opened.status).toBe(403);
+		expect((await h.open(lodged.link, await h.login("bob"))).opened.status).toBe(403);
 		const alice = await h.login();
-		const { challenge } = await h.open(lodged, alice);
+		const { challenge } = await h.open(lodged.link, alice);
 		const other = await h.login();
-		expect((await h.open(lodged, other)).opened.status).toBe(400);
+		expect((await h.open(lodged.link, other)).opened.status).toBe(400);
 		expect((await h.decide(challenge, other)).answered.status).toBe(403);
 		const { answered, state } = await h.decide(challenge, alice);
 		// Another browser carries no round trip: nothing is spent.
@@ -84,7 +90,7 @@ describe("a connection in the browser, through the assembled module", () => {
 		const h = await harness();
 		const lodged = await h.lodge();
 		const alice = await h.login();
-		const { challenge } = await h.open(lodged, alice);
+		const { challenge } = await h.open(lodged.link, alice);
 		const shown = await h.browse("GET", "/session/federation-grants/consent", alice, { challenge });
 		expect(shown.json).toMatchObject({
 			client_id: "worker",
@@ -95,7 +101,7 @@ describe("a connection in the browser, through the assembled module", () => {
 		});
 		const denied = await h.decide(challenge, alice, "deny");
 		expect(h.location(denied.answered).searchParams.get("error")).toBe("access_denied");
-		expect((await h.grantCall(String(lodged.json?.grant_id), "token")).json).toEqual({
+		expect((await h.grantCall(lodged.id, "token")).json).toEqual({
 			error: "authorization_pending",
 		});
 	});
@@ -115,7 +121,7 @@ describe("a connection in the browser, through the assembled module", () => {
 
 	it("sends back only to a return the client still lists", async () => {
 		const h = await harness();
-		const flow = await h.started({ redirect_uri: back });
+		const flow = await h.started();
 		h.relist(["cal"], []);
 		const done = await h.callback(flow.state, flow.browser);
 		expect(done.status).toBe(400);
@@ -129,27 +135,27 @@ describe("a connection in the browser, through the assembled module", () => {
 			requirements: [shortToUse(short)],
 		});
 		const lodged = await h.lodge();
-		const bob = await h.open(lodged, await h.login("bob"));
+		const bob = await h.open(lodged.link, await h.login("bob"));
 		expect(bob.opened).toMatchObject({
 			status: 403,
 			text: "This request was made for another account.",
 		});
 		short.every = true;
 		const alice = await h.login();
-		const unknown = await h.open(lodged, alice);
+		const unknown = await h.open(lodged.link, alice);
 		expect(unknown.opened).toMatchObject({ status: 403, text: "Sign in again to continue." });
 		short.every = false;
-		const raised = await h.open(lodged, alice);
+		const raised = await h.open(lodged.link, alice);
 		expect(raised.opened.status).toBe(303);
 		expect(h.location(raised.opened).pathname).toBe("/raise");
 	});
 
 	it("answers a browser with no session with the login page, or 401 without one", async () => {
 		const h = await harness({ settings: { "login-page": `${origin}/login` } });
-		const anonymous = await h.open(await h.lodge(), "");
+		const anonymous = await h.open((await h.lodge()).link, "");
 		expect(h.location(anonymous.opened).searchParams.get("redirect_to")).toBe(anonymous.link.href);
 		const plain = await harness();
-		expect((await plain.open(await plain.lodge(), "")).opened.status).toBe(401);
+		expect((await plain.open((await plain.lodge()).link, "")).opened.status).toBe(401);
 	});
 
 	it("ends a pending grant a subject's revocation reached before its callback", async () => {

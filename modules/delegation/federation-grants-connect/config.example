@@ -1,4 +1,4 @@
-federation-grants {
+federation-grants-connect {
 	page = "https://login.example.invalid/federation-grants"
 	login-page = "https://login.example.invalid/login"
 }
