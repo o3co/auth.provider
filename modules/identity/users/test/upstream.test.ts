@@ -35,9 +35,13 @@ const boot = async (
 				usersModule,
 				secretHashModule,
 				stores.module,
-				defineModule({ name: "test-ledger" }, (m) => [m.contribute(ledgers).by(() => ledger)]),
+				defineModule({ name: "test-ledger", takes: [] }, (m) => [
+					m.contribute(ledgers).by(() => ledger),
+				]),
 				...names.map((name, i) =>
-					defineModule({ name: `names-${i}` }, (m) => [m.contribute(upstreamNames).by(() => name)]),
+					defineModule({ name: `names-${i}`, takes: [] }, (m) => [
+						m.contribute(upstreamNames).by(() => name),
+					]),
 				),
 			],
 			config: { ...kernelConfig(), users: {} },
@@ -162,7 +166,7 @@ describe("IdP names declared to users", () => {
 					secretHashModule,
 					memoryUsersStores().module,
 					...names.map((name, i) =>
-						defineModule({ name: `names-${i}` }, (m) => [
+						defineModule({ name: `names-${i}`, takes: [] }, (m) => [
 							m.contribute(upstreamNames).by(() => name),
 						]),
 					),

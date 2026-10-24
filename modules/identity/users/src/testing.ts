@@ -385,7 +385,7 @@ function memoryStore<T>() {
 export function memoryUsersStores() {
 	const links = memoryStore<StoredLink>();
 	const contacts = memoryStore<StoredContacts>();
-	const module = defineModule({ name: "users-stores" }, (m) => [
+	const module = defineModule({ name: "users-stores", takes: [] }, (m) => [
 		m.provide(linkStore).by(() => links.store),
 		m.provide(contactStore).by(() => contacts.store),
 	]);

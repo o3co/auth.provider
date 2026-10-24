@@ -1,4 +1,5 @@
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { describe, expect, it } from "vitest";
 import { contactStore, type Ledger, ledgers, users, type Verified } from "../src/contract.ts";
@@ -6,6 +7,7 @@ import { keptLinks } from "../src/links/kept.ts";
 import { ledgerLinks } from "../src/links/ledger.ts";
 import usersModule from "../src/module.ts";
 import type { UserSource } from "../src/registered.ts";
+import { linkStore } from "../src/store.ts";
 import { memoryUsersStores } from "../src/testing.ts";
 
 const alice = { subject: "s-alice", attributes: {} };
@@ -64,30 +66,65 @@ describe("the link store users asks for", () => {
 		bySubject: async () => none,
 		...(byUpstream ? { byUpstream } : {}),
 	});
-	const contactsOnly = defineModule({ name: "contacts-only" }, (m) => [
+	const contactsOnly = defineModule({ name: "contacts-only", takes: [] }, (m) => [
 		m.provide(contactStore).by(() => memoryUsersStores().contacts.store),
 	]);
-	const boot = (ledger?: Ledger) =>
-		assemble({
-			modules: [
-				usersModule,
-				secretHashModule,
-				contactsOnly,
-				...(ledger
-					? [defineModule({ name: "test-ledger" }, (m) => [m.contribute(ledgers).by(() => ledger)])]
-					: []),
-			],
-			config: { ...kernelConfig(), users: {} },
-		});
+	/** A link store that keeps in memory and lists each method asked of it. */
+	const countedLinks = (asked: string[]) =>
+		defineModule({ name: "counted-links", takes: [] }, (m) => [
+			m.provide(linkStore).by(() => {
+				const store = memoryUsersStores().links.store;
+				return new Proxy(store, {
+					get(target, name, receiver) {
+						const value = Reflect.get(target, name, receiver);
+						if (typeof value !== "function") return value;
+						return (...args: unknown[]) => {
+							asked.push(String(name));
+							return value.apply(target, args);
+						};
+					},
+				});
+			}),
+		]);
+	const parts = (ledger: Ledger | undefined, links: readonly ReturnType<typeof countedLinks>[]) => [
+		usersModule,
+		secretHashModule,
+		contactsOnly,
+		...links,
+		...(ledger
+			? [
+					defineModule({ name: "test-ledger", takes: [] }, (m) => [
+						m.contribute(ledgers).by(() => ledger),
+					]),
+				]
+			: []),
+	];
+	const config = { ...kernelConfig(), users: {} };
+	const boot = (ledger?: Ledger, links: readonly ReturnType<typeof countedLinks>[] = []) =>
+		assemble({ modules: parts(ledger, links), config });
 
-	it("is none where the ledger looks users up by upstream identity", async () => {
-		const app = await boot(ledgerOf(async () => none));
+	it("is never asked where the ledger looks users up by upstream identity", async () => {
+		const asked: string[] = [];
+		const app = await boot(
+			ledgerOf(async () => none),
+			[countedLinks(asked)],
+		);
 		expect(await app.get(users).byUpstream(device.idp, device.subject)).toEqual(none);
+		expect(asked).toEqual([]);
 	});
 
-	it("is needed where users keeps the links", async () => {
-		for (const ledger of [ledgerOf(), undefined]) {
+	it("is needed in every composition, where users keeps the links and where the ledger does", async () => {
+		for (const ledger of [ledgerOf(), undefined, ledgerOf(async () => none)]) {
 			await expect(boot(ledger)).rejects.toBeInstanceOf(BootRefused);
 		}
+	});
+
+	it("is taken where users keeps the links, and left untaken where the ledger keeps them", async () => {
+		const kept = await takesUnused({ modules: parts(ledgerOf(), [countedLinks([])]), config });
+		expect(kept).toEqual({});
+		const upstream = ledgerOf(async () => none);
+		const left = await takesUnused({ modules: parts(upstream, [countedLinks([])]), config });
+		// Its takes name the link store in every composition; a ledger with upstream lookups never asks it.
+		expect(left).toEqual({ users: ["users.link-store"] });
 	});
 });
