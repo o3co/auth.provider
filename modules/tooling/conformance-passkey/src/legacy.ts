@@ -36,6 +36,8 @@ onLegacy(passkeyArea, {
 		"store-fault:passkeys",
 		// The legacy build keeps no limit of passkeys per user.
 		"passkey-credential-limit",
+		// The legacy build logs in with a passkey at the token endpoint alone, never into a session, and never refuses a password for one.
+		"passkey-session-login",
 	],
 	differs: [
 		// A framed ceremony whose browser reports no top origin is accepted with no frame listed.
