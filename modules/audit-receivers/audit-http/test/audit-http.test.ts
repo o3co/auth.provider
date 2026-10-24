@@ -30,7 +30,7 @@ beforeEach(() => {
 const elsewhere = "elsewhere.example";
 /** An outbound that keeps each request and answers as the test says. */
 const outboundAnswering = (answer: () => Promise<OutboundResponse>) =>
-	defineModule({ name: "outbound" }, (m) => [
+	defineModule({ name: "outbound", takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async (url, request, narrower) => {
 				sent.push({ url, request, ...(narrower ? { narrower } : {}) });
@@ -179,7 +179,7 @@ const receiverOf = async (answer: () => Promise<OutboundResponse>, section: unkn
 		modules: [
 			outboundAnswering(answer),
 			auditHttp,
-			defineModule({ name: "peek" }, (m) => [
+			defineModule({ name: "peek", takes: [auditReceivers] }, (m) => [
 				m.provide(receivers).by((c) => c.collect(auditReceivers)),
 			]),
 		],
