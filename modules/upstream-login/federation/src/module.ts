@@ -5,15 +5,21 @@ import { requestsPerSource } from "@mod/rate-limit";
 import { handoff } from "@mod/upstream-handoff";
 import { upstreams } from "@mod/upstreams";
 import { upstreamNames } from "@mod/users";
-import { amrSourceIn, idpsIn, upstreamNamesIn, upstreamsIn } from "./idps/idps.ts";
-import { loginCaller, loginIn } from "./login/login.ts";
-import { base, federationIdps, roundTripIn } from "./round-trip/round-trip.ts";
+import { amrSourceIn, idpsIn, idpsTakes, upstreamNamesIn, upstreamsIn } from "./idps/idps.ts";
+import { loginCaller, loginIn, loginTakes } from "./login/login.ts";
+import { base, federationIdps, roundTripIn, roundTripTakes } from "./round-trip/round-trip.ts";
 import { section } from "./section.ts";
 
 /** The one handler both methods' routes share, built once. */
 const federationRoute = contract<Pick<Route, "uses" | "handle">>("federation.route");
 
-export default defineModule({ name: "federation", section }, (m) => [
+/**
+ * What the module takes: `handoff` for a held login that opened, and its helpers' (`idpsIn`,
+ * `loginIn`, `roundTripIn`); its own IdPs and route are not named.
+ */
+const takes = [handoff, ...idpsTakes, ...loginTakes, ...roundTripTakes];
+
+export default defineModule({ name: "federation", section, takes }, (m) => [
 	m.contribute(amrSources).by(amrSourceIn),
 	// A login may return to an IdP's start (`base/<name>`), as a step-up page returns a link's start.
 	m.contribute(returnPaths).by(() => ({ path: base, segment: true })),

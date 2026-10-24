@@ -117,8 +117,19 @@ export const federationIdps = contract<ReadonlyMap<string, Idp>>("federation.idp
 const landingWith = (landing: string | undefined, at: Pick<Site, "origin">) =>
 	landing ?? `${at.origin}/`;
 
+export const landingTakes = [site] as const;
+
 export const landingIn = async (c: BuildContext<Settings>) =>
 	landingWith(c.section.landing, await c.get(site));
+
+/** What `roundTripIn` and `landingIn` (`landingTakes`) take from the build context; the IdPs are the module's own. */
+export const roundTripTakes = [
+	roundTrips,
+	upstreamContinuations,
+	originEvidence,
+	logins,
+	...landingTakes,
+] as const;
 
 /** The round trip over the IdPs, ending in the continuation its start chose. */
 export async function roundTripIn(
