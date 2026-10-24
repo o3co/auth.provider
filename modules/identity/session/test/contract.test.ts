@@ -2,7 +2,7 @@ import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { describe, expect, it } from "vitest";
@@ -34,7 +34,7 @@ async function placeOver(
 				? { kind: "short", requirement: "test", answer: { error: "short" } }
 				: { kind: "admit", judged: credentialsJudged && level === "credentials" },
 	};
-	const around = defineModule({ name: "around" }, (m) => [
+	const around = defineModule({ name: "around", takes: [] }, (m) => [
 		m.contribute(entryJudge).by(() => judge),
 		m.contribute(closingParticipants).by(() => ({
 			closing: async (session) => {
@@ -125,4 +125,10 @@ describe("the stand-in's seams", () => {
 		gate.open?.();
 		expect(await entering).toEqual({ kind: "absent" });
 	});
+});
+
+it("takes every handle its stand-in's takes name, the seams collected though none is contributed", async () => {
+	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
+	const modules = [http, cookiesModule, sessionStandIn, subjectRevocationStandIn];
+	expect(await takesUnused({ modules, config })).toEqual({});
 });
