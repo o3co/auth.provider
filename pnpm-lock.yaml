@@ -128,24 +128,12 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
-      '@mod/upstream-round-trip':
-        specifier: workspace:*
-        version: link:../../upstream-login/upstream-round-trip
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../../upstream-login/upstreams
-      '@mod/url-setting':
-        specifier: workspace:*
-        version: link:../../foundation/url-setting
-      '@mod/users':
-        specifier: workspace:*
-        version: link:../../identity/users
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -159,9 +147,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
-      '@mod/session-requirements':
+      '@mod/session':
         specifier: workspace:*
-        version: link:../../identity/session-requirements
+        version: link:../../identity/session
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store

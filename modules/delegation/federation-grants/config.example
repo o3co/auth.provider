@@ -1,4 +1,0 @@
-federation-grants {
-	page = "https://login.example.invalid/federation-grants"
-	login-page = "https://login.example.invalid/login"
-}

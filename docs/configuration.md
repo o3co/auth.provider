@@ -169,9 +169,6 @@ From `@mod/federation-grants`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation-grants.page` | string |  |  | `FEDERATION_GRANTS_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host). |
-| `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host). |
-| `federation-grants.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host). |
 | `federation-grants.connections` | map | `{}` |  |  |  | What a grant may be for, by a name (a-z, 0-9 and -, at most 32): idp (a federation IdP that offers delegation), scopes (holding openid), resource, max-access-token-lifetime and scope-subsets. |
 | `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
 | `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
@@ -183,7 +180,6 @@ From `@mod/federation-grants`.
 | `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged and renewed intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
 | `federation-grants.sweep-interval` | string | `1h` |  |  |  | How often each host walks every grant kept, erasing the credentials of one past its end or ended by its subject's revocation though no request reads it: a duration with a unit, from 1m to 1d, e.g. 1h. |
 | `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  | Whether a subject's revocation may be asked to leave its established grants. |
-| `federation-grants.identity-check` | required \| none | `required` |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. |
 | `federation-grants.requests` | integer (1–1000) | `60` |  |  |  | Requests allowed per source in each window, on every route, from 1 to 1000. |
 | `federation-grants.window` | string | `1m` |  |  |  | The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m. |
 

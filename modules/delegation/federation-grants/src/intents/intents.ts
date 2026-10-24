@@ -142,12 +142,6 @@ export function intentsWith(p: IntentsParts): GrantIntents {
 	};
 
 	return {
-		legacySettings: {
-			...(settings.page === undefined ? {} : { page: settings.page }),
-			...(settings["login-page"] === undefined ? {} : { loginPage: settings["login-page"] }),
-			...(settings["step-up-page"] === undefined ? {} : { stepUpPage: settings["step-up-page"] }),
-			identityCheck: settings["identity-check"],
-		},
 		connected: Object.keys(settings.connections).length > 0,
 		connectUrl: (handle) => `${p.origin}${browserBase}/connect?request=${handle}`,
 		callbackUrl,

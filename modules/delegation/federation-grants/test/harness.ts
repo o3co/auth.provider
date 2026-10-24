@@ -16,18 +16,13 @@ import type { Module } from "@mod/kernel";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
-import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
-import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
-import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
-import { roundTripStore, type StoredRoundTrip } from "@mod/upstream-round-trip";
-import roundTripModule from "@mod/upstream-round-trip/module";
 import {
 	type DelegatedExchange,
 	type Delegation,
@@ -37,7 +32,6 @@ import {
 	type UpstreamTokens,
 	upstreams,
 } from "@mod/upstreams";
-import { type Users, users } from "@mod/users";
 import { grantIntents, grantsBrowsers } from "../src/contract.ts";
 import { browserStandIn } from "../src/intents/test/stand-in.ts";
 import federationGrants from "../src/module.ts";
@@ -60,16 +54,6 @@ export interface Scripted {
 	/** The IdP no longer offers its delegation, as after the operator took it away. */
 	withdrawn: boolean;
 }
-
-/** A requirement a session falls short of to be used, and at every level while `every` is set. */
-export const shortToUse = (short = { every: false }): EntryRequirement => ({
-	name: "mfa",
-	judges: ["use", "credentials"],
-	admits: async (_context, level) =>
-		level === "use" || short.every
-			? { kind: "short", answer: { error: "mfa_required" } }
-			: { kind: "admit" },
-});
 
 /** Tokens an upstream gives, bearer with a refresh token and five minutes, unless a test says. */
 export const upstreamTokens = (more: Partial<Record<keyof UpstreamTokens, unknown>> = {}) =>
@@ -138,8 +122,6 @@ const read = (response: HttpResponse): Answer => {
 export async function harness(
 	options: {
 		readonly settings?: Partial<FederationGrantsSettings>;
-		readonly requirements?: readonly EntryRequirement[];
-		readonly holders?: Readonly<Record<string, string | "down">>;
 		/** The resource the connection `cal` is for. */
 		readonly resource?: string;
 		/** The public origin; none for `null`. */
@@ -188,24 +170,10 @@ export async function harness(
 			return next ?? ({ kind: "refreshed", tokens: fresh } as UpstreamRefresh);
 		},
 	};
-	const holders = options.holders ?? {};
 	const stubs = defineModule({ name: "stubs" }, (m) => [
 		m.provide(upstreams).by(() => ({
 			of: (idp) => (idp === "corp" && !script.withdrawn ? { delegation } : undefined),
 		})),
-		m.provide(users).by(
-			() =>
-				({
-					byUpstream: async (_idp: string, subject: string) => {
-						const holder = holders[subject];
-						if (holder === "down") throw new Unavailable("ledger");
-						return holder === undefined
-							? { kind: "none" }
-							: { kind: "user", user: { subject: holder, attributes: {} } };
-					},
-				}) as unknown as Users,
-		),
-		...(options.requirements ?? []).map((r) => m.contribute(entryRequirements).by(() => r)),
 		m.provide(probed).by((c) => c.collect(routes)),
 	]);
 	const worker = (id: string) =>
@@ -214,24 +182,14 @@ export async function harness(
 			method: "client_secret_basic",
 			sections: { "federation-grants": { connections: ["cal"], "return-uris": [back] } },
 		});
-	const keptTrips = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-	const tripStore = defineModule({ name: "trips" }, (m) => [
-		m.provide(roundTripStore).by(() => ({
-			save: keptTrips.records.create,
-			update: keptTrips.records.change,
-		})),
-	]);
 	const app = await assemble({
 		modules: [
 			http,
 			clientsModule,
 			secretHashModule,
 			sessionStandIn,
-			sessionRequirements,
 			csrfStandIn,
 			cookiesModule,
-			tripStore,
-			roundTripModule,
 			subjectRevocationStandIn,
 			rateLimitStandIn,
 			recorded.module,
@@ -255,7 +213,6 @@ export async function harness(
 				}),
 			]),
 			...federationGrantsConfig({
-				page: `${origin}/consent-page`,
 				connections: {
 					cal: {
 						idp: "corp",
@@ -318,22 +275,6 @@ export async function harness(
 			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() });
 		return (done.cookies[0] ?? "").split(";")[0] ?? "";
 	};
-	/** A browser's request to a route, with its cookie and its query or form. */
-	const browse = async (
-		method: "GET" | "POST",
-		path: string,
-		cookie: string,
-		params: Record<string, string> = {},
-	) => {
-		const values = new Map(Object.entries(params).map(([k, v]) => [k, [v]]));
-		const request = testRequest({
-			method,
-			path,
-			headers: new Map([["cookie", cookie]]),
-			...(method === "GET" ? { query: values } : { form: values }),
-		});
-		return read(await routeOf(method, path).handle(request));
-	};
 	const intents = app.get(grantIntents);
 	const walk = browserStandIn(intents, {
 		delegation,
@@ -384,7 +325,6 @@ export async function harness(
 		lodge,
 		grantCall,
 		login,
-		browse,
 		location,
 		open,
 		decide,

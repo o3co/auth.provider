@@ -7,7 +7,7 @@ Internal module of `federation-grants`: the client routes, and the revocation fo
 - Follows a subject's revocation through the grants listed under it (`follow.ts`).
 
 ## Not here
-- The browser half (`connect`), token renewal (`refresh`), record shapes (`grant`).
+- The browser half (`federation-grants-connect`, through `intents`), token renewal (`refresh`), record shapes (`grant`).
 
 ## Offers
 - `apiOver` (the build context) → the handler of `/oauth/federation-grants/…`, through `apiWith` (clients, stores, attempt limit, `grant`'s parts, `refresh`, upstreams, audit, settings, origin, runtime).

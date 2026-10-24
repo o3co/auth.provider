@@ -7,7 +7,7 @@ Internal module of `federation-grants`: what a grant and a browser step are, and
 - Judges upstream tokens, a grant against its subject's boundaries and its end, and a client's permission and returns.
 
 ## Not here
-- When records are written (`api`, `connect`, `refresh`), sealing itself (`seal`), the boundaries (`subject-revocation`).
+- When records are written (`api`, `intents`, `refresh`), sealing itself (`seal`), the boundaries (`subject-revocation`).
 
 ## Offers
 - `shared`, built by `sharedOver` from the build context: the public origin, `recordsWith`, `judgeWith` and `listingWith` over its contracts, once for the package. It refuses boot when connections lack the origin or their IdP's delegation. The other internal modules take the contracts they use from the build context; the package's module only declares the routes and contributions they fill, and starts the sweep with these shared parts.

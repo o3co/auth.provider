@@ -18,13 +18,13 @@ describe("the operator's section and the boot", () => {
 		});
 	}
 
-	it("boots with its pages at http on a loopback host", async () => {
-		const local = {
-			page: "http://localhost:3000/page",
-			"login-page": "http://127.0.0.1:3000/login",
-			"step-up-page": "http://[::1]:3000/raise",
-		};
-		await expect(harness({ settings: local })).resolves.toBeDefined();
+	it("refuses to boot on a browser setting still written here, naming the key and never its value", async () => {
+		const error = await harness({
+			settings: { "login-page": "https://issuer.example/secret-login" } as never,
+		}).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect(JSON.stringify((error as BootRefused).refusals)).toContain("login-page");
+		expect(JSON.stringify((error as BootRefused).refusals)).not.toContain("secret-login");
 	});
 
 	it("counts every route's requests per source in the operator's window", async () => {

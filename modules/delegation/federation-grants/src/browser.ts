@@ -77,16 +77,6 @@ export type Back =
  * browser half sees views and refs, never a record.
  */
 export interface GrantIntents {
-	/**
-	 * For now, the browser half's settings as federation-grants' section still holds them, for a
-	 * browser half whose own section leaves them out; it goes once the settings have moved (TODO 96).
-	 */
-	readonly legacySettings: {
-		readonly page?: string;
-		readonly loginPage?: string;
-		readonly stepUpPage?: string;
-		readonly identityCheck: "required" | "none";
-	};
 	/** Whether the operator configured any connection: a browser half refuses boot then without the page that asks the user. */
 	readonly connected: boolean;
 	/** The connect link a client sends the user to, on the public origin. */
@@ -189,7 +179,7 @@ export interface GrantsBrowser {
 	readonly callback: (request: HttpRequest) => Promise<HttpResponse>;
 }
 
-/** The browser half, contributed by the package that runs it. */
+/** The browser half, contributed by the one package that runs it (`federation-grants-connect`). */
 export const grantsBrowsers = extensionPoint<GrantsBrowser>("federation-grants.browsers", {
-	multiplicity: "many",
+	multiplicity: "one",
 });
