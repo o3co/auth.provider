@@ -10,9 +10,12 @@ export function clientAssertionConfig(settings: Partial<ClientAssertionSettings>
 	return { "client-assertion": { ...settings } };
 }
 
-/** The section that gives a test client its keys. */
-export function clientKeysFor(keys: readonly Jwk[]) {
-	return { [clientKeys.name]: { keys } };
+/** The section that gives a test client its keys, with its other fields as given. */
+export function clientKeysFor(
+	keys: readonly Jwk[],
+	fields: { readonly "accept-loose-audience"?: boolean } = {},
+) {
+	return { [clientKeys.name]: { keys, ...fields } };
 }
 
 /** A place that keeps spent assertions, as one implementation of the store interface offers it. */

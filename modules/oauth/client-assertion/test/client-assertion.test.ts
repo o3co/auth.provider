@@ -62,6 +62,8 @@ async function boot({
 	issuerUrl = issuer,
 	/** Where the token endpoint is; null for a deployment without a public origin. */
 	tokenEndpoint = tokenUrl as string | null,
+	/** The clients whose section accepts a loose audience. */
+	loose = [] as readonly string[],
 } = {}) {
 	const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
 	const down = unavailableSwitch<SpentAssertions>("spent assertions");
@@ -84,10 +86,15 @@ async function boot({
 			),
 	]);
 	// A client of a secret method also holds its secret, which clients requires at boot.
-	const registeredAs = (id: string) =>
-		method === "private_key_jwt"
-			? { id, kind: "confidential" as const, method, sections: clientKeysFor(keys) }
-			: confidentialClient({ id, method, sections: clientKeysFor(keys) });
+	const registeredAs = (id: string) => {
+		const sections = clientKeysFor(
+			keys,
+			loose.includes(id) ? { "accept-loose-audience": true } : {},
+		);
+		return method === "private_key_jwt"
+			? { id, kind: "confidential" as const, method, sections }
+			: confidentialClient({ id, method, sections });
+	};
 	const app = await assemble({
 		modules: [
 			http,
@@ -125,7 +132,7 @@ const claims = (extra: Record<string, unknown> = {}): JWTPayload =>
 		Object.entries({
 			iss: "app",
 			sub: "app",
-			aud: tokenUrl,
+			aud: issuer,
 			exp: seconds() + 60,
 			jti: `j-${Math.random()}`,
 			...extra,
@@ -164,13 +171,20 @@ const tried = async (
 ) => outcome(c, presenting(await sign(claims(extra), key, header), form));
 
 describe("private_key_jwt", () => {
-	it("authenticates a client by an assertion signed with its key, for the issuer or the token endpoint", async () => {
+	it("authenticates a client by an assertion signed with its key, for the issuer as one string", async () => {
 		const { c } = await boot();
 		expect(await tried(c)).toBe("app");
-		expect(await tried(c, { aud: issuer })).toBe("app");
-		expect(await tried(c, { aud: ["x", issuer] })).toBe("app");
 		expect(await tried(c, {}, { client_id: "app" })).toBe("app");
 		expect(await tried(c, { aud: `${issuer}/other` })).toBe("bad_credentials");
+	});
+
+	it("refuses an assertion for the token endpoint, or naming its audience in a list, before spending its jti", async () => {
+		const { c } = await boot();
+		for (const aud of [tokenUrl, [issuer], [tokenUrl], ["x", issuer], [issuer, tokenUrl]]) {
+			expect(await tried(c, { aud, jti: "kept" }), JSON.stringify(aud)).toBe("bad_credentials");
+			expect(lastWarned()).toBe("audience");
+		}
+		expect(await tried(c, { jti: "kept" })).toBe("app");
 	});
 
 	it("names the asymmetric algorithms an assertion may be signed with, and no shared secret", async () => {
@@ -183,12 +197,26 @@ describe("private_key_jwt", () => {
 		).toEqual([]);
 	});
 
-	it("takes the token endpoint's own location as an audience, whatever path the issuer has", async () => {
+	it("also takes the token endpoint's location, and lists, from a client accepting a loose audience, logging each", async () => {
 		const tenant = `${issuer}/tenant`;
-		const { c } = await boot({ issuerUrl: tenant });
-		expect(await tried(c, { aud: tokenUrl })).toBe("app");
+		const { c } = await boot({ issuerUrl: tenant, loose: ["app"] });
+		const loosely = () =>
+			recorded.lines().filter((line) => line.event === "client-assertion.loose_audience");
+		const before = loosely().length;
 		expect(await tried(c, { aud: tenant })).toBe("app");
+		expect(loosely()).toHaveLength(before);
+		for (const aud of [tokenUrl, [tokenUrl], ["x", tenant]]) {
+			expect(await tried(c, { aud }), JSON.stringify(aud)).toBe("app");
+		}
+		expect(loosely()).toHaveLength(before + 3);
+		expect(loosely().at(-1)).toMatchObject({ level: "warn", fields: { client: "app" } });
+		// The token endpoint's own location, whatever path the issuer has.
 		expect(await tried(c, { aud: `${tenant}/oauth/token` })).toBe("bad_credentials");
+		expect(await tried(c, { aud: ["x"] })).toBe("bad_credentials");
+		// Each client's own: another is held to the issuer alone.
+		const twin = { iss: "app:twin", sub: "app:twin" };
+		expect(await tried(c, { ...twin, aud: tokenUrl })).toBe("bad_credentials");
+		expect(await tried(c, { ...twin, aud: tenant })).toBe("app:twin");
 		const nowhere = await boot({ tokenEndpoint: null }).catch((error) => error);
 		expect(nowhere).toBeInstanceOf(BootRefused);
 	});
@@ -483,7 +511,8 @@ describe("private_key_jwt", () => {
 				algorithms: ["ES256"],
 				verifierOf: () => ({ verify: async () => ({ kind: "unavailable" }) }),
 			},
-			audiences: [tokenUrl],
+			issuer,
+			tokenEndpoint: tokenUrl,
 			maxLifetimeMs: 3_600_000,
 			skewMs: 30_000,
 			clock: runtime.clock,
@@ -533,6 +562,16 @@ describe("private_key_jwt", () => {
 		const keys = await clientKeys.schema["~standard"].validate({ keys: [], other: 1 });
 		expect(keys.issues).toBeDefined();
 		expect(clientKeysFor([])).toEqual({ "client-assertion": { keys: [] } });
+	});
+
+	it("holds a client to the issuer alone unless its section accepts a loose audience, a boolean", async () => {
+		const validated = (value: Record<string, unknown>) =>
+			clientKeys.schema["~standard"].validate({ keys: [], ...value });
+		expect(await validated({})).toMatchObject({ value: { "accept-loose-audience": false } });
+		expect(await validated({ "accept-loose-audience": true })).toMatchObject({
+			value: { "accept-loose-audience": true },
+		});
+		expect((await validated({ "accept-loose-audience": "true" })).issues).toBeDefined();
 	});
 
 	it("takes the operator's lifetime cap and clock allowance within their bounds, in whole seconds written with their unit", () => {

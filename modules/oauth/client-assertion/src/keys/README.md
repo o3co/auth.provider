@@ -1,12 +1,13 @@
 # keys
 
-Internal module of `client-assertion`: the client metadata section that holds a client's keys for its assertions.
+Internal module of `client-assertion`: the client metadata section that holds a client's keys for its assertions, and whether it is taken with a loose audience.
 
 ## Responsibilities
 - Reads a client's keys, written in or a key set's URL, and where they come from; checks at boot that `outbound` lets a registered client's key set URL through.
+- Reads whether the client accepts a loose audience (`accept-loose-audience`, default false).
 
 ## Not here
-- Checking an assertion and spending it (the package). Fetching the key set (`external-jwt`, through `outbound`).
+- Checking an assertion, its audience among it, and spending it (the package). Fetching the key set (`external-jwt`, through `outbound`).
 
 ## Offers
 - `clientKeys`, the section; `keysOf` (the section) → where the keys come from; `clientKeysIn` (the build context) → the section with its boot check, `outbound`'s refusals taken from the composition.

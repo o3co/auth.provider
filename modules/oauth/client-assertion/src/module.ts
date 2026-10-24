@@ -18,7 +18,8 @@ export default defineModule({ name: "client-assertion", section }, (m) => [
 		return assertionMethod({
 			spent: await c.get(spentAssertions),
 			jwt: await c.get(externalJwt),
-			audiences: [(await c.get(issuer)).url, url],
+			issuer: (await c.get(issuer)).url,
+			tokenEndpoint: url,
 			maxLifetimeMs: c.section["max-lifetime"] * 1000,
 			skewMs: c.section["clock-skew"] * 1000,
 			clock: c.clock,
