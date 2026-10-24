@@ -15,7 +15,7 @@ const guarantees = Object.values(guaranteeFor);
 const codes: Space = { name: "code-grant-store.codes", guarantees };
 const voids: Space = { name: "code-grant-store.voids", guarantees };
 
-export default defineModule({ name: "code-grant-store", section }, (m) => [
+export default defineModule({ name: "code-grant-store", section, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => codes),
 	m.contribute(spaces).by(() => voids),
 	m.provide(codeStore).by(async (c) => {
