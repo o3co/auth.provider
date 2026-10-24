@@ -18,13 +18,29 @@ const place = (
 		readonly records?: Answer<{ complete: boolean }>[];
 		readonly clear?: Answer<{ count: number; kinds: string[] }>;
 		readonly release?: Answer<object>;
+		/** Parts by name, each call taking the next scripted answer (a done count, stopped, or a failure). */
+		readonly parts?: Readonly<Record<string, Answer<number | "stopped">[]>>;
 	} = {},
 ) => {
 	const calls: string[] = [];
 	const events: AuditRecord[] = [];
 	const logged = recordingLog();
 	const records = [...(script.records ?? [])];
+	const parts = Object.entries(script.parts ?? {}).map(([name, answers]) => {
+		const left = [...answers];
+		return {
+			name,
+			remove: async (subject: string) => {
+				calls.push(`part ${name} ${subject}`);
+				const given = answer(left.shift(), 0);
+				return given === "stopped"
+					? ({ kind: "stopped" } as const)
+					: ({ kind: "done", removed: given } as const);
+			},
+		};
+	});
 	const reset = resetOver({
+		parts,
 		revocations: {
 			record: async (subject, options) => {
 				calls.push(`record ${subject} keep=${options?.keepDelegations}`);
@@ -62,6 +78,7 @@ describe("a reset by an operator", () => {
 			kind: "done",
 			removed: 2,
 			kinds: ["backup", "code"],
+			parts: {},
 		});
 		expect(p.calls).toEqual([
 			"record ann keep=true",
@@ -169,6 +186,7 @@ describe("a reset run, answering how it ended", () => {
 			kind: "done",
 			removed: 2,
 			kinds: ["backup", "code"],
+			parts: {},
 		});
 		expect(p.attributes().at(-1)).toMatchObject({ complete: "true", requestedBy: "ticket-7" });
 	});
@@ -207,6 +225,7 @@ describe("a reset run, answering how it ended", () => {
 			kind: "done",
 			removed: 2,
 			kinds: ["backup", "code"],
+			parts: {},
 		});
 	});
 
@@ -227,5 +246,150 @@ describe("a reset run, answering how it ended", () => {
 		await expect(p.reset.run("hal")).rejects.toThrow(new TypeError("broken"));
 		expect(p.attributes().at(-1)).toMatchObject({ complete: "false" });
 		expect(p.lines().map((l) => l.fields)).toEqual([{ stoppedAt: "factors", error: "TypeError" }]);
+	});
+});
+
+describe("a reset's parts", () => {
+	const removed = { count: 2, kinds: ["backup", "code"] };
+	const sessionsTwice = ["record ann keep=true", "record ann keep=true"];
+	const records = (calls: readonly string[]) => calls.filter((c) => c.startsWith("record"));
+
+	it("removes each part by its name's order, after the factors and before the lockout's release, answering their counts", async () => {
+		const p = place({ parts: { zeta: [3], alpha: [1] } });
+		expect(await p.reset.run("ann")).toEqual({
+			kind: "done",
+			removed: 2,
+			kinds: ["backup", "code"],
+			parts: { alpha: 1, zeta: 3 },
+		});
+		expect(p.calls).toEqual([
+			"record ann keep=true",
+			"clear ann",
+			"part alpha ann",
+			"part zeta ann",
+			"release mfa ann true whole",
+			"record ann keep=true",
+		]);
+		expect(p.attributes().at(-1)).toMatchObject({ parts: "alpha=1 zeta=3", complete: "true" });
+		expect(p.attributes().at(-1)).not.toHaveProperty("partsStopped");
+	});
+
+	it("answers and records a part by any name, one an object's prototype goes by too", async () => {
+		// A computed key: an own entry, as a part's name is, never the prototype.
+		const p = place({ parts: { ["__proto__"]: [2], constructor: [1] } });
+		const done = await p.reset.run("ann");
+		expect(done.kind === "done" && Object.entries(done.parts)).toEqual([
+			["__proto__", 2],
+			["constructor", 1],
+		]);
+		expect(p.attributes().at(-1)).toMatchObject({
+			parts: "__proto__=2 constructor=1",
+			complete: "true",
+		});
+	});
+
+	it("keeps calling the rest past a part that stopped, keeps the lockout, and answers stopped at parts", async () => {
+		const p = place({ parts: { alpha: ["stopped"], zeta: [3] } });
+		expect(await p.reset.run("ann")).toEqual({ kind: "stopped", at: "parts", removed });
+		expect(p.calls).toEqual([
+			"record ann keep=true",
+			"clear ann",
+			"part alpha ann",
+			"part zeta ann",
+			"record ann keep=true",
+		]);
+		expect(p.attributes().at(-1)).toMatchObject({
+			parts: "zeta=3",
+			partsStopped: "alpha",
+			sessionsAgain: "true",
+			complete: "false",
+		});
+		expect(p.lines().map((l) => l.fields)).toEqual([{ stoppedAt: "parts", error: "Unavailable" }]);
+	});
+
+	it("keeps calling the rest past a part that throws, and throws it once recorded", async () => {
+		const p = place({ parts: { alpha: [new TypeError("broken")], zeta: [3] } });
+		await expect(p.reset.run("ann")).rejects.toThrow(new TypeError("broken"));
+		expect(p.calls).toContain("part zeta ann");
+		expect(p.calls).not.toContain("release mfa ann true whole");
+		expect(records(p.calls)).toEqual(sessionsTwice);
+		expect(p.attributes().at(-1)).toMatchObject({
+			partsStopped: "alpha",
+			sessionsAgain: "true",
+			complete: "false",
+		});
+	});
+
+	it("calls the parts though the factors' removal stopped, and answers that first failure", async () => {
+		const p = place({ clear: new Unavailable("mfa"), parts: { alpha: [1] } });
+		expect(await p.reset.run("ann")).toEqual({ kind: "stopped", at: "factors" });
+		expect(p.calls).toEqual([
+			"record ann keep=true",
+			"clear ann",
+			"part alpha ann",
+			"record ann keep=true",
+		]);
+		expect(p.attributes().at(-1)).toMatchObject({ parts: "alpha=1", complete: "false" });
+	});
+
+	it("calls no part where the first boundary does not hold", async () => {
+		const p = place({ records: [{ complete: false }], parts: { alpha: [1] } });
+		expect(await p.reset.run("ann")).toEqual({ kind: "stopped", at: "sessions" });
+		expect(p.calls).toEqual(["record ann keep=true"]);
+	});
+
+	it("never moves a boundary for a part: the reset moves its two alone", async () => {
+		const p = place({ parts: { alpha: [1], beta: ["stopped"], gamma: [new TypeError("x")] } });
+		await expect(p.reset.run("ann")).rejects.toThrow(TypeError);
+		expect(records(p.calls)).toEqual(sessionsTwice);
+	});
+
+	it("throws a part's failure that is not unavailable over an earlier unavailable step", async () => {
+		const p = place({ clear: new Unavailable("mfa"), parts: { alpha: [new TypeError("broken")] } });
+		await expect(p.reset.run("ann")).rejects.toThrow(new TypeError("broken"));
+		expect(p.attributes().at(-1)).toMatchObject({
+			partsStopped: "alpha",
+			sessionsAgain: "true",
+			complete: "false",
+		});
+		expect(p.lines().map((l) => l.fields)).toEqual([
+			{ stoppedAt: "factors", error: "Unavailable" },
+		]);
+	});
+
+	it("throws the first of two parts' failures, and names both as stopped", async () => {
+		const p = place({
+			parts: { alpha: [new TypeError("first")], beta: [new RangeError("second")] },
+		});
+		await expect(p.reset.run("ann")).rejects.toThrow(new TypeError("first"));
+		expect(p.attributes().at(-1)).toMatchObject({ partsStopped: "alpha beta", complete: "false" });
+		expect(records(p.calls)).toEqual(sessionsTwice);
+	});
+
+	it("calls every part after the factors' removal throws, and throws that failure", async () => {
+		const p = place({ clear: new TypeError("broken"), parts: { alpha: [1], beta: [2] } });
+		await expect(p.reset.run("ann")).rejects.toThrow(new TypeError("broken"));
+		expect(p.calls).toEqual([
+			"record ann keep=true",
+			"clear ann",
+			"part alpha ann",
+			"part beta ann",
+			"record ann keep=true",
+		]);
+		expect(p.attributes().at(-1)).toMatchObject({ parts: "alpha=1 beta=2", complete: "false" });
+	});
+
+	it("finishes on a second run: a part already emptied answers none, and the lockout is released once all are done", async () => {
+		const p = place({ parts: { alpha: [2, 0], beta: ["stopped", 1] } });
+		expect(await p.reset.run("ann")).toEqual({ kind: "stopped", at: "parts", removed });
+		expect(p.calls).not.toContain("release mfa ann true whole");
+		expect(await p.reset.run("ann")).toEqual({
+			kind: "done",
+			removed: 2,
+			kinds: ["backup", "code"],
+			parts: { alpha: 0, beta: 1 },
+		});
+		expect(p.calls.filter((c) => c.startsWith("release"))).toEqual(["release mfa ann true whole"]);
+		expect(p.attributes().at(-1)).toMatchObject({ parts: "alpha=0 beta=1", complete: "true" });
 	});
 });

@@ -4,7 +4,7 @@ import type { FactorManaging } from "@mod/mfa-managing";
 import type { LockoutPolicy, Lockouts } from "@mod/rate-limit";
 import type { Revocations } from "@mod/subject-revocation";
 import events from "./audit-events.ts";
-import type { MfaReset, Removed, ResetOutcome } from "./contract.ts";
+import type { MfaReset, Removed, ResetOutcome, ResetPart } from "./contract.ts";
 
 export interface ResetParts {
 	readonly factors: Pick<FactorManaging, "clear">;
@@ -14,10 +14,12 @@ export interface ResetParts {
 	readonly lockout: { readonly name: string; readonly policy: LockoutPolicy };
 	readonly audit: Pick<Audit, "record">;
 	readonly log: Log;
+	/** The parts it removes beside the factors, by name. */
+	readonly parts: readonly ResetPart[];
 }
 
-/** The step a run stopped at: a boundary, the factors' removal, or the lockout's release. */
-type Stop = "sessions" | "factors" | "lock";
+/** The step a run stopped at: a boundary, the factors' removal, a part's, or the lockout's release. */
+type Stop = "sessions" | "factors" | "parts" | "lock";
 
 const wellFormed = (text: unknown, max = Number.POSITIVE_INFINITY): text is string =>
 	typeof text === "string" && text.length > 0 && text.length <= max && text.isWellFormed();
@@ -29,6 +31,8 @@ const typeOf = (error: unknown) => (error instanceof Error ? error.name : typeof
  */
 interface Ran {
 	readonly cleared: Removed | undefined;
+	/** Each part done, by name, with how many went. */
+	readonly parts: Readonly<Record<string, number>>;
 	readonly failure: { readonly at: Stop; readonly error: unknown } | undefined;
 	readonly fault: { readonly error: unknown } | undefined;
 }
@@ -65,7 +69,23 @@ export function resetOver(p: ResetParts): MfaReset {
 			})) === true;
 		const sessions = await endSessions();
 		const cleared = sessions ? await step("factors", () => p.factors.clear(subject)) : undefined;
-		if (cleared) {
+		// Each part by its name's order, whatever the factors' removal answered, the rest past one that fails.
+		const went: [string, number][] = [];
+		const partsStopped: string[] = [];
+		const ordered = [...p.parts].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+		for (const part of sessions ? ordered : []) {
+			const removed = await step("parts", async () => {
+				const done = await part.remove(subject);
+				// A part stopped is a step unavailable, as a boundary that leaves a session open is.
+				if (done.kind === "stopped") throw new Unavailable(part.name);
+				return done.removed;
+			});
+			if (removed === undefined) partsStopped.push(part.name);
+			else went.push([part.name, removed]);
+		}
+		// Each name an own entry, whatever it is: an assignment by `__proto__` would set the prototype.
+		const parts: Record<string, number> = Object.fromEntries(went);
+		if (cleared && partsStopped.length === 0) {
 			await step("lock", () =>
 				p.lockouts.releaseUnder(p.lockout.name, subject, p.lockout.policy, { kind: "whole" }),
 			);
@@ -77,6 +97,12 @@ export function resetOver(p: ResetParts): MfaReset {
 			attributes: {
 				by: "operator",
 				...(cleared ? { kinds: cleared.kinds.join(" "), count: String(cleared.count) } : {}),
+				...(went.length > 0
+					? {
+							parts: went.map(([n, c]) => `${n}=${c}`).join(" "),
+						}
+					: {}),
+				...(partsStopped.length > 0 ? { partsStopped: partsStopped.join(" ") } : {}),
 				sessions: String(sessions),
 				...(sessionsAgain === undefined ? {} : { sessionsAgain: String(sessionsAgain) }),
 				complete: String(failure === undefined),
@@ -91,11 +117,11 @@ export function resetOver(p: ResetParts): MfaReset {
 		} else {
 			p.log.info("mfa-flows.reset", {});
 		}
-		return { cleared, failure, fault };
+		return { cleared, parts, failure, fault };
 	};
 	return {
 		run: async (subject, options = {}): Promise<ResetOutcome> => {
-			const { cleared, failure, fault } = await attempt(subject, options);
+			const { cleared, parts, failure, fault } = await attempt(subject, options);
 			// The one place a step's unavailability becomes a stopped run; any other failure, at any step, is thrown.
 			if (fault !== undefined) throw fault.error;
 			if (failure !== undefined) {
@@ -103,10 +129,14 @@ export function resetOver(p: ResetParts): MfaReset {
 				// first boundary or the removal, after them at the release or the second boundary.
 				if (cleared === undefined)
 					return { kind: "stopped", at: failure.at as "sessions" | "factors" };
-				return { kind: "stopped", at: failure.at as "sessions" | "lock", removed: cleared };
+				return {
+					kind: "stopped",
+					at: failure.at as "sessions" | "parts" | "lock",
+					removed: cleared,
+				};
 			}
 			const done = cleared as Removed;
-			return { kind: "done", removed: done.count, kinds: done.kinds };
+			return { kind: "done", removed: done.count, kinds: done.kinds, parts };
 		},
 	};
 }
