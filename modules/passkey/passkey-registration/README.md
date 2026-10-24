@@ -26,6 +26,7 @@
 - `credential_id_conflict` tells a signed-in session that some subject lists an id. Ids are high-entropy, made by the authenticator, so this answers only for an id already known.
 - Each refusal of `passkeys` maps to one error word here, and nowhere else.
 - A store that cannot tell is `503`, never a refusal.
+- Removing the subject's last passkey (`last`) lets its password logins in again where `login-passkey` refuses them for passkey holders (`password = refused-when-held`).
 - Entry at `credentials` is `mfa`'s judgement where it is composed; else `session` needs a recent sign-in at a known time.
 
 ## Depends on
