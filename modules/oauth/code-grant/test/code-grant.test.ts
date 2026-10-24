@@ -17,7 +17,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { crowdingFor, memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
@@ -71,7 +71,7 @@ const memoryStores = () => {
 		missing = false;
 		return Promise.resolve(undefined);
 	};
-	const module = defineModule({ name: "code-stores" }, (m) => [
+	const module = defineModule({ name: "code-stores", takes: [] }, (m) => [
 		m.provide(codeStore).by((c) => {
 			clock = c.clock.now;
 			return { nameOf, save: stand.records.create, update };
@@ -102,11 +102,11 @@ codeStoreContract("records stand-in", async () => {
 const verifier = "v".repeat(43);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 const maker = (scope: string) =>
-	defineModule({ name: `maker-${scope}` }, (m) => [
+	defineModule({ name: `maker-${scope}`, takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({ scope, make: async () => "id.token" })),
 	]);
 /** Hands the grants to the test, so it can call the code grant directly. */
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [grants] }, (m) => [
 	m.provide(grantsSeen).by((c) => c.collect(grants)),
 ]);
 
@@ -125,7 +125,7 @@ const refusedFor = (reason: string) =>
 
 /** A policy that allows what `allows` allows, and refuses the rest. */
 const policy = (allows: (request: IssuanceRequest) => boolean) =>
-	defineModule({ name: "test-policy" }, (m) => [
+	defineModule({ name: "test-policy", takes: [] }, (m) => [
 		m.contribute(issuancePolicies).by(() => ({
 			name: "test-policy",
 			judge: async (request) =>
@@ -135,17 +135,18 @@ const policy = (allows: (request: IssuanceRequest) => boolean) =>
 		})),
 	]);
 
-async function serve(
-	options: {
-		revocation?: "denylist" | "unsupported";
-		/** Whether session-tokens records the tokens issued from a session (as combinations composes it). */
-		recorded?: boolean;
-		extra?: Module[];
-		codeGrant?: Parameters<typeof codeGrantConfig>[0];
-	} = {},
-) {
+type Options = {
+	revocation?: "denylist" | "unsupported";
+	/** Whether session-tokens records the tokens issued from a session (as combinations composes it). */
+	recorded?: boolean;
+	extra?: Module[];
+	codeGrant?: Parameters<typeof codeGrantConfig>[0];
+};
+
+/** What `serve` assembles, with the stores it reaches into. */
+function assembly(options: Options = {}) {
 	const stores = memoryStores();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			tokensStandIn({ revocable: (options.revocation ?? "denylist") === "denylist" }),
@@ -183,7 +184,13 @@ async function serve(
 			...codeGrantConfig(options.codeGrant ?? { "sweep-interval": "1s" }),
 		},
 		runtime,
-	});
+	};
+	return { input, stores };
+}
+
+async function serve(options: Options = {}) {
+	const { input, stores } = assembly(options);
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const { session, cookies } = await app.get(sessions).complete(testRequest(), {
@@ -370,7 +377,7 @@ it("asks the issuance policies before the code is used up, and only for its own 
 });
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing" }, (m) => [
+const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -405,7 +412,7 @@ it("refuses a resource outside the code's audience when the look before use miss
 });
 
 it("takes the resource the rule refuses to a grant that takes no audience, as one that asks it", async () => {
-	const strict = defineModule({ name: "strict" }, (m) => [
+	const strict = defineModule({ name: "strict", takes: [] }, (m) => [
 		m.contribute(targetRules).by(() => ({
 			target: ({ param, audience, within }) => {
 				const asked = param("resource");
@@ -542,7 +549,7 @@ it("issues nothing for a code whose session closed before the exchange", async (
 
 /** A requirement a session falls short of at use while `short.now` is set. */
 const shortToUse = (short: { now: boolean }) =>
-	defineModule({ name: "short-to-use" }, (m) => [
+	defineModule({ name: "short-to-use", takes: [] }, (m) => [
 		m.contribute(entryRequirements).by(() => ({
 			name: "mfa",
 			judges: ["use"],
@@ -629,7 +636,7 @@ it("adds an ID token when the code's scope holds the maker's scope, and names th
 
 describe("what the ID token maker is told", () => {
 	const recordingMaker = (asked: IdTokenRequest[]) =>
-		defineModule({ name: "maker-recording" }, (m) => [
+		defineModule({ name: "maker-recording", takes: [] }, (m) => [
 			m.contribute(idTokens).by(() => ({
 				scope: "openid",
 				make: async (request) => {
@@ -694,7 +701,7 @@ it("names no ID token scope without a maker", async () => {
 });
 
 it("refuses to start with two ID token makers, without revocable tokens, without its tokens recorded to their session, or with an addition on a response field", async () => {
-	const onAccessToken = defineModule({ name: "adds-access_token" }, (m) => [
+	const onAccessToken = defineModule({ name: "adds-access_token", takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({ field: "access_token", issue: async () => "x" })),
 	]);
 	await expect(serve({ extra: [maker("openid"), maker("other")] })).rejects.toEqual(
@@ -741,7 +748,7 @@ it("never brings back a code that expired while it was being redeemed", async ()
 it("adds what a contribution issues alongside, under its own field, from the redeemed facts", async () => {
 	const seen: Redeemed[] = [];
 	const adding = (field: string, value: string | undefined) =>
-		defineModule({ name: `adds-${field}` }, (m) => [
+		defineModule({ name: `adds-${field}`, takes: [] }, (m) => [
 			m.contribute(additions).by(() => ({
 				field,
 				issue: async (redeemed) => {
@@ -770,7 +777,7 @@ it("adds what a contribution issues alongside, under its own field, from the red
 
 it("tells the additions the code's acr, and none for a code without one", async () => {
 	const seen: Redeemed[] = [];
-	const adding = defineModule({ name: "adds-acr" }, (m) => [
+	const adding = defineModule({ name: "adds-acr", takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({
 			field: "extra",
 			issue: async (redeemed) => {
@@ -788,7 +795,7 @@ it("tells the additions the code's acr, and none for a code without one", async 
 
 it("tells the access token and the additions that a session did not know its authentication time", async () => {
 	const seen: Redeemed[] = [];
-	const adding = defineModule({ name: "adds-unknown" }, (m) => [
+	const adding = defineModule({ name: "adds-unknown", takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({
 			field: "extra",
 			issue: async (redeemed) => {
@@ -817,7 +824,7 @@ it("tells the access token and the additions that a session did not know its aut
 it("takes back what was issued alongside a code that comes again", async () => {
 	const issuedFor: string[] = [];
 	const taken: string[] = [];
-	const adding = defineModule({ name: "adds-taken" }, (m) => [
+	const adding = defineModule({ name: "adds-taken", takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({
 			field: "extra",
 			issue: async (redeemed) => {
@@ -839,7 +846,7 @@ it("takes back what was issued alongside a code that comes again", async () => {
 
 it("tells an addition the binding the redeemed tokens carry", async () => {
 	const seen: Redeemed[] = [];
-	const adding = defineModule({ name: "adds-seen" }, (m) => [
+	const adding = defineModule({ name: "adds-seen", takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({
 			field: "extra",
 			issue: async (redeemed) => {
@@ -888,7 +895,7 @@ it("marks nothing void when listing a reused code fails, so a later reuse still 
 
 /** Notes each redemption in a session as told, running `during` first when given. */
 const noting = (noted: [string, string][], during?: () => Promise<void>) =>
-	defineModule({ name: "noting" }, (m) => [
+	defineModule({ name: "noting", takes: [] }, (m) => [
 		m.contribute(sessionRedemptions).by(() => ({
 			name: "noting",
 			redeemed: async (session, clientId) => {
@@ -924,11 +931,11 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 		return { answer, token: given[0] as string };
 	};
 	const failingAddition = (issue: () => Promise<string | undefined>) =>
-		defineModule({ name: "failing-addition" }, (m) => [
+		defineModule({ name: "failing-addition", takes: [] }, (m) => [
 			m.contribute(additions).by(() => ({ field: "extra", issue })),
 		]);
 	const failingMaker = (make: () => Promise<string>) =>
-		defineModule({ name: "failing-maker" }, (m) => [
+		defineModule({ name: "failing-maker", takes: [] }, (m) => [
 			m.contribute(idTokens).by(() => ({ scope: "openid", make })),
 		]);
 
@@ -945,7 +952,7 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 
 	it("when recording it to the session fails in issuing, leaving the code used up", async () => {
 		const told: string[] = [];
-		const failing = defineModule({ name: "failing-record" }, (m) => [
+		const failing = defineModule({ name: "failing-record", takes: [] }, (m) => [
 			m.contribute(sessionIssuances).by(() => ({
 				issued: async (_, { id }) => {
 					told.push(`stand-in.${id}`);
@@ -1051,5 +1058,15 @@ it("offers the shape of an S256 challenge: 43 base64url characters, as RFC 7636 
 		`${"A".repeat(42)}=`,
 	]) {
 		expect(challengeShape.test(refused), refused).toBe(false);
+	}
+});
+
+it("takes all its module names, with an ID token maker and an addition or with neither", async () => {
+	const adding = defineModule({ name: "adds-extra", takes: [] }, (m) => [
+		m.contribute(additions).by(() => ({ field: "extra", issue: async () => undefined })),
+	]);
+	for (const extra of [[], [maker("openid"), adding]]) {
+		const { input } = assembly({ extra });
+		expect(await takesUnused(input)).toEqual({});
 	}
 });

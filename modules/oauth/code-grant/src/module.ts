@@ -19,7 +19,20 @@ import {
 import { answerFields, codeGrant, voiding } from "./grant.ts";
 import { section } from "./section.ts";
 
-export default defineModule({ name: "code-grant", section }, (m) => [
+const takes = [
+	codeStore,
+	voidList,
+	sessions,
+	clients,
+	issuer,
+	tokens,
+	idTokens,
+	additions,
+	sessionIssuances,
+	sessionRedemptions,
+];
+
+export default defineModule({ name: "code-grant", section, takes }, (m) => [
 	m.provide(codes).by(async (c) => {
 		const store = await c.get(codeStore);
 		const opened = await c.get(sessions);
