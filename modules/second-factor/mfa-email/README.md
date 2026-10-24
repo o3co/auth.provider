@@ -14,7 +14,8 @@
 - Boot is refused where no binding proof `account-email` is composed (`mfa-email-proof`'s), or where `mfa-binding-proof`, which hears it, is not: a code by email comes with the proof of the account's address, so a first factor is never bound unproved.
 - Mail purposes `mfa-email.enrollment`, `mfa-email.login`, `mfa-email.proof`, taking `code` and `minutes`; `mfa-email-wording` words them.
 - `purposes` and their type `Purpose`, for the module that words them.
-- For a proof that mails a code to the same address by the same rules: `mailedCodes` (mail, users, a session's attributes, the clock), or `mailedCodesIn` (the build context, taking them from the assembly) → `addressNow` (subject, where asked from → the address, as the invariants below choose it), `send` (purpose, address, code, end → sent with what to show and keep / limited) and `matches` (kept code, typed → whether it is the code, before its end); `longCode` and `readLongCode`.
+- For a proof that mails a code to the same address by the same rules: `mailedCodes` (mail, users, a session's attributes, the clock) → `addressNow` (subject, where asked from → the address, as the invariants below choose it), `send` (purpose, address, code, end → sent with what to show and keep / limited) and `matches` (kept code, typed → whether it is the code, before its end); `longCode` and `readLongCode`.
+- `mailedCodesIn` (the build context): the same, taking them from the assembly; a module calling it names `mailedTakes` in its takes.
 - Operator section: `adds-second-factor` (whether a proof adds `mfa`, and so whether the factor counts; default false), `code-lifetime` (1m–30m, default `10m`, written with its unit).
 
 ## Invariants

@@ -69,6 +69,9 @@ export function mailedCodes(p: MailedParts): MailedCodes {
 	};
 }
 
+/** What `mailedCodesIn` takes from the build context, for the takes of each module calling it. */
+export const mailedTakes = [mail, users, subjectAttributes] as const;
+
 /** The same, over what the assembly gives: `mail`, `users`, and `subject-attributes` taken late. */
 export const mailedCodesIn = async (c: BuildContext<unknown>): Promise<MailedCodes> =>
 	mailedCodes({
