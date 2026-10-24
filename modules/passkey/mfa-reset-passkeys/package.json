@@ -1,0 +1,32 @@
+{
+	"name": "@mod/mfa-reset-passkeys",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"joins": [
+		"@mod/mfa-reset",
+		"@mod/passkey-reset"
+	],
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/mfa-reset": "workspace:*",
+		"@mod/passkey-reset": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/mfa-flows": "workspace:*",
+		"@mod/mfa-managing": "workspace:*",
+		"@mod/passkeys": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/webauthn": "workspace:*",
+		"@mod/webauthn-store": "workspace:*",
+		"vitest": "5.0.5"
+	}
+}
