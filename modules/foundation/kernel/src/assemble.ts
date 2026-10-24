@@ -11,7 +11,7 @@ import {
 } from "./lifecycle/readiness.ts";
 import { type StopHook, stopWithin } from "./lifecycle/stop.ts";
 import type { BuildContext, Module } from "./module.ts";
-import { BootRefused, type Refusal, RefusalSignal } from "./refusal/refusal.ts";
+import { BootRefused, buildRefusalOf, type Refusal, RefusalSignal } from "./refusal/refusal.ts";
 import { guardedLog, logSinks, routedLog } from "./runtime/log.ts";
 import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime/runtime.ts";
 
@@ -86,12 +86,24 @@ function refuseIfAny(refusals: readonly Refusal[]): void {
 	if (refusals.length > 0) throw new BootRefused(refusals);
 }
 
-/** Records why a build failed, unless the refusal behind it is recorded already. */
+/**
+ * Records why a build failed, unless the refusal behind it is recorded already. A value whose
+ * reading throws, or that is no refusal the kernel can read, is a failure, never passed over.
+ */
 function recordFailure(error: unknown, where: string, refusals: Refusal[]): void {
-	if (error instanceof RefusalSignal) refusals.push(...error.refusals);
-	else if (!(error instanceof DependencyFailed)) {
-		refusals.push({ where, reason: "failed during assembly" });
+	const failed = { where, reason: "failed during assembly" };
+	try {
+		if (error instanceof RefusalSignal) {
+			refusals.push(...error.refusals);
+			return;
+		}
+		if (error instanceof DependencyFailed) return;
+	} catch {
+		refusals.push(failed);
+		return;
 	}
+	// A library's refusal names its own where and reason; any other error's text is never kept.
+	refusals.push(buildRefusalOf(error) ?? failed);
 }
 
 export async function assemble(input: AssemblyInput): Promise<Assembly> {
