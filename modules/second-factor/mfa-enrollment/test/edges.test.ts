@@ -11,7 +11,7 @@ const contact = { available: [] as boolean[], sent: 0 };
 afterEach(() => {
 	contact.available = [];
 });
-const contactProof = defineModule({ name: "edge-proof" }, (m) => [
+const contactProof = defineModule({ name: "edge-proof", takes: [] }, (m) => [
 	m.contribute(bindingProofs).by(() => ({
 		name: "contact",
 		available: async () => contact.available.shift() ?? true,
@@ -25,7 +25,7 @@ const shy = { unreadable: false };
 afterEach(() => {
 	shy.unreadable = false;
 });
-const shyKind = defineModule({ name: "kind-shy" }, (m) => [
+const shyKind = defineModule({ name: "kind-shy", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "shy",
 		amr: ["otp"],

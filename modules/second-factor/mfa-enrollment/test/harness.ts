@@ -177,7 +177,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -202,7 +202,7 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 	})),
 ]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
-const backup = defineModule({ name: "kind-backup" }, (m) => [
+const backup = defineModule({ name: "kind-backup", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -239,7 +239,7 @@ const afterWrite = async <T>(write: Promise<T>) => {
 const factorStand = () => {
 	const stand = memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
 	const joint = updatingTogether(stand.records);
-	return defineModule({ name: "factor-store" }, (m) => [
+	return defineModule({ name: "factor-store", takes: [] }, (m) => [
 		m.provide(factorStore).by(() =>
 			factorsDown.wrap({
 				save: (key: string, record: StoredFactors) =>
@@ -276,7 +276,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 	const simulated = simulatedStore();
 	const kept = memoryTransactions(() => runtime.clock.now());
 	const audit = auditStandIn();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			audit.module,
@@ -310,7 +310,8 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			...flowsConfig(pick(true)),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -402,6 +403,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 	};
 	return {
 		app,
+		input,
 		kept,
 		call,
 		signIn,
