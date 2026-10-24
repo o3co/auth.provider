@@ -13,7 +13,7 @@ import type { HttpRequest } from "@mod/http";
 import { contract, deepFreeze, defineModule } from "@mod/kernel";
 import type { Binding } from "@mod/sender-binding";
 import { type Tokens, tokens } from "@mod/tokens";
-import { composedRule, unread } from "../built-in/targets.ts";
+import { composedRule, targetTakes, unread } from "../built-in/targets.ts";
 import { answeredBody } from "../route/answer.ts";
 import { grantInputOf, mistypedRefusal, tokenPath } from "../route/endpoint.ts";
 import { refusedAnswer } from "../route/issuance.ts";
@@ -103,38 +103,42 @@ export function grantInput(
  * checked in its tests rather than here; a mistyped parameter and an untargeted request are refused
  * first, as the endpoint refuses them. Tests compose `client-allowance` beside it.
  */
-export const grantCaller = defineModule({ name: "token-endpoint" }, (m) => [
-	m.provide(targets).by(composedRule),
-	m.provide(grantCalls).by(async (c) => {
-		const known = await c.get(clients);
-		const issuing = await c.get(tokens);
-		const told = await c.collect(sessionIssuances);
-		const table = new Map((await c.collect(grants)).map((grant) => [grant.grantType, grant]));
-		const rule = await c.get(targets);
-		return {
-			call: async (grantType, clientId, params, options = {}) => {
-				const grant = table.get(grantType);
-				const client = await known.find(clientId);
-				if (!grant || !client) throw new Error(`no grant ${grantType} or client ${clientId}`);
-				const input = grantInput(
-					issuing,
-					grant,
-					client,
-					params,
-					{ ...options, targets: rule },
-					told,
-				);
-				// The endpoint's own checks before any grant runs, so a grant's declaration is tested too.
-				const mistyped = mistypedRefusal(input.request);
-				if (mistyped) return { kind: "error", ...mistyped };
-				const untargeted = grant.targets ? undefined : rule.untargeted?.({ param: input.param });
-				if (untargeted) return untargeted;
-				const outcome = await grant.handle(input);
-				if (outcome.kind === "refused") return refusedAnswer(outcome);
-				return outcome.kind === "issued"
-					? { ...outcome, body: answeredBody(outcome.body) }
-					: outcome;
-			},
-		};
-	}),
-]);
+export const grantCaller = defineModule(
+	// `composedRule`'s takes, and its own; its own `targets` and `grantCalls` are not named.
+	{ name: "token-endpoint", takes: [...targetTakes, clients, tokens, sessionIssuances, grants] },
+	(m) => [
+		m.provide(targets).by(composedRule),
+		m.provide(grantCalls).by(async (c) => {
+			const known = await c.get(clients);
+			const issuing = await c.get(tokens);
+			const told = await c.collect(sessionIssuances);
+			const table = new Map((await c.collect(grants)).map((grant) => [grant.grantType, grant]));
+			const rule = await c.get(targets);
+			return {
+				call: async (grantType, clientId, params, options = {}) => {
+					const grant = table.get(grantType);
+					const client = await known.find(clientId);
+					if (!grant || !client) throw new Error(`no grant ${grantType} or client ${clientId}`);
+					const input = grantInput(
+						issuing,
+						grant,
+						client,
+						params,
+						{ ...options, targets: rule },
+						told,
+					);
+					// The endpoint's own checks before any grant runs, so a grant's declaration is tested too.
+					const mistyped = mistypedRefusal(input.request);
+					if (mistyped) return { kind: "error", ...mistyped };
+					const untargeted = grant.targets ? undefined : rule.untargeted?.({ param: input.param });
+					if (untargeted) return untargeted;
+					const outcome = await grant.handle(input);
+					if (outcome.kind === "refused") return refusedAnswer(outcome);
+					return outcome.kind === "issued"
+						? { ...outcome, body: answeredBody(outcome.body) }
+						: outcome;
+				},
+			};
+		}),
+	],
+);

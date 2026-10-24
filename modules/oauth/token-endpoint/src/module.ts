@@ -5,9 +5,9 @@ import { metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
 import { unservedGrants } from "./allowed/allowed.ts";
-import { composedRule } from "./built-in/targets.ts";
+import { composedRule, targetTakes } from "./built-in/targets.ts";
 import { tokenEndpointLocation } from "./contract.ts";
-import { endpointIn } from "./endpoint-in/endpoint-in.ts";
+import { endpointIn, endpointTakes } from "./endpoint-in/endpoint-in.ts";
 import { tokenPath } from "./route/endpoint.ts";
 import { section } from "./section.ts";
 
@@ -17,7 +17,10 @@ const cors = {
 	exposes: ["dpop-nonce", "www-authenticate", "retry-after"],
 };
 
-export default defineModule({ name: "token-endpoint", section }, (m) => [
+/** What the endpoint takes: its helpers' (`composedRule`, `endpointIn`), and the grants, the site and clients. */
+const takes = [...targetTakes, ...endpointTakes, grants, site, clients];
+
+export default defineModule({ name: "token-endpoint", section, takes }, (m) => [
 	m.provide(targets).by(composedRule),
 	m
 		.provide(composedGrants)
