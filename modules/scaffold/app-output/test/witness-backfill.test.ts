@@ -46,12 +46,14 @@ export class BootRefused extends Error {
 		"index.js": `
 import { appendFileSync } from "node:fs";
 export const witnessBackfill = "witnessBackfill";
+export const passkeyBackfill = "passkeyBackfill";
 export const backfill = {
 	settle: async (subject) => {
 		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
 		if (subject === "down") throw Object.assign(new Error("down for alice"), { name: "Unavailable" });
 		if (subject === "boom") throw new Error("secret of alice");
 		if (subject === "claimless") return "unclaimed";
+		if (subject === "registering") return "pending";
 		if (subject === "odd") return "a word of a later release";
 		return "marked";
 	},
@@ -60,7 +62,8 @@ export const backfill = {
 	},
 };
 
-async function script() {
+/** The entry `runs` calls for, written over the fakes; a run of it on an input. */
+async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill.ts") {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	for (const [name, files] of Object.entries(fakes)) {
 		const dir = join(target, "node_modules", name);
@@ -71,15 +74,12 @@ async function script() {
 	}
 	const importOf = (name: string) =>
 		name === kernel || name === configFiles ? "fake-kernel" : "fake-witnessing";
-	const { files } = await entriesOf(["@mod/mfa-witnessing"], importOf, (file) => `node ${file}`);
+	const { files } = await entriesOf([runs], importOf, (path) => `node ${path}`);
 	await mkdir(join(target, "src"));
-	await writeFile(
-		join(target, "src", "witness-backfill.ts"),
-		files["src/witness-backfill.ts"] ?? "",
-	);
+	await writeFile(join(target, file), files[file] ?? "");
 	return (input: string, env: Record<string, string> = {}) => {
 		const seen = join(target, `seen-${Math.random()}`);
-		const run = spawnSync(process.execPath, ["src/witness-backfill.ts"], {
+		const run = spawnSync(process.execPath, [file], {
 			cwd: target,
 			env: { ...process.env, ...env, SEEN: seen },
 			input,
@@ -167,4 +167,14 @@ it("refuses boot as config-files' check refuses, writing the refusal and exiting
 	expect(done.stderr).toBe("refused config-files: LEGACY_ONE\n");
 	expect(done.status).toBe(78);
 	expect(done.seen).toEqual([]);
+});
+
+it("writes the passkey backfill alike: its own answers counted in its order, pending among them", async () => {
+	const run = await script("@mod/passkey-witnessing", "src/passkey-backfill.ts");
+	const done = await run("registering\nfirst\nodd\n");
+	expect(done.seen).toEqual(["registering", "first", "odd"]);
+	expect(done.stdout).toBe("marked 1 held 0 none 0 pending 1 inconsistent 0 unknown 1 failed 0\n");
+	expect(done.status).toBe(1);
+	const settled = await run("registering\nfirst\n");
+	expect(settled.status).toBe(0);
 });
