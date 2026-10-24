@@ -28,7 +28,7 @@ import wiring from "../src/module.ts";
 
 const runtime = quietRuntime();
 const seen = contract<readonly Addition[]>("additions-seen");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [additions] }, (m) => [
 	m.provide(seen).by((c) => c.collect(additions)),
 ]);
 

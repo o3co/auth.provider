@@ -19,7 +19,7 @@ const boundaries: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "subject-revocation-store" }, (m) => [
+export default defineModule({ name: "subject-revocation-store", takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => boundaries),
 	m.provide(boundaryStore).by(async (c): Promise<BoundaryStore> => {
 		const place = { store: await c.get(store), space: boundaries, log: c.log, random: c.random };

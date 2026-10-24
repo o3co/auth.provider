@@ -37,7 +37,7 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "refresh-store", section }, (m) => [
+export default defineModule({ name: "refresh-store", section, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => families),
 	m.contribute(spaces).by(() => redemptions),
 	m.contribute(spaces).by(() => bySession),

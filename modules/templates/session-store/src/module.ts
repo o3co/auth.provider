@@ -52,7 +52,7 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "session-store", section }, (m) => [
+export default defineModule({ name: "session-store", section, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => sessions),
 	m.contribute(spaces).by(() => cookies),
 	m.contribute(spaces).by(() => closings),

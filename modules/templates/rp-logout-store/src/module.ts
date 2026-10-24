@@ -31,7 +31,7 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "rp-logout-store", section }, (m) => [
+export default defineModule({ name: "rp-logout-store", section, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => held),
 	m.contribute(spaces).by(() => pending),
 	m.provide(sessionClients).by(async (c) =>

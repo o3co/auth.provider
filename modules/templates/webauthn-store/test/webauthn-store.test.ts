@@ -139,7 +139,7 @@ it("changes a credential and a subject as one batch across both spaces, keeping 
 });
 
 it("refuses to start over a store that writes no records of two partitions as one", async () => {
-	const lacking = defineModule({ name: "lacking-store" }, (m) => [
+	const lacking = defineModule({ name: "lacking-store", takes: [] }, (m) => [
 		// Refused while it is built, before any call: a store with no batch across is enough.
 		m.provide(store).by(() => ({}) as Store),
 	]);
