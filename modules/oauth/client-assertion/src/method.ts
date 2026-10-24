@@ -13,7 +13,10 @@ export const assertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-be
 export interface Parts {
 	readonly spent: SpentAssertions;
 	readonly jwt: ExternalJwt;
-	readonly audiences: readonly string[];
+	/** `issuer`'s URL, the one audience every client's assertion may name. */
+	readonly issuer: string;
+	/** The token endpoint's absolute URL, which a client accepting a loose audience may name too. */
+	readonly tokenEndpoint: string;
 	readonly maxLifetimeMs: number;
 	readonly skewMs: number;
 	readonly clock: Clock;
@@ -75,18 +78,32 @@ export function assertionMethod(p: Parts): AuthMethod {
 			if (field(request, "client_assertion_type") !== assertionType) {
 				return refuse("assertion type");
 			}
+			const section = client.section(clientKeys);
+			const loose = section["accept-loose-audience"];
 			// A verifier over this client's written keys; every asymmetric algorithm external-jwt knows is taken.
-			const verifier = p.jwt.verifierOf(keysOf(client.section(clientKeys)), {
+			const verifier = p.jwt.verifierOf(keysOf(section), {
 				algorithms: p.jwt.algorithms,
 				skewMs: p.skewMs,
 				maxLifetimeMs: p.maxLifetimeMs,
-				expect: { iss: client.id, sub: client.id, aud: p.audiences },
+				expect: {
+					iss: client.id,
+					sub: client.id,
+					aud: loose ? [p.issuer, p.tokenEndpoint] : [p.issuer],
+				},
 			});
 			const verified = await verifier.verify(field(request, "client_assertion") ?? "");
 			// Written keys are never out of reach; this is for a key source that is fetched.
 			if (verified.kind === "unavailable") throw new Unavailable("client keys");
-			const assertion = checked(verified);
+			const assertion = checked(verified, p.issuer);
 			if (assertion.kind === "invalid") return refuse(assertion.reason);
+			// The issuer alone, as one string, before the jti is spent. An assertion naming the token
+			// endpoint, or a list, may have been made for another authorization server that names this
+			// one's endpoint, and taken from there (OpenID Foundation, private_key_jwt notice, 2025-01;
+			// FAPI 2.0 Security Profile §5.3.2.1). external-jwt takes any one audience of a list.
+			if (!assertion.forIssuer) {
+				if (!loose) return refuse("audience");
+				p.log.warn("client-assertion.loose_audience", { client: client.id });
+			}
 			// Past the assertion's end by the allowance, and the margin for the store's own clock.
 			const lifetimeMs = assertion.expiresAt - p.clock.now() + p.skewMs + storeClockMarginMs;
 			const saved = await p.spent.save(spentName(client.id, assertion.jti), lifetimeMs);

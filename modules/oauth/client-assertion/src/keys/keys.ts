@@ -15,6 +15,8 @@ const verifiesSignatures = (jwk: Jwk) => publicJwk(jwk) !== undefined && verifie
 export interface ClientKeys {
 	readonly keys: readonly Jwk[];
 	readonly "jwks-uri"?: string | undefined;
+	/** Also takes the token endpoint's URL, or a list, as an assertion's audience. */
+	readonly "accept-loose-audience": boolean;
 }
 
 export const clientKeys: Section<ClientKeys> = {
@@ -35,6 +37,12 @@ export const clientKeys: Section<ClientKeys> = {
 				.optional()
 				.describe(
 					"Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot.",
+				),
+			"accept-loose-audience": z
+				.boolean()
+				.prefault(false)
+				.describe(
+					"Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client still changing what it sends; to be removed.",
 				),
 		})
 		.refine((s) => s.keys.length === 0 || s["jwks-uri"] === undefined, {
