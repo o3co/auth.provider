@@ -97,7 +97,7 @@ async function open(world: { token?: Handler; settings?: Record<string, unknown>
 	};
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound" }, (m) => [m.provide(outbound).by(() => stub)]),
+			defineModule({ name: "outbound", takes: [] }, (m) => [m.provide(outbound).by(() => stub)]),
 			externalJwtModule,
 		],
 		config: kernelConfig(),
