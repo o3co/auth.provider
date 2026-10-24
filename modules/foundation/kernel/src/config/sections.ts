@@ -3,7 +3,7 @@ import { getValidated } from "@o3co/ts.hocon/zod";
 import { type ZodType, z } from "zod";
 import { deepFreeze } from "../freeze.ts";
 import type { Module } from "../module.ts";
-import type { Refusal } from "../refusal.ts";
+import type { Refusal } from "../refusal/refusal.ts";
 import { type KernelSettings, kernelSection } from "./settings.ts";
 
 export const KERNEL_SECTION = "kernel";

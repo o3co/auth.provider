@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
 	assemble,
+	BuildRefused,
 	contract,
 	defineModule,
 	extensionPoint,
@@ -257,6 +258,76 @@ describe("assemble", () => {
 			}),
 		);
 		expect(refusals).toEqual([{ where: "routes", reason: "failed during assembly" }]);
+	});
+
+	it("refuses a build a library refuses with its where and reason, beside the other refusals", async () => {
+		const opened = contract<string>("opened");
+		// A library called in a factory, with no build context to refuse through.
+		const open = (space: string): string => {
+			throw new BuildRefused(space, "a space holds records or secret records, not both");
+		};
+		const refusals = await refusalsOf(
+			assemble({
+				modules: [
+					defineModule({ name: "a" }, (m) => [m.provide(opened).by(() => open("a.cookies"))]),
+					defineModule({ name: "b" }, (m) => [
+						m.provide(contract<string>("built-on")).by((c) => c.get(opened)),
+					]),
+					defineModule({ name: "c" }, (m) => [
+						m.provide(contract<string>("secretive")).by(() => {
+							throw new Error("token=abc");
+						}),
+					]),
+				],
+				config: single,
+			}),
+		);
+		// b only waited on a: what refused it is a's, recorded once; c's own text never shows.
+		expect(refusals).toEqual([
+			{ where: "a.cookies", reason: "a space holds records or secret records, not both" },
+			{ where: "c", reason: "failed during assembly" },
+		]);
+	});
+
+	it("refuses a build that throws a value it cannot read as a refusal as failed, never letting it pass", async () => {
+		const mark = Symbol.for("@mod/kernel.build-refused");
+		const thrown: unknown[] = [
+			Object.defineProperty({}, mark, {
+				get() {
+					throw new Error("mark");
+				},
+			}),
+			Object.defineProperty({ [mark]: true, reason: "r" }, "where", {
+				get() {
+					throw new Error("where");
+				},
+			}),
+			{ [mark]: true },
+			{ [mark]: true, where: "w", reason: "token=abc\nrefused invented: forged" },
+			new Proxy(
+				{},
+				{
+					getPrototypeOf() {
+						throw new Error("prototype");
+					},
+				},
+			),
+		];
+		for (const [i, value] of thrown.entries()) {
+			const refusals = await refusalsOf(
+				assemble({
+					modules: [
+						defineModule({ name: `odd${i}` }, (m) => [
+							m.provide(contract<string>(`odd${i}`)).by(() => {
+								throw value;
+							}),
+						]),
+					],
+					config: single,
+				}),
+			);
+			expect(refusals, String(i)).toEqual([{ where: `odd${i}`, reason: "failed during assembly" }]);
+		}
 	});
 
 	it("refuses only the failed contribution at a point nothing collects", async () => {
