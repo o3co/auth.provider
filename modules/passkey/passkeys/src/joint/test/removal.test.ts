@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { expect, it } from "vitest";
-import { keptPasskeys } from "../src/records.ts";
-import type { PasskeyStore } from "../src/store.ts";
-import { heldState, jointOver, memoryStores, writeToken } from "./stores.ts";
+import { heldState, jointOver, memoryStores, writeToken } from "../../../test/stores.ts";
+import { keptPasskeys } from "../../records.ts";
+import type { PasskeyStore } from "../../store.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
 

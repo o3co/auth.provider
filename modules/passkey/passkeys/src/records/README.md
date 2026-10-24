@@ -6,7 +6,7 @@ Internal module of `passkeys`: the passkey records, read in the shape written, a
 - Reads holders and passkeys in the shape written, and makes the writes that keep a holder's list as it is: a first holder, an activation, a count, a name.
 
 ## Not here
-- The writes that change a list, and the fence they move (the package's records, which compose this module). Challenges (`challenges`). Where records are kept (the package's store interface).
+- The writes that change a list, and the fence they move (`joint`). Challenges (`challenges`). Where records are kept (the package's store interface).
 
 ## Offers
 - `recordsOver` (the passkey store) → `holder`, `handleFor`, `passkey`, `activated`, `count`, `listed`, `renamed`.
