@@ -1,0 +1,70 @@
+/**
+ * Writes `text` to the stream, waiting until it is handed on: a slow pipe holds the script there
+ * rather than leaving it buffered for an exit to drop.
+ */
+const written = (stream: NodeJS.WriteStream, text: string) =>
+	new Promise<void>((resolve, reject) =>
+		stream.write(text, (error) => (error ? reject(error) : resolve())),
+	);
+
+/** A refused boot: each refusal on its own line of standard error, then exit 78. */
+const refused = async (error: unknown): Promise<never> => {
+	if (!BootRefused.is(error)) throw error;
+	for (const refusal of error.refusals) {
+		await written(process.stderr, `refused ${refusal.where}: ${refusal.reason}\n`);
+	}
+	process.exit(78);
+};
+
+/** The longest subject, in bytes. */
+const longest = 255;
+
+/**
+ * Each line of standard input as it was sent, without its line ending, or undefined for a line
+ * longer than a subject may be. No more of a line than that is ever held.
+ */
+async function* lines(input: AsyncIterable<Buffer>): AsyncGenerator<string | undefined> {
+	let held: Buffer[] = [];
+	let size = 0;
+	// One byte more, for a carriage return before the line feed.
+	const hold = (part: Buffer) => {
+		size += part.length;
+		held = size > longest + 1 ? [] : [...held, part];
+	};
+	const line = () => {
+		const text = size > longest + 1 ? undefined : Buffer.concat(held).toString("utf8").replace(/\r$/, "");
+		held = [];
+		size = 0;
+		return text === undefined || Buffer.byteLength(text) > longest ? undefined : text;
+	};
+	for await (const chunk of input) {
+		let from = 0;
+		for (let at = chunk.indexOf(10); at !== -1; at = chunk.indexOf(10, from)) {
+			hold(chunk.subarray(from, at));
+			yield line();
+			from = at + 1;
+		}
+		hold(chunk.subarray(from));
+	}
+	if (size > 0) yield line();
+}
+
+// The script writes no log line, which could carry a subject.
+const quiet = () => undefined;
+const runtime = {
+	clock: { now: () => Date.now() },
+	random: { bytes: (length: number) => new Uint8Array(randomBytes(length)) },
+	log: { trace: quiet, debug: quiet, info: quiet, warn: quiet, error: quiet, fatal: quiet },
+};
+
+// The app as `start` builds it, never started: no route is served while the script runs.
+const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
+const source = { files, env: process.env };
+const app = await loadConfig(source)
+	.then(async (config) => {
+		// A variable 0.17 read, left in the environment, is named once, or refuses boot, as config-files says.
+		const told = await legacyVariablesCheck(source);
+		if (told !== undefined) await written(process.stderr, `warn config-files: ${told}\n`);
+		return assemble({ modules: [{{modules}}], config, runtime });
+	})
+	.catch(refused);

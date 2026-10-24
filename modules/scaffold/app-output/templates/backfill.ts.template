@@ -4,67 +4,7 @@ import { assemble, BootRefused, isUnavailable } from "{{kernel}}";
 import { {{contract}} } from "{{entry}}";
 {{imports}}
 
-/** A refused boot: each refusal on its own line of standard error, then exit 78. */
-const refused = (error: unknown): never => {
-	if (!BootRefused.is(error)) throw error;
-	for (const refusal of error.refusals) {
-		process.stderr.write(`refused ${refusal.where}: ${refusal.reason}\n`);
-	}
-	process.exit(78);
-};
-
-/** The longest subject, in bytes. */
-const longest = 255;
-
-/**
- * Each line of standard input as it was sent, without its line ending, or undefined for a line
- * longer than a subject may be. No more of a line than that is ever held.
- */
-async function* lines(input: AsyncIterable<Buffer>): AsyncGenerator<string | undefined> {
-	let held: Buffer[] = [];
-	let size = 0;
-	// One byte more, for a carriage return before the line feed.
-	const hold = (part: Buffer) => {
-		size += part.length;
-		held = size > longest + 1 ? [] : [...held, part];
-	};
-	const line = () => {
-		const text = size > longest + 1 ? undefined : Buffer.concat(held).toString("utf8").replace(/\r$/, "");
-		held = [];
-		size = 0;
-		return text === undefined || Buffer.byteLength(text) > longest ? undefined : text;
-	};
-	for await (const chunk of input) {
-		let from = 0;
-		for (let at = chunk.indexOf(10); at !== -1; at = chunk.indexOf(10, from)) {
-			hold(chunk.subarray(from, at));
-			yield line();
-			from = at + 1;
-		}
-		hold(chunk.subarray(from));
-	}
-	if (size > 0) yield line();
-}
-
-// The script tells only its counts, so it writes no log line, which could carry a subject.
-const quiet = () => undefined;
-const runtime = {
-	clock: { now: () => Date.now() },
-	random: { bytes: (length: number) => new Uint8Array(randomBytes(length)) },
-	log: { trace: quiet, debug: quiet, info: quiet, warn: quiet, error: quiet, fatal: quiet },
-};
-
-// The app as `start` builds it, never started: no route is served while marks are filled.
-const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
-const source = { files, env: process.env };
-const app = await loadConfig(source)
-	.then(async (config) => {
-		// A variable 0.17 read, left in the environment, is named once, or refuses boot, as config-files says.
-		const told = await legacyVariablesCheck(source);
-		if (told !== undefined) process.stderr.write(`warn config-files: ${told}\n`);
-		return assemble({ modules: [{{modules}}], config, runtime });
-	})
-	.catch(refused);
+{{subjects}}
 const backfill = app.get({{contract}});
 // The answers counted by name, in the order the line tells them; one this script does not know (a
 // later release's) is counted as unknown.
@@ -87,7 +27,7 @@ for await (const subject of lines(process.stdin)) {
 		if (!isUnavailable(error)) break;
 	}
 }
-process.stdout.write(`${[...counts].map(([name, n]) => `${name} ${n}`).join(" ")}\n`);
+await written(process.stdout, `${[...counts].map(([name, n]) => `${name} ${n}`).join(" ")}\n`);
 // Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
 await app.stop().catch(() => undefined);
 // A subject settled with any answer it knows is counted, not failed: one that could not be settled, or an answer not known, is 1.

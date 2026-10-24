@@ -76,7 +76,8 @@ export const mainSource = (modules: readonly string[], importOf = (name: string)
  * The app's entries besides `start`, each for an app that composes its package: the same modules,
  * built and never started, running what that package offers. The template's mark `entry` names it;
  * a backfill's marks `contract` and `answers` name the contract it settles through and the answers
- * it counts, in the order its line tells them.
+ * it counts, in the order its line tells them. `subjects` is the part shared by the entries that
+ * read subjects: the app built, never started, and the subjects read from standard input.
  */
 const entries: readonly {
 	readonly script: string;
@@ -120,13 +121,17 @@ export async function entriesOf(
 	const called = entries.filter((entry) => modules.includes(entry.runs));
 	const files: Record<string, string> = {};
 	for (const entry of called) {
-		files[entry.file] = await filled(entry.template, {
+		const fill = {
 			...entry.fill,
 			kernel: importOf(kernel),
 			configFiles: importOf(configFiles),
 			entry: importOf(entry.runs),
 			imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
 			modules: modules.map((_, i) => `m${i}`).join(", "),
+		};
+		files[entry.file] = await filled(entry.template, {
+			...fill,
+			subjects: await filled("subjects.ts.part", fill),
 		});
 	}
 	const scripts = Object.fromEntries(called.map((entry) => [entry.script, run(entry.file)]));
