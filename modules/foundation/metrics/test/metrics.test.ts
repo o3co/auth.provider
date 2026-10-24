@@ -1,5 +1,5 @@
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import {
 	counter,
@@ -11,6 +11,7 @@ import {
 	metrics,
 } from "../src/contract.ts";
 import metricsModule from "../src/module.ts";
+import { metricsStandIn } from "../src/testing.ts";
 
 function runtime() {
 	const recorded = recordingLog();
@@ -29,7 +30,7 @@ function runtime() {
 }
 
 const emitter = (made: () => readonly Instrument[]) =>
-	defineModule({ name: "emitter" }, (m) =>
+	defineModule({ name: "emitter", takes: [] }, (m) =>
 		made().map((i) => m.contribute(instruments).by(() => i)),
 	);
 
@@ -268,4 +269,10 @@ describe("refusals at boot", () => {
 			"metrics.instruments:up: not made by counter, histogram or gauge, or made for another assembly",
 		]);
 	});
+});
+
+it("takes every handle its takes name, the module and its stand-in alike", async () => {
+	for (const module of [metricsModule, metricsStandIn(10)]) {
+		expect(await takesUnused({ modules: [module], config: kernelConfig() })).toEqual({});
+	}
 });
