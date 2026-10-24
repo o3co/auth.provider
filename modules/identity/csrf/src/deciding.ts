@@ -12,6 +12,9 @@ const ours = contract<Site>("csrf.public-origin");
  * Without a public origin the module refuses boot. The stand-in refuses every unsafe request
  * instead, until no test boots it without one.
  */
+/** What `deciding` takes from other modules: the site, and cookies for the token it checks. */
+export const decidingTakes = [cookies, site] as const;
+
 export const deciding = (m: Parts<undefined>, withoutOrigin: "refuse boot" | "refuse requests") => [
 	m.provide(ours).by(async (c) => {
 		const publicSite = await c.get(site);

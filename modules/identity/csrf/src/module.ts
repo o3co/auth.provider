@@ -2,11 +2,11 @@ import { cookies } from "@mod/cookies";
 import { jsonAnswer, routes } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { carried, keptToken, newToken } from "./check.ts";
-import { deciding } from "./deciding.ts";
+import { deciding, decidingTakes } from "./deciding.ts";
 
 const tokenSeconds = 7200;
 
-export default defineModule({ name: "csrf" }, (m) => [
+export default defineModule({ name: "csrf", takes: decidingTakes }, (m) => [
 	...deciding(m, "refuse boot"),
 	m.contribute(routes).by(async (c) => {
 		const jar = await c.get(cookies);
