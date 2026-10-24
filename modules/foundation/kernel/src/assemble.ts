@@ -165,7 +165,23 @@ function recordFailure(error: unknown, where: string, refusals: Refusal[]): void
 	refusals.push(buildRefusalOf(error) ?? failed);
 }
 
-export async function assemble(input: AssemblyInput): Promise<Assembly> {
+/** What a test may watch of the takes as the assembly holds them; nothing an app is given. */
+export interface TakesWatch {
+	/** The takes a declaring module is held to, once the preflight has asked them. */
+	held(module: string, handles: ReadonlySet<Handle>): void;
+	/** A handle a declaring module's factory took, by get, late or collect. */
+	took(module: string, handle: Handle): void;
+}
+
+export function assemble(input: AssemblyInput): Promise<Assembly> {
+	return assembleWatching(input);
+}
+
+/** `assemble`, with the takes it holds and the takes taken told to a test's watch (`./testing`). */
+export async function assembleWatching(
+	input: AssemblyInput,
+	watch?: TakesWatch,
+): Promise<Assembly> {
 	const modules = input.modules;
 	const refusals: Refusal[] = [];
 	const { kernel, sections } = readSections(modules, input.config, refusals);
@@ -184,6 +200,7 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 	const parts = indexParts(modules, refusals);
 	const { providers, contributions } = parts;
 	const heldTakes = checkTakes(modules, sections, parts, refusals);
+	for (const [module, handles] of heldTakes) watch?.held(module.name, handles);
 	refuseIfAny(refusals);
 
 	const built = new Map<Item, Promise<unknown>>();
@@ -220,7 +237,11 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 	const beyondTakes = new Map<Module, Set<Handle>>();
 	const mayName = (handle: Handle, item: Item) => {
 		const held = heldTakes.get(item.module);
-		if (held === undefined || held.has(handle)) return;
+		if (held === undefined) return;
+		if (held.has(handle)) {
+			watch?.took(item.module.name, handle);
+			return;
+		}
 		if (item.module.provides?.some((provision) => provision.contract === handle)) return;
 		const refused = beyondTakes.get(item.module) ?? new Set<Handle>();
 		if (!refused.has(handle)) {

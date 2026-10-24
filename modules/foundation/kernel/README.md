@@ -24,7 +24,7 @@
   - `kernelConfig` builds it, single unless told otherwise.
 - A section, and a value it passes through read by `readConfigured` (the value, or each `ConfigurationIssue`), is read as the HOCON library's typed getters read it: a string converts to the number or boolean its schema asks for, and one that does not, or a value configuration cannot hold, refuses boot.
 - Keys of time and size are read through `setting`: written with their unit, read as a number of it.
-- `./testing`: a switch making an implementation's async calls unavailable (the next call, or named methods until restored), a module whose provision goes through one, a quiet runtime and a recording log.
+- `./testing`: a switch making an implementation's async calls unavailable (the next call, or named methods until restored), a module whose provision goes through one, a quiet runtime and a recording log, and `takesUnused` (each handle a module's takes name that no factory took in an assembly, which it stops before it answers, by module, for a test of each section).
 
 ## Invariants
 - Before any factory runs, one preflight refuses, together with the sections', replicas' and duplicate providers' refusals, each gap a module's takes show: a contract no other module provides or its `takenBy` refuses, a point whose registered contributions break its rule (by identity, once). A refused boot has built nothing.
