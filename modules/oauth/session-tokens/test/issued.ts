@@ -60,7 +60,7 @@ export function issuedInMemory(size = 1000) {
 	};
 	const down = unavailableSwitch<TokenIndex>("token-index");
 	const index = down.wrap({ save: records.create, read: records.read });
-	const module = defineModule({ name: "issued-tokens" }, (m) => [
+	const module = defineModule({ name: "issued-tokens", takes: [] }, (m) => [
 		m.provide(issuedTokens).by((c) => {
 			clock = c.clock.now;
 			return place satisfies IssuedTokens;
