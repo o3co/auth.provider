@@ -11,7 +11,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { amrSources } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import { sessionStandIn } from "@mod/session/testing";
@@ -27,38 +27,41 @@ let stop = async () => {};
 afterEach(() => stop());
 
 const proving = (amr: string[]) =>
-	defineModule({ name: "proving" }, (m) => [
+	defineModule({ name: "proving", takes: [] }, (m) => [
 		m.contribute(amrSources).by(() => ({ name: "proving", amr })),
 	]);
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 const offering = (name: string, sets: string[][]) =>
-	defineModule({ name: `offers-${name}` }, (m) => [
+	defineModule({ name: `offers-${name}`, takes: [] }, (m) => [
 		m.contribute(acrEntries).by(() => ({ acr: name, sets })),
 	]);
 
+/** The assembly the tests serve: http, issuer, login-gates and acr, with this table and these modules. */
+const assembly = (values: Record<string, string[][]>, extra: Module[]) => ({
+	modules: [
+		http,
+		issuerModule,
+		reader,
+		sessionStandIn,
+		subjectRevocationStandIn,
+		gatesModule,
+		acrModule,
+		...extra,
+	],
+	config: {
+		...kernelConfig(),
+		...httpConfig(),
+		...issuerConfig({ url: "https://as.example" }),
+		...acrConfig(values),
+	},
+	runtime,
+});
+
 async function serve(values: Record<string, string[][]>, extra: Module[]) {
-	const app = await assemble({
-		modules: [
-			http,
-			issuerModule,
-			reader,
-			sessionStandIn,
-			subjectRevocationStandIn,
-			gatesModule,
-			acrModule,
-			...extra,
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...issuerConfig({ url: "https://as.example" }),
-			...acrConfig(values),
-		},
-		runtime,
-	});
+	const app = await assemble(assembly(values, extra));
 	await app.start();
 	stop = () => app.stop(1000);
 	const listed = async () =>
@@ -137,4 +140,14 @@ it("refuses to start with an offered entry whose sets are not each a non-empty s
 
 it("reads an empty table when the operator sets nothing", () => {
 	expect(section.parse({})).toEqual({ values: {} });
+});
+
+it("takes all it names, with a table and with none, offered entries or not", async () => {
+	for (const [values, extra] of [
+		[table, offers()],
+		[{}, []],
+		[{}, offers()],
+	] as const) {
+		expect(await takesUnused(assembly(values, [...extra])), JSON.stringify(values)).toEqual({});
+	}
 });

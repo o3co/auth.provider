@@ -24,7 +24,7 @@ const unmeetable = (table: Table, provable: { achievable(set: readonly string[])
 		.filter(([, sets]) => !sets.some((set) => provable.achievable(set)))
 		.map(([name]) => name);
 
-export default defineModule({ name: "acr", section }, (m) => [
+export default defineModule({ name: "acr", section, takes: [acrEntries, logins] }, (m) => [
 	m.provide(acr).by(async (c) => {
 		const loose = (await c.collect(acrEntries)).filter((entry) => !isAmrSets(entry.sets));
 		if (loose.length > 0) {
@@ -35,7 +35,9 @@ export default defineModule({ name: "acr", section }, (m) => [
 			);
 		}
 		const table = await tableOf(c);
-		const unmet = Object.keys(table).length > 0 ? unmeetable(table, await c.get(logins)) : [];
+		// Taken whatever the table holds: login-gates is composed wherever acr is (its dependency).
+		const provable = await c.get(logins);
+		const unmet = Object.keys(table).length > 0 ? unmeetable(table, provable) : [];
 		if (unmet.length > 0) {
 			// A configured acr is told by its key, never in the text; an offered one is a module's own name.
 			const configured = unmet.filter((name) => Object.hasOwn(c.section.values, name));
