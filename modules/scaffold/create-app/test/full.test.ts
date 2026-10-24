@@ -23,6 +23,7 @@ import {
 	generated,
 	importedModules as imports,
 	installed,
+	linked,
 	read,
 	root,
 } from "./full-app.ts";
@@ -115,6 +116,24 @@ it("assembles the features added, with their wirings, bridges and default adapte
 	expect(await read(target, "config/application.conf")).toMatch(
 		/^\tverification-uri = \$\{\?DEVICE_GRANT_VERIFICATION_URI\}$/m,
 	);
+});
+
+it("adds federation grants with the browser half that runs them, which the full app holds neither of, and boots", async () => {
+	const grants = ["@mod/federation-grants", "@mod/federation-grants-connect"];
+	for (const name of grants) expect(full(), name).not.toContain(name);
+	const target = await linked(await generated(["@mod/federation-grants"]));
+	expect(await imports(target)).toEqual(expect.arrayContaining(grants));
+	const pkg = JSON.parse(await read(target, "package.json"));
+	for (const name of grants) expect(pkg.dependencies, name).toHaveProperty(name);
+	// The browser half's page is its own section's, read from env as the rest.
+	expect(await read(target, "config/application.conf")).toMatch(
+		/^\tpage = \$\{\?FEDERATION_GRANTS_CONNECT_PAGE\}$/m,
+	);
+	// federation-grants takes exactly one browser half: booting shows the bridge is composed.
+	await configured(target, { deployment: "single", redisUrl: "redis://127.0.0.1:1" });
+	const run = boot(target, "config/local.conf,config/application.conf");
+	expect(run.status, run.stderr).toBe(78);
+	expect(run.refused, run.stderr).toEqual(["redis.url"]);
 });
 
 it("reads each scalar of the composed modules' fragments from env, one variable each, holding no value", async () => {
