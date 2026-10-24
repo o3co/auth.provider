@@ -1,7 +1,9 @@
+import { audit } from "@mod/audit";
 import { documentCopies } from "@mod/client-documents";
-import { metadataSections } from "@mod/clients";
+import { clients, metadataSections } from "@mod/clients";
 import { routes, site } from "@mod/http";
 import { defineModule, Unavailable } from "@mod/kernel";
+import { sessions } from "@mod/session";
 import { askKey, storedOf } from "./ask.ts";
 import { clientCopy, clientSection } from "./client-section.ts";
 import { consents } from "./contract.ts";
@@ -20,7 +22,10 @@ const grantKey = (clientId: string, subject: string) => JSON.stringify([subject,
 const isRange = (range: readonly string[]) =>
 	range.every((r) => r !== "" && !spaceOrControl.test(r)) && new Set(range).size === range.length;
 
-export default defineModule({ name: "consent", section }, (m) => [
+/** What its provision and its routes take; each is taken whatever the section says. */
+const takes = [grantStore, askStore, site, sessions, clients, audit];
+
+export default defineModule({ name: "consent", section, takes }, (m) => [
 	m.contribute(metadataSections).by(() => clientSection),
 	m.contribute(documentCopies).by(() => clientCopy),
 	m.provide(consents).by(async (c) => {

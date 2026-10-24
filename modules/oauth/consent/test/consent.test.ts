@@ -9,7 +9,7 @@ import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
@@ -86,7 +86,7 @@ function faulty<T extends StoredGrant | StoredAsk>() {
 
 /** A client a source other than the operator's settings shows, as a metadata document would. */
 const documentId = "https://docs.example/client.json";
-const documents = defineModule({ name: "documents" }, (m) => [
+const documents = defineModule({ name: "documents", takes: [] }, (m) => [
 	m.contribute(clientSources).by(() => ({
 		find: async (id: string) =>
 			id === documentId
@@ -102,7 +102,7 @@ const documents = defineModule({ name: "documents" }, (m) => [
 
 /** The document copies composed, as client-documents' reader collects them. */
 const copiesSeen = contract<readonly DocumentCopy[]>("test.copies-seen");
-const copiesProbe = defineModule({ name: "copies-probe" }, (m) => [
+const copiesProbe = defineModule({ name: "copies-probe", takes: [documentCopies] }, (m) => [
 	m.provide(copiesSeen).by((c) => c.collect(documentCopies)),
 ]);
 
@@ -116,7 +116,8 @@ async function serve(
 	const grants = faulty<StoredGrant>();
 	const asks = faulty<StoredAsk>();
 	const recorded = auditStandIn();
-	const app = await assemble({
+	// The composition as one value, for a test of what its modules take.
+	const input = {
 		modules: [
 			http,
 			clientsModule,
@@ -155,7 +156,8 @@ async function serve(
 				: consentConfig({ "challenge-lifetime": "1m", page })),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -216,7 +218,17 @@ async function serve(
 		};
 	};
 	const copies = app.get(copiesSeen);
-	return { grants, asks, sessionFor, pendingFor, call, given, copies, events: recorded.events };
+	return {
+		input,
+		grants,
+		asks,
+		sessionFor,
+		pendingFor,
+		call,
+		given,
+		copies,
+		events: recorded.events,
+	};
 }
 
 describe("consent: asking", () => {
@@ -702,4 +714,11 @@ describe("consent's sections", () => {
 			expect(page(value), value).toBe(false);
 		}
 	});
+});
+
+it("takes all it names, with a consent page and without one", async () => {
+	for (const page of ["https://as.example/consent", null]) {
+		const { input } = await serve("https://as.example", page);
+		expect(await takesUnused(input), String(page)).toEqual({});
+	}
 });

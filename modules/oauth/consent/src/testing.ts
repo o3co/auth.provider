@@ -42,7 +42,7 @@ export function consentStoresOn(stands: {
 		read: records.read,
 		update: records.change,
 	});
-	return defineModule({ name: "consent-stores" }, (m) => [
+	return defineModule({ name: "consent-stores", takes: [] }, (m) => [
 		m.provide(grantStore).by(() => storeOf(stands.grants)),
 		m.provide(askStore).by(() => storeOf(stands.asks)),
 	]);
