@@ -123,10 +123,9 @@ export interface PasskeyWitnessing {
 	): Promise<void>;
 }
 
-/** At most one; with none, passkeys matches the witness composed itself, or the store alone tells. */
+/** At most one; with none, the store alone tells, and a passkey witness composed refuses boot. */
 export const passkeyWitnessing = extensionPoint<PasskeyWitnessing>("passkeys.witnessing", {
 	multiplicity: "many",
 });
 
-export { type PasskeyWitness, passkeyWitnesses } from "@mod/passkey-witness";
 export * from "./store.ts";

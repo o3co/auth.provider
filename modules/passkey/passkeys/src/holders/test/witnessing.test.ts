@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { memoryStores, writeToken } from "../../../test/stores.ts";
 import type { AfterRemoval, Asked, PasskeyWitnessing } from "../../contract.ts";
@@ -25,15 +24,7 @@ function asked(answer = true) {
 			calls.push({ kind: "emptied", at, reads: [await after(), await holds()] });
 		},
 	};
-	const { holders, settle } = holdersOver({
-		records,
-		witness: undefined,
-		witnessing,
-		audit: { record: () => {} },
-		log: recordingLog().log,
-		token: fresh,
-		handle: fresh,
-	});
+	const { holders, settle } = holdersOver({ records, witnessing, handle: fresh });
 	const register = async (subject: string) => {
 		const id = fresh();
 		const credential = {

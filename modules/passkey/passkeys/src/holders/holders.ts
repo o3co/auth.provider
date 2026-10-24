@@ -1,120 +1,33 @@
-import { type Audit, declaredAudit } from "@mod/audit";
-import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import type { PasskeyWitness } from "@mod/passkey-witness";
-import events from "../audit-events.ts";
 import type { Asked, PasskeyHolders, PasskeyWitnessing } from "../contract.ts";
 import type { Emptied, KeptPasskeys } from "../records.ts";
 
+export type { Asked } from "../contract.ts";
+
 export interface HolderParts {
 	readonly records: KeptPasskeys;
-	/** None composed leaves the store alone to tell. */
-	readonly witness: PasskeyWitness | undefined;
-	/** Where one is contributed, it matches the mark with the passkeys in this module's place. */
-	readonly witnessing?: PasskeyWitnessing | undefined;
-	readonly audit: Pick<Audit, "record">;
-	readonly log: Pick<Log, "warn">;
-	/** A new token for a mark this call sets. */
-	readonly token: () => string;
+	/** Where one is contributed, it keeps the witness's mark in line; none leaves the store alone to tell. */
+	readonly witnessing: PasskeyWitnessing | undefined;
 	/** A new holder's handle, for a reset of a subject that has none. */
 	readonly handle: () => string;
 }
 
-export type { Asked } from "../contract.ts";
-
-/** A witness unavailable is asked again this often, with the same token, which answers alike. */
-const enrollRetries = 3;
-/** A settle marks this often at most, then is unavailable. */
-const settleMarks = 2;
-
-/** `ask`'s answer, asked again while it is unavailable. */
-async function retried<T>(ask: () => Promise<T>) {
-	for (let attempt = 0; ; attempt++) {
-		try {
-			return await ask();
-		} catch (error) {
-			if (!isUnavailable(error) || attempt === enrollRetries) throw error;
-		}
-	}
-}
-
-/** The subjects' holdings, and the settle that keeps the witness's mark in line with them. */
+/** The subjects' holdings, and the settle that asks the witnessing where passkeys settles. */
 export function holdersOver(p: HolderParts) {
-	const audited = declaredAudit(p.audit, events);
 	const holds = async (subject: string) => (await p.records.listed(subject)).length > 0;
-	const inconsistent = (subject: string, at: Asked) => {
-		audited.record("passkey.enrollment_inconsistent", { subject, attributes: { at } });
-		p.log.warn("passkey.enrollment_inconsistent", { at });
-		return new Unavailable("passkeys");
-	};
 	/**
-	 * After a write that emptied the list left `emptied`: withdraws the mark by the token read first,
-	 * only where the holder then holds none for sure, and marks again where a passkey came meanwhile.
-	 */
-	const withdrawn = async (
-		witness: PasskeyWitness,
-		subject: string,
-		at: Asked,
-		emptied: Emptied,
-	) => {
-		// The mark before the holdings: a registration lists before it marks.
-		const token = await witness.markedWith(subject);
-		if (token === undefined) return false;
-		const held = await p.records.afterRemoval(subject, emptied);
-		if (held === "unsure") throw inconsistent(subject, at);
-		if (held !== "none") return held === "passkey";
-		await retried(() => witness.withdraw(subject, token));
-		const after = await p.records.afterRemoval(subject, emptied);
-		if (after === "unsure") throw inconsistent(subject, at);
-		// A pending one marks once admitted.
-		return after === "passkey" ? settle(subject, at) : false;
-	};
-	/**
-	 * Marks a subject holding a passkey with no mark, under a new token. A mark beside none goes by
-	 * `withdraw` where this call set it, as `withdrawn` says where this call emptied the list
-	 * (`emptied`), and is otherwise read once more, then recorded and unavailable: the store may have
-	 * lost the passkeys. After any write it reads both again; it marks twice at most, then is
-	 * unavailable. Answers whether the subject holds a passkey, as the read the mark agreed with saw it.
+	 * Asks the witnessing, if any, to bring the mark in line: after a write that emptied the list
+	 * (`emptied`), with what that write left, read anew; otherwise with whether the subject holds a
+	 * passkey, read anew. Answers whether it holds, as the read the mark agreed with saw it, or as the
+	 * store alone tells without a witnessing.
 	 */
 	const settle = async (subject: string, at: Asked, emptied?: Emptied): Promise<boolean> => {
 		const witnessing = p.witnessing;
-		if (witnessing !== undefined) {
-			const holding = () => holds(subject);
-			if (emptied === undefined) return witnessing.settle(subject, at, holding);
-			await witnessing.emptied(
-				subject,
-				at,
-				() => p.records.afterRemoval(subject, emptied),
-				holding,
-			);
-			// After an emptying write no caller reads the answer: it tells nothing of the mark.
-			return false;
-		}
-		const witness = p.witness;
-		if (witness === undefined) return holds(subject);
-		if (emptied !== undefined) return withdrawn(witness, subject, at, emptied);
-		let mine: string | undefined;
-		for (let marks = 0; ; ) {
-			const held = await holds(subject);
-			const marked = await witness.read(subject);
-			if (held === marked) return held;
-			if (!held) {
-				// After its own withdraw, both are read again: another may have marked meanwhile.
-				if (mine !== undefined) {
-					await witness.withdraw(subject, mine);
-					mine = undefined;
-					continue;
-				}
-				// Read once more: a last removal may lie between emptying the list and its withdraw.
-				const again = await holds(subject);
-				const still = await witness.read(subject);
-				if (again === still) return again;
-				if (!again) throw inconsistent(subject, at);
-			}
-			if (marks === settleMarks) throw new Unavailable("passkeys");
-			marks += 1;
-			const token = p.token();
-			mine = (await retried(() => witness.enroll(subject, token))) ? token : undefined;
-		}
+		const holding = () => holds(subject);
+		if (witnessing === undefined) return holding();
+		if (emptied === undefined) return witnessing.settle(subject, at, holding);
+		await witnessing.emptied(subject, at, () => p.records.afterRemoval(subject, emptied), holding);
+		// After an emptying write no caller reads the answer: it tells nothing of the mark.
+		return false;
 	};
 	const holders: PasskeyHolders = {
 		// What the settle saw, the mark agreeing: never a read of the passkeys alone after it.
@@ -128,7 +41,7 @@ export function holdersOver(p: HolderParts) {
 		settle: async (subject) => {
 			await settle(subject, "settle");
 		},
-		witnessed: p.witnessing !== undefined || p.witness !== undefined,
+		witnessed: p.witnessing !== undefined,
 	};
 	return { holders, settle };
 }

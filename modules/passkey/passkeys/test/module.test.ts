@@ -8,7 +8,6 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { passkeyWitnesses as witnesses } from "@mod/passkey-witness";
 import { passkeyWitnessStandIn as witnessStandIn } from "@mod/passkey-witness/testing";
 import webauthn from "@mod/webauthn/module";
 import {
@@ -21,7 +20,7 @@ import {
 import { expect, it } from "vitest";
 import {
 	challengeStore,
-	passkeyWitnesses as ownWitnesses,
+	type PasskeyWitnessing,
 	passkeyHolders,
 	passkeyStore,
 	passkeys,
@@ -30,10 +29,35 @@ import {
 } from "../src/contract.ts";
 import passkeysModule from "../src/module.ts";
 import type { PasskeyStore } from "../src/store.ts";
-import { passkeysConfig, passkeyWitnessStandIn } from "../src/testing.ts";
+import { passkeysConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
-const boot = (witnesses: ReturnType<typeof passkeyWitnessStandIn>[]) =>
+/** A witnessing in place of passkey-witnessing's, its marks in a map: set where the subject holds a passkey, gone where an emptying write left none. */
+const scriptedWitnessing = (name = "witnessing") => {
+	const marks = new Map<string, string>();
+	const failing = { settle: 0 };
+	let n = 0;
+	const witnessing: PasskeyWitnessing = {
+		settle: async (subject, _at, holds) => {
+			if (failing.settle > 0) {
+				failing.settle -= 1;
+				throw new Unavailable("passkey-witness");
+			}
+			const held = await holds();
+			if (held && !marks.has(subject)) marks.set(subject, `m${++n}`);
+			return held;
+		},
+		emptied: async (subject, _at, after) => {
+			if ((await after()) === "none") marks.delete(subject);
+		},
+	};
+	const module = defineModule({ name }, (m) => [
+		m.contribute(passkeyWitnessing).by(() => witnessing),
+	]);
+	return { module, marks, failing };
+};
+
+const boot = (witnesses: { readonly module: ReturnType<typeof defineModule> }[]) =>
 	assemble({
 		modules: [
 			memoryStores().module,
@@ -68,14 +92,16 @@ it("refuses to boot a passkey store that cannot change both its spaces as one", 
 	]);
 });
 
-it("refuses to boot with two passkey witnesses", async () => {
-	await expect(
-		boot([passkeyWitnessStandIn("one"), passkeyWitnessStandIn("two")]),
-	).rejects.toBeInstanceOf(BootRefused);
+it("refuses to boot a passkey witness composed without a witnessing to ask it", async () => {
+	const refused = await boot([witnessStandIn()]).catch((error: unknown) => error);
+	expect((refused as BootRefused).refusals).toContainEqual({
+		where: "passkeys",
+		reason: "a passkey witness is composed without passkey-witnessing",
+	});
 });
 
 it("marks a subject with the witness composed once a registration is written, and clears it with the last removal", async () => {
-	const stand = passkeyWitnessStandIn();
+	const stand = scriptedWitnessing();
 	const app = await boot([stand]);
 	const holders = app.get(passkeyHolders);
 	expect(holders.witnessed).toBe(true);
@@ -98,7 +124,7 @@ async function answered(app: Awaited<ReturnType<typeof boot>>, subject: string) 
 }
 
 it("keeps nothing usable where the caller's check says no or fails before the passkey is listed", async () => {
-	const stand = passkeyWitnessStandIn();
+	const stand = scriptedWitnessing();
 	const app = await boot([stand]);
 	for (const admitted of [
 		async () => false,
@@ -120,7 +146,7 @@ it("keeps nothing usable where the caller's check says no or fails before the pa
 });
 
 it("ends the passkey where the check says no or fails once it is listed, its mark going too", async () => {
-	const stand = passkeyWitnessStandIn();
+	const stand = scriptedWitnessing();
 	const app = await boot([stand]);
 	for (const second of ["no", "throws"] as const) {
 		const { kept, response } = await answered(app, "kim");
@@ -142,10 +168,10 @@ it("ends the passkey where the check says no or fails once it is listed, its mar
 });
 
 it("keeps a passkey both asks admitted though the witness cannot mark it, answering unavailable", async () => {
-	const stand = passkeyWitnessStandIn();
+	const stand = scriptedWitnessing();
 	const app = await boot([stand]);
 	const { kept, response } = await answered(app, "lee");
-	stand.failing.enroll = 4;
+	stand.failing.settle = 1;
 	await expect(kept.register("lee", response, undefined, async () => true)).rejects.toSatisfy(
 		isUnavailable,
 	);
@@ -170,7 +196,7 @@ it("ends a passkey whose write may have landed though its answer was lost", asyn
 		})),
 		m.provide(challengeStore).by(() => stores.challenges),
 	]);
-	const stand = passkeyWitnessStandIn();
+	const stand = scriptedWitnessing();
 	const app = await assemble({
 		modules: [lossy, auditStandIn().module, webauthn, passkeysModule, stand.module],
 		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
@@ -194,7 +220,7 @@ it("ends a passkey whose write may have landed though its answer was lost", asyn
 });
 
 it("ends only the new passkey where the check says no once it is listed, the subject's mark staying for the one it holds", async () => {
-	const stand = passkeyWitnessStandIn();
+	const stand = scriptedWitnessing();
 	const app = await boot([stand]);
 	const first = await answered(app, "ann");
 	expect(await first.kept.register("ann", first.response)).toMatchObject({ kind: "registered" });
@@ -442,14 +468,6 @@ it("ends only its own write where a removal and another registration of the id l
 	expect([await signsIn(one), await signsIn(two)]).toEqual(["refused", "sam"]);
 	expect((await kept.listed?.("sam"))?.map((p) => p.id)).toEqual([one.response.id]);
 	await app.stop(1000);
-});
-
-it("offers the witness's extension point as passkey-witness holds it, so a witness contributed through either name reaches it", async () => {
-	expect(ownWitnesses).toBe(witnesses);
-	// One through each name is two witnesses at the one point.
-	await expect(boot([passkeyWitnessStandIn("one"), witnessStandIn("two")])).rejects.toBeInstanceOf(
-		BootRefused,
-	);
 });
 
 it("refuses to boot with two passkey witnessings contributed", async () => {
