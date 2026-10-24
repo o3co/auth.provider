@@ -8,7 +8,7 @@ Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.
 
 ### Security
 
-- `mail-smtp`: nodemailer 10.1.2 → 10.1.7. Three moderate advisories in nodemailer's address parser (GHSA-85x2-q946-cp5h and two others): a nested comment, a `;` inside a quoted string or comment, or a `>` inside a quoted local part could end an address early. A message could then go to a recipient other than the one its header names. Fixed in nodemailer 10.1.4. Nothing to change beyond upgrading.
+- `mail-smtp`: nodemailer 10.1.2 → 10.1.7, past three moderate advisories in nodemailer's address parser (GHSA-85x2-q946-cp5h, GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w): a nested comment, a `;` inside a quoted string or comment, or a `>` inside a quoted local part could end an address early, so a message could go to a recipient other than the one its header names. That is nodemailer's exposure; `mail-smtp` never parses a recipient (it writes `To` itself and passes its own envelope), so no deployment could misdeliver through it. The parser does read the configured `from`: a `from` that the old parser happened to accept but is no address, such as `(noreply@example.test)` written as a comment alone, now refuses boot. Write `from` as an address, optionally with a display name.
 
 ## [0.18.4] - 2026-10-23
 
