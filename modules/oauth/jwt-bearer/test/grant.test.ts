@@ -18,7 +18,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { type Narrower, type Outbound, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
@@ -63,7 +63,7 @@ const trustedUpstream = [
 
 /** Spent assertions on records' stand-in, whose own clock runs `aheadMs` past the kernel's. */
 const spentOn = (aheadMs = 0) =>
-	defineModule({ name: "spent-assertions" }, (m) => [
+	defineModule({ name: "spent-assertions", takes: [] }, (m) => [
 		m.provide(spentAssertions).by(() => {
 			const stand = memoryRecords<true>(() => clock.at + aheadMs, { shards: 1, perShard: 1 });
 			return {
@@ -72,8 +72,8 @@ const spentOn = (aheadMs = 0) =>
 		}),
 	]);
 
-/** Where the token endpoint answers; null for a deployment without a public origin. */
-async function serve(
+/** The grant's assembly; `located` is where the token endpoint answers, null for no public origin. */
+function assembly(
 	storeAheadMs = 0,
 	named = issuer,
 	located: string | null = `${issuer}/oauth/token`,
@@ -81,10 +81,10 @@ async function serve(
 	out: Module = outboundModule,
 	extra: readonly Module[] = [],
 ) {
-	const location = defineModule({ name: "token-endpoint-location" }, (m) => [
+	const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
 		m.provide(tokenEndpointLocation).by(() => ({ url: located ?? undefined })),
 	]);
-	const app = await assemble({
+	return {
 		modules: [
 			location,
 			http,
@@ -119,7 +119,12 @@ async function serve(
 			"jwt-bearer": { issuers },
 		},
 		runtime,
-	});
+	};
+}
+
+/** Where the token endpoint answers; null for a deployment without a public origin. */
+async function serve(...given: Parameters<typeof assembly>) {
+	const app = await assemble(assembly(...given));
 	/** Calls the grant as the token endpoint would for the client "app". */
 	const grant = (a: string, more: Record<string, string> = {}) =>
 		app.get(grantCalls).call(grantType, "app", { grant_type: grantType, assertion: a, ...more });
@@ -147,7 +152,7 @@ const saidOf = (outcome: GrantOutcome) =>
 	outcome.kind === "error" ? `${outcome.error}: ${outcome.description}` : "issued";
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing" }, (m) => [
+const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -228,7 +233,7 @@ describe("jwt-bearer", () => {
 	it("asks the issuance policies before the jti is used up, and again when issuing", async () => {
 		const asked: IssuanceRequest[] = [];
 		let refusing = new Set([1]);
-		const policy = defineModule({ name: "test-policy" }, (m) => [
+		const policy = defineModule({ name: "test-policy", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -499,7 +504,7 @@ describe("jwt-bearer", () => {
 		/** An outbound answering the key set, keeping what it was asked. */
 		function keySetAt(keys: unknown[]) {
 			const asked: { url: string; narrower: Narrower | undefined }[] = [];
-			const module = defineModule({ name: "outbound-stand-in" }, (m) => [
+			const module = defineModule({ name: "outbound-stand-in", takes: [] }, (m) => [
 				m.provide(outbound).by(() => ({
 					fetch: async (url, _request, narrower) => {
 						asked.push({ url, narrower });
@@ -582,7 +587,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 	type Answer = Awaited<ReturnType<SignerKeys["keysOf"]>>;
 	/** A module contributing the device keys, answering as `answer` says now and recording each ask. */
 	const signing = (answer: () => Promise<Answer>, asked: unknown[] = []) =>
-		defineModule({ name: "device-keys" }, (m) => [
+		defineModule({ name: "device-keys", takes: [] }, (m) => [
 			m.contribute(signerKeys).by(() => ({
 				issuer: fixedIss,
 				keysOf: async (signer) => {
@@ -598,7 +603,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		asked: unknown[] = [],
 		name = "linked-subjects",
 	) =>
-		defineModule({ name }, (m) => [
+		defineModule({ name, takes: [] }, (m) => [
 			m.contribute(linkedSubjects).by(() => ({
 				declaredBy: name,
 				subjectOf: async (upstream: string, sub: string) => {
@@ -801,4 +806,8 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		};
 		expect(await refused([{ ...fetched, "subject-is-key-thumbprint": true }])).toBe("refused");
 	});
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused(assembly())).toEqual({});
 });
