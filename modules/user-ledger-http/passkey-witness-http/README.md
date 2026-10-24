@@ -1,11 +1,11 @@
 # passkey-witness-http
 
 ## Responsibilities
-- Contributes `passkeys`' witness kept at the operator's HTTP ledger: whether a subject carries the mark and its token, setting it to a token unless one is set, and removing it only where it is a token's, each asked of the ledger through `outbound`. It offers no clear.
+- Contributes a passkey witness (`passkey-witness`'s contract) kept at the operator's HTTP ledger: whether a subject carries the mark and its token, setting it to a token unless one is set, and removing it only where it is a token's, each asked of the ledger through `outbound`. It offers no clear.
 - Reads each answer once, at this boundary, into the witness's answer.
 
 ## Not here
-- When the witness is read, enrolled or withdrawn, and what is decided with it, and the witness's contract (`passkeys`). Whether the ledger may be reached, redirects, and the caps on size and time (`outbound`). Keeping the mark (the ledger's).
+- When the witness is read, enrolled or withdrawn, and what is decided with it, and the witness's contract (`passkey-witness`). Whether the ledger may be reached, redirects, and the caps on size and time (`outbound`). Keeping the mark (the ledger's).
 
 ## Offers
 - Composition definition only (a contribution to `passkeys.witnesses`). Opt-in: no axis's default, so composing `passkeys` alone never brings it.
@@ -35,4 +35,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `passkeys`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)
+- `kernel`, `passkey-witness`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)

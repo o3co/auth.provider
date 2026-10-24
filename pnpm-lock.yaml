@@ -4482,9 +4482,9 @@ importers:
       '@mod/outbound-policy':
         specifier: workspace:*
         version: link:../../foundation/outbound-policy
-      '@mod/passkeys':
+      '@mod/passkey-witness':
         specifier: workspace:*
-        version: link:../../passkey/passkeys
+        version: link:../../passkey/passkey-witness
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
