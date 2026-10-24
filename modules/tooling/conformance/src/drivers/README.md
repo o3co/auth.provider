@@ -23,6 +23,7 @@ Internal module of `conformance`: the new system's driver, composed from a scene
 - A pattern's app composing `mail-smtp` sends its mail to a fake relay at loopback, started and stopped with it, unless the scene sets that section.
 - On a pattern's app, a scene whose modules the app lacks is skipped with that reason.
 - On a pattern's app, a scene about a Store the app did not choose (it pauses the Store on a memory one, or refuses a volatile Store on Redis) is left out as an alternative, even with `full+opt-ins`.
+- A scene's Redis fsyncs every write (`appendfsync always`), as a deployment's does; its app waits five seconds on a command, so a shared Docker VM's slow fsync is no `503`, except where the scene pauses the store, which keeps the default second.
 - On a pattern's app, a scene about the absence of a module the app composes (a set-up's `without`) is left out with that reason, even with `full+opt-ins`.
 - On a pattern's app, each scene left out or failed is a line in the file `CONFORMANCE_NOT_IN_PATTERN_FILE` names, when set, which `patterns` reads.
 

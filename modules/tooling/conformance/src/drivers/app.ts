@@ -55,6 +55,17 @@ export function sectionsOf(parts: readonly NewPart[], fallback = true): Sections
 export const appConfig = (scene: string, layers: readonly string[], local?: string) =>
 	[scene, ...layers, ...(local ? [local] : []), "config/application.conf"].join(",");
 
+/**
+ * The scene's Redis section. Its server fsyncs every write, as a deployment's does, and a shared
+ * Docker VM's fsync can stall past the default second: the wait is five, but where the scene pauses
+ * the store it keeps the default, so its unavailable answers come as soon as an app's would.
+ */
+export const sceneRedis = (url: string, pauses: boolean) => ({
+	url,
+	replication: "none",
+	...(pauses ? {} : { "command-timeout": "5s" }),
+});
+
 /** Tries at a new port when another process takes the one chosen before the app binds it. */
 const portAttempts = 3;
 
@@ -124,7 +135,7 @@ export async function started(
 			...(store === "volatile"
 				? { store: { "accept-volatile": scene.acceptVolatileStore ?? true } }
 				: {}),
-			...(redis ? { redis: { url: redis.url, replication: "none" } } : {}),
+			...(redis ? { redis: sceneRedis(redis.url, scene.storeFaults === true) } : {}),
 			...(smtp ? { "mail-smtp": { host: smtp.host, port: smtp.port, security: "none" } } : {}),
 		};
 		const scratch = await mkdtemp(join(tmpdir(), "conformance-scene-"));
