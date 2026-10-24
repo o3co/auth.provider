@@ -14,7 +14,7 @@ const spent: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "jwt-bearer-store" }, (m) => [
+export default defineModule({ name: "jwt-bearer-store", takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => spent),
 	m.provide(spentAssertions).by(async (c) => {
 		const place = { store: await c.get(store), space: spent, log: c.log, random: c.random };
