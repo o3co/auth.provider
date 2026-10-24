@@ -14,7 +14,7 @@ const used: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "exchange-id-tokens-store" }, (m) => [
+export default defineModule({ name: "exchange-id-tokens-store", takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => used),
 	m.provide(usedIdTokens).by(async (c): Promise<UsedIdTokens> => {
 		const place = { store: await c.get(store), space: used, log: c.log, random: c.random };
