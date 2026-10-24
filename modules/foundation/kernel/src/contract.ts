@@ -12,6 +12,7 @@ export {
 	type ExtensionPoint,
 	type ExtensionRule,
 	extensionPoint,
+	type Handle,
 } from "./handles.ts";
 export { type Probe, probes, type Readiness, type ReadinessReport } from "./lifecycle/readiness.ts";
 export {

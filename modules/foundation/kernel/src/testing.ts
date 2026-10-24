@@ -1,4 +1,5 @@
-import type { Contract } from "./handles.ts";
+import { type AssemblyInput, assembleWatching } from "./assemble.ts";
+import type { Contract, Handle } from "./handles.ts";
 import type { Module } from "./module.ts";
 import { Unavailable } from "./refusal/refusal.ts";
 import {
@@ -141,4 +142,30 @@ export function switchedModule<T extends object>(
 					},
 		),
 	});
+}
+
+/**
+ * Each handle a module's takes name that no factory took in this assembly, by module (a module
+ * without takes left out, and one that took all it names): a stale take shows in a test, for each
+ * section the test gives. It stops the assembly before it answers, and refuses as the boot does.
+ */
+export async function takesUnused(
+	input: AssemblyInput,
+): Promise<Readonly<Record<string, readonly string[]>>> {
+	const held = new Map<string, ReadonlySet<Handle>>();
+	const taken = new Map<string, Set<Handle>>();
+	const assembly = await assembleWatching(input, {
+		held: (module, handles) => held.set(module, handles),
+		took: (module, handle) => taken.set(module, (taken.get(module) ?? new Set()).add(handle)),
+	});
+	// Read as the assembly left it: a take a stop hook makes is no take of the assembly.
+	const unused = Object.fromEntries(
+		[...held].flatMap(([module, handles]) => {
+			const left = [...handles].filter((handle) => !taken.get(module)?.has(handle));
+			return left.length > 0 ? [[module, left.map((handle) => handle.label)]] : [];
+		}),
+	);
+	// What the factories opened is closed before the answer: each package's tests ask this.
+	await assembly.stop();
+	return unused;
 }
