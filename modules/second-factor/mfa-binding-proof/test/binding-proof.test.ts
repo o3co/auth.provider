@@ -3,7 +3,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
 import { factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
@@ -35,7 +35,7 @@ afterEach(async () => {
 
 /** Counting kinds whose proof is their secret: two, so a pass is seen to begin only its own kind. */
 const counting = (kind: string) =>
-	defineModule({ name: `kind-${kind}` }, (m) => [
+	defineModule({ name: `kind-${kind}`, takes: [] }, (m) => [
 		m.contribute(factorKinds).by(() => ({
 			kind,
 			amr: ["otp"],
@@ -47,13 +47,13 @@ const counting = (kind: string) =>
 				proof === secret ? { kind: "valid" as const, state: null } : { kind: "invalid" as const },
 		})),
 	]);
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 
 /** What the proof last kept, and how it answers: not available to `nobody`. */
 const contact = { kept: "", limited: false, refused: false, from: [] as unknown[] };
-const owning = defineModule({ name: "proof-contact" }, (m) => [
+const owning = defineModule({ name: "proof-contact", takes: [] }, (m) => [
 	m.contribute(bindingProofs).by(() => ({
 		name: "contact",
 		available: async (subject, from) => {
@@ -73,7 +73,7 @@ const owning = defineModule({ name: "proof-contact" }, (m) => [
 
 async function serve(mode?: "never" | "when-available" | "always", proofs = [owning]) {
 	const stand = memoryRecords<StoredFactors>(() => runtime.clock.now(), { shards: 1, perShard: 1 });
-	const store = defineModule({ name: "factor-store" }, (m) => [
+	const store = defineModule({ name: "factor-store", takes: [] }, (m) => [
 		m.provide(factorStore).by(() => ({
 			save: (key, record) => stand.records.create(key, record, "endless"),
 			read: stand.records.read,
@@ -82,7 +82,7 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 			updateTogether: updatingTogether(stand.records),
 		})),
 	]);
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			auditStandIn().module,
@@ -108,7 +108,8 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 			...(mode ? { "mfa-binding-proof": { mode } } : {}),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	stop = () => app.stop(1000);
 	const asking = app.get(bindingProof);
 	const decided = app.get(factorBinding);
@@ -129,8 +130,15 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 		if (proved.kind !== "valid") throw new Error(proved.kind);
 		return decided.bind(subject, begun.pending, proved.state);
 	};
-	return { asking, decided, passOf, bindCode, inAMinute, sessions: app.get(sessions) };
+	return { input, asking, decided, passOf, bindCode, inAMinute, sessions: app.get(sessions) };
 }
+
+it("takes all it names, whatever the mode", async () => {
+	for (const mode of ["never", "when-available", "always"] as const) {
+		expect(await takesUnused((await serve(mode)).input)).toEqual({});
+		await stop();
+	}
+});
 
 it("asks the available proof of a subject holding no counting factor, and nothing of one it is not available to or one holding a factor", async () => {
 	const { asking, passOf, bindCode } = await serve();
