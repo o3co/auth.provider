@@ -14,6 +14,8 @@ How to run auth-provider 0.18: Redis, rotating keys, upgrading, and what to watc
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
 - [Passkey list entries 0.18 left](#passkey-list-entries-018-left)
 - [Filling the passkey witness's marks](#filling-the-passkey-witnesss-marks)
+- [Passkey logins into a session](#passkey-logins-into-a-session)
+- [Resetting a subject's passkeys](#resetting-a-subjects-passkeys)
 - [Name resolution](#name-resolution)
 - [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
@@ -267,6 +269,39 @@ Once the witness is composed on every instance, run `pnpm run passkey-backfill` 
 It exits 0 when none failed and none was unknown, else 1: run it again on the same list until it exits 0. It exits 78 when the app's boot is refused. The app's `src/passkey-backfill.ts` comes with an app generated with 0.19 that composes `passkey-witnessing`; for one generated before, generate the project again.
 
 **A mark beside no passkey** (`inconsistent`) is either a store that lost the subject's passkeys, the case the mark is there for, or a mark that outlived them (a removal that emptied the list while the ledger could not answer). Check the passkey store first: where it lost records, restore it before anything else. Where you know the subject holds no passkey, an operator's passkey reset of the subject (`passkeyReset.reset`, or `mfaReset.run` where `mfa-reset-passkeys` is composed) withdraws the mark; run the backfill once more and check `none`.
+
+## Passkey logins into a session
+
+`login-passkey` logs a browser in with a passkey (the page's side is in [your login page](login-page.md#a-login-with-a-passkey)). What it needs and changes:
+
+- **The user ledger answers by subject.** A passkey names its subject, not a username, so the login asks `users` for the user by subject. With a ledger over HTTP, set `users-http.subject-url`: without it every passkey login answers `503`. A subject the ledger answers not found (`404` or `410`) is refused.
+- **A passkey whose authenticator verified the user proves a second factor too** (amr `pop` and `mfa`), so the second-factor gate lets the login in without asking a factor, and `mfa.mode = required` is met without one. A passkey synchronized between devices can be stolen with its account at the platform; where that must not stand for a second factor, set `login-passkey.counts-as-mfa = false`, and a user holding a factor is asked it after the passkey.
+- **With a passkey witness, every passkey login reads the ledger** before the session opens, and fills the subject's mark there if it is missing. While the ledger cannot answer, passkey logins answer `503`.
+- **Each route counts its requests per source** (`login-passkey.attempts` per `window`), apart from the password login's.
+
+### Refusing passwords of passkey holders
+
+`login-passkey.password = refused-when-held` refuses a password login of a subject holding a passkey, answered as a wrong password (`401 invalid_credentials`), and records `passkey.password_refused` with the subject. It is checked before a second factor holds the login, and again when a held login resumes. A federated login whose upstream amr is mapped to `pwd` is refused too; map it otherwise where that must not happen.
+
+1. Compose a passkey witness (`passkey-witness-http`): boot is refused in this mode without one, as a passkey store that lost its records would read as holding none and let a stolen password in.
+2. With the witness on every instance, run the backfill until it exits 0 ([Filling the passkey witness's marks](#filling-the-passkey-witnesss-marks)): a subject not yet marked whose store is lost would read as holding none.
+3. Set `refused-when-held` on every instance. Users who must keep signing in by password are in the group `login-passkey.password-exempt-group`.
+
+While the ledger cannot answer, every password login outside the exempt group answers `503`: whether its subject holds a passkey is read with the witness. A user who removes their last passkey signs in by password again; one who loses every passkey signs in by password only in the exempt group, or after an operator resets their passkeys.
+
+## Resetting a subject's passkeys
+
+`passkeyReset.reset(subject, { requestedBy })` (`passkey-reset`) ends the subject's sessions, empties its passkey list, withdraws the witness's mark, and ends the sessions again. `mfaReset.run` does the same as one of its parts where `mfa-reset-passkeys` is composed beside `passkey-reset`. Each run records `passkey.reset` (or `mfa.reset` with `parts`).
+
+- `{kind: "done", removed}`: every step ran. `removed` counts the list entries taken off, pending ones and old entries 0.18 left among them, not the passkeys that could sign in.
+- `{kind: "stopped", at}`: a step was unavailable (`sessions`, a boundary; `passkeys`, the removal); run it again once the store, the ledger or the revocations answer. A `removed` comes with a stop at the second boundary only.
+- A failure that is not unavailable is thrown, once the run is recorded.
+
+`done` says every step ran, not that no passkey is left. A registration whose challenge was made after the first boundary, written after the removal and admitted before the second boundary, stays usable; so does one made after the reset. So:
+
+- **To recover from a leaked passkey**, stop the subject's work first: no new login, session or passkey registration for the subject, and wait for the running ones to finish. Then reset, check the subject with the backfill (`none`), and let the subject back in. Without that, someone holding the leaked passkey can sign in between the first boundary and the removal and register a passkey of their own that the reset leaves.
+- **While 0.18 instances still run**, which write a passkey's record and the list apart, these guarantees hold only once they and the requests they took are gone.
+- **A subject whose store lost its records**, the mark alone left, is mended by a reset, which makes the subject's holder anew: stop the subject's work first, as above.
 
 ## Name resolution
 

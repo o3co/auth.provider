@@ -60,6 +60,25 @@ Every answer is never cached.
 
 After a `200`, the browser holds the session cookie, and the authorization endpoint it returns to goes on to consent or straight to the client.
 
+## A login with a passkey
+
+Where `login-passkey` is composed, the page can offer a passkey beside the password. It makes two requests of its own, both carrying the CSRF token as the password login does.
+
+1. `POST /session/login/passkey/options`, with no body. `200` with WebAuthn request options in JSON (base64url values: `challenge`, `rpId`, `userVerification`, `timeout`, and an empty `allowCredentials`), and a cookie naming this browser. Pass them to `navigator.credentials.get({ publicKey })` after decoding the base64url values, or give them to a library that does. They ask for a discoverable credential, so `mediation: "conditional"` works: the browser offers the user's passkeys in the username field's autofill.
+2. `POST /session/login/passkey` with JSON `{"response": <the credential, as JSON>, "redirect_to": "…"}`: the credential `navigator.credentials.get` answered, serialized as `PublicKeyCredential.toJSON()` writes it (base64url `id`, `rawId`, `response.clientDataJSON`, `response.authenticatorData`, `response.signature`, `response.userHandle`, and `type`).
+
+The options' challenge is good for `webauthn.challenge-lifetime` (2 minutes unless set) and only in the browser that asked: the cookie ties the two. A page that asks options when it loads, for conditional mediation, asks them again before that time runs out, and again after every answer to the login, which ends the challenge whatever it says.
+
+| Answer | What the page does |
+|---|---|
+| `200 {"redirect_to": "…"}` or `200 {}` | As for a password login. |
+| `403` with another body, and cookies | A step after the passkey holds the login, as for a password login. A passkey whose authenticator verified the user proves a second factor too, unless `login-passkey.counts-as-mfa` is false, so that step is rarer. |
+| `401 {"error": "passkey_login_failed"}` | Say the sign-in failed, and ask new options before trying again. The answer never tells why: an unknown passkey, a user the ledger does not know, a challenge another browser asked, a revoked session. |
+| `429 {"error": "too_many_attempts"}` | Too many requests from this address on that route: wait as `Retry-After` says before trying again. |
+| `403 {"error": "csrf"}`, `400` and `503` | As for a password login. |
+
+A user registers passkeys from a signed-in session, through `passkey-registration`'s routes under `/oauth/webauthn/registration/`, which also list, rename and remove them. Where the operator refuses passwords of users holding a passkey (`login-passkey.password = refused-when-held`), a user who removes their last passkey can sign in by password again, and a user who loses every passkey signs in by password only if they are in the exempt group; otherwise the operator resets their passkeys.
+
 ## A login through an upstream that a second factor holds
 
 A login through an upstream (`federation`) ends in the upstream's callback, a navigation of the browser rather than a request your page makes. When a second factor holds that login, the provider sends the browser to `federation.held-page` (`303`, with no query). Without that setting the callback answers the held login's `403` JSON, which a browser cannot act on: set it wherever a second factor is composed beside `federation`.
@@ -76,4 +95,4 @@ The transaction's identifier never goes in a URL; only this `GET` takes it from 
 
 - Each setting named here is in the [configuration reference](configuration.md).
 - What the provider guarantees about sessions, cookies and CSRF is in the [security model](security-model.md#browsers-sessions-cookies-and-csrf).
-- The module cards of `login-password`, `csrf` and `login-gates` hold the full contract, under `modules/identity/` in the repository.
+- The module cards of `login-password`, `csrf` and `login-gates` hold the full contract, under `modules/identity/` in the repository, and `login-passkey`'s and `passkey-registration`'s under `modules/passkey/`.
