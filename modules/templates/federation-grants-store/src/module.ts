@@ -75,7 +75,7 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "federation-grants-store", section }, (m) => [
+export default defineModule({ name: "federation-grants-store", section, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => grants),
 	m.contribute(spaces).by(() => steps),
 	m.contribute(spaces).by(() => pending),

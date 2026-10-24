@@ -29,7 +29,7 @@ const locks: Space = {
 	guarantees: Object.values(locksGuaranteeFor),
 };
 
-export default defineModule({ name: "federation-tokens-store" }, (m) => [
+export default defineModule({ name: "federation-tokens-store", takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => tokens),
 	m.contribute(spaces).by(() => locks),
 	m.provide(upstreamTokenStore).by(async (c): Promise<UpstreamTokenStore> => {
