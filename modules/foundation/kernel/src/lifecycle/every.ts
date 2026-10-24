@@ -1,4 +1,5 @@
 import type { Log } from "../runtime/runtime.ts";
+import { kindOf } from "./kind.ts";
 
 /** A task run at a fixed interval while the app runs; runs never overlap. */
 export function periodic(
@@ -19,7 +20,7 @@ export function periodic(
 			.catch((error: unknown) => {
 				log.warn("kernel.every_failed", {
 					module: where,
-					kind: error instanceof Error ? error.name : typeof error,
+					kind: kindOf(error),
 				});
 			})
 			.finally(() => {

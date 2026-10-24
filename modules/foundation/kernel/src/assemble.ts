@@ -281,7 +281,15 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 			refusals.push({ where: by, reason: `no module provides ${contract.label}` });
 		}
 	}
-	refuseIfAny(refusals);
+	if (refusals.length > 0) {
+		// Taken first: a context a build kept may still add refusals, from a stop hook too.
+		const refused = new BootRefused(refusals);
+		// What the builds started, ended before refusing: the hooks registered so far, in reverse.
+		await stopWithin(kernel["stop-deadline"] * 1000, [], stopHooks, runtime.log, {
+			during: "refusal",
+		});
+		throw refused;
+	}
 	assembled = { readiness: readinessOf(probeList, runtime, () => stopping) };
 
 	return {

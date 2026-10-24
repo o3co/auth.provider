@@ -11,8 +11,8 @@
 
 ## Offers
 - `defineModule`: name, section schema (zod, the library that reads sections), multi-instance declaration (a boolean, or a function asked only with a section that passed), provisions and contributions. `contract` (optionally `takenBy`, the names of the modules that may take it) and `extensionPoint` (exactly one / at least one / any number / keyed) make the handles.
-- `assemble`: answers `get`, `start` and `stop(deadlineMs?)` (without one, `stop-deadline`), or rejects with `BootRefused` (one module may raise several refusals); `BootRefused.is` tells one by a mark every copy of the kernel shares, never by its class.
-- `stop`: after the periodic tasks, runs the stop hooks in reverse order, each given a signal that aborts at the deadline; the hooks left are then called without waiting.
+- `assemble`: answers `get`, `start` and `stop(deadlineMs?)` (without one, `stop-deadline`), or rejects with `BootRefused` (one module may raise several refusals), refused after its builds once their stop hooks ran (`lifecycle`'s rollback); `BootRefused.is` tells one by a mark every copy of the kernel shares, never by its class.
+- `stop`: after the periodic tasks, runs the stop hooks in reverse order, each given a signal that aborts at the deadline; the hooks left are then called without waiting. A hook may also run without `start()`, on a refused assembly: it ends what its build started.
 - Build context: the runtime, `section`, `get`, `collect`, `late` (a function giving a contract's interface once assembly succeeds), `readinessReport`, `onStart`, `onStop`, `every`, `refuse` and `refuseAll`.
 - `readinessReport(deadlineMs)`: runs every probe (a contributed check of one resource, keyed by name at `probes`) at once, joining a check still running, and gives each probe's name and whether it passed. `ready` only if all pass within the caller's deadline; once stop begins, `unready` with all down. A check is aborted once no caller waits.
 - `every(intervalMs, task)`: runs `task(signal)` from start at a whole interval of ms from 1 to 2^31−1, never two at once; a failed run is logged and the next follows; stop aborts a running one and waits for it.
