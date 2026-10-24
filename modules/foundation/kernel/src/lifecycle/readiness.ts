@@ -1,6 +1,7 @@
 import { deepFreeze } from "../freeze.ts";
 import { extensionPoint } from "../handles.ts";
 import type { Runtime } from "../runtime/runtime.ts";
+import { kindOf } from "./kind.ts";
 
 export interface Probe {
 	/** The resource's name, as the log shows it; the key at `probes`. */
@@ -72,7 +73,7 @@ export function readinessOf(
 				(): Outcome => ({ outcome: "passed" }),
 				(error: unknown): Outcome => ({
 					outcome: "failed",
-					kind: error instanceof Error ? error.name : typeof error,
+					kind: kindOf(error),
 				}),
 			),
 			deadline,
