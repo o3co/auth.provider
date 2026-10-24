@@ -9,9 +9,11 @@ import { resealers } from "@mod/seal";
 import { revocationFollowers } from "@mod/subject-revocation";
 import { apiOver, base } from "./api/api.ts";
 import { followerOver } from "./api/follow.ts";
-import { browser, browserBase, connectOver } from "./connect/connect.ts";
+import { grantIntents } from "./browser.ts";
+import { browser, browserBase, browserFrom } from "./connect/connect.ts";
 import { clientSection } from "./grant/grant.ts";
 import { recordsOver, shared, sharedOver } from "./grant/shared.ts";
+import { intentsOver } from "./intents/intents.ts";
 import { resealerOver } from "./resealer.ts";
 import { name, type Settings, section } from "./section.ts";
 import { grantStore } from "./store.ts";
@@ -37,7 +39,8 @@ export default defineModule({ name, section }, (m) => [
 		await sweepIn(c, parts, await c.get(audit));
 		return parts;
 	}),
-	m.provide(browser).by(connectOver),
+	m.provide(grantIntents).by(intentsOver),
+	m.provide(browser).by(browserFrom),
 	...[base, `${base}/*`].map((path) =>
 		m.contribute(routes).by(async (c) => ({
 			method: "POST" as const,

@@ -34,6 +34,7 @@ import {
 	recordsWith,
 	retentionMs,
 } from "../../grant/grant.ts";
+import { intentsWith } from "../../intents/intents.ts";
 import { section } from "../../section.ts";
 import { upstreamAccountWith } from "../../upstream-account/upstream-account.ts";
 import { browserBase, connectWith } from "../connect.ts";
@@ -192,14 +193,11 @@ export async function connector(
 		...options.settings,
 	});
 	const records = recordsWith(seal);
-	const browser = connectWith({
-		sessions: app.get(sessions),
+	const intents = intentsWith({
 		clients,
-		upstreamAccount: upstreamAccountWith({ users, check: settings["identity-check"] }),
 		upstreams,
 		grants: stores.grants,
 		steps: stores.steps,
-		trips: app.get(roundTrips),
 		pending: stores.pending,
 		records,
 		judge: judgeWith(app.get(revocations), {
@@ -211,6 +209,15 @@ export async function connector(
 		settings,
 		origin,
 		...runtime,
+	});
+	const browser = connectWith({
+		sessions: app.get(sessions),
+		upstreamAccount: upstreamAccountWith({ users, check: settings["identity-check"] }),
+		upstreams,
+		trips: app.get(roundTrips),
+		intents,
+		settings,
+		log: logged.log,
 	});
 
 	let n = 0;

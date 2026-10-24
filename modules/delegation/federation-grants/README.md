@@ -5,7 +5,7 @@
 - Holds the upstream credentials apart from any session, and hands the client the upstream's bearer token, refreshed under a lock within a rotation budget.
 - Seals again, for `seal`'s resealers (as `federation-grants`), credentials a `previous` key sealed: walking every grant, writing only over the credentials read and keeping the grant's lifetime, counting those no key opens. A refresh seals under the current key anyway.
 - Answers a grant's status, renewal and revocation, and follows a subject's revocation.
-- Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `sweep` (erasing credentials no request reads), `connect` (browser half), `refresh` (tokens, for `api`). Each takes the contracts it uses from the build context; the package's module only declares the routes and contributions they fill, and starts the sweep with the shared parts.
+- Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `sweep` (erasing credentials no request reads), `intents` (an intent's steps, for the browser half), `connect` (browser half), `refresh` (tokens, for `api`).
 
 ## Not here
 - The upstream's requests (`upstreams`' IdP type), who holds an upstream account (`users`), revocation boundaries (`subject-revocation`), session entry (`session`), consent to this provider's clients (`consent`).
@@ -19,6 +19,7 @@
   - Errors: `grant_not_found` (404), `authorization_pending`, `invalid_request`, `invalid_scope`, `invalid_target` (400), `access_denied` (403), `grant_revoked`, `grant_expired`, `reauthorization_required` (410), `rate_limited` (429), `upstream_token_ineligible`, `upstream_rejected` (502, `retry-after: 300`), `temporarily_unavailable` (503).
 - Browser routes: `GET …/session/federation-grants/connect?request=`, `GET` and `POST …/consent` (`challenge`, `decision`; the POST under `csrf`), `GET …/callback/<connection>`, which returns to the intent's URI with `grant_id`, `state` and any `error`.
 - The client routes and the connect and callback `GET`s take other sites' requests, each with its reason declared (a client's own authenticated call, the client's navigation, the upstream's redirect); the consent's `POST` is checked by `csrf` before its source is counted.
+- `grantIntents`: the browser half's intent steps on an opaque `IntentRef`, and for now its old settings; `grantsBrowsers`: its route handlers.
 - Client metadata `federation-grants`: `connections`, `return-uris` (exact, holding no `grant_id`, `state` or `error`).
 - Operator section:
   - `page`, `login-page`, `step-up-page` (https; http only on a loopback host)

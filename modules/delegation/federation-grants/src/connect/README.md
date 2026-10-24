@@ -9,7 +9,8 @@ Internal module of `federation-grants`: the browser half of a connection.
 - The client routes (`api`), session entry (`session`), the CSRF policy (`csrf`, declared by the package), the upstream's requests (the IdP type). Whose upstream account a callback reached, and the identity check (`upstream-account`).
 
 ## Offers
-- `browser`, built by `connectOver` from the build context through `connectWith` (sessions, clients, `upstream-account`'s check, upstreams, stores, `grant`'s parts, audit, settings, origin, runtime) → `connect`, `question`, `decide`, `callback`.
+- `connectOver`, from the build context through `connectWith` (sessions, `upstream-account`'s check, upstreams, round trips, the package's `grantIntents`, settings, log) → `connect`, `question`, `decide`, `callback`. It reads and changes intents only through `grantIntents`, never the store interfaces. It refuses boot when connections lack the page that asks the user.
+- `browser`, built once by `browserFrom` for the package's browser routes until the browser half moves out (TODO 96): the one `grantsBrowsers` contribution, else `connectOver`'s, built only then; more than one refuses boot. `browserAmong` is its choice alone.
 
 ## Invariants
 - Every step enters the session at `use` as the intent's subject; a short session is told whose it is at `none` before anything else.
@@ -23,8 +24,9 @@ Internal module of `federation-grants`: the browser half of a connection.
 - Two round trips of one connection begun in one browser leave only the later one's callback.
 - The upstream start is built before the question is spent: a throw is `503` and keeps it; a refusal ends the intent as `grant_not_authorizable`.
 - A failure after the round trip is taken ends the intent, is audited, and returns to the client only while it lists the URI.
+- The upstream's tokens are judged before the session and revocations are checked again: tokens not to hold end the intent, whatever that check would find.
 - An activation writes only over its own intent, unended and within its time as read after the exchange.
 - An activation is audited once written; dropping the pending first-time intent after it only tidies: a failure is logged and passed, and the browser goes back.
 
 ## Depends on
-- `http`, `request-source`, `session`, `clients`, `upstream-account`, `upstreams` (the delegation), `upstream-round-trip` (round trips), `audit`, `kernel`; `grant`, the package's store interfaces
+- `http`, `request-source`, `session`, `upstream-account`, `upstreams` (the delegation), `upstream-round-trip` (round trips), `kernel`; the package's `grantIntents` (`intents`)

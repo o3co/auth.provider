@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { testRequest } from "@mod/http/testing";
 import { Unavailable } from "@mod/kernel";
 import { sessions } from "@mod/session";
+import { revocations } from "@mod/subject-revocation";
 import { type DelegatedExchange, UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
 import {
@@ -380,6 +381,34 @@ describe("the callback", () => {
 		expect(errorOf(h, await h.callback(flow.state, flow.browser))).toBe(
 			"reauthentication_required",
 		);
+	});
+
+	it("judges the tokens before the second check: tokens it would not hold end the intent, the session lost or the check down", async () => {
+		const unheld = () => upstreamLogin(upstreamTokens({ refreshToken: undefined }));
+		const h = await connector();
+		const closed = await h.started();
+		h.script.exchange = async () => {
+			const closing = testRequest({ headers: new Map([["cookie", closed.browser]]) });
+			await h.app.get(sessions).closeRequest(closing);
+			return unheld();
+		};
+		expect(errorOf(h, await h.callback(closed.state, closed.browser))).toBe("refresh_token_absent");
+		const down = await h.started();
+		const boundaries = h.app.get(revocations);
+		const compare = boundaries.compare;
+		h.script.exchange = async () => {
+			boundaries.compare = async () => {
+				throw new Unavailable("boundaries");
+			};
+			return unheld();
+		};
+		const answered = await h.callback(down.state, down.browser);
+		boundaries.compare = compare;
+		expect([answered.status, errorOf(h, answered)]).toEqual([303, "refresh_token_absent"]);
+		expect((h.stores.peek(down.id) as { intent?: { ended?: string } }).intent?.ended).toBe(
+			"refresh_token_absent",
+		);
+		expect(failed(h)).toEqual(["refresh_token_absent", "refresh_token_absent"]);
 	});
 
 	it("keeps a connection the pending list cannot drop: audited as authorized, and the browser sent back", async () => {
