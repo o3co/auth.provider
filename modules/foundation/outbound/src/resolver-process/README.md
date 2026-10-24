@@ -9,7 +9,7 @@ Internal module of `outbound`: name lookups run as the system runs them, in a he
 ## Not here
 - Sharing a lookup among those waiting on it, and each one's deadline: the caller's.
 - What a name's addresses may be: `outbound-policy`'s.
-- When to stop: the caller's. A composition refused after `start` runs no `stop` (kernel runs none): the generated entry exits and the helper ends with it, but a process that catches the refusal and lives on keeps the helper until it ends, never kept alive by it, and each composition it tries again starts one more for each pool.
+- When to stop: the caller's, `outbound`'s stop hook, which `kernel` runs at a stop and when it refuses the composition after the helpers started (its rollback).
 
 ## Offers
 - `resolverPool` (`pool`, the name it logs; `size`, the lookups at once and the helper's threads; `warn`; `now`, the kernel's clock): `start`, `stop`, and `run(name, family?)`, a `Job` (`answer`, `want`, `unwant`) or none where the helper is not ready or no place is free.
