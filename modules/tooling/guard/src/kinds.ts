@@ -9,6 +9,7 @@ export const kindRules = {
 	wiringKind: kinds.wiring,
 	capabilityKind: kinds.capability,
 	commonKind: kinds.common,
+	protocolKind: kinds.protocol,
 	capabilityBlind,
 	runtimeFromKernel: [kinds.foundation, kinds.capability, kinds.feature, kinds.adapter],
 	widerSurfaceKinds: [kinds.common, kinds.foundation],

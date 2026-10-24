@@ -38,6 +38,13 @@ it("lets a kind need its own level and those below, never one above", () => {
 	expect(mayNeed(kinds.feature, kinds.wiring)).toBe(false);
 });
 
+it("puts protocol on the bottom level beside common, so every kind may need it and it needs none above", () => {
+	expect(kindOrder[0]).toEqual([kinds.common, kinds.protocol]);
+	for (const kind of Object.values(kinds)) expect(mayNeed(kind, kinds.protocol), kind).toBe(true);
+	for (const kind of kindOrder.slice(1).flat())
+		expect(mayNeed(kinds.protocol, kind), kind).toBe(false);
+});
+
 it("keeps a capability-blind kind off a capability, though it sits below", () => {
 	for (const blind of capabilityBlind) expect(mayNeed(blind, kinds.capability)).toBe(false);
 	expect(mayNeed(kinds.adapter, kinds.capability)).toBe(true);

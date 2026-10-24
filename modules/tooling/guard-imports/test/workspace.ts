@@ -11,7 +11,7 @@ export const budget: Rules = {
 	runtimeFromKernel: ["foundation", "capability", "feature", "adapter"],
 	widerSurfaceKinds: ["common", "foundation"],
 	kindOrder: [
-		["common"],
+		["common", "protocol"],
 		["foundation"],
 		["capability"],
 		["feature"],

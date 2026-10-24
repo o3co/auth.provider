@@ -30,6 +30,16 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
+	it("reads a class's extends and an instantiation as values, and type arguments and implements not", () => {
+		const p = pkg("@t/heritage", {
+			"src/a.ts": "export const Socket = class extends WebSocket {};\n",
+			"src/b.ts": "export const List = class extends Array<WebSocket> {};\n",
+			"src/c.ts": "export const open = WebSocket<[]>;\n",
+			"src/d.ts": "export const Shaped = class implements EventSource {};\n",
+		});
+		expect(said(p)).toEqual(["src/a.ts WebSocket", "src/c.ts WebSocket"]);
+	});
+
 	it("reads a declared class's extends, in a source and in a declaration file, as reaching nothing", () => {
 		const p = pkg("@t/ambient", {
 			"src/a.ts": "export declare class Socket extends WebSocket {}\n",

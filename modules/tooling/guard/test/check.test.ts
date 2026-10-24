@@ -76,6 +76,67 @@ describe("guard", () => {
 		).toEqual(["grantType (@t/f)", "keys (@t/f)"]);
 	});
 
+	it("holds a protocol, as common, to names no other contract owns, its own names its own", () => {
+		const feature = pkg("@t/pf", { "src/contract.ts": "export const grantType = 1;\n" });
+		const kernel = pkg(
+			"@t/pk",
+			{ "src/contract.ts": "export const run = 1;\n" },
+			undefined,
+			"common",
+		);
+		const wire = pkg(
+			"@t/pw",
+			{ "src/contract.ts": "export const answer = 1;\nexport const grantType = 2;\n" },
+			undefined,
+			"protocol",
+		);
+		expect(
+			check([feature, kernel, wire], budget)
+				.filter((v) => v.rule.startsWith("G6"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@t/pw contract grantType (@t/pf)"]);
+		const twin = pkg(
+			"@t/pt",
+			{ "src/contract.ts": "export const answer = 3;\n" },
+			undefined,
+			"protocol",
+		);
+		expect(
+			check([wire, twin], budget)
+				.filter((v) => v.rule.startsWith("G6"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual(["@t/pt contract answer (@t/pw)", "@t/pw contract answer (@t/pt)"]);
+	});
+
+	it("counts a protocol a unit imports against its dependencies, as it does any package but common", () => {
+		const wire = pkg(
+			"@t/dw",
+			{ "src/contract.ts": "export const w = 1;\n" },
+			undefined,
+			"protocol",
+		);
+		const kernel = pkg(
+			"@t/dk",
+			{ "src/contract.ts": "export const k = 1;\n" },
+			undefined,
+			"common",
+		);
+		const user = pkg(
+			"@t/du",
+			{
+				"src/contract.ts":
+					'import { w } from "@t/dw";\nimport { k } from "@t/dk";\nexport const u = w + k;\n',
+			},
+			{ exports: { ".": "./src/contract.ts" }, dependencies: { "@t/dw": "*", "@t/dk": "*" } },
+		);
+		expect(
+			check([wire, kernel, user], { ...budget, dependencies: 0 })
+				.filter((v) => v.rule.startsWith("G7") && v.where.startsWith("@t/du"))
+				.map((v) => v.detail),
+		).toEqual(["dependencies 1 > 0"]);
+	});
+
 	it("counts only values against the contract budget and finds unexported types in public signatures", () => {
 		const p = pkg("@t/s", {
 			"src/contract.ts":
@@ -523,7 +584,7 @@ describe("guard", () => {
 
 	it("G21 refuses a document line that lays out a list of the configuration in its order", () => {
 		const lines = [
-			"1. common 2. foundation 3. capability 4. feature, in that order",
+			"1. common 2. protocol 3. foundation 4. capability, in that order",
 			"- `foundation`, `capability` and `feature`",
 			"a foundation module and a capability, then a feature",
 			"feature, capability, foundation",
@@ -537,7 +598,7 @@ describe("guard", () => {
 			.filter((v) => v.rule.startsWith("G21"))
 			.map((v) => v.detail);
 		expect(g21).toEqual([
-			"common, foundation, capability, feature",
+			"common, protocol, foundation, capability",
 			"foundation, capability, feature",
 			"foundation, capability, feature",
 			"capability, feature, adapter",

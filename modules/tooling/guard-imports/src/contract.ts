@@ -8,6 +8,7 @@ import {
 	dependencyRules,
 	fileImportRules,
 	helperRules,
+	ownFileRules,
 	wiringRules,
 } from "./rules.ts";
 import { type Rules, type Scope, scopeOf } from "./scope.ts";
@@ -56,7 +57,10 @@ export function importRules(s: Scope, surfaces: ReadonlyMap<string, Surface>): v
 	cycles(s);
 	for (const p of s.packages) {
 		dependencyRules(s, p);
-		for (const file of s.sources(p)) fileImportRules(s, p, file);
+		for (const file of s.sources(p)) {
+			fileImportRules(s, p, file);
+			ownFileRules(s, p, file);
+		}
 		helperRules(s, p, surfaces);
 	}
 	wiringRules(s);

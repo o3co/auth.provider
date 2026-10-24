@@ -21,11 +21,12 @@ Expose decisions through the owning module's interface. For example, a caller sh
 
 ## Kinds
 
-The kind names come from `combinations`. `guard` defines their dependency order and checks. The table describes each kind and the review needed to add a module of that kind.
+The kind names and their dependency order come from `kinds`; `guard` checks them. The table describes each kind and the review needed to add a module of that kind.
 
 | Kind | What it is | Adding one |
 |---|---|---|
 | common | Code with no workspace dependencies. | Requires human review. |
+| protocol | The contract of a wire an outside system speaks with the provider: request fields, answer shapes, what each status means, paths. Types, constants and fixed schemas only, with no I/O, clock, randomness or state. It has no workspace dependencies and is not product, so both a product module and a verification package can depend on it. | Requires human review. |
 | foundation | A feature-independent contract. | An ordinary change. |
 | capability | A reusable implementation, such as `records`, that wiring adapts to feature-owned contracts. It depends on no feature. | Requires human review to avoid duplicating the same implementation across features. Interface changes also require review because they affect every wired feature. |
 | feature | Something the provider does for its users. | An ordinary change. |

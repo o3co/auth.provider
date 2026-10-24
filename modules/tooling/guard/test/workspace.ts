@@ -29,9 +29,10 @@ export const budget: Budget = {
 	fixtureFile: "(^|/)test/fixtures/|\\.vectors\\.ts$",
 	generatedFile: "\\.bundled\\.mjs$",
 	commonKind: "common",
+	protocolKind: "protocol",
 	runtimeFromKernel: ["foundation", "capability", "feature", "adapter"],
 	kindOrder: [
-		["common"],
+		["common", "protocol"],
 		["foundation"],
 		["capability"],
 		["feature"],
