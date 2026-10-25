@@ -99,7 +99,8 @@ export default defineModule(
 			const source = ledger
 				? contributedSource(ledger, c.log)
 				: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
-			// A ledger that looks users up by upstream identity has the last word there, so no link store is asked for.
+			// A ledger that looks users up by upstream identity has the last word there, so the link store,
+			// composed all the same (it is among what users takes), is never called.
 			const linking = ledger?.byUpstream
 				? ledgerLinks(source)
 				: keptLinks(source, await c.get(linkStore));
