@@ -14,6 +14,7 @@
 - `pnpm distribution`: prints each problem and exits 1, or prints `distribution: ok`.
 - `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools, a trial file among them, left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
 - `pnpm release:pack`, `pnpm release:published` and `pnpm release:check`: packing the release with its index sealed, checking it before anything is published, and checking it as an operator meets it; see the internal modules `release` and `release-check`.
+- `pnpm release:evidence <dir>`: before anything is published, the evidence of the CI run that tested the tag's tree, or the release stopped; see the internal module `release-evidence`.
 
 ## Invariants
 - Bundles come only from the directory structure and the bundle manifests.
