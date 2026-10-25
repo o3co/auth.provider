@@ -22,6 +22,7 @@ Internal module of `spec-checklist`: what a CI run's tests proved of the checkli
 - The expected runs are `unit`, `integration`, each package with a `conformance` script, and each run a package's `evidence-runs` script prints as JSON (`<package>@<pattern>`, `<package>#<run>`).
 - A test file runs in: `integration` for `.integration.test.ts`; a harness package's printed runs; an area's own run and its pattern runs for its `.case.ts`; `unit` for any other `.test.ts`; its package's run otherwise.
 - An item's status, the first that holds: its mark; `hole` with no test; `failed` where a test naming it failed, its file did not load, or a run of its tests had an error no test owns; `incomplete` where an expected run of its tests did not report; `passed` where one passed; else `unverified`.
+- A test in a suite or a file that failed outside its tests, such as in a hook, is reported `failed`, whatever it did itself.
 - A test skipped with a note `excused: <class>` is counted apart by its class, neither passed nor failed.
 
 ## Depends on

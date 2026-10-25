@@ -58,12 +58,21 @@ const namesOf = (test: TestCase): string[] => {
 	return names;
 };
 
+/** Whether a suite the test is in, or its file, failed outside its tests, such as in a hook. */
+const suiteFailed = (test: TestCase): boolean => {
+	let at = test.parent;
+	for (; at.type === "suite"; at = at.parent) if (at.errors().length > 0) return true;
+	return at.errors().length > 0;
+};
+
 function testsOf(module: TestModule): EvidenceTest[] {
 	const file = relative(repoRoot, module.moduleId);
 	const tests: EvidenceTest[] = [...module.children.allTests()].map((t) => {
 		const result = t.result();
-		const note = result.state === "skipped" ? result.note : undefined;
-		return { file, names: namesOf(t), state: result.state, ...(note ? { note } : {}) };
+		// A test that passed in a suite that failed proves nothing: its hook may not have run its part.
+		const state = suiteFailed(t) ? "failed" : result.state;
+		const note = state === "skipped" && result.state === "skipped" ? result.note : undefined;
+		return { file, names: namesOf(t), state, ...(note ? { note } : {}) };
 	});
 	return module.errors().length > 0 ? [...tests, { file, names: [], state: "failed" }] : tests;
 }

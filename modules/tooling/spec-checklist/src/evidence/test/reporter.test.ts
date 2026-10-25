@@ -8,7 +8,7 @@ import type { EvidenceReport } from "../reporter.ts";
 const fixture = join(import.meta.dirname, "fixtures", "evidence");
 const root = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
 
-it("writes a run's results, named by what ran them, even where tests fail or a file does not load", () => {
+it("writes a run's results, named by what ran them, even where tests fail, a file does not load or a hook fails", () => {
 	const dir = mkdtempSync(join(tmpdir(), "spec-evidence-"));
 	const ran = spawnSync(
 		"pnpm",
@@ -45,6 +45,17 @@ it("writes a run's results, named by what ran them, even where tests fail or a f
 		),
 	).toEqual([
 		{ file: `${at}/broken.sample.ts`, names: [], state: "failed" },
+		{ file: `${at}/file-hook.sample.ts`, names: [], state: "failed" },
+		{
+			file: `${at}/file-hook.sample.ts`,
+			names: ["passes in a file whose hook fails [rfc7009-2-e]"],
+			state: "failed",
+		},
+		{
+			file: `${at}/hooks.sample.ts`,
+			names: ["a suite whose hook fails", "passes alone [rfc7009-2-d]"],
+			state: "failed",
+		},
 		{
 			file: `${at}/runs.sample.ts`,
 			names: ["a suite [rfc7009-2-a]", "fails [rfc7009-2-c]"],
@@ -64,15 +75,21 @@ it("writes a run's results, named by what ran them, even where tests fail or a f
 	]);
 });
 
-it("writes nothing without SPEC_EVIDENCE_DIR", () => {
+it("writes nothing without SPEC_EVIDENCE_DIR, where it runs nor beside the config", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "spec-evidence-none-"));
+	const before = readdirSync(fixture);
 	const ran = spawnSync(
-		"pnpm",
-		["exec", "vitest", "run", "--config", join(fixture, "vitest.config.ts")],
-		{
-			cwd: root,
-			encoding: "utf8",
-			env: { ...process.env, SPEC_EVIDENCE_DIR: "" },
-		},
+		process.execPath,
+		[
+			join(root, "node_modules", "vitest", "vitest.mjs"),
+			"run",
+			"--config",
+			join(fixture, "vitest.config.ts"),
+		],
+		{ cwd, encoding: "utf8", env: { ...process.env, SPEC_EVIDENCE_DIR: "" } },
 	);
 	expect(ran.status).not.toBe(0);
+	expect(ran.stdout + ran.stderr).toContain("passes [rfc7009-2-b]");
+	expect(readdirSync(cwd)).toEqual([]);
+	expect(readdirSync(fixture)).toEqual(before);
 });
