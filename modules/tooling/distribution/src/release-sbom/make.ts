@@ -202,7 +202,7 @@ try {
 		const left = notRemoved(
 			removing,
 			{ status: answer.status, stderr: answer.stderr ?? "" },
-			(listed.stdout ?? "").split("\n"),
+			{ status: listed.status, stdout: listed.stdout ?? "", stderr: listed.stderr ?? "" },
 		);
 		if (left) problems.push(left);
 	}
