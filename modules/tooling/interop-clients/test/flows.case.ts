@@ -3,17 +3,21 @@ import { readChecklist } from "@mod/spec-checklist";
 import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vitest";
 import { converse } from "../src/dialog/dialog.ts";
 import { differencesOf, readDifferences } from "../src/differences/differences.ts";
-import { type Flow, libraryNamed } from "../src/libraries/libraries.ts";
+import { type Flow, libraries, libraryNamed } from "../src/libraries/libraries.ts";
 import { startWorld, type World, type WorldClient } from "./world/world.ts";
 
 const library = libraryNamed(process.env.INTEROP_LIBRARY);
 const runs = (flow: Flow) => library.flows.includes(flow);
 const checklist = readChecklist();
 const differences = differencesOf(
-	readDifferences(join(import.meta.dirname, "..", "known-differences.json"), {
-		items: new Map(checklist.specs.flatMap((s) => s.items.map((i) => [i.id, i] as const))),
-		decisions: checklist.decisions,
-	}),
+	readDifferences(
+		join(import.meta.dirname, "..", "known-differences.json"),
+		{
+			items: new Map(checklist.specs.flatMap((s) => s.items.map((i) => [i.id, i] as const))),
+			decisions: checklist.decisions,
+		},
+		libraries.map((l) => l.name),
+	),
 	library.name,
 );
 

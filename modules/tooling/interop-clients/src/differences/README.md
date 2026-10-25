@@ -10,7 +10,7 @@ Internal module of `interop-clients`: the differences accepted between a library
 - `differencesOf`: for one library's run, the difference that excuses a check, and the ones no check met.
 
 ## Invariants
-- A difference names its library, flow, the check's title and a reason, none of them empty, and passes `spec-checklist`'s `exceptionProblems`.
+- A difference names its library, flow, the check's title and a reason, none of them empty, a library the harness runs, and passes `spec-checklist`'s `exceptionProblems`.
 - A check is excused only by a difference naming its library, flow and exact title.
 
 ## Depends on

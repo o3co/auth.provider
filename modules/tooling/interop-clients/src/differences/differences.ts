@@ -12,8 +12,16 @@ export interface Difference extends ExceptionEntry {
 
 type Known = Parameters<typeof exceptionProblems>[1];
 
-/** The differences the file holds, each held to the exceptions' rules; any it breaks are refused together. */
-export function differencesIn(text: string, known: Known): Difference[] {
+/**
+ * The differences the file holds, each held to the exceptions' rules and naming a library the
+ * harness runs (`libraries`), as one naming none would be left out of every run; any they break are
+ * refused together.
+ */
+export function differencesIn(
+	text: string,
+	known: Known,
+	libraries: readonly string[],
+): Difference[] {
 	const read = (JSON.parse(text) as { differences?: unknown }).differences;
 	if (!Array.isArray(read)) throw new Error("known differences: no list of differences");
 	const differences = read as Difference[];
@@ -24,14 +32,17 @@ export function differencesIn(text: string, known: Known): Difference[] {
 		)
 			? []
 			: [`${at}: names no library, flow, check or reason`];
-		return [...narrow, ...exceptionProblems(d, known).map((p) => `${at}: ${p}`)];
+		const run = libraries.includes(d.library)
+			? []
+			: [`${at}: names ${d.library}, which the harness does not run`];
+		return [...narrow, ...run, ...exceptionProblems(d, known).map((p) => `${at}: ${p}`)];
 	});
 	if (problems.length > 0) throw new Error(`known differences:\n${problems.join("\n")}`);
 	return differences;
 }
 
-export const readDifferences = (file: string, known: Known) =>
-	differencesIn(readFileSync(file, "utf8"), known);
+export const readDifferences = (file: string, known: Known, libraries: readonly string[]) =>
+	differencesIn(readFileSync(file, "utf8"), known, libraries);
 
 /** The differences of one library's run, which tells the ones its checks met and the ones none did. */
 export function differencesOf(differences: readonly Difference[], library: string) {
