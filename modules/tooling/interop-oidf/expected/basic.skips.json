@@ -1,0 +1,13 @@
+[
+	{
+		"test-name": "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
+		"variant": {
+			"client_auth_type": "client_secret_basic",
+			"response_type": "code",
+			"response_mode": "default"
+		},
+		"configuration-filename": "op.json",
+		"class": "out-of-scope",
+		"item": "oidc-core-6.1-b"
+	}
+]

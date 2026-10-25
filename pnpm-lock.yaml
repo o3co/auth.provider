@@ -4390,6 +4390,24 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/tooling/interop-oidf:
+    dependencies:
+      '@mod/conformance':
+        specifier: workspace:*
+        version: link:../conformance
+      '@mod/conformance-code':
+        specifier: workspace:*
+        version: link:../conformance-code
+      '@mod/conformance-front':
+        specifier: workspace:*
+        version: link:../conformance-front
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/tooling/ledger-fakes:
     dependencies:
       '@mod/ledger-wire':
