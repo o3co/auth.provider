@@ -33,7 +33,7 @@
 - Family records (the current secret's hash, client, subject, scope, audience, session, authentication context, binding, end; or a revoked mark), what each redemption left, and each access token's family. Every record outlives what it covers by one allowance, for hosts whose clocks lag.
 
 ## Depends on
-- `kernel`, `tokens`, `grants`, `client-allowance`, `code-grant`, `token-control`, `session`, `session-participants`, `subject-revocation`, `clients`, `issuer`, `sender-binding`
+- `kernel`, `tokens`, `grants`, `client-allowance`, `code-grant`, `token-control`, `session`, `session-participants`, `subject-revocation`, `clients`, `issuer`, `sender-binding`, `audit`
 
 ## Vocabulary
 - family: the series of refresh tokens that starts from one code redemption or one `start`. reuse: a token arriving that is not the family's current token.
