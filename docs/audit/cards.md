@@ -332,6 +332,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
 - `@mod/guard` (verification, `modules/tooling/guard`): Checks the workspace's invariants, each reported by its id, place and what went over:
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
+  - `change-record` (`src/change-record`): a change record's machine rows, what two commits of the workspace differ in.
   - `network` (`src/network`): G26, how product code may reach the network, and G27, where a card states the server it needs.
   - `protocol` (`src/protocol`): G33, a protocol package holds a wire's contract alone.
 - `@mod/guard-imports` (verification, `modules/tooling/guard-imports`): Reads the workspace: its packages and their manifests, what each source file imports, and each package's public surface.
