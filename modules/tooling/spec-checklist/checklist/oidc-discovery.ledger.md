@@ -80,9 +80,9 @@
 - 6 #1 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
 - 6 #2 REQUIRED: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
 - 6 #3 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
-- 7.1 #1 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
-- 7.1 #2 SHOULD: excluded deployment: TLS ends at the proxy in front, which the deployment provides
-- 7.1 #3 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
-- 7.1 #4 MUST: oidc-discovery-7.1-a
-- 7.2 #1 MUST: oidc-discovery-7.1-a
+- 7.1 #1 MUST: oidc-discovery-7.1-b
+- 7.1 #2 SHOULD: oidc-discovery-7.1-c
+- 7.1 #3 MUST: oidc-discovery-7.1-b
+- 7.1 #4 MUST: oidc-discovery-7.1-a, oidc-discovery-7.1-d
+- 7.2 #1 MUST: oidc-discovery-7.1-d
 - 7.2 #2 MUST: oidc-discovery-7.2-a

@@ -131,6 +131,12 @@
 ## 7.1 TLS Requirements
 
 - **oidc-discovery-7.1-a** MUST: the TLS connections the OP makes check the server's certificate (RFC 6125).
+- **oidc-discovery-7.1-b** MUST: idp-oidc's requests to an upstream (its configuration, key set and token endpoint, through outbound) are protected by TLS with a cipher suite giving confidentiality and integrity.
+  role: rp
+- **oidc-discovery-7.1-c** SHOULD: idp-oidc's TLS connections to an upstream follow BCP 195.
+  role: rp
+- **oidc-discovery-7.1-d** MUST: idp-oidc, through outbound, checks an upstream's TLS server certificate (RFC 6125) whenever it uses TLS, its configuration request among them.
+  role: rp
 
 ## 7.2 Impersonation Attacks
 
