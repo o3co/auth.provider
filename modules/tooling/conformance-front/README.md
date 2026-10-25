@@ -15,7 +15,8 @@
 
 ## Invariants
 - The app is told the scheme (`X-Forwarded-Proto: https`) and the sender's address (`X-Forwarded-For`) alone: those a client wrote, `Forwarded` and `X-Forwarded-Host` are dropped, and so is a client's own certificate header.
-- A body goes on with its length as rewritten; a connection's own headers are never passed.
+- A body goes on with its length as rewritten. A connection's own headers (`Connection`, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, the proxy ones) and those a `Connection` header names, in any case, are never passed, to the app or back.
+- An answer the app cuts off midway ends the client's answer too.
 - A certificate is carried, never judged.
 - While the app cannot be reached, the answer is `502`.
 

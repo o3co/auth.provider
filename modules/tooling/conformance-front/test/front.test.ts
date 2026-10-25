@@ -219,3 +219,91 @@ describe("an https front of an app, as a deployment's proxy is", () => {
 		expect(without?.headers["x-client-cert"]).toBeUndefined();
 	});
 });
+
+describe("what an https front passes on of a connection", () => {
+	it("drops a request's per-connection headers, those its Connection header names among them", async () => {
+		const a = await app(() => ({ status: 200 }));
+		const f = await front(a.base);
+		await send(f.origin, "/x", {
+			headers: {
+				connection: "x-hop, X-Other",
+				"x-hop": "value",
+				"x-other": "v",
+				"x-kept": "k",
+				te: "trailers",
+			},
+		});
+		const sent = a.seen[0]?.headers;
+		expect(sent?.["x-hop"]).toBeUndefined();
+		expect(sent?.["x-other"]).toBeUndefined();
+		expect(sent?.te).toBeUndefined();
+		expect(sent?.["x-kept"]).toBe("k");
+	});
+
+	it("passes a chunked request with a declared trailer on whole, by its length", async () => {
+		const a = await app(() => ({ status: 200 }));
+		const f = await front(a.base);
+		const answer = await new Promise<number>((resolve, reject) => {
+			const req = request(
+				`${f.origin}/chunked`,
+				{ method: "POST", ca: server.cert, headers: { trailer: "x-sum" } },
+				(res) => {
+					res.resume();
+					res.on("end", () => resolve(res.statusCode ?? 0));
+				},
+			);
+			req.on("error", reject);
+			req.write("a=1&");
+			req.write("b=2");
+			req.addTrailers({ "x-sum": "2" });
+			req.end();
+		});
+		expect(answer).toBe(200);
+		expect(a.seen[0]?.body).toBe("a=1&b=2");
+		expect(a.seen[0]?.headers.trailer).toBeUndefined();
+		expect(a.seen[0]?.headers["content-length"]).toBe("7");
+	});
+
+	it("drops an answer's per-connection headers, those the app's Connection header names among them", async () => {
+		const a = await app(() => ({
+			status: 200,
+			headers: {
+				connection: "x-internal",
+				"x-internal": "secret",
+				trailer: "x-sum",
+				"x-shown": "s",
+			},
+		}));
+		const f = await front(a.base);
+		const answer = await send(f.origin, "/x");
+		expect(answer.headers["x-internal"]).toBeUndefined();
+		expect(answer.headers.trailer).toBeUndefined();
+		expect(answer.headers["x-shown"]).toBe("s");
+	});
+
+	it("ends the client's answer where the app's is cut off midway", async () => {
+		const cut = createServer((_req, res) => {
+			res.writeHead(200, { "content-length": "100" });
+			res.write("partial");
+			setTimeout(() => res.socket?.destroy(), 50);
+		});
+		await new Promise<void>((resolve) => cut.listen(0, "127.0.0.1", resolve));
+		stops.push(() => new Promise((resolve) => cut.close(() => resolve())));
+		const f = await front(`http://127.0.0.1:${(cut.address() as AddressInfo).port}`);
+		const ended = await new Promise<string>((resolve) => {
+			const timer = setTimeout(() => resolve("still open"), 5_000);
+			const req = request(`${f.origin}/x`, { ca: server.cert }, (res) => {
+				res.on("data", () => {});
+				res.on("error", () => resolve("ended"));
+				res.on("aborted", () => resolve("ended"));
+				res.on("close", () => {
+					clearTimeout(timer);
+					resolve("ended");
+				});
+			});
+			req.on("error", () => resolve("ended"));
+			req.end();
+		});
+		expect(ended).toBe("ended");
+	});
+});

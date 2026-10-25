@@ -90,15 +90,29 @@ export interface Front {
 	stop(): Promise<void>;
 }
 
-/** Headers never passed on: a connection's own, and what only the front says. */
+/** A connection's own headers (RFC 9110 §7.6.1), never passed on either way. */
 const hopByHop = [
 	"connection",
 	"keep-alive",
+	"proxy-connection",
+	"proxy-authenticate",
+	"proxy-authorization",
+	"te",
+	"trailer",
 	"transfer-encoding",
 	"upgrade",
-	"host",
-	"content-length",
 ];
+
+/** Headers as passed on: a connection's own dropped, those its `Connection` names among them, in any case, and `also`. */
+function passedOn(headers: IncomingHttpHeaders, also: ReadonlySet<string>): IncomingHttpHeaders {
+	const named = String(headers.connection ?? "")
+		.split(",")
+		.map((name) => name.trim().toLowerCase())
+		.filter((name) => name !== "");
+	const dropped = new Set([...hopByHop, ...named, ...also]);
+	return Object.fromEntries(Object.entries(headers).filter(([name]) => !dropped.has(name)));
+}
+
 const frontsOwn = ["forwarded", "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host"];
 
 const bodyOf = (req: IncomingMessage) =>
@@ -128,8 +142,10 @@ const answer = (res: ServerResponse, given: FrontAnswer) => {
 export async function startFront(options: FrontOptions): Promise<Front> {
 	let origin = "";
 	const certificateHeader = options.clientCertificate?.header.toLowerCase();
+	// The front's own say, and what it sets anew: the host and the length of the body it sends.
 	const dropped = new Set([
-		...hopByHop,
+		"host",
+		"content-length",
 		...frontsOwn,
 		...(certificateHeader === undefined ? [] : [certificateHeader]),
 	]);
@@ -144,9 +160,7 @@ export async function startFront(options: FrontOptions): Promise<Front> {
 		const handled = await options.handle?.(received);
 		if (handled !== undefined) return answer(res, handled);
 		const { url, body } = options.rewrite?.(received) ?? received;
-		const headers: OutgoingHttpHeaders = Object.fromEntries(
-			Object.entries(req.headers).filter(([name]) => !dropped.has(name)),
-		);
+		const headers: OutgoingHttpHeaders = passedOn(req.headers, dropped);
 		headers["x-forwarded-proto"] = "https";
 		headers["x-forwarded-for"] = received.address;
 		if (body.length > 0 || req.headers["content-length"] !== undefined)
@@ -165,12 +179,10 @@ export async function startFront(options: FrontOptions): Promise<Front> {
 			},
 			(app) => {
 				options.answered?.(received, { status: app.statusCode ?? 502, headers: app.headers });
-				const back = Object.fromEntries(
-					Object.entries(app.headers).filter(
-						([name]) => !hopByHop.includes(name) || name === "content-length",
-					),
-				);
-				res.writeHead(app.statusCode ?? 502, back);
+				res.writeHead(app.statusCode ?? 502, passedOn(app.headers, new Set()));
+				// An answer cut off midway ends the client's too, never left open.
+				app.on("error", (error) => res.destroy(error));
+				app.on("aborted", () => res.destroy());
 				app.pipe(res);
 			},
 		);
