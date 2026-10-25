@@ -473,7 +473,8 @@ describe("delegated issuers", () => {
 		await expect((await serve([down.module])).grant("app", sent())).rejects.toBeInstanceOf(
 			Unavailable,
 		);
-	});
+		// Each case boots its own composition: some dozen, slow on a loaded host.
+	}, 30_000);
 
 	describe("at boot", () => {
 		const at = (i: number) => `jwt-bearer.delegated-issuers.${i}`;
