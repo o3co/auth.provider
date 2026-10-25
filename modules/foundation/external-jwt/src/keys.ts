@@ -46,8 +46,8 @@ function boundTo(jwk: Jwk, allowed: readonly Algorithm[]): Algorithm | undefined
 
 /**
  * The one key that may verify under the header's algorithm and id, each fitting by its kind, curve,
- * use and id, and read under its one algorithm among those allowed. `unbound`: a key fits but is
- * read under another algorithm, or none, which a fresh set would not change.
+ * use and id, and read under its one algorithm among those allowed. `unbound`: the key the `kid`
+ * names is read under another algorithm, or none, which a fresh set would not change.
  */
 export function picked(
 	candidates: readonly Candidate[],
@@ -60,6 +60,6 @@ export function picked(
 		return verifiesUnder(unnamed, alg) && (kid === undefined || jwk.kid === kid);
 	});
 	const [only, ...more] = fit.filter(({ jwk }) => boundTo(jwk, allowed) === alg);
-	if (!only) return fit.length > 0 ? "unbound" : "no-key";
+	if (!only) return fit.length > 0 && kid !== undefined ? "unbound" : "no-key";
 	return more.length > 0 ? "ambiguous-key" : only;
 }

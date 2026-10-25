@@ -664,6 +664,26 @@ describe("a key set at a URL", () => {
 		expect(s.asked).toHaveLength(2);
 	});
 
+	it("fetches again, past the minute, for a token naming no kid that only a key named for another alg fits", async () => {
+		const rsa = await testSigner("RS256", "k1");
+		const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+		const pss = { ...publicKey.export({ format: "jwk" }), kid: "k2", alg: "PS256" };
+		const s = served();
+		s.serve([{ ...rsa.jwk, alg: "RS256" }]);
+		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
+		const both = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
+		expect((await both.verify(await rsa.sign(fresh()))).kind).toBe("valid");
+		// The issuer moves to PS256 under a new key; a token naming no kid cannot say the cached one is meant.
+		s.serve([{ ...rsa.jwk, alg: "RS256" }, pss]);
+		const moved = await new SignJWT(fresh()).setProtectedHeader({ alg: "PS256" }).sign(privateKey);
+		expect(await both.verify(moved)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(1);
+		now += 61_000;
+		expect((await both.verify(moved)).kind).toBe("valid");
+		expect(s.asked).toHaveLength(2);
+	});
+
 	it("keeps one set for a URL and its hosts, whichever verifier asks", async () => {
 		const signer = await testSigner("ES256", "k1");
 		const s = served();
