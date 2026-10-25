@@ -72,3 +72,19 @@ export const microsOf = (reply: Reply | undefined): number => {
 	const [s, us] = items.map((i) => (i.kind === "bulk" ? Number(i.data?.toString()) : Number.NaN));
 	return (s ?? Number.NaN) * 1_000_000 + (us ?? Number.NaN);
 };
+
+const refused = (reply: Reply, what: readonly string[]) =>
+	new Error(
+		`${what.join(" ")} refused: ${reply.kind === "error" ? reply.text : `answered ${reply.kind}`}`,
+	);
+
+/** Fails unless Redis answered `OK`: an error answer is a refusal, never a success. */
+export function ok(reply: Reply, what: readonly string[]): void {
+	if (!(reply.kind === "simple" && reply.text === "OK")) throw refused(reply, what);
+}
+
+/** The text of a string answer; an error answer, or none, fails. */
+export function textOf(reply: Reply, what: readonly string[]): string {
+	if (reply.kind !== "bulk" || reply.data === null) throw refused(reply, what);
+	return reply.data.toString();
+}

@@ -386,3 +386,59 @@ describe("what a topology keeps true across its faults", () => {
 		expect(await say(next, "GET", "late")).toBe("");
 	});
 });
+
+describe("what a topology takes as done", () => {
+	const deny = (node: Node, ...commands: string[]) =>
+		node.ask(
+			"ACL",
+			"SETUSER",
+			"default",
+			"on",
+			"nopass",
+			"~*",
+			"&*",
+			"+@all",
+			...commands.map((c) => `-${c}`),
+		);
+
+	it("refuses a promotion whose barrier Redis refused, changing nothing", async () => {
+		const t = await topology({ replicas: 2 });
+		const [next, other] = t.replicas();
+		if (!next || !other) throw new Error("no replicas");
+		const old = t.primary();
+		await deny(old, "client|pause");
+		await expect(t.promote({ replica: next, reattach: [other] })).rejects.toThrow(/CLIENT PAUSE/);
+		expect(old.state().running).toBe(true);
+		expect(t.primary().name).toBe(old.name);
+		expect(await role(next)).toBe("slave");
+	});
+
+	it("never reports as primary a candidate that refused to detach", async () => {
+		const t = await topology({ replicas: 1 });
+		const [next] = t.replicas();
+		if (!next) throw new Error("no replica");
+		const old = t.primary();
+		await deny(next, "replicaof", "slaveof");
+		await expect(t.promote({ replica: next })).rejects.toThrow(/REPLICAOF/);
+		expect(t.primary().name).toBe(old.name);
+	});
+
+	it("refuses to start where a replica cannot be pointed at its primary", async () => {
+		await expect(
+			startTopology({ replicas: 1, settings: ["--rename-command", "REPLICAOF", ""] }),
+		).rejects.toThrow(/REPLICAOF/);
+	});
+
+	it("refuses a node's run id where Redis refused to tell it", async () => {
+		const t = await topology({ replicas: 0 });
+		await deny(t.primary(), "info");
+		await expect(t.primary().runId()).rejects.toThrow(/INFO/);
+	});
+
+	it("refuses a sleep Redis refused", async () => {
+		const t = await topology({ replicas: 0, settings: ["--enable-debug-command", "no"] });
+		const sleeping = t.sleep(t.primary(), 1);
+		sleeping.asleep.catch(() => {});
+		await expect(sleeping.awake).rejects.toThrow(/DEBUG/);
+	});
+});

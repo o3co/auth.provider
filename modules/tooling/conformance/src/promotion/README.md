@@ -15,6 +15,7 @@ Internal module of `conformance`: promoting a replica of a Redis topology's prim
 - Keeping the old primary on, a candidate that detaches only after the hold lapsed is a failed promotion, the topology needing recovery, never a success.
 - A promotion that fails after the barrier leaves an old primary it did not kill taking writes again. Its deadline's timer ends with it, however it ends.
 - With the old primary kept on, each primary keeps a replica online.
+- What it must have done (holding writes, detaching the candidate, reattaching, releasing) counts only where Redis answered `OK`, and a read of the replication state only where Redis answered it; a refusal fails the promotion, before anything changes where it comes first.
 
 ## Depends on
 - The relay's answer.

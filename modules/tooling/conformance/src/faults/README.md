@@ -17,6 +17,7 @@ Internal module of `conformance`: a Redis topology a fault scene runs on, and th
 ## Invariants
 - Every node fsyncs every write (`appendonly`, `appendfsync always`) and runs Redis as its own user from the start, its debug command allowed, for a slow server.
 - A node follows its primary by command, never by a start argument, so one crashed starts again in its current role, following its current primary, checked before `crash` answers.
+- Pointing a node at its primary, a run id and a sleep count only where Redis did them (`OK`, a run id, a sleep between two `TIME`s); a refusal fails the start, the crash, `runId` or `awake`.
 - A request was held by a sleep only where Redis served it at or after the sleep's end; the hint alone proves nothing.
 - A moved clock is `clock`'s, on the pinned Redis image.
 - Containers and networks carry the run's process label; those of a process no longer running are removed at the next start, and a start that fails removes what it started. A container goes with its volume; a crash keeps both.

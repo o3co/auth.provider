@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { ask, askAll, microsOf } from "../ask/ask.ts";
+import { ask, askAll, microsOf, ok, textOf } from "../ask/ask.ts";
 import { clockImage, faketimeEnv } from "../clock/clock.ts";
 import { type PromoteOptions, promote } from "../promotion/promotion.ts";
 import type { Reply, Upstream } from "../relay/relay.ts";
@@ -88,8 +88,10 @@ export async function startTopology(spec: TopologySpec) {
 		upstream: () => ports.get(name) ?? portOf(name),
 		ask: (...args) => ask(ports.get(name) ?? portOf(name), args),
 		runId: async () => {
-			const info = await ask(ports.get(name) ?? portOf(name), ["INFO", "server"]);
-			return field(info.kind === "bulk" ? (info.data?.toString() ?? "") : "", "run_id") ?? "";
+			const info = textOf(await ask(ports.get(name) ?? portOf(name), ["INFO", "server"]), ["INFO"]);
+			const id = field(info, "run_id");
+			if (!id) throw new Error(`INFO server named no run id for ${name}`);
+			return id;
 		},
 		state: () => {
 			const [running, exitCode] = docker(
@@ -120,8 +122,7 @@ export async function startTopology(spec: TopologySpec) {
 		}
 	};
 	const info = async (n: Node) => {
-		const r = await n.ask("INFO", "replication");
-		return r.kind === "bulk" ? (r.data?.toString() ?? "") : "";
+		return textOf(await n.ask("INFO", "replication"), ["INFO"]);
 	};
 	const start = async (name: string) => {
 		await dockerAsync(
@@ -187,7 +188,7 @@ export async function startTopology(spec: TopologySpec) {
 		for (const n of nodes) await answering(n);
 		const first = names[0] ?? "";
 		for (const [i, n] of nodes.entries()) follows.set(n.name, i === 0 ? undefined : first);
-		for (const n of nodes.slice(1)) await n.ask("REPLICAOF", first, "6379");
+		for (const n of nodes.slice(1)) ok(await n.ask("REPLICAOF", first, "6379"), ["REPLICAOF"]);
 		await until("the replicas did not come online", () =>
 			onlineAt(nodes[0] as Node, nodes.length - 1),
 		);
@@ -236,7 +237,7 @@ export async function startTopology(spec: TopologySpec) {
 				if (!(head?.kind === "bulk" && head.data?.toString() === "master"))
 					throw new Error(`${n.name} did not start again as a primary`);
 			} else {
-				await n.ask("REPLICAOF", upstream, "6379");
+				ok(await n.ask("REPLICAOF", upstream, "6379"), ["REPLICAOF"]);
 				await until(`${n.name} did not follow ${upstream} again`, () => following(n, upstream));
 			}
 			return { exitCode };
@@ -252,7 +253,13 @@ export async function startTopology(spec: TopologySpec) {
 				n.upstream(),
 				[["TIME"], ["DEBUG", "SLEEP", String(seconds)], ["TIME"]],
 				(seconds + 30) * 1_000,
-			).then(([before, , after]) => ({ from: microsOf(before), to: microsOf(after) }));
+			).then(([before, slept, after]) => {
+				if (slept) ok(slept, ["DEBUG", "SLEEP"]);
+				const span = { from: microsOf(before), to: microsOf(after) };
+				if (!Number.isFinite(span.from) || !Number.isFinite(span.to))
+					throw new Error("TIME refused around the sleep");
+				return span;
+			});
 			awake.catch(() => {});
 			const asleep = (async () => {
 				await pause(50);

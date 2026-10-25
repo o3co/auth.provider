@@ -1,3 +1,4 @@
+import { ok, textOf } from "../ask/ask.ts";
 import type { Reply } from "../relay/relay.ts";
 
 /** A node as a promotion needs it: its name, and a command to it. */
@@ -32,10 +33,9 @@ export interface PromoteOptions<N extends Member> {
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const field = (info: string, name: string) =>
 	new RegExp(`^${name}:(.*)$`, "m").exec(info)?.[1]?.trim();
-const replication = async (n: Member) => {
-	const r = await n.ask("INFO", "replication");
-	return r.kind === "bulk" ? (r.data?.toString() ?? "") : "";
-};
+const replication = async (n: Member) => textOf(await n.ask("INFO", "replication"), ["INFO"]);
+/** A command that must be done: an error answer fails the promotion. */
+const done = async (n: Member, ...args: string[]) => ok(await n.ask(...args), args);
 const until = async (what: string, ok: () => Promise<boolean>, ms = 10_000) => {
 	const end = performance.now() + ms;
 	while (!(await ok())) {
@@ -70,7 +70,7 @@ export async function promote<N extends Member>(m: Membership<N>, o: PromoteOpti
 	const catchUpMs = o.catchUpMs ?? 5_000;
 	const held = catchUpMs + (o.holdMs ?? 60_000);
 	const paused = performance.now();
-	await old.ask("CLIENT", "PAUSE", String(held), "WRITE");
+	await done(old, "CLIENT", "PAUSE", String(held), "WRITE");
 	const from = performance.now();
 	// The pause lapses on its own: past this, the old primary may have taken writes the target
 	// missed, so the promotion fails instead, a second before it can.
@@ -100,13 +100,13 @@ export async function promote<N extends Member>(m: Membership<N>, o: PromoteOpti
 			m.kill(old);
 			m.killed.add(old.name);
 		}
-		await o.replica.ask("REPLICAOF", "NO", "ONE");
+		await done(o.replica, "REPLICAOF", "NO", "ONE");
 		m.follows.set(o.replica.name, undefined);
 		// Kept on, the old primary may take writes once the hold lapses: a candidate that detached
 		// only after it is a promotion that failed, the topology needing recovery.
 		if (o.keepOld) inTime(`before ${o.replica.name} detached; the topology needs recovery`);
 		for (const r of reattach) {
-			await r.ask("REPLICAOF", o.replica.name, "6379");
+			await done(r, "REPLICAOF", o.replica.name, "6379");
 			m.follows.set(r.name, o.replica.name);
 		}
 		m.setPrimary(o.replica);
@@ -115,7 +115,7 @@ export async function promote<N extends Member>(m: Membership<N>, o: PromoteOpti
 			async () => (await online(o.replica)) >= reattach.length,
 		);
 		if (o.keepOld) {
-			await old.ask("CLIENT", "UNPAUSE");
+			await done(old, "CLIENT", "UNPAUSE");
 			await until("the old primary lost every replica", async () => (await online(old)) > 0);
 		}
 	} catch (error) {
