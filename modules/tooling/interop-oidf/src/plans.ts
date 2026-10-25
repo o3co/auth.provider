@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PlanDefinition } from "./harness/harness.ts";
 import { reclaimOrphans } from "./orphans/orphans.ts";
@@ -41,25 +43,34 @@ export function planCommands(
 	}));
 }
 
+/** Where the plans keep their records: `named` where given, a directory made for them otherwise. */
+export async function recordsOf(
+	named: string | undefined,
+): Promise<{ readonly dir: string; readonly made: boolean }> {
+	if (named !== undefined) return { dir: named, made: false };
+	return { dir: await mkdtemp(join(tmpdir(), "interop-oidf-records-")), made: true };
+}
+
 if (import.meta.main) {
 	const [command, ...names] = process.argv.slice(2);
 	if (command === "evidence-runs") console.log(JSON.stringify(evidenceRuns));
 	else if (command === "plan") {
+		const commands = planCommands(names);
+		// Every plan's records in one directory, made where none is named: a run killed before its
+		// stops still has its suite's logs kept, somewhere told.
+		const records = await recordsOf(process.env.OIDF_ARTIFACTS_DIR);
+		if (records.made) console.error(`the plans' records are kept in ${records.dir}`);
 		// One vitest for each plan: each its own report, under its own run's name.
-		for (const { args, run } of planCommands(names)) {
+		for (const { args, run } of commands) {
 			const ran = spawnSync("pnpm", args, {
 				cwd: join(import.meta.dirname, ".."),
 				stdio: "inherit",
-				env: { ...process.env, SPEC_EVIDENCE_RUN: run },
+				env: { ...process.env, SPEC_EVIDENCE_RUN: run, OIDF_ARTIFACTS_DIR: records.dir },
 			});
 			if (ran.status !== 0) process.exitCode = ran.status ?? 1;
 			// A plan's run killed before its stops (cancelled, or a worker that died) leaves its suite on the
 			// fixed ports; it is taken down here, its logs kept, and the plan fails for it.
-			const records = process.env.OIDF_ARTIFACTS_DIR;
-			const reclaimed = await reclaimOrphans(
-				undefined,
-				records === undefined ? undefined : join(records, run, "reclaimed"),
-			);
+			const reclaimed = await reclaimOrphans(undefined, join(records.dir, run, "reclaimed"));
 			if (reclaimed.length > 0) {
 				console.error(`${run}: took down the suite its run left behind (${reclaimed.join(", ")})`);
 				process.exitCode = 1;
