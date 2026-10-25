@@ -8,6 +8,7 @@ import { revocations } from "@mod/subject-revocation";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { z } from "zod";
 import { check } from "./assertion/assertion.ts";
+import { bindingOf, identifiedBy, identifiedOf, unidentified } from "./clientless/clientless.ts";
 import { meets } from "./conditions/conditions.ts";
 import {
 	type DelegatedAssertions,
@@ -127,6 +128,15 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 		};
 		const refusedGrant = (description: string) =>
 			({ kind: "error", error: "invalid_grant", description }) as const;
+		const anotherClient = refusedGrant("assertion is for another client");
+		const assertionRequired = {
+			kind: "error",
+			error: "invalid_request",
+			description: "assertion is required",
+		} as const;
+		const binding = bindingOf(c.section.issuers);
+		/** Where every assertion of a trusted issuer is checked, whether a request names its client or none. */
+		const verify = (assertion: string) => check(assertion, trusted, selfIssued);
 		/**
 		 * What any assertion verified becomes: a token for its subject, once the client may have it and
 		 * its single use is spent. It must have a second left when it is spent and give a token that
@@ -192,6 +202,8 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			delegate: DelegatedAssertions,
 			assertion: string,
 		): Promise<GrantOutcome | Refused> => {
+			// An entry's client takes its own entry's assertions alone: its delegate is never asked.
+			if (binding.forAnother(undefined, input.client.id)) return anotherClient;
 			const told = await checkedBy(delegate, assertion);
 			// As an unknown signer is: the answer tells nothing of which issuers are delegated.
 			if (told.kind === "invalid") return refusedGrant("untrusted signer");
@@ -214,21 +226,38 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			grantType: jwtBearerGrantType,
 			readsAmbient: "none",
 			targets: true,
+			...(c.section.issuers.some((i) => i.client !== undefined)
+				? {
+						// A request naming no client: the client of the entry whose verified assertion it carries.
+						identify: async ({ param }) => {
+							const assertion = param("assertion");
+							if (!assertion) return assertionRequired;
+							// A delegated issuer's identifies none: its delegate checks it for a client named.
+							if (delegation.by.has(sentIssuerOf(assertion) ?? "")) return unidentified;
+							return identifiedBy(await verify(assertion), (iss) => entries.get(iss), subjectOf);
+						},
+					}
+				: {}),
 			handle: async (input) => {
 				const assertion = input.param("assertion");
-				if (!assertion)
-					return { kind: "error", error: "invalid_request", description: "assertion is required" };
+				if (!assertion) return assertionRequired;
 				// A delegated issuer's assertion goes its delegate's way alone, whatever it answers.
 				const delegate = delegation.by.get(sentIssuerOf(assertion) ?? "");
 				if (delegate) return delegated(input, delegate, assertion);
-				const verified = await check(assertion, trusted, selfIssued);
+				// What identify found for a request naming no client, taken as it is: not checked again.
+				const known = identifiedOf(input.identified);
+				const verified = known ? known.verified : await verify(assertion);
 				if (verified.kind === "invalid") return refusedGrant(verified.reason);
 				const entry = entries.get(verified.entry) as IssuerEntry;
-				// Held to its issuer's conditions once verified, before any subject is looked up or jti spent.
-				if (entry.conditions && !meets(entry.conditions, verified.claims))
-					return refusedGrant("assertion does not meet its issuer's conditions");
-				const subject = await subjectOf(verified.entry, verified.subject);
-				if (subject === undefined) return refusedGrant("unknown subject");
+				// Bound to its client first, then held to its conditions, before any subject is looked up or jti spent.
+				if (binding.forAnother(entry, input.client.id)) return anotherClient;
+				let subject = known?.subject;
+				if (subject === undefined) {
+					if (entry.conditions && !meets(entry.conditions, verified.claims))
+						return refusedGrant("assertion does not meet its issuer's conditions");
+					subject = await subjectOf(verified.entry, verified.subject);
+					if (subject === undefined) return refusedGrant("unknown subject");
+				}
 				const checked = { ...verified, subject };
 				const keepUntil = keepUntilOf(checked.expiresAt);
 				// An issuer with a ledger uses its jti up there alone, never the store, whatever it answers;
