@@ -1,0 +1,23 @@
+{
+	"name": "@mod/interop-clients",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"scripts": {
+		"library": "node src/main.ts library",
+		"evidence-runs": "node src/main.ts --evidence-runs"
+	},
+	"dependencies": {
+		"@mod/conformance": "workspace:*",
+		"@mod/conformance-code": "workspace:*",
+		"@mod/conformance-front": "workspace:*",
+		"@mod/conformance-oauth": "workspace:*",
+		"@mod/spec-checklist": "workspace:*",
+		"openid-client": "6.8.8",
+		"undici": "8.12.2"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}

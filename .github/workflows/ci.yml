@@ -306,6 +306,7 @@ jobs:
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
       patterns: ${{ steps.plan.outputs.patterns }}
+      libraries: ${{ steps.plan.outputs.libraries }}
       sha: ${{ steps.plan.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -323,9 +324,11 @@ jobs:
           set -euo pipefail
           areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
           patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
+          libraries=$(pnpm --silent --filter @mod/spec-checklist run plan library)
           {
             echo "areas=$areas"
             echo "patterns=$patterns"
+            echo "libraries=$libraries"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
@@ -478,6 +481,68 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # One client library: its adapter, built from the library's registry, runs each flow it runs
+  # first-class against the provider (interop-clients). On a pull request to main, the release
+  # branches and the daily run on develop; not on develop's every-five-merges run.
+  interop-clients:
+    needs: conformance-plan
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && !(github.event_name == 'push' && github.ref == 'refs/heads/develop') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        library: ${{ fromJSON(needs.conformance-plan.outputs.libraries) }}
+    steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: library
+          MATRIX: ${{ matrix.library }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
+      - uses: actions/checkout@v4
+        with:
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # The JDK and Maven's cache, for the adapters Maven builds; the jars are checked against their pins.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: modules/tooling/interop-clients/adapters/*/pom.xml
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @mod/interop-clients run library "${{ matrix.library }}"
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-library-${{ matrix.library }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The check required of a release: every area and every pattern passed.
   conformance:
     needs: [conformance-due, conformance-plan, conformance-area, conformance-pattern]
@@ -556,7 +621,7 @@ jobs:
   # and on the release branches it fails where an expected run did not report or an item is
   # failed, incomplete or unverified, and elsewhere it only tells.
   compliance:
-    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, release-check]
+    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, interop-clients, release-check]
     if: always()
     runs-on: ubuntu-latest
     steps:

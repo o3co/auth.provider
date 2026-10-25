@@ -342,6 +342,11 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `recorded` (`src/recorded`): G30, that an audit event is recorded only through its declarations.
   - `surface` (`src/surface`): a package's public surface, read from its `.` entry by a TypeScript program of its own.
   - `taken` (`src/taken`): G31, that a contract its owner declares `takenBy` is imported by the packages it names alone.
+- `@mod/interop-clients` (verification, `modules/tooling/interop-clients`): Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
+  - `dialog` (`src/dialog`): one flow's exchange with an adapter.
+  - `differences` (`src/differences`): the differences accepted between a library and the provider.
+  - `libraries` (`src/libraries`): the client libraries the harness runs.
+  - `pins` (`src/pins`): the SHA-256 of each jar an adapter is built from.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.
 - `@mod/references` (assembly, `modules/tooling/references`): Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), and the audit index's generated parts, the cards and the dependencies (internal module `audit-index`).
   - `attack-surface` (`src/attack-surface`): the attack surface reference, what reaches the provider from outside and what it reaches out to.

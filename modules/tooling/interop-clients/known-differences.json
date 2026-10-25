@@ -1,0 +1,4 @@
+{
+	"$comment": "Each accepted difference between a library and this provider, written narrowly: the library, the flow and the check's title, all of them, and its class as spec-checklist's exceptions take it. A difference no longer met fails the run, so a fixed one is taken out.",
+	"differences": []
+}
