@@ -171,7 +171,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(() => {
-	for (const id of [replica, secondReplica, container]) if (id) docker("rm", "-f", id);
+	for (const id of [replica, secondReplica, container]) if (id) docker("rm", "-f", "-v", id);
 	if (network) docker("network", "rm", network);
 });
 
@@ -397,7 +397,7 @@ describe("redis", () => {
 				open([durable], undefined, `redis://127.0.0.1:${port}`, "none"),
 			).rejects.toBeInstanceOf(BootRefused);
 		} finally {
-			docker("rm", "-f", node);
+			docker("rm", "-f", "-v", node);
 		}
 	}, 60_000);
 
@@ -454,7 +454,7 @@ describe("redis", () => {
 				name: "Unavailable",
 			});
 		} finally {
-			for (const id of [follower, lone]) if (id) docker("rm", "-f", id);
+			for (const id of [follower, lone]) if (id) docker("rm", "-f", "-v", id);
 			docker("network", "rm", net);
 		}
 	}, 90_000);
@@ -516,7 +516,7 @@ describe("redis", () => {
 				same.disconnect();
 			}
 		} finally {
-			docker("rm", "-f", lone);
+			docker("rm", "-f", "-v", lone);
 		}
 	}, 60_000);
 
@@ -583,7 +583,7 @@ describe("redis", () => {
 			});
 			await expect(app).rejects.toBeInstanceOf(BootRefused);
 		} finally {
-			docker("rm", "-f", old);
+			docker("rm", "-f", "-v", old);
 		}
 	}, 60_000);
 
@@ -637,7 +637,7 @@ describe("redis", () => {
 describe("one server alone, as configured with replication none", () => {
 	const lone: string[] = [];
 	afterAll(() => {
-		for (const id of lone) docker("rm", "-f", id);
+		for (const id of lone) docker("rm", "-f", "-v", id);
 	});
 	const replicatedOnly = defineModule({ name: "replicated-owner", takes: [] }, (m) => [
 		m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
@@ -671,7 +671,7 @@ describe("a Redis 7.0 server", () => {
 		await waitFor(() => pings(old));
 	}, 60_000);
 	afterAll(() => {
-		if (old) docker("rm", "-f", old);
+		if (old) docker("rm", "-f", "-v", old);
 	});
 
 	it("names the store's keys where a script is refused one, in 7.0's words", async () => {
@@ -698,7 +698,7 @@ describe("settings the server will not show", () => {
 		await waitFor(() => pings(blocked));
 	}, 60_000);
 	afterAll(() => {
-		if (blocked) docker("rm", "-f", blocked);
+		if (blocked) docker("rm", "-f", "-v", blocked);
 	});
 	const kept = defineModule({ name: "kept-owner", takes: [] }, (m) => [
 		m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
