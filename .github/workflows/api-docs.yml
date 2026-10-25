@@ -105,6 +105,8 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+          # A run of all jobs again writes over the site an earlier attempt kept: an artifact's name is the run's.
+          overwrite: true
 
   # The push, with the right to write, of the pages the build kept: it checks the pages out afresh,
   # runs nothing the repository or the build holds, and gives git no hook.
