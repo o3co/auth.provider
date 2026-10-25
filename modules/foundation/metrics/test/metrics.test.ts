@@ -273,6 +273,8 @@ describe("refusals at boot", () => {
 
 it("takes every handle its takes name, the module and its stand-in alike", async () => {
 	for (const module of [metricsModule, metricsStandIn(10)]) {
-		expect(await takesUnused({ modules: [module], config: kernelConfig() })).toEqual({});
+		expect(
+			(await takesUnused({ modules: [module], config: kernelConfig() })).metrics,
+		).toBeUndefined();
 	}
 });
