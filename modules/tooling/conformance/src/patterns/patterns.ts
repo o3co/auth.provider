@@ -34,10 +34,17 @@ export function runsOf(summaries: readonly PatternSummary[], args: readonly stri
 export const patternNames = (summaries: readonly PatternSummary[]) =>
 	runsOf(summaries, []).map((run) => run.pattern);
 
-/** Each area's run on each pattern's app, as `<area's package>@<pattern>`: the runs a CI run reports. */
+/**
+ * Each area's run on each pattern's app, `<area's package>@<pattern>`, as `spec-checklist` lists a
+ * CI run's runs: a pattern job's, its matrix the pattern. A pattern with no areas is one run of this
+ * package, which no area reports, so the run lacking it fails as its job does.
+ */
 export const evidenceRuns = (summaries: readonly PatternSummary[]) =>
 	runsOf(summaries, []).flatMap((run) =>
-		run.areas.map((area) => `@mod/conformance-${area}@${run.pattern}`),
+		(run.areas.length > 0
+			? run.areas.map((area) => `@mod/conformance-${area}`)
+			: ["@mod/conformance"]
+		).map((pkg) => ({ entry: `${pkg}@${run.pattern}`, kind: "pattern", matrix: run.pattern })),
 	);
 
 /** An ANSI escape sequence, as a terminal that colours output writes one (ESC, then CSI). */

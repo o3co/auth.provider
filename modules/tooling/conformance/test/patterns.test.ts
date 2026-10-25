@@ -35,12 +35,14 @@ describe("the runs over the patterns", () => {
 		expect(patternNames(summaries)).toEqual(["simple-web", "a2a", "full", "full+opt-ins"]);
 	});
 
-	it("names every run of an area's scenes on a pattern's app, as the evidence of a CI run counts it", () => {
+	it("lists every run of an area's scenes on a pattern's app, as the evidence of a CI run counts it", () => {
+		const run = (entry: string, matrix: string) => ({ entry, kind: "pattern", matrix });
 		expect(evidenceRuns(summaries)).toEqual([
-			"@mod/conformance-keys@simple-web",
-			"@mod/conformance-ops@simple-web",
-			"@mod/conformance-keys@full",
-			"@mod/conformance-keys@full+opt-ins",
+			run("@mod/conformance-keys@simple-web", "simple-web"),
+			run("@mod/conformance-ops@simple-web", "simple-web"),
+			run("@mod/conformance@a2a", "a2a"),
+			run("@mod/conformance-keys@full", "full"),
+			run("@mod/conformance-keys@full+opt-ins", "full+opt-ins"),
 		]);
 	});
 

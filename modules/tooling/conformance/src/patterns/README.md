@@ -7,7 +7,7 @@ Internal module of `conformance`: running every pattern's areas on its app.
 
 ## Offers
 - The script `patterns`: every pattern, `full` both ways, or one pattern on the areas named. `patterns --list` prints every run's pattern as JSON, for CI to run each in a job of its own.
-- The script `evidence-runs`: each area's run on each pattern's app as JSON, `@mod/conformance-<area>@<pattern>`, the runs `spec-checklist` expects a CI run to report.
+- The script `evidence-runs`: each area's run on each pattern's app, `@mod/conformance-<area>@<pattern>`, as the JSON runs `spec-checklist` reads (kind `pattern`, the pattern its matrix value); a pattern with no areas is the run `@mod/conformance@<pattern>`, which no area reports.
 - `full` (the full template) and `full+opt-ins` (with every feature that opts in), the names the package's drivers read.
 
 ## Invariants
