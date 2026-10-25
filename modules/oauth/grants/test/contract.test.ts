@@ -1,6 +1,6 @@
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { expect, it } from "vitest";
-import { grants, tokenTies } from "../src/contract.ts";
+import { type Grant, type GrantInput, grants, tokenTies } from "../src/contract.ts";
 
 const echo = (name: string, grantType = "urn:test:echo") =>
 	defineModule({ name, takes: [] }, (m) => [
@@ -40,4 +40,51 @@ it("takes any number of token ties, one for each name, and refuses boot when two
 		"session",
 	]);
 	await expect(boot(tie("a", "family"), tie("b", "family"))).rejects.toBeInstanceOf(BootRefused);
+});
+
+it("lets a grant identify the client of a request naming none, and hands what it identified back to it", async () => {
+	// What the grant checked, as it would carry it: the endpoint never reads it.
+	const checked = { signer: "s" };
+	const identifying = defineModule({ name: "identifying", takes: [] }, (m) => [
+		m.contribute(grants).by(() => ({
+			grantType: "urn:test:identifying",
+			readsAmbient: "none",
+			identify: async ({ param }) =>
+				param("assertion") === "known"
+					? { kind: "client", client: "registered", identified: checked }
+					: { kind: "error", error: "invalid_grant", description: "untrusted signer" },
+			handle: async ({ identified }) =>
+				identified === checked
+					? { kind: "issued", body: {} }
+					: { kind: "error", error: "invalid_grant" },
+		})),
+	]);
+	const found = contract<Grant>("found");
+	const read = defineModule({ name: "identifying-reader", takes: [grants] }, (m) => [
+		m.provide(found).by(async (c) => (await c.collect(grants))[0] as Grant),
+	]);
+	const grant = (await assemble({ modules: [identifying, read], config: kernelConfig() })).get(
+		found,
+	);
+	const asked = (assertion: string) => ({
+		request: {} as GrantInput["request"],
+		param: (name: string) => (name === "assertion" ? assertion : undefined),
+		value: () => undefined,
+	});
+	expect(await grant.identify?.(asked("known"))).toEqual({
+		kind: "client",
+		client: "registered",
+		identified: checked,
+	});
+	expect(await grant.identify?.(asked("other"))).toMatchObject({
+		kind: "error",
+		error: "invalid_grant",
+	});
+	const input = { identified: checked } as GrantInput;
+	expect(await grant.handle(input)).toEqual({ kind: "issued", body: {} });
+	// A grant that cannot tell has no `identify`: the endpoint answers such a request as it does today.
+	expect(
+		"identify" in
+			(await assemble({ modules: [echo("a"), read], config: kernelConfig() })).get(found),
+	).toBe(false);
 });
