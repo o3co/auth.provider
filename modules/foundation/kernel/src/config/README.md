@@ -13,6 +13,7 @@ Internal module of `kernel`: reading each module's section, and the kernel's own
 
 ## Invariants
 - A section is read as the HOCON library's typed getters read it; a refusal names the key path, never the value. A section for no module, a module without a section given one, and a duplicate module name are refused.
+- A module's schema that throws as it reads its section (any value, one whose reading throws too) refuses that section by the module's name (`its schema failed as it read the section`), keeping none of what it threw.
 
 ## Depends on
 - `setting`; the package's freezing, module and refusal types; `runtime` (the log levels)

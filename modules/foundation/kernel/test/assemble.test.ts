@@ -24,6 +24,36 @@ describe("assemble", () => {
 		expect(wrong.map((r) => r.where)).toEqual(["kernel.deployment"]);
 	});
 
+	it("refuses a section its schema throws on, by the module's name, keeping none of what it threw", async () => {
+		const thrown: (() => unknown)[] = [
+			() => new TypeError("token=abc"),
+			() => ({ secret: "token=abc" }),
+			() =>
+				new Proxy(
+					{},
+					{
+						getPrototypeOf() {
+							throw new Error("token=abc");
+						},
+					},
+				),
+		];
+		for (const [i, value] of thrown.entries()) {
+			const section = z.object({ n: z.number() }).transform(() => {
+				throw value();
+			});
+			const refusals = await refusalsOf(
+				assemble({
+					modules: [defineModule({ name: "m", section, takes: [] })],
+					config: { ...single, m: { n: 1 } },
+				}),
+			);
+			expect(refusals, String(i)).toEqual([
+				{ where: "m", reason: "its schema failed as it read the section" },
+			]);
+		}
+	});
+
 	it("builds its own section: a single deployment, unless the settings say otherwise", async () => {
 		expect(kernelConfig()).toEqual({ kernel: { deployment: "single" } });
 		const multi = kernelConfig({ deployment: "multi", logging: { level: "warn" } });
