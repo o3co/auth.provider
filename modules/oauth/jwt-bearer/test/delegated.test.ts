@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
+import { clientSources } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import externalJwtModule from "@mod/external-jwt/module";
-import type { GrantInput, GrantOutcome } from "@mod/grants";
+import { type GrantInput, type GrantOutcome, targetRules } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
@@ -26,13 +27,14 @@ import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { tokens } from "@mod/tokens";
+import { issuancePolicies, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
 import {
 	type DelegatedAssertions,
 	delegatedAssertions,
+	linkedSubjects,
 	signerKeys,
 	spentAssertions,
 } from "../src/contract.ts";
@@ -159,12 +161,21 @@ function assembly(
 	};
 }
 
-async function serve(extra: readonly Module[], log = quietRuntime().log) {
-	const app = await assemble(assembly(extra, undefined, log));
-	const grant = (client: string, a: string, binding?: Binding) =>
+async function serve(
+	extra: readonly Module[],
+	log = quietRuntime().log,
+	section?: Record<string, unknown>,
+) {
+	const app = await assemble(assembly(extra, section, log));
+	const grant = (client: string, a: string, binding?: Binding, more: Record<string, string> = {}) =>
 		app
 			.get(grantCalls)
-			.call(grantType, client, { grant_type: grantType, assertion: a }, binding ? { binding } : {});
+			.call(
+				grantType,
+				client,
+				{ grant_type: grantType, assertion: a, ...more },
+				binding ? { binding } : {},
+			);
 	return { app, grant };
 }
 const saidOf = (outcome: GrantOutcome) =>
@@ -224,6 +235,73 @@ describe("delegated issuers", () => {
 		expect(d.spent).toEqual([]);
 	});
 
+	it("asks the client's allowance, the audience and the issuance policies before the delegate spends, leaving the assertion usable", async () => {
+		const refusingAudience = defineModule({ name: "refusing-audience", takes: [] }, (m) => [
+			m.contribute(targetRules).by(() => ({
+				target: ({ param, audience }) =>
+					param("resource")
+						? { kind: "error", error: "invalid_target", description: "not here" }
+						: { kind: "audience", audience },
+			})),
+		]);
+		let refusing = true;
+		const policy = defineModule({ name: "refusing-policy", takes: [] }, (m) => [
+			m.contribute(issuancePolicies).by(() => ({
+				name: "test-policy",
+				judge: async () =>
+					refusing
+						? { kind: "refused", reason: "test_reason", description: "refused here" }
+						: { kind: "allowed" },
+			})),
+		]);
+		const d = delegating();
+		const s = await serve([d.module, refusingAudience, policy]);
+		const a = sent();
+		expect(saidOf(await s.grant("app", a, undefined, { scope: "write" }))).toMatch(
+			/^invalid_scope/,
+		);
+		expect(saidOf(await s.grant("app", a, undefined, { resource: "https://api.example" }))).toBe(
+			"invalid_target: not here",
+		);
+		expect(saidOf(await s.grant("app", a))).toBe("invalid_grant: refused here");
+		expect(d.spent).toEqual([]);
+		refusing = false;
+		expect(saidOf(await s.grant("app", a))).toBe("issued");
+	});
+
+	it("tries no other way for a delegated issuer's assertion: no trusted issuer's keys, subjects or store are asked", async () => {
+		const asked: string[] = [];
+		const own = "https://own.example";
+		const spies = defineModule({ name: "spies", takes: [] }, (m) => [
+			m.contribute(signerKeys).by(() => ({
+				issuer: own,
+				keysOf: async () => {
+					asked.push("keys");
+					return { kind: "none" };
+				},
+			})),
+			m.contribute(linkedSubjects).by(() => ({
+				declaredBy: "spies",
+				subjectOf: async () => {
+					asked.push("subject");
+					return { kind: "none" };
+				},
+			})),
+		]);
+		const d = delegating();
+		const section = {
+			issuers: [{ issuer: own, subject: "linked", upstream: "own" }],
+			"delegated-issuers": [idp],
+		};
+		const s = await serve([d.module, spies], undefined, section);
+		for (const answer of [{ kind: "invalid" }, valid]) {
+			await s.grant("app", sent(answer));
+		}
+		expect(asked).toEqual([]);
+		expect(stored).toEqual([]);
+		expect(d.spent).toHaveLength(1);
+	});
+
 	describe("a public client", () => {
 		const forPhones = { ...valid, clients: ["phone", "old-phone"] };
 		const bound = { ...forPhones, holderDigest: digest };
@@ -255,6 +333,27 @@ describe("delegated issuers", () => {
 			);
 			expect(d.spent).toEqual([expect.any(String)]);
 			expect(saidOf(await s.grant("old-phone", a, proved))).toBe("issued");
+		});
+
+		it("reads accept-unbound for registered clients alone: one a source names cannot give it to itself", async () => {
+			const logged = recordingLog();
+			const source = defineModule({ name: "a-source", takes: [] }, (m) => [
+				m.contribute(clientSources).by(() => ({
+					find: async (id: string) =>
+						id === "named-phone"
+							? {
+									id,
+									kind: "public" as const,
+									method: "none",
+									sections: { ...allowed, "jwt-bearer": { "accept-unbound": true } },
+								}
+							: undefined,
+				})),
+			]);
+			const s = await serve([delegating().module, source], logged.log);
+			const unbound = { ...valid, clients: ["named-phone"] };
+			expect(saidOf(await s.grant("named-phone", sent(unbound)))).toBe(refusedKey);
+			expect(logged.lines().filter((e) => e.fields.client === "named-phone")).toEqual([]);
 		});
 
 		it("leaves a confidential client's digest unread", async () => {
