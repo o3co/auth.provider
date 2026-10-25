@@ -17,8 +17,9 @@ on:
         required: true
         type: string
 
+# The build reads alone; the push alone writes, and runs none of the build's code.
 permissions:
-  contents: write
+  contents: read
 
 # Two releases never write the pages at once; neither is cancelled.
 concurrency:
@@ -26,9 +27,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  site:
-    name: Build and publish the API site
+  # The site built where nothing can write: the release's code and what it published run here.
+  build:
+    name: Build the API site
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # The push takes the site by this id, never by a name another job could make again.
+    outputs:
+      site: ${{ steps.site.outputs.artifact-id }}
     env:
       TAG: ${{ inputs.tag }}
     steps:
@@ -40,7 +47,6 @@ jobs:
             exit 1
           fi
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
-      # Neither checkout keeps the token in its git configuration: the push alone is given it.
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
@@ -86,6 +92,42 @@ jobs:
       - name: Build this release's API into the pages
         run: pnpm api-docs build "$RUNNER_TEMP/api-project" "$GITHUB_WORKSPACE/pages" "$VERSION"
 
+      # The pages as built, their git directory left behind: whatever the build wrote there, a hook
+      # among it, never reaches the push.
+      - name: Keep the site for the push
+        id: site
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-site
+          path: |
+            pages
+            !pages/.git
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  # The push, with the right to write, of the pages the build kept: it checks the pages out afresh,
+  # runs nothing the repository or the build holds, and gives git no hook.
+  push:
+    name: Publish the API site
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+          persist-credentials: false
+      - name: Take the site the build kept
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.build.outputs.site }}
+          path: ${{ runner.temp }}/site
+          merge-multiple: true
       - name: Publish the pages
         shell: bash
         working-directory: pages
@@ -93,14 +135,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          if git diff --cached --quiet; then
+          VERSION="${TAG#v}"
+          # The pages become the site as built, their own git directory kept.
+          rsync -a --delete --exclude .git "$RUNNER_TEMP/site/" ./
+          git -c core.hooksPath=/dev/null add -A
+          if git -c core.hooksPath=/dev/null diff --cached --quiet; then
             echo "the API of v${VERSION} is on the pages already"
             exit 0
           fi
-          git commit -m "docs: API for v${VERSION}"
+          git -c core.hooksPath=/dev/null -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "docs: API for v${VERSION}"
           # The token for this push alone, as checkout would set it, never written to the configuration.
           auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" push origin HEAD:gh-pages
+          git -c core.hooksPath=/dev/null -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" push origin HEAD:gh-pages
