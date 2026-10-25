@@ -20,7 +20,7 @@
 
 ## Invariants
 - The subject comes from the session, never from the body.
-- A registration a revocation since its challenge reaches (`subject-revocation`, a reset's included) leaves nothing usable: `passkeys` asks this check once its record is written and again once it is listed, and keeps nothing on a no or a failure. It is answered `401 unauthorized`, recording nothing.
+- A registration a revocation since its challenge reaches (`subject-revocation`, a reset's included) leaves nothing usable: `passkeys` asks this check before the record and its listing are written, as one, and again after, and keeps nothing on a no or a failure. It is answered `401 unauthorized`, recording nothing.
 - `response` must be an object, and a `nickname` sent is a label (`labels`' `isLabel`); otherwise `invalid_request`, before `passkeys` is asked.
 - Client data that does not read is `invalid_request`; `passkeys`' `no-challenge` is `challenge_invalid`.
 - `credential_id_conflict` tells a signed-in session that some subject lists an id. Ids are high-entropy, made by the authenticator, so this answers only for an id already known.
