@@ -1,6 +1,6 @@
 # recorded
 
-Internal module of `guard`: G30, that an audit event is recorded only through its declarations.
+Internal module of `guard-imports`: G30, that an audit event is recorded only through its declarations.
 
 ## Responsibilities
 - Finds, in shipped code, each call that records on the audit contract itself rather than through the wrapper its declarations give.

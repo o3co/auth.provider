@@ -27,6 +27,7 @@
 
 ## Invariants
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
+- A package's sources are its `.ts` files, `.config.ts` ones aside, and its `.mjs` files.
 - A document copies a configuration list when one line lays out more consecutive values of a list (nested lists flattened) than the configuration allows, in order, with no word between them but `and`, `or` or `then`.
 - Documents are all Markdown in the repository. A target is a link target, or an inline path that is explicitly relative or whose first part is beside the document (any other, `/`-rooted ones too, names a place outside it); it resolves from the document's directory, and is refused if it leaves it or names a missing file with an extension.
 - G12 reads no fenced code block: a block's samples show another project's files, not references to this one. G11 and G21 read blocks as any text.

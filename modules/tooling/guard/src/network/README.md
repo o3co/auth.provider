@@ -22,12 +22,13 @@ Internal module of `guard`: G26, how product code may reach the network, and G27
   - Imports or re-exports anything from `node:child_process`: a process started can reach anything. One starter is let through, below.
   - Imports or re-exports a network client: `ioredis`, `nodemailer`, `undici`, `ws`, `node-fetch`, `axios` or `got`.
   - Uses `fetch`, `WebSocket` or `EventSource` as a value where no declaration of the name in scope at that place hides it (one in another function does not), or as a property of `globalThis`, `global`, `self` or `window`, named by a dot or a string literal.
-  - Loads one of the modules or clients above with `import()` or `require`, as if imported whole, or loads a module named only at run time (`import()`).
+  - Loads one of the modules or clients above with `import()` or `require`, as if imported whole, or loads a module named only at run time, by `import()` or a loader's call, either told as `import()`.
 - The words, and what each lets a package reach:
   - `serves-http`: `node:http`'s `createServer` and `Server`.
   - `outbound`: `node:http`'s and `node:https`'s `request` and `Agent`, `node:net`'s and `node:tls`'s `connect`, and `lookup` from `node:dns` and `node:dns/promises`.
   - `redis`: the `ioredis` client.
   - `smtp`: `node:net`'s and `node:tls`'s `connect`, and `nodemailer`.
+- A module imported or loaded whole reaches each of its names, so the words cover it only where they name every one. None names all of a module above: a package imports the names a word lets through.
 - A starter and its helper are read through their facts (`fork`, `join` and `lookup` by the bindings they import and the reads of them, `process` unbound); a call named `require`, or `import()`, counts as a load whatever binds it, as the launch form's own strictness asks, beside every loader the facts read.
 - A package declaring `outbound` may name in `forks` one shipped source this rule reads (the starter, a plain file, never a link) and its helper, a plain `.mjs` file beside it; `forks` naming more is refused. The starter's `node:child_process` is let through only where all of these hold; else it is refused with the condition it misses:
   - It imports `fork` alone by name and reaches `node:child_process` (under either name) no other way: no other import, no re-export, no `import()` or `require` of it, nor of a module named at run time alone.
@@ -36,7 +37,8 @@ Internal module of `guard`: G26, how product code may reach the network, and G27
 - Every starter `forks` names is held to that form, whatever its scan finds it reaches: one starting nothing as written is refused all the same.
 - Every helper `forks` names is a plain `.mjs` file, else reported and never read. It imports `node:dns/promises`' `lookup` alone, by one import, and loads nothing else: no other import, no re-export, no `import()` or `require`. What it reaches counts toward the package's words.
 - `redis` and `smtp` reach a server the deployment provides: a package declaring either has a `## Deployment` section on its card, stating what that server must be (G27).
-- A place no declared word lets through is refused, as is a word guard does not know, a declared word the package reaches nothing with, and a word its card does not state. Tests, test tables and verification and assembly packages are not read.
+- A place no declared word lets through is refused, as is a word guard does not know, a declared word the package reaches nothing with, and a word its card does not state. Only the product kinds' packages are read (common, protocol, verification and assembly are not), and in them neither tests, test tables nor a published contract test suite.
 
 ## Depends on
+- `guard-imports`: each file's `facts`, and `lexicalAnalysis` for a file read alone.
 - `typescript`.

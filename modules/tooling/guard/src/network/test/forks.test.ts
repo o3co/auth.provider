@@ -272,8 +272,9 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		]) {
 			expect(refused(`${dnsOnly}${loading}`), loading).toContainEqual(`${helper} (${alone})`);
 		}
-		// Covered by the word outbound, but not a helper's to reach.
+		// Whole, past the word outbound, which names a few of its names; and not a helper's to reach.
 		expect(refused(`${dnsOnly}const m = await import("node:https");\n`)).toEqual([
+			`${helper} node:https`,
 			`${helper} (${alone})`,
 		]);
 	});

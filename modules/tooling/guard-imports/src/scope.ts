@@ -104,8 +104,8 @@ export function scopeOf<B extends Rules>(
 }
 
 /**
- * A published contract test suite is test code for the budget, though it lives outside the test
- * place and is still checked as shipped code by every other rule.
+ * A published contract test suite is test code for the budget and for the rules that pass tests by,
+ * though it lives outside the test place; the other rules check it as shipped code.
  */
 export function budgetsAsTest(s: Scope, p: Pkg, file: string) {
 	return s.isTest(file) || file === p.manifest.exports?.["./testing"]?.replace(/^\.\//, "");
