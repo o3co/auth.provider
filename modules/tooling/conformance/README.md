@@ -9,7 +9,7 @@
 
 ## Offers
 - Area (name and shape of its parts), scene composition, registration of set-ups for the new system (modules and sections, store kind; a set-up is told the modules composed, and the sections are those it gives knowing them)
-- Driver contract: start with a scene → root URL or boot refusal, stop, storage failure (only when the scene asks for it), the mail sent where the driver runs a relay, `can` (the needs the target cannot provide) and `differs` (among the differences the owner decided, those the target answers differently).
+- Driver contract: start with a scene, and on the new system the PEM files its process trusts besides the system's (`trustedCertificates`, for a party it reaches over https under a certificate of its own) → root URL or boot refusal, stop, storage failure (only when the scene asks for it), the mail sent where the driver runs a relay, `can` (the needs the target cannot provide) and `differs` (among the differences the owner decided, those the target answers differently).
 - Driver registration and selection by `CONFORMANCE_TARGET` (the default is the new system)
 - Pattern mode, with `CONFORMANCE_PATTERN` naming a pattern on the new system: `full` is the full template, `full+opt-ins` adds every feature that opts in
   - An area may adapt its part to the app's modules (`onNew`'s third argument): a set-up with a party the app reaches at loopback, started before it and stopped after it, or a reason to leave the scene out because the app chose an alternative, which even `full+opt-ins` leaves out
