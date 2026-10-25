@@ -86,7 +86,7 @@ Tag the merge commit on `main` as `v<version>` and push the tag. The workflow re
 
 ## What the workflow does
 
-It runs in four jobs before the API site's. `evidence` reads the CI runs, and nothing else. `pack` runs the checks and packs, and `sbom` makes the lists; both run what the release packed, and read alone. `publish` alone holds what publishing takes (its OIDC token and writing the release), and runs nothing the release packed.
+It runs in four jobs before the API site's. `evidence` reads the CI runs, and nothing else. `pack` runs the checks and packs, and `sbom` makes the lists; both run what the release packed, and read alone. `publish` alone holds what publishing takes (its OIDC token and writing the release), and runs nothing the release packed. The API site's own two jobs build it where nothing can write, then push it in a job that runs none of the build's code.
 
 1. Finds the CI run of the release pull request that tested the tag's tree, and keeps its evidence: each test's result and the compliance table (`pnpm release:evidence`). It stops the release where none will do; see [When the release finds no evidence](#when-the-release-finds-no-evidence).
 2. Runs `pnpm check`.
