@@ -1,4 +1,9 @@
+import { mkdtemp } from "node:fs/promises";
+import { createServer, type Server } from "node:https";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { selfSigned } from "@mod/conformance-front";
 import { readChecklist } from "@mod/spec-checklist";
 import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vitest";
 import { converse } from "../src/dialog/dialog.ts";
@@ -107,4 +112,76 @@ describe(`${library.name}: the known differences`, () => {
 	it("are each met by a check of this run, so a fixed one is taken out", () => {
 		expect(differences.unmet()).toEqual([]);
 	});
+});
+
+describe(`${library.name}: a discovery that names plain http`, () => {
+	let server: Server;
+	let origin = "";
+	let cert = "";
+	let told: Record<string, unknown> = {};
+	beforeAll(async () => {
+		const tls = await selfSigned("127.0.0.1", await mkdtemp(join(tmpdir(), "interop-http-")));
+		cert = tls.cert;
+		server = createServer(tls, (req, res) => {
+			res.writeHead(req.url === "/.well-known/openid-configuration" ? 200 : 404, {
+				"content-type": "application/json",
+			});
+			res.end(JSON.stringify(told));
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		origin = `https://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	});
+	afterAll(async () => {
+		await new Promise((resolve) => server?.close(resolve));
+	});
+
+	/** The flow's end against a provider whose discovery says `endpoints`; any browser step fails it. */
+	async function against(endpoints: Record<string, string>) {
+		told = {
+			issuer: origin,
+			authorization_endpoint: `${origin}/authorize`,
+			token_endpoint: `${origin}/token`,
+			userinfo_endpoint: `${origin}/userinfo`,
+			jwks_uri: `${origin}/jwks`,
+			response_types_supported: ["code"],
+			subject_types_supported: ["public"],
+			id_token_signing_alg_values_supported: ["RS256"],
+			...endpoints,
+		};
+		const dialog = await converse(
+			library.adapter(),
+			{
+				flow: "login",
+				issuer: origin,
+				ca: cert,
+				client: world.clients.basic,
+				redirectUri: world.redirectUri,
+			},
+			async (ask) => {
+				throw new Error(`asked ${ask.ask} before refusing plain http`);
+			},
+			30_000,
+		);
+		return dialog.outcome;
+	}
+
+	it.runIf(runs("login"))(
+		"refuses a provider whose discovery names an http token endpoint, before the browser",
+		async () => {
+			expect(await against({ token_endpoint: "http://127.0.0.1:1/token" })).toMatchObject({
+				kind: "error",
+				type: "insecure",
+			});
+		},
+	);
+
+	it.runIf(runs("login"))(
+		"refuses a provider whose discovery names an http key set, before the browser",
+		async () => {
+			expect(await against({ jwks_uri: "http://127.0.0.1:1/jwks" })).toMatchObject({
+				kind: "error",
+				type: "insecure",
+			});
+		},
+	);
 });

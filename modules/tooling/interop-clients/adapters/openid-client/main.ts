@@ -52,6 +52,17 @@ function trusting(ca: string): client.CustomFetch {
 	return (url, options) => fetch(url, { ...options, dispatcher }) as unknown as Promise<Response>;
 }
 
+/** An endpoint the discovery names over anything but https fails the flow before any request is sent there. */
+function refuseInsecure(metadata: Record<string, unknown>) {
+	for (const [key, value] of Object.entries(metadata)) {
+		if (!(key.endsWith("_endpoint") || key === "jwks_uri") || typeof value !== "string") continue;
+		if (new URL(value).protocol !== "https:")
+			throw Object.assign(new Error(`the discovery names ${key} ${value}, not https`), {
+				error: "insecure",
+			});
+	}
+}
+
 async function configOf(i: Instruction) {
 	const metadata = i.client.method === "none" ? {} : { client_secret: i.client.secret };
 	const fetching = trusting(i.ca);
@@ -65,6 +76,7 @@ async function configOf(i: Instruction) {
 		},
 	);
 	config[client.customFetch] = fetching;
+	refuseInsecure(config.serverMetadata() as unknown as Record<string, unknown>);
 	// The id token's signature is checked against the provider's keys, not taken on TLS's word.
 	client.enableNonRepudiationChecks(config);
 	return config;

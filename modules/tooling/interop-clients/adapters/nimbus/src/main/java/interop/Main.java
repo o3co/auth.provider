@@ -78,7 +78,7 @@ public final class Main {
   }
 
   /** A failure the adapter reports as the library or the provider named it. */
-  static final class Refused extends Exception {
+  static final class Refused extends RuntimeException {
     final String type;
 
     Refused(String type, String message) {
@@ -115,9 +115,22 @@ public final class Main {
     return context.getSocketFactory();
   }
 
+  /** A request over https alone, trusting the front's certificate; any other URL is refused before it is sent. */
   private HTTPRequest sending(HTTPRequest request) {
+    if (!"https".equals(request.getURI().getScheme()))
+      throw new Refused("insecure", "a request to " + request.getURI() + ", not https");
     request.setSSLSocketFactory(tls);
     return request;
+  }
+
+  /** An endpoint or key set the discovery names over anything but https fails the flow before any request. */
+  private static void refuseInsecure(OIDCProviderMetadata op) throws Refused {
+    for (Map.Entry<String, Object> e : op.toJSONObject().entrySet()) {
+      String key = e.getKey();
+      if (!(key.endsWith("_endpoint") || key.equals("jwks_uri")) || !(e.getValue() instanceof String value)) continue;
+      if (!value.startsWith("https://"))
+        throw new Refused("insecure", "the discovery names " + key + " " + value + ", not https");
+    }
   }
 
   private Map<String, Object> client() throws Exception {
@@ -143,8 +156,11 @@ public final class Main {
   }
 
   private OIDCProviderMetadata provider() throws Exception {
-    return OIDCProviderMetadata.resolve(
-        new Issuer(JSONObjectUtils.getString(instruction, "issuer")), this::sending);
+    OIDCProviderMetadata op =
+        OIDCProviderMetadata.resolve(
+            new Issuer(JSONObjectUtils.getString(instruction, "issuer")), this::sending);
+    refuseInsecure(op);
+    return op;
   }
 
   /** What a sign-in gave: the provider, the tokens and the ID token's claims as the validator took them. */
