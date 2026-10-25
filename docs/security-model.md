@@ -4,7 +4,9 @@ What auth-provider 0.19 guarantees, and what it leaves to the deployment. Each g
 
 ## Contents
 
+- [Trust assumptions](#trust-assumptions)
 - [Promises across modules](#promises-across-modules)
+- [Revocation delays](#revocation-delays)
 - [Boot](#boot)
 - [Secrets and logs](#secrets-and-logs)
 - [Requests and proxies](#requests-and-proxies)
@@ -18,6 +20,22 @@ What auth-provider 0.19 guarantees, and what it leaves to the deployment. Each g
 - [Storage](#storage)
 - [Audit](#audit)
 - [Keys](#keys)
+
+## Trust assumptions
+
+Every guarantee here rests on what the deployment does. Each section's "Left to you" says it where it applies; this gathers them by what the deployment must do.
+
+- **Its proxy strips what clients forge.** It strips or overwrites `X-Forwarded-For`, the forwarded scheme and the client-certificate header that clients send, and `http.trusted-proxies` names it ([Requests and proxies](#requests-and-proxies)).
+- **Its host clocks are synchronized (NTP).** Sessions, codes, tokens, lockouts, key expiry and a subject's revocation are judged on each host's clock, with nothing allowed for skew between hosts: a revocation is compared in whole seconds, so what was made just before it on a host whose clock runs ahead can count as made after it and outlive it ([runbook](runbook.md#before-you-deploy)). Keep them as close as NTP allows; no allowance between hosts is promised.
+- **What it terminates, it protects.** TLS is terminated in front of the app, which speaks plain HTTP behind it.
+- **An outbound proxy checks where names lead.** With `outbound.proxy` set, the proxy resolves names and refuses the addresses `outbound` would refuse ([Outbound requests](#outbound-requests)).
+- **Plain-text peers are on a trusted network.** What goes to a `plain-internal` pair, and to Redis where it is reached in the clear, is readable and changeable on the way: such peers sit on a network trusted against both.
+- **Redis keeps what it is checked to keep.** Its persistence stays as it was at boot, the replicas persist too, and a lagging replica is never promoted ([Storage](#storage)).
+- **An upstream's word on its own authentication is trusted as far as it is mapped.** An IdP's `amr` and `auth_time` count as the IdP says, for what `federation.idps.<name>.upstream-amr` maps and the fresh-login allowance lets in ([Upstream identity providers](#upstream-identity-providers)).
+- **A signer key ledger answers the keys signers hold now.** `signer-keys-http` asks for each assertion and keeps nothing between them, so a key the ledger still answers still signs.
+- **Its origin's other subdomains are its own.** Double-submit CSRF protection relies on them being unable to set the cookie ([Browsers](#browsers-sessions-cookies-and-csrf)).
+- **Its configuration and its credentials are its own.** The configuration files and environment that hold secrets are readable only by the app, and whoever writes them is trusted; each ledger's `credential` is known only to the app and that ledger.
+- **What it asks of it is in place.** The runbook's [Before you deploy](runbook.md#before-you-deploy) lists what the deployment must provide.
 
 ## Promises across modules
 
@@ -77,6 +95,31 @@ Each promise below holds across every module composed. Each names what keeps it 
     - Kept by: `rate-limit`'s policies, marked `per-source`; a route without one declares why it counts no source.
     - Scenes: oauth ("limits requests to the token endpoint per source"), identity (login attempts per sender), passkey ("passkey login: the options' limit"), ops (the operations routes and request counting).
     - Declared exceptions: the route reference's "Per source" reasons; and, as promise 3 declares, `rate-limit.fail-mode = open`, which lets a request limit pass requests uncounted while the store cannot count (an attempt limit still refuses).
+
+## Revocation delays
+
+How long something revoked can still be used, by where it is checked. **None** means the next check after the revocation is recorded refuses it: a request already past its checks is not stopped (promise 4), and the store or ledger that holds it answers as it now stands, an outage refusing rather than allowing (promise 3).
+
+| What is revoked | Where it is checked | Delay | Set by |
+|---|---|---|---|
+| A subject, for access tokens, with `subject-tokens` composed | Each time this provider verifies a token | None | `subject-revocation` and `subject-tokens` |
+| A subject, for access tokens not bound to a session, with `tokens.subject-check = none` | Not checked for the token itself: the revocation closes the subject's sessions, ending the tokens bound to them (promise 1), and leaves the others | Until the token expires | `tokens.access-token-lifetime` (default `1h`) |
+| A token revoked by id (`tokens.revocation = denylist`) | Each time this provider verifies a token | None | `tokens.revocation`; with `unsupported`, nothing issued can be revoked |
+| Any access token, at a resource server that verifies it itself | That resource server | Until the token expires, unless it asks introspection | `tokens.access-token-lifetime` |
+| Any access token, at a resource server that asks introspection | Each call | As long as the resource server keeps the answer, at most to its `exp` (RFC 7662 §4) | The resource server |
+| A refresh token or its family | Each refresh | None | `refresh` |
+| A session | Each read | None; its tokens as promise 1 says | `session` |
+| A back-channel logout notice | The client, once delivered | No bound: after a failure that can pass (408, 429, a 5xx, the client unreachable) a notice is tried again until `rp-logout.notify-within` (default `1d`), then dropped; one `outbound` refuses, any other status, or a client gone is settled at once, undelivered | `rp-logout.notify-within` |
+| An issuer's or an IdP's key set (`external-jwt`) | Each verification, against the set fetched | Fetched again after an hour; while none can be had, the last set is used until `external-jwt.key-set-max-age` (default `1d`) after its fetch, then unavailable | `external-jwt.key-set-max-age` |
+| A JWT bearer signer's key at a ledger (`signer-keys-http`) | Each assertion | None, as far as the ledger answers its current keys | The ledger |
+| A client certificate, `mtls.mode = pki` with CRLs | Each binding | Until the CA publishes a CRL that lists it (the CA's delay, outside the app), then until the CRL held is fetched again: a CRL is kept up to `mtls.revocation.crl-ttl` (default `1h`) from its fetch | `mtls.revocation.crl-ttl` |
+| A client certificate, `mtls.mode = pki` with OCSP | Each binding | Until the responder answers it revoked (the responder's delay), then until the answer held ends: its `nextUpdate`, never past its signer's expiry, or `mtls.revocation.ocsp-fresh` (default `10m`) after its `thisUpdate` where it gives none | `mtls.revocation.ocsp-fresh` |
+| A client certificate, `mtls.revocation.mode = disabled` | Not checked | Until the certificate expires | `mtls.revocation.mode` |
+| A client certificate, while revocation cannot be told and `mtls.revocation.on-unavailable = allow` | Not checked during the outage | The outage's length, and `mtls.revocation.failure-lifetime` (default `30s`) after it, while the failure is held (each binding warns) | `mtls.revocation.on-unavailable`, `mtls.revocation.failure-lifetime` |
+| A client certificate, `mtls.mode = self-signed` | Never: this mode binds any certificate that parses, without the client's registration, and has no revocation | Until the tokens bound to it expire or are revoked, or a check outside the app (a proxy refusing it) stops it | `tokens.access-token-lifetime`, `tokens.revocation` |
+| This provider's previous signing key | Each verification | Until the key's `expires-at`, and as long as a resource server keeps the key set it fetched | `keys.previous`, the runbook's [rotation](runbook.md#rotating-the-signing-key) |
+
+To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tokens`, choose `tokens.revocation = denylist`, have resource servers ask introspection, prefer CRLs or OCSP to `disabled` and `on-unavailable = reject` to `allow`, and lower `rp-logout.notify-within` only where a client that cannot be reached by then may keep its session.
 
 ## Boot
 
