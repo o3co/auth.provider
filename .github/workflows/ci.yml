@@ -367,6 +367,17 @@ jobs:
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
       - run: pnpm conformance:patterns "${{ matrix.pattern }}"
+        env:
+          # Where the runner keeps a failed area's whole output (output.log), so the step below finds it.
+          TMPDIR: ${{ runner.temp }}
+      - name: Keep the output of each area that failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-output-${{ matrix.pattern }}
+          path: ${{ runner.temp }}/conformance-*/output.log
+          if-no-files-found: ignore
+          retention-days: 14
 
   # The check required of a release: every area and every pattern passed.
   conformance:
