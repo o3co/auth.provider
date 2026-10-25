@@ -2,7 +2,7 @@ import { upstreamEndSessions } from "@mod/federation-tokens";
 import { defineModule } from "@mod/kernel";
 import { upstreamEnds } from "@mod/rp-logout";
 
-export default defineModule({ name: "rp-logout-federation" }, (m) => [
+export default defineModule({ name: "rp-logout-federation", takes: [upstreamEndSessions] }, (m) => [
 	m.contribute(upstreamEnds).by(async (c) => {
 		const ends = await c.get(upstreamEndSessions);
 		return {

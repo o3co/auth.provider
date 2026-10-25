@@ -50,7 +50,7 @@ export function memoryStores(now: () => number = () => 0) {
 		hold: (name, mark, lifetimeMs) => lockStand.records.create(name, mark, lifetimeMs),
 		update: lockStand.records.change,
 	};
-	const module = defineModule({ name: "federation-tokens-stores" }, (m) => [
+	const module = defineModule({ name: "federation-tokens-stores", takes: [] }, (m) => [
 		m.provide(upstreamTokenStore).by(() => records),
 		m.provide(refreshLocks).by(() => locks),
 	]);

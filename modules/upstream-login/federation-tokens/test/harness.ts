@@ -75,7 +75,7 @@ export async function harness(
 	const offered: Record<string, Offered> = { corp: options.offered ?? {}, other: {} };
 	/** Subjects whose sessions fall short of a requirement at use. */
 	const short = new Set<string>();
-	const stubs = defineModule({ name: "stubs" }, (m) => [
+	const stubs = defineModule({ name: "stubs", takes: [routes, upstreamLoginReceivers] }, (m) => [
 		m.provide(issuer).by(() => ({ url: "https://issuer.example" })),
 		m.provide(sessionTokens).by(() => ({
 			sessionOf: async (id) => {
@@ -116,7 +116,7 @@ export async function harness(
 			all: await c.collect(routes),
 		})),
 	]);
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			clientsModule,
@@ -150,7 +150,8 @@ export async function harness(
 			...federationTokensConfig(options.settings),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	const { route, receivers, all } = app.get(probed);
 	/** A session opened for `subject`. */
 	const login = async (subject = "alice") => {
@@ -219,6 +220,7 @@ export async function harness(
 	};
 	return {
 		app,
+		input,
 		/** Every route composed, for a test that drives another module's. */
 		routes: all,
 		stores,

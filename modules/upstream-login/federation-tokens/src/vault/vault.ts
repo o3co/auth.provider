@@ -94,6 +94,9 @@ export function vaultWith(seal: Seal) {
 
 export type Vault = ReturnType<typeof vaultWith>;
 
+/** What `vaultFrom` takes from the build context. */
+export const vaultTakes = [sealContract] as const;
+
 /** The vault, sealing with the composition's seal. */
 export async function vaultFrom(c: Pick<BuildContext<unknown>, "get">): Promise<Vault> {
 	return vaultWith(await c.get(sealContract));

@@ -10,6 +10,9 @@ interface Parts {
 	readonly site: Pick<Site, "origin" | "secureCookies">;
 }
 
+/** What `idpsIn` takes from the build context. */
+export const idpsTakes = [idpTypes, site] as const;
+
 export async function idpsIn(c: BuildContext<Settings>) {
 	const { idps, refusals } = await openIdps({
 		types: await c.collect(idpTypes),

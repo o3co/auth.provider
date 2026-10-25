@@ -185,7 +185,9 @@ async function open(world: World = {}) {
 	});
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound" }, (m) => [m.provide(outbound).by(() => stub.outbound)]),
+			defineModule({ name: "outbound", takes: [] }, (m) => [
+				m.provide(outbound).by(() => stub.outbound),
+			]),
 			externalJwtModule,
 		],
 		config: kernelConfig(),
@@ -1261,13 +1263,15 @@ describe("idp-oidc", () => {
 		const recorded = recordingLog();
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "outbound" }, (m) => [
+				defineModule({ name: "outbound", takes: [] }, (m) => [
 					m.provide(outbound).by(() => stub.outbound),
 					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpOidc,
-				defineModule({ name: "types" }, (m) => [m.provide(types).by((c) => c.collect(idpTypes))]),
+				defineModule({ name: "types", takes: [idpTypes] }, (m) => [
+					m.provide(types).by((c) => c.collect(idpTypes)),
+				]),
 			],
 			config: kernelConfig(),
 			runtime: quietRuntime({ clock, log: recorded.log }),

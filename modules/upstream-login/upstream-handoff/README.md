@@ -15,7 +15,7 @@
 - `handoff.joined` (session, IdP, tokens): a link's tokens, handed at once to the open session it joined, answering what it gave each receiver; `handoff.withdrawn` (session id, IdP, that answer) takes them back.
 - `noHandoff`, where no module receives upstream tokens.
 - Extension point `handoffSealing`: the seal a held login's tokens are kept under. Where some module receives upstream tokens, none or two refuse boot.
-- Composition definition (`./module`): provides `handoff` over the receivers in name order, taking the held login store and the sealing contributed only where some module receives upstream tokens. `upstream-handoff-seal` contributes the composed `seal`.
+- Composition definition (`./module`): provides `handoff` over the receivers in name order, taking the held login store and the sealing contributed in every assembly, used only where some module receives upstream tokens. `upstream-handoff-seal` contributes the composed `seal`.
 - Store interface for held logins, its needs (survives failover, names from the secret) and contract test (`./testing`).
 
 ## Invariants

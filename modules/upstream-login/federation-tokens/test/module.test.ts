@@ -1,3 +1,4 @@
+import { takesUnused } from "@mod/kernel/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { harness } from "./harness.ts";
 
@@ -38,4 +39,8 @@ describe("the routes as composed", () => {
 		s.advance(1);
 		expect(await s.send("POST")).toBe(200);
 	});
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused((await harness()).input)).toEqual({});
 });

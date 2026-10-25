@@ -60,6 +60,9 @@ export const handoffSealing = extensionPoint<Seal>("upstream-handoff.sealing", {
 	multiplicity: "many",
 });
 
+/** What `handoffIn` takes from the build context, after the point it names. */
+export const handoffTakes = [upstreamLoginReceivers, handoffSealing, heldLoginStore] as const;
+
 export const noHandoff: Handoff = {
 	of: () => undefined,
 	opened: async () => {},
@@ -83,9 +86,10 @@ export async function handoffIn(
 	const receivers = (await c.collect(upstreamLoginReceivers)).toSorted((a, b) =>
 		a.name < b.name ? -1 : 1,
 	);
+	const [contributed, ...others] = await c.collect(handoffSealing);
+	const held = await c.get(heldLoginStore);
 	// Sealing is needed only where a module receives upstream tokens.
 	if (receivers.length === 0) return noHandoff;
-	const [contributed, ...others] = await c.collect(handoffSealing);
 	if (others.length > 0)
 		return c.refuse("upstream-handoff", "more than one sealing is contributed");
 	if (!contributed) {
@@ -97,7 +101,7 @@ export async function handoffIn(
 	return handoffWith({
 		receivers,
 		seal: contributed,
-		held: await c.get(heldLoginStore),
+		held,
 		clock: c.clock,
 		random: c.random,
 		log: c.log,

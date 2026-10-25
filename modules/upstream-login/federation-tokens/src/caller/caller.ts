@@ -71,6 +71,9 @@ export function callerWith(parts: Parts) {
 
 export type CallerCheck = ReturnType<typeof callerWith>;
 
+/** What `callerFrom` takes from the build context. */
+export const callerTakes = [senderBinding, tokens, sessionTokens, sessions] as const;
+
 /** The check, from the contracts it reads. */
 export async function callerFrom(c: Pick<BuildContext<unknown>, "get">): Promise<CallerCheck> {
 	return callerWith({

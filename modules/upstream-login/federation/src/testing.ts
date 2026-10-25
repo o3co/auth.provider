@@ -29,7 +29,7 @@ export function testIdpType(
 	more: Pick<Upstream, "refresh" | "endSession" | "delegation"> = {},
 ) {
 	const asked = { starts: [] as AuthorizationStart[], exchanges: [] as CodeExchange[] };
-	const module = defineModule({ name: "test-idp-type" }, (m) => [
+	const module = defineModule({ name: "test-idp-type", takes: [] }, (m) => [
 		m.contribute(idpTypes).by(() =>
 			idpType({
 				type: "test",

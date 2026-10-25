@@ -9,7 +9,14 @@ import {
 	type UpstreamTokenStore,
 	upstreamTokenStore,
 } from "../store.ts";
-import { type Entries, type Entry, type Kept, type Vault, vaultFrom } from "../vault/vault.ts";
+import {
+	type Entries,
+	type Entry,
+	type Kept,
+	type Vault,
+	vaultFrom,
+	vaultTakes,
+} from "../vault/vault.ts";
 
 /** What a request for a session's upstream token comes to. */
 export type Current =
@@ -413,6 +420,15 @@ export function renewalWith(parts: Parts) {
 }
 
 export type Renewal = ReturnType<typeof renewalWith>;
+
+/** What `renewalIn` takes from the build context, `sessions` late, and the vault's. */
+export const renewalTakes = [
+	sessions,
+	upstreamTokenStore,
+	refreshLocks,
+	upstreams,
+	...vaultTakes,
+] as const;
 
 /** The keeper over the build context: its stores, `upstreams`, the vault and `session`'s entries, taken here. */
 export async function renewalIn(c: BuildContext<Settings>): Promise<Renewal> {

@@ -15,7 +15,7 @@ import { determinedSource } from "@mod/request-source";
 import { type Upstreams, upstreams } from "@mod/upstreams";
 import { z } from "zod";
 import events from "../audit-events.ts";
-import { type CallerCheck, callerFrom } from "../caller/caller.ts";
+import { type CallerCheck, callerFrom, callerTakes } from "../caller/caller.ts";
 import { endSessionAt } from "../end-session.ts";
 import type { Current, Renewal } from "../renewal/renewal.ts";
 import type { Settings } from "../section.ts";
@@ -174,6 +174,9 @@ async function logout(
 	if (location === undefined) return jsonAnswer(200, { disconnected: true });
 	return { status: 303, headers: { ...noStore, location } };
 }
+
+/** What `routesIn` takes from the build context, and its caller check's. */
+export const routesTakes = [clients, upstreams, audit, ...callerTakes] as const;
 
 /** The route over the build context, its caller check and its contracts taken here, answering with `renewal`. */
 export async function routesIn(c: BuildContext<Settings>, renewal: Renewal): Promise<Route> {

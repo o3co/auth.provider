@@ -14,7 +14,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
 import { type LoginFrom, loginGates, logins, openedAfterHold, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
@@ -123,7 +123,7 @@ async function serve(setup: Setup = {}) {
 	const idp = testIdpType(setup.answers ?? answering(["good", alice]), setup.more);
 	const saved: string[] = [];
 	const keptHeld = memoryRecords<StoredHeldLogin>(() => now, { shards: 1, perShard: 1 });
-	const held = defineModule({ name: "held" }, (m) => [
+	const held = defineModule({ name: "held", takes: [] }, (m) => [
 		m.provide(heldLoginStore).by(() => ({
 			save: async (key, value, lifetimeMs) => {
 				saved.push(JSON.stringify(value));
@@ -134,7 +134,7 @@ async function serve(setup: Setup = {}) {
 		})),
 	]);
 	const keptTrips = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-	const trips = defineModule({ name: "trips" }, (m) => [
+	const trips = defineModule({ name: "trips", takes: [] }, (m) => [
 		m.provide(roundTripStore).by(() => ({
 			save: async (key, value, lifetimeMs) => {
 				saved.push(JSON.stringify(value));
@@ -145,7 +145,7 @@ async function serve(setup: Setup = {}) {
 	]);
 	const receiving = setup.receivers ?? [];
 	const audit = auditStandIn();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			...(setup.withoutCsrf ? [] : [csrfStandIn]),
@@ -188,7 +188,8 @@ async function serve(setup: Setup = {}) {
 			}),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const at = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -249,6 +250,7 @@ async function serve(setup: Setup = {}) {
 		return (await app.get(logins)).login(testRequest(), facts, {}, from);
 	};
 	return {
+		input,
 		saved,
 		declared: <T>(of: ReturnType<typeof contract<T>>) => app.get(of),
 		resume,
@@ -346,7 +348,7 @@ describe("federation", () => {
 	it("begins anew where the browser's live round trip carries what federation does not read", async () => {
 		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
 		let garbled = false;
-		const trips = defineModule({ name: "trips" }, (m) => [
+		const trips = defineModule({ name: "trips", takes: [] }, (m) => [
 			m.provide(roundTripStore).by(() => ({
 				save: kept.records.create,
 				update: async (key, change) => {
@@ -372,7 +374,7 @@ describe("federation", () => {
 		 */
 		const earlier = ({ mixed = false, forced = false } = {}) => {
 			const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-			return defineModule({ name: "trips" }, (m) => [
+			return defineModule({ name: "trips", takes: [] }, (m) => [
 				m.provide(roundTripStore).by(() => ({
 					save: async (key, value, lifetimeMs) => {
 						const { carried: was, ...rest } = value as unknown as {
@@ -435,7 +437,7 @@ describe("federation", () => {
 
 	it("refuses a callback whose round trip goes on to a continuation not composed, clearing its cookie and warning", async () => {
 		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-		const trips = defineModule({ name: "trips" }, (m) => [
+		const trips = defineModule({ name: "trips", takes: [] }, (m) => [
 			m.provide(roundTripStore).by(() => ({
 				save: async (key, value, lifetimeMs) => {
 					// Carried as if a continuation of another name had begun it.
@@ -995,7 +997,7 @@ describe("federation", () => {
 	});
 
 	it("answers a login a gate holds with the gate's answer, opening no session", async () => {
-		const gate = defineModule({ name: "gate" }, (m) => [
+		const gate = defineModule({ name: "gate", takes: [] }, (m) => [
 			m.contribute(loginGates).by(() => ({
 				name: "second",
 				hold: async () => ({
@@ -1020,7 +1022,7 @@ describe("federation", () => {
 	});
 
 	it("sends a browser whose login a gate holds to the held page, by 303 with no query, and its cookies", async () => {
-		const gate = defineModule({ name: "gate" }, (m) => [
+		const gate = defineModule({ name: "gate", takes: [] }, (m) => [
 			m.contribute(loginGates).by(() => ({
 				name: "second",
 				hold: async () => ({
@@ -1118,7 +1120,7 @@ describe("federation", () => {
 
 	it("answers a round trip carrying what it does not know as invalid_state, spent and its cookie cleared", async () => {
 		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
-		const odd = defineModule({ name: "trips" }, (m) => [
+		const odd = defineModule({ name: "trips", takes: [] }, (m) => [
 			m.provide(roundTripStore).by(() => ({
 				save: (key, value, lifetimeMs) =>
 					kept.records.create(
@@ -1139,7 +1141,7 @@ describe("federation", () => {
 	});
 
 	it("is unavailable when it cannot keep a round trip", async () => {
-		const alwaysExists = defineModule({ name: "trips" }, (m) => [
+		const alwaysExists = defineModule({ name: "trips", takes: [] }, (m) => [
 			m.provide(roundTripStore).by(() => ({
 				save: async () => "exists" as const,
 				update: async () => undefined,
@@ -1184,7 +1186,7 @@ describe("federation", () => {
 	it("declares its start and its callback apart, each with its own reason and its rate limit, and each reaches its own", async () => {
 		const declared = contract<readonly Route[]>("test.declared");
 		const reached: string[] = [];
-		const probe = defineModule({ name: "probe" }, (m) => [
+		const probe = defineModule({ name: "probe", takes: [routes] }, (m) => [
 			m.provide(declared).by((c) => c.collect(routes)),
 			m.contribute(requestEnds).by(() => ({ ended: (end) => void reached.push(end.route ?? "") })),
 		]);
@@ -1224,7 +1226,7 @@ describe("federation", () => {
 
 	it("names each IdP to users with its upstream's issuer, so another route naming it for another issuer refuses boot", async () => {
 		const naming = (issuer: string) =>
-			defineModule({ name: "elsewhere" }, (m) => [
+			defineModule({ name: "elsewhere", takes: [] }, (m) => [
 				m.contribute(upstreamNames).by(() => ({
 					declaredBy: "elsewhere",
 					names: [{ name: "corp", issuer }],
@@ -1326,7 +1328,9 @@ describe("a deployment with no IdP", () => {
 });
 
 const returnTo = (path: string) =>
-	defineModule({ name: `return-${path}` }, (m) => [m.contribute(returnPaths).by(() => ({ path }))]);
+	defineModule({ name: `return-${path}`, takes: [] }, (m) => [
+		m.contribute(returnPaths).by(() => ({ path })),
+	]);
 
 interface Held {
 	readonly facts: LoginFacts;
@@ -1337,7 +1341,7 @@ interface Held {
 /** A stand-in gate that holds every login, keeping what login-gates hands it, as a gate that resumes it would. */
 function holdingGate() {
 	const held: Held[] = [];
-	const module = defineModule({ name: "holding-gate" }, (m) => [
+	const module = defineModule({ name: "holding-gate", takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "second",
 			hold: async (_request, facts, done, from) => {
@@ -1360,7 +1364,7 @@ interface Told {
 function receivers(names: readonly string[], failing: readonly string[] = []) {
 	const told: Told[] = [];
 	const modules = names.map((name) =>
-		defineModule({ name: `receiver-${name}` }, (m) => [
+		defineModule({ name: `receiver-${name}`, takes: [] }, (m) => [
 			m.contribute(upstreamLoginReceivers).by(() => ({
 				name,
 				received: async (at) => {
@@ -1449,7 +1453,7 @@ describe("upstream tokens", () => {
 	});
 
 	it("leaves a login another caller asked for alone", async () => {
-		const other = defineModule({ name: "other-caller" }, (m) => [
+		const other = defineModule({ name: "other-caller", takes: [] }, (m) => [
 			m.contribute(openedAfterHold).by(() => ({ caller: "other", opened: async () => {} })),
 		]);
 		const told = receivers(["a"]);
@@ -1479,7 +1483,7 @@ describe("upstream tokens", () => {
 
 	it("is unavailable when it cannot keep the tokens of a held login", async () => {
 		const gate = holdingGate();
-		const full = defineModule({ name: "held" }, (m) => [
+		const full = defineModule({ name: "held", takes: [] }, (m) => [
 			m.provide(heldLoginStore).by(() => ({
 				save: async () => "exists" as const,
 				update: async () => undefined,
@@ -1492,4 +1496,11 @@ describe("upstream tokens", () => {
 		expect([res.status, res.body]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(res.cookies).toContain(clearedOf(res.started.cookie));
 	});
+});
+
+it("takes all it names, a module receiving upstream tokens or none", async () => {
+	expect(await takesUnused((await serve()).input)).toEqual({});
+	await stop();
+	const { modules } = receivers(["a"]);
+	expect(await takesUnused((await serve({ receivers: modules })).input)).toEqual({});
 });

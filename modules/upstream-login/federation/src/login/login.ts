@@ -10,6 +10,7 @@ import {
 	type Continuation,
 	type Idp,
 	landingIn,
+	landingTakes,
 	proves,
 	recorderOf,
 	secondOf,
@@ -29,6 +30,9 @@ export interface LoginParts {
 
 /** The name login-gates tells when a login federation asked for opens after a hold. */
 export const loginCaller = "federation";
+
+/** What `loginIn` takes from the build context, and the landing's, whose `site` its held page is checked against. */
+export const loginTakes = [logins, users, audit, handoff, ...landingTakes] as const;
 
 export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> {
 	const heldPage = c.section["held-page"];
