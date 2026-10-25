@@ -15,6 +15,7 @@
 		"@mod/conformance-legacy": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/spec-checklist": "workspace:*",
 		"vitest": "5.0.5"
 	}
 }
