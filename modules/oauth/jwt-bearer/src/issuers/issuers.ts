@@ -74,7 +74,9 @@ const narrowing = {
 		.duration("s")
 		.pipe(z.number().int().min(1).max(86_400))
 		.optional()
-		.describe("This issuer's longest assertion lifetime, no longer than the section's."),
+		.describe(
+			"How far ahead its `exp`, and how far back its `iat`, this issuer's assertion may be when it is taken, no longer than the section's.",
+		),
 	"clock-skew": setting
 		.duration("s")
 		.pipe(z.number().int().min(0).max(300))

@@ -47,7 +47,9 @@ const section = z.strictObject({
 		.duration("s")
 		.pipe(z.number().int().min(1).max(86_400))
 		.prefault("1h")
-		.describe("The longest lifetime an assertion may claim, from `1s` to `1d` in whole seconds."),
+		.describe(
+			"How far ahead its `exp`, and how far back its `iat`, an assertion may be when it is taken, from `1s` to `1d` in whole seconds.",
+		),
 	"clock-skew": setting
 		.duration("s")
 		.pipe(z.number().int().min(0).max(300))
