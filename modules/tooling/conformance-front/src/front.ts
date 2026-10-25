@@ -71,6 +71,11 @@ export interface FrontOptions {
 	/** The address the front listens on. */
 	readonly listen: string;
 	readonly tls: { readonly key: string; readonly cert: string };
+	/**
+	 * The sender the app is told of, in place of the peer's address: for a client on this machine,
+	 * whose loopback address the app takes for its trusted proxy and so finds no sender.
+	 */
+	readonly sender?: string;
 	/** Asks each client for a certificate, and forwards it URL-encoded in this header. */
 	readonly clientCertificate?: { readonly header: string };
 	/** Answers a request at the front; one it leaves goes on to the app. */
@@ -162,7 +167,7 @@ export async function startFront(options: FrontOptions): Promise<Front> {
 		const { url, body } = options.rewrite?.(received) ?? received;
 		const headers: OutgoingHttpHeaders = passedOn(req.headers, dropped);
 		headers["x-forwarded-proto"] = "https";
-		headers["x-forwarded-for"] = received.address;
+		headers["x-forwarded-for"] = options.sender ?? received.address;
 		if (body.length > 0 || req.headers["content-length"] !== undefined)
 			headers["content-length"] = String(body.length);
 		const presented = (req.socket as TLSSocket).getPeerCertificate?.();
