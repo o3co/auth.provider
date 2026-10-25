@@ -6,7 +6,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { packedOf } from "../release/seal.ts";
+import { packedOf } from "../packed/packed.ts";
 import { listedProblems } from "./boms.ts";
 
 const [directory, listing] = process.argv.slice(2);

@@ -1,5 +1,5 @@
 /** The release's lists of what it ships (CycloneDX), as the tools write them, named for publication and checked against what it packed. */
-import type { Packed } from "../release/seal.ts";
+import type { Packed } from "../packed/packed.ts";
 
 /** A CycloneDX document, as far as these functions read and write it. */
 export interface Bom {
