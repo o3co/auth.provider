@@ -12,5 +12,5 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 8414: OAuth 2.0 Authorization Server Metadata](rfc8414.md) | 26 | 18 | 0 | 18 | 0 | 2 | 0 | 2 | 0 | 6 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
-| [RFC 9700: Best Current Practice for OAuth 2.0 Security](rfc9700.md) | 40 | 21 | 0 | 21 | 0 | 17 | 0 | 17 | 0 | 2 |
-| Total | 238 | 157 | 0 | 157 | 0 | 58 | 0 | 58 | 0 | 23 |
+| [RFC 9700: Best Current Practice for OAuth 2.0 Security](rfc9700.md) | 39 | 20 | 0 | 20 | 0 | 17 | 0 | 17 | 0 | 2 |
+| Total | 237 | 156 | 0 | 156 | 0 | 58 | 0 | 58 | 0 | 23 |
