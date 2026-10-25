@@ -43,6 +43,25 @@ describe("titlesIn", () => {
 		});
 	});
 
+	it("reads the title a tagged template's table leads to, and takes no title from the table", () => {
+		const tagged = [
+			"it.each`",
+			"\ta | b",
+			"\t$" + "{1} | $" + "{2}",
+			'`("adds $a and $b [rfc7009-2-a]", () => {});',
+			"describe.for`x $" + '{1}`("grouped [rfc7009-2-b]", () => {});',
+			"test.concurrent.each`n $" + '{1} [rfc7009-2-c]`("case [rfc7009-2-d]", () => {});',
+		].join("\n");
+		expect(titlesIn(tagged, true)).toEqual({
+			titles: [
+				{ title: "adds $a and $b [rfc7009-2-a]", ids: ["rfc7009-2-a"] },
+				{ title: "grouped [rfc7009-2-b]", ids: ["rfc7009-2-b"] },
+				{ title: "case [rfc7009-2-d]", ids: ["rfc7009-2-d"] },
+			],
+			stray: ["rfc7009-2-c"],
+		});
+	});
+
 	it("names an ID written anywhere but a title: a wrapper's title, a comment, any template, a plain string", () => {
 		const wrapped = [
 			"const unless = (d: string) => it.runIf(d === '');",

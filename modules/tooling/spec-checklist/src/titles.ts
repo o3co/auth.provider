@@ -6,11 +6,22 @@ const runners = new Set(["it", "test", "describe"]);
 const direct = new Set(["only", "skip", "todo", "concurrent", "sequential", "fails", "shuffle"]);
 /** Modifiers that take a table or a condition, and return what takes the title. */
 const factories = new Set(["each", "for", "runIf", "skipIf"]);
+/** Of those, the ones that also take their table as a tagged template. */
+const tables = new Set(["each", "for"]);
 
-/** A runner, through modifiers that take the title and the calls of those that return what does. */
+/**
+ * A runner, through modifiers that take the title and the calls of those that return what does,
+ * a table given as a tagged template among them.
+ */
 function isChain(e: ts.Expression): boolean {
 	if (ts.isIdentifier(e)) return runners.has(e.text);
 	if (ts.isPropertyAccessExpression(e)) return direct.has(e.name.text) && isChain(e.expression);
+	if (ts.isTaggedTemplateExpression(e))
+		return (
+			ts.isPropertyAccessExpression(e.tag) &&
+			tables.has(e.tag.name.text) &&
+			isChain(e.tag.expression)
+		);
 	if (ts.isCallExpression(e))
 		return (
 			ts.isPropertyAccessExpression(e.expression) &&
