@@ -39,3 +39,13 @@ Still reportable, though no guarantee names them:
 
 Which versions get fixes is [Supported versions](#supported-versions), as it stands when a fix is published; a report against a version outside it is still welcome, and is answered as the policy says.
 
+## How a fix is made and published
+
+A fix stays as private as the report until the version that carries it is released:
+
+1. The fix is made in the advisory's temporary private fork, as a private pull request, with its change record ([findings and fixes](docs/audit/findings.md)).
+2. GitHub runs no Actions there, so the checks that hold the guarantees are run on the fix's branch on a private machine, and their evidence is kept with the change record: the tests, the conformance scenes, the checklists' compliance, the guard and the release check.
+3. The fixed version is published in one sequence: the fix to the public branches, the tag, the release workflow, and the advisory ([a security fix's release](docs/releasing.md#a-security-fixs-release)). The fix is visible only while that workflow runs.
+4. After the release, the change record is reviewed and published, with CI's run on the published commits added to it.
+
+The advisory and the changelog name the kind of hole closed, the versions affected and the version that fixes it.
