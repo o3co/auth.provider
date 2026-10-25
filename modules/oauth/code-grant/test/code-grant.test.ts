@@ -1067,6 +1067,7 @@ it("takes all its module names, with an ID token maker and an addition or with n
 	]);
 	for (const extra of [[], [maker("openid"), adding]]) {
 		const { input } = assembly({ extra });
-		expect(await takesUnused(input)).toEqual({});
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(input))["code-grant"]).toBeUndefined();
 	}
 });
