@@ -29,7 +29,8 @@
 - `client_id`, when given, names the client; otherwise the assertion's `iss` does.
 - `iss` and `sub` are the client's id.
 - `aud` is `issuer`'s URL as one string, judged before the `jti` is spent: the token endpoint's URL, or a list, could be for another authorization server that names this one's token endpoint.
-- A client whose section sets `accept-loose-audience` is also taken with a loose audience: the token endpoint's absolute URL from `token-endpoint`, or a list holding either URL. Each is logged as a `client-assertion.loose_audience` warning with the client. Without the token endpoint's URL, boot is refused.
+- A client whose section sets `accept-loose-audience` is also taken with a loose audience: the token endpoint's absolute URL from `token-endpoint`, or a list holding either URL. Each is logged as a `client-assertion.loose_audience` warning with the client.
+- Without the token endpoint's URL from `token-endpoint`, boot is refused, whether or not a client accepts a loose audience.
 - The assertion is checked against the client's own keys, written or at its `jwks-uri`, in any asymmetric algorithm `external-jwt` knows. A key set is fetched from its URL's host alone; while it cannot be fetched, the answer is unavailable.
 - The longest lifetime is `max-lifetime`; the clock allowance is `clock-skew`.
 - `jti` is a well-formed string of 1–256 characters.
