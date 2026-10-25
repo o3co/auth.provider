@@ -16,7 +16,7 @@
 - A binding begun while the subject held no counting factor binds only if none counts when it is written; else it writes nothing, answers `first-binding-closed`, and records `mfa.first_binding_conflict` (`kind`, `reason`). Of two first bindings at once, one binds.
 - A binding asked from a login holds the password alone: it begins and binds only as the subject's first counting factor, whenever it began; once one counts, `begin` and `bind` answer `first-binding-closed` and record the conflict.
 - A first counting factor begins only where every gate contributed admits it, given what the caller holds (`mfa-binding-proof`'s asks its proof); `begin` asks the kind for nothing before. With no gate, the first factor trusts whoever binds it.
-- `bind` writes no recovery codes; a binding of a subject holding none keeps them a place. A label not of its shape is refused before anything is read.
+- `bind` writes no recovery codes; a binding of a subject holding none keeps them a place and answers them due, only where a factor that counts stands once it is written (a first way back alone has none, as the reissue asks a counting one). A label not of its shape is refused before anything is read.
 - With a witnessing, its standing judges a first binding, each binding settles it after its write, and a first binding whose factor a reset took is `first-binding-closed`.
 
 ## Depends on
