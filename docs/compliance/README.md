@@ -7,8 +7,9 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | Specification | Items | MUST in scope | MUST mapped | MUST hole | MUST noncompliant | SHOULD in scope | SHOULD mapped | SHOULD hole | SHOULD deviates | Out of scope |
 |---|---|---|---|---|---|---|---|---|---|---|
 | [RFC 6749: The OAuth 2.0 Authorization Framework](rfc6749.md) | 114 | 80 | 0 | 80 | 0 | 25 | 0 | 25 | 0 | 9 |
+| [RFC 6750: The OAuth 2.0 Authorization Framework: Bearer Token Usage](rfc6750.md) | 31 | 18 | 0 | 18 | 0 | 9 | 0 | 9 | 0 | 4 |
 | [RFC 7009: OAuth 2.0 Token Revocation](rfc7009.md) | 9 | 7 | 0 | 7 | 0 | 2 | 0 | 2 | 0 | 0 |
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 8414: OAuth 2.0 Authorization Server Metadata](rfc8414.md) | 26 | 18 | 0 | 18 | 0 | 2 | 0 | 2 | 0 | 6 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
-| Total | 167 | 118 | 0 | 118 | 0 | 32 | 0 | 32 | 0 | 17 |
+| Total | 198 | 136 | 0 | 136 | 0 | 41 | 0 | 41 | 0 | 21 |
