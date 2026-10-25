@@ -145,8 +145,8 @@ export function switchedModule<T extends object>(
 }
 
 /**
- * Each handle a module's takes name that no factory took in this assembly, by module (a module
- * without takes left out, and one that took all it names): a stale take shows in a test, for each
+ * Each handle a module's takes name that no factory took in this assembly, by module (one that
+ * took all it names left out): a stale take shows in a test, for each
  * section the test gives. It stops the assembly before it answers, and refuses as the boot does.
  */
 export async function takesUnused(

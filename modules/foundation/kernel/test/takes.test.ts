@@ -81,7 +81,7 @@ describe("a module's takes, checked before anything is built", () => {
 						(m) => [m.provide(shared).by(() => "a")],
 					),
 					defineModule({ name: "fixed", section: z.object({ on: z.boolean() }), takes: [missing] }),
-					defineModule({ name: "unsafe", replicaSafe: false }, (m) => [
+					defineModule({ name: "unsafe", replicaSafe: false, takes: [] }, (m) => [
 						m.provide(shared).by(() => "b"),
 					]),
 				],
@@ -106,7 +106,7 @@ describe("a module's takes, checked before anything is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "pool-owner" }, (m) => [
+					defineModule({ name: "pool-owner", takes: [] }, (m) => [
 						m.provide(pool).by((c) => {
 							ran.push("pool opened");
 							c.onStop(() => {
@@ -131,7 +131,7 @@ describe("a module's takes, checked before anything is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "owner" }, (m) => [m.provide(kept).by(() => "k")]),
+					defineModule({ name: "owner", takes: [] }, (m) => [m.provide(kept).by(() => "k")]),
 					defineModule({ name: "outsider", takes: [kept] }),
 				],
 				config: single,
@@ -157,7 +157,7 @@ describe("a module's takes, checked before anything is built", () => {
 			assemble({
 				modules: [
 					defineModule({ name: "owner", takes: [one, some] }),
-					defineModule({ name: "two" }, (m) => [
+					defineModule({ name: "two", takes: [] }, (m) => [
 						m.contribute(one).by(() => "a"),
 						m.contribute(one).by(() => "b"),
 					]),
@@ -176,7 +176,7 @@ describe("a module's takes, checked before anything is built", () => {
 					defineModule({ name: "owner", takes: [some] }, (m) => [
 						m.provide(contract<readonly string[]>("all")).by((c) => c.collect(some)),
 					]),
-					defineModule({ name: "broken" }, (m) => [
+					defineModule({ name: "broken", takes: [] }, (m) => [
 						m.contribute(some).by(() => {
 							throw new Error("broken");
 						}),
@@ -244,7 +244,7 @@ describe("a module's takes, held while it is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "provider" }, (m) => [
+					defineModule({ name: "provider", takes: [] }, (m) => [
 						m.provide(declared).by(() => "d"),
 						m.provide(undeclared).by(() => "u"),
 						m.provide(later).by(() => "l"),
@@ -274,18 +274,19 @@ describe("a module's takes, held while it is built", () => {
 		]);
 	});
 
-	it("lets a module without takes take as before", async () => {
-		const value = contract<string>("value");
-		const assembly = await assemble({
-			modules: [
-				defineModule({ name: "older" }, (m) => [m.provide(value).by(() => "v")]),
-				defineModule({ name: "oldest" }, (m) => [
-					m.provide(contract<string>("again")).by((c) => c.get(value)),
-				]),
-			],
-			config: single,
-		});
-		expect(assembly.get(value)).toBe("v");
+	it("refuses a module that declares no takes, as one written without the types may be", async () => {
+		// A module's definition from plain JavaScript, or one cast past its type: no takes at all.
+		const untyped = { name: "untyped" } as unknown as Parameters<typeof defineModule>[0];
+		const refusals = await refusalsOf(
+			assemble({
+				modules: [
+					defineModule(untyped, (m) => [m.provide(contract<string>("v")).by(() => "v")]),
+					defineModule({ name: "declared", takes: [] }),
+				],
+				config: single,
+			}),
+		);
+		expect(refusals).toEqual([{ where: "untyped", reason: "declares no takes" }]);
 	});
 });
 

@@ -17,7 +17,7 @@ type Call = (log: Log) => void;
 
 /** A sink module keeping what it gets under `name`. */
 function sink(name: string, got: (string | LogLine)[], write?: LogSink["write"]): Module {
-	return defineModule({ name }, (m) => [
+	return defineModule({ name, takes: [] }, (m) => [
 		m.contribute(logSinks).by(() => ({
 			write:
 				write ??
@@ -30,7 +30,7 @@ function sink(name: string, got: (string | LogLine)[], write?: LogSink["write"])
 
 /** A module whose provision logs `call` once built. */
 function speaker(call: Call, name = "speaker"): Module {
-	return defineModule({ name }, (m) => [
+	return defineModule({ name, takes: [] }, (m) => [
 		m.provide(contract<object>(name)).by((c) => {
 			call(c.log);
 			return {};
@@ -167,14 +167,14 @@ describe("log sinks", () => {
 	it("builds the sinks before the other parts and drops the lines logged while they build", async () => {
 		const got: (string | LogLine)[] = [];
 		const needed = contract<object>("needed");
-		const logging = defineModule({ name: "logging" }, (m) => [
+		const logging = defineModule({ name: "logging", takes: [needed] }, (m) => [
 			m.contribute(logSinks).by(async (c) => {
 				c.log.error("from the sink");
 				await c.get(needed);
 				return { write: (line: LogLine) => void got.push(line) };
 			}),
 		]);
-		const before = defineModule({ name: "before" }, (m) => [
+		const before = defineModule({ name: "before", takes: [] }, (m) => [
 			m.provide(needed).by((c) => {
 				c.log.error("while sinks build");
 				return {};
@@ -190,7 +190,7 @@ describe("log sinks", () => {
 	it("hands a failed periodic run's line to the sinks", async () => {
 		vi.useFakeTimers();
 		const got: (string | LogLine)[] = [];
-		const failing = defineModule({ name: "failing" }, (m) => [
+		const failing = defineModule({ name: "failing", takes: [] }, (m) => [
 			m.provide(contract<object>("failing")).by((c: BuildContext<unknown>) => {
 				c.every(100, async () => {
 					throw new Error("once");
@@ -215,7 +215,7 @@ describe("log sinks", () => {
 	it("keeps running a failing periodic task when its warn line meets a throwing sink or log", async () => {
 		vi.useFakeTimers();
 		let runs = 0;
-		const failing = defineModule({ name: "failing" }, (m) => [
+		const failing = defineModule({ name: "failing", takes: [] }, (m) => [
 			m.provide(contract<object>("failing")).by((c: BuildContext<unknown>) => {
 				c.every(100, async () => {
 					runs++;

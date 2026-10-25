@@ -18,14 +18,14 @@ function setUp(list: readonly Probe[]) {
 	let now = 0;
 	const runtime = quietRuntime({ clock: { now: () => now }, log: recorded.log });
 	let context: BuildContext<unknown> | undefined;
-	const asker = defineModule({ name: "asker" }, (m) => [
+	const asker = defineModule({ name: "asker", takes: [] }, (m) => [
 		m.provide(contract<object>("asker")).by((c) => {
 			context = c;
 			return {};
 		}),
 	]);
 	const contributors = list.map((probe, i) =>
-		defineModule({ name: `c${i}` }, (m) => [m.contribute(probes).by(() => probe)]),
+		defineModule({ name: `c${i}`, takes: [] }, (m) => [m.contribute(probes).by(() => probe)]),
 	);
 	return {
 		/** The fields of each warn line so far. */
@@ -316,14 +316,14 @@ describe("readiness", () => {
 	});
 
 	it("rejects when asked during assembly, and after a refused assembly", async () => {
-		const early = defineModule({ name: "early" }, (m) => [
+		const early = defineModule({ name: "early", takes: [] }, (m) => [
 			m.provide(contract<object>("early")).by((c) => c.readinessReport(1000)),
 		]);
 		expect(await refusalsOf(assemble({ modules: [early], config: single }))).toEqual([
 			{ where: "early", reason: "failed during assembly" },
 		]);
 		let held: BuildContext<unknown> | undefined;
-		const holder = defineModule({ name: "holder" }, (m) => [
+		const holder = defineModule({ name: "holder", takes: [] }, (m) => [
 			m.provide(contract<object>("holder")).by((c) => {
 				held = c;
 				return {};

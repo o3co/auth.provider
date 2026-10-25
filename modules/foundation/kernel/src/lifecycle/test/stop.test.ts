@@ -15,7 +15,7 @@ describe("stop", () => {
 		order: string[],
 		hook: (signal: AbortSignal) => Promise<void> | void = () => {},
 	) =>
-		defineModule({ name }, (m) => [
+		defineModule({ name, takes: [] }, (m) => [
 			m.provide(contract<object>(name)).by((c) => {
 				c.onStop((signal) => {
 					order.push(name);
@@ -125,7 +125,7 @@ describe("stop", () => {
 		const seen: string[] = [];
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "p" }, (m) => [
+				defineModule({ name: "p", takes: [] }, (m) => [
 					m.provide(contract<object>("p")).by((c) => {
 						c.every(100, (signal) => {
 							return new Promise<void>((resolve) => {
