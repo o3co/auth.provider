@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Loads } from "../contract.ts";
 
-/** Every answer's policy: nothing loads but from this origin, and no one frames it. */
+/** Every answer's policy: nothing by default; scripts and images from this origin, styles and fonts over https too; no one frames it. */
 const policy = [
 	"default-src 'none'",
 	"base-uri 'self'",

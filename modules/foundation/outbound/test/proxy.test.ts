@@ -270,6 +270,15 @@ it("answers a proxy it cannot reach as unreachable", async () => {
 	expect(await failureOf(out.fetch(at("/jwks")))).toBe("unreachable");
 });
 
+it("asks the proxy for a name as the URL writes it, a trailing dot kept, as it resolves one itself", async () => {
+	const dotted = (path: string) => `https://idp.example.test.:${idpPort}${path}`;
+	expect((await viaProxy().fetch(dotted("/.well-known/openid-configuration"))).status).toBe(200);
+	expect(asked.map((a) => a.target)).toEqual([`idp.example.test.:${idpPort}`]);
+	// Without the proxy, the name is resolved here, its dot kept too.
+	await failureOf(paths({ "plain-loopback": [] }).fetch(dotted("/jwks")));
+	expect(resolved).toEqual(["idp.example.test."]);
+});
+
 it("asks the proxy for an IPv6 destination in brackets, with its port", async () => {
 	const out = paths({
 		proxy: `http://127.0.0.1:${proxyPort}`,

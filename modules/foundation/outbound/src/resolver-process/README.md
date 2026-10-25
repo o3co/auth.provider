@@ -25,7 +25,7 @@ Internal module of `outbound`: name lookups run as the system runs them, in a he
 - More than 64 good addresses fail that lookup alone (`too-many`); nothing is cut before the policy checks them.
 - After a fault, it is started again after a backoff from 100 ms, doubling to 5 seconds, and back to 100 ms once one answers; past 30 such starts in 60 seconds, its lookups fail at once (`refusing`) until the window frees.
 - The first start's failure is final: `start` rejects and nothing is started again. `stop` may be called any number of times, even while starting or waiting to start again: it ends the helper, holding the parent until its end is seen, and waits for it.
-- It logs `outbound.resolver_fault` (pool, reason), `outbound.resolver_recovered`, `outbound.resolver_restarts` (pool, count) and `outbound.resolver_stuck` (pool), never a name or an address.
+- It logs `outbound.resolver_fault` (pool, reason), `outbound.resolver_recovered`, `outbound.resolver_restarts` (pool, restarts) and `outbound.resolver_stuck` (pool), never a name or an address.
 
 ## Depends on
-- node's `child_process` (`fork` alone, in `process.ts`) and `dns/promises` (`lookup` alone, in the helper).
+- node's `child_process` (`fork` alone, in `process.ts`) and `dns/promises` (`lookup` alone, in the helper); `net` (`isIP`, to check an answer's addresses) and `path` (`join`, the helper's file).

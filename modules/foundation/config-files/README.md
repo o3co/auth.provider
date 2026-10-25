@@ -9,7 +9,7 @@
 
 ## Offers
 - `loadConfig` (`ConfigSource`: `files`, highest priority first, and `env`) → a plain tree; `${...}` reaches environment variables and the same file only.
-- `legacyVariablesCheck` (`ConfigSource`) → the boot's warning, or none, as `env`'s `APP_LEGACY_VARIABLES` says: unset or `warn`, the warning; `refuse`, a refused boot at `config-files` where any is set; `ignore`, nothing read. Any other value refuses boot at `APP_LEGACY_VARIABLES`.
+- `legacyVariablesCheck` (`ConfigSource`) → the boot's warning, or none, as `env`'s `APP_LEGACY_VARIABLES` says: unset, empty or `warn`, the warning; `refuse`, a refused boot at `config-files` where any is set; `ignore`, nothing read. Any other value refuses boot at `APP_LEGACY_VARIABLES`.
 - `unreadLegacyVariables` (`ConfigSource`) → the variables 0.17 bound that `env` sets and no file reads; `legacyVariablesWarning` (those names) → the warning, or none. Kept for the entry of an app generated with 0.18, which calls them.
 
 ## Invariants
