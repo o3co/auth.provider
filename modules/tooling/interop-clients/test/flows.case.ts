@@ -192,9 +192,15 @@ describe(`${library.name}: a token for one resource server`, () => {
 		(context) =>
 			excusable(context, "resource", async () => {
 				const result = await run("resource", world.clients.basic, { resource: world.resource });
+				// Both requests carry the parameter: the token takes the code's audience, so its own tells neither.
+				expect(world.seen.authorizations.at(-1)?.searchParams.getAll("resource")).toEqual([
+					world.resource,
+				]);
+				expect(world.seen.tokenRequests.at(-1)?.getAll("resource")).toEqual([world.resource]);
 				const told = await world.introspect(String(result.accessToken));
 				expect(told.active).toBe(true);
-				expect([told.aud].flat()).toContain(world.resource);
+				// The client holds another audience, which a request asking none would get.
+				expect([told.aud].flat()).toEqual([world.resource]);
 			}),
 	);
 });

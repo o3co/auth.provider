@@ -29,6 +29,11 @@ export interface World {
 	readonly resource: string;
 	/** What the provider's introspection answers of a token, asked as the `post` client. */
 	introspect(token: string): Promise<Record<string, unknown>>;
+	/** Each authorization URL a library sent the browser to, and each token request it sent through the front, in order. */
+	readonly seen: {
+		readonly authorizations: readonly URL[];
+		readonly tokenRequests: readonly URLSearchParams[];
+	};
 	/** A browser with its own session: it logs in and follows an authorization URL to the redirect. */
 	browser(): { authorize(url: string): Promise<string> };
 	stop(): Promise<void>;
@@ -39,6 +44,8 @@ const sender = "198.51.100.30";
 const user = { username: "alice", password: "correct horse battery" };
 const redirectUri = "https://rp.example/cb";
 const resource = "https://api.example";
+// The code clients' other audience: what the provider gives where no resource is asked, so asking one shows.
+const otherAudience = "https://other-api.example";
 // A secret with the characters RFC 6749 §2.3.1 form-encodes before Basic, where libraries part ways.
 const awkward = "s3cret+with%odd:chars and space";
 
@@ -62,7 +69,7 @@ const client = (id: string, method: WorldClient["method"], secret?: string): Cli
 	...(secret === undefined ? {} : { secret }),
 	grants: ["authorization_code", "refresh_token"],
 	scopes: ["openid", "profile", "email", "offline_access"],
-	audiences: [resource],
+	audiences: [otherAudience, resource],
 	redirectUris: [redirectUri],
 	firstParty: true,
 });
@@ -111,12 +118,18 @@ export async function startWorld(
 	const dir = await mkdtemp(join(given.under ?? tmpdir(), "interop-clients-"));
 	const tls = await selfSigned("127.0.0.1", dir);
 	let base = "";
+	const authorizations: URL[] = [];
+	const tokenRequests: URLSearchParams[] = [];
 	const front: Front = await startFront({
 		upstream: () => base,
 		publicHost: "127.0.0.1",
 		listen: "127.0.0.1",
 		tls,
 		sender,
+		answered: (request) => {
+			if (request.method === "POST" && request.url.pathname === "/oauth/token")
+				tokenRequests.push(new URLSearchParams(request.body.toString()));
+		},
 	});
 	const key = assertionKey();
 	const clients = {
@@ -172,6 +185,7 @@ export async function startWorld(
 		clients,
 		redirectUri,
 		resource,
+		seen: { authorizations, tokenRequests },
 		async introspect(token: string) {
 			const answer = await fetch(`${base}/oauth/introspect`, {
 				method: "POST",
@@ -196,6 +210,7 @@ export async function startWorld(
 			const at = browserAt(() => base, front.origin, user);
 			return {
 				async authorize(url: string) {
+					authorizations.push(new URL(url));
 					const answer = await at.authorize(authorizationQuery(url, front.origin));
 					if (!answer.at)
 						throw new Error(
