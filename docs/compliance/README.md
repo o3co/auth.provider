@@ -15,4 +15,5 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | [RFC 8693: OAuth 2.0 Token Exchange](rfc8693.md) | 18 | 15 | 0 | 15 | 0 | 2 | 0 | 2 | 0 | 1 |
 | [RFC 8707: Resource Indicators for OAuth 2.0](rfc8707.md) | 3 | 2 | 0 | 2 | 0 | 1 | 0 | 1 | 0 | 0 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
-| Total | 247 | 190 | 0 | 190 | 0 | 35 | 0 | 35 | 0 | 22 |
+| [RFC 9449: OAuth 2.0 Demonstrating Proof of Possession (DPoP)](rfc9449.md) | 30 | 24 | 0 | 24 | 0 | 1 | 0 | 1 | 0 | 5 |
+| Total | 277 | 214 | 0 | 214 | 0 | 36 | 0 | 36 | 0 | 27 |
