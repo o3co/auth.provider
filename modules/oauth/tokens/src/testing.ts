@@ -620,7 +620,7 @@ export function tokensStandIn(
 				const stand: Tokens = {
 					revocable: () => denylist.revocable,
 					accessTokenLifetimeSeconds: () => configured,
-					...issuing(judge, issueAccess),
+					...issuing(judge, issueAccess, c.clock.now),
 					verifyAccess: verify,
 					issuedToOf: async (token) => {
 						const kept = live(token, denylistAllowanceMs);

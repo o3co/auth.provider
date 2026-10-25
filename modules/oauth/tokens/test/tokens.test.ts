@@ -14,7 +14,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
-import { accessTokenSigning } from "@mod/keys";
+import { type AccessTokenSigning, accessTokenSigning } from "@mod/keys";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
@@ -67,11 +67,17 @@ const assembly = (
 		extra = [],
 		origin,
 		issuerUrl = "https://issuer.example",
-	}: { readonly extra?: Module[]; readonly origin?: string; readonly issuerUrl?: string } = {},
+		keys = keysModule,
+	}: {
+		readonly extra?: Module[];
+		readonly origin?: string;
+		readonly issuerUrl?: string;
+		readonly keys?: Module;
+	} = {},
 ) => ({
 	modules: [
 		http,
-		keysModule,
+		keys,
 		issuerModule,
 		senderBindingModule,
 		tokensModule,
@@ -348,7 +354,7 @@ it("writes one audience as a string and more as a list, an empty scope not at al
 	expect(claimsOf(two.token)).toMatchObject({ aud: ["a", "b"], scope: "read" });
 });
 
-it("issues a token already at its end when the cap has passed", async () => {
+it("issues a token already at its end when the cap has passed, answering none left", async () => {
 	const t = await boot({ revocation: "unsupported" });
 	const issued = await issueFor(t, grant, { notAfter: now - 10_000 });
 	expect([issued.expiresIn, issued.expiresAt]).toEqual([0, Math.floor(now / 1000) * 1000]);
@@ -405,4 +411,64 @@ it("takes all it names under either revocation, the denylist only where it keeps
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 		expect((await takesUnused(assembly({ revocation })))["tokens"], revocation).toBeUndefined();
 	}
+});
+
+/** keys, its signing of an access token taking `signing.ms` on the kernel's clock: a remote signer, say. */
+const signing = { ms: 0 };
+const slowKeys: Module = {
+	...keysModule,
+	provides: (keysModule.provides ?? []).map((part) =>
+		part.contract !== accessTokenSigning
+			? part
+			: {
+					contract: part.contract,
+					create: async (context: Parameters<typeof part.create>[0]) => {
+						const real = (await part.create(context)) as AccessTokenSigning;
+						return {
+							...real,
+							sign: async (claims: Readonly<Record<string, unknown>>) => {
+								const token = await real.sign(claims);
+								now += signing.ms;
+								return token;
+							},
+						};
+					},
+				},
+	),
+};
+
+describe("the lifetime answered, after the signing", () => {
+	beforeEach(() => {
+		signing.ms = 0;
+	});
+	const slow = () =>
+		boot({ "access-token-lifetime": "1m", revocation: "unsupported" }, { keys: slowKeys });
+
+	it("answers expiresIn from when the token is signed, its expiry as it was set", async () => {
+		const t = await slow();
+		expect(await issueFor(t, grant)).toMatchObject({ expiresIn: 60, expiresAt: start + 60_000 });
+		now = start;
+		signing.ms = 2500;
+		// Rounded up to whole seconds: 57.5 left is 58.
+		const late = await issueFor(t, grant);
+		expect(late).toMatchObject({ expiresIn: 58, expiresAt: start + 60_000 });
+		expect(claimsOf(late.token)).toMatchObject({ iat: start / 1000, exp: start / 1000 + 60 });
+	});
+
+	it("answers none left for a token its signing outlasts, and what is left, rounded up, for one it does not", async () => {
+		const t = await slow();
+		const capped = { notAfter: start + 2000 };
+		for (const [ms, left] of [
+			[3000, 0],
+			[2000, 0],
+			[1500, 1],
+			[1000, 1],
+			[0, 2],
+		] as const) {
+			now = start;
+			signing.ms = ms;
+			const issued = await issueFor(t, grant, capped);
+			expect([issued.expiresIn, issued.expiresAt], String(ms)).toEqual([left, start + 2000]);
+		}
+	});
 });

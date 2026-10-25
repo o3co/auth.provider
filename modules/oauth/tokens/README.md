@@ -33,6 +33,7 @@
 - Added claims are the grant's statement: signed with the rest, a resource cannot tell them from the provider's, so composing a grant trusts it with its tokens' content.
 - An added claim follows `added-claims`' rules, its shape, reserved names and limits; one outside them is the grant's maker's mistake (TypeError at `issue` and `admits`, a 500 with no audit), and a token read back with one is refused as `shape`.
 - A token over 16 KiB, or an actor chain over 16, is neither issued (TypeError) nor read.
+- An access token ends after its lifetime from its issue, capped at the expiry cap given. Its expires-in is what is left once it is signed, rounded up to whole seconds: none where its end has come, its cap passed or its signing slow. Whether to hand out such a token is the issuing side's.
 
 ## Depends on
 - `kernel`, `http`, `keys`, `issuer`, `sender-binding`, `added-claims`, `token-denylist`

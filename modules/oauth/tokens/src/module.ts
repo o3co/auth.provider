@@ -233,7 +233,7 @@ export default defineModule(
 			const access: Tokens = {
 				revocable: () => denylist.revocable,
 				accessTokenLifetimeSeconds: () => lifetime,
-				...issuing(judge, issueAccess),
+				...issuing(judge, issueAccess, c.clock.now),
 				verifyAccess: async (token) => {
 					const checked = await check(token);
 					if (checked.kind === "invalid") return checked;
