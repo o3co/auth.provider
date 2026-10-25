@@ -8,15 +8,15 @@
 - Verifying the assertion, the subject's shape, and the algorithms the grant takes (`jwt-bearer`). Whether the ledger may be reached, redirects, and the caps on size and time (`outbound`). Which devices hold which keys (the ledger's).
 
 ## Offers
-- Composition definition only (a contribution to `jwt-bearer.signer-keys`, keyed by its issuer). Opt-in: no axis's default, so composing `jwt-bearer` alone never brings it.
+- Composition definition only (a contribution to `jwt-bearer.signer-keys`, keyed by its issuer, declaring `perSigner`). Opt-in: no axis's default, so composing `jwt-bearer` alone never brings it.
 - Operator section: `issuer` (required: the `iss` it answers for, one of `jwt-bearer`'s `issuers` with no keys of its own); `keys-url` (required: the URL whole, https or a plain-http pair outbound names, no fragment); `credential` (optional: `keys`' `bearerToken` of at least 32 bytes of key material, never a `REPLACE-` sample), sent on every call; `timeout` and `max-response-size`, each narrowing outbound's cap, written with its unit.
 - The call: `POST {keys-url}` with the URL as written, nothing added; `Content-Type` and `Accept: application/json`; `Authorization: Bearer {credential}` when one is set, none otherwise; the body `{"issuer", "subject", "kid"}`, `kid` only where the assertion names one.
 
   | Answer | Read as |
   |---|---|
-  | `200`, a JSON object with `keys`, a list of JWKs, and `algorithms`, optional, among `EdDSA`, `ES256` and `RS256` | the keys `keys` reads as public alone, and the algorithms, or all three when none are named |
+  | `200`, a JSON object with `keys`, a list of JWKs, and `algorithms`, optional, among those there are to take (`jwt-bearer`'s `takenAlgorithms`) | the keys `keys` reads as public alone, and the algorithms, or the grant's defaults (`EdDSA`, `ES256`, `RS256`) when none are named |
   | `404` (not known) or `410` (known, and revoked), or a `200` whose `keys` is empty (no key now) | none |
-  | anything else, a `200` with no key `keys` reads as public alone or whose algorithms the grant does not take included | unavailable |
+  | anything else, a `200` with no key `keys` reads as public alone or naming an algorithm there is none to take included | unavailable |
 
 ## Invariants
 - Nothing is kept between assertions: each asks the ledger again.
@@ -25,6 +25,9 @@
 - Boot is refused on a `keys-url` that outbound's destination policy refuses (saying which of `outbound`'s keys to set, by `outbound.refusals`), and on a `credential` that `outbound.credentials` will not send there (at `credential`); `outbound` sends the credential as its `credential`.
 - A destination refused when sending, or no answer in time or size, is unavailable. Each failure logs one `signer-keys-http.ledger_failed` warning with its status, or its kind alone: outbound's refusal reason or failure, `no-answer` or `malformed`. None is not logged. No text or bytes from the ledger, nor the credential, are logged.
 - Holds no state, so it is safe on multiple instances.
+
+## Deployment
+- The ledger answers each signer's own keys alone: a key it answers for one subject it never answers for another. The contribution declares this (`perSigner`), and the HTTP call cannot hold the ledger to it: it is the ledger's deployment that keeps keys apart by signer.
 
 ## Depends on
 - `kernel`, `jwt-bearer`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule); its takes name `credentialPolicy` (`outbound.credentials`) with or without a `credential`, as `outbound` provides it beside `outbound`, so a module of your own providing `outbound` provides it too
