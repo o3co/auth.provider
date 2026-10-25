@@ -34,6 +34,10 @@ function isChain(e: ts.Expression): boolean {
 export interface Title {
 	readonly title: string;
 	readonly ids: readonly string[];
+	/** Its suites' titles, outermost first, then its own; a suite's title that is no plain string is `null`. */
+	readonly path: readonly (string | null)[];
+	/** Whether it is a suite's title (`describe`), which the tests inside it meet. */
+	readonly suite: boolean;
 }
 
 interface Literal {
@@ -41,23 +45,41 @@ interface Literal {
 	readonly end: number;
 	readonly text: string;
 	readonly title: boolean;
+	readonly path: readonly (string | null)[];
+	readonly suite: boolean;
+}
+
+/** The runner a chain of modifiers starts from. */
+function runnerOf(e: ts.Expression): string {
+	if (ts.isIdentifier(e)) return e.text;
+	if (ts.isPropertyAccessExpression(e)) return runnerOf(e.expression);
+	if (ts.isTaggedTemplateExpression(e)) return runnerOf(e.tag);
+	if (ts.isCallExpression(e)) return runnerOf(e.expression);
+	return "";
 }
 
 /** Every string and template part in a source, decoded, and whether it is a test's title. */
 function literalsOf(source: string, holdsTests: boolean): Literal[] {
 	const file = ts.createSourceFile("t.ts", source, ts.ScriptTarget.Latest, true);
-	const titles = new Set<ts.Node>();
+	const titles = new Map<ts.Node, { path: (string | null)[]; suite: boolean }>();
 	const literals: Literal[] = [];
+	// The titles of the suites the visit is inside, outermost first.
+	const suites: (string | null)[] = [];
 	const visit = (node: ts.Node) => {
 		const [first] = ts.isCallExpression(node) ? node.arguments : [];
-		if (
-			holdsTests &&
-			ts.isCallExpression(node) &&
-			first &&
-			ts.isStringLiteral(first) &&
-			isChain(node.expression)
-		)
-			titles.add(first);
+		const runner =
+			holdsTests && ts.isCallExpression(node) && isChain(node.expression)
+				? runnerOf(node.expression)
+				: "";
+		const plain = first && ts.isStringLiteral(first) ? first : undefined;
+		if (runner && plain)
+			titles.set(plain, { path: [...suites, plain.text], suite: runner === "describe" });
+		if (runner === "describe") {
+			suites.push(plain ? plain.text : null);
+			ts.forEachChild(node, visit);
+			suites.pop();
+			return;
+		}
 		if (
 			ts.isStringLiteral(node) ||
 			ts.isNoSubstitutionTemplateLiteral(node) ||
@@ -70,6 +92,8 @@ function literalsOf(source: string, holdsTests: boolean): Literal[] {
 				end: node.end,
 				text: node.text,
 				title: titles.has(node),
+				path: titles.get(node)?.path ?? [],
+				suite: titles.get(node)?.suite ?? false,
 			});
 		ts.forEachChild(node, visit);
 	};
@@ -99,7 +123,7 @@ export function titlesIn(
 			else found.push({ at: l.start + m.index, id: m[0] });
 		}
 		if (l.title && candidates.length > 0)
-			titles.push({ at: l.start, title: { title: l.text, ids } });
+			titles.push({ at: l.start, title: { title: l.text, ids, path: l.path, suite: l.suite } });
 	}
 	let rest = source;
 	for (const l of literals)

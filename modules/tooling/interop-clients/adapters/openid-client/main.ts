@@ -29,6 +29,10 @@ interface Instruction {
 	readonly client: Client;
 	readonly redirectUri?: string;
 	readonly scope?: string;
+	/** `issuer` asks a private key JWT naming the issuer as its audience: openid-client's own default. */
+	readonly assertionAudience?: string;
+	/** The resource server the token is asked for (RFC 8707), in the authorization and token requests. */
+	readonly resource?: string;
 }
 
 async function authOf(c: Client): Promise<client.ClientAuth> {
@@ -94,14 +98,20 @@ async function signIn(config: client.Configuration, i: Instruction) {
 		code_challenge_method: "S256",
 		state,
 		nonce,
+		...(i.resource ? { resource: i.resource } : {}),
 	});
 	const { location } = await ask({ ask: "browse", url: url.href });
-	return client.authorizationCodeGrant(config, new URL(String(location)), {
-		pkceCodeVerifier: verifier,
-		expectedState: state,
-		expectedNonce: nonce,
-		idTokenExpected: true,
-	});
+	return client.authorizationCodeGrant(
+		config,
+		new URL(String(location)),
+		{
+			pkceCodeVerifier: verifier,
+			expectedState: state,
+			expectedNonce: nonce,
+			idTokenExpected: true,
+		},
+		i.resource ? { resource: i.resource } : undefined,
+	);
 }
 
 async function login(i: Instruction) {
@@ -135,10 +145,38 @@ async function refresh(i: Instruction) {
 	};
 }
 
+/** Signs in asking for a token for one resource server, by the parameter in both requests. */
+async function resource(i: Instruction) {
+	const tokens = await signIn(await configOf(i), i);
+	return { accessToken: tokens.access_token };
+}
+
+/** The client credentials grant, the client authenticating as its configuration says. */
+async function clientCredentials(i: Instruction) {
+	const tokens = await client.clientCredentialsGrant(await configOf(i), {
+		...(i.scope ? { scope: i.scope } : {}),
+		...(i.resource ? { resource: i.resource } : {}),
+	});
+	return { accessToken: tokens.access_token, tokenType: tokens.token_type, scope: tokens.scope };
+}
+
+/** Signs in, introspects the access token, revokes it, and introspects it again. */
+async function revocation(i: Instruction) {
+	const config = await configOf(i);
+	const token = (await signIn(config, i)).access_token;
+	const before = await client.tokenIntrospection(config, token);
+	await client.tokenRevocation(config, token, { token_type_hint: "access_token" });
+	const after = await client.tokenIntrospection(config, token);
+	return { before: before.active, after: after.active };
+}
+
 const flows: Record<string, (i: Instruction) => Promise<unknown>> = {
 	login,
 	"public-login": login,
 	refresh,
+	resource,
+	"client-credentials": clientCredentials,
+	revocation,
 };
 
 const instruction = (await read()) as unknown as Instruction;

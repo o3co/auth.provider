@@ -20,7 +20,18 @@ const read = parseItems(
 );
 const spec = { spec: "rfc9999", title: read.title, items: read.items, ledger: undefined };
 const tests = new Map([
-	["rfc9999-4-a", [{ pkg: "@mod/x", file: "test/x.test.ts", title: "answers [rfc9999-4-a]" }]],
+	[
+		"rfc9999-4-a",
+		[
+			{
+				pkg: "@mod/x",
+				file: "test/x.test.ts",
+				title: "answers [rfc9999-4-a]",
+				path: ["answers [rfc9999-4-a]"],
+				suite: false,
+			},
+		],
+	],
 ]);
 
 describe("staticStatus", () => {

@@ -15,7 +15,7 @@ const source = [
 
 describe("titlesIn", () => {
 	it("reads the IDs in the titles of it, test and describe, through their modifiers", () => {
-		expect(titlesIn(source, true)).toEqual({
+		expect(titlesIn(source, true)).toMatchObject({
 			titles: [
 				{ title: "revocation [rfc7009-2-a]", ids: ["rfc7009-2-a"] },
 				{
@@ -37,7 +37,7 @@ describe("titlesIn", () => {
 			'it.each(["[rfc7009-2-c]"])("case %s", () => {});',
 			'test.skipIf("[rfc7009-2-d]").concurrent("chained", () => {});',
 		].join("\n");
-		expect(titlesIn(modifiers, true)).toEqual({
+		expect(titlesIn(modifiers, true)).toMatchObject({
 			titles: [{ title: "unrelated [rfc7009-2-b]", ids: ["rfc7009-2-b"] }],
 			stray: ["rfc7009-2-a", "rfc7009-2-c", "rfc7009-2-d"],
 		});
@@ -52,7 +52,7 @@ describe("titlesIn", () => {
 			"describe.for`x $" + '{1}`("grouped [rfc7009-2-b]", () => {});',
 			"test.concurrent.each`n $" + '{1} [rfc7009-2-c]`("case [rfc7009-2-d]", () => {});',
 		].join("\n");
-		expect(titlesIn(tagged, true)).toEqual({
+		expect(titlesIn(tagged, true)).toMatchObject({
 			titles: [
 				{ title: "adds $a and $b [rfc7009-2-a]", ids: ["rfc7009-2-a"] },
 				{ title: "grouped [rfc7009-2-b]", ids: ["rfc7009-2-b"] },
@@ -72,7 +72,7 @@ describe("titlesIn", () => {
 			"it(`made $" + '{"up"} [rfc7009-2-b]`, () => {});',
 			'const id = "oidc-core-3.1.2.1-a";',
 		].join("\n");
-		expect(titlesIn(wrapped, true)).toEqual({
+		expect(titlesIn(wrapped, true)).toMatchObject({
 			titles: [],
 			stray: ["rfc7009-2-a", "rfc7636-4.4-a", "rfc7009-2-c", "rfc7009-2-b", "oidc-core-3.1.2.1-a"],
 		});
@@ -83,7 +83,7 @@ describe("titlesIn", () => {
 			'it("escaped [\\u0072fc7009-2-a]", () => {});',
 			'const hidden = "\\u0072fc9999-2-a";',
 		].join("\n");
-		expect(titlesIn(escaped, true)).toEqual({
+		expect(titlesIn(escaped, true)).toMatchObject({
 			titles: [{ title: "escaped [rfc7009-2-a]", ids: ["rfc7009-2-a"] }],
 			stray: ["rfc9999-2-a"],
 		});
@@ -95,7 +95,7 @@ describe("titlesIn", () => {
 			'it("long [rfc7009-2-aaa]", () => {});',
 			'const tail = "rfc7009-2-a-b";',
 		].join("\n");
-		expect(titlesIn(malformed, true)).toEqual({
+		expect(titlesIn(malformed, true)).toMatchObject({
 			titles: [
 				{ title: "upper [rfc7009-2-A]", ids: [] },
 				{ title: "long [rfc7009-2-aaa]", ids: [] },
@@ -105,7 +105,7 @@ describe("titlesIn", () => {
 	});
 
 	it("names an ID in a title that is not in brackets, and every ID in a file that holds no tests", () => {
-		expect(titlesIn('it("covers rfc7009-2-a", () => {});', true)).toEqual({
+		expect(titlesIn('it("covers rfc7009-2-a", () => {});', true)).toMatchObject({
 			titles: [{ title: "covers rfc7009-2-a", ids: [] }],
 			stray: ["rfc7009-2-a"],
 		});
@@ -113,5 +113,47 @@ describe("titlesIn", () => {
 			titles: [],
 			stray: ["rfc7009-2-a"],
 		});
+	});
+
+	it("gives each title its suites' titles, outermost first, and whether it is a suite; a suite's title not a plain string is unknown", () => {
+		const nested = [
+			'describe("outer", () => {',
+			'\tdescribe("inner [rfc7009-2-a]", () => {',
+			'\t\tit("checks [rfc7009-2-b]", () => {});',
+			"\t});",
+			'\tdescribe.each([1])("by %s", () => {',
+			'\t\tit("checks [rfc7009-2-b]", () => {});',
+			"\t});",
+			"\tdescribe(`templated`, () => {",
+			'\t\tit("deep [rfc7009-2-c]", () => {});',
+			"\t});",
+			"});",
+		].join("\n");
+		expect(titlesIn(nested, true).titles).toEqual([
+			{
+				title: "inner [rfc7009-2-a]",
+				ids: ["rfc7009-2-a"],
+				path: ["outer", "inner [rfc7009-2-a]"],
+				suite: true,
+			},
+			{
+				title: "checks [rfc7009-2-b]",
+				ids: ["rfc7009-2-b"],
+				path: ["outer", "inner [rfc7009-2-a]", "checks [rfc7009-2-b]"],
+				suite: false,
+			},
+			{
+				title: "checks [rfc7009-2-b]",
+				ids: ["rfc7009-2-b"],
+				path: ["outer", "by %s", "checks [rfc7009-2-b]"],
+				suite: false,
+			},
+			{
+				title: "deep [rfc7009-2-c]",
+				ids: ["rfc7009-2-c"],
+				path: ["outer", null, "deep [rfc7009-2-c]"],
+				suite: false,
+			},
+		]);
 	});
 });

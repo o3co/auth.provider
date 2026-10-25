@@ -87,10 +87,14 @@ function checkedRequest(request: IssuanceRequest): IssuanceRequest {
 	};
 }
 
-/** `admits` and `issue` over the judgment and the issuing, alike for tokens and its stand-in. */
+/**
+ * `admits` and `issue` over the judgment and the issuing, alike for tokens and its stand-in. A
+ * token's lifetime is answered from when its issuing is done, its signing included.
+ */
 export function issuing(
 	judge: (request: IssuanceRequest) => Promise<Admitted>,
 	issueAccess: IssueAccess,
+	now: () => number,
 ): Pick<Tokens, "admits" | "issue"> {
 	return {
 		admits: async (request) => judge(checkedRequest(request)),
@@ -100,7 +104,14 @@ export function issuing(
 			const taken = deepFreeze(structuredClone({ request: checkedRequest(request), limits }));
 			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
-			return { kind: "issued", access: await issueAccess(taken.request.grant, taken.limits) };
+			const access = await issueAccess(taken.request.grant, taken.limits);
+			// What is left once signed, rounded up, so a token signed at once answers its whole lifetime;
+			// none where its end has come, its cap passed or its signing slow.
+			const leftMs = access.expiresAt - now();
+			return {
+				kind: "issued",
+				access: { ...access, expiresIn: Math.max(0, Math.ceil(leftMs / 1000)) },
+			};
 		},
 	};
 }
