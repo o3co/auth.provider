@@ -227,4 +227,27 @@ describe("the components a bundle holds inside", () => {
 			],
 		});
 	});
+
+	it("refuses a declared bundle whose regions name none, or only some, of the packages declared inside it", () => {
+		const file = "package/app-output/src/lockfile/check-outside.bundled.mjs";
+		const unread = insideBom(
+			[{ ...scaffold, files: new Map([[file, "// no region\n"]]) }],
+			declared,
+		);
+		expect(unread).toEqual({
+			problems: [
+				"app-output/src/lockfile/check-outside.bundled.mjs: its regions name no semver, which its manifest's bundledInside declares inside it",
+				"app-output/src/lockfile/check-outside.bundled.mjs: its regions name no yaml, which its manifest's bundledInside declares inside it",
+			],
+		});
+		const some = insideBom(
+			[{ ...scaffold, files: new Map([[file, region("semver", "7.8.5")]]) }],
+			declared,
+		);
+		expect(some).toEqual({
+			problems: [
+				"app-output/src/lockfile/check-outside.bundled.mjs: its regions name no yaml, which its manifest's bundledInside declares inside it",
+			],
+		});
+	});
 });

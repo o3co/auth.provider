@@ -18,7 +18,7 @@ Internal module of `distribution`: the release's lists of what it ships (SBOMs),
 - The app is the full template with every feature that opts in, made by the packed entrance and installed from the tarballs alone, no script run (the tree an operator's install makes, which runs them, and the lists' README says so); the entrance is installed alone, as an operator runs it.
 - A component of a package this release packed is named as npm publishes it (purl, reference, distribution URL), its hash kept; one not named by the path of a tarball the release packed stops the release, nothing renamed. Every other component is as the tool wrote it.
 - Every tarball packed is in the app's list or the entrance's, by its name, version and SHA-512, with a dependency entry.
-- A bundled file no manifest declares, one declared in no tarball, and a package held inside that its declaration does not name, stop the release.
+- A bundled file no manifest declares, one declared in no tarball, a package held inside that its declaration does not name, and one declared that the bundle's regions do not name, stop the release: the packages held are the packages declared.
 - Every development dependency a workspace manifest names is in the build tools' list.
 - The image is built from the app's Dockerfile as the release check builds it, and removed, its base stage's too, however its build or listing ends.
 - The release workflow is held, by a test reading it, to make the lists after the tarballs are checked against npm and before the draft release, and to attach them to it.

@@ -138,8 +138,9 @@ const heldIn = (text: string) =>
 /**
  * The list of the components the release's bundles hold inside, which no dependency tree shows: each
  * bundle with a bundled file, the file within it, and the packages it holds at the versions its
- * regions name. A bundled file no manifest declares, a declared one in no tarball, and a package
- * held that its declaration does not name, are each told, and no list is made.
+ * regions name. A bundled file no manifest declares, a declared one in no tarball, a package held
+ * that its declaration does not name, and one declared that its regions do not, are each told, and
+ * no list is made.
  */
 export function insideBom(
 	tarballs: readonly {
@@ -164,6 +165,14 @@ export function insideBom(
 				if (!d.packages.includes(name)) {
 					problems.push(
 						`${at(d)}: holds ${name}@${held.get(name)} inside, which its manifest's bundledInside does not declare`,
+					);
+				}
+			}
+			// The regions must name every package declared: one read in part, or not at all, lists none of what is missing.
+			for (const name of d.packages) {
+				if (!held.has(name)) {
+					problems.push(
+						`${at(d)}: its regions name no ${name}, which its manifest's bundledInside declares inside it`,
 					);
 				}
 			}
