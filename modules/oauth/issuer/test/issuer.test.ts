@@ -121,3 +121,14 @@ it("takes a plain-http issuer only beside the same plain-http public origin, whi
 	const plain = await boot("http://as.example", "http://as.example", "development");
 	expect(plain.get(issuer).url).toBe("http://as.example");
 });
+
+it("refuses a plain-http issuer in a production deployment", async () => {
+	const refused = await boot("http://as.example", "http://as.example").catch(
+		(error: BootRefused) => error.refusals,
+	);
+	expect(refused).toContainEqual({
+		where: "issuer.url",
+		reason:
+			"is plain http, which a production deployment does not take; set kernel.environment = development to try one",
+	});
+});
