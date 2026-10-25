@@ -51,6 +51,14 @@ A feature that follows an Internet-Draft is preview until the draft is published
 - A later revision may change it in a minor version. A change an operator must act on still carries an upgrade notice, and so does a change to a value other implementations rely on, such as a media type or a metadata name.
 - Once the RFC is published and the feature is checked against it, the feature leaves preview in a minor version whose changelog says so; from then on, semver covers it.
 
+### Attack surface
+
+What an outside party can reach, and what the provider reaches out to, grows only on purpose:
+
+- A new route, setting, outbound call or place a secret is kept opens only where the operator asks for it: by composing the module that brings it, or by writing the setting. A new default that opens one in a module already composed counts as opening it, and so needs the maintainers' agreement, as one that is on with no setting does.
+- What opens is declared: a route's marks and its reasons, which `http` checks at boot ([the route reference](routes.md)); a setting that weakens a guarantee is named `accept-*` and warns at each boot, or is named among the declared exceptions in [the security model](security-model.md).
+- What nothing uses any more is removed through [Deprecation](#deprecation).
+
 ### Upgrade notices
 
 Each change an operator must act on to upgrade carries a numbered notice, `U-<minor>-<n>` numbered within the minor version that brings the change (`U-0.19-3`), at its line in the changelog and at its entry in [the migration guide](migration.md). A notice states what to change, and how to tell whether a deployment is affected. An operator checks off the notices between the version they run and the one they move to; a release with none says so.
