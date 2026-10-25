@@ -91,10 +91,10 @@ export type TargetCheck = (
 /** A refusal, the only decision the target check gives besides the audience. */
 type Refused = Extract<Decision, { kind: "refuse" }>;
 
-/** The target check over `token-endpoint`'s composed rule for the audience a request asks for. */
 /** What `targetCheckOver` takes. */
 export const targetCheckTakes = [targets];
 
+/** The target check over `token-endpoint`'s composed rule for the audience a request asks for. */
 export async function targetCheckOver(c: Pick<BuildContext<unknown>, "get">): Promise<TargetCheck> {
 	const rule = await c.get(targets);
 	return (client, one, audience, issuer) => {

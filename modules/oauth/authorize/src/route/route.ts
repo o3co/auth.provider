@@ -127,10 +127,10 @@ export function routeWith({
 	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
 
-/** This endpoint's URL on `http`'s public origin; none without one. */
 /** What `endpointOver` and `routeOver` take, the flow's included: what the module takes. */
 export const routeTakes = [site, named, clients, audit, targets, ...flowTakes];
 
+/** This endpoint's URL on `http`'s public origin; none without one. */
 export const endpointOver = async (c: BuildContext<Settings>) => {
 	const origin = (await c.get(site)).origin;
 	return origin && `${origin}${path}`;
