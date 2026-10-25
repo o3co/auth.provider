@@ -10,5 +10,6 @@ it("takes all it names", async () => {
 		config: { ...kernelConfig(), ...webauthnConfig() },
 		runtime: quietRuntime(),
 	};
-	expect(await takesUnused(input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input)).webauthn).toBeUndefined();
 });
