@@ -21,6 +21,7 @@
 - The configuration file reads the fragments' scalar keys from env only, holding no values; each variable is the section and key path joined by `_`, upper-cased, `-` as `_`.
 - Two keys reading one variable, or a key no variable can name, are refused, naming both or it.
 - Neither example holds a live value line: the local layer's holds each fragment list with its placeholders and each value spanning sections (`audit.receivers`), the environment's each variable, all as comments; a copy sets nothing. A value spanning sections never goes to env.
+- A key the local layer's example writes keeps its path: an element HOCON would read otherwise (a quoted key with a dot) is quoted, so the copy reads back one key.
 - A scalar given in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer.
 
 ## Depends on

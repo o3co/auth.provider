@@ -119,3 +119,16 @@ it("refuses a fragment over 64 KiB, and one whose keys and values come to over 3
 		"w: its keys and values come to over 32768 bytes",
 	);
 });
+
+it("writes a quoted key with a dot in the local layer's example as that one key, so the copy reads back the fragment's own tree", () => {
+	const text =
+		's {\n\t"a.b" = ["REPLACE-A"]\n\tc {\n\t\t"d.e" = ["REPLACE-D"]\n\t}\n\tplain = ["REPLACE-P"]\n}\n';
+	const fragments = fragmentsOf([{ from: "s", text }]);
+	const copy = localConfExample(fragments)
+		.split("\n")
+		.filter((line) => !line.startsWith("## "))
+		.map((line) => line.replace(/^# /, ""))
+		.join("\n");
+	expect(fragmentsOf([{ from: "copy", text: `${copy}\n` }])).toEqual(fragments);
+	expect(writtenOf(fragments).map((w) => w.key)).toEqual(['s."a.b"', 's.c."d.e"', "s.plain"]);
+});

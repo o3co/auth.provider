@@ -158,8 +158,9 @@ export function settingsOf(fragments: readonly Fragment[]): Setting[] {
 export function writtenOf(fragments: readonly Fragment[]): Written[] {
 	return fragments.flatMap((f) =>
 		leaves(f.tree, [f.section]).flatMap(([path, value]): Written[] => {
-			const key = path.join(".");
-			const noted = spanningSections.get(key);
+			// Each element quoted where HOCON would read it otherwise, so a key with a dot stays one key.
+			const key = path.map(hoconKey).join(".");
+			const noted = spanningSections.get(path.join("."));
 			if (noted !== undefined) return [{ key, example: noted, spansSections: true }];
 			if (severalLines(value)) {
 				return [{ key, example: `"""${value}"""`, spansSections: false, severalLines: true }];
@@ -210,7 +211,7 @@ const example = (header: string, values: readonly string[]) =>
 export function localConfExample(fragments: readonly Fragment[]): string {
 	return example(
 		"Copy to config/local.conf, uncomment each key and replace its placeholders; git and the image leave that file out.",
-		writtenOf(fragments).map((w) => `${w.key.split(".").map(hoconKey).join(".")} = ${w.example}`),
+		writtenOf(fragments).map((w) => `${w.key} = ${w.example}`),
 	);
 }
 
