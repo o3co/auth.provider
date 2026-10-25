@@ -50,14 +50,19 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		expect(said(p)).toEqual([]);
 	});
 
-	it("reads a module's default taken by name as a value it binds", () => {
+	it("reads a module's default taken by name as the module whole, as a default is, and one taken as a type as nothing", () => {
 		const p = pkg("@t/named-default", {
 			"src/a.ts": 'import { default as fetch } from "node-fetch";\nexport const a = fetch;\n',
 			"src/b.ts": 'import { default as cp } from "node:child_process";\nexport const b = cp;\n',
+			"src/c.ts": 'import { default as https } from "node:https";\nexport const c = https;\n',
+			"src/d.ts": 'import { default as net, type Socket } from "net";\nexport const d = net;\n',
+			"src/e.ts": 'import { type default as tls } from "node:tls";\nexport type E = typeof tls;\n',
 		});
 		expect(said(p)).toEqual([
 			"src/a.ts node-fetch",
 			"src/b.ts node:child_process (forks does not name it)",
+			"src/c.ts node:https",
+			"src/d.ts node:net",
 		]);
 	});
 

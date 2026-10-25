@@ -1,5 +1,11 @@
 import { join } from "node:path";
-import { type Edge, type FileFacts, lexicalAnalysis, type Pkg } from "@mod/guard-imports";
+import {
+	type Edge,
+	type EdgeBinding,
+	type FileFacts,
+	lexicalAnalysis,
+	type Pkg,
+} from "@mod/guard-imports";
 import type ts from "typescript";
 import { budgetsAsTest, type Scope } from "../units.ts";
 import { forksOf, importsLookupAlone, isPlainHelper, launchRefusal } from "./forks.ts";
@@ -68,15 +74,13 @@ const nodeName = (specifier: string) =>
 const clientOf = (specifier: string) =>
 	clients.find((c) => specifier === c || specifier.startsWith(`${c}/`));
 
-/** What an import or a re-export reaches: a client or a process, a module whole (a default, a namespace, `export *`, a re-exported default), or each value named; nothing where it binds types alone. */
+/** What an import or a re-export reaches: a client or a process, a module whole (a default, by name or not, a namespace, `export *`), or each value named; nothing where it binds types alone. */
 function reachedByBindings(edge: Edge): string[] {
 	const specifier = edge.specifier.text ?? "";
 	const values = edge.bindings.filter((b) => !b.typeOnly);
-	const reexported = edge.form === "export-from";
-	const whole = values.some((b) => b.form !== "named" || (reexported && b.imported === "default"));
-	const named = values
-		.filter((b) => b.form === "named" && !(reexported && b.imported === "default"))
-		.map((b) => b.imported);
+	const isDefault = (b: EdgeBinding) => b.form === "named" && b.imported === "default";
+	const whole = values.some((b) => b.form !== "named" || isDefault(b));
+	const named = values.filter((b) => b.form === "named" && !isDefault(b)).map((b) => b.imported);
 	if (!whole && named.length === 0) return [];
 	const client = clientOf(specifier);
 	if (client) return [client];
