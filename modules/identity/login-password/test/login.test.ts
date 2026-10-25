@@ -76,7 +76,8 @@ async function serve(setup: Setup = {}) {
 			...(setup.extra ?? []),
 		],
 		config: {
-			...kernelConfig(),
+			// A plain-http origin is one only a development deployment takes.
+			...kernelConfig({ environment: origin.startsWith("http:") ? "development" : "production" }),
 			...httpConfig({
 				"trusted-proxies": setup.trusted ?? ["127.0.0.1"],
 				"public-origin": origin,
