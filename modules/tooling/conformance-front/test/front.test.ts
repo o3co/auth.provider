@@ -141,6 +141,14 @@ describe("an https front of an app, as a deployment's proxy is", () => {
 		expect(sent?.headers.forwarded).toBeUndefined();
 	});
 
+	it("tells the app the sender the harness names, where it names one, in place of the peer's address", async () => {
+		const a = await app(() => ({ status: 200 }));
+		// A client on this machine reaches the front from loopback, as the app's trusted proxy does.
+		const f = await front(a.base, { sender: "198.51.100.30" });
+		await send(f.origin, "/x", { headers: { "x-forwarded-for": "203.0.113.9" } });
+		expect(a.seen[0]?.headers["x-forwarded-for"]).toBe("198.51.100.30");
+	});
+
 	it("reaches the app where it runs once it runs, after the front started", async () => {
 		let upstream = "http://127.0.0.1:1";
 		const f = await startFront({
