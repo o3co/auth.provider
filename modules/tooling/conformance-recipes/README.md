@@ -14,6 +14,7 @@
 - `composedBy` (command, workspace → the modules the app it generates depends on), `transcript` (a recorder of a scene's exchanges, by block), `withBlocks` (a document and its blocks' text → the document rewritten).
 - `pnpm --filter @mod/conformance-recipes run examples`: rewrites each recipe's generated blocks from a run.
 - `pnpm --filter @mod/conformance-recipes run external`, with `RECIPES_TARBALLS` naming the packed release (`pnpm bundles`, then `.github/scripts/pack-published.sh <dir>`): the recipes written against the published packages, built and run from the tarballs alone; with `RECIPES_WRITE=1` it rewrites their blocks.
+- The script `evidence-runs`: that release run as the JSON run `spec-checklist` reads (kind `release`, only a release's), so a release whose recipes left no evidence fails its compliance.
 
 ## Invariants
 - A recipe's generate command, and each script it has its reader run, is one constant, shown in its document and run by its scene.
