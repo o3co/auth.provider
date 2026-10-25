@@ -956,6 +956,8 @@ A link from an upstream identity to a user written in `users.registered[].upstre
 
 A federated login proves `fed` and nothing else, unless the IdP's `upstream-amr` maps the upstream's amr values to local ones. Where MFA is required, federated users then complete a local second factor, unless the map gives `mfa`: a login whose amr holds `mfa` passes the second-factor gate unasked. Mapping an upstream value to `mfa` trusts that IdP's claim for MFA, in place of a local second factor, and for every acr it satisfies; do so only for an IdP whose MFA you trust.
 
+To keep the local second factor and still let the IdP's MFA meet an acr, as 0.18 did, map the upstream value to an amr of your own, such as `upstream-mfa`, and add a set holding it to that acr: `acr.values { "urn:o3co:acr:mfa" = [["mfa"], ["upstream-mfa"]] }`. The gate holds such a login as any other, where its subject has a factor to prove or must bind one, and the proof adds `mfa`; a login the gate lets through meets the acr by `upstream-mfa`. The operator's entry takes the place of the one `mfa-acr` offers, so keep `["mfa"]` in it.
+
 ### RP-initiated logout after an upstream login
 
 When the session came from a federated login, logout goes on to the upstream IdP's end-session endpoint and passes the client's registered `post_logout_redirect_uri` to it unchanged. Register that URI as a post-logout redirect at the upstream IdP too, as 0.17 also required.
