@@ -25,14 +25,14 @@ export function accessKind(tokens: Tokens): RevocableKind {
 	};
 }
 
+/** What `revocationIn` takes. */
+export const revocationTakes = [clients, tokens, audit];
+
 /**
  * RFC 7009 revocation. Whatever the token is, the answer is the same unless revoking is
  * refused outright, so the answer tells a caller nothing about tokens it did not receive.
  * The hint only says which kind to try first (§2.1); a hint no kind answers to is ignored.
  */
-/** What `revocationIn` takes. */
-export const revocationTakes = [clients, tokens, audit];
-
 /** The revocation handler over the contracts the assembly gives, for access tokens and the kinds contributed. */
 export const revocationIn = async (
 	c: BuildContext<unknown>,
