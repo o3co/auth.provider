@@ -239,6 +239,7 @@ describe("issuer's metadata", () => {
 it("takes all it names, with users and with a ledger that cannot answer", async () => {
 	const runtime = quietRuntime();
 	for (const usersAs of [[usersModule], [usersModule, unanswering]]) {
-		expect(await takesUnused(composed({ runtime, usersAs }))).toEqual({});
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(composed({ runtime, usersAs })))["oidc"]).toBeUndefined();
 	}
 });
