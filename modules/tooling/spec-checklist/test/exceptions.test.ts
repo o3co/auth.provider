@@ -81,6 +81,7 @@ describe("exceptionProblems", () => {
 				`- sha256: ${"0".repeat(64)}`,
 				"- 4 #1 MUST: rfc9999-4-d",
 				"- 4 #2 SHOULD: rfc9999-4-a",
+				"- 4 #3 MUST: excluded restates rfc9999-4-b",
 			].join("\n"),
 		).ledger;
 		const withLedgers = { ...known, ledgers: new Map([["rfc9999", ledger]]) };
@@ -121,6 +122,10 @@ describe("exceptionProblems", () => {
 				"its test names rfc9999-4-d, which section 4's MUST names",
 			]);
 			expect(exceptionProblems(optional(), withLedgers, ["rfc9999-4-c"])).toEqual([]);
+			// A row that restates another's item binds that item in this section too.
+			expect(exceptionProblems(optional(), withLedgers, ["rfc9999-4-b"])).toEqual([
+				"its test names rfc9999-4-b, which section 4's MUST names",
+			]);
 		});
 	});
 });

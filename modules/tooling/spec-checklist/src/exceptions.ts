@@ -78,9 +78,18 @@ function optionalProblems(
 	if (!known.ledgers) return ["cannot be checked without the ledgers"];
 	const ledger = known.ledgers.get(entry.spec);
 	if (!ledger) return [`names ${entry.spec}, of which the checklist holds no ledger`];
+	// The items a MUST or SHOULD row of the section binds: those it names, or the one it restates.
+	const named = (r: (typeof ledger.rows)[number]) =>
+		r.to.kind === "items"
+			? r.to.ids
+			: r.to.category === "restates" && r.to.detail
+				? [r.to.detail]
+				: [];
 	const bound = ledger.rows.flatMap((r) =>
-		r.section === entry.section && r.to.kind === "items"
-			? r.to.ids.filter((id) => tested.includes(id)).map((id) => ({ id, keyword: r.keyword }))
+		r.section === entry.section
+			? named(r)
+					.filter((id) => tested.includes(id))
+					.map((id) => ({ id, keyword: r.keyword }))
 			: [],
 	);
 	return [
