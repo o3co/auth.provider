@@ -4,10 +4,10 @@ import { defineModule } from "@mod/kernel";
 import { revocations } from "@mod/subject-revocation";
 import { exchangeVerifiers } from "@mod/token-exchange";
 import { upstreamNames, users } from "@mod/users";
+import { idTokenChecks, usedIdTokens } from "./contract.ts";
 import { fixedIssuers, type Issuers } from "./issuers.ts";
 import { kinds, section } from "./section.ts";
-import { usedIdTokens } from "./store.ts";
-import { idTokens, type Taken } from "./verifier.ts";
+import { idTokenChecksOver, idTokens, type Taken } from "./verifier.ts";
 
 /** The module over the given issuers; the composed one is over the fixed issuers alone. */
 export const exchangeIdTokensOver = (issuers: Issuers) =>
@@ -16,7 +16,7 @@ export const exchangeIdTokensOver = (issuers: Issuers) =>
 			name: "exchange-id-tokens",
 			section,
 			// The verifiers are contributed, not collected, so they are not named.
-			takes: [clients, externalJwt, users, revocations, usedIdTokens],
+			takes: [clients, externalJwt, users, revocations, usedIdTokens, idTokenChecks],
 		},
 		(m) => [
 			// Each kind taken, under its upstream's name and issuer, so users counts it once among every module's.
@@ -29,7 +29,8 @@ export const exchangeIdTokensOver = (issuers: Issuers) =>
 						: [{ name: settings.upstream, issuer: issuers[kind].iss[0] }];
 				}),
 			})),
-			m.contribute(exchangeVerifiers).by(async (c) => {
+			// The checks any grant takes them by; the exchange is one such grant.
+			m.provide(idTokenChecks).by(async (c) => {
 				const known = await c.get(clients);
 				for (const kind of kinds) {
 					for (const id of Object.keys(c.section[kind]?.clients ?? {})) {
@@ -57,7 +58,7 @@ export const exchangeIdTokensOver = (issuers: Issuers) =>
 						},
 					];
 				});
-				return idTokens({
+				return idTokenChecksOver({
 					taken,
 					users: await c.get(users),
 					revocations: await c.get(revocations),
@@ -67,6 +68,7 @@ export const exchangeIdTokensOver = (issuers: Issuers) =>
 					skewMs,
 				});
 			}),
+			m.contribute(exchangeVerifiers).by(async (c) => idTokens(await c.get(idTokenChecks))),
 		],
 	);
 
