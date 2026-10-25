@@ -48,6 +48,21 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 - TLS を終端するリバースプロキシ。アプリ自体は平文の HTTP で待ち受けます。
 - 各サービス内での認可。トークンで何を許可するかは、各サービスまたは別のポリシーエンジンが判断します。[関連プロジェクト](#関連プロジェクト)を参照してください。
 
+## ユースケース：段階的な認証基盤の近代化
+
+独自の認証システムを一度に置き換えず、段階的に OAuth 2.0 と OpenID Connect（OIDC）へ移行します。プロバイダーは既存の仕組みと並べて動かせるので、どの段で止めることもできます。
+
+| 段 | すること | 支える仕組み |
+|---|---|---|
+| 1. 既存のユーザー情報を使い続ける | ユーザー情報やパスワードは移行しません。プロバイダーは既存の認証 API に、パスワードの確認とユーザーの参照を問い合わせます。既存の API がプロバイダーの呼び出しに答えます。形が違う場合は、間に薄いアダプターを置きます。 | [users-http](modules/user-ledger-http/users-http/README.md) |
+| 2. OAuth と OIDC を先に入れる | 既存のサービスは動かしたまま、新しいアプリと既存のアプリを 1 つずつ標準のフローへ切り替えます。既存のシステムが知っている鍵を持つ端末やバックエンドは、署名した assertion をトークンに換えられます。鍵は既存の台帳に問い合わせ、各 `jti` はほかのサービスからも見える所で使い切ります。 | [エンドポイント](#エンドポイント)と [discovery](modules/oauth/discovery/README.md)。[jwt-bearer](modules/oauth/jwt-bearer/README.md) と [signer-keys-http](modules/user-ledger-http/signer-keys-http/README.md)、[jti-ledger-http](modules/user-ledger-http/jti-ledger-http/README.md) |
+| 3. 認証を必要に応じて強くする | 第2の認証要素、パスキー、上流の IdP を通じたログイン（SSO）、ユーザーストアで失効させたユーザーの開いているセッションとそれに結びつくトークンの終了を、生成したアプリにモジュールとして足します。期限まで残るトークンもあります。runbook の [Revoking a user from the ledger](docs/runbook.md#revoking-a-user-from-the-ledger) を参照してください。 | [mfa](modules/second-factor/mfa/README.md)、[passkeys](modules/passkey/passkeys/README.md)、[federation](modules/upstream-login/federation/README.md)、[subject-revocation-http](modules/user-ledger-http/subject-revocation-http/README.md)。[パターンの選択と機能の追加](#パターンの選択と機能の追加) |
+| 4. ログインの体験を良くする | アカウントはそのままに、画面を変えます。ログインページと同意ページは自分で用意するもので、決まった契約に沿って作るので、作り直すことも、パスキーのボタンを足すこともできます。 | [ログインページのガイド](docs/login-page.md)、[MFA ページのレシピ](docs/recipe-mfa-page.md)、[login-passkey](modules/passkey/login-passkey/README.md) |
+| 5. 必要になれば別の IdP へ移る | アプリはプロバイダーと標準の OAuth 2.0 と OIDC だけで話すので、Keycloak などの別の IdP へ移すのは、各クライアントの設定の変更です。移るまでの間、プロバイダーはその IdP を上流としてログインさせることもできます。ユーザー ID、セッション、トークンは引き継がれないので、その移行は別に計画します。 | [エンドポイント](#エンドポイント)。[federation](modules/upstream-login/federation/README.md) と [idp-oidc](modules/upstream-login/idp-oidc/README.md) |
+| 6. 使い続ける | 要件を満たす限り、プロバイダーを長く使う認証基盤として運用します。 | [本番運用の前に](#本番運用の前に)、[runbook](docs/runbook.md)、[セキュリティモデル](docs/security-model.md)、[バージョンとサポート](#バージョンとサポート) |
+
+得られること：既存の資産を活かし、移行のリスク、初期の費用、サービスの停止を小さく抑えながら、認証基盤を育て続けられます。特定の IdP への移行を前提にしないので、将来の選択肢を残せます。
+
 ## 動作要件
 
 - Node.js 24 以降。
