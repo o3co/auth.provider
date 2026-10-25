@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Bom, coverageProblems, insideBom, npmNamed } from "../boms.ts";
+import { type Bom, coverageProblems, insideBom, listedProblems, npmNamed } from "../boms.ts";
 
 const hex = "ab".repeat(64);
 const integrity = `sha512-${Buffer.from(hex, "hex").toString("base64")}`;
@@ -249,5 +249,24 @@ describe("the components a bundle holds inside", () => {
 				"app-output/src/lockfile/check-outside.bundled.mjs: its regions name no yaml, which its manifest's bundledInside declares inside it",
 			],
 		});
+	});
+});
+
+describe("the tarballs publish takes, against those the lists were made of", () => {
+	const a = { name: "@o3co/auth-provider-oauth", version: "1.0.0", integrity: "sha512-A" };
+	const b = { name: "@o3co/create-auth-provider", version: "1.0.0", integrity: "sha512-B" };
+
+	it("are the same tarballs, by name, version and integrity", () => {
+		expect(listedProblems([a, b], [b, a])).toEqual([]);
+	});
+
+	it("names one of other bytes, one the lists never held, and one they held that is not there", () => {
+		expect(listedProblems([{ ...a, integrity: "sha512-X" }, b], [a, b])).toEqual([
+			"@o3co/auth-provider-oauth@1.0.0: another tarball than the lists were made of",
+		]);
+		expect(listedProblems([a, b], [a])).toEqual(["@o3co/create-auth-provider@1.0.0: in no list"]);
+		expect(listedProblems([a], [a, b])).toEqual([
+			"@o3co/create-auth-provider@1.0.0: listed, and not among the tarballs to publish",
+		]);
 	});
 });

@@ -208,3 +208,29 @@ export function insideBom(
 	if (problems.length > 0) return { problems };
 	return { bom: { bomFormat: "CycloneDX", specVersion: "1.6", version: 1, components } };
 }
+
+/**
+ * Why the tarballs about to be published are not those the lists were made of (`tarballs.json`): one
+ * of other bytes, one no list held, and one listed that is not among them. Run where they are
+ * published, so what is published is what the lists cover.
+ */
+export function listedProblems(
+	tarballs: readonly Packed[],
+	listed: readonly Pick<Packed, "name" | "version" | "integrity">[],
+): string[] {
+	const at = (p: Pick<Packed, "name" | "version">) => `${p.name}@${p.version}`;
+	const byAt = new Map(listed.map((l) => [at(l), l]));
+	const published = new Set(tarballs.map(at));
+	return [
+		...tarballs.flatMap((t) => {
+			const l = byAt.get(at(t));
+			if (!l) return [`${at(t)}: in no list`];
+			return l.integrity === t.integrity
+				? []
+				: [`${at(t)}: another tarball than the lists were made of`];
+		}),
+		...listed
+			.filter((l) => !published.has(at(l)))
+			.map((l) => `${at(l)}: listed, and not among the tarballs to publish`),
+	];
+}
