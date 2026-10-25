@@ -27,6 +27,8 @@ export type Examined =
 			readonly run: RunSeen;
 			readonly tested: { readonly commit: string; readonly tree: string };
 			readonly jobs: Readonly<Record<string, string | null | undefined>>;
+			/** The release's compliance read again over the evidence kept: whether it lets the release go on, and what it told. */
+			readonly recomputed: { readonly releasable: boolean; readonly told: string };
 			readonly artifacts: readonly ArtifactSeen[];
 	  }
 	| { readonly run: RunSeen; readonly problem: string };
@@ -134,6 +136,9 @@ function refusalOf(tag: Tag, e: Examined): string | undefined {
 	if (unpassed.length > 0) {
 		const ended = unpassed.map((job) => `its ${job} job ended ${e.jobs[job] ?? "without running"}`);
 		return `${e.run.url}: ${ended.join(", ")}: a release pull request's run runs and passes ${releaseJobs.join(", ")}; ${rerun(e.run)}`;
+	}
+	if (!e.recomputed.releasable) {
+		return `${e.run.url}: the evidence it kept no longer makes the release's compliance (${e.recomputed.told}); ${rerun(e.run)}`;
 	}
 	return undefined;
 }

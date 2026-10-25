@@ -86,6 +86,47 @@ const walk = (dir: string): string[] =>
 		return statSync(path).isDirectory() ? walk(path) : [path];
 	});
 
+/**
+ * The release's compliance (spec-checklist's, with `--release`) read again over the evidence kept,
+ * as the run it is from and the commit it tested: an artifact gone since CI passed leaves an expected
+ * run unreported. Read only over the tag's tree, whose checklist and tests are the tested commit's.
+ */
+function recomputed(run: RunSeen, commit: string, tree: string, dir: string) {
+	if (tree !== tag.tree) return { releasable: false, told: "not read: another tree" };
+	const read = spawnSync(
+		"pnpm",
+		["--silent", "--filter", "@mod/spec-checklist", "run", "compliance", dir, "--release"],
+		{
+			encoding: "utf8",
+			maxBuffer: 1 << 28,
+			env: { ...process.env, SPEC_EVIDENCE_COMMIT: commit, GITHUB_RUN_ID: String(run.id) },
+		},
+	);
+	// What it tells, from the table it wrote beside the reports: the runs that did not report, the items that block.
+	let told = `${read.stderr ?? ""}`.trim().split("\n").slice(-3).join(" ");
+	try {
+		const table = JSON.parse(readFileSync(join(dir, "compliance.json"), "utf8")) as {
+			missingRuns?: string[];
+			items?: { status?: string }[];
+		};
+		const blocking = (table.items ?? []).filter((i) =>
+			["failed", "incomplete", "unverified"].includes(i.status ?? ""),
+		).length;
+		told =
+			[
+				table.missingRuns?.length
+					? `runs that did not report: ${table.missingRuns.join(", ")}`
+					: "",
+				blocking > 0 ? `${blocking} items failed, incomplete or unverified` : "",
+			]
+				.filter((t) => t !== "")
+				.join("; ") || told;
+	} catch {
+		// No table written: what it printed on standard error is told instead.
+	}
+	return { releasable: read.status === 0, told };
+}
+
 /** A candidate's artifacts downloaded and unpacked, the commit its reports tested with that commit's tree, and how its jobs ended. */
 function examined(run: RunSeen): Examined {
 	const chosen = artifactsOf(
@@ -125,7 +166,13 @@ function examined(run: RunSeen): Examined {
 			".jobs[] | {name, conclusion}",
 		).map((j) => [j.name, j.conclusion]),
 	);
-	return { run, tested: { commit, tree }, jobs, artifacts: chosen.take };
+	return {
+		run,
+		tested: { commit, tree },
+		jobs,
+		recomputed: recomputed(run, commit, tree, dir),
+		artifacts: chosen.take,
+	};
 }
 
 try {

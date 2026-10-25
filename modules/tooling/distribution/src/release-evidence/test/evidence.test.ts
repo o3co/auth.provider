@@ -148,6 +148,7 @@ describe("whether the release may go on with a run's evidence", () => {
 		run: run({ id: 7 }),
 		tested: { commit: "m", tree: tag.tree },
 		jobs: { conformance: "success", "release-check": "success", compliance: "success" },
+		recomputed: { releasable: true, told: "" },
 		artifacts: [artifact("compliance")],
 	};
 	/** Examines each candidate by its id, from what the case lays out; a function, to throw. */
@@ -229,6 +230,23 @@ describe("whether the release may go on with a run's evidence", () => {
 		});
 		const unrun = { ...taken, run: run({ id: 12 }), jobs: { compliance: "success" } };
 		expect(firstTaken(tag, [unrun.run], by({ 12: unrun })).kind).toBe("stopped");
+	});
+
+	it("takes a run only where its kept evidence, read again, still makes the release's compliance", () => {
+		// An artifact removed after CI passed leaves an expected run unreported.
+		const thinned = {
+			...taken,
+			run: run({ id: 13 }),
+			recomputed: { releasable: false, told: "runs that did not report: @mod/conformance-keys" },
+		};
+		expect(firstTaken(tag, [thinned.run], by({ 13: thinned }))).toEqual({
+			kind: "stopped",
+			problems: [
+				expect.stringMatching(
+					/the evidence it kept no longer makes the release's compliance \(runs that did not report: @mod\/conformance-keys\)/,
+				),
+			],
+		});
 	});
 
 	it("stops, naming what is missing and what to do, where no run will do", () => {

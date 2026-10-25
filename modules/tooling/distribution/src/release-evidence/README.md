@@ -19,7 +19,8 @@ Internal module of `distribution`: the evidence a release keeps, from the CI run
 - A run is the release pull request's only where its `conformance`, `release-check` and `compliance` jobs, which CI runs on a pull request to main alone, passed in its latest attempt: a run of a pull request to develop from the same head and branch skipped them.
 - A run's tested commit is the one commit its reports name; its tree, as the repository holds that commit, must be the tag's: main moved after the run otherwise, and what it tested is not what the tag publishes.
 - Of a run's artifacts, each job's evidence is taken from its newest attempt (the number CI ends the name with) and the compliance table is the newest; only those taken are held to be there and unexpired, an older attempt's expiry stopping nothing.
+- Over the tag's tree, the evidence taken is read again by the release's compliance (`spec-checklist`'s `compliance --release`, as that run and the commit it tested), which must let the release go on: an artifact gone since CI passed leaves an expected run unreported, and stops it.
 - Every stop names the run, what is missing (no run, another tree, compliance not passed, an artifact missing or expired) and what to do.
 
 ## Depends on
-- `gh`, `git` and `unzip`, run.
+- `spec-checklist`'s `compliance`, and `gh`, `git` and `unzip`, run.
