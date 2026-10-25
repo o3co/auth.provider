@@ -11,7 +11,7 @@
 - Keyed records: create if absent, read while it lives, change from what it holds, remove, and a scan of the keys of those living, by pages, as `store` walks (a scanned space holds records by key alone); a lifetime is ms from the write, or endless.
 - Records changed together: `changeRecords`, records of spaces of the same guarantees on one store, and the records the decision watches from them, any of them written, as one; `changeTogether`, two of them, only the two written; `changesTogether` tells whether a store can.
 - `pairedRecordsIn` pairs a place's records so, and `pairedRecordsAcross` the records of two places, each refusing through the builder's `refuse` where its store cannot; `pairedRecordsAcross` also where its places are on two stores or their spaces declare other guarantees.
-- Records under a secret: the same but the scan, kept under a name made from the secret, reached by secret or by name. They hold short-lived values only, so a rotation waits them out and they need no scan.
+- Records under a secret: the same but the scan (which their `named` records, reached by name, keep), kept under a name made from the secret, reached by secret or by name. They hold short-lived values only, so a rotation waits them out and they need no scan.
 - Deferred work: add, done, and each, which hands the work over; work that fails stays and is counted.
 - Keyed sets: add a member for a lifetime (answering those pushed out over the cap), the members with their time left, remove a member; the members pushed out and awaiting, and settling one.
 - No contract of its own: the wiring builds each over a place, with the cap and `kernel`'s clock for keyed sets.
@@ -24,7 +24,7 @@
 - Every answer is confirmed: a rewrite that writes nothing (no change, no record, a set gone), a create that finds a record, and a remove that finds none confirm what they read with a write of their own.
 - Reads are confirmed only in a space that declares confirmed reads; a feature that decides on them states it among its needs.
 - Records and deferred work leave expiry to the store; keyed sets read only `kernel`'s clock; no two clocks are compared.
-- Records hold JSON values. A change without a lifetime keeps the record's; a lifetime under 1 ms is 1 ms.
+- Records hold JSON values. A change without a lifetime keeps the record's; a change's lifetime under 1 ms is 1 ms.
 - A keyed set is one record per key, rewritten whole, so its cap stays small; anything in it that is not a member is no member.
 - A member ends at its add's time plus its lifetime on `kernel`'s clock, however late the write lands; the set is kept ten minutes past its last end. What an add pushes out awaits in that same write, until its caller settles it or its end passes, so a caller stopped between the add and its own work finds it again. A set kept as a bare list, as before, reads as members alone.
 - Over the cap, the other members ending first are pushed out (ties by code point order), never the one being added, and that is logged with the space. A cap is a whole number from 1.

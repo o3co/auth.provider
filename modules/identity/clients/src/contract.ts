@@ -76,7 +76,7 @@ export type Authentication =
 				| "wrong_method"
 				| "bad_credentials"
 				| "invalid_record";
-			/** Challenges for the response: the tried method's, or every method's when none was tried. */
+			/** Challenges for the response: the tried method's, or every method's when none was tried; none for `multiple_methods` and `malformed_credentials`, answered as malformed requests. */
 			readonly challenges: readonly string[];
 	  };
 

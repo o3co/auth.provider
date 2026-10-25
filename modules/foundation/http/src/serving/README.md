@@ -16,7 +16,7 @@ Internal module of `http`: the server that answers each request with the route i
 ## Invariants
 - Paths: a middle `*` segment takes exactly one non-empty segment, and a last `/*` everything under it; of the declared paths reaching a path, the one with a literal at the first segment they differ comes first, and a middle `*` before a last.
 - A handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent).
-- A GET route also answers HEAD, with the same headers and no body.
+- A GET route that changes no state also answers HEAD, with the same headers and no body; for one that changes state, HEAD is `405`.
 - A path no route reaches gets `404`, and a path whose routes take other methods gets `405` naming them in `Allow`.
 - A preflight to a cross-origin route is answered before the policies.
 - A body the route does not take is refused only after the route's policies have seen the request.

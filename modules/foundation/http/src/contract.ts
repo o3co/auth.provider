@@ -191,7 +191,7 @@ export const requestEnds = extensionPoint<RequestEndObserver>("http.request-ends
 /** Headers keeping an answer out of every cache, HTTP/1.0 ones included (RFC 6749 §5.1). */
 export const noStore = Object.freeze({ "cache-control": "no-store", pragma: "no-cache" });
 
-/** A JSON answer kept out of caches, with any cookies and headers it adds. */
+/** A JSON answer kept out of caches, with any cookies and headers it adds; a header given replaces `noStore`'s of its name. */
 export const jsonAnswer = (
 	status: number,
 	json: unknown,

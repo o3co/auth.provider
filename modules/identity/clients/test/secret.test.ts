@@ -137,7 +137,7 @@ it("refuses a source's client whose secret is no hash, or that holds none, match
 	expect(await c.authenticate(post("bare", "x"))).toMatchObject(refused("bad_credentials"));
 });
 
-it("computes one scrypt per work in use for a known client, an unknown client, an invalid record and another method's client alike, and none for another client_id", async () => {
+it("computes one scrypt per work in use for a known client, an unknown client, an invalid record and another method's client alike, another client_id beside included", async () => {
 	const invalid = { id: "invalid", kind: "confidential", method: "no-such-method" } as ClientRecord;
 	const source = defineModule({ name: "source", takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
@@ -156,6 +156,11 @@ it("computes one scrypt per work in use for a known client, an unknown client, a
 		headers: new Map(Object.entries(basic("s10", "p"))),
 		form: new Map([["client_id", ["s11"]]]),
 	});
+	const nobodyBesideOther = testRequest({
+		method: "POST",
+		headers: new Map(Object.entries(basic("nobody", "p"))),
+		form: new Map([["client_id", ["s11"]]]),
+	});
 	const cases: [request: HttpRequest, answer: object, scryptRuns: number][] = [
 		[basicRequest("s10", "p"), as("s10"), 2],
 		[basicRequest("s10", "wrong"), refused("bad_credentials"), 2],
@@ -165,7 +170,9 @@ it("computes one scrypt per work in use for a known client, an unknown client, a
 		[post("nobody", "p"), refused("unknown_client"), 2],
 		[post("invalid", "p"), refused("invalid_record"), 2],
 		[basicRequest("s11", "p"), refused("wrong_method"), 2],
-		[besideOther, refused("bad_credentials"), 0],
+		// Another client_id beside the header's tells a known id from an unknown one by no time either.
+		[besideOther, refused("bad_credentials"), 2],
+		[nobodyBesideOther, refused("unknown_client"), 2],
 	];
 	for (const [request, answer, scryptRuns] of cases) {
 		counted.scrypt = 0;
