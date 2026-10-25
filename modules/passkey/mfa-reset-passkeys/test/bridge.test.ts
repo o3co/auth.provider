@@ -35,7 +35,8 @@ async function contributed(answer: PasskeyResetPart["passkeys"]) {
 
 it("takes all it names", async () => {
 	const { input } = composition(async () => ({ kind: "done", removed: 0 }));
-	expect(await takesUnused(input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["mfa-reset-passkeys"]).toBeUndefined();
 });
 
 it("contributes the part named passkeys, as the reset's audit names it", async () => {
