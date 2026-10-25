@@ -142,6 +142,15 @@ describe("refusing an outside declaration, naming it", () => {
 		);
 	});
 
+	it("lets an outside wiring need what declares forWiring: the refusal is a feature's alone", () => {
+		const declared = workspaceOf([{ name: "@w/store", kind: "foundation", forWiring: true }]);
+		const outside: Declaration[] = [
+			feature("@x/a"),
+			{ name: "@x/a-store", kind: "wiring", wires: "@x/a", needs: ["@x/a", "@w/store"] },
+		];
+		expect(() => declaredWith(declared, outside)).not.toThrow();
+	});
+
 	it("refuses a field its kind does not take", () => {
 		refused([{ ...feature("@x/a"), replaces: "@c/mail" }], /@x\/a: replaces is an adapter's/);
 		refused([{ ...feature("@x/a"), wires: "@x/b" }], /@x\/a: wires is a wiring's/);
