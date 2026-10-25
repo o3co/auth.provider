@@ -12,11 +12,13 @@ import { z } from "zod";
 import { check } from "./assertion/assertion.ts";
 import {
 	algorithms,
+	jtiLedgers,
 	linkedIssuers,
 	linkedSubjects,
 	signerKeys,
 	spentAssertions,
 } from "./contract.ts";
+import { spentIn } from "./ledgers.ts";
 import { contributedSigners, fetchedSigners, type Signers, writtenSigners } from "./signers.ts";
 
 /** The grant type it serves (RFC 7523). */
@@ -133,6 +135,7 @@ const takes = [
 	externalJwt,
 	signerKeys,
 	linkedSubjects,
+	jtiLedgers,
 ];
 
 export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
@@ -189,12 +192,18 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 						: contributedSigners(jwt, keys as NonNullable<typeof keys>, policyOf(i), thumbprint),
 			);
 		}
-		const unnamed = [...contributed.keys()].filter((named) => !trusted.has(named)).length;
-		if (unnamed > 0) {
-			refused.push({
-				where: "jwt-bearer.issuers",
-				reason: `keys are contributed for ${unnamed} issuer${unnamed === 1 ? "" : "s"} none of these names: name ${unnamed === 1 ? "it" : "them"} here, or leave out the module that contributes them`,
-			});
+		const ledgers = new Map((await c.collect(jtiLedgers)).map((l) => [l.issuer, l]));
+		for (const [what, named] of [
+			["keys are", [...contributed.keys()]],
+			["jti ledgers are", [...ledgers.keys()]],
+		] as const) {
+			const unnamed = named.filter((name) => !trusted.has(name)).length;
+			if (unnamed > 0) {
+				refused.push({
+					where: "jwt-bearer.issuers",
+					reason: `${what} contributed for ${unnamed} issuer${unnamed === 1 ? "" : "s"} none of these names: name ${unnamed === 1 ? "it" : "them"} here, or leave out the module that contributes them`,
+				});
+			}
 		}
 		if (refused.length > 0) return c.refuseAll(refused);
 		const linked = linkedOf(c.section);
@@ -250,9 +259,19 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 				// Asked before the jti is used up, so a refusal leaves the assertion usable.
 				const admitted = await admits(access);
 				if (admitted.kind === "refused") return admitted;
-				// Relative, since the store judges a lifetime by its own clock.
-				const lifetimeMs = checked.expiresAt + skewMs - c.clock.now() + usedAllowanceMs;
-				if ((await spent.save(spentName(checked.issuer, checked.jti), lifetimeMs)) === "exists")
+				const keepUntil = checked.expiresAt + skewMs + usedAllowanceMs;
+				// An issuer with a ledger uses its jti up there alone, never the store, whatever it answers.
+				const ledger = ledgers.get(checked.issuer);
+				const told = ledger
+					? await spentIn(ledger, {
+							sentIssuer: checked.issuer,
+							jti: checked.jti,
+							expiresAt: checked.expiresAt,
+							keepUntil,
+						})
+					: // Relative, since the store judges a lifetime by its own clock.
+						await spent.save(spentName(checked.issuer, checked.jti), keepUntil - c.clock.now());
+				if (told === "replayed" || told === "exists")
 					return { kind: "error", error: "invalid_grant", description: "assertion replayed" };
 				const issued = await issue(access, { notAfter: checked.expiresAt });
 				if (issued.kind === "refused") return issued;

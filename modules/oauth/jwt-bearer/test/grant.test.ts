@@ -33,6 +33,8 @@ import { tokensStandIn } from "@mod/tokens/testing";
 import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import {
+	type JtiLedger,
+	jtiLedgers,
 	type LinkedSubjects,
 	linkedSubjects,
 	type SignerKeys,
@@ -61,13 +63,18 @@ const trustedUpstream = [
 	},
 ];
 
+/** Each name the store was asked to save, in order, across the tests. */
+const saved: string[] = [];
 /** Spent assertions on records' stand-in, whose own clock runs `aheadMs` past the kernel's. */
 const spentOn = (aheadMs = 0) =>
 	defineModule({ name: "spent-assertions", takes: [] }, (m) => [
 		m.provide(spentAssertions).by(() => {
 			const stand = memoryRecords<true>(() => clock.at + aheadMs, { shards: 1, perShard: 1 });
 			return {
-				save: (name: string, lifetimeMs: number) => stand.records.create(name, true, lifetimeMs),
+				save: (name: string, lifetimeMs: number) => {
+					saved.push(name);
+					return stand.records.create(name, true, lifetimeMs);
+				},
 			};
 		}),
 	]);
@@ -805,6 +812,176 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 			"jwks-uri": "https://idp.example/jwks",
 		};
 		expect(await refused([{ ...fetched, "subject-is-key-thumbprint": true }])).toBe("refused");
+	});
+});
+
+describe("assertions used up in a ledger a module contributes for their issuer", () => {
+	type Spend = Parameters<JtiLedger["spend"]>[0];
+	/** A module contributing `issuer`'s ledger, answering as `answer` says now and recording each spend. */
+	const ledgerOf = (
+		answer: (spend: Spend) => Promise<unknown>,
+		spends: Spend[] = [],
+		forIssuer = "https://idp.example",
+		name = "jti-ledger",
+	) =>
+		defineModule({ name, takes: [] }, (m) => [
+			m.contribute(jtiLedgers).by(() => ({
+				issuer: forIssuer,
+				spend: async (spend: Spend) => {
+					spends.push(spend);
+					return (await answer(spend)) as "first" | "replayed";
+				},
+			})),
+		]);
+	/** A ledger keeping what it was told in memory: first once per jti, then replayed. */
+	const kept = () => {
+		const used = new Set<string>();
+		return async ({ jti }: Spend) => {
+			if (used.has(jti)) return "replayed";
+			used.add(jti);
+			return "first";
+		};
+	};
+	const other = {
+		issuer: "https://other.example",
+		subject: "as-is",
+		keys: [{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") }],
+	};
+	const located = `${issuer}/oauth/token`;
+	const serveWith = (
+		extra: Module[],
+		issuers: readonly Record<string, unknown>[] = trustedUpstream,
+	) => serve(undefined, issuer, located, issuers, outboundModule, extra);
+
+	it("spends an issuer's jti in its ledger alone, as sent, the store kept for an issuer with none", async () => {
+		const spends: Spend[] = [];
+		const s = await serveWith([ledgerOf(kept(), spends)], [...trustedUpstream, other]);
+		const before = saved.length;
+		const signed = await assertion({ ...base, jti: "j-ledger" });
+		expect(errorOf(await s.grant(signed))).toBe("issued");
+		expect(saidOf(await s.grant(signed))).toBe("invalid_grant: assertion replayed");
+		expect(spends).toEqual([
+			{
+				sentIssuer: "https://idp.example",
+				jti: "j-ledger",
+				expiresAt: base.exp * 1000,
+				keepUntil: base.exp * 1000 + 30_000 + 60_000,
+			},
+			expect.objectContaining({ jti: "j-ledger" }),
+		]);
+		expect(saved.length).toBe(before);
+		// The other issuer has no ledger: its jti goes to the store as ever.
+		const theirs = await assertion(
+			{ ...base, iss: "https://other.example", jti: "j-store" },
+			stranger.privateKey,
+		);
+		expect(errorOf(await s.grant(theirs))).toBe("issued");
+		expect(saved.length).toBe(before + 1);
+		expect(spends).toHaveLength(2);
+	});
+
+	it("asks no ledger for an assertion refused before its jti would be used up, or whose jti is malformed", async () => {
+		const spends: Spend[] = [];
+		const s = await serveWith([ledgerOf(kept(), spends), narrowing]);
+		expect(
+			errorOf(await s.grant(await assertion(base), { resource: "https://elsewhere.example" })),
+		).toBe("invalid_target");
+		await s.revoke("alice");
+		expect(saidOf(await s.grant(await assertion({ ...base, iat: now / 1000 - 1 })))).toBe(
+			"invalid_grant: assertion revoked",
+		);
+		for (const jti of [undefined, "", "j".repeat(257), "lone-\ud800"]) {
+			const signed = await new SignJWT({ ...base, ...(jti === undefined ? {} : { jti }) })
+				.setProtectedHeader({ alg: "EdDSA" })
+				.sign(upstream.privateKey);
+			expect(errorOf(await s.grant(signed)), String(jti)).toBe("invalid_grant");
+		}
+		expect(spends).toEqual([]);
+	});
+
+	it("is unavailable, issuing nothing and writing no store, where the ledger cannot tell or answers in another shape", async () => {
+		let answer = async (): Promise<unknown> => {
+			throw new Unavailable("jti-ledger");
+		};
+		const s = await serveWith([ledgerOf(() => answer())]);
+		const before = saved.length;
+		const signed = await assertion(base);
+		for (const told of [
+			async () => {
+				throw new Unavailable("jti-ledger");
+			},
+			async () => {
+				throw new Error("ledger said token=abc");
+			},
+			async () => undefined,
+			async () => "ok",
+			async () => ({ kind: "first" }),
+		]) {
+			answer = told;
+			await expect(s.grant(signed)).rejects.toBeInstanceOf(Unavailable);
+		}
+		expect(saved.length).toBe(before);
+		answer = async () => "first";
+		expect(errorOf(await s.grant(signed))).toBe("issued");
+	});
+
+	it("leaves an assertion whose ledger answer was lost used up, and gives one token of two at once", async () => {
+		const record = kept();
+		let lose = true;
+		const s = await serveWith([
+			ledgerOf(async (spend) => {
+				const told = await record(spend);
+				if (lose) {
+					lose = false;
+					throw new Unavailable("jti-ledger");
+				}
+				return told;
+			}),
+		]);
+		const signed = await assertion(base);
+		await expect(s.grant(signed)).rejects.toBeInstanceOf(Unavailable);
+		expect(saidOf(await s.grant(signed))).toBe("invalid_grant: assertion replayed");
+		const twin = await assertion(base);
+		const both = await Promise.all([s.grant(twin), s.grant(twin)]);
+		expect(both.map(errorOf).sort()).toEqual(["invalid_grant", "issued"]);
+	});
+
+	it("refuses to boot on a ledger for an issuer it does not name, and on two ledgers for one issuer", async () => {
+		const refusalsOf = (extra: Module[]) =>
+			serveWith(extra).then(
+				() => [],
+				(error: BootRefused) => error.refusals,
+			);
+		expect(await refusalsOf([ledgerOf(kept(), [], "https://nowhere.example")])).toEqual([
+			{
+				where: "jwt-bearer.issuers",
+				reason:
+					"jti ledgers are contributed for 1 issuer none of these names: name it here, or leave out the module that contributes them",
+			},
+		]);
+		const twice = await refusalsOf([
+			ledgerOf(kept(), [], "https://idp.example", "one-ledger"),
+			ledgerOf(kept(), [], "https://idp.example", "two-ledger"),
+		]);
+		expect(twice.map((r) => r.where)).toEqual(["jwt-bearer.jti-ledgers:https://idp.example"]);
+	});
+
+	it("takes an assertion through its exp and clock-skew past it, one made with the longest exp it takes, and none after", async () => {
+		// L = max-assertion-lifetime (1h), S = clock-skew (30s): signed at t with exp t + L + S, it is
+		// taken until t + L + 2S, which the ledger's cutover waits (L + 2S + clock differences) rest on.
+		const s = await serveWith([ledgerOf(kept())]);
+		const t = clock.at;
+		const exp = (t + 3_600_000 + 30_000) / 1000;
+		const signedAt = (jti: string) => assertion({ ...base, exp, jti });
+		try {
+			expect(errorOf(await s.grant(await signedAt("j-at-t")))).toBe("issued");
+			clock.at = t + 3_600_000 + 60_000 - 1000;
+			expect(errorOf(await s.grant(await signedAt("j-last")))).toBe("issued");
+			clock.at = t + 3_600_000 + 60_000;
+			expect(saidOf(await s.grant(await signedAt("j-after")))).toMatch(/^invalid_grant: /);
+		} finally {
+			clock.at = t;
+		}
 	});
 });
 
