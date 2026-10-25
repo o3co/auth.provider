@@ -36,7 +36,7 @@ export const section = z
 			.boolean()
 			.prefault(false)
 			.describe(
-				"Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it.",
+				"Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it, and only with `kernel.environment = development`, as a production deployment refuses it.",
 			),
 		/** Where a trusted proxy forwards the client's certificate; none is read without it. */
 		"client-certificate": certificateSettings.optional(),
