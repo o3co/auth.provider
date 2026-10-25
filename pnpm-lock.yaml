@@ -4271,6 +4271,31 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/tooling/interop-clients:
+    dependencies:
+      '@mod/conformance':
+        specifier: workspace:*
+        version: link:../conformance
+      '@mod/conformance-code':
+        specifier: workspace:*
+        version: link:../conformance-code
+      '@mod/conformance-front':
+        specifier: workspace:*
+        version: link:../conformance-front
+      '@mod/conformance-oauth':
+        specifier: workspace:*
+        version: link:../conformance-oauth
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
+      openid-client:
+        specifier: 6.8.8
+        version: 6.8.8
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/tooling/ledger-fakes:
     dependencies:
       '@mod/ledger-wire':
@@ -5516,9 +5541,15 @@ packages:
     resolution: {integrity: sha512-OQa6FDln5fLttmqSbjDiRYvFDOFNrBqfiOwHPlEbURil3b+vPB1v8xpi+Sp46drzNDlsTnNsS502vthmz56r4w==}
     engines: {node: '>=20.0.0'}
 
+  oauth4webapi@3.8.8:
+    resolution: {integrity: sha512-8N28E+a/oxfXWBgOMt+ZP/JUf/XR+IFbvkAEPP3gznXOMv9BpAAwiIj0TFNz3tGTPc0ZQ8zmWBNgN1nAys0gng==}
+
   obug@3.0.0:
     resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
+
+  openid-client@6.8.8:
+    resolution: {integrity: sha512-ZsucJA5Ad04Uv7YN4ql+s4GXNmb9uAYQwyJTsJx7CH/MX3JZioLE2pVKi1SC+YrbSLA4Px3Gi30dMjgOZtb6pA==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -6220,7 +6251,14 @@ snapshots:
 
   nodemailer@10.1.7: {}
 
+  oauth4webapi@3.8.8: {}
+
   obug@3.0.0: {}
+
+  openid-client@6.8.8:
+    dependencies:
+      jose: 6.2.12
+      oauth4webapi: 3.8.8
 
   picocolors@1.1.1: {}
 

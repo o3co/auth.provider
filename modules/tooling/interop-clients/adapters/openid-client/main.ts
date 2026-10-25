@@ -1,0 +1,132 @@
+// The openid-client adapter: one flow per run, told on its first input line, done with the library's
+// own calls; each browser step is asked of the driver, and the result is what the library gave back.
+// It trusts the front's certificate through NODE_EXTRA_CA_CERTS, which Node's fetch reads at start.
+import { createInterface } from "node:readline";
+import * as client from "openid-client";
+
+const lines = createInterface({ input: process.stdin })[Symbol.asyncIterator]();
+const read = async (): Promise<Record<string, unknown>> =>
+	JSON.parse(String((await lines.next()).value));
+const write = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
+const ask = async (question: Record<string, unknown>) => {
+	write(question);
+	return read();
+};
+
+interface Client {
+	readonly id: string;
+	readonly secret?: string;
+	readonly method: "client_secret_basic" | "client_secret_post" | "none" | "private_key_jwt";
+	readonly privateJwk?: JsonWebKey & { kid?: string; alg?: string };
+}
+
+interface Instruction {
+	readonly flow: string;
+	readonly issuer: string;
+	readonly client: Client;
+	readonly redirectUri?: string;
+	readonly scope?: string;
+}
+
+async function authOf(c: Client): Promise<client.ClientAuth> {
+	if (c.method === "client_secret_basic") return client.ClientSecretBasic(c.secret ?? "");
+	if (c.method === "client_secret_post") return client.ClientSecretPost(c.secret ?? "");
+	if (c.method === "none") return client.None();
+	const jwk = c.privateJwk ?? {};
+	const key = await crypto.subtle.importKey(
+		"jwk",
+		jwk,
+		{ name: "ECDSA", namedCurve: "P-256" },
+		false,
+		["sign"],
+	);
+	return client.PrivateKeyJwt({ key, kid: jwk.kid });
+}
+
+async function configOf(i: Instruction) {
+	const metadata = i.client.method === "none" ? {} : { client_secret: i.client.secret };
+	const config = await client.discovery(
+		new URL(i.issuer),
+		i.client.id,
+		metadata,
+		await authOf(i.client),
+	);
+	// The id token's signature is checked against the provider's keys, not taken on TLS's word.
+	client.enableNonRepudiationChecks(config);
+	return config;
+}
+
+/** The authorization code flow with PKCE, nonce and state, the browser's part asked of the driver. */
+async function signIn(config: client.Configuration, i: Instruction) {
+	const verifier = client.randomPKCECodeVerifier();
+	const state = client.randomState();
+	const nonce = client.randomNonce();
+	const url = client.buildAuthorizationUrl(config, {
+		redirect_uri: i.redirectUri ?? "",
+		scope: i.scope ?? "openid",
+		code_challenge: await client.calculatePKCECodeChallenge(verifier),
+		code_challenge_method: "S256",
+		state,
+		nonce,
+	});
+	const { location } = await ask({ ask: "browse", url: url.href });
+	return client.authorizationCodeGrant(config, new URL(String(location)), {
+		pkceCodeVerifier: verifier,
+		expectedState: state,
+		expectedNonce: nonce,
+		idTokenExpected: true,
+	});
+}
+
+async function login(i: Instruction) {
+	const config = await configOf(i);
+	const tokens = await signIn(config, i);
+	const claims = tokens.claims();
+	const userinfo = await client.fetchUserInfo(config, tokens.access_token, claims?.sub ?? "");
+	return {
+		idToken: claims,
+		userinfo,
+		tokenType: tokens.token_type,
+		scope: tokens.scope,
+		refreshToken: tokens.refresh_token !== undefined,
+	};
+}
+
+/** Signs in, refreshes once, then presents the refresh token it replaced again. */
+async function refresh(i: Instruction) {
+	const config = await configOf(i);
+	const first = (await signIn(config, i)).refresh_token;
+	if (first === undefined) throw new Error("the code's token answer held no refresh token");
+	const renewed = await client.refreshTokenGrant(config, first);
+	const replayed = await client.refreshTokenGrant(config, first).then(
+		() => "taken",
+		(error: { error?: string }) => error.error ?? "refused",
+	);
+	return {
+		accessToken: renewed.access_token !== undefined,
+		rotated: renewed.refresh_token !== undefined && renewed.refresh_token !== first,
+		replayed,
+	};
+}
+
+const flows: Record<string, (i: Instruction) => Promise<unknown>> = {
+	login,
+	"public-login": login,
+	refresh,
+};
+
+const instruction = (await read()) as unknown as Instruction;
+try {
+	const flow = flows[instruction.flow];
+	if (!flow) throw new Error(`no flow ${instruction.flow}`);
+	write({ result: await flow(instruction) });
+} catch (error) {
+	const e = error as Error & { code?: string; error?: string; cause?: unknown };
+	// The answer the library refused, where it kept it: its status and the start of its body.
+	const answered =
+		e.cause instanceof Response
+			? ` (${e.cause.status}: ${(await e.cause.text()).slice(0, 300)})`
+			: "";
+	write({ error: { type: e.error ?? e.code ?? e.name, message: `${e.message}${answered}` } });
+}
+process.exit(0);
