@@ -356,10 +356,42 @@ describe("jwt-bearer", () => {
 		// The audience the client is given, the issuer's for a client allowed none, is held to it too.
 		const elsewhere = await under({ audiences: ["https://api.example"] });
 		expect(errorOf(await elsewhere.grant(await assertion(base)))).toBe("invalid_target");
+		// So is a resource asked that the client may have but the ceiling does not name.
+		const set = assembly(
+			undefined,
+			issuer,
+			`${issuer}/oauth/token`,
+			[{ ...trustedUpstream[0], ceiling: { audiences: [issuer] } }],
+			outboundModule,
+			[narrowing],
+		);
+		const wide = allowancesFor({
+			grants: [grantType],
+			scopes: ["read"],
+			"default-scopes": ["read"],
+			audiences: [issuer, "https://api.example"],
+		});
+		const app = await assemble({
+			...set,
+			config: {
+				...set.config,
+				...clientsConfig([confidentialClient({ id: "app", sections: wide })]),
+			},
+		});
+		const ask = async (resource: string) =>
+			saidOf(
+				await app.get(grantCalls).call(grantType, "app", {
+					grant_type: grantType,
+					assertion: await assertion(base),
+					resource,
+				}),
+			);
+		expect(await ask("https://api.example")).toBe("invalid_target: not https://api.example");
 		expect(saved.length).toBe(before);
 		expect(errorOf(await (await under({ scopes: ["read"] })).grant(await assertion(base)))).toBe(
 			"issued",
 		);
+		expect(await ask(issuer)).toBe("issued");
 		expect(errorOf(await (await under({ audiences: [issuer] })).grant(await assertion(base)))).toBe(
 			"issued",
 		);
