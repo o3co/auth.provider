@@ -55,7 +55,7 @@ export interface FactorKind {
 	readonly addsSecondFactor: boolean;
 	/** Whether guessing can beat it, so failures count toward a lockout. */
 	readonly guessable: boolean;
-	/** Whether it meets a required second factor; one that does not is a way back only. */
+	/** Whether it meets a required second factor; one that does not is a way back only, which a subject still binds unless mfa issues it (`issuedWayBack`). */
 	readonly counts: boolean;
 	/** The value no two factors of this kind may hold, whatever their subjects; none while it cannot be told. */
 	uniqueSecret?(factor: Opened): string | undefined;
@@ -66,6 +66,10 @@ export interface FactorKind {
 	/** `kept` is what the factor's last challenge kept, when one was sent. */
 	verify(secret: string, state: unknown, proof: string, kept?: string): Promise<Verified>;
 }
+
+/** A way back mfa issues itself (the recovery codes): it does not count and says guessing cannot beat it. No subject begins one. */
+export const issuedWayBack = (kind: Pick<FactorKind, "counts" | "guessable">): boolean =>
+	!kind.counts && kind.guessable === false;
 
 export const factorKinds = extensionPoint<FactorKind>("mfa.factor-kinds", {
 	multiplicity: "keyed",
