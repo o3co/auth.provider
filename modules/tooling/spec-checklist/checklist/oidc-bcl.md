@@ -55,8 +55,12 @@
 
 ## 2.7 Back-Channel Logout Actions
 
-- **oidc-bcl-2.7-a** SHOULD: refresh tokens issued without `offline_access` to a session that is logged out are revoked.
-- **oidc-bcl-2.7-b** SHOULD NOT: a refresh token issued with `offline_access` is, as a rule, revoked because its session is logged out.
+- **oidc-bcl-2.7-a** SHOULD: where o3co's RP logs a session out on a valid logout token, the refresh tokens issued without `offline_access` to that session are revoked.
+  role: rp
+  out-of-scope: o3co's RP takes no logout token: no upstream-login module offers a back-channel logout URI, and o3co registers nothing at an upstream (upstream-client's settings).
+- **oidc-bcl-2.7-b** SHOULD NOT: a refresh token issued with `offline_access` is, as a rule, revoked because o3co's RP logged its session out on a logout token.
+  role: rp
+  out-of-scope: o3co's RP takes no logout token: no upstream-login module offers a back-channel logout URI, and o3co registers nothing at an upstream (upstream-client's settings).
 
 ## 2.8 Back-Channel Logout Response
 
@@ -66,7 +70,7 @@
 - **oidc-bcl-2.8-b** MUST: o3co's RP answers an invalid back-channel logout request, or one whose logout failed, with `400 Bad Request`.
   role: rp
   out-of-scope: o3co's RP takes no logout token: no upstream-login module offers a back-channel logout URI, and o3co registers nothing at an upstream (upstream-client's settings).
-- **oidc-bcl-2.8-c** MUST: where o3co's RP's back-channel logout response has a body, it carries `error`.
+- **oidc-bcl-2.8-c** MUST: where o3co's RP's error response to a back-channel logout request (an invalid request, or a logout that failed) has a body, it carries `error`.
   role: rp
   out-of-scope: o3co's RP takes no logout token: no upstream-login module offers a back-channel logout URI, and o3co registers nothing at an upstream (upstream-client's settings).
 - **oidc-bcl-2.8-d** SHOULD: o3co's RP's back-channel logout response carries `Cache-Control: no-store`.
