@@ -30,7 +30,7 @@ import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { issuancePolicies, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type DelegatedAssertions,
 	delegatedAssertions,
@@ -57,6 +57,8 @@ vi.mock("../src/assertion/assertion.ts", async (original) => {
 });
 
 const now = 1_800_000_000_000;
+/** The kernel's clock, which a test may move: put back after each. */
+const clock = { at: now };
 const issuer = "https://as.example";
 const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 /** An issuer whose assertions another module checks: their audience is an app, never this server. */
@@ -173,7 +175,7 @@ function assembly(
 			]),
 			"jwt-bearer": { issuers: [], ...section },
 		},
-		runtime: quietRuntime({ clock: { now: () => now }, log }),
+		runtime: quietRuntime({ clock: { now: () => clock.at }, log }),
 	};
 }
 
@@ -254,6 +256,41 @@ describe("delegated issuers", () => {
 		}
 		expect(d.spent).toEqual([]);
 		expect(saidOf(await s.grant("app", sent({ ...valid, expiresAt: now + 1000 })))).toBe("issued");
+	});
+
+	describe("the second left, while the grant works", () => {
+		afterEach(() => {
+			clock.at = now;
+		});
+		const lasting = { ...valid, expiresAt: now + 2000 };
+
+		it("is asked again just before the spend: time the issuance policies take leaves it unspent", async () => {
+			const slow = defineModule({ name: "slow-policy", takes: [] }, (m) => [
+				m.contribute(issuancePolicies).by(() => ({
+					name: "slow-policy",
+					judge: async () => {
+						clock.at += 1500;
+						return { kind: "allowed" };
+					},
+				})),
+			]);
+			const d = delegating();
+			const s = await serve([d.module, slow]);
+			expect(saidOf(await s.grant("app", sent(lasting)))).toBe("invalid_grant: expired");
+			expect(d.spent).toEqual([]);
+		});
+
+		it("is held to the token issued: one the spend's time leaves no life in is handed to no one", async () => {
+			const d = delegating({
+				spend: async () => {
+					clock.at += 2000;
+					return "spent";
+				},
+			});
+			const s = await serve([d.module]);
+			expect(saidOf(await s.grant("app", sent(lasting)))).toBe("invalid_grant: expired");
+			expect(d.spent).toHaveLength(1);
+		});
 	});
 
 	it("gives no token for an assertion made before its subject's revocation", async () => {

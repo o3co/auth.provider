@@ -136,11 +136,18 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			const found = await resolver.subjectOf(name, sub);
 			return found.kind === "subject" ? found.subject : undefined;
 		};
-		/** What any assertion verified becomes: a token for its subject, once the client may have it and its single use is spent. */
+		const refusedGrant = (description: string) =>
+			({ kind: "error", error: "invalid_grant", description }) as const;
+		/**
+		 * What any assertion verified becomes: a token for its subject, once the client may have it and
+		 * its single use is spent. One `lasting` must have a second left when it is spent and give a
+		 * token that lives, however long the steps before take.
+		 */
 		const issueFor = async (
 			{ client, param, admits, issue, target }: GrantInput,
 			checked: { readonly subject: string; readonly issuedAt?: number; readonly expiresAt: number },
 			spend: () => Promise<"spent" | "replayed">,
+			lasting = false,
 		): Promise<GrantOutcome | Refused> => {
 			const allowed = clientAllowance.allowedIssuance(client, param("scope"), named);
 			if (allowed.kind === "error") return allowed;
@@ -160,11 +167,14 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			// Asked before the assertion is used up, so a refusal leaves it usable.
 			const admitted = await admits(access);
 			if (admitted.kind === "refused") return admitted;
+			if (lasting && checked.expiresAt - c.clock.now() < 1000) return refusedGrant("expired");
 			if ((await spend()) === "replayed")
 				return { kind: "error", error: "invalid_grant", description: "assertion replayed" };
 			const issued = await issue(access, { notAfter: checked.expiresAt });
 			if (issued.kind === "refused") return issued;
 			const token = issued.access;
+			// Cut to the assertion's end at the time of issue, it may have no life left: handed to no one.
+			if (lasting && token.expiresIn < 1) return refusedGrant("expired");
 			return {
 				kind: "issued",
 				body: {
@@ -175,8 +185,6 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 				},
 			};
 		};
-		const refusedGrant = (description: string) =>
-			({ kind: "error", error: "invalid_grant", description }) as const;
 		/**
 		 * A delegated issuer's assertion: checked and used up by its delegate alone, never another way. A
 		 * public client proves the key it names; one with accept-unbound need not where it names none.
@@ -198,7 +206,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			if (client.kind !== "confidential" && !unbound && !holds(input.binding, told.holderDigest)) {
 				return refusedGrant("the request does not prove the key the assertion names");
 			}
-			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion));
+			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion), true);
 			if (client.kind !== "confidential" && unbound && outcome.kind === "issued") {
 				c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
 			}
