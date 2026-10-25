@@ -15,7 +15,7 @@ Internal module of `spec-checklist`: what a CI run's tests proved of the checkli
 - An entry names the run: `unit` and `integration` for the root's two configs; else the package beside the config, then `@<pattern>` with `CONFORMANCE_PATTERN` and `#<run>` with `SPEC_EVIDENCE_RUN`.
 - `run expected [--release]`: the runs a CI run must report, a release's own too with `--release`, as JSON.
 - `run plan <kind>`: the values a kind of job's matrix takes, as JSON, from the same runs.
-- `run compliance <dir> [--release]`: reads every report under `dir` against the expected runs (a release's with `--release`), writes `compliance.json` (each item's status, the runs that did not report, the counts by class and status) and `compliance.md` beside them; with `--release`, fails where an expected run did not report or an item is `failed`, `incomplete` or `unverified`.
+- `run compliance <dir> [--release]`: reads every report under `dir` against the expected runs (a release's with `--release`), writes `compliance.json` (each item's status and role with the identity of each report its tests ran in, the runs that did not report, the counts by class and status, and by role) and `compliance.md` beside them; with `--release`, fails where an expected run did not report or an item is `failed`, `incomplete` or `unverified`.
 
 ## Invariants
 - Every vitest config the workspace tracks registers the reporter, its fixtures' aside.

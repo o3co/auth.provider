@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { parseItems } from "../../checklist.ts";
 import { type EvidenceReport, entryOf } from "../reporter.ts";
-import { type Expected, itemStatuses, planOf, runsPrinted, selectReports } from "../runs.ts";
+import {
+	checkpoint,
+	complianceTable,
+	type Expected,
+	itemStatuses,
+	planOf,
+	runsPrinted,
+	selectReports,
+} from "../runs.ts";
 
 const identity = (entry: string, extra: Partial<EvidenceReport["identity"]> = {}) => ({
 	commit: "c1",
@@ -138,6 +146,31 @@ describe("itemStatuses", () => {
 			"rfc9999-4-f": "hole",
 			"rfc9999-4-g": "out-of-scope",
 		});
+	});
+
+	it("keeps the identity of each report its tests ran in, with their results there, and its role", () => {
+		const statuses = itemStatuses(items, tests, [unit, area], expected, pkgDirs);
+		const of = (id: string) => statuses.find((s) => s.id === id);
+		const at = { commit: "c1", run: "r1", attempt: 1, job: "checks" };
+		expect(of("rfc9999-4-b")?.evidence).toEqual([
+			{ ...at, entry: "unit", passed: 1, failed: 1, skipped: 0 },
+		]);
+		expect(of("rfc9999-4-c")?.evidence).toEqual([
+			{ ...at, entry: "@mod/conformance-code", passed: 1, failed: 0, skipped: 0 },
+		]);
+		expect(of("rfc9999-4-f")?.evidence).toEqual([]);
+		expect(of("rfc9999-4-a")?.role).toBe("as");
+	});
+
+	it("counts the checkpoint by class and status, and by role", () => {
+		const statuses = itemStatuses(items, tests, [unit, area], expected, pkgDirs);
+		const counts = checkpoint(statuses);
+		expect(counts.MUST).toMatchObject({ passed: 1, failed: 2, incomplete: 1, hole: 1 });
+		expect(counts.byRole.as).toEqual({ MUST: counts.MUST, SHOULD: counts.SHOULD });
+		expect(counts.byRole.rp?.MUST.passed).toBe(0);
+		expect(complianceTable(statuses, [])).toContain(
+			"| as | MUST | 1 | 2 | 1 | 1 | 1 | 0 | 0 | 1 |",
+		);
 	});
 
 	it("does not count a test the harness excused as passed, nor as failed", () => {

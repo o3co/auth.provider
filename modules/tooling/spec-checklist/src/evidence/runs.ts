@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { Item } from "../checklist.ts";
+import { type Item, type Role, roles } from "../checklist.ts";
 import { classOf, itemId } from "../ids.ts";
 import type { TestRef } from "../report.ts";
 import type { EvidenceReport } from "./reporter.ts";
@@ -54,9 +54,22 @@ export type RunStatus =
 	| "unverified"
 	| "passed";
 
+/** A report a test naming an item ran in: its identity, and the results of the item's tests in it. */
+export interface Evidence {
+	readonly commit: string;
+	readonly run: string;
+	readonly attempt: number;
+	readonly job: string;
+	readonly entry: string;
+	readonly passed: number;
+	readonly failed: number;
+	readonly skipped: number;
+}
+
 export interface ItemStatus {
 	readonly id: string;
 	readonly strength: Item["strength"];
+	readonly role: Role;
 	readonly status: RunStatus;
 	readonly passed: number;
 	readonly failed: number;
@@ -64,6 +77,8 @@ export interface ItemStatus {
 	readonly missing: readonly string[];
 	/** Results a harness excused, by their class. */
 	readonly excused: Readonly<Record<string, number>>;
+	/** The reports its tests ran in, the status's provenance. */
+	readonly evidence: readonly Evidence[];
 }
 
 /** Of the reports given, this commit's and run's for the new system, the last attempt of each entry and job. */
@@ -117,6 +132,28 @@ export function itemStatuses(
 		string,
 		{ passed: number; failed: number; excused: Record<string, number> }
 	>();
+	const evidence = new Map<string, Map<EvidenceReport, Evidence>>();
+	for (const r of reports) {
+		for (const t of r.tests) {
+			for (const id of idsIn(t.names)) {
+				const byReport = evidence.get(id) ?? new Map<EvidenceReport, Evidence>();
+				const { commit, run, attempt, job, entry } = r.identity;
+				const e = byReport.get(r) ?? {
+					commit,
+					run,
+					attempt,
+					job,
+					entry,
+					passed: 0,
+					failed: 0,
+					skipped: 0,
+				};
+				const state = t.state === "pending" ? "skipped" : t.state;
+				byReport.set(r, { ...e, [state]: e[state] + 1 });
+				evidence.set(id, byReport);
+			}
+		}
+	}
 	for (const t of reports.flatMap((r) => r.tests)) {
 		for (const id of idsIn(t.names)) {
 			const s = seen.get(id) ?? { passed: 0, failed: 0, excused: {} };
@@ -145,7 +182,16 @@ export function itemStatuses(
 						: s.passed > 0
 							? "passed"
 							: "unverified");
-		return { id: i.id, strength: i.strength, status, ...s, missing };
+		const provenance = [...(evidence.get(i.id)?.values() ?? [])];
+		return {
+			id: i.id,
+			strength: i.strength,
+			role: i.role,
+			status,
+			...s,
+			missing,
+			evidence: provenance,
+		};
 	});
 }
 
@@ -160,8 +206,7 @@ const order: readonly RunStatus[] = [
 	"out-of-scope",
 ];
 
-/** The counts the checkpoint reports: by strength's class and status, every item counted once. */
-export function checkpoint(statuses: readonly ItemStatus[]) {
+const countsOf = (statuses: readonly ItemStatus[]) => {
 	const of = (cls: "MUST" | "SHOULD") =>
 		Object.fromEntries(
 			order.map((st) => [
@@ -170,6 +215,14 @@ export function checkpoint(statuses: readonly ItemStatus[]) {
 			]),
 		);
 	return { MUST: of("MUST"), SHOULD: of("SHOULD") };
+};
+
+/** The counts the checkpoint reports: by strength's class and status, every item counted once, and by role. */
+export function checkpoint(statuses: readonly ItemStatus[]) {
+	const byRole = Object.fromEntries(
+		roles.map((role) => [role, countsOf(statuses.filter((s) => s.role === role))]),
+	);
+	return { ...countsOf(statuses), byRole };
 }
 
 /** The run's compliance table, as Markdown. */
@@ -189,6 +242,15 @@ export function complianceTable(
 		`|---|${order.map(() => "---").join("|")}|`,
 		...(["MUST", "SHOULD"] as const).map(
 			(cls) => `| ${cls} | ${order.map((st) => counts[cls][st]).join(" | ")} |`,
+		),
+		"",
+		`| Role | Class | ${order.join(" | ")} |`,
+		`|---|---|${order.map(() => "---").join("|")}|`,
+		...roles.flatMap((role) =>
+			(["MUST", "SHOULD"] as const).map(
+				(cls) =>
+					`| ${role} | ${cls} | ${order.map((st) => counts.byRole[role]?.[cls][st] ?? 0).join(" | ")} |`,
+			),
 		),
 		"",
 		"| Item | Strength | Status | Passed | Failed | Missing runs | Excused |",
