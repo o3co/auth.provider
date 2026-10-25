@@ -1,0 +1,4 @@
+jti-ledger-http {
+	issuer = "https://devices.example.invalid"
+	consume-url = "https://ledger.example.invalid/assertions/consume"
+}

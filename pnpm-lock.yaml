@@ -4702,6 +4702,30 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/user-ledger-http/jti-ledger-http:
+    dependencies:
+      '@mod/jwt-bearer':
+        specifier: workspace:*
+        version: link:../../oauth/jwt-bearer
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   modules/user-ledger-http/ledger-wire:
     devDependencies:
       vitest:
