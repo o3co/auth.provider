@@ -19,8 +19,8 @@ onLegacy(secondFactorArea, {
 			...(part.mail
 				? {
 						MFA_EMAIL_FACTOR_ENABLED: "true",
-						// As on the new target, its proof adds `mfa`.
-						MFA_EMAIL_FACTOR_ADDS_MFA: "true",
+						// As on the new target, its proof adds `mfa` unless the scene keeps the default.
+						MFA_EMAIL_FACTOR_ADDS_MFA: String(part.mail.addsSecondFactor ?? true),
 						STANDARD_SMTP_MAIL_SENDER_SECURE: "none",
 					}
 				: {}),
