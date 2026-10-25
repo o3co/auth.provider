@@ -4,7 +4,7 @@
 - Contributes WebAuthn as a kind of second factor (`webauthn`), on `webauthn`'s ceremonies.
 
 ## Not here
-- The ceremonies and their checks (`webauthn`). Keeping factors, challenges and transactions (`mfa`, `mfa-flows`). Passkeys for signing in (`webauthn`).
+- The ceremonies and their checks (`webauthn`). Keeping factors, challenges and transactions (`mfa`, `mfa-flows`). Passkeys for signing in (`passkeys`).
 
 ## Offers
 - Contribution to `mfa`'s factor kinds: `webauthn`, adding `mfa`, not guessable, counting.
