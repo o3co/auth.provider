@@ -1,19 +1,29 @@
 import { execFileSync } from "node:child_process";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { ask, askAll, microsOf } from "../../ask/ask.ts";
 import { type Reply, startRelay } from "../../relay/relay.ts";
 import { encode, rawClient } from "../../relay/test/client.ts";
 import { roleOf } from "../../store-wire/store-wire.ts";
 import { type Node, startTopology, type Topology } from "../topology.ts";
 
-let running: Topology | undefined;
+// Every topology a test starts is stopped after it, however many it starts.
+let running: Topology[] = [];
 afterEach(async () => {
-	await running?.stop();
-	running = undefined;
+	for (const t of running) await t.stop();
+	running = [];
+});
+afterAll(() => {
+	const left = execFileSync(
+		"docker",
+		["ps", "-aq", "--filter", `label=conformance.owner=${process.pid}`],
+		{ encoding: "utf8" },
+	).trim();
+	expect(left).toBe("");
 });
 const topology = async (spec: Parameters<typeof startTopology>[0]) => {
-	running = await startTopology(spec);
-	return running;
+	const t = await startTopology(spec);
+	running.push(t);
+	return t;
 };
 
 /** A reply's text: a status, an error, a number, a string, or an array's lines. */
@@ -77,7 +87,6 @@ describe("a Redis topology", () => {
 		expect(names.every((n) => exists("container", n))).toBe(true);
 		expect(exists("network", t.network)).toBe(true);
 		await t.stop();
-		running = undefined;
 		expect(names.some((n) => exists("container", n))).toBe(false);
 		expect(exists("network", t.network)).toBe(false);
 		expect(volumes.some((v) => exists("volume", v))).toBe(false);
@@ -249,6 +258,31 @@ describe("what a topology keeps true across its faults", () => {
 		await k.promote({ replica: a, reattach: [b] });
 		expect(k.replicas().map((n) => n.name)).toEqual([b.name]);
 		await k.stop();
+	});
+
+	it("refuses to keep the old primary on where none of its replicas would stay with it, changing nothing", async () => {
+		const t = await topology({ replicas: 2 });
+		const [next, other] = t.replicas();
+		if (!next || !other) throw new Error("no replicas");
+		const old = t.primary();
+		await expect(t.promote({ replica: next, reattach: [other], keepOld: true })).rejects.toThrow(
+			/old primary/,
+		);
+		expect(t.primary().name).toBe(old.name);
+		expect(await role(next)).toBe("slave");
+		expect(await written(old, "k", "v", 2)).toBe("2");
+	});
+
+	it("lets the old primary take writes again where a promotion keeping it on fails", async () => {
+		const t = await topology({ replicas: 3 });
+		const [, next, moved] = t.replicas();
+		if (!next || !moved) throw new Error("no replicas");
+		const old = t.primary();
+		t.pause(moved, true);
+		await expect(t.promote({ replica: next, reattach: [moved], keepOld: true })).rejects.toThrow();
+		t.pause(moved, false);
+		const taken = await ask(old.upstream(), ["SET", "after", "1"], 1_000);
+		expect(taken).toEqual({ kind: "simple", text: "OK" });
 	});
 
 	it("refuses to keep the old primary on without a replica for the new one", async () => {

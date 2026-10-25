@@ -223,6 +223,12 @@ export async function startTopology(spec: TopologySpec) {
 			const reattach = o.reattach ?? [];
 			if (o.keepOld && reattach.length === 0)
 				throw new Error("keeping the old primary on needs a replica reattached to the new one");
+			const moving = new Set([o.replica.name, ...reattach.map((r) => r.name)]);
+			const staying = nodes.filter(
+				(n) => follows.get(n.name) === old.name && !killed.has(n.name) && !moving.has(n.name),
+			);
+			if (o.keepOld && staying.length === 0)
+				throw new Error("keeping the old primary on needs one of its replicas to stay with it");
 			// Offsets compare only within one replication history.
 			if ((await replid(o.replica)) !== (await replid(old)))
 				throw new Error(
@@ -231,31 +237,37 @@ export async function startTopology(spec: TopologySpec) {
 			const catchUpMs = o.catchUpMs ?? 5_000;
 			await old.ask("CLIENT", "PAUSE", String(catchUpMs + 60_000), "WRITE");
 			const from = performance.now();
+			// Whatever fails from here, an old primary not killed takes writes again.
 			try {
 				const offset = Number(field(await info(old), "master_repl_offset"));
 				const caughtUp = async () =>
 					Number(field(await info(o.replica), "slave_repl_offset") ?? -1) >= offset;
 				await until(`not eligible: ${o.replica.name} lags behind ${old.name}`, caughtUp, catchUpMs);
 				await o.between?.();
+				if (!o.keepOld) {
+					docker("kill", "-s", "KILL", old.name);
+					killed.add(old.name);
+				}
+				await o.replica.ask("REPLICAOF", "NO", "ONE");
+				follows.set(o.replica.name, undefined);
+				for (const r of reattach) {
+					await r.ask("REPLICAOF", o.replica.name, "6379");
+					follows.set(r.name, o.replica.name);
+				}
+				primary = o.replica;
+				await until("the replicas named did not follow", () =>
+					onlineAt(o.replica, reattach.length),
+				);
+				if (o.keepOld) {
+					await old.ask("CLIENT", "UNPAUSE");
+					await until(
+						"the old primary lost every replica",
+						async () => (await replicasOf(old)) > 0,
+					);
+				}
 			} catch (error) {
-				await old.ask("CLIENT", "UNPAUSE").catch(() => undefined);
+				if (!killed.has(old.name)) await old.ask("CLIENT", "UNPAUSE").catch(() => undefined);
 				throw error;
-			}
-			if (!o.keepOld) {
-				docker("kill", "-s", "KILL", old.name);
-				killed.add(old.name);
-			}
-			await o.replica.ask("REPLICAOF", "NO", "ONE");
-			follows.set(o.replica.name, undefined);
-			for (const r of reattach) {
-				await r.ask("REPLICAOF", o.replica.name, "6379");
-				follows.set(r.name, o.replica.name);
-			}
-			primary = o.replica;
-			await until("the replicas named did not follow", () => onlineAt(o.replica, reattach.length));
-			if (o.keepOld) {
-				await old.ask("CLIENT", "UNPAUSE");
-				await until("the old primary lost every replica", async () => (await replicasOf(old)) > 0);
 			}
 			return { primary: o.replica, old, barrier: { from, to: performance.now() } };
 		},

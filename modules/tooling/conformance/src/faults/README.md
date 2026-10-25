@@ -18,7 +18,8 @@ Internal module of `conformance`: a Redis topology a fault scene runs on, and th
 - Every node fsyncs every write (`appendonly`, `appendfsync always`) and runs Redis as its own user from the start, its debug command allowed, for a slow server.
 - A replica that has not caught up, or follows another replication history than the primary, is never promoted; its refusal says it is not eligible.
 - Writes to the primary are held from the barrier at which the target is taken until the old primary is killed or, kept on, released.
-- Keeping the old primary on needs a replica reattached to the new one.
+- Keeping the old primary on needs a replica reattached to the new one and one of its own to stay with it; a choice that leaves either without is refused before anything changes.
+- A promotion that fails after the barrier leaves an old primary it did not kill taking writes again.
 - A node follows its primary by command, never by a start argument, so one crashed starts again in its current role, following its current primary, checked before `crash` answers.
 - A request was held by a sleep only where Redis served it at or after the sleep's end; the hint alone proves nothing.
 - With the old primary kept on, each primary keeps a replica online.
