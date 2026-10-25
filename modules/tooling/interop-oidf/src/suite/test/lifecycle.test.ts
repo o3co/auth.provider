@@ -1,0 +1,90 @@
+import { existsSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import type { Command } from "../../commands/commands.ts";
+import { composeOverride, startSuite } from "../suite.ts";
+
+const pin = { tag: "release-v1", commit: "c0ffee", python: ["httpx==1"] };
+const host = { name: "host.docker.internal", listen: "127.0.0.1" };
+
+/** A command that answers as `answer` says, keeping each call; one it does not know answers nothing. */
+function commands(
+	answer: (cmd: string, args: readonly string[]) => Promise<string> | string = () => "",
+) {
+	const calls: { cmd: string; args: readonly string[]; timeoutMs: number; signal?: AbortSignal }[] =
+		[];
+	const command: Command = async (cmd, args, options) => {
+		calls.push({
+			cmd,
+			args,
+			timeoutMs: options.timeoutMs,
+			...(options.signal ? { signal: options.signal } : {}),
+		});
+		return { stdout: await answer(cmd, args) };
+	};
+	return { command, calls };
+}
+
+const isDown = (args: readonly string[]) => args.includes("down");
+
+describe("the suite's start and stop, held to their time and leaving nothing behind", () => {
+	it("marks every container with the process that owns it", () => {
+		const text = composeOverride(host, 4242);
+		for (const service of ["mongodb", "nginx", "server"]) {
+			expect(text).toMatch(
+				new RegExp(
+					`  ${service}:\\n(    .*\\n|      .*\\n)*    labels:\\n      o3co.oidf.owner: "4242"\\n`,
+				),
+			);
+		}
+	});
+
+	it("gives up at the plan's deadline on a step that hangs, and still stops what it started", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "suite-start-"));
+		const { command, calls } = commands(
+			(cmd, args) =>
+				new Promise<string>((resolve, reject) => {
+					if (cmd === "git" && args[0] === "clone") {
+						const signal = calls.at(-1)?.signal;
+						signal?.addEventListener("abort", () => reject(new Error("aborted")));
+						return;
+					}
+					resolve("");
+				}),
+		);
+		const started = startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), {
+			command,
+			signal: AbortSignal.timeout(200),
+		});
+		await expect(started).rejects.toThrow();
+		// The stop runs past the deadline, by budgets of its own.
+		const down = calls.find((c) => c.cmd === "docker" && isDown(c.args));
+		expect(down?.signal).toBeUndefined();
+		expect(down?.timeoutMs).toBeGreaterThan(0);
+	});
+
+	it("says its stop failed, and keeps what stops the suite, where the containers could not be taken down", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "suite-stop-"));
+		const suiteDir = join(dir, "suite");
+		const { command } = commands((cmd, args) => {
+			if (cmd === "git" && args[0] === "-C") return `${pin.commit}\n`;
+			// The suite comes up, never answers before the deadline, and the daemon then fails to take it down.
+			if (cmd === "docker" && isDown(args)) throw new Error("the daemon did not answer");
+			return "";
+		});
+		const started = startSuite(pin, suiteDir, host, join(dir, "suite.log"), {
+			command,
+			signal: AbortSignal.timeout(300),
+		});
+		const error = await started.then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		const told =
+			error instanceof AggregateError ? error.errors.map(String).join("\n") : String(error);
+		expect(told).toContain("the daemon did not answer");
+		expect(existsSync(join(suiteDir, "override.yml"))).toBe(true);
+	});
+});

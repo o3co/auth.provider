@@ -351,9 +351,12 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `libraries` (`src/libraries`): the client libraries the harness runs.
   - `pins` (`src/pins`): the SHA-256 of each jar an adapter is built from.
 - `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config, on the `simple-web` pattern's app behind an https front.
+  - `api` (`src/api`): the suite's API, reached trusting its certificate alone.
+  - `commands` (`src/commands`): a command a plan runs, held to its time.
   - `expected` (`src/expected`): whether the expected entries may go to the suite.
   - `harness` (`src/harness`): one plan run end to end, reported as tests.
   - `login` (`src/login`): the deployment's login page, as the suite's browser meets it.
+  - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
   - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
   - `results` (`src/results`): what each suite test of a plan proved.
   - `scene` (`src/scene`): the app the OP plans meet.

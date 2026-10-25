@@ -26,7 +26,7 @@ ${redirectTo === null ? "" : `<input type="hidden" name="redirect_to" value="${e
  * answer the page itself takes to the provider's password login, as the browser at its address,
  * and turns into the redirect the provider names, with the session it set.
  */
-export function loginPage(upstream: string, publicOrigin: string) {
+export function loginPage(upstream: string, publicOrigin: string, withinMs = 30_000) {
 	return {
 		form: (redirectTo: string | null) => page(redirectTo),
 		async submit(
@@ -39,18 +39,29 @@ export function loginPage(upstream: string, publicOrigin: string) {
 				password: form.get("password") ?? "",
 				...(redirectTo === null ? {} : { redirect_to: redirectTo }),
 			});
-			const answer = await fetch(`${upstream}/session/login`, {
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-					origin: publicOrigin,
-					"x-forwarded-proto": "https",
-					"x-forwarded-for": browser.address,
-					...(browser.cookie === undefined ? {} : { cookie: browser.cookie }),
-				},
-				body: sent,
-				redirect: "manual",
-			});
+			// A provider that never answers the login is a page saying so, never a wait.
+			let answer: Response;
+			try {
+				answer = await fetch(`${upstream}/session/login`, {
+					signal: AbortSignal.timeout(withinMs),
+					method: "POST",
+					headers: {
+						"content-type": "application/x-www-form-urlencoded",
+						origin: publicOrigin,
+						"x-forwarded-proto": "https",
+						"x-forwarded-for": browser.address,
+						...(browser.cookie === undefined ? {} : { cookie: browser.cookie }),
+					},
+					body: sent,
+					redirect: "manual",
+				});
+			} catch (error) {
+				return {
+					status: 504,
+					headers: {},
+					body: page(redirectTo, `the provider did not answer the login (${String(error)})`),
+				};
+			}
 			const body = (await answer.json().catch(() => ({}))) as {
 				readonly redirect_to?: string;
 				readonly error?: string;

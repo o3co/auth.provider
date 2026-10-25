@@ -1,11 +1,19 @@
-import { execFile } from "node:child_process";
-import { createHash, X509Certificate } from "node:crypto";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { connect } from "node:tls";
-import { promisify } from "node:util";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { certificateAt, getJson } from "../api/api.ts";
+import { type Command, systemCommand } from "../commands/commands.ts";
+import { ownerLabel, reclaimOrphans } from "../orphans/orphans.ts";
 
-const run = promisify(execFile);
+/** Each command's own time: a setup step's within the plan's deadline, a stop's after it too. */
+const budgetMs = {
+	clone: 300_000,
+	quick: 30_000,
+	pip: 300_000,
+	up: 600_000,
+	logs: 60_000,
+	down: 120_000,
+} as const;
 
 /** The suite's version, pinned: its release tag and the commit the tag names. */
 export interface SuitePin {
@@ -29,15 +37,13 @@ export interface SuiteHost {
 }
 
 /** Docker Desktop names this machine itself, in IPv4; on Linux the name is given the bridge's gateway. */
-export async function hostForSuite(): Promise<SuiteHost> {
+export async function hostForSuite(command: Command = systemCommand): Promise<SuiteHost> {
 	if (process.platform === "darwin") return { name: "host.docker.internal", listen: "127.0.0.1" };
-	const { stdout } = await run("docker", [
-		"network",
-		"inspect",
-		"bridge",
-		"-f",
-		"{{(index .IPAM.Config 0).Gateway}}",
-	]);
+	const { stdout } = await command(
+		"docker",
+		["network", "inspect", "bridge", "-f", "{{(index .IPAM.Config 0).Gateway}}"],
+		{ timeoutMs: budgetMs.quick },
+	);
 	const gateway = stdout.trim();
 	return { name: "host.docker.internal", listen: gateway, mapped: gateway };
 }
@@ -46,21 +52,20 @@ export async function hostForSuite(): Promise<SuiteHost> {
  * The compose file beside the suite's own: its store is in memory, never a directory of this
  * machine's (a run's store is thrown away, and Docker Desktop's shared directories can refuse its
  * writes); its server reaches this machine by name, mapped to an IPv4 address alone (`host-gateway`
- * adds an IPv6 one the suite's Java may pick and find no route to).
+ * adds an IPv6 one the suite's Java may pick and find no route to); every container is labelled with
+ * the process that owns it.
  */
-export const composeOverride = (host: SuiteHost) => `services:
+export const composeOverride = (host: SuiteHost, owner: number = process.pid) => {
+	const labels = `    labels:\n      ${ownerLabel}: "${owner}"\n`;
+	return `services:
   mongodb:
     volumes:
       - type: tmpfs
         target: /data/db
-${
-	host.mapped === undefined
-		? ""
-		: `  server:
-    extra_hosts:
-      - "${host.name}:${host.mapped}"
-`
-}`;
+${labels}  nginx:
+${labels}  server:
+${host.mapped === undefined ? "" : `    extra_hosts:\n      - "${host.name}:${host.mapped}"\n`}${labels}`;
+};
 
 /**
  * The compose file's environment: the image tag pinned, and the suite's public origins as the
@@ -73,13 +78,6 @@ export const suiteEnv = (pin: SuitePin): NodeJS.ProcessEnv => ({
 	BASE_URL: suiteOrigin,
 	BASE_MTLS_URL: "https://localhost.emobix.co.uk:8444",
 });
-
-/** A certificate as PEM, from its DER bytes. */
-export const pemOf = (der: Buffer) =>
-	`-----BEGIN CERTIFICATE-----\n${der
-		.toString("base64")
-		.match(/.{1,64}/g)
-		?.join("\n")}\n-----END CERTIFICATE-----\n`;
 
 /** The suite at its pinned version, started in `dir`: a directory of its own, removed when it stops. */
 export interface Suite {
@@ -98,85 +96,24 @@ export interface Suite {
 export const projectOf = (dir: string) =>
 	`o3co-oidf-${createHash("sha256").update(dir).digest("hex").slice(0, 16)}`;
 
-/** Asks the suite's nginx for its certificate, without trusting it yet: the one to trust from now on. */
-export async function certificateAt(
-	at: { readonly host: string; readonly port: number } = { host: "127.0.0.1", port: 8443 },
-	withinMs = 5_000,
-): Promise<string> {
-	const der = await new Promise<Buffer>((resolve, reject) => {
-		const socket = connect(
-			{
-				host: at.host,
-				port: at.port,
-				servername: "localhost.emobix.co.uk",
-				rejectUnauthorized: false,
-			},
-			() => {
-				const raw = socket.getPeerCertificate().raw;
-				socket.end();
-				resolve(raw);
-			},
-		);
-		socket.once("error", reject);
-		// A port that takes the connection and never finishes the handshake is tried again, not waited on.
-		socket.setTimeout(withinMs, () =>
-			socket.destroy(new Error(`no TLS handshake within ${withinMs / 1000}s`)),
-		);
-	});
-	return pemOf(der);
-}
-
-/**
- * The check of a server's identity that takes this certificate alone, by its fingerprint: the
- * suite's names `localhost`, not the host it is reached by, so its name is no check.
- */
-export function pinnedTo(pem: string) {
-	const pinned = new X509Certificate(pem).fingerprint256;
-	return (_host: string, presented: { readonly fingerprint256: string }) =>
-		presented.fingerprint256 === pinned
-			? undefined
-			: new Error("the suite answered with another certificate than the one first read");
-}
-
-/** A JSON GET at the suite, trusting the certificate it was first read with alone. */
-export async function getJson(url: string, ca: string): Promise<{ status: number; body: unknown }> {
-	const { request } = await import("node:https");
-	const checkServerIdentity = pinnedTo(ca);
-	return new Promise((resolve, reject) => {
-		const req = request(url, { ca, checkServerIdentity, timeout: 30_000 }, (res) => {
-			// An answer cut off midway is refused, never left pending.
-			res.on("error", reject);
-			res.on("aborted", () => reject(new Error(`the suite cut its answer to ${url} off`)));
-			let text = "";
-			res.on("data", (chunk) => {
-				text += chunk;
-			});
-			res.on("end", () => {
-				let body: unknown = text;
-				try {
-					body = JSON.parse(text);
-				} catch {}
-				resolve({ status: res.statusCode ?? 0, body });
-			});
-		});
-		req.on("timeout", () => req.destroy(new Error(`the suite did not answer ${url}`)));
-		req.on("error", reject);
-		req.end();
-	});
-}
-
 /**
  * Starts the suite at `pin` in `dir`: its source at the pinned commit (the compose file and the
- * scripts), a Python of its own for the scripts, and its containers under a project of their own.
- * Stopping keeps the server's log in `log` first, then takes the containers and their volumes down
- * and removes `dir`, however the start went.
+ * scripts), a Python of its own for the scripts, and its containers under a project of their own,
+ * after any suite whose owner is gone was taken down. Each setup step is held to its own time and to
+ * `signal`, the plan's deadline. Stopping keeps every container's state and log in `log` first, then
+ * takes the containers and their volumes down by budgets of its own, past the deadline too, and
+ * removes `dir`; however the start went. A stop that fails keeps `dir`, which holds what stops the
+ * suite, and tells every step that failed.
  */
 export async function startSuite(
 	pin: SuitePin,
 	dir: string,
 	host: SuiteHost,
 	log: string,
+	options: { readonly command?: Command; readonly signal?: AbortSignal } = {},
 ): Promise<Suite> {
+	const command = options.command ?? systemCommand;
+	const signal = options.signal;
 	const source = join(dir, "suite");
 	const name = projectOf(dir);
 	const compose = [
@@ -189,34 +126,62 @@ export async function startSuite(
 		join(dir, "override.yml"),
 	];
 	const env = suiteEnv(pin);
+	/** A setup step: its own time, and the plan's deadline. */
+	const step = (cmd: string, args: readonly string[], timeoutMs: number, cwd?: string) =>
+		command(cmd, args, { timeoutMs, env, ...(signal ? { signal } : {}), ...(cwd ? { cwd } : {}) });
 	const stop = async () => {
+		const problems: unknown[] = [];
+		const kept = async (args: readonly string[]) =>
+			command("docker", [...compose, ...args], { timeoutMs: budgetMs.logs, env }).then(
+				(r) => r.stdout,
+				(error: unknown) => {
+					problems.push(error);
+					return "";
+				},
+			);
 		// Every container's state and log: a failed start is often one of them gone.
-		const said = async (args: readonly string[]) =>
-			(
-				await run("docker", [...compose, ...args], { env, maxBuffer: 64 * 1024 * 1024 }).catch(
-					() => ({ stdout: "" }),
-				)
-			).stdout;
-		const states = await said(["ps", "--all", "--format", "{{.Service}} {{.State}} {{.Status}}"]);
-		const logs = await said(["logs", "--no-color"]);
-		await writeFile(log, `${states}\n${logs}`).catch(() => {});
-		await run("docker", [...compose, "down", "--volumes", "--remove-orphans"], { env }).catch(
-			() => {},
+		const states = await kept(["ps", "--all", "--format", "{{.Service}} {{.State}} {{.Status}}"]);
+		const logs = await kept(["logs", "--no-color"]);
+		await writeFile(log, `${states}\n${logs}`).catch((error: unknown) => problems.push(error));
+		const down = await command("docker", [...compose, "down", "--volumes", "--remove-orphans"], {
+			timeoutMs: budgetMs.down,
+			env,
+		}).then(
+			() => true,
+			(error: unknown) => {
+				problems.push(error);
+				return false;
+			},
 		);
-		await rm(dir, { recursive: true, force: true });
+		// What stops the suite stays while its containers may run.
+		if (down)
+			await rm(dir, { recursive: true, force: true }).catch((error: unknown) =>
+				problems.push(error),
+			);
+		if (problems.length > 0)
+			throw new AggregateError(
+				problems,
+				`the suite's stop failed${down ? "" : `; its compose files stay in ${dir}`}`,
+			);
 	};
+	await mkdir(dir, { recursive: true });
 	try {
-		await run("git", [
-			"clone",
-			"--quiet",
-			"--depth",
-			"1",
-			"--branch",
-			pin.tag,
-			"https://gitlab.com/openid/conformance-suite.git",
-			source,
-		]);
-		const { stdout: head } = await run("git", ["-C", source, "rev-parse", "HEAD"]);
+		await reclaimOrphans(command, join(dirname(log), "reclaimed"));
+		await step(
+			"git",
+			[
+				"clone",
+				"--quiet",
+				"--depth",
+				"1",
+				"--branch",
+				pin.tag,
+				"https://gitlab.com/openid/conformance-suite.git",
+				source,
+			],
+			budgetMs.clone,
+		);
+		const { stdout: head } = await step("git", ["-C", source, "rev-parse", "HEAD"], budgetMs.quick);
 		if (head.trim() !== pin.commit) {
 			throw new Error(
 				`the suite's tag ${pin.tag} names ${head.trim()}, not the pinned ${pin.commit}`,
@@ -224,19 +189,20 @@ export async function startSuite(
 		}
 		await writeFile(join(dir, "override.yml"), composeOverride(host));
 		const venv = join(dir, "python");
-		await run("python3", ["-m", "venv", venv]);
-		await run(join(venv, "bin", "pip"), ["install", "--quiet", ...pin.python]);
-		await run("docker", [...compose, "up", "--detach", "--quiet-pull"], { env });
+		await step("python3", ["-m", "venv", venv], budgetMs.quick);
+		await step(join(venv, "bin", "pip"), ["install", "--quiet", ...pin.python], budgetMs.pip);
+		await step("docker", [...compose, "up", "--detach", "--quiet-pull"], budgetMs.up);
 		const deadline = Date.now() + readyWithinMs;
 		let ca: string | undefined;
 		for (;;) {
+			signal?.throwIfAborted();
 			try {
 				ca ??= await certificateAt();
 				if ((await getJson(`${suiteOrigin}/api/plan?length=1`, ca)).status === 200) break;
 			} catch {}
 			if (Date.now() > deadline)
 				throw new Error(`the suite did not answer within ${readyWithinMs / 1000}s`);
-			await new Promise((resolve) => setTimeout(resolve, 2_000));
+			await sleep(2_000, signal);
 		}
 		const certificate = join(dir, "suite-cert.pem");
 		await writeFile(certificate, ca);
@@ -254,7 +220,30 @@ export async function startSuite(
 			stop,
 		};
 	} catch (error) {
-		await stop();
+		// The start's failure first, then each of the stop's.
+		const stopped = await stop().then(
+			() => [],
+			(failed: unknown) => (failed instanceof AggregateError ? failed.errors : [failed]),
+		);
+		if (stopped.length > 0)
+			throw new AggregateError(
+				[error, ...stopped],
+				`${String(error)}; and the suite's stop failed`,
+			);
 		throw error;
 	}
 }
+
+/** Waits `ms`, or less where `signal` aborts. */
+const sleep = (ms: number, signal?: AbortSignal) =>
+	new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(resolve, ms);
+		signal?.addEventListener(
+			"abort",
+			() => {
+				clearTimeout(timer);
+				reject(signal.reason);
+			},
+			{ once: true },
+		);
+	});

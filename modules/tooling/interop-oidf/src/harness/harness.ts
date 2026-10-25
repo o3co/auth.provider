@@ -55,8 +55,20 @@ export const keptThenStopped =
 		}
 	};
 
-/** The longest one plan may run. */
-const planWithinMs = 15 * 60_000;
+/** The longest the suite's runner may run a plan. */
+const runWithinMs = 15 * 60_000;
+
+/** The longest a whole plan may take, its setup and its run, before its stops; they run past it by budgets of their own. */
+const planWithinMs = 25 * 60_000;
+
+/** Runs every stop, the last pushed first, though some fail; answers each failure, none swallowed. */
+export async function stopAll(stops: readonly (() => Promise<unknown>)[]): Promise<unknown[]> {
+	const problems: unknown[] = [];
+	for (const stop of [...stops].reverse()) {
+		await stop().catch((error: unknown) => problems.push(error));
+	}
+	return problems;
+}
 
 const readJson = async <T>(file: string): Promise<T> =>
 	JSON.parse(await readFile(file, "utf8")) as T;
@@ -85,12 +97,25 @@ async function expectedOf(name: string) {
 }
 
 /** What the runner's process said and how it ended, held to the plan's time. */
-function runner(python: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv) {
+function runner(
+	python: string,
+	args: readonly string[],
+	cwd: string,
+	env: NodeJS.ProcessEnv,
+	signal: AbortSignal,
+) {
 	return new Promise<{ code: number | null; output: string }>((resolve) => {
 		execFile(
 			python,
 			[...args],
-			{ cwd, env, timeout: planWithinMs, maxBuffer: 256 * 1024 * 1024 },
+			{
+				cwd,
+				env,
+				timeout: runWithinMs,
+				signal,
+				killSignal: "SIGKILL",
+				maxBuffer: 256 * 1024 * 1024,
+			},
 			(error, stdout, stderr) => {
 				const code = error === null ? 0 : typeof error.code === "number" ? error.code : null;
 				resolve({ code, output: `${stdout}${stderr}` });
@@ -146,6 +171,10 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 		(await mkdtemp(join(tmpdir(), `interop-oidf-artifacts-${plan.name}-`)));
 	await mkdir(artifacts, { recursive: true });
 	const stops: (() => Promise<unknown>)[] = [];
+	// One deadline for the whole plan, its setup and its run; the stops run past it.
+	const deadline = AbortSignal.timeout(planWithinMs);
+	let result: PlanRun | undefined;
+	let failure: unknown;
 	try {
 		const host = await hostForSuite();
 		const suite = await startSuite(
@@ -153,6 +182,7 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 			join(work, "suite"),
 			host,
 			join(artifacts, "suite-server.log"),
+			{ signal: deadline },
 		);
 		stops.push(() => suite.stop());
 		const shim = pkceShim();
@@ -298,6 +328,7 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 				CONFORMANCE_DEV_MODE: "1",
 				DISABLE_SSL_VERIFY: "1",
 			},
+			deadline,
 		);
 		await writeFile(join(artifacts, "runner.log"), said.output);
 		await cp(join(run, "export"), join(artifacts, "export"), { recursive: true });
@@ -309,9 +340,27 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 			failures: expected.failures,
 			skips: expected.skips,
 		});
-		return { ...judged, runner: said, artifacts };
-	} finally {
-		for (const stop of stops.reverse()) await stop().catch(() => {});
-		await rm(work, { recursive: true, force: true });
+		result = { ...judged, runner: said, artifacts };
+	} catch (error) {
+		failure = error;
 	}
+	const problems = await stopAll(stops);
+	// A stop that failed keeps what stops its part in `work`; it is left for the next run to take down.
+	if (problems.length === 0)
+		await rm(work, { recursive: true, force: true }).catch((e: unknown) => problems.push(e));
+	if (failure !== undefined) {
+		if (problems.length > 0)
+			throw new AggregateError(
+				[failure, ...problems],
+				`${String(failure)}; and stopping what it started failed`,
+			);
+		throw failure;
+	}
+	if (problems.length > 0)
+		throw new AggregateError(
+			problems,
+			`the plan ran, and stopping what it started failed (left in ${work})`,
+		);
+	if (result === undefined) throw new Error("the plan ended with no result");
+	return result;
 }

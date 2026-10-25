@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import type { PlanDefinition } from "./harness/harness.ts";
+import { reclaimOrphans } from "./orphans/orphans.ts";
 
 /** The OP plans the harness runs, each one evidence run of its own. */
 export const plans = {
@@ -52,6 +53,17 @@ if (import.meta.main) {
 				env: { ...process.env, SPEC_EVIDENCE_RUN: run },
 			});
 			if (ran.status !== 0) process.exitCode = ran.status ?? 1;
+			// A plan's run killed before its stops (cancelled, or a worker that died) leaves its suite on the
+			// fixed ports; it is taken down here, its logs kept, and the plan fails for it.
+			const records = process.env.OIDF_ARTIFACTS_DIR;
+			const reclaimed = await reclaimOrphans(
+				undefined,
+				records === undefined ? undefined : join(records, run, "reclaimed"),
+			);
+			if (reclaimed.length > 0) {
+				console.error(`${run}: took down the suite its run left behind (${reclaimed.join(", ")})`);
+				process.exitCode = 1;
+			}
 		}
 	} else console.error(`usage: evidence-runs | plan [${Object.keys(plans).join("|")}]...`);
 }
