@@ -17,7 +17,7 @@ export function keptToken(jar: Cookies, request: HttpRequest): string | undefine
 /** A new token: 32 random bytes are 43 base64url characters. */
 export const newToken = (random: Random) => Buffer.from(random.bytes(32)).toString("base64url");
 
-/** Same-origin evidence or the double-submit token; any foreign evidence is refused regardless. */
+/** Same-origin evidence or the double-submit token; an Origin or a Referer naming another origin is refused regardless. */
 export function checking(origin: string, secureCookies: boolean, jar: Cookies) {
 	return (request: HttpRequest): "passed" | "refused" => {
 		// A secure cookie means nothing to a plain-http request.
