@@ -11,7 +11,7 @@ Internal module of `conformance`: running every pattern's areas on its app.
 
 ## Invariants
 - Prints each area's tests line, and its scenes left out by reason.
-- A failed area prints why: vitest's failures from their heading on (a scene refused before its tests too, where none failed), or its last 60 lines; and keeps its whole output in a file it names.
+- A failed area prints why: vitest's failures from their heading on, at most 400 lines (a scene refused before its tests too, where none failed), or its last 60 lines; and keeps its whole output in a file it names, under the OS temp dir (`TMPDIR`) as `conformance-<pattern>-<area>-*/output.log`, which CI uploads.
 - A pattern with no areas fails.
 - Any failure exits non-zero.
 
