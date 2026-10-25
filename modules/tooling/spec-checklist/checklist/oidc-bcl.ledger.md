@@ -1,0 +1,53 @@
+# OpenID Connect Back-Channel Logout 1.0 ledger
+
+- source: https://openid.net/specs/openid-connect-backchannel-1_0.txt
+- version: OpenID Connect Back-Channel Logout 1.0 incorporating errata set 1, Final
+- sha256: bc37561124c00bdcc1df89f58ce0afd828b15a635587847be0928bd378f027bb
+
+- 1.1 #1 MUST: excluded definition
+- 1.1 #2 MUST NOT: excluded definition
+- 1.1 #3 REQUIRED: excluded definition
+- 1.1 #4 SHALL: excluded definition
+- 1.1 #5 SHALL NOT: excluded definition
+- 1.1 #6 SHOULD: excluded definition
+- 1.1 #7 SHOULD NOT: excluded definition
+- 1.1 #8 RECOMMENDED: excluded definition
+- 1.1 #9 NOT RECOMMENDED: excluded definition
+- 1.1 #10 MUST NOT: excluded definition
+- 2.1 #1 SHOULD: oidc-bcl-2.1-a
+- 2.2 #1 MUST: oidc-bcl-2.2-a
+- 2.2 #2 MUST: oidc-bcl-2.2-b
+- 2.2 #3 MUST NOT: oidc-bcl-2.2-c
+- 2.2 #4 SHOULD: excluded client-only
+- 2.2 #5 SHOULD: excluded client-only
+- 2.4 #1 REQUIRED: oidc-bcl-2.4-a
+- 2.4 #2 REQUIRED: oidc-bcl-2.4-b
+- 2.4 #3 REQUIRED: oidc-bcl-2.4-c
+- 2.4 #4 REQUIRED: oidc-bcl-2.4-d
+- 2.4 #5 REQUIRED: oidc-bcl-2.4-e
+- 2.4 #6 REQUIRED: oidc-bcl-2.4-f
+- 2.4 #7 MUST: oidc-bcl-2.4-g
+- 2.4 #8 SHOULD: oidc-bcl-2.4-h
+- 2.4 #9 MUST: oidc-bcl-2.4-i
+- 2.4 #10 MUST NOT: oidc-bcl-2.4-j
+- 2.4 #11 MUST NOT: oidc-bcl-2.4-j
+- 2.4 #12 MUST: excluded client-only
+- 2.4 #13 MUST: oidc-bcl-2.4-k
+- 2.4 #14 SHOULD: oidc-bcl-2.4-l
+- 2.4 #15 RECOMMENDED: oidc-bcl-2.4-m
+- 2.5 #1 MUST: excluded client-only
+- 2.5 #2 SHOULD: oidc-bcl-2.5-a
+- 2.5 #3 SHOULD NOT: oidc-bcl-2.5-b
+- 2.6 #1 MUST: excluded client-only
+- 2.6 #2 SHOULD: excluded client-only
+- 2.6 #3 SHOULD: oidc-bcl-2.6-b
+- 2.6 #4 MUST NOT: oidc-bcl-2.6-a
+- 2.7 #1 SHOULD: oidc-bcl-2.7-a
+- 2.7 #2 SHOULD NOT: oidc-bcl-2.7-b
+- 2.8 #1 MUST: excluded client-only
+- 2.8 #2 MUST: excluded client-only
+- 2.8 #3 REQUIRED: excluded client-only
+- 2.8 #4 SHOULD: excluded client-only
+- 3 #1 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 3 #2 REQUIRED: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 3 #3 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
