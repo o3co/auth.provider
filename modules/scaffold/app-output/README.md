@@ -24,6 +24,7 @@
 - `Packages.outside`, where the caller has packages outside the release: what the app is given beside them, see the internal module `outside`; `appZod`, the zod every app depends on.
 
 ## Invariants
+- The manifest's `bundledInside` names each bundled file the package ships, by its path in the package, with every package from outside it holds inside, for the release's list of what it ships: the package's test holds it to the files there and to the packages each bundle's own regions name.
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken. Every file is made before any is written.
 - A name not an npm package is refused by `namesPackages`, before anything is written.
 - The manifest names the pnpm the workspace builds with, and the app also depends on `zod` at the packages' version.
