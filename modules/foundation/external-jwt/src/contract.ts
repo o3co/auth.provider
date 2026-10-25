@@ -64,7 +64,12 @@ export type Verified =
 			readonly header: Readonly<Record<string, unknown>>;
 			readonly claims: Readonly<Record<string, unknown>>;
 	  }
-	| { readonly kind: "invalid"; readonly reason: Reason }
+	| {
+			readonly kind: "invalid";
+			readonly reason: Reason;
+			/** Present where the signature held and a claim was refused after; absent for a refusal before. */
+			readonly signed?: true;
+	  }
 	| { readonly kind: "unavailable" };
 
 export interface Verifier {
