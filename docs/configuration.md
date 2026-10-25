@@ -280,6 +280,7 @@ From `@mod/jwt-bearer`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is"}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. |
+| `jwt-bearer.delegated-issuers` | list of string | `[]` |  |  |  | Issuers whose assertions another module checks by its own rules, each exactly as sent: their audience is an app, not this server, so RFC 7523 §3 does not hold. Each needs the one module that checks it. |
 | `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | The longest lifetime an assertion may claim, from `1s` to `1d` in whole seconds. |
 | `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
 
@@ -856,6 +857,14 @@ From `@mod/federation-tokens`.
 |---|---|---|---|---|
 | `sections.federation-tokens.receives` | boolean | `false` |  | Whether the client may be handed its sessions' upstream tokens; only a client the operator registers may. |
 | `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  | Where an upstream logout this client asks may send the browser back, each matched exactly. |
+
+### sections.jwt-bearer
+
+From `@mod/jwt-bearer`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.jwt-bearer.accept-unbound` | boolean | `false` |  | Lets this public client present a delegated issuer's assertion that names no key (no digest in its nonce) without proving one by DPoP: for apps already sent out that make no DPoP key. A leaked assertion can then be used once, before its owner, until it ages out, and the token is bound to no key. Each is logged; one naming a key is proved still. Read for registered clients only. |
 
 ### sections.rp-logout
 
