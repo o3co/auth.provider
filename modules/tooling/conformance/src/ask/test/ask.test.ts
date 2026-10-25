@@ -43,3 +43,28 @@ describe("reading what Redis answered", () => {
 		expect(() => textOf({ kind: "bulk", data: null }, ["INFO"])).toThrow(/INFO refused/);
 	});
 });
+
+describe("an answer Redis did not send as RESP2", () => {
+	for (const [what, bytes] of [
+		["RESP3", "%1\r\n+a\r\n+b\r\n"],
+		["a broken frame", "$x\r\n"],
+	] as const) {
+		it(`is refused, ${what}, for one command and for several`, async () => {
+			const sockets: Socket[] = [];
+			const server = createServer((socket) => {
+				sockets.push(socket);
+				socket.on("data", () => socket.write(bytes));
+			});
+			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+			const address = server.address();
+			const to = {
+				host: "127.0.0.1",
+				port: typeof address === "object" && address ? address.port : 0,
+			};
+			await expect(ask(to, ["PING"], 5_000)).rejects.toThrow(/RESP3|malformed/);
+			await expect(askAll(to, [["PING"], ["PING"]], 5_000)).rejects.toThrow(/RESP3|malformed/);
+			for (const s of sockets) s.destroy();
+			await new Promise((resolve) => server.close(resolve));
+		});
+	}
+});

@@ -272,6 +272,8 @@ export async function startTopology(spec: TopologySpec) {
 				}
 				throw new Error(`the Redis ${n.name} did not fall asleep`);
 			})();
+			// A hint a scene need not read: its giving up is never left unhandled.
+			asleep.catch(() => {});
 			return { asleep, awake };
 		},
 		/** Pauses a node's container, or resumes it. */

@@ -11,7 +11,7 @@ Internal module of `conformance`: a Redis topology a fault scene runs on, and th
 - A node: its name, `upstream` (where it answers on this host now), `ask`, `runId`, `state` (running, exit code).
 - `promote` a replica, as `promotion` does, in this topology.
 - `crash` a node (SIGKILL, then started again, answering how it ended), and `pause` a node's container.
-- `sleep` a node (`DEBUG SLEEP`): `awake` with when it began and ended on Redis's clock, from a `TIME` on either side in the same write; `asleep` only a hint, a PING unanswered.
+- `sleep` a node (`DEBUG SLEEP`): `awake` with when it began and ended on Redis's clock, from a `TIME` on either side in the same write; `asleep` only a hint, a PING unanswered, whose giving up is never left unhandled.
 - `redisImage`: the Redis image by version and digest.
 
 ## Invariants

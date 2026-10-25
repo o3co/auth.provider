@@ -15,7 +15,14 @@ export function ask(to: Upstream, args: readonly string[], timeoutMs = 30_000): 
 		const timer = setTimeout(() => socket.destroy(new Error(`no reply to ${args[0]}`)), timeoutMs);
 		let done = false;
 		socket.on("data", (chunk: Buffer) => {
-			const [frame] = reader.push(chunk);
+			let frame: ReturnType<typeof reader.push>[number] | undefined;
+			try {
+				[frame] = reader.push(chunk);
+			} catch (error) {
+				// An answer it cannot read ends the request through the error handler.
+				socket.destroy(error as Error);
+				return;
+			}
 			if (!frame) return;
 			done = true;
 			clearTimeout(timer);
@@ -47,7 +54,12 @@ export function askAll(
 		const timer = setTimeout(() => socket.destroy(new Error("no reply")), timeoutMs);
 		let done = false;
 		socket.on("data", (chunk: Buffer) => {
-			replies.push(...reader.push(chunk).map((f) => f.value));
+			try {
+				replies.push(...reader.push(chunk).map((f) => f.value));
+			} catch (error) {
+				socket.destroy(error as Error);
+				return;
+			}
 			if (replies.length < commands.length) return;
 			done = true;
 			clearTimeout(timer);

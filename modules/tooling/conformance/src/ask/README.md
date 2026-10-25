@@ -11,7 +11,7 @@ Internal module of `conformance`: Redis at hand, for the topology and the scenes
 
 ## Invariants
 - An error answer resolves `ask` as an answer; `ok` and `textOf` read it as a refusal, never a success.
-- A connection that closes, errs or runs out of time before every reply has come is refused, at once.
+- A connection that closes, errs or runs out of time before every reply has come, or an answer it cannot read (RESP3, a broken frame), is refused, at once.
 - Several commands in one write reach Redis in that order, on one connection: a `WAIT` among them counts the writes before it.
 
 ## Depends on

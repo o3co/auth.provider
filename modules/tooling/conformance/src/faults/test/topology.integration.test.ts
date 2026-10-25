@@ -442,3 +442,44 @@ describe("what a topology takes as done", () => {
 		await expect(sleeping.awake).rejects.toThrow(/DEBUG/);
 	});
 });
+
+describe("what a topology leaves unhandled", () => {
+	const rejections: unknown[] = [];
+	const count = (reason: unknown) => rejections.push(reason);
+
+	it("leaves no rejection unhandled where a scene reads only a sleep's end", async () => {
+		process.on("unhandledRejection", count);
+		try {
+			const t = await topology({ replicas: 0, settings: ["--enable-debug-command", "no"] });
+			await expect(t.sleep(t.primary(), 1).awake).rejects.toThrow(/DEBUG/);
+			// The hint gives up after its tries: long enough for it to have rejected.
+			await new Promise((resolve) => setTimeout(resolve, 2_000));
+			expect(rejections).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", count);
+		}
+	});
+
+	it("leaves no rejection unhandled where the scene's step fails after the barrier ran out", async () => {
+		process.on("unhandledRejection", count);
+		try {
+			const t = await topology({ replicas: 2 });
+			const [next, other] = t.replicas();
+			if (!next || !other) throw new Error("no replicas");
+			await expect(
+				t.promote({
+					replica: next,
+					reattach: [other],
+					catchUpMs: 1_000,
+					holdMs: 1_500,
+					between: () =>
+						new Promise((_, reject) => setTimeout(() => reject(new Error("late")), 2_500)),
+				}),
+			).rejects.toThrow(/barrier/);
+			await new Promise((resolve) => setTimeout(resolve, 2_000));
+			expect(rejections).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", count);
+		}
+	});
+});

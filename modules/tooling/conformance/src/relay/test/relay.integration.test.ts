@@ -429,3 +429,29 @@ describe("what the relay keeps in order and on record", () => {
 		await expect(relay.close()).rejects.toThrow(/never/);
 	});
 });
+
+describe("a caller's code that throws", () => {
+	it("fails the relay, its connection cut, and never ends the run", async () => {
+		const relay = await startRelay({
+			upstream: upstreamOf(redis.url),
+			roleOf: (c) => {
+				if (c.name === "ECHO") throw new Error("a role that cannot be told");
+				return undefined;
+			},
+		});
+		relay.observe({
+			request: (c) => {
+				if (c.name === "INCR") throw new Error("a match that cannot be read");
+				return false;
+			},
+			succeeded: () => true,
+		});
+		for (const command of [encode("ECHO", "x"), encode("INCR", fresh())]) {
+			const c = await rawClient(relay.url);
+			c.write(command);
+			await Promise.race([c.closed, pause(2_000)]);
+			expect(c.isClosed()).toBe(true);
+		}
+		await expect(relay.close()).rejects.toThrow(/cannot be told[\s\S]*cannot be read/);
+	});
+});

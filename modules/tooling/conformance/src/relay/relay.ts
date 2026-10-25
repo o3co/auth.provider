@@ -341,8 +341,16 @@ export async function startRelay(options: RelayOptions) {
 		links.push(link);
 		const fromApp = frames();
 		const fromRedis = frames();
-		client.on("data", (chunk: Buffer) => fromClient(link, chunk, fromApp));
-		link.server.on("data", (chunk: Buffer) => fromServer(link, chunk, fromRedis));
+		// A caller's match or role that throws fails the relay and cuts the connection, never the run.
+		const guarded = (read: () => void) => {
+			try {
+				read();
+			} catch (error) {
+				fail(link, error instanceof Error ? error.message : String(error));
+			}
+		};
+		client.on("data", (chunk: Buffer) => guarded(() => fromClient(link, chunk, fromApp)));
+		link.server.on("data", (chunk: Buffer) => guarded(() => fromServer(link, chunk, fromRedis)));
 		for (const socket of [client, link.server]) {
 			socket.on("error", () => cut(link));
 			socket.on("close", () => cut(link));
