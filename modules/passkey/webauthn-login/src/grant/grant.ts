@@ -43,7 +43,6 @@ export interface LoginParts {
 	readonly issuer: string;
 }
 
-/** The passkey login grant: an assertion of a kept passkey for the client's tokens. */
 /** What `passkeyGrantIn` takes from the build context. */
 export const grantTakes = [passkeys, lineage, subjectRevocation, audit, issuer] as const;
 
@@ -57,6 +56,7 @@ export const passkeyGrantIn = async (c: BuildContext<unknown>) =>
 		issuer: (await c.get(issuer)).url,
 	});
 
+/** The passkey login grant: an assertion of a kept passkey for the client's tokens. */
 export function passkeyGrant(p: LoginParts): Grant {
 	return {
 		grantType: webauthnGrantType,

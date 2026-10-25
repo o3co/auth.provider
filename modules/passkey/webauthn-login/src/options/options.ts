@@ -11,7 +11,6 @@ function requesterOf({ fields, mistyped }: HttpRequest): string | false {
 	return id === undefined || id === "" ? false : id;
 }
 
-/** Request options the same for everyone, whose challenge only the client named redeems. */
 /** What `optionsRouteIn` takes from the build context. */
 export const optionsTakes = [passkeys] as const;
 
@@ -19,6 +18,7 @@ export const optionsTakes = [passkeys] as const;
 export const optionsRouteIn = async (c: BuildContext<Settings>) =>
 	optionsRoute(await c.get(passkeys), { limit: c.section.requests, ms: c.section.window * 1000 });
 
+/** Request options the same for everyone, whose challenge only the client named redeems. */
 export function optionsRoute(passkeys: Passkeys, window: Window): Route {
 	return {
 		method: "POST",
