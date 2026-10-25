@@ -21,12 +21,12 @@ export interface ArtifactSeen {
 	readonly createdAt: string;
 }
 
-/** What a candidate run was found to be: what it tested and how its compliance ended, or why it cannot be read. */
+/** What a candidate run was found to be: what it tested and how its jobs ended (its latest attempt's, by name), or why it cannot be read. */
 export type Examined =
 	| {
 			readonly run: RunSeen;
 			readonly tested: { readonly commit: string; readonly tree: string };
-			readonly compliance: string | undefined;
+			readonly jobs: Readonly<Record<string, string | null | undefined>>;
 			readonly artifacts: readonly ArtifactSeen[];
 	  }
 	| { readonly run: RunSeen; readonly problem: string };
@@ -121,14 +121,19 @@ export function testedCommitOf(reports: readonly unknown[], run: string): string
 	return commits.size === 1 ? [...commits][0] : undefined;
 }
 
+/** The jobs CI runs on a pull request to main alone, and must pass there: a run that skipped them is no release pull request's. */
+export const releaseJobs = ["conformance", "release-check", "compliance"] as const;
+
 /** Why a run examined will not do, with what to do; none where it will. */
 function refusalOf(tag: Tag, e: Examined): string | undefined {
 	if ("problem" in e) return `${e.run.url}: ${e.problem}; ${rerun(e.run)}`;
 	if (e.tested.tree !== tag.tree) {
 		return `${e.run.url} tested tree ${e.tested.tree}, but the tag's tree is ${tag.tree}: main moved after it ran, so what it tested is not what the tag publishes; see "When the release finds no evidence" in docs/releasing.md`;
 	}
-	if (e.compliance !== "success") {
-		return `${e.run.url}: its compliance job ended ${e.compliance ?? "without running"}; ${rerun(e.run)}`;
+	const unpassed = releaseJobs.filter((job) => e.jobs[job] !== "success");
+	if (unpassed.length > 0) {
+		const ended = unpassed.map((job) => `its ${job} job ended ${e.jobs[job] ?? "without running"}`);
+		return `${e.run.url}: ${ended.join(", ")}: a release pull request's run runs and passes ${releaseJobs.join(", ")}; ${rerun(e.run)}`;
 	}
 	return undefined;
 }

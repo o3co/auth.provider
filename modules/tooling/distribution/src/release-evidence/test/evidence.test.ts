@@ -147,7 +147,7 @@ describe("whether the release may go on with a run's evidence", () => {
 	const taken = {
 		run: run({ id: 7 }),
 		tested: { commit: "m", tree: tag.tree },
-		compliance: "success",
+		jobs: { conformance: "success", "release-check": "success", compliance: "success" },
 		artifacts: [artifact("compliance")],
 	};
 	/** Examines each candidate by its id, from what the case lays out; a function, to throw. */
@@ -212,6 +212,25 @@ describe("whether the release may go on with a run's evidence", () => {
 		});
 	});
 
+	it("takes a run only where the jobs a release pull request runs passed, never a run that skipped them", () => {
+		// A pull request to develop from the same head and branch skips the release's jobs.
+		const toDevelop = {
+			...taken,
+			run: run({ id: 11 }),
+			jobs: { ...taken.jobs, "release-check": "skipped", conformance: "skipped" },
+		};
+		expect(firstTaken(tag, [toDevelop.run], by({ 11: toDevelop }))).toEqual({
+			kind: "stopped",
+			problems: [
+				expect.stringMatching(
+					/its conformance job ended skipped, its release-check job ended skipped: .*release pull request/,
+				),
+			],
+		});
+		const unrun = { ...taken, run: run({ id: 12 }), jobs: { compliance: "success" } };
+		expect(firstTaken(tag, [unrun.run], by({ 12: unrun })).kind).toBe("stopped");
+	});
+
 	it("stops, naming what is missing and what to do, where no run will do", () => {
 		const none = firstTaken(tag, [], by({}));
 		expect(none.kind).toBe("stopped");
@@ -223,7 +242,7 @@ describe("whether the release may go on with a run's evidence", () => {
 			[run({ id: 8 }), run({ id: 9 }), run({ id: 10 })],
 			by({
 				8: { ...taken, run: run({ id: 8 }), tested: { commit: "n", tree: "other" } },
-				9: { ...taken, run: run({ id: 9 }), compliance: "failure" },
+				9: { ...taken, run: run({ id: 9 }), jobs: { ...taken.jobs, compliance: "failure" } },
 				10: { run: run({ id: 10 }), problem: "evidence-area-0-1 has expired" },
 			}),
 		);

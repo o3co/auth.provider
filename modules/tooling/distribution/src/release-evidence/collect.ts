@@ -86,7 +86,7 @@ const walk = (dir: string): string[] =>
 		return statSync(path).isDirectory() ? walk(path) : [path];
 	});
 
-/** A candidate's artifacts downloaded and unpacked, the commit its reports tested with that commit's tree, and how its compliance ended. */
+/** A candidate's artifacts downloaded and unpacked, the commit its reports tested with that commit's tree, and how its jobs ended. */
 function examined(run: RunSeen): Examined {
 	const chosen = artifactsOf(
 		listed<ArtifactSeen>(
@@ -119,11 +119,13 @@ function examined(run: RunSeen): Examined {
 	const commit = testedCommitOf(reports, String(run.id));
 	if (commit === undefined) return { run, problem: "its reports name no one commit tested" };
 	const tree = ran("gh", ["api", `${repo}/git/commits/${commit}`, "--jq", ".tree.sha"]);
-	const compliance = listed<string>(
-		`${repo}/actions/runs/${run.id}/jobs?per_page=100`,
-		'.jobs[] | select(.name == "compliance") | .conclusion',
-	)[0];
-	return { run, tested: { commit, tree }, compliance, artifacts: chosen.take };
+	const jobs = Object.fromEntries(
+		listed<{ name: string; conclusion: string | null }>(
+			`${repo}/actions/runs/${run.id}/jobs?per_page=100`,
+			".jobs[] | {name, conclusion}",
+		).map((j) => [j.name, j.conclusion]),
+	);
+	return { run, tested: { commit, tree }, jobs, artifacts: chosen.take };
 }
 
 try {
