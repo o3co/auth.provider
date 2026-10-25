@@ -5,6 +5,7 @@ import {
 	type ConfiguredUrl,
 	isLoopbackHttp,
 	isLoopbackName,
+	loopbackPagesRefused,
 	sameTarget,
 	urlSetting,
 	urlsChecked,
@@ -499,5 +500,23 @@ describe("isLoopbackHttp", () => {
 		]) {
 			expect(isLoopbackHttp(url), url).toBe(false);
 		}
+	});
+});
+
+describe("loopbackPagesRefused", () => {
+	it("names each page, or list of pages, holding plain http on a loopback host, by its key alone", () => {
+		const refused = loopbackPagesRefused({
+			"login-page": "http://localhost:3000/login",
+			"step-up-page": "https://as.example/raise",
+			absent: undefined,
+			"return-targets": ["https://as.example/a", "http://127.0.0.1/b"],
+		});
+		const reason =
+			"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to";
+		expect(refused).toEqual([
+			{ key: "login-page", reason },
+			{ key: "return-targets", reason },
+		]);
+		expect(JSON.stringify(refused)).not.toContain("localhost:3000");
 	});
 });
