@@ -162,6 +162,22 @@ describe("itemStatuses", () => {
 		expect(of("rfc9999-4-a")?.role).toBe("as");
 	});
 
+	it("keeps the report and the reason of a failure no test owns: a file that did not load, a run's own error", () => {
+		const at = { commit: "c1", run: "r1", attempt: 1, job: "checks" };
+		const [, , , , e] = itemStatuses(items, tests, [unit, area], expected, pkgDirs);
+		expect(e).toMatchObject({ id: "rfc9999-4-e", status: "failed", evidence: [] });
+		expect(e?.failures).toEqual([
+			{ ...at, entry: "unit", reason: "modules/x/x/test/broken.test.ts: failed outside its tests" },
+		]);
+		const erred: EvidenceReport = { ...area, errors: 2 };
+		const [, , c] = itemStatuses(items, tests, [unit, erred], expected, pkgDirs);
+		expect(c).toMatchObject({ id: "rfc9999-4-c", status: "failed" });
+		expect(c?.failures).toEqual([
+			{ ...at, entry: "@mod/conformance-code", reason: "2 error(s) no test owns" },
+		]);
+		expect(itemStatuses(items, tests, [unit, area], expected, pkgDirs)[0]?.failures).toEqual([]);
+	});
+
 	it("counts the checkpoint by class and status, and by role", () => {
 		const statuses = itemStatuses(items, tests, [unit, area], expected, pkgDirs);
 		const counts = checkpoint(statuses);

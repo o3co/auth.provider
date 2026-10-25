@@ -66,6 +66,16 @@ export interface Evidence {
 	readonly skipped: number;
 }
 
+/** A failure no test naming the item owns, as a report gave it: its identity and the reason. */
+export interface Failure {
+	readonly commit: string;
+	readonly run: string;
+	readonly attempt: number;
+	readonly job: string;
+	readonly entry: string;
+	readonly reason: string;
+}
+
 export interface ItemStatus {
 	readonly id: string;
 	readonly strength: Item["strength"];
@@ -79,6 +89,8 @@ export interface ItemStatus {
 	readonly excused: Readonly<Record<string, number>>;
 	/** The reports its tests ran in, the status's provenance. */
 	readonly evidence: readonly Evidence[];
+	/** The failures of its tests' files and runs that no test owns, with the reports that gave them. */
+	readonly failures: readonly Failure[];
 }
 
 /** Of the reports given, this commit's and run's for the new system, the last attempt of each entry and job. */
@@ -171,6 +183,22 @@ export function itemStatuses(
 		const entries = [...new Set(refs.flatMap((r) => entriesOfFile(r.pkg, r.file, expected)))];
 		const missing = entries.filter((e) => expected.entries.includes(e) && !present.has(e));
 		const broken = files.some((f) => brokenFiles.has(f)) || entries.some((e) => errored.has(e));
+		const failures = reports.flatMap((r) => {
+			const { commit, run, attempt, job, entry } = r.identity;
+			const at = { commit, run, attempt, job, entry };
+			const outside = [
+				...new Set(
+					r.tests
+						.filter((t) => t.names.length === 0 && t.state === "failed" && files.includes(t.file))
+						.map((t) => t.file),
+				),
+			].map((file) => ({ ...at, reason: `${file}: failed outside its tests` }));
+			const errors =
+				r.errors > 0 && entries.includes(entry)
+					? [{ ...at, reason: `${r.errors} error(s) no test owns` }]
+					: [];
+			return [...outside, ...errors];
+		});
 		const status: RunStatus =
 			i.mark?.kind ??
 			(refs.length === 0
@@ -191,6 +219,7 @@ export function itemStatuses(
 			...s,
 			missing,
 			evidence: provenance,
+			failures,
 		};
 	});
 }
