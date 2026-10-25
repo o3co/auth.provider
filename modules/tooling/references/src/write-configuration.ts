@@ -2,6 +2,7 @@
 /** Writes the generated references, configuration (with each package's defaults), audit events and routes, into the workspace this package lies in. */
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { attackSurfaceFile, attackSurfaceIn, attackSurfaceOf } from "./attack-surface/surface.ts";
 import { auditReferenceFile, auditReferenceOf, declarationsIn } from "./audit-events.ts";
 import {
 	clientSectionsOf,
@@ -24,3 +25,4 @@ await writeFile(
 for (const s of sections) await writeFile(referenceConfFile(s.dir), referenceConfOf(s));
 await writeFile(auditReferenceFile(root), auditReferenceOf(await declarationsIn(root)));
 await writeFile(routesFile(root), routesOf(await routesIn(root)));
+await writeFile(attackSurfaceFile(root), attackSurfaceOf(await attackSurfaceIn(root)));
