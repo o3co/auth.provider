@@ -9,8 +9,8 @@
 
 ## Offers
 - Composition definition (grant, taking its audience from the request), and its contract (`.`).
-- Extension point `signerKeys`, one per issuer: the keys of the signer an assertion names (its `sub` and `kid`) with the algorithms they take, or none; it throws Unavailable when it cannot tell, and is asked anew for each assertion.
-- Extension point `linkedSubjects`: the subject a linked issuer's verified signer stands for, by the IdP name and the `sub`, or none; it throws Unavailable when it cannot tell. Contract `linkedIssuers`: each linked issuer with its IdP name (`upstream`), for the module declaring the names.
+- Extension point `signerKeys`, one per issuer: the keys of the signer an assertion names (its subject and `kid`) with the algorithms they take, or none; it throws Unavailable when it cannot tell, and is asked anew for each assertion.
+- Extension point `linkedSubjects`: the subject a linked issuer's verified signer stands for, by the IdP name and the signer's subject, or none; it throws Unavailable when it cannot tell. Contract `linkedIssuers`: each linked issuer with its IdP name (`upstream`), for the module declaring the names.
 - Store interface for spent assertions: save a name for a lifetime, answering `created` or `exists`; its needs are under Data. Its contract test (`./testing`).
 - Extension point `jtiLedgers`, one per issuer: a ledger shared with whatever else accepts that issuer's assertions, using one up by its `jti` as sent (`first` or `replayed`), in place of the store; it throws Unavailable when it cannot tell. Its contract test and a ledger in memory (`./testing`).
 - Operator section:
@@ -24,8 +24,8 @@
 - A key set is fetched only at https from its issuer's host; a `jwks-uri` not at https or on another host, or with an issuer that is no URL, refuses the boot. While no key set can be had, the grant is unavailable.
 - Boot is refused on an issuer with keys both written and contributed, or neither; on `upstream` without `linked`, or `linked` without it; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them; on `subject-is-key-thumbprint` with a key set, which cannot tell which key signed; and on an issuer without `subject`.
 - Boot is refused on an issuer named twice in `issuers`, on keys contributed for an issuer `issuers` does not name, and on a `self-issued-prefix` that starts any issuer or overlaps another prefix (at both, whatever the order). Each refusal of an issuer is at its place (`jwt-bearer.issuers.<i>`), never by its value. Boot logs where self-issued signers are taken (`jwt-bearer.self_issued_signers`, info), never a prefix.
-- The signer is read, its shape checked and its keys asked for as the internal module `assertion` says, before anything is verified; every refusal before the signature holds answers `untrusted signer`, telling nothing of which signers have keys.
-- `as-is`: the token is for the `sub`, a self-issued signer's thumbprint. `linked`: for the subject `linkedSubjects` resolves (`upstream`, that) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.
+- The signer is read, its shape checked and its keys asked for as the internal module `assertion` says, before anything is verified. Its subject is its `sub`, or a self-issued signer's thumbprint; every refusal before the signature holds answers `untrusted signer`.
+- `as-is`: the token is for the signer's subject. `linked`: for the subject `linkedSubjects` resolves (`upstream`, that) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.
 - A refusal's reason is told in this grant's own words. Keys or subjects that cannot be told make the grant unavailable, using up no `jti`.
 - Usable only when the client explicitly allows it.
 - The audience asked (`grants`' `target`, after the scope) narrows the token within what the client may be issued; it is asked before the `sessions` boundary and the `jti` is written, so a refusal leaves the assertion usable.
