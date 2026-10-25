@@ -111,7 +111,7 @@ function sweepLeftBehind(): void {
 		if (!id || running(Number(pid))) continue;
 		// Its run may be removing it as this lists it (its stop, or `--rm`): gone or going is what this wants.
 		try {
-			execFileSync("docker", ["rm", "-f", id], { stdio: "ignore" });
+			execFileSync("docker", ["rm", "-f", "-v", id], { stdio: "ignore" });
 		} catch {}
 	}
 }
@@ -138,7 +138,7 @@ export async function startRedis(
 		...settings,
 	]);
 	const stop = async () => {
-		execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+		execFileSync("docker", ["rm", "-f", "-v", name], { stdio: "ignore" });
 	};
 	const bound = execFileSync("docker", ["port", name, "6379/tcp"], { encoding: "utf8" });
 	const port = /:(\d+)\s*$/m.exec(bound)?.[1];
