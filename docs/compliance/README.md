@@ -11,8 +11,9 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | [RFC 7523: JSON Web Token (JWT) Profile for OAuth 2.0 Client Authentication and Authorization Grants](rfc7523.md) | 30 | 28 | 0 | 28 | 0 | 0 | 0 | 0 | 0 | 2 |
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 7662: OAuth 2.0 Token Introspection](rfc7662.md) | 16 | 12 | 0 | 12 | 0 | 3 | 0 | 3 | 0 | 1 |
+| [RFC 8628: OAuth 2.0 Device Authorization Grant](rfc8628.md) | 19 | 15 | 0 | 15 | 0 | 4 | 0 | 4 | 0 | 0 |
 | [RFC 8693: OAuth 2.0 Token Exchange](rfc8693.md) | 18 | 15 | 0 | 15 | 0 | 2 | 0 | 2 | 0 | 1 |
 | [RFC 8705: OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](rfc8705.md) | 11 | 2 | 0 | 2 | 0 | 5 | 0 | 5 | 0 | 4 |
 | [RFC 8707: Resource Indicators for OAuth 2.0](rfc8707.md) | 3 | 2 | 0 | 2 | 0 | 1 | 0 | 1 | 0 | 0 |
 | [RFC 9449: OAuth 2.0 Demonstrating Proof of Possession (DPoP)](rfc9449.md) | 30 | 24 | 0 | 24 | 0 | 1 | 0 | 1 | 0 | 5 |
-| Total | 160 | 126 | 0 | 126 | 0 | 18 | 0 | 18 | 0 | 16 |
+| Total | 179 | 141 | 0 | 141 | 0 | 22 | 0 | 22 | 0 | 16 |
