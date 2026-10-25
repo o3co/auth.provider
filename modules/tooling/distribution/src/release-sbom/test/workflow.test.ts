@@ -231,13 +231,39 @@ it("pins every action from outside GitHub by its commit, in the release and the 
 	for (const action of outside) expect(action).toMatch(/@[0-9a-f]{40}$/);
 });
 
-it("keeps the API site's credentials out of its checkouts and its install, the token in the push alone", () => {
-	const steps = site.jobs.site?.steps ?? [];
-	for (const checkout of steps.filter(uses("actions/checkout")))
-		expect(checkout.with?.["persist-credentials"]).toBe(false);
-	for (const install of steps.filter(runs("pnpm install")))
+it("builds the API site where nothing can write, and pushes it where none of its code runs", () => {
+	const { build, push } = site.jobs as Record<string, Job & { outputs?: Record<string, string> }>;
+	expect((site as { permissions?: unknown }).permissions).toEqual({ contents: "read" });
+	expect(build?.permissions).toEqual({ contents: "read" });
+	expect(push?.permissions).toEqual({ contents: "write" });
+	expect(needsOf(push)).toEqual(["build"]);
+	expect(build?.outputs?.site).toMatch(/steps\.\w+\.outputs\.artifact-id/);
+	const kept = only(build, uses("actions/upload-artifact"));
+	expect(build?.steps?.[kept]?.with).toMatchObject({ "include-hidden-files": true });
+	expect(String(build?.steps?.[kept]?.with?.path)).toContain("!");
+	for (const install of (build?.steps ?? []).filter(runs("pnpm install")))
 		expect(install.run).toContain("--ignore-scripts");
-	const tokened = steps.filter((s) =>
+	const steps = push?.steps ?? [];
+	// The push runs nothing of the build's: no package manager nor node, and git with no hook.
+	for (const text of ["pnpm", "npm ", "node "])
+		expect(
+			steps.filter(runs(text)).map((s) => s.name),
+			text,
+		).toEqual([]);
+	expect(downloads(push).map((s) => s.with?.["artifact-ids"])).toEqual([
+		"${{ needs.build.outputs.site }}",
+	]);
+	for (const job of [build, push]) {
+		for (const checkout of (job?.steps ?? []).filter(uses("actions/checkout")))
+			expect(checkout.with?.["persist-credentials"]).toBe(false);
+	}
+	const gits = steps.filter(runs("git "));
+	expect(gits.length).toBeGreaterThan(0);
+	for (const git of gits) {
+		for (const line of (git.run ?? "").split("\n").filter((l) => /^\s*git /.test(l)))
+			expect(line).toContain("core.hooksPath=/dev/null");
+	}
+	const tokened = [...(build?.steps ?? []), ...steps].filter((s) =>
 		JSON.stringify((s as Step & { env?: unknown }).env ?? {}).includes("github.token"),
 	);
 	expect(tokened.map((s) => s.name)).toEqual(["Publish the pages"]);
