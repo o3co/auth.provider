@@ -1,9 +1,3 @@
-import { randomBytes } from "node:crypto";
-import { legacyVariablesCheck, loadConfig } from "{{configFiles}}";
-import { assemble, BootRefused, isUnavailable } from "{{kernel}}";
-import { {{contract}} } from "{{entry}}";
-{{imports}}
-
 {{subjects}}
 const backfill = app.get({{contract}});
 // The answers counted by name, in the order the line tells them; one this script does not know (a
@@ -27,8 +21,8 @@ for await (const subject of lines(process.stdin)) {
 		if (!isUnavailable(error)) break;
 	}
 }
-await written(process.stdout, `${[...counts].map(([name, n]) => `${name} ${n}`).join(" ")}\n`);
+tell(1, `${[...counts].map(([name, n]) => `${name} ${n}`).join(" ")}\n`);
 // Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
 await app.stop().catch(() => undefined);
 // A subject settled with any answer it knows is counted, not failed: one that could not be settled, or an answer not known, is 1.
-process.exit(counts.get("failed") === 0 && counts.get("unknown") === 0 ? 0 : 1);
+end(undefined, counts.get("failed") === 0 && counts.get("unknown") === 0 ? 0 : 1);

@@ -5,7 +5,8 @@ import { configFiles, filled, kernel, refusedPart } from "../project.ts";
  * built and never started, running what that package offers. The template's mark `entry` names it;
  * a backfill's marks `contract` and `answers` name the contract it settles through and the answers
  * it counts, in the order its line tells them. `subjects` is the part shared by the entries that
- * read subjects: the app built, never started, and the subjects read from standard input.
+ * read subjects: the guard read first, then the app read and built, never started, and the subjects
+ * read from standard input.
  */
 const entries: readonly {
 	readonly script: string;
@@ -64,7 +65,12 @@ export async function entriesOf(
 			imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
 			modules: modules.map((_, i) => `m${i}`).join(", "),
 		};
-		const shared = { ...fill, refused: await refusedPart() };
+		const shared = {
+			...fill,
+			refused: await refusedPart(),
+			guard: await filled("guard.ts.part", {}),
+			reads: modules.map((name) => `import("${importOf(name)}/module")`).join(", "),
+		};
 		files[entry.file] = await filled(entry.template, {
 			...shared,
 			subjects: await filled("subjects.ts.part", shared),

@@ -32,6 +32,8 @@ export async function assemble({ runtime }) {
 	if (process.env.REFUSE) throw new (await import("fake-kernel-copy")).BootRefused([{ where: "a.b", reason: "why" }]);
 	// A boot that fails as no refusal, its message holding a subject and a secret.
 	if (process.env.BOOT_FAILS) throw new Error("secret of alice at boot");
+	// A refusal marked as the kernel's, its refusals of no shape the script can count.
+	if (process.env.REFUSAL_MISSHAPED) throw Object.assign(new Error("refused"), { [mark]: true, refusals: { length: "secret of alice" } });
 	// Many refusals, each long, so their lines fill a pipe read slowly.
 	if (process.env.REFUSE_MANY) throw new BootRefused(Array.from({ length: Number(process.env.REFUSE_MANY) }, (_, i) => ({ where: \`at.\${i}\`, reason: "r".repeat(100) })));
 	// Without the script's own runtime, the composed sink would write this line.
@@ -76,7 +78,20 @@ export const backfill = {
 		return "marked";
 	},
 };`,
-		"module.js": "export default {};",
+		// Read as the app's composed module is: a dependency that throws, warns, writes or rejects while it is read,
+		// or whose exit handler throws, each holding what the script must never tell.
+		"module.js": `
+if (process.env.IMPORT_THROWS) throw new Error("secret of alice at import");
+if (process.env.WARNS) process.emitWarning("secret of alice warning");
+if (process.env.CONSOLE) {
+	console.error("secret of alice console error");
+	console.log("secret of alice console log");
+	process.stderr.write("secret of alice stderr\\n");
+	await new Promise((resolve) => process.stdout.write("secret of alice awaited\\n", resolve));
+}
+if (process.env.EXIT_THROWS) process.on("exit", () => { throw new Error("secret of alice at exit"); });
+if (process.env.REJECTS) Promise.reject(new Error("secret of alice rejected"));
+export default {};`,
 	},
 };
 
@@ -142,7 +157,25 @@ async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill
 				.map((line) => JSON.parse(line)),
 		}));
 	};
-	return Object.assign(run, { slowly });
+	/** A run whose standard output, or error, is closed at once, as a reader that stopped reading leaves it. */
+	const shut = (
+		input: string,
+		more: Record<string, string> = {},
+		closed: "stdout" | "stderr" = "stdout",
+	) =>
+		new Promise<{ stderr: string; status: number | null }>((resolve) => {
+			const env = { ...process.env, ...more, SEEN: join(target, `seen-${Math.random()}`) };
+			const child = spawn(process.execPath, [file], { cwd: target, env });
+			let stderr = "";
+			child.stderr.on("data", (chunk) => {
+				stderr += chunk;
+			});
+			child[closed].destroy();
+			child.stdin.on("error", () => undefined);
+			child.on("close", (status) => resolve({ stderr, status }));
+			child.stdin.end(input);
+		});
+	return Object.assign(run, { slowly, shut });
 }
 
 it("settles each line as it was sent, skipping only empty lines, and counts a line longer than a subject as failed", async () => {
@@ -236,6 +269,53 @@ it("tells nothing of a boot that fails as no refusal, nor of a failure after its
 		expect(`${done.stdout}${done.stderr}`).not.toMatch(/secret|alice/);
 });
 
+it("tells nothing a dependency writes, warns, throws or rejects while it is read or as it exits, nor a refusal it cannot count", async () => {
+	for (const [runs, file] of [
+		["@mod/mfa-witnessing", "src/witness-backfill.ts"],
+		["@mod/mfa-reset", "src/unclaimed-factors.ts"],
+	] as const) {
+		const run = await script(runs, file);
+		const told = async (env: Record<string, string>) => {
+			const done = await run("first\n", env);
+			expect(`${done.stdout}${done.stderr}`, `${file} ${JSON.stringify(env)}`).not.toMatch(
+				/secret|alice/,
+			);
+			return done;
+		};
+		const thrown = await told({ IMPORT_THROWS: "1" });
+		expect([thrown.stderr, thrown.status], file).toEqual([
+			"failed: the app could not be built: start it with this configuration to read why\n",
+			1,
+		]);
+		// A warning, and what a dependency writes, go nowhere: the run goes on.
+		for (const env of [{ WARNS: "1" }, { CONSOLE: "1" }]) {
+			const done = await told(env);
+			expect(done.status, `${file} ${JSON.stringify(env)}`).toBe(0);
+		}
+		// An exit handler that throws fails a run that ended 0, and leaves a refusal as it was.
+		const exiting = await told({ EXIT_THROWS: "1" });
+		expect(
+			[exiting.stderr.endsWith("failed: the run stopped on an unexpected error\n"), exiting.status],
+			file,
+		).toEqual([true, 1]);
+		const refusedExiting = await told({ EXIT_THROWS: "1", REFUSE: "1" });
+		expect([refusedExiting.stderr, refusedExiting.status], file).toEqual([
+			"refused 1: start the app with this configuration to read why\n",
+			78,
+		]);
+		const rejected = await told({ REJECTS: "1", NODE_OPTIONS: "--unhandled-rejections=warn" });
+		expect([rejected.stderr, rejected.status], file).toEqual([
+			"failed: the run stopped on an unexpected error\n",
+			1,
+		]);
+		const misshaped = await told({ REFUSAL_MISSHAPED: "1" });
+		expect([misshaped.stderr, misshaped.status], file).toEqual([
+			"refused: start the app with this configuration to read why\n",
+			78,
+		]);
+	}
+}, 60_000);
+
 it("writes the passkey backfill alike: its own answers counted in its order, pending among them", async () => {
 	const run = await script("@mod/passkey-witnessing", "src/passkey-backfill.ts");
 	const done = await run("registering\nfirst\nodd\n");
@@ -277,6 +357,22 @@ it("hands on every subject it names before it exits, though the pipe it writes t
 	const done = await run.slowly(`${subjects.join("\n")}\n`);
 	expect(done.stdout.split("\n").filter((line) => line !== "")).toEqual(subjects);
 	expect([done.stderr, done.status]).toEqual(["named 10000 clear 0 failed 0\n", 0]);
+}, 60_000);
+
+it("fails a run whose standard output was closed, counting no subject it could not hand on as named, and ends with its code where standard error was", async () => {
+	const naming = await script("@mod/mfa-reset", "src/unclaimed-factors.ts");
+	expect(await naming.shut("claimless\nfirst\n")).toEqual({
+		stderr: "named 0 clear 0 failed 1\n",
+		status: 1,
+	});
+	const counting = await script("@mod/mfa-witnessing", "src/witness-backfill.ts");
+	expect(await counting.shut("first\n")).toEqual({
+		stderr: "failed: the run stopped on an unexpected error\n",
+		status: 1,
+	});
+	// Ended from the handler of an exit handler that throws, a line standard error does not take still leaves the code.
+	const exiting = await counting.shut("first\n", { EXIT_THROWS: "1" }, "stderr");
+	expect(exiting).toEqual({ stderr: "", status: 1 });
 }, 60_000);
 
 it("hands on every refusal of a refused boot before it exits 78, from the app's entry and the others, though standard error is read slowly", async () => {
