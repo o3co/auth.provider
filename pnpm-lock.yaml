@@ -4156,6 +4156,9 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       '@mod/webauthn':
         specifier: workspace:*
         version: link:../../passkey/webauthn

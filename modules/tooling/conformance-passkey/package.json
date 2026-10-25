@@ -22,6 +22,7 @@
 		"@mod/conformance-identity": "workspace:*",
 		"@mod/conformance-keys": "workspace:*",
 		"@mod/conformance-second-factor": "workspace:*",
+		"@mod/spec-checklist": "workspace:*",
 		"@mod/webauthn": "workspace:*",
 		"jose": "6.2.12"
 	}
