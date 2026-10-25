@@ -7,10 +7,13 @@
 	"scripts": {
 		"report": "node src/main.ts report",
 		"check": "node src/main.ts check",
-		"ledger": "node src/main.ts ledger"
+		"ledger": "node src/main.ts ledger",
+		"expected": "node src/main.ts expected",
+		"compliance": "node src/main.ts compliance"
 	},
 	"exports": {
-		".": "./src/contract.ts"
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts"
 	},
 	"dependencies": {
 		"@mod/guard-imports": "workspace:*",

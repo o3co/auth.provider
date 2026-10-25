@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { readWorkspace } from "@mod/guard-imports";
 import {
 	type Checklist,
@@ -10,6 +11,7 @@ import {
 	parseLedger,
 	type Spec,
 } from "./checklist.ts";
+import type { Expected } from "./evidence/runs.ts";
 import type { TestRef } from "./report.ts";
 import { titlesIn } from "./titles.ts";
 
@@ -87,3 +89,37 @@ export function repoFindings(c: Checklist, w: ReturnType<typeof workspaceTests>)
 	});
 	return [...checklistFindings(c), ...w.stray, ...named];
 }
+
+const scriptsOf = (p: ReturnType<typeof readWorkspace>[number]) =>
+	(p.manifest as { readonly scripts?: Readonly<Record<string, string>> }).scripts ?? {};
+
+/**
+ * The runs a CI run must report: the root's unit and integration runs, each package with a
+ * `conformance` script on the new system, and every run a package's `evidence-runs` script prints
+ * (JSON: a pattern's runs as `<package>@<pattern>`, a harness's as `<package>#<run>`).
+ */
+export function expectedOf(root: string): Expected {
+	const packages = readWorkspace(root);
+	const areas = packages.filter((p) => scriptsOf(p).conformance).map((p) => p.name);
+	const printed = packages
+		.filter((p) => scriptsOf(p)["evidence-runs"])
+		.flatMap(
+			(p) =>
+				JSON.parse(
+					execFileSync("pnpm", ["--silent", "--filter", p.name, "run", "evidence-runs"], {
+						cwd: root,
+						encoding: "utf8",
+					}),
+				) as string[],
+		);
+	const runsOf = new Map<string, string[]>();
+	for (const run of printed.filter((e) => e.includes("#"))) {
+		const pkg = run.slice(0, run.indexOf("#"));
+		runsOf.set(pkg, [...(runsOf.get(pkg) ?? []), run]);
+	}
+	return { entries: ["unit", "integration", ...areas, ...printed], areas: new Set(areas), runsOf };
+}
+
+/** Each workspace package's directory, relative to the root. */
+export const packageDirs = (root: string) =>
+	new Map(readWorkspace(root).map((p) => [p.name, relative(root, p.dir)]));

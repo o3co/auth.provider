@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	expectedOf,
 	readChecklist,
 	repoFindings,
 	repoRoot,
@@ -23,5 +24,14 @@ describe("the checklist and the workspace's tests", () => {
 		const files = reportFiles(checklist.specs, workspace.tests, updatedByOf(checklist));
 		for (const [name, text] of files)
 			expect(readFileSync(join(reportDir, name), "utf8"), name).toBe(text);
+	});
+});
+
+describe("the runs a CI run must report", () => {
+	it("are the root's unit and integration runs and each conformance area's, beside what packages print", () => {
+		const { entries, areas } = expectedOf(repoRoot);
+		expect(entries.slice(0, 2)).toEqual(["unit", "integration"]);
+		expect(areas.has("@mod/conformance-code")).toBe(true);
+		expect(entries).toContain("@mod/conformance-code");
 	});
 });

@@ -1,0 +1,180 @@
+import { join } from "node:path";
+import type { Item } from "../checklist.ts";
+import { classOf, itemId } from "../ids.ts";
+import type { TestRef } from "../report.ts";
+import type { EvidenceReport } from "./reporter.ts";
+
+/** The runs a CI run must report, and which of them run a package's tests. */
+export interface Expected {
+	readonly entries: readonly string[];
+	/** The packages whose `.case.ts` tests run as their own entry and once per pattern (`<package>@<pattern>`). */
+	readonly areas: ReadonlySet<string>;
+	/** A harness's runs (`<package>#<run>`), by its package. */
+	readonly runsOf: ReadonlyMap<string, readonly string[]>;
+}
+
+export type RunStatus =
+	| "out-of-scope"
+	| "noncompliant"
+	| "deviates"
+	| "hole"
+	| "failed"
+	| "incomplete"
+	| "unverified"
+	| "passed";
+
+export interface ItemStatus {
+	readonly id: string;
+	readonly strength: Item["strength"];
+	readonly status: RunStatus;
+	readonly passed: number;
+	readonly failed: number;
+	/** The expected runs of its tests that did not report. */
+	readonly missing: readonly string[];
+	/** Results a harness excused, by their class. */
+	readonly excused: Readonly<Record<string, number>>;
+}
+
+/** Of the reports given, this commit's and run's for the new system, the last attempt of each entry and job. */
+export function selectReports(
+	reports: readonly EvidenceReport[],
+	of: { readonly commit: string; readonly run: string },
+): EvidenceReport[] {
+	const last = new Map<string, EvidenceReport>();
+	for (const r of reports) {
+		const { commit, run, entry, job, target, attempt } = r.identity;
+		if (commit !== of.commit || run !== of.run || target !== "new") continue;
+		const key = JSON.stringify([entry, job]);
+		const kept = last.get(key);
+		if (!kept || kept.identity.attempt < attempt) last.set(key, r);
+	}
+	return [...last.values()];
+}
+
+/** The expected runs a test file's tests run in. */
+export function entriesOfFile(pkg: string, file: string, expected: Expected): readonly string[] {
+	if (file.endsWith(".integration.test.ts")) return ["integration"];
+	const runs = expected.runsOf.get(pkg);
+	if (runs) return runs;
+	if (file.endsWith(".case.ts") && expected.areas.has(pkg))
+		return expected.entries.filter((e) => e === pkg || e.startsWith(`${pkg}@`));
+	if (file.endsWith(".test.ts")) return ["unit"];
+	return [pkg];
+}
+
+const idsIn = (names: readonly string[]) =>
+	names
+		.flatMap((n) => [...n.matchAll(/\[([^\]\s]+)\]/g)].map((m) => m[1] ?? ""))
+		.filter((id) => itemId.test(id));
+
+/**
+ * Each item's status from the reports: its mark; a hole without a test; failed where a test of it
+ * failed, its file failed to load, or a run of it had an error no test owns; incomplete where an
+ * expected run of its tests did not report; passed where one passed; else unverified. A result the
+ * harness excused (skipped with a note `excused: <class>`) is counted apart, as neither.
+ */
+export function itemStatuses(
+	items: readonly Item[],
+	tests: ReadonlyMap<string, readonly TestRef[]>,
+	reports: readonly EvidenceReport[],
+	expected: Expected,
+	pkgDirs: ReadonlyMap<string, string>,
+): ItemStatus[] {
+	const present = new Set(reports.map((r) => r.identity.entry));
+	const errored = new Set(reports.filter((r) => r.errors > 0).map((r) => r.identity.entry));
+	const brokenFiles = new Set(
+		reports.flatMap((r) =>
+			r.tests.filter((t) => t.names.length === 0 && t.state === "failed").map((t) => t.file),
+		),
+	);
+	const seen = new Map<
+		string,
+		{ passed: number; failed: number; excused: Record<string, number> }
+	>();
+	for (const t of reports.flatMap((r) => r.tests)) {
+		for (const id of idsIn(t.names)) {
+			const s = seen.get(id) ?? { passed: 0, failed: 0, excused: {} };
+			const excuse = /^excused: (\S+)/.exec(t.note ?? "")?.[1];
+			if (t.state === "passed") s.passed += 1;
+			else if (t.state === "failed") s.failed += 1;
+			else if (t.state === "skipped" && excuse) s.excused[excuse] = (s.excused[excuse] ?? 0) + 1;
+			seen.set(id, s);
+		}
+	}
+	return items.map((i) => {
+		const refs = tests.get(i.id) ?? [];
+		const s = seen.get(i.id) ?? { passed: 0, failed: 0, excused: {} };
+		const files = refs.map((r) => join(pkgDirs.get(r.pkg) ?? r.pkg, r.file));
+		const entries = [...new Set(refs.flatMap((r) => entriesOfFile(r.pkg, r.file, expected)))];
+		const missing = entries.filter((e) => expected.entries.includes(e) && !present.has(e));
+		const broken = files.some((f) => brokenFiles.has(f)) || entries.some((e) => errored.has(e));
+		const status: RunStatus =
+			i.mark?.kind ??
+			(refs.length === 0
+				? "hole"
+				: s.failed > 0 || broken
+					? "failed"
+					: missing.length > 0
+						? "incomplete"
+						: s.passed > 0
+							? "passed"
+							: "unverified");
+		return { id: i.id, strength: i.strength, status, ...s, missing };
+	});
+}
+
+const order: readonly RunStatus[] = [
+	"passed",
+	"failed",
+	"incomplete",
+	"unverified",
+	"hole",
+	"noncompliant",
+	"deviates",
+	"out-of-scope",
+];
+
+/** The counts the checkpoint reports: by strength's class and status, every item counted once. */
+export function checkpoint(statuses: readonly ItemStatus[]) {
+	const of = (cls: "MUST" | "SHOULD") =>
+		Object.fromEntries(
+			order.map((st) => [
+				st,
+				statuses.filter((s) => classOf(s.strength) === cls && s.status === st).length,
+			]),
+		);
+	return { MUST: of("MUST"), SHOULD: of("SHOULD") };
+}
+
+/** The run's compliance table, as Markdown. */
+export function complianceTable(
+	statuses: readonly ItemStatus[],
+	missingRuns: readonly string[],
+): string {
+	const counts = checkpoint(statuses);
+	return [
+		"# Compliance of this run",
+		"",
+		missingRuns.length === 0
+			? "Every expected run reported."
+			: `Runs that did not report: ${missingRuns.join(", ")}.`,
+		"",
+		`| Class | ${order.join(" | ")} |`,
+		`|---|${order.map(() => "---").join("|")}|`,
+		...(["MUST", "SHOULD"] as const).map(
+			(cls) => `| ${cls} | ${order.map((st) => counts[cls][st]).join(" | ")} |`,
+		),
+		"",
+		"| Item | Strength | Status | Passed | Failed | Missing runs | Excused |",
+		"|---|---|---|---|---|---|---|",
+		...statuses.map(
+			(s) =>
+				`| ${s.id} | ${s.strength} | ${s.status} | ${s.passed} | ${s.failed} | ${s.missing.join(", ")} | ${Object.entries(
+					s.excused,
+				)
+					.map(([k, n]) => `${k} ${n}`)
+					.join(", ")} |`,
+		),
+		"",
+	].join("\n");
+}
