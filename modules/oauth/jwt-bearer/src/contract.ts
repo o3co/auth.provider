@@ -88,4 +88,45 @@ export const jtiLedgers = extensionPoint<JtiLedger>("jwt-bearer.jti-ledgers", {
 	keyOf: (ledger) => ledger.issuer,
 });
 
+/**
+ * What a delegate makes of an assertion it checked by its own rules: the account it is for, when it
+ * was made and ends (ms), the clients of this provider it is for, and the digest of a key its holder
+ * must prove (`BASE64URL(SHA-256(jkt))`).
+ */
+export type DelegatedCheck =
+	| {
+			readonly kind: "valid";
+			readonly subject: string;
+			readonly issuedAt: number;
+			readonly expiresAt: number;
+			readonly clients: readonly [string, ...string[]];
+			readonly holderDigest?: string;
+	  }
+	| { readonly kind: "invalid" };
+
+/**
+ * Assertions another module checks by its own rules, for issuers the section's `delegated-issuers`
+ * names. Their audience is an app, never this server, so RFC 7523 §3 does not hold: jwt-bearer reads
+ * neither their audience nor their `jti`, and leaves their single use to the delegate.
+ */
+export interface DelegatedAssertions {
+	/** The contributing module's name, told where boot is refused. */
+	readonly declaredBy: string;
+	/** The `iss` values it checks, each as sent. */
+	readonly issuers: readonly string[];
+	/** Checks signature, audience, times and subject; throws Unavailable when it cannot tell. */
+	check(assertion: string): Promise<DelegatedCheck>;
+	/**
+	 * Uses the assertion up: `spent` the first time, `replayed` after. Throws Unavailable when it cannot
+	 * tell; one whose answer is lost may stay used. Asked once every check before issuing has passed.
+	 */
+	spend(assertion: string): Promise<"spent" | "replayed">;
+}
+
+/** Counted by jwt-bearer: exactly one for each delegated issuer. */
+export const delegatedAssertions = extensionPoint<DelegatedAssertions>(
+	"jwt-bearer.delegated-assertions",
+	{ multiplicity: "many" },
+);
+
 export * from "./store.ts";
