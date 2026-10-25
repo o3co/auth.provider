@@ -36,7 +36,8 @@
 		"api-docs": "pnpm --filter @mod/api-docs run api-docs",
 		"release:check": "pnpm --filter @mod/distribution run release-check",
 		"release:pack": "pnpm --filter @mod/distribution run release-pack",
-		"release:published": "pnpm --filter @mod/distribution run release-published"
+		"release:published": "pnpm --filter @mod/distribution run release-published",
+		"release:evidence": "pnpm --filter @mod/distribution run release-evidence"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",

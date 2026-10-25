@@ -9,7 +9,8 @@
 		"bundles": "node src/bundles.ts",
 		"release-check": "node src/release-check/check.ts",
 		"release-pack": "node src/release/pack.ts",
-		"release-published": "node src/release/check-published.ts"
+		"release-published": "node src/release/check-published.ts",
+		"release-evidence": "node src/release-evidence/collect.ts"
 	},
 	"exports": {
 		".": "./src/contract.ts"

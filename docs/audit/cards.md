@@ -332,6 +332,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `release` (`src/release`): Packs the release, the index sealed in between, into the tarballs it publishes.
   - `release-check` (`src/release-check`): Checks the release as an operator meets it: apps made by the packed `create-auth-provider`, installed from the tarballs, type-checked, and booted in their image; an app assembled by hand from them; and a package outside the release composed beside them (`outside-scene`).
   - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
+  - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
 - `@mod/guard` (verification, `modules/tooling/guard`): Checks the workspace's invariants, each reported by its id, place and what went over:
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
   - `change-record` (`src/change-record`): a change record's machine rows, what two commits of the workspace differ in.
