@@ -3,6 +3,9 @@
 ## 1.2 Terminology
 
 - **oidc-core-1.2-a** MUST: the UserInfo endpoint's URL uses the `https` scheme.
+- **oidc-core-1.2-b** MUST: a Request URI o3co's RP sends is one the authorization server can retrieve.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
 
 ## 2 ID Token
 
@@ -26,6 +29,12 @@
 - **oidc-core-2-q** MUST NOT: an ID token is signed with `none`, unless the response type returns no ID token from the authorization endpoint and the client asked for `none` when it registered.
 - **oidc-core-2-s** MUST: the OP ignores claims it does not understand in an ID token it reads, such as an `id_token_hint`.
 - **oidc-core-2-r** SHOULD NOT: an ID token uses the header parameter `x5u`, `x5c`, `jku` or `jwk`.
+- **oidc-core-2-t** MUST NOT: upstream-client accepts an id_token for a login at or after its `exp`, beyond the IdP type's `clock-skew` (external-jwt).
+  role: rp
+- **oidc-core-2-u** MUST: upstream-client takes an id_token only while the current time is before its `exp`, give or take the IdP type's `clock-skew` (external-jwt).
+  role: rp
+- **oidc-core-2-v** MUST: where an id_token carries `nonce`, upstream-client checks that it equals the `nonce` the authentication request sent.
+  role: rp
 
 ## 3.1.2.1 Authentication Request
 
@@ -52,6 +61,21 @@
 - **oidc-core-3.1.2.1-u** MUST: with `id_token_hint`, where the End-User the hint names is not logged in and is not logged in by the request, the OP returns an error.
 - **oidc-core-3.1.2.1-v** SHOULD: with `prompt=none` and no `id_token_hint`, the OP answers successfully where it can (it may otherwise return `invalid_request`).
 - **oidc-core-3.1.2.1-w** SHOULD: a redirection URI of the code flow uses `https`; it may instead use `http` for a confidential client where the OP allows it, or for a native client with `localhost`, `127.0.0.1` or `[::1]` as its host, or an alternate scheme, such as one identifying a callback into a native application.
+- **oidc-core-3.1.2.1-x** SHOULD: upstream-client sends `state` in every authorization request to an upstream; upstream-round-trip makes it and keeps the round trip under it until the callback, tied to the browser.
+  role: rp
+- **oidc-core-3.1.2.1-y** SHOULD NOT: an IdP type sends `response_mode` naming the default mode of the response type it asks for (upstream-client sends none; idp-apple sends `form_post` alone).
+  role: rp
+- **oidc-core-3.1.2.1-z** MUST: upstream-round-trip makes each round trip's `nonce` from enough entropy that it cannot be guessed.
+  role: rp
+- **oidc-core-3.1.2.1-aa** SHOULD: where o3co's RP sends `prompt=none`, it sends an `id_token_hint` where it can.
+  role: rp
+  out-of-scope: o3co's RP never sends `prompt=none`: `upstreams`' prompt is `login` alone, and idp-oidc and idp-google add only `consent`.
+- **oidc-core-3.1.2.1-ab** MUST: to use an encrypted id_token as `id_token_hint`, o3co's RP first decrypts the signed id_token inside it.
+  role: rp
+  out-of-scope: o3co's RP takes signed id_tokens alone (external-jwt verifies a compact JWS) and negotiates no encryption: its clients at the upstreams are the operator's static settings.
+- **oidc-core-3.1.2.1-ac** SHOULD: a `login_hint` o3co's RP sends matches the value it used for discovery.
+  role: rp
+  out-of-scope: o3co's RP sends no `login_hint` and discovers no issuer from an identifier (upstream-client's authorization URL; idp-oidc's `issuer` is a setting).
 
 ## 3.1.2.2 Authentication Request Validation
 
@@ -88,6 +112,11 @@
 - **oidc-core-3.1.2.6-c** MUST: an error response carries `error`.
 - **oidc-core-3.1.2.6-d** MUST: an error response carries the `state` the request carried, where it carried one.
 
+## 3.1.2.7 Authentication Response Validation
+
+- **oidc-core-3.1.2.7-a** MUST: federation validates an upstream's code-flow authentication response by RFC 6749, especially §4.1.2 and §10.12: it takes a callback only through the round trip whose `state` it carries, in the browser that began it (upstream-round-trip: bound to its cookie, compared in constant time, taken once), and an `error` or a missing code ends it without an exchange.
+  role: rp
+
 ## 3.1.3.1 Token Request
 
 - **oidc-core-3.1.3.1-a** MUST: the OP authenticates a confidential client at the token endpoint by the method it registered.
@@ -107,10 +136,45 @@
 - **oidc-core-3.1.3.3-b** SHOULD: the OP supports the `Bearer` token type.
 - **oidc-core-3.1.3.3-c** MUST: a successful token response for a code issued in answer to an OpenID Connect authentication request carries `id_token`.
 - **oidc-core-3.1.3.3-d** MUST: a token response holding tokens, secrets or other sensitive information carries `Cache-Control: no-store`.
+- **oidc-core-3.1.3.3-e** SHOULD: upstream-client ignores parameters it does not recognize in an upstream's token response.
+  role: rp
+
+## 3.1.3.5 Token Response Validation
+
+- **oidc-core-3.1.3.5-a** MUST: idp-oidc, idp-google and idp-apple validate a token response by RFC 6749 (§5.1, §10.12), by Section 3.1.3.7 for its id_token and by Section 3.1.3.8 for its access token: one without an id_token is refused, the id_token is checked through upstream-client, and a given `at_hash` is checked against the access token.
+  role: rp
 
 ## 3.1.3.7 ID Token Validation
 
 - **oidc-core-3.1.3.7-a** SHOULD: an ID token is signed with `RS256`, or the algorithm the client sent in `id_token_signed_response_alg` when it registered.
+- **oidc-core-3.1.3.7-b** MUST: upstream-client validates the id_token of every token response it takes by this section's steps before the login is used.
+  role: rp
+- **oidc-core-3.1.3.7-c** SHOULD: where id_token encryption was negotiated at registration, o3co's RP rejects an id_token that is not encrypted.
+  role: rp
+  out-of-scope: o3co's RP takes signed id_tokens alone (external-jwt verifies a compact JWS) and negotiates no encryption: its clients at the upstreams are the operator's static settings.
+- **oidc-core-3.1.3.7-d** MUST: upstream-client checks that the id_token's `iss` exactly matches the IdP type's issuer identifier (idp-oidc's `issuer`, which its discovered description must name; Google's and Apple's fixed issuers).
+  role: rp
+- **oidc-core-3.1.3.7-e** MUST: upstream-client checks that the id_token's `aud` contains the client's `client-id` registered at that issuer.
+  role: rp
+- **oidc-core-3.1.3.7-f** MUST: upstream-client rejects an id_token that does not list the client among its audiences, or that lists other audiences the client does not trust.
+  role: rp
+- **oidc-core-3.1.3.7-g** SHOULD: where an IdP type uses an extension under which `azp` is present (idp-google: Google's cross-client identity), it validates `azp` as that extension says.
+  role: rp
+- **oidc-core-3.1.3.7-h** SHOULD: where `azp` is present, upstream-client checks that it is the client's `client-id`.
+  role: rp
+- **oidc-core-3.1.3.7-i** MUST: upstream-client validates the id_token's signature by JWS under the algorithm its `alg` header names, one of the IdP type's `algorithms` (external-jwt), and never takes TLS server validation in its place.
+  role: rp
+- **oidc-core-3.1.3.7-j** MUST: upstream-client checks the signature only with keys the issuer provides: the `jwks_uri` of idp-oidc's description (or its `jwks-uri` setting without discovery), or Google's or Apple's key set.
+  role: rp
+- **oidc-core-3.1.3.7-k** MUST: where the authentication request sent a `nonce` (every OpenID Connect IdP type sends one), upstream-client refuses an id_token without a `nonce` equal to it.
+  role: rp
+- **oidc-core-3.1.3.7-l** SHOULD: o3co's RP checks the `nonce` against replay: upstream-round-trip lets a round trip, and with it its nonce, be taken once.
+  role: rp
+- **oidc-core-3.1.3.7-m** SHOULD: where o3co's RP asked for `acr`, it checks that the asserted value is appropriate.
+  role: rp
+  out-of-scope: o3co's RP never asks for `acr`: it sends no `acr_values` and no `claims` (upstream-client's authorization URL).
+- **oidc-core-3.1.3.7-n** SHOULD: where `auth_time` was asked for (by `max_age`), federation checks the upstream's `auth_time` and requests re-authentication where too much time has passed.
+  role: rp
 
 ## 3.2.2.1 Authentication Request
 
@@ -124,6 +188,9 @@
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
 - **oidc-core-3.2.2.1-e** MUST: in the implicit flow, the OP refuses a request without `response_type`.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
+- **oidc-core-3.2.2.1-f** MUST: in the implicit flow, o3co's RP's `nonce` values have enough entropy that they cannot be guessed.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
 
 ## 3.2.2.5 Successful Authentication Response
 
@@ -133,11 +200,32 @@
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
 - **oidc-core-3.2.2.5-c** MUST: an implicit flow response carries the `state` the request carried, where it carried one.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
+- **oidc-core-3.2.2.5-d** MUST: an RP using the implicit flow supports RFC 6750 bearer token usage.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+- **oidc-core-3.2.2.5-e** MUST: in the implicit flow, o3co's RP checks that the response's `state` equals the one its request sent.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
 
 ## 3.2.2.6 Authentication Error Response
 
 - **oidc-core-3.2.2.6-a** MUST: an implicit flow error is returned in the redirection URI's fragment.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
+
+## 3.2.2.8 Authentication Response Validation
+
+- **oidc-core-3.2.2.8-a** MUST: o3co's RP validates an implicit flow response as this section says.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+
+## 3.2.2.9 Access Token Validation
+
+- **oidc-core-3.2.2.9-a** SHOULD: o3co's RP validates an access token issued from the authorization endpoint with an id_token against its `at_hash`.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+- **oidc-core-3.2.2.9-b** MUST: in that check, `at_hash` matches the left half of the access token's hash, base64url-encoded.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
 
 ## 3.2.2.10 ID Token
 
@@ -146,17 +234,50 @@
 - **oidc-core-3.2.2.10-b** MUST: an ID token issued with an access token from the authorization endpoint carries `at_hash`.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
 
+## 3.2.2.11 ID Token Validation
+
+- **oidc-core-3.2.2.11-a** MUST: in the implicit flow, o3co's RP validates the id_token as Section 3.1.3.7 says, but for this section's differences.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+- **oidc-core-3.2.2.11-b** MUST: in the implicit flow, o3co's RP validates the id_token's signature by JWS under its `alg`.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+- **oidc-core-3.2.2.11-c** MUST: in the implicit flow, o3co's RP checks that `nonce` equals the one the request sent.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+- **oidc-core-3.2.2.11-d** SHOULD: in the implicit flow, o3co's RP checks the `nonce` against replay.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+
 ## 3.3.2.1 Authentication Request
 
 - **oidc-core-3.3.2.1-a** MUST: in the hybrid flow, the OP refuses a request without `nonce` for `code id_token` and `code id_token token`.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
 - **oidc-core-3.3.2.1-b** MUST: in the hybrid flow, the OP refuses a request without `response_type`.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
+- **oidc-core-3.3.2.1-c** MUST: in the hybrid flow, o3co's RP's `nonce` values have enough entropy that they cannot be guessed.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
 
 ## 3.3.2.6 Authentication Error Response
 
 - **oidc-core-3.3.2.6-a** MUST: a hybrid flow error is returned in the redirection URI's fragment.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
+
+## 3.3.2.8 Authentication Response Validation
+
+- **oidc-core-3.3.2.8-a** MUST: o3co's RP validates a hybrid flow response as this section says.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+
+## 3.3.2.10 Authorization Code Validation
+
+- **oidc-core-3.3.2.10-a** SHOULD: o3co's RP validates a code issued from the authorization endpoint with an id_token against its `c_hash`.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+- **oidc-core-3.3.2.10-b** MUST: where `c_hash` is present, it matches the left half of the code's hash, base64url-encoded.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
 
 ## 3.3.2.11 ID Token
 
@@ -167,6 +288,12 @@
 - **oidc-core-3.3.2.11-c** MUST: an ID token of `code id_token` or `code id_token token` from the authorization endpoint carries `c_hash`.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
 
+## 3.3.2.12 ID Token Validation
+
+- **oidc-core-3.3.2.12-a** MUST: in the hybrid flow, o3co's RP validates an id_token from the authorization endpoint as Section 3.2.2.11 says.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+
 ## 3.3.3.6 ID Token
 
 - **oidc-core-3.3.3.6-a** MUST: the two ID tokens of a hybrid flow carry identical `iss` and `sub`.
@@ -175,6 +302,24 @@
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
 - **oidc-core-3.3.3.6-c** SHOULD: claims about the End-User present in both ID tokens of a hybrid flow have the same values.
   out-of-scope: the implicit and hybrid flows are not offered: `response_types_supported` is `code` alone (`authorize`'s card).
+
+## 3.3.3.7 ID Token Validation
+
+- **oidc-core-3.3.3.7-a** MUST: in the hybrid flow, o3co's RP validates an id_token from the token endpoint as Section 3.1.3.7 says.
+  role: rp
+  out-of-scope: o3co's RP uses the code flow alone: upstream-client asks `response_type=code`, which an IdP type cannot change, and takes id_tokens from the token endpoint alone (upstream-client's card).
+
+## 4 Initiating Login from a Third Party
+
+- **oidc-core-4-a** MUST: federation checks a `target_link_uri` it is passed, so that it is not used as an open redirector to outside sites.
+  role: rp
+  out-of-scope: o3co's RP has no login initiation endpoint: federation's start takes `redirect_to`, `prompt`, `max_age` and `link` alone, and no `iss`, `login_hint` or `target_link_uri` (federation's card).
+- **oidc-core-4-b** MUST: federation ignores the parameters it does not understand at a login initiation endpoint.
+  role: rp
+  out-of-scope: o3co's RP has no login initiation endpoint: federation's start takes `redirect_to`, `prompt`, `max_age` and `link` alone, and no `iss`, `login_hint` or `target_link_uri` (federation's card).
+- **oidc-core-4-c** SHOULD: at a login initiation endpoint, federation uses frame busting and other techniques to stop third-party sites logging an End-User in without their knowledge.
+  role: rp
+  out-of-scope: o3co's RP has no login initiation endpoint: federation's start takes `redirect_to`, `prompt`, `max_age` and `link` alone, and no `iss`, `login_hint` or `target_link_uri` (federation's card).
 
 ## 5.1 Standard Claims
 
@@ -214,12 +359,20 @@
   out-of-scope: the OP has no claim in more than one language or script to match with: the fixed claim table holds untagged claims (`oidc`'s card).
 - **oidc-core-5.2-e** SHOULD NOT: `claims_locales` naming locales the OP does not support makes the request an error.
 - **oidc-core-5.2-f** SHOULD: where the OP determines, by `claims_locales` or otherwise, that the End-User and client ask for claims in one set of languages and scripts, claims in that language and script are returned without language tags.
+- **oidc-core-5.2-g** SHOULD: upstream-client's id-token reader can handle and use claims that carry language tags.
+  role: rp
 
 ## 5.3 UserInfo Endpoint
 
 - **oidc-core-5.3-a** MUST: the UserInfo endpoint takes requests by `GET` and by `POST`.
 - **oidc-core-5.3-b** MUST: the UserInfo endpoint accepts access tokens as RFC 6750 bearer tokens.
 - **oidc-core-5.3-c** SHOULD: the UserInfo endpoint supports CORS or another way for browser-based clients to reach it.
+
+## 5.3.1 UserInfo Request
+
+- **oidc-core-5.3.1-a** SHOULD: a UserInfo request o3co's RP sends to an upstream uses `GET` and sends the access token in the `Authorization` header.
+  role: rp
+  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
 
 ## 5.3.2 Successful UserInfo Response
 
@@ -241,17 +394,38 @@
   out-of-scope: signed and encrypted userinfo answers are not offered: `userinfo` publishes `userinfo_endpoint` alone and answers JSON (`userinfo`'s card), with no `userinfo_signing_alg_values_supported` or `userinfo_encryption_alg_values_supported`.
 - **oidc-core-5.3.2-m** MUST: a signed UserInfo answer's `aud` is or includes the client's ID.
   out-of-scope: signed and encrypted userinfo answers are not offered: `userinfo` publishes `userinfo_endpoint` alone and answers JSON (`userinfo`'s card), with no `userinfo_signing_alg_values_supported` or `userinfo_encryption_alg_values_supported`.
+- **oidc-core-5.3.2-n** MUST: o3co's RP checks that a UserInfo answer's `sub` exactly matches the id_token's `sub`, and uses none of the answer's values where they differ.
+  role: rp
+  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
+
+## 5.3.4 UserInfo Response Validation
+
+- **oidc-core-5.3.4-a** MUST: o3co's RP validates an upstream's UserInfo answer: a TLS server certificate check that the intended OP answered, and decryption with the registered keys where `userinfo_encrypted_response_alg` was registered.
+  role: rp
+  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
+- **oidc-core-5.3.4-b** SHOULD: o3co's RP validates a signed UserInfo answer's signature by JWS.
+  role: rp
+  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
 
 ## 5.5 Requesting Claims using the "claims" Request Parameter
 
 - **oidc-core-5.5-a** SHOULD: an OP that does not support the `claims` parameter returns the claims it believes useful where a client uses it.
 - **oidc-core-5.5-b** MUST: the OP ignores members of a `claims` request it does not understand.
+- **oidc-core-5.5-c** MUST: an authorization request of o3co's RP whose `claims` uses the `userinfo` member also uses a `response_type` that issues an access token for the UserInfo endpoint.
+  role: rp
+  out-of-scope: o3co's RP sends no `claims` parameter (upstream-client's authorization URL).
 
 ## 5.5.1 Individual Claims Requests
 
 - **oidc-core-5.5.1-a** MUST NOT: claims requested but not returned, essential or voluntary, make the OP return an error, unless a claim's own description says otherwise.
 - **oidc-core-5.5.1-b** MUST: a requested `sub` value that does not match fails the authentication.
 - **oidc-core-5.5.1-c** MUST: the OP ignores members of an individual claim request it does not understand.
+- **oidc-core-5.5.1-d** MUST: each member value of a `claims` request's `userinfo` and `id_token` that o3co's RP sends is `null` or a JSON object.
+  role: rp
+  out-of-scope: o3co's RP sends no `claims` parameter (upstream-client's authorization URL).
+- **oidc-core-5.5.1-e** MUST: a `value` member, and every entry of a `values` member, of a `claims` request o3co's RP sends is a valid value for the claim asked.
+  role: rp
+  out-of-scope: o3co's RP sends no `claims` parameter (upstream-client's authorization URL).
 
 ## 5.5.1.1 Requesting the "acr" Claim
 
@@ -285,10 +459,24 @@
   out-of-scope: aggregated and distributed claims are not offered, and no endpoint of o3co's is a claims provider's: claims come from the fixed claim table alone (`oidc`'s card) and userinfo answers JSON, not a JWT (`userinfo`'s card).
 - **oidc-core-5.6.2-h** SHOULD: a JWT a claims provider issues carries `iss`.
   out-of-scope: aggregated and distributed claims are not offered, and no endpoint of o3co's is a claims provider's: claims come from the fixed claim table alone (`oidc`'s card) and userinfo answers JSON, not a JWT (`userinfo`'s card).
+- **oidc-core-5.6.2-i** MUST: where o3co's RP reads an upstream's aggregated claim, it ignores members of its source it does not understand.
+  role: rp
+  out-of-scope: o3co's RP reads no aggregated or distributed claims: upstream-client's id-token reader reads `email`, `email_verified`, `name` and `picture` alone.
+- **oidc-core-5.6.2-j** SHOULD: o3co's RP fetches a distributed claim with its access token in the `Authorization` header.
+  role: rp
+  out-of-scope: o3co's RP reads no aggregated or distributed claims: upstream-client's id-token reader reads `email`, `email_verified`, `name` and `picture` alone.
+- **oidc-core-5.6.2-k** MUST: o3co's RP handles claims listed in `_claim_sources` that the claims provider does not return, not treating them as an error.
+  role: rp
+  out-of-scope: o3co's RP reads no aggregated or distributed claims: upstream-client's id-token reader reads `email`, `email_verified`, `name` and `picture` alone.
+- **oidc-core-5.6.2-l** SHOULD: o3co's RP treats a claim from `_claim_sources` that is not returned like any other requested claim not returned.
+  role: rp
+  out-of-scope: o3co's RP reads no aggregated or distributed claims: upstream-client's id-token reader reads `email`, `email_verified`, `name` and `picture` alone.
 
 ## 5.7 Claim Stability and Uniqueness
 
 - **oidc-core-5.7-a** MUST: `sub` is locally unique and never reassigned within the issuer for an End-User.
+- **oidc-core-5.7-b** MUST NOT: federation uses `email`, `phone_number`, `preferred_username`, `name` or any claim but `iss` with `sub`, from the id_token or from UserInfo, as a unique identifier of the End-User.
+  role: rp
 
 ## 6 Passing Request Parameters as JWTs
 
@@ -310,6 +498,9 @@
   out-of-scope: request objects are not offered: a request carrying `request` or `request_uri` is refused, and `request_uri_parameter_supported` is false (`authorize`'s card).
 - **oidc-core-6.1-f** MUST: the OP takes a request object both signed and encrypted only where it was signed first, then encrypted.
   out-of-scope: request objects are not offered: a request carrying `request` or `request_uri` is refused, and `request_uri_parameter_supported` is false (`authorize`'s card).
+- **oidc-core-6.1-g** SHOULD: a signed request object o3co's RP sends carries `iss` (its client ID, unless another party signed it) and `aud` (the upstream's issuer identifier, or a list including it).
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
 
 ## 6.2 Passing a Request Object by Reference
 
@@ -322,11 +513,38 @@
   out-of-scope: request objects are not offered: a request carrying `request` or `request_uri` is refused, and `request_uri_parameter_supported` is false (`authorize`'s card).
 - **oidc-core-6.2-e** MUST: the OP takes a request object at a `request_uri` only where what is there is a request object.
   out-of-scope: request objects are not offered: a request carrying `request` or `request_uri` is refused, and `request_uri_parameter_supported` is false (`authorize`'s card).
+- **oidc-core-6.2-f** SHOULD: a `request_uri` of o3co's RP whose content could change carries the base64url SHA-256 of that content as its fragment.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
+- **oidc-core-6.2-g** SHOULD NOT: a `request_uri` o3co's RP sends is longer than 512 ASCII characters.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
+- **oidc-core-6.2-h** MUST: a `request_uri` o3co's RP sends is reachable by the upstream authorization server.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
+- **oidc-core-6.2-i** SHOULD: a `request_uri` o3co's RP sends is reachable by o3co.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
+
+## 6.2.1 URI Referencing the Request Object
+
+- **oidc-core-6.2.1-a** MUST NOT: a request object of o3co's RP with requested claim values is revealed to anyone but the authorization server.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
+- **oidc-core-6.2.1-b** MUST: a `request_uri` o3co's RP sends has enough entropy for its lifetime.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
+- **oidc-core-6.2.1-c** SHOULD: o3co's RP removes a `request_uri` once it is known not to be used again, or after a reasonable timeout, unless access control is in place.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
 
 ## 6.2.3 Authorization Server Fetches Request Object
 
 - **oidc-core-6.2.3-a** MUST: the OP retrieves the request object at a `request_uri` by `GET`, unless it already holds it cached, and parses it to recreate the request's parameters.
   out-of-scope: request objects are not offered: a request carrying `request` or `request_uri` is refused, and `request_uri_parameter_supported` is false (`authorize`'s card).
+- **oidc-core-6.2.3-b** SHOULD: o3co's RP uses a unique `request_uri` for each request with distinct parameters, or otherwise keeps the authorization server from caching it.
+  role: rp
+  out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
 
 ## 6.3.1 Encrypted Request Object
 
@@ -350,6 +568,11 @@
 
 - **oidc-core-6.3.3-a** MUST: the OP assembles the request's parameters from the request object and the OAuth 2.0 parameters, the request object's taking precedence.
   out-of-scope: request objects are not offered: a request carrying `request` or `request_uri` is refused, and `request_uri_parameter_supported` is false (`authorize`'s card).
+
+## 7.2.1 Providing Information with the "registration" Request Parameter
+
+- **oidc-core-7.2.1-a** SHOULD NOT: idp-oidc, idp-google or idp-apple sends the `registration` parameter to an upstream that is not a Self-Issued OP.
+  role: rp
 
 ## 7.3 Self-Issued OpenID Provider Request
 
@@ -471,6 +694,8 @@
   out-of-scope: `offline_access` is not offered: `scopes_supported` holds no `offline_access`, and clients carry no `application_type` (`oidc`'s and `clients`' cards).
 - **oidc-core-11-f** SHOULD: the OP receives or has consent for offline access where the client's `application_type` is `native`.
   out-of-scope: `offline_access` is not offered: `scopes_supported` holds no `offline_access`, and clients carry no `application_type` (`oidc`'s and `clients`' cards).
+- **oidc-core-11-g** MUST: where idp-oidc asks an upstream for offline access (`offline_access`), its `prompt` holds `consent`, unless other conditions for processing the request permit offline access to the requested resources.
+  role: rp
 
 ## 12.1 Refresh Request
 
@@ -534,6 +759,11 @@
 
 - **oidc-core-15.3-a** SHOULD: an OP meeting RPs without a pre-configured relationship does so by Discovery and Dynamic Client Registration.
 
+## 16.3 Token Manufacture/Modification
+
+- **oidc-core-16.3-a** SHOULD: idp-oidc, idp-google and idp-apple validate the signature of what an upstream signs (the id_token, through upstream-client's id-token reader and external-jwt), to verify that a legitimate OP issued it and that it is intact.
+  role: rp
+
 ## 16.4 Access Token Disclosure
 
 - **oidc-core-16.4-a** MUST NOT: an access token is exposed to an unauthorized party.
@@ -549,6 +779,11 @@
 ## 16.9 Token Reuse
 
 - **oidc-core-16.9-a** SHOULD: a one-time-use token, such as an authorization code, carries a timestamp and a short lifetime, or the OP records its use.
+
+## 16.11 Token Substitution
+
+- **oidc-core-16.11-a** MUST NOT: upstream-client logs a user in through the implicit flow without extra mechanisms that let o3co tell the id_token and access token were issued for its use.
+  role: rp
 
 ## 16.12 Timing Attack
 
@@ -586,6 +821,12 @@
 ## 16.22 HTTP 307 Redirects
 
 - **oidc-core-16.22-a** MUST NOT: the OP redirects to the redirection URI by HTTP 307.
+
+## 17.1 Personally Identifiable Information
+
+- **oidc-core-17.1-a** SHOULD: UserInfo data o3co's RP keeps is associated with its purpose-of-use statement.
+  role: rp
+  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
 
 ## 17.2 Data Access Monitoring
 
