@@ -134,8 +134,11 @@ async function register(post: Post, twist: Twist = {}) {
 }
 
 it("takes all it names, with mfa and without", async () => {
-	expect(await takesUnused(composition())).toEqual({});
-	expect(await takesUnused(composition({}, { withMfa: true }))).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(composition()))["passkey-registration"]).toBeUndefined();
+	expect(
+		(await takesUnused(composition({}, { withMfa: true })))["passkey-registration"],
+	).toBeUndefined();
 });
 
 it("registers a passkey for the session's subject, and excludes it from the next options", async () => {

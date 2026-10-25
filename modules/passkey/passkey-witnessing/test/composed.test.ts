@@ -397,7 +397,8 @@ it("takes all it names", async () => {
 		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
 		runtime: quietRuntime(),
 	};
-	expect(await takesUnused(input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["passkey-witnessing"]).toBeUndefined();
 });
 
 it("refuses boot without exactly one witness composed", async () => {

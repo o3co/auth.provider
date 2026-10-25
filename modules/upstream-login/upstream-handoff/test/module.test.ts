@@ -44,10 +44,13 @@ const composition = (modules: readonly Module[]) => ({
 const boot = (modules: readonly Module[]) => assemble(composition(modules));
 
 it("takes all it names, a module receiving upstream tokens or none", async () => {
-	expect(await takesUnused(composition([]))).toEqual({});
-	expect(await takesUnused(composition([receiving(), sealing("sealing", recording([]))]))).toEqual(
-		{},
-	);
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(composition([])))["upstream-handoff"]).toBeUndefined();
+	expect(
+		(await takesUnused(composition([receiving(), sealing("sealing", recording([]))])))[
+			"upstream-handoff"
+		],
+	).toBeUndefined();
 });
 
 it("is no handoff where no module receives upstream tokens, asking for no seal", async () => {

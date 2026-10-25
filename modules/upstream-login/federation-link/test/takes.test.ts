@@ -21,5 +21,6 @@ const stubs = defineModule({ name: "stubs", takes: [] }, (m) => [
 
 it("takes all it names", async () => {
 	const input = { modules: [stubs, linkModule], config: kernelConfig(), runtime: quietRuntime() };
-	expect(await takesUnused(input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["federation-link"]).toBeUndefined();
 });

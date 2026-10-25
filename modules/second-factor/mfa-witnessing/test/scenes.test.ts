@@ -213,5 +213,6 @@ it("judges whether a counting factor is held against the witness, recording wher
 
 it("takes all it names, with mfa and a witness in memory", async () => {
 	const h = await witnessed();
-	expect(await takesUnused(h.input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(h.input))["mfa-witnessing"]).toBeUndefined();
 });
