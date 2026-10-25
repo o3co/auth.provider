@@ -25,3 +25,20 @@ describe("BootRefused.is", () => {
 		}
 	});
 });
+
+describe("a BootRefused's refusals", () => {
+	it("are read one at a time into its own frozen list, a hole or a value of another shape left out, never throwing", () => {
+		const secret = {
+			where: "w",
+			get reason(): string {
+				throw new Error("secret=abc");
+			},
+		};
+		// biome-ignore lint/suspicious/noSparseArray: a list with a hole is the case.
+		const given = [, { where: "kernel", reason: "no" }, secret, { where: 1, reason: "r" }, null];
+		const refused = new BootRefused(given as never);
+		expect(refused.refusals).toEqual([{ where: "kernel", reason: "no" }]);
+		expect(Object.isFrozen(refused.refusals) && Object.isFrozen(refused.refusals[0])).toBe(true);
+		expect(refused.message).toBe("boot refused (1)");
+	});
+});

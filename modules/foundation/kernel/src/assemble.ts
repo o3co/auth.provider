@@ -17,15 +17,25 @@ import {
 	type Refusal,
 	RefusalSignal,
 	readThrown,
+	refusalsIn,
 } from "./refusal/refusal.ts";
 import { guardedLog, logSinks, routedLog } from "./runtime/log.ts";
 import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime/runtime.ts";
 import { checkTakes, countRefusal, takenByRefusal } from "./takes/takes.ts";
 
 export interface Assembly {
+	/** The contract's interface; one no module provides throws an Error at once. */
 	get<T>(contract: Contract<T>): T;
+	/**
+	 * Runs the start hooks in the order registered, one at a time; the first that rejects stops the
+	 * rest and the periodic tasks from starting, and `start` rejects with it. It has no deadline and
+	 * is called once: a second call runs the hooks and starts the periodic tasks again.
+	 */
 	start(): Promise<void>;
-	/** Without a deadline, the kernel section's `stop-deadline`. */
+	/**
+	 * Without a deadline, the kernel section's `stop-deadline`. It is called once: each call runs the
+	 * stop hooks again, and calls made side by side are not joined, so the caller stops once.
+	 */
 	stop(deadlineMs?: number): Promise<void>;
 }
 
@@ -86,7 +96,11 @@ function recordFailure(error: unknown, where: string, refusals: Refusal[]): void
 					: "other",
 		"unreadable",
 	);
-	if (seen === "signal") refusals.push(...(error as RefusalSignal).refusals);
+	if (seen === "signal") {
+		// Read as a thrown value is, into the kernel's own list: a signal rethrown altered may hold none.
+		const told = refusalsIn(readThrown(() => (error as RefusalSignal).refusals, undefined));
+		for (const refusal of told.length > 0 ? told : [failed]) refusals.push(refusal);
+	}
 	// A library's refusal names its own where and reason; any other error's text is never kept.
 	else if (seen !== "dependency") refusals.push(buildRefusalOf(error) ?? failed);
 }
@@ -99,6 +113,7 @@ export interface TakesWatch {
 	took(module: string, handle: Handle): void;
 }
 
+/** Builds the modules; it waits on each factory without a deadline (`stop-deadline` bounds stopping alone). */
 export function assemble(input: AssemblyInput): Promise<Assembly> {
 	return assembleWatching(input);
 }

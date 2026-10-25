@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { refusalsOf } from "../../../test/refusals.ts";
 import { assemble, contract, defineModule, kernelConfig } from "../../contract.ts";
@@ -151,6 +153,59 @@ describe("stop", () => {
 		await vi.advanceTimersByTimeAsync(50);
 		await stop;
 		expect(seen).toEqual(["task ended", "hook"]);
+	});
+
+	it("warns a hook late at the deadline, and failed again should it reject after, a rollback's marked during", async () => {
+		vi.useFakeTimers();
+		/** A hook that rejects `ms` after it is called. */
+		const lateThenFailing = (ms: number) => () =>
+			new Promise<void>((_, reject) => setTimeout(() => reject(new Error("x")), ms));
+		const recorded = recordingLog();
+		const app = await assemble({
+			modules: [stopping("slow", [], lateThenFailing(800))],
+			config: single,
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+		const stop = app.stop(500);
+		await vi.advanceTimersByTimeAsync(1000);
+		await stop;
+		const rolledBack = recordingLog();
+		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+			m.provide(contract<void>("refused")).by((c) => c.refuse("refusing", "on purpose")),
+		]);
+		const refused = refusalsOf(
+			assemble({
+				modules: [stopping("slow", [], lateThenFailing(1500)), refusing],
+				config: kernelConfig({ "stop-deadline": "1s" }),
+				runtime: quietRuntime({ log: rolledBack.log }),
+			}),
+		);
+		await vi.advanceTimersByTimeAsync(1000);
+		await refused;
+		// Its failure comes after the refusal is told.
+		await vi.advanceTimersByTimeAsync(1000);
+		const fields = (r: ReturnType<typeof recordingLog>) => r.lines().map((line) => line.fields);
+		expect(fields(recorded)).toEqual([
+			{ module: "slow", outcome: "late" },
+			{ module: "slow", outcome: "failed", kind: "Error" },
+		]);
+		expect(fields(rolledBack)).toEqual([
+			{ module: "slow", outcome: "late", during: "refusal" },
+			{ module: "slow", outcome: "failed", kind: "Error", during: "refusal" },
+		]);
+	});
+
+	it("leaves its process free to end, though a hook never ends", () => {
+		const began = performance.now();
+		const ran = spawnSync(
+			process.execPath,
+			[join(import.meta.dirname, "fixtures", "stop-free.ts")],
+			{
+				encoding: "utf8",
+				timeout: 30_000,
+			},
+		);
+		expect([ran.status, performance.now() - began < 20_000]).toEqual([0, true]);
 	});
 
 	it("aborts a hung stop hook at the deadline, and still calls the earlier ones", async () => {

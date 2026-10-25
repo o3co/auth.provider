@@ -40,8 +40,8 @@ export interface BuildContext<S> extends Runtime {
 	every(intervalMs: number, task: (signal: AbortSignal) => Promise<void>): void;
 	refuse(where: string, reason: string): never;
 	/**
-	 * Refuses with every problem found at once, so the operator sees them together. The list, and
-	 * the signal thrown, are left as given: one emptied or rethrown altered may leave no refusal read.
+	 * Refuses with every problem found at once, so the operator sees them together. The list is
+	 * copied as given: changing it after leaves the refusal as it was.
 	 */
 	refuseAll(refusals: readonly Refusal[]): never;
 }
@@ -61,7 +61,7 @@ export interface Contribution<S> {
 export interface ModuleHead<S> {
 	readonly name: string;
 	readonly section?: ZodType<S>;
-	/** A function is asked only with a section that passed its schema. */
+	/** Safe on multiple instances unless it says otherwise; a function is asked only with a section that passed its schema. */
 	readonly replicaSafe?: boolean | ((section: S) => boolean);
 	/**
 	 * What a production deployment must not hold in this section: each a key path below the section
