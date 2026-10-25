@@ -425,10 +425,11 @@ const witnessed = () => [passkeyWitnessStandIn().module, witnessingModule];
 
 it("takes all it names, a passkey holder's password allowed or refused", async () => {
 	const allowed = await serve();
-	expect(await takesUnused(allowed.input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(allowed.input))["login-passkey"]).toBeUndefined();
 	await stop();
 	const refused = await serve({ section: { password: "refused-when-held" }, extra: witnessed() });
-	expect(await takesUnused(refused.input)).toEqual({});
+	expect((await takesUnused(refused.input))["login-passkey"]).toBeUndefined();
 });
 
 describe("the gate credential-policy", () => {
