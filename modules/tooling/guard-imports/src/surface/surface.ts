@@ -124,7 +124,9 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 					member.valueDeclaration ?? member.declarations?.[0] ?? source!,
 				) & ts.ModifierFlags.Readonly;
 			const optional = member.flags & ts.SymbolFlags.Optional ? "?" : "";
-			return `  ${readonly ? "readonly " : ""}${member.name}${optional}: ${text(checker.getTypeOfSymbol(member))}`;
+			// A member keyed by a symbol is named as written (`[mark]`), never by the id one program gives it.
+			const name = member.name.startsWith("__@") ? checker.symbolToString(member) : member.name;
+			return `  ${readonly ? "readonly " : ""}${name}${optional}: ${text(checker.getTypeOfSymbol(member))}`;
 		});
 		const calls = type
 			.getCallSignatures()

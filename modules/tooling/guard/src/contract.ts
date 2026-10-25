@@ -9,7 +9,7 @@ import {
 	surfacesOf,
 	type Violation,
 } from "@mod/guard-imports";
-import { budgetRules } from "./budget/budget.ts";
+import { budgetMeasures, budgetRules, type Measure } from "./budget/budget.ts";
 import { laidOut } from "./documents.ts";
 import { helpersOf, networkRules } from "./network/network.ts";
 import { protocolRules } from "./protocol/protocol.ts";
@@ -19,7 +19,7 @@ import { budgetsAsTest, type Scope } from "./units.ts";
 import type { Doc } from "./workspace.ts";
 
 export { branchingImports, dependencyCards, heavyDependencyCards } from "./budget/budget.ts";
-export type { Doc, Pkg, Violation };
+export type { Doc, Measure, Pkg, Violation };
 
 /** The configuration: the budget numbers, beside the rules guard-imports reads. */
 export interface Budget extends Rules {
@@ -163,4 +163,14 @@ export function check(
 	}
 	documentRules(s, documents);
 	return violations;
+}
+
+/** Every unit's budget measures, each with its limit where G7 holds one, whether past it or not; on the surfaces given, read once by the caller, or read here. */
+export function measures(
+	packages: readonly Pkg[],
+	budget: Budget,
+	surfaces: ReadonlyMap<string, Surface> = surfacesOf(packages),
+): Measure[] {
+	const s = scopeOf(packages, budget, () => {}, helpersOf(packages));
+	return packages.flatMap((p) => budgetMeasures(s, p, surfaces));
 }

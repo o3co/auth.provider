@@ -71,18 +71,32 @@ export function branchingImports(
 	});
 }
 
-/** G7, with G9 and G17 on what it measures: the package and each internal module on its own. */
-export function budgetRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surface>) {
-	const { budget, byName, report, workspaceDeps } = s;
+/** One measure of a unit: what it counts, its value, and the limit G7 holds it to, where one does. */
+export interface Measure {
+	readonly where: string;
+	readonly what: string;
+	readonly value: number;
+	readonly limit?: number;
+}
+
+const cardItems = (card: string) => card.split("\n").filter((l) => /^\s*- /.test(l));
+
+/** Every measure of the package and of each internal module on its own, under its limit or past it. */
+export function budgetMeasures(
+	s: Scope,
+	p: Pkg,
+	surfaces: ReadonlyMap<string, Surface>,
+): Measure[] {
+	const { budget, byName, workspaceDeps } = s;
 	const fixture = new RegExp(budget.fixtureFile);
 	const counted = new RegExp(budget.countedFixtureFile);
 	const generated = new RegExp(budget.generatedFile);
 	const { cardDirs, unitOf, cardOf, whereOf } = unitsOf(p);
-	for (const unit of ["", ...cardDirs]) {
+	return ["", ...cardDirs].flatMap((unit) => {
 		const where = whereOf(unit);
-		const over = (what: string, value: number, limit: number, note = "") => {
-			if (value > limit) report("G7 budget", where, `${what} ${value} > ${limit}${note}`);
-		};
+		const found: Measure[] = [];
+		const measure = (what: string, value: number, limit?: number) =>
+			found.push(limit === undefined ? { where, what, value } : { where, what, value, limit });
 		const files = p.files.filter((file) => unitOf(file) === unit);
 		let sourceLines = 0;
 		let testLines = 0;
@@ -106,46 +120,39 @@ export function budgetRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surf
 				commentLines += counts.comment;
 			}
 		}
-		over("source lines", sourceLines, budget.sourceLines);
-		over("test lines", testLines, budget.testLines);
+		measure("source lines", sourceLines, budget.sourceLines);
+		measure("test lines", testLines, budget.testLines);
 		const commentLimit = Math.max(budget.commentShare * sourceLines, budget.commentFloor);
-		over("comment lines", commentLines, Math.round(commentLimit * 10) / 10);
+		measure("comment lines", commentLines, Math.round(commentLimit * 10) / 10);
 		if (unit === "") {
 			const surface = surfaces.get(p.name);
-			over(
+			const common = s.isCommon(p);
+			measure(
 				"contract values",
 				surface?.values.size ?? 0,
-				s.isCommon(p) ? budget.commonContractValues : budget.contractValues,
+				common ? budget.commonContractValues : budget.contractValues,
 			);
 			const wider = budget.widerSurfaceKinds.includes(s.kindOf(p));
-			over(
+			measure(
 				"contract members",
 				surface?.members ?? 0,
 				wider ? budget.widerContractMembers : budget.contractMembers,
 			);
-			for (const type of surface?.hidden ?? []) {
-				report("G9 types in public signatures are exported", p.name, type);
-			}
 		}
 		const card = cardOf(unit);
-		if (card === undefined) report("G7 budget", where, "no card");
-		else {
+		if (card !== undefined) {
 			const dependents = s.packages.filter((q) => workspaceDeps(q, false).includes(p.name));
 			const narrow = unit === "" && dependents.length >= budget.narrowCardFanIn;
-			over(
+			measure(
 				"card lines",
 				card.split("\n").length,
 				narrow ? budget.narrowCardLines : budget.cardLines,
 			);
-			over("card bytes", Buffer.byteLength(card), budget.cardBytes);
-			for (const line of card.split("\n").filter((l) => /^\s*- /.test(l))) {
-				const opening = line.replace(/^\s*- /, "").slice(0, 12);
-				over("card item bytes", Buffer.byteLength(line), budget.cardItemBytes, ` (${opening}…)`);
-			}
-			for (const phrase of planPhrases) {
-				if (card.includes(phrase))
-					report("G17 a card holds only the current contract", where, phrase);
-			}
+			measure("card bytes", Buffer.byteLength(card), budget.cardBytes);
+			const items = cardItems(card);
+			measure("card items", items.length);
+			const largest = Math.max(0, ...items.map((line) => Buffer.byteLength(line)));
+			measure("card item bytes", largest, budget.cardItemBytes);
 		}
 		// What working in the unit reads: its own files, the cards of the modules it lies in, and
 		// the cards of the packages it depends on (the package's, or those its files import).
@@ -167,11 +174,47 @@ export function budgetRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surf
 			(sum, text) => sum + Buffer.byteLength(text),
 			0,
 		);
-		over("reading scope bytes", bytes + cards, budget.readRangeBytes);
+		measure("reading scope bytes", bytes + cards, budget.readRangeBytes);
 		const imported = [...importedBy(p, unit, budget)].filter((name) => {
 			const dep = byName.get(name);
 			return dep !== undefined && !s.isCommon(dep);
 		});
-		over("dependencies", imported.length, budget.dependencies);
+		measure("dependencies", imported.length, budget.dependencies);
+		return found;
+	});
+}
+
+/** G7, with G9 and G17 on what it measures: the package and each internal module on its own. */
+export function budgetRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surface>) {
+	const { budget, report } = s;
+	const { cardDirs, cardOf, whereOf } = unitsOf(p);
+	const byWhere = Map.groupBy(budgetMeasures(s, p, surfaces), (m) => m.where);
+	for (const unit of ["", ...cardDirs]) {
+		const where = whereOf(unit);
+		const over = (what: string, value: number, limit: number, note = "") => {
+			if (value > limit) report("G7 budget", where, `${what} ${value} > ${limit}${note}`);
+		};
+		for (const m of byWhere.get(where) ?? []) {
+			// Each item is reported by its own opening, below.
+			if (m.limit !== undefined && m.what !== "card item bytes") over(m.what, m.value, m.limit);
+		}
+		if (unit === "") {
+			for (const type of surfaces.get(p.name)?.hidden ?? []) {
+				report("G9 types in public signatures are exported", p.name, type);
+			}
+		}
+		const card = cardOf(unit);
+		if (card === undefined) {
+			report("G7 budget", where, "no card");
+			continue;
+		}
+		for (const line of cardItems(card)) {
+			const opening = line.replace(/^\s*- /, "").slice(0, 12);
+			over("card item bytes", Buffer.byteLength(line), budget.cardItemBytes, ` (${opening}…)`);
+		}
+		for (const phrase of planPhrases) {
+			if (card.includes(phrase))
+				report("G17 a card holds only the current contract", where, phrase);
+		}
 	}
 }

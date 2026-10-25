@@ -9,7 +9,9 @@ Internal module of `guard`: G7, how much each unit may hold and make a reader re
 - The numbers themselves: the configuration. What the public surface holds: `guard-imports`' `surfacesOf`.
 
 ## Offers
-- `budgetRules` (G7, G9, G17), `dependencyCards` (each unit's dependency cards, in bytes), `heavyDependencyCards` (the units whose dependency cards pass their measure) and `branchingImports` (the internal modules reported as branches).
+- `budgetMeasures`: every measure of the package and of each internal module, its value and the limit G7 holds it to, whether past it or not.
+  - The measures: the source, test and comment lines; the package's contract values and members; the card's lines, bytes, items and largest item; the reading scope's bytes; the dependencies.
+- `budgetRules` (G7, G9, G17, from those measures), `dependencyCards` (each unit's dependency cards, in bytes), `heavyDependencyCards` (the units whose dependency cards pass their measure) and `branchingImports` (the internal modules reported as branches).
 
 ## Invariants
 - The budget is measured per unit: the package, and each internal module (a directory with a card) apart from it; a file belongs to the innermost one.

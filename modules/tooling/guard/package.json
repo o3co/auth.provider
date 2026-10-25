@@ -5,7 +5,8 @@
 	"kind": "verification",
 	"type": "module",
 	"scripts": {
-		"guard": "node src/main.ts"
+		"guard": "node src/main.ts",
+		"change-record": "node src/change-record/main.ts"
 	},
 	"exports": {
 		".": "./src/contract.ts"
