@@ -40,6 +40,21 @@ it("tells the units added, removed, moved and changed", () => {
 	});
 });
 
+it("tells a move only where the last part matches one gone unit and one come, else the removals and the addition", () => {
+	const files = (...wheres: string[]) =>
+		new Map(wheres.map((w) => [w, new Map([["src/x.ts", w]])]));
+	const units = changesOf(
+		reading({ files: files("@t/a/src/util", "@t/b/src/util", "@t/c/src/one") }),
+		reading({ files: files("@t/c/src/util", "@t/c/src/parts/one") }),
+	).units;
+	expect(units).toEqual({
+		added: ["@t/c/src/util"],
+		removed: ["@t/a/src/util", "@t/b/src/util"],
+		moved: [["@t/c/src/one", "@t/c/src/parts/one"]],
+		changed: [],
+	});
+});
+
 it("tells each export added, removed, renamed, moved or changed, a swap of members of the same count too", () => {
 	const base = reading({
 		signatures: new Map([

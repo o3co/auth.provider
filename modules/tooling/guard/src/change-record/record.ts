@@ -91,13 +91,17 @@ const lastPart = (where: string) => where.split("/").at(-1);
 const sameFiles = (a?: ReadonlyMap<string, string>, b?: ReadonlyMap<string, string>) =>
 	a?.size === b?.size && [...(a ?? [])].every(([file, hash]) => b?.get(file) === hash);
 
-/** The units added, removed, moved (one gone and one come with the same last part) and changed. */
+/** The units added, removed, moved (the one gone and the one come with the same last part) and changed. */
 function unitChanges(base: Reading, head: Reading) {
 	const gone = sorted([...base.files.keys()].filter((w) => !head.files.has(w)));
 	const come = sorted([...head.files.keys()].filter((w) => !base.files.has(w)));
+	// A move only where the last part names one unit gone and one come: an ambiguous match stays the removals and the additions.
 	const moved = gone.flatMap((from) => {
 		const to = come.filter((w) => lastPart(w) === lastPart(from));
-		return to.length === 1 && to[0] !== undefined ? [[from, to[0]] as [string, string]] : [];
+		const alike = gone.filter((w) => lastPart(w) === lastPart(from));
+		return to.length === 1 && alike.length === 1 && to[0] !== undefined
+			? [[from, to[0]] as [string, string]]
+			: [];
 	});
 	const changed = sorted(
 		[...base.files.keys()].filter(
