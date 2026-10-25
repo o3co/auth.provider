@@ -40,15 +40,17 @@ jobs:
             exit 1
           fi
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+      # Neither checkout keeps the token in its git configuration: the push alone is given it.
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
-      - uses: pnpm/action-setup@v4
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       # The names the release published (published-packages.sh reads them
       # from the build), each installed from npm at this version, so the site
@@ -78,6 +80,7 @@ jobs:
         with:
           ref: gh-pages
           path: pages
+          persist-credentials: false
 
       # Only this minor's dir, the root and the list of releases change.
       - name: Build this release's API into the pages
@@ -86,6 +89,8 @@ jobs:
       - name: Publish the pages
         shell: bash
         working-directory: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
@@ -96,4 +101,6 @@ jobs:
             exit 0
           fi
           git commit -m "docs: API for v${VERSION}"
-          git push origin HEAD:gh-pages
+          # The token for this push alone, as checkout would set it, never written to the configuration.
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" push origin HEAD:gh-pages
