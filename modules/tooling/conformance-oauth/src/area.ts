@@ -40,7 +40,15 @@ export interface ClientScene {
 	};
 }
 
-export type TrustedIssuerScene =
+/** A ledger the issuer's assertions are used up in, shared with another service: its URL and token. */
+export interface JtiLedgerScene {
+	readonly consumeUrl: string;
+	readonly credential: string;
+	/** The header the token goes in as it is; unset, as a bearer Authorization. */
+	readonly credentialHeader?: string;
+}
+
+export type TrustedIssuerScene = (
 	| {
 			readonly issuer: string;
 			readonly alg: "EdDSA" | "ES256" | "RS256";
@@ -50,7 +58,11 @@ export type TrustedIssuerScene =
 	| {
 			readonly issuer: string;
 			readonly linked: { readonly upstream: string; readonly keysUrl: string };
-	  };
+	  }
+) & {
+	/** Its assertions used up in this ledger in place of the store. */
+	readonly jtiLedger?: JtiLedgerScene;
+};
 
 /** Clients, the token endpoint and what is offered beside it. */
 export interface OauthPart {

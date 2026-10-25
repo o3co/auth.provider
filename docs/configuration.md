@@ -259,6 +259,19 @@ From `@mod/issuer`.
 |---|---|---|---|---|---|---|
 | `issuer.url` | string |  | yes | `ISSUER_URL` | `https://login.example.invalid` | The issuer the tokens name, as clients see it; no query and no trailing slash. |
 
+## jti-ledger-http
+
+From `@mod/jti-ledger-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `jti-ledger-http.issuer` | string |  | yes | `JTI_LEDGER_HTTP_ISSUER` | `https://devices.example.invalid` | The `iss` whose assertions it uses up: one of jwt-bearer's `issuers`. |
+| `jti-ledger-http.consume-url` | string |  | yes | `JTI_LEDGER_HTTP_CONSUME_URL` | `https://ledger.example.invalid/assertions/consume` | Where an assertion's jti is used up. Plain http is reached only where outbound's policy names it. |
+| `jti-ledger-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
+| `jti-ledger-http.credential-header` | string |  |  |  |  | The header the credential goes in, as it is, such as x-internal-token; unset, it goes as Authorization: Bearer. |
+| `jti-ledger-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |
+| `jti-ledger-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
+
 ## jwt-bearer
 
 From `@mod/jwt-bearer`.

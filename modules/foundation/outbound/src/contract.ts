@@ -3,6 +3,7 @@ import type { Narrower } from "@mod/outbound-policy";
 
 // The destination policy's own, as `fetch` takes and throws them.
 export { DestinationRefused, type Narrower, type RefusalReason } from "@mod/outbound-policy";
+export { credentialHeaderRefusal } from "./credential/credential.ts";
 
 /** Why no usable answer came, for a caller to log by; it carries no value and no body. */
 export type OutboundFailure =
@@ -41,6 +42,14 @@ export interface OutboundRequest {
 	readonly body?: string | Uint8Array;
 	/** The Authorization value, sent as that header; a secret never told. The only way to send one: headers may not name it. */
 	readonly credential?: string;
+	/**
+	 * The header the credential goes as, in place of Authorization, its value as given: one a ledger
+	 * asks a token in. Under the credential's rules alike, and headers may not name it either, in any
+	 * case; a name outbound or the request's shape decides (its own, the host, the framing,
+	 * `content-type`, `cookie`, `proxy-authorization`), one that is no header token, or one without
+	 * a credential is a TypeError.
+	 */
+	readonly credentialHeader?: string;
 }
 
 export interface OutboundResponse {
@@ -94,7 +103,7 @@ export interface SignedNarrower extends Narrower {
 export interface SignedOutbound {
 	fetch(
 		url: string,
-		request: Omit<OutboundRequest, "credential">,
+		request: Omit<OutboundRequest, "credential" | "credentialHeader">,
 		narrower: SignedNarrower,
 	): Promise<OutboundResponse>;
 }

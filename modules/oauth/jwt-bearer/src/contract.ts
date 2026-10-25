@@ -52,4 +52,36 @@ export type LinkedIssuers = readonly { readonly upstream: string; readonly issue
 
 export const linkedIssuers = contract<LinkedIssuers>("jwt-bearer.linked-issuers");
 
+/** An assertion as its issuer's ledger is asked to use it up: its jti as sent, and how long it stays used. */
+export interface SpendingAssertion {
+	/** The `iss` as the assertion sent it. */
+	readonly sentIssuer: string;
+	/** As sent: 1 to 256 well-formed characters. */
+	readonly jti: string;
+	/** The assertion's `exp`, in ms. */
+	readonly expiresAt: number;
+	/** Until when it must stay used, in ms: its `exp`, the clock skew allowed, and a margin. */
+	readonly keepUntil: number;
+}
+
+/**
+ * One issuer's ledger of the assertions used up, shared with whatever else accepts them: in place of
+ * the store, for that issuer's assertions alone.
+ */
+export interface JtiLedger {
+	/** The `iss` it answers for: one of the section's `issuers`. */
+	readonly issuer: string;
+	/**
+	 * Uses the assertion up: `first` where it was not used before, `replayed` where it was. Throws
+	 * Unavailable when it cannot tell; one whose answer is lost may stay used. Asked once the
+	 * assertion is verified and every check before issuing has passed.
+	 */
+	spend(assertion: SpendingAssertion): Promise<"first" | "replayed">;
+}
+
+export const jtiLedgers = extensionPoint<JtiLedger>("jwt-bearer.jti-ledgers", {
+	multiplicity: "keyed",
+	keyOf: (ledger) => ledger.issuer,
+});
+
 export * from "./store.ts";

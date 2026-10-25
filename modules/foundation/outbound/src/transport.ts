@@ -50,7 +50,7 @@ export interface Trust {
 const ownHeaders = { "user-agent": "auth-provider", "accept-encoding": "identity" };
 
 /** Headers outbound decides alone: its own, the host, and how the message is framed and carried. */
-const decided = new Set([
+export const decided: ReadonlySet<string> = new Set([
 	...Object.keys(ownHeaders),
 	"host",
 	"content-length",

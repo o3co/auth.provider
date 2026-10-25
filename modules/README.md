@@ -176,6 +176,7 @@ What each module contains is described by that module's contract card (each modu
 | The JWT bearer grant (RFC 7523) and its trusted issuers, their keys or key sets | grant contribution / setting | jwt-bearer |
 | Resolving a linked JWT bearer signer's subject through users, and declaring the linked issuers' IdP names | contribution | jwt-bearer-users |
 | One issuer's JWT bearer signer keys, asked of the operator's HTTP ledger on every assertion, its request shape and credential | contribution / setting | signer-keys-http |
+| One issuer's JWT bearer assertions used up in the operator's HTTP ledger, shared with other services accepting them, its request shape and credential | contribution / setting | jti-ledger-http |
 | The token exchange grant (RFC 8693), the verifiers of the token types it exchanges, the actor chain | grant contribution / extension point kind / setting | token-exchange |
 | Verifying one token type for exchange | contribution | the module that verifies that type |
 | Verifying Apple's and Google's id_tokens for exchange, which client of this provider may exchange each app's id_token, and taking each once | contribution / setting / data | exchange-id-tokens |

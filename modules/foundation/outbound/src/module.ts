@@ -3,7 +3,6 @@ import { contract, defineModule } from "@mod/kernel";
 import {
 	type CredentialPolicy,
 	credentialPolicy,
-	DestinationRefused,
 	hostList,
 	type Narrower,
 	type OutboundLimits,
@@ -23,6 +22,7 @@ import {
 	type SignedOutbound,
 	signedOutbound,
 } from "./contract.ts";
+import { sentRequest } from "./credential/credential.ts";
 import {
 	inProcessPool,
 	LookupRefused,
@@ -158,24 +158,6 @@ interface Paths {
 	readonly credentialRefusalOf: CredentialPolicy["refusalOf"];
 	readonly limitsOf: OutboundLimits["of"];
 	readonly lookupsOf: NonNullable<OutboundLimits["lookupsOf"]>;
-}
-
-/** One header value: printable ASCII on one line, no space at either end. */
-const headerValue = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;
-
-/** The request as sent: its credential as the Authorization header; none for signed material. Its value is never told. */
-function sentRequest(request: OutboundRequest, signed: boolean): OutboundRequest {
-	const { credential, ...rest } = request;
-	// An Authorization value goes only as a credential, under its rules: never one a caller writes.
-	if (Object.keys(rest.headers ?? {}).some((name) => name.toLowerCase() === "authorization")) {
-		throw new TypeError("outbound: an Authorization value goes as the request's credential");
-	}
-	if (credential === undefined) return rest;
-	if (signed) throw new DestinationRefused("credential");
-	if (!headerValue.test(credential)) {
-		throw new TypeError("outbound: a credential is one header value, printable ASCII on one line");
-	}
-	return { ...rest, headers: { ...rest.headers, authorization: credential } };
 }
 
 /** The outbound paths over a resolver; the module passes the system's, a test its own. */
