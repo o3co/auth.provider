@@ -38,7 +38,8 @@ export function issuanceFor(
 		try {
 			for (const one of told) await one.issued(session, { id, expiresAt });
 		} catch (error) {
-			await tokens.revokeReferenced(referenceOf(issued.access));
+			// The failure told is the one thrown on: a token whose revocation fails too is handed to no one.
+			await tokens.revokeReferenced(referenceOf(issued.access)).catch(() => undefined);
 			throw error;
 		}
 		return issued;
