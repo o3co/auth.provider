@@ -18,6 +18,7 @@ The generator reads what your package is from one key of its `package.json`, `au
 	"exports": { "./module": "./dist/module.js" },
 	"peerDependencies": {
 		"@o3co/auth-provider-foundation": "^0.19.0",
+		"@o3co/auth-provider-identity": "^0.19.0",
 		"@o3co/auth-provider-oauth": "^0.19.0",
 		"zod": "^4.6.0"
 	},
@@ -37,6 +38,8 @@ The generator reads what your package is from one key of its `package.json`, `au
 ### Export the module
 
 Export the module the app imports at `./module`, as every module of the release does. The generator takes it as node's resolver would load it for an app's import: a path inside your package, as in the manifest above, or conditions whose first that applies reaches one. A blocked target (`null`), an array, or a path through `..` or `node_modules` is refused. No code of your package is run to tell.
+
+Its `defineModule` head declares `takes`, as the `kernel` card says: the handles its factories take from other modules, `[]` for none. The generator does not check it; the app's boot refuses a module without it (`refused <name>: declares no takes`). The [recipe for a grant of your own](recipe-external-grant.md) writes such a module.
 
 ### Take the release and zod as peers
 
