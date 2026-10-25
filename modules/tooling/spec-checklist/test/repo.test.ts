@@ -7,6 +7,7 @@ import {
 	repoFindings,
 	repoRoot,
 	reportDir,
+	runsOf,
 	updatedByOf,
 	workspaceTests,
 } from "../src/repo.ts";
@@ -46,5 +47,27 @@ describe("the runs a CI run must report", () => {
 		const expected = expectedOf(runs, false);
 		expect([...expected.areas]).toEqual(["@mod/conformance-code"]);
 		expect(expected.runsOf.get("@mod/interop-oidf")).toEqual(["@mod/interop-oidf#basic"]);
+	});
+});
+
+describe("the workspace's runs", { timeout: 120_000 }, () => {
+	it("are the root's, each area's, each pattern's and the recipes' release run, as the packages print them", () => {
+		const runs = runsOf(repoRoot);
+		expect(runs.slice(0, 2).map((r) => r.entry)).toEqual(["unit", "integration"]);
+		expect(runs).toContainEqual({
+			entry: "@mod/conformance-code",
+			kind: "area",
+			matrix: "@mod/conformance-code",
+		});
+		expect(runs).toContainEqual({
+			entry: "@mod/conformance-code@full",
+			kind: "pattern",
+			matrix: "full",
+		});
+		expect(runs).toContainEqual({
+			entry: "@mod/conformance-recipes",
+			kind: "release",
+			releaseOnly: true,
+		});
 	});
 });
