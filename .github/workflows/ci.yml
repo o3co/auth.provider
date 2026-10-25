@@ -270,8 +270,11 @@ jobs:
   # and each pattern runs in a job of its own; `conformance` passes only once
   # all of them have.
   #
-  # What the jobs run, read from the repository: an area is a package with a
-  # `conformance` script, and a pattern is a run `patterns --list` names.
+  # What the jobs run is read from the runs spec-checklist lists (`run plan`), the
+  # same runs whose evidence compliance expects: an area is a package with a
+  # `conformance` script, a pattern a pattern run `conformance` prints. The plan
+  # also fixes the one commit every conformance job and compliance check out, so a
+  # daily run's jobs test the same develop commit.
   conformance-plan:
     needs: conformance-due
     if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
@@ -279,6 +282,7 @@ jobs:
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
       patterns: ${{ steps.plan.outputs.patterns }}
+      sha: ${{ steps.plan.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -293,10 +297,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          areas=$(jq -c -s 'map(select(.scripts.conformance) | .name)' modules/*/*/package.json)
-          patterns=$(pnpm --silent --filter @mod/conformance run patterns --list)
-          echo "areas=$areas" >> "$GITHUB_OUTPUT"
-          echo "patterns=$patterns" >> "$GITHUB_OUTPUT"
+          areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
+          patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
+          {
+            echo "areas=$areas"
+            echo "patterns=$patterns"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
   # One area: its scenes on the new system, then on the legacy one. A scene the
   # legacy system cannot be set up for, or answers by a decided difference, is
@@ -320,8 +327,8 @@ jobs:
       - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
-          # The daily run tests develop, where merged work waits for the next release.
-          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
           # The legacy build clones the v0.17.0 tag from this checkout.
           fetch-depth: 0
           fetch-tags: true
@@ -385,8 +392,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The daily run tests develop, where merged work waits for the next release.
-          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -498,8 +505,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The commit the conformance jobs tested: the daily run tests develop.
-          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          # The commit the conformance jobs tested, where they ran; else the event's.
+          ref: ${{ needs.conformance-plan.outputs.sha || '' }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -521,6 +528,9 @@ jobs:
           status=0
           pnpm --silent --filter @mod/spec-checklist run compliance "$RUNNER_TEMP/evidence" $release > "$RUNNER_TEMP/compliance.out" || status=$?
           cat "$RUNNER_TEMP/compliance.out" >> "$GITHUB_STEP_SUMMARY"
+          # The summary over every specification, from the checklist alone, which the repository does not keep.
+          pnpm --silent --filter @mod/spec-checklist run summary > "$RUNNER_TEMP/evidence/summary.md"
+          { echo; echo "## The checklist by specification and by role"; echo; cat "$RUNNER_TEMP/evidence/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Keep the table
         if: always()
@@ -530,6 +540,7 @@ jobs:
           path: |
             ${{ runner.temp }}/evidence/compliance.json
             ${{ runner.temp }}/evidence/compliance.md
+            ${{ runner.temp }}/evidence/summary.md
           if-no-files-found: ignore
           retention-days: 90
 
