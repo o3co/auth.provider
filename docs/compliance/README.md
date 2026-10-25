@@ -7,6 +7,7 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | Specification | Items | MUST in scope | MUST mapped | MUST hole | MUST noncompliant | SHOULD in scope | SHOULD mapped | SHOULD hole | SHOULD deviates | Out of scope |
 |---|---|---|---|---|---|---|---|---|---|---|
 | [OpenID Connect Back-Channel Logout 1.0](oidc-bcl.md) | 23 | 14 | 0 | 14 | 0 | 8 | 0 | 8 | 0 | 1 |
+| [OpenID Connect Core 1.0](oidc-core.md) | 274 | 105 | 0 | 105 | 0 | 43 | 0 | 43 | 0 | 126 |
 | [OpenID Connect Discovery 1.0](oidc-discovery.md) | 51 | 24 | 0 | 24 | 0 | 8 | 0 | 8 | 0 | 19 |
 | [OpenID Connect RP-Initiated Logout 1.0](oidc-rpinit.md) | 19 | 13 | 0 | 13 | 0 | 6 | 0 | 6 | 0 | 0 |
 | [RFC 6749: The OAuth 2.0 Authorization Framework](rfc6749.md) | 112 | 79 | 0 | 79 | 0 | 24 | 0 | 24 | 0 | 9 |
@@ -14,4 +15,4 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 8414: OAuth 2.0 Authorization Server Metadata](rfc8414.md) | 26 | 18 | 0 | 18 | 0 | 2 | 0 | 2 | 0 | 6 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
-| Total | 258 | 168 | 0 | 168 | 0 | 53 | 0 | 53 | 0 | 37 |
+| Total | 532 | 273 | 0 | 273 | 0 | 96 | 0 | 96 | 0 | 163 |
