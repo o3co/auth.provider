@@ -84,7 +84,7 @@ describe(`${library.name}: refreshing`, () => {
 		"refreshes the access token, the refresh token rotated and the one it replaced refused",
 		(context) =>
 			excusable(context, "refresh", async () => {
-				const result = await run("refresh", world.clients.basic);
+				const result = await run("refresh", world.clients.post);
 				expect(result).toEqual({ accessToken: true, rotated: true, replayed: "invalid_grant" });
 			}),
 	);
@@ -173,7 +173,7 @@ describe(`${library.name}: a token for one resource server`, () => {
 		"asks a token for one resource server by `resource` in both requests, and gets one meant for it",
 		(context) =>
 			excusable(context, "resource", async () => {
-				const result = await run("resource", world.clients.basic, { resource: world.resource });
+				const result = await run("resource", world.clients.post, { resource: world.resource });
 				// Both requests carry the parameter: the token takes the code's audience, so its own tells neither.
 				expect(world.seen.authorizations.at(-1)?.searchParams.getAll("resource")).toEqual([
 					world.resource,
@@ -225,7 +225,7 @@ describe(`${library.name}: revoking`, () => {
 		"introspects an access token as active, revokes it, and introspects it as inactive",
 		(context) =>
 			excusable(context, "revocation", async () => {
-				const result = await run("revocation", world.clients.basic);
+				const result = await run("revocation", world.clients.post);
 				expect(result).toEqual({ before: true, after: false });
 			}),
 	);
@@ -236,7 +236,7 @@ describe(`${library.name}: a token bound to a key`, () => {
 		"gets an access token bound to a DPoP key, answering the nonce each endpoint asks, and reads userinfo with it",
 		(context) =>
 			excusable(context, "dpop", async () => {
-				const result = await run("dpop", world.clients.basic);
+				const result = await run("dpop", world.clients.post);
 				expect(String(result.tokenType).toLowerCase()).toBe("dpop");
 				expect(claims(result.userinfo).sub).toBe(result.sub);
 				const told = await world.introspect(String(result.accessToken));
@@ -276,7 +276,7 @@ describe(`${library.name}: logging out`, () => {
 		"ends the session by the end-session endpoint, and is sent back with its state",
 		(context) =>
 			excusable(context, "logout", async () => {
-				const result = await run("logout", world.clients.basic, {
+				const result = await run("logout", world.clients.post, {
 					postLogoutRedirectUri: world.postLogoutRedirectUri,
 				});
 				const back = new URL(String(result.location));
@@ -291,7 +291,7 @@ describe(`${library.name}: exchanging a token`, () => {
 		"exchanges a signed-in user's access token for another of the same subject, by token exchange",
 		(context) =>
 			excusable(context, "token-exchange", async () => {
-				const result = await run("token-exchange", world.clients.basic);
+				const result = await run("token-exchange", world.clients.post);
 				expect(result.issuedTokenType).toBe("urn:ietf:params:oauth:token-type:access_token");
 				expect(await world.introspect(String(result.accessToken))).toMatchObject({
 					active: true,
