@@ -140,19 +140,28 @@ export function recordsOver(store: PasskeyStore) {
 			// Written only over this write's pending record, so the record before tells whether this one wrote.
 			return changed && pendingOf(changed.before, written) ? "activated" : "taken";
 		},
-		/** Moves the count on from the one judged; another change first is a lost race. */
-		count: async (judged: Credential, next: Credential): Promise<"counted" | "raced"> => {
-			const changed = await store.credentials.update(credentialKey(judged.id), (current) => {
-				// A removed passkey has no count to move on.
-				if (passkeyOf(judged.id, current)?.credential.signCount !== judged.signCount)
-					return undefined;
-				return {
-					value: stored({ ...current, signCount: next.signCount, backedUp: next.backedUp }),
-				};
-			});
-			// Written only over the count judged, so the count before tells whether this one wrote.
-			const before = changed && passkeyOf(judged.id, changed.before)?.credential.signCount;
-			return before === judged.signCount ? "counted" : "raced";
+		/**
+		 * Moves the count on from the one judged, of the passkey judged: its subject and key. Another
+		 * change first, or the id taken over by another registration meanwhile, is a lost race.
+		 */
+		count: async (judged: Passkey, next: Credential): Promise<"counted" | "raced"> => {
+			const { id } = judged.credential;
+			/** The passkey judged, as it stands: a removed one, or one registered again by another, is not. */
+			const same = (record: StoredPasskey | undefined) => {
+				const now = record && passkeyOf(id, record);
+				return (
+					now?.subject === judged.subject &&
+					now.credential.publicKey === judged.credential.publicKey &&
+					now.credential.signCount === judged.credential.signCount
+				);
+			};
+			const changed = await store.credentials.update(credentialKey(id), (current) =>
+				same(current)
+					? { value: stored({ ...current, signCount: next.signCount, backedUp: next.backedUp }) }
+					: undefined,
+			);
+			// Written only over the passkey judged, so the record before tells whether this one wrote.
+			return changed && same(changed.before) ? "counted" : "raced";
 		},
 		/** What the subject's list names as written: `passkey` where one is the subject's passkey, `pending` where only pending ones are, `none` otherwise. */
 		writtenHolding: async (subject: string): Promise<"passkey" | "pending" | "none"> => {

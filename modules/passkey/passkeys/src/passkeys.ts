@@ -42,7 +42,7 @@ export function passkeysOver(p: PasskeyParts): Passkeys {
 			const credential = { ...found.credential, userHandle: holder.handle };
 			const asserted = await p.ceremonies.assert(response, challenge, credential, p.verification);
 			if (asserted.kind === "refused") return asserted;
-			if ((await p.records.count(credential, asserted.credential)) === "raced") {
+			if ((await p.records.count(found, asserted.credential)) === "raced") {
 				return refused("raced");
 			}
 			return {

@@ -152,6 +152,16 @@ it("refuses an assertion whose count another changed first", async () => {
 	expect(await passkeys.assert(response, "app")).toEqual({ kind: "refused", reason: "raced" });
 });
 
+it("refuses an assertion whose passkey another subject took over meanwhile, its key and count the same", async () => {
+	const { passkeys, answer, stores } = await kept();
+	const response = await answer();
+	// Removed and registered again by another subject between the signature and the count.
+	stores.raceCredentials(
+		(record) => ({ ...(record as object), subject: "kim" }) as unknown as typeof record,
+	);
+	expect(await passkeys.assert(response, "app")).toEqual({ kind: "refused", reason: "raced" });
+});
+
 it("answers unavailable when the store cannot tell, never a refusal", async () => {
 	const { passkeys, answer, stores } = await kept();
 	const response = await answer();

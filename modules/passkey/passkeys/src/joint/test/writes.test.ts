@@ -85,7 +85,9 @@ it("removes a passkey from its holder, telling when none is left, and strips its
 	const judged = { ...(await credentialFor("sam", a)) };
 	expect(await records.removed("sam", a)).toEqual({ removed: true, empty: false });
 	expect(await records.passkey(a)).toBeUndefined();
-	expect(await records.count(judged, { ...judged, signCount: 1 })).toBe("raced");
+	expect(
+		await records.count({ subject: "sam", credential: judged }, { ...judged, signCount: 1 }),
+	).toBe("raced");
 	expect(await records.removed("sam", b)).toMatchObject({ removed: true, empty: true });
 	expect(await records.removed("sam", b)).toEqual({ removed: false, empty: true });
 	expect(await records.listed("sam")).toEqual([]);
