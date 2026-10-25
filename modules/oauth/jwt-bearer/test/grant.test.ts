@@ -243,6 +243,49 @@ describe("jwt-bearer", () => {
 		expect(errorOf(await s.grant(signed))).toBe("invalid_grant");
 	});
 
+	it("refuses as expired an assertion with less than a second left when its jti would be used up, or a token with less once issued", async () => {
+		/** How long each asking of the issuance policies takes: before the jti is used up, then in issuing. */
+		let waits: number[] = [];
+		const waiting = defineModule({ name: "test-policy", takes: [] }, (m) => [
+			m.contribute(issuancePolicies).by(() => ({
+				name: "test-policy",
+				judge: async () => {
+					clock.at += waits.shift() ?? 0;
+					return { kind: "allowed" };
+				},
+			})),
+		]);
+		const s = await serve(
+			undefined,
+			issuer,
+			`${issuer}/oauth/token`,
+			trustedUpstream,
+			outboundModule,
+			[waiting],
+		);
+		try {
+			const before = saved.length;
+			// Past its end within the clock allowance: no token, and its jti left unused.
+			expect(saidOf(await s.grant(await assertion({ ...base, exp: now / 1000 - 10 })))).toBe(
+				"invalid_grant: expired",
+			);
+			// Less than a second left once the steps before the jti are done: the same.
+			waits = [119_500];
+			expect(saidOf(await s.grant(await assertion(base)))).toBe("invalid_grant: expired");
+			expect(saved.length).toBe(before);
+			// A second left then, but issuing takes it: the token is handed to no one, the jti used up.
+			clock.at = now;
+			waits = [0, 119_500];
+			expect(saidOf(await s.grant(await assertion(base)))).toBe("invalid_grant: expired");
+			expect(saved.length).toBe(before + 1);
+			clock.at = now;
+			waits = [0, 0];
+			expect(saidOf(await s.grant(await assertion(base)))).toBe("issued");
+		} finally {
+			clock.at = now;
+		}
+	});
+
 	it("asks the issuance policies before the jti is used up, and again when issuing", async () => {
 		const asked: IssuanceRequest[] = [];
 		let refusing = new Set([1]);
@@ -1279,19 +1322,20 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 		expect(twice.map((r) => r.where)).toEqual(["jwt-bearer.jti-ledgers:https://idp.example"]);
 	});
 
-	it("takes an assertion through its exp and clock-skew past it, one made with the longest exp it takes, and none after", async () => {
+	it("takes an assertion until a second before its exp, one made with the longest exp it takes, and none after", async () => {
 		// L = max-assertion-lifetime (1h), S = clock-skew (30s): signed at t with exp t + L + S, it is
-		// taken until t + L + 2S, which the ledger's cutover waits (L + 2S + clock differences) rest on.
+		// taken until a second before that exp, never past it. The ledger's cutover waits (L + 2S + clock
+		// differences) stay a bound above it.
 		const s = await serveWith([ledgerOf(kept())]);
 		const t = clock.at;
 		const exp = (t + 3_600_000 + 30_000) / 1000;
 		const signedAt = (jti: string) => assertion({ ...base, exp, jti });
 		try {
 			expect(errorOf(await s.grant(await signedAt("j-at-t")))).toBe("issued");
-			clock.at = t + 3_600_000 + 60_000 - 1000;
+			clock.at = t + 3_600_000 + 30_000 - 1000;
 			expect(errorOf(await s.grant(await signedAt("j-last")))).toBe("issued");
-			clock.at = t + 3_600_000 + 60_000;
-			expect(saidOf(await s.grant(await signedAt("j-after")))).toMatch(/^invalid_grant: /);
+			clock.at = t + 3_600_000 + 30_000 - 999;
+			expect(saidOf(await s.grant(await signedAt("j-after")))).toBe("invalid_grant: expired");
 		} finally {
 			clock.at = t;
 		}
