@@ -3,7 +3,7 @@
 ## Responsibilities
 - Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
 - Reports each suite test as a vitest test, its result excused only by an expected entry the checklist lets it take.
-- Its internal modules: `pkce` gives PKCE to requests that carry none, `login` is the login page, `expected` judges the expected entries, `results` reads each test's outcome, `scene` is the app's scene, `suite` starts and stops the suite, `harness` runs a plan.
+- Its internal modules: `pkce` gives PKCE to requests that carry none, `login` is the login page, `expected` judges the expected entries, `results` reads each test's outcome, `scene` is the app's scene, `suite` starts and stops the suite, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time, `harness` runs a plan.
 
 ## Not here
 - The front itself (`conformance-front`), the app's start (`conformance`), and what an exception may be (`spec-checklist`'s `exceptionProblems`).
@@ -24,7 +24,7 @@
 - A failure or warning is excused only by an entry matching it exactly; a suite test excused is skipped as `excused: <class>`, one the suite leaves for a person's review as `review: …`; neither is passed.
 - A suite test that never ran or did not finish fails; so does an entry no test used, and a plan the suite's runner fails.
 - The suite's tag must name the pinned commit. Everything a run starts is stopped and its directories removed, however it ends.
-- The plans run one at a time: the suite takes fixed ports.
+- The plans run one at a time: the suite takes fixed ports. Its containers carry the process that owns them; a suite whose owner is gone (a run cancelled or killed before its stops) is taken down, its logs kept, at the next start and when the plan script's run of a plan ends, which then fails.
 - A logout plan's clients register the suite's post-logout redirect and that plan's own channel alone (the RP-initiated plan serves neither channel). The back channel reaches the suite through `conformance-tunnel`, set as the app's `outbound.proxy`: the suite's host resolves to loopback, which outbound never reaches over https directly. The app trusts the suite's certificate, the harness's own, by `trustedCertificates`, its checks of names unchanged.
 - The app is told one sender, a documentation address, for every request the suite makes: on a desktop the suite reaches the front from loopback, the app's trusted proxy.
 
