@@ -60,7 +60,8 @@ function shapeRefusals(declared: Declared, outside: readonly Declaration[]): str
 			}
 			return [];
 		});
-		return [...fields, ...needs, ...kindRefusals(d, declared, outside)];
+		const joins = d.joins?.length === 0 ? [`${d.name}: joins names no module`] : [];
+		return [...fields, ...joins, ...needs, ...kindRefusals(d, declared, outside)];
 	});
 }
 
@@ -125,7 +126,21 @@ function graphRefusals(declared: Declared): string[] {
 		}
 		return [];
 	});
-	return [...named, ...axes, ...cycles(declared)];
+	// What a need brings is a foundation, a feature or an axis owner (then its axis's choice), as
+	// composing walks them; an outside need on any other module would be dropped, so it is refused.
+	const unbrought = [...packages.values()]
+		.filter((p) => p.outside)
+		.flatMap((p) =>
+			p.needs.flatMap((need) => {
+				const to = packages.get(need);
+				if (!to?.module || to.kind === kinds.foundation || to.kind === kinds.feature) return [];
+				if (adapters.has(need)) return [];
+				return [
+					`${p.name}: needs ${need}, ${a(to.kind ?? "module")}, which a need never brings: need what it adapts or wires`,
+				];
+			}),
+		);
+	return [...named, ...axes, ...unbrought, ...cycles(declared)];
 }
 
 /** A cycle of needs and joins among the packages declared, if any: a dependency on what is not declared (an npm package) is no edge. */

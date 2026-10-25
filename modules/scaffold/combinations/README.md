@@ -23,7 +23,7 @@
 - `published` (modules): built into a bundle, each name given as published, in the order given: `{ name, package, entry }`, the bundle to depend on and the path its entries import under (a module at `<entry>/module`), read from the index's entries. It refuses, naming each, a name no bundle publishes; in the workspace, where nothing is published, it refuses every name.
 - `combinationsWith` (declarations: name, kind, needs, and as its kind takes them optIn, replaces or adapts, default, wires, joins): the offers above, over the workspace and those beside it.
 - `combinationsWith` refuses, naming each declaration: a name declared already, a kind no package beside the workspace may be (a feature, an adapter or a wiring may), a field its kind does not take, a need not declared or against `mayNeed`, a feature's need on what declares forWiring, an adapter without one of replaces and adapts, a wiring of no outside feature.
-- `combinationsWith` refuses too, over all packages: a name replaced, adapted, joined or wired that is not declared, an axis with several defaults or several adapters and no default, a cycle of needs and joins; a need on what is not declared (an npm package) is no edge.
+- `combinationsWith` refuses too, over all packages: a name replaced, adapted, joined or wired that is not declared, an axis with several defaults or several adapters and no default, a cycle of needs and joins, an outside need on a module no need brings (one neither a foundation, a feature nor an axis owner); a need on what is not declared (an npm package) is no edge.
 
 ## Invariants
 - A wiring names the feature it `wires`; it comes with the feature, whether given or brought in.

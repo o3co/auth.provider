@@ -151,6 +151,44 @@ describe("refusing an outside declaration, naming it", () => {
 		expect(() => declaredWith(declared, outside)).not.toThrow();
 	});
 
+	it("refuses a need composing would never bring: an adapter of another axis, or a wiring", () => {
+		refused(
+			[
+				feature("@x/f"),
+				feature("@x/g"),
+				{ name: "@x/a", kind: "adapter", adapts: "@x/f", needs: ["@x/b"] },
+				{ name: "@x/b", kind: "adapter", adapts: "@x/g", needs: [] },
+			],
+			/@x\/a: needs @x\/b, an adapter, which a need never brings: need what it adapts or wires/,
+		);
+		refused(
+			[
+				feature("@x/f"),
+				feature("@x/g"),
+				{ name: "@x/f-store", kind: "wiring", wires: "@x/f", needs: ["@x/f"] },
+				{ name: "@x/g-store", kind: "wiring", wires: "@x/g", needs: ["@x/g", "@x/f-store"] },
+			],
+			/@x\/g-store: needs @x\/f-store, a wiring, which a need never brings/,
+		);
+	});
+
+	it("lets an outside module need an axis owner, whose axis then brings its choice", () => {
+		const declared = declaredWith(fixture, [
+			feature("@x/g"),
+			{ name: "@x/b", kind: "adapter", adapts: "@x/g", needs: [] },
+			feature("@x/f", ["@x/g"]),
+		]);
+		expect(composedWith(declared, { features: { login: ["@x/f"] } })).toEqual([
+			"@x/f",
+			"@x/g",
+			"@x/b",
+		]);
+	});
+
+	it("refuses an empty joins, as the workspace's manifests are", () => {
+		refused([{ ...feature("@x/a"), joins: [] }], /@x\/a: joins names no module/);
+	});
+
 	it("refuses a field its kind does not take", () => {
 		refused([{ ...feature("@x/a"), replaces: "@c/mail" }], /@x\/a: replaces is an adapter's/);
 		refused([{ ...feature("@x/a"), wires: "@x/b" }], /@x\/a: wires is a wiring's/);
