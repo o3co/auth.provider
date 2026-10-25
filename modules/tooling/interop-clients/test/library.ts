@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { readChecklist } from "@mod/spec-checklist";
 import type { TestContext } from "vitest";
 import { differencesOf, readDifferences } from "../src/differences/differences.ts";
-import { type Flow, libraries, libraryNamed } from "../src/libraries/libraries.ts";
+import { type Flow, flows, libraries, libraryNamed } from "../src/libraries/libraries.ts";
 
 /** The library this run is of, and whether it runs a flow first-class. */
 export const library = libraryNamed(process.env.INTEROP_LIBRARY);
@@ -20,7 +20,7 @@ const differences = differencesOf(
 				checklist.specs.flatMap((s) => (s.ledger ? [[s.spec, s.ledger] as const] : [])),
 			),
 		},
-		libraries.map((l) => l.name),
+		{ libraries: libraries.map((l) => l.name), flows },
 	),
 	library.name,
 );
