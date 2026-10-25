@@ -34,6 +34,9 @@ export async function assemble({ runtime }) {
 	if (process.env.BOOT_FAILS) throw new Error("secret of alice at boot");
 	// A refusal marked as the kernel's, its refusals of no shape the script can count.
 	if (process.env.REFUSAL_MISSHAPED) throw Object.assign(new Error("refused"), { [mark]: true, refusals: { length: "secret of alice" } });
+	// Marked alike, its refusals, or their count, throwing as they are read.
+	if (process.env.REFUSALS_THROW) throw Object.defineProperty(Object.assign(new Error("refused"), { [mark]: true }), "refusals", { get() { throw new Error("secret of alice refusals"); } });
+	if (process.env.LENGTH_THROWS) throw Object.assign(new Error("refused"), { [mark]: true, refusals: { get length() { throw new Error("secret of alice length"); } } });
 	// Many refusals, each long, so their lines fill a pipe read slowly.
 	if (process.env.REFUSE_MANY) throw new BootRefused(Array.from({ length: Number(process.env.REFUSE_MANY) }, (_, i) => ({ where: \`at.\${i}\`, reason: "r".repeat(100) })));
 	// Without the script's own runtime, the composed sink would write this line.
@@ -93,8 +96,8 @@ export const backfill = {
 		return "marked";
 	},
 };`,
-		// Read as the app's composed module is: a dependency that throws, warns, writes or rejects while it is read,
-		// or whose exit handler throws, each holding what the script must never tell.
+		// Read as the app's composed module is: a dependency that throws, warns, writes, ends a stream or rejects
+		// while it is read, or whose exit handler throws, each holding what the script must never tell.
 		"module.js": `
 if (process.env.IMPORT_THROWS) throw new Error("secret of alice at import");
 if (process.env.WARNS) process.emitWarning("secret of alice warning");
@@ -103,6 +106,10 @@ if (process.env.CONSOLE) {
 	console.log("secret of alice console log");
 	process.stderr.write("secret of alice stderr\\n");
 	await new Promise((resolve) => process.stdout.write("secret of alice awaited\\n", resolve));
+}
+if (process.env.ENDS) {
+	process.stderr.end("secret of alice stderr end\\n");
+	await new Promise((resolve) => process.stdout.end("secret of alice stdout end\\n", resolve));
 }
 if (process.env.EXIT_THROWS) process.on("exit", () => { throw new Error("secret of alice at exit"); });
 if (process.env.REJECTS) Promise.reject(new Error("secret of alice rejected"));
@@ -303,7 +310,7 @@ it("tells nothing a dependency writes, warns, throws or rejects while it is read
 			1,
 		]);
 		// A warning, and what a dependency writes, go nowhere: the run goes on.
-		for (const env of [{ WARNS: "1" }, { CONSOLE: "1" }]) {
+		for (const env of [{ WARNS: "1" }, { CONSOLE: "1" }, { ENDS: "1" }]) {
 			const done = await told(env);
 			expect(done.status, `${file} ${JSON.stringify(env)}`).toBe(0);
 		}
@@ -323,11 +330,18 @@ it("tells nothing a dependency writes, warns, throws or rejects while it is read
 			"failed: the run stopped on an unexpected error\n",
 			1,
 		]);
-		const misshaped = await told({ REFUSAL_MISSHAPED: "1" });
-		expect([misshaped.stderr, misshaped.status], file).toEqual([
-			"refused: start the app with this configuration to read why\n",
-			78,
-		]);
+		// A refusal whose count cannot be read, as a number or at all, is told without it.
+		for (const env of [
+			{ REFUSAL_MISSHAPED: "1" },
+			{ REFUSALS_THROW: "1" },
+			{ LENGTH_THROWS: "1" },
+		]) {
+			const uncounted = await told(env);
+			expect([uncounted.stderr, uncounted.status], `${file} ${JSON.stringify(env)}`).toEqual([
+				"refused: start the app with this configuration to read why\n",
+				78,
+			]);
+		}
 	}
 }, 60_000);
 

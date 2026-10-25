@@ -9,7 +9,12 @@ const [{ legacyVariablesCheck, loadConfig }, { assemble, BootRefused, isUnavaila
 /** A boot that could not be built: how many refusals, where they can be counted (exit 78), or that it failed (exit 1). */
 const notBuilt = (error: unknown): never => {
 	if (!BootRefused.is(error)) return notRead();
-	const n: unknown = (error as { refusals?: { length?: unknown } }).refusals?.length;
+	let n: unknown;
+	try {
+		n = (error as { refusals?: { length?: unknown } }).refusals?.length;
+	} catch {
+		// A count that throws as it is read is told as none: the boot was still refused.
+	}
 	const many = Number.isSafeInteger(n) && (n as number) >= 0 ? ` ${n}` : "";
 	return end(`refused${many}: start the app with this configuration to read why`, 78);
 };
