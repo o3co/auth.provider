@@ -29,7 +29,7 @@
 - 2 #11 MUST: oidc-core-2-v
 - 2 #12 MUST: oidc-core-2-i
 - 2 #13 SHOULD: oidc-core-2-j
-- 2 #14 SHOULD NOT: excluded other: a rule on what a relying party lets a level-0 authentication reach
+- 2 #14 SHOULD NOT: oidc-core-2-w
 - 2 #15 SHOULD: oidc-core-2-k
 - 2 #16 MUST NOT: oidc-core-2-l
 - 2 #17 SHOULD: oidc-core-2-m

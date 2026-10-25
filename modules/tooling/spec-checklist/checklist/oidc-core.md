@@ -35,6 +35,8 @@
   role: rp
 - **oidc-core-2-v** MUST: where an id_token carries `nonce`, upstream-client checks that it equals the `nonce` the authentication request sent.
   role: rp
+- **oidc-core-2-w** SHOULD NOT: federation lets a login an upstream asserted with `acr` `0` authorize access to a resource of monetary value.
+  role: rp
 
 ## 3.1.2.1 Authentication Request
 
@@ -146,7 +148,8 @@
 
 ## 3.1.3.7 ID Token Validation
 
-- **oidc-core-3.1.3.7-a** SHOULD: an ID token is signed with `RS256`, or the algorithm the client sent in `id_token_signed_response_alg` when it registered.
+- **oidc-core-3.1.3.7-a** SHOULD: upstream-client takes an id_token whose `alg` is `RS256`, or the algorithm o3co sent in `id_token_signed_response_alg` when it registered at the upstream.
+  role: rp
 - **oidc-core-3.1.3.7-b** MUST: upstream-client validates the id_token of every token response it takes by this section's steps before the login is used.
   role: rp
 - **oidc-core-3.1.3.7-c** SHOULD: where id_token encryption was negotiated at registration, o3co's RP rejects an id_token that is not encrypted.
