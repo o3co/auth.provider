@@ -11,14 +11,14 @@
 - Routes `POST /session/login/passkey/options` (no body needed) and `POST /session/login/passkey` (JSON: `response`, the assertion; `redirect_to`).
   - Options are the same for everyone (discoverable credentials, no credential listed, usable with `mediation: conditional`) and set the requester's cookie for the challenge's lifetime (`webauthn`'s `challenge-lifetime`).
   - The login answers `200` with `{}` or `{redirect_to}`; a gate holding the login is `403` with the gate's answer and cookies, unread.
-  - Every refusal is `401` `{"error": "passkey_login_failed"}`. Other errors: `csrf` (403), `repeated_parameter`, `invalid_redirect`, `invalid_request` (400), too many requests (429), `temporarily_unavailable` (503).
+  - Every refusal is `401` `{"error": "passkey_login_failed"}`. Other errors: `csrf` (403), `repeated_parameter`, `invalid_redirect`, `invalid_request` (400), too many requests (429), a login's body other than JSON (415), `temporarily_unavailable` (503, a store) or `service_unavailable` (503, requests not counted).
 - Contribution to `login-gates`: the amr a passkey login proves, `pop`, and `mfa` where `counts-as-mfa`; and the gate `credential-policy`.
 - Audit events (declared in `./audit-events`): `passkey.session.opened`, `passkey.session.held`, `passkey.session.refused` (`reason`), `passkey.password_refused`, each with the `source` where `request-source` determined it.
 - Operator section: `counts-as-mfa` (default true), `attempts` per source on each route (1–100, default 20) in `window` (1m–1d, default `15m`), `password` (`allowed`, the default, or `refused-when-held`), `password-exempt-group`.
 
 ## Invariants
 - Checks run in this order on both routes: `csrf`, then attempts per source; on the login, then repeated parameters, the destination, the assertion's presence.
-- An assertion is redeemed only with the cookie its options set: another browser's, or none, is refused as the assertion's `challenge`. Every login answer ends that cookie.
+- An assertion is redeemed only with the cookie its options set: another browser's, or none, is refused as the assertion's `challenge`. Every answer the login's handler gives ends that cookie; one refused before it (csrf, the request limit, the body) takes no challenge.
 - A refusal tells nothing of why: whether the credential is registered, the user known or a revocation landed is the same `401`; the reason is recorded only.
 - The login's facts: the assertion's subject, the amr, the challenge's time as the authentication time, and the user's attributes from `users`.
 - A revocation of the subject since the challenge was made refuses the login before the gates, before a gate's hold is handed on, and once a session opened, closing it before its cookie goes out.

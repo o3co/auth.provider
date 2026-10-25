@@ -15,8 +15,8 @@ Internal module of `login-passkey`: the options route and the login route, up to
 - A requester is 32 random bytes in base64url, kept in the cookie `passkey-login` (`__Host-` where cookies are secure) as long as the challenge lives.
 - The login route refuses before the assertion is asked: a repeated parameter, a destination `login-gates` does not allow, a `response` that is no object.
 - With no requester cookie, or an assertion `passkeys` refuses, it records `passkey.session.refused` with the refusal and answers `401`.
-- A store unavailable is `503` `temporarily_unavailable`.
-- Every login answer, whatever it is, ends the requester's cookie, in one place: the challenge is redeemed once.
+- A store unavailable is `503` `temporarily_unavailable`; requests not counted are `503` `service_unavailable`, and a login's body other than JSON `415` (both answered before the handler).
+- Every answer the login's handler gives, whatever it is, ends the requester's cookie, in one place: the challenge is redeemed once. One refused before the handler takes no challenge.
 
 ## Depends on
-- `http`, `csrf`, `rate-limit`, `cookies`, `passkeys`, `webauthn` (the challenge's lifetime), `login-gates`; the internal modules `opening` and `audited`
+- `kernel` (`isUnavailable`), `http`, `csrf`, `rate-limit`, `cookies`, `passkeys`, `webauthn` (the challenge's lifetime), `login-gates`; the internal modules `opening` and `audited`
