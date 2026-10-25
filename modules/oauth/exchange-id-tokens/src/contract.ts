@@ -27,4 +27,7 @@ export interface IdTokenChecks {
 	consume(idToken: string): Promise<"consumed" | "replayed">;
 }
 
-export const idTokenChecks = contract<IdTokenChecks>("exchange-id-tokens.checks");
+/** Taken by this module, for the exchange, and by the module taking these id_tokens as JWT bearer assertions. */
+export const idTokenChecks = contract<IdTokenChecks>("exchange-id-tokens.checks", {
+	takenBy: ["exchange-id-tokens", "jwt-bearer-id-tokens"],
+});
