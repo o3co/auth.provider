@@ -8,6 +8,14 @@ import type { Unit } from "./plan.ts";
 
 type Versioned = Unit & { readonly version: string };
 
+/** How a command is run: its status and what it wrote on standard error. */
+export type Run = (
+	command: string,
+	args: readonly string[],
+) => { readonly status: number | null; readonly stderr?: string };
+const npm: Run = (command, args) =>
+	spawnSync(command, args, { encoding: "utf8", timeout: 120_000 });
+
 /** What the registry answers for each package at its version: there with its integrity, not there, or no answer read. */
 export function lookedUp(units: readonly Versioned[]): Map<string, Lookup> {
 	return new Map(
@@ -39,19 +47,19 @@ export function lookedUp(units: readonly Versioned[]): Map<string, Lookup> {
 export function takenFromRegistry(
 	units: readonly (Versioned & { readonly integrity: string })[],
 	into: string,
+	run: Run = npm,
 ): { readonly given: Map<string, string> } | { readonly problems: string[] } {
 	mkdirSync(into, { recursive: true });
 	const problems: string[] = [];
 	const given = new Map<string, string>();
 	for (const u of units) {
-		const got = spawnSync(
-			"npm",
-			["pack", `${u.name}@${u.version}`, "--pack-destination", into, "--ignore-scripts"],
-			{
-				encoding: "utf8",
-				timeout: 120_000,
-			},
-		);
+		const got = run("npm", [
+			"pack",
+			`${u.name}@${u.version}`,
+			"--pack-destination",
+			into,
+			"--ignore-scripts",
+		]);
 		const file = join(into, tarballFileOf(u.name, u.version));
 		if (got.status !== 0 || !existsSync(file)) {
 			problems.push(

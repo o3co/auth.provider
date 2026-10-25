@@ -12,7 +12,7 @@ import { basename, join, resolve } from "node:path";
 import { lookedUp, takenFromRegistry } from "../fetched/fetch.ts";
 import { fetchPlan } from "../fetched/plan.ts";
 import { releaseOrder } from "./order/release-order.ts";
-import { packRelease } from "./packing.ts";
+import { packRelease } from "./packing/packing.ts";
 
 const root = process.env.INIT_CWD ?? process.cwd();
 const [destination, ...flags] = process.argv.slice(2);
