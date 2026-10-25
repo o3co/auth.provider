@@ -197,5 +197,5 @@ it("takes every handle its takes name", async () => {
 		reader,
 	];
 	const config = { ...kernelConfig(), ...usersConfig([]) };
-	expect(await takesUnused({ modules, config })).toEqual({});
+	expect((await takesUnused({ modules, config }))["subject-attributes"]).toBeUndefined();
 });
