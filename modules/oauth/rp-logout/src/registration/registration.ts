@@ -1,4 +1,6 @@
 import type { Client, Section } from "@mod/clients";
+import type { BuildContext } from "@mod/kernel";
+import { destinationRefusal, type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
 import { redirectsAt, registrable } from "@mod/redirect-uris";
 import { z } from "zod";
 
@@ -73,3 +75,28 @@ export const registration: Section<Registration> = {
 			? undefined
 			: "frontchannel-logout-uri is at none of its redirect URIs' origins",
 };
+
+/**
+ * The section with a boot check that `outbound`'s policy lets a registered client's back channel
+ * through, as the logout token is posted to it: one it refuses would be dropped at every logout.
+ */
+export function registrationUnder(refusals: OutboundRefusals): Section<Registration> {
+	return {
+		...registration,
+		checkAtBoot: (value, client) => {
+			const framed = registration.checkAtBoot?.(value, client);
+			if (framed) return framed;
+			const uri = value["backchannel-logout-uri"];
+			return uri === undefined
+				? undefined
+				: destinationRefusal(refusals, uri, undefined, "the backchannel-logout-uri");
+		},
+	};
+}
+
+/** The section as the composition gives it, with `outbound`'s refusals read from it. */
+export async function registrationIn(
+	c: Pick<BuildContext<unknown>, "get">,
+): Promise<Section<Registration>> {
+	return registrationUnder(await c.get(outboundRefusals));
+}

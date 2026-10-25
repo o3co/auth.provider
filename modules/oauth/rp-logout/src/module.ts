@@ -2,13 +2,14 @@ import { metadataSections } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, routes, site, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
+import { outboundRefusals } from "@mod/outbound-policy";
 import { requestsPerSource } from "@mod/rate-limit";
 import { participants } from "@mod/session-participants";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom, endingTakes } from "./ending/ending.ts";
 import { type Notices, noticesFrom, noticesTakes } from "./notices/notices.ts";
 import { remembering, rememberingTakes } from "./redemptions/redemptions.ts";
-import { registration } from "./registration/registration.ts";
+import { registrationIn } from "./registration/registration.ts";
 import { section } from "./section.ts";
 
 type Handler = (request: HttpRequest) => Promise<HttpResponse>;
@@ -25,10 +26,17 @@ export default defineModule(
 		name,
 		section,
 		replicaSafe: true,
-		takes: [upstreamEnds, site, ...noticesTakes, ...endingTakes, ...rememberingTakes],
+		takes: [
+			upstreamEnds,
+			site,
+			outboundRefusals,
+			...noticesTakes,
+			...endingTakes,
+			...rememberingTakes,
+		],
 	},
 	(m) => [
-		m.contribute(metadataSections).by(() => registration),
+		m.contribute(metadataSections).by(registrationIn),
 		remembering(m, name),
 		m.provide(shared).by(async (c) => {
 			const notices = await noticesFrom(c);

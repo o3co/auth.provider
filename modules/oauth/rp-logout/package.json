@@ -21,6 +21,7 @@
 		"@mod/keys": "workspace:*",
 		"@mod/oidc": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/outbound-policy": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/redirect-uris": "workspace:*",
 		"@mod/request-source": "workspace:*",

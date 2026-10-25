@@ -1745,6 +1745,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit

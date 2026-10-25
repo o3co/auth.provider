@@ -21,6 +21,7 @@ import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import oidc from "@mod/oidc/module";
 import { type Outbound, type OutboundRequest, outbound } from "@mod/outbound";
+import { outboundRefusals } from "@mod/outbound-policy";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
@@ -67,6 +68,8 @@ export async function harness(
 		readonly sessionsModule?: Module;
 		/** Makes rp-logout's session clients store fail as it says. */
 		readonly clientsDown?: UnavailableSwitch<SessionClients>;
+		/** Why outbound's destination policy refuses a URL, as its refusals explain it; none by default. */
+		readonly refused?: (url: string) => string | undefined;
 	} = {},
 ) {
 	let now = 1_800_000_000_000;
@@ -77,6 +80,7 @@ export async function harness(
 	const sent: Sent[] = [];
 	const answering = { answer: async (_url: string): Promise<number> => 200 };
 	const outside = defineModule({ takes: [], name: "outbound-stand-in" }, (m) => [
+		m.provide(outboundRefusals).by(() => ({ explained: (url) => options.refused?.(url) })),
 		m.provide(outbound).by(
 			(): Outbound => ({
 				fetch: async (url, request) => {
