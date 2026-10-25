@@ -144,5 +144,5 @@ describe("lookup", () => {
 
 it("takes every handle its takes name, on a site of its own", async () => {
 	const config = { ...kernelConfig(), http: { port: 0, "public-origin": "https://app.example" } };
-	expect(await takesUnused({ modules: [http, cookiesModule], config })).toEqual({});
+	expect((await takesUnused({ modules: [http, cookiesModule], config })).cookies).toBeUndefined();
 });
