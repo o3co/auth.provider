@@ -248,6 +248,23 @@ describe("the components a bundle holds inside", () => {
 		});
 	});
 
+	it("lists each version a bundle holds of one package, none dropped", () => {
+		const file = "package/app-output/src/lockfile/check-outside.bundled.mjs";
+		const two =
+			region("semver", "6.3.1") +
+			region("semver", "7.8.5") +
+			region("yaml", "2.9.1") +
+			region("semver", "7.8.5");
+		const made = insideBom([{ ...scaffold, files: new Map([[file, two]]) }], declared);
+		if ("problems" in made) throw new Error(made.problems.join("; "));
+		const inside = made.bom.components[0]?.components?.[0]?.components ?? [];
+		expect(inside.map((c) => `${c.name}@${c.version}`)).toEqual([
+			"semver@6.3.1",
+			"semver@7.8.5",
+			"yaml@2.9.1",
+		]);
+	});
+
 	it("refuses a declared bundle whose regions name none, or only some, of the packages declared inside it", () => {
 		const file = "package/app-output/src/lockfile/check-outside.bundled.mjs";
 		const unread = insideBom(

@@ -129,15 +129,16 @@ export interface Declared {
 	readonly packages: readonly string[];
 }
 
-/** Each package a bundle's regions name the file of, at its version (`node_modules/.pnpm/<name>@<version>/node_modules/<name>/`). */
-const heldIn = (text: string) =>
-	new Map(
-		[
-			...text.matchAll(
-				/^\/\/#region .*?node_modules\/\.pnpm\/[^/]+?@([^/@]+)\/node_modules\/((?:@[^/]+\/)?[^/]+)\//gm,
-			),
-		].map((m) => [m[2] as string, m[1] as string]),
-	);
+/** Each package and version a bundle's regions name the file of (`node_modules/.pnpm/<name>@<version>/node_modules/<name>/`), once. */
+const heldIn = (text: string) => {
+	const pairs = [
+		...text.matchAll(
+			/^\/\/#region .*?node_modules\/\.pnpm\/[^/]+?@([^/@]+)\/node_modules\/((?:@[^/]+\/)?[^/]+)\//gm,
+		),
+	].map((m) => ({ name: m[2] as string, version: m[1] as string }));
+	// Each name and version once, two versions of one package both kept.
+	return [...new Map(pairs.map((p) => [`${p.name}@${p.version}`, p])).values()];
+};
 
 /**
  * The list of the components the release's bundles hold inside, which no dependency tree shows: each
@@ -165,24 +166,24 @@ export function insideBom(
 				return [];
 			}
 			const held = heldIn(text);
-			for (const name of held.keys()) {
+			for (const { name, version } of held) {
 				if (!d.packages.includes(name)) {
 					problems.push(
-						`${at(d)}: holds ${name}@${held.get(name)} inside, which its manifest's bundledInside does not declare`,
+						`${at(d)}: holds ${name}@${version} inside, which its manifest's bundledInside does not declare`,
 					);
 				}
 			}
 			// The regions must name every package declared: one read in part, or not at all, lists none of what is missing.
 			for (const name of d.packages) {
-				if (!held.has(name)) {
+				if (!held.some((h) => h.name === name)) {
 					problems.push(
 						`${at(d)}: its regions name no ${name}, which its manifest's bundledInside declares inside it`,
 					);
 				}
 			}
 			const inside = [...held]
-				.sort(([a], [b]) => a.localeCompare(b))
-				.map(([name, version]) => ({
+				.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
+				.map(({ name, version }) => ({
 					type: "library",
 					name,
 					version,
