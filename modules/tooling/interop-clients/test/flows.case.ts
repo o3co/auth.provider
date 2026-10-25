@@ -53,6 +53,12 @@ async function run(flow: Flow, client: WorldClient, extra: Record<string, unknow
 		{ flow, issuer: world.issuer, ca: world.ca, client, redirectUri: world.redirectUri, ...extra },
 		async (ask) => {
 			if (ask.ask === "browse") return { location: await browser.authorize(String(ask.url)) };
+			if (ask.ask === "device") {
+				expect(ask.verificationUri).toBe(`${world.issuer}/device`);
+				await browser.approve(String(ask.userCode));
+				return {};
+			}
+			if (ask.ask === "logout") return { location: await browser.endSession(String(ask.url)) };
 			throw new Error(`the driver has no answer to ${ask.ask}`);
 		},
 		90_000,
@@ -228,6 +234,47 @@ describe(`${library.name}: revoking`, () => {
 			excusable(context, "revocation", async () => {
 				const result = await run("revocation", world.clients.basic);
 				expect(result).toEqual({ before: true, after: false });
+			}),
+	);
+});
+
+describe(`${library.name}: a token bound to a key`, () => {
+	it.runIf(runs("dpop"))(
+		"gets an access token bound to a DPoP key, answering the nonce each endpoint asks, and reads userinfo with it",
+		(context) =>
+			excusable(context, "dpop", async () => {
+				const result = await run("dpop", world.clients.basic);
+				expect(String(result.tokenType).toLowerCase()).toBe("dpop");
+				expect(claims(result.userinfo).sub).toBe(result.sub);
+				const told = await world.introspect(String(result.accessToken));
+				expect(claims(told.cnf).jkt).toEqual(expect.any(String));
+			}),
+	);
+});
+
+describe(`${library.name}: a device`, () => {
+	it.runIf(runs("device"))(
+		"gets a token by the device authorization grant, once the user approves the code",
+		(context) =>
+			excusable(context, "device", async () => {
+				const result = await run("device", world.clients.device, { scope: "openid read" });
+				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+				expect((await world.introspect(String(result.accessToken))).active).toBe(true);
+			}),
+	);
+});
+
+describe(`${library.name}: logging out`, () => {
+	it.runIf(runs("logout"))(
+		"ends the session by the end-session endpoint, and is sent back with its state",
+		(context) =>
+			excusable(context, "logout", async () => {
+				const result = await run("logout", world.clients.basic, {
+					postLogoutRedirectUri: world.postLogoutRedirectUri,
+				});
+				const back = new URL(String(result.location));
+				expect(`${back.origin}${back.pathname}`).toBe(world.postLogoutRedirectUri);
+				expect(back.searchParams.get("state")).toBe(result.state);
 			}),
 	);
 });
