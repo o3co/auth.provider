@@ -29,7 +29,11 @@ Internal module of `jwt-bearer`: the trusted issuers, each entry of the section'
 - An entry's `client` is a registered client, public with method `none` (nothing it authenticates with), allowed this grant alone, and no other entry's; boot is refused at the entry's `client` on any other, never by its value, so a request naming no client skips no client's authentication and opens no other grant.
 - `accept-any-subject` is refused beside an entry's `client`: a request naming no client has no authentication, so conditions, a table or keys alone narrow whose assertions it takes. Boot warns of each entry with a `client` each time at its place (`jwt-bearer.clientless_issuer`), never by its issuer or client.
 - Boot is refused on a `self-issued-prefix` beside keys written or a key set, or on an issuer without `subject-is-key-thumbprint`; on one that starts any issuer, its own included; and on two that overlap, one starting the other, at both whatever the order, so no assertion can be read as two issuers'. Each refusal of an entry is at its place (`jwt-bearer.issuers.<i>`), never by its value.
+- Boot logs `jwt-bearer.self_issued_signers` (info) with the places of the issuers taking self-issued signers, never a prefix.
 - Boot is refused on a delegated issuer named twice, that no module checks or two do (naming them), that is an entry's issuer, or that a self-issued prefix starts, so no assertion is read by two rules; each at its place (`jwt-bearer.delegated-issuers.<i>`). And on assertions delegated for an issuer the list does not name.
 
 ## Depends on
 - `external-jwt` (key sources), `clients` (the registered clients), `client-allowance` (a client's grants), `keys` (reading a PEM), `outbound-policy` (the key set's host), the package's contract and `signers`, `kernel` (the build context)
+
+## Vocabulary
+- Trusted issuer: an issuer whose assertions are accepted.

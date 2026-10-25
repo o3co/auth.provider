@@ -2,7 +2,12 @@
 
 ## Responsibilities
 - Contributes the grant by JWT assertion.
-- Its internal module `issuers` holds the list of trusted issuers and their signers; `assertion` checks an assertion, all but its single use; `delegated` takes a delegated issuer's, which another module checks; `conditions` reads the conditions an issuer holds verified claims to; `policy` makes each issuer's own policy of the section's.
+- Internal modules, each as its own card says:
+  - `issuers`
+  - `assertion`
+  - `delegated`
+  - `conditions`
+  - `policy`
 
 ## Not here
 - Client authentication (`token-endpoint`).
@@ -20,9 +25,7 @@
 
 ## Invariants
 - Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once issued is handed to no one, also `expired`.
-- How a signer is read and its keys asked for, a trusted issuer's key set, and a delegated issuer's assertion, which goes its delegate's way alone (its audience an app, not RFC 7523 §3): as the internal modules `assertion`, `issuers` and `delegated` say.
 - A trusted issuer's assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under that issuer's own policy, as `policy` makes it. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
-- Boot logs `jwt-bearer.self_issued_signers` (info) with the places of the issuers taking self-issued signers, never a prefix.
 - Boot is refused on an entry `issuers` cannot read as a trusted issuer, as its card says, each at its place (`jwt-bearer.issuers.<i>`), never by its value; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them.
 - `as-is`: the token is for the signer's subject. `linked`: for the subject `linkedSubjects` resolves (`upstream`, the signer's subject) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.
 - A refusal's reason is told in this grant's own words. Keys or subjects that cannot be told make the grant unavailable, using up no `jti`.
@@ -39,6 +42,3 @@
 
 ## Depends on
 - `kernel`, `grants`, `client-allowance`, `clients`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `outbound-policy`, `keys`, `subject-revocation`, and `users`, through its internal modules `assertion` and `delegated`
-
-## Vocabulary
-- Trusted issuer: an issuer whose assertions are accepted.

@@ -105,12 +105,6 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			if (acceptsUnbound(client)) c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
 		}
 		const selfIssued = selfIssuedOf(c.section.issuers);
-		// Told once, by place: the prefixes are the operator's, never written out.
-		if (selfIssued.length > 0) {
-			c.log.info("jwt-bearer.self_issued_signers", {
-				at: selfIssued.map((s) => s.where).join(","),
-			});
-		}
 		const linked = linkedOf(c.section.issuers);
 		const resolvers = await c.collect(linkedSubjects);
 		if (linked.size > 0 && resolvers.length === 0) {
