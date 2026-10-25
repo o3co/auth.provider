@@ -301,6 +301,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
   - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
   - `patterns` (`src/patterns`): running every pattern's areas on its app.
+  - `promotion` (`src/promotion`): promoting a replica of a Redis topology's primary without losing what the primary took.
   - `relay` (`src/relay`): a relay between an app and Redis that causes a fault at a known point and shows that it happened.
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
