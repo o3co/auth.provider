@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Command } from "../../commands/commands.ts";
-import { composeOverride, startSuite } from "../suite.ts";
+import { composeOverride } from "../../compose/compose.ts";
+import { startSuite } from "../suite.ts";
 
 const pin = { tag: "release-v1", commit: "c0ffee", python: ["httpx==1"] };
 const host = { name: "host.docker.internal", listen: "127.0.0.1" };

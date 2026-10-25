@@ -355,6 +355,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config, on the `simple-web` pattern's app behind an https front.
   - `api` (`src/api`): the suite's API, reached trusting its certificate alone.
   - `commands` (`src/commands`): a command a plan runs, held to its time.
+  - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
   - `expected` (`src/expected`): whether the expected entries may go to the suite.
   - `harness` (`src/harness`): one plan run end to end, reported as tests.
   - `login` (`src/login`): the deployment's login page, as the suite's browser meets it.

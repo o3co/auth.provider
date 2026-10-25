@@ -1,12 +1,12 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { composeOverride, projectOf, suiteEnv, suiteOrigin } from "../suite.ts";
+import { composeOverride, projectOf, suiteEnv } from "../../compose/compose.ts";
+import { suiteOrigin } from "../suite.ts";
 
 describe("the suite, as the harness starts it", () => {
 	it("lets the suite's server reach this machine by name, in IPv4 alone", () => {
 		const linux = composeOverride({
 			name: "host.docker.internal",
-			listen: "172.17.0.1",
 			mapped: "172.17.0.1",
 		});
 		expect(linux).toContain(
@@ -14,9 +14,7 @@ describe("the suite, as the harness starts it", () => {
 		);
 		expect(linux).not.toContain("host-gateway");
 		// Docker Desktop names the machine itself.
-		expect(composeOverride({ name: "host.docker.internal", listen: "127.0.0.1" })).not.toContain(
-			"extra_hosts",
-		);
+		expect(composeOverride({ name: "host.docker.internal" })).not.toContain("extra_hosts");
 	});
 
 	it("keeps the suite's store in memory, never in a directory of this machine", () => {
@@ -34,7 +32,10 @@ describe("the suite, as the harness starts it", () => {
 		const before = process.env.BASE_URL;
 		process.env.BASE_URL = "/";
 		try {
-			const env = suiteEnv({ tag: "release-v1", commit: "c", python: [] });
+			const env = suiteEnv("release-v1", {
+				base: suiteOrigin,
+				mtls: "https://localhost.emobix.co.uk:8444",
+			});
 			expect(env.BASE_URL).toBe(suiteOrigin);
 			expect(env.BASE_MTLS_URL).toBe("https://localhost.emobix.co.uk:8444");
 			expect(env.IMAGE_TAG).toBe("release-v1");

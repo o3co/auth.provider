@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { certificateAt, getJson } from "../api/api.ts";
 import { type Command, systemCommand } from "../commands/commands.ts";
-import { ownerLabel, reclaimOrphans } from "../orphans/orphans.ts";
+import { composeOverride, projectOf, suiteEnv } from "../compose/compose.ts";
+import { reclaimOrphans } from "../orphans/orphans.ts";
 
 /** Each command's own time: a setup step's within the plan's deadline, a stop's after it too. */
 const budgetMs = {
@@ -48,37 +48,6 @@ export async function hostForSuite(command: Command = systemCommand): Promise<Su
 	return { name: "host.docker.internal", listen: gateway, mapped: gateway };
 }
 
-/**
- * The compose file beside the suite's own: its store is in memory, never a directory of this
- * machine's (a run's store is thrown away, and Docker Desktop's shared directories can refuse its
- * writes); its server reaches this machine by name, mapped to an IPv4 address alone (`host-gateway`
- * adds an IPv6 one the suite's Java may pick and find no route to); every container is labelled with
- * the process that owns it.
- */
-export const composeOverride = (host: SuiteHost, owner: number = process.pid) => {
-	const labels = `    labels:\n      ${ownerLabel}: "${owner}"\n`;
-	return `services:
-  mongodb:
-    volumes:
-      - type: tmpfs
-        target: /data/db
-${labels}  nginx:
-${labels}  server:
-${host.mapped === undefined ? "" : `    extra_hosts:\n      - "${host.name}:${host.mapped}"\n`}${labels}`;
-};
-
-/**
- * The compose file's environment: the image tag pinned, and the suite's public origins as the
- * harness names them, never as the runner's environment has them (vitest sets `BASE_URL` to `/`
- * for Vite, which the compose file would take for the suite's origin).
- */
-export const suiteEnv = (pin: SuitePin): NodeJS.ProcessEnv => ({
-	...process.env,
-	IMAGE_TAG: pin.tag,
-	BASE_URL: suiteOrigin,
-	BASE_MTLS_URL: "https://localhost.emobix.co.uk:8444",
-});
-
 /** The suite at its pinned version, started in `dir`: a directory of its own, removed when it stops. */
 export interface Suite {
 	/** The suite's scripts, as the pinned commit holds them. */
@@ -91,10 +60,6 @@ export interface Suite {
 	api(path: string): Promise<unknown>;
 	stop(): Promise<void>;
 }
-
-/** A start's Compose project: one of its own, from its whole directory, as every start's ends alike. */
-export const projectOf = (dir: string) =>
-	`o3co-oidf-${createHash("sha256").update(dir).digest("hex").slice(0, 16)}`;
 
 /**
  * Starts the suite at `pin` in `dir`: its source at the pinned commit (the compose file and the
@@ -125,7 +90,7 @@ export async function startSuite(
 		"-f",
 		join(dir, "override.yml"),
 	];
-	const env = suiteEnv(pin);
+	const env = suiteEnv(pin.tag, { base: suiteOrigin, mtls: "https://localhost.emobix.co.uk:8444" });
 	/** A setup step: its own time, and the plan's deadline. */
 	const step = (cmd: string, args: readonly string[], timeoutMs: number, cwd?: string) =>
 		command(cmd, args, { timeoutMs, env, ...(signal ? { signal } : {}), ...(cwd ? { cwd } : {}) });
