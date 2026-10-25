@@ -59,7 +59,19 @@ jobs:
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
+      # The lowest version's run keeps the evidence of the unit tests (spec-checklist's reporter);
+      # build-and-test holds both versions to passing.
       - run: pnpm check
+        env:
+          SPEC_EVIDENCE_DIR: ${{ matrix.node == '24' && format('{0}/evidence', runner.temp) || '' }}
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-checks-${{ matrix.node }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
       # The API site builds from the bundles as they stand, before a release
       # does it from what it published; nothing is written to the pages.
       - name: The API site builds from the bundles
@@ -181,6 +193,16 @@ jobs:
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:integration
+        env:
+          SPEC_EVIDENCE_DIR: ${{ matrix.node == '24' && format('{0}/evidence', runner.temp) || '' }}
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-integration-${{ matrix.node }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The required check on every branch it guards: both jobs above passed, on
   # every Node version of their matrix.
@@ -329,11 +351,25 @@ jobs:
             pnpm --filter @mod/conformance-legacy run prepare-legacy
           fi
       - name: Conformance on the new system
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter "${{ matrix.area }}" run conformance
+      # Runs where the new system failed too, so each target reports; the legacy one's evidence is
+      # kept but not counted.
       - name: Conformance on the legacy system
+        if: ${{ !cancelled() }}
         env:
           CONFORMANCE_TARGET: legacy
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter "${{ matrix.area }}" run conformance
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-area-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
   # One pattern's app, on each area it composes.
   conformance-pattern:
@@ -370,6 +406,8 @@ jobs:
         env:
           # Where the runner keeps a failed area's whole output (output.log), so the step below finds it.
           TMPDIR: ${{ runner.temp }}
+          # Each area's run on the pattern's app inherits it and reports as `<area>@<pattern>`.
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
       - name: Keep the output of each area that failed
         if: failure()
         uses: actions/upload-artifact@v4
@@ -378,6 +416,14 @@ jobs:
           path: ${{ runner.temp }}/conformance-*/output.log
           if-no-files-found: ignore
           retention-days: 14
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-pattern-${{ matrix.pattern }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The check required of a release: every area and every pattern passed.
   conformance:
@@ -429,7 +475,63 @@ jobs:
       - name: The recipes against the packed release
         env:
           RECIPES_TARBALLS: ${{ runner.temp }}/tarballs
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter @mod/conformance-recipes run external
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-release-check
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # What this run's tests proved of the checklist's items (spec-checklist's `compliance`): it reads
+  # every job's evidence, keeps this commit and run's, and tells each item's status and the expected
+  # runs that did not report. It runs after every job, whatever they ended; on a pull request to main
+  # and on the release branches it fails where an expected run did not report or an item is
+  # failed, incomplete or unverified, and elsewhere it only tells.
+  compliance:
+    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, release-check]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit the conformance jobs tested: the daily run tests develop.
+          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      # Each job's evidence in a directory of its own, so no two reports share a path.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: evidence-*
+          path: ${{ runner.temp }}/evidence
+      - name: Each item's status from this run's evidence
+        env:
+          RELEASE: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          release=""
+          if [ "$RELEASE" = true ]; then release=--release; fi
+          status=0
+          pnpm --silent --filter @mod/spec-checklist run compliance "$RUNNER_TEMP/evidence" $release > "$RUNNER_TEMP/compliance.out" || status=$?
+          cat "$RUNNER_TEMP/compliance.out" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Keep the table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance
+          path: |
+            ${{ runner.temp }}/evidence/compliance.json
+            ${{ runner.temp }}/evidence/compliance.md
+          if-no-files-found: ignore
+          retention-days: 90
 
   # Daily on the default branch, and on every push: known vulnerabilities in
   # what an app installs.
