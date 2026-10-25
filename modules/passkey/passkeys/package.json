@@ -30,5 +30,14 @@
 		"vitest": {
 			"optional": true
 		}
+	},
+	"takenBy": {
+		"passkeyHolders": [
+			"@mod/login-passkey",
+			"@mod/passkey-reset"
+		],
+		"passkeyReading": [
+			"@mod/passkey-witnessing"
+		]
 	}
 }
