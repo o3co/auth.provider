@@ -152,8 +152,8 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 			...(part.jwtBearer
 				? {
 						"jwt-bearer": {
-							issuers: part.jwtBearer.issuers.map((i) =>
-								"linked" in i
+							issuers: part.jwtBearer.issuers.map((i) => ({
+								...("linked" in i
 									? {
 											issuer: i.issuer,
 											subject: "linked",
@@ -167,8 +167,12 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 											issuer: i.issuer,
 											subject: "as-is",
 											keys: [{ alg: i.alg, "public-key": i.publicPem }],
-										},
-							),
+											// A scene's issuer is one organisation's: with no conditions, it takes any subject.
+											...(i.conditions ? {} : { "accept-any-subject": true }),
+										}),
+								...(i.conditions ? { conditions: i.conditions } : {}),
+								...(i.ceiling ? { ceiling: i.ceiling } : {}),
+							})),
 						},
 					}
 				: {}),

@@ -71,6 +71,18 @@ export type TrustedIssuerScene = (
 ) & {
 	/** Its assertions used up in this ledger in place of the store. */
 	readonly jtiLedger?: JtiLedgerScene;
+	/** Conditions its assertions' verified claims meet; an issuer with written keys and none takes any subject. */
+	readonly conditions?: {
+		readonly "subject-prefix"?: string;
+		readonly claims?: Readonly<
+			Record<string, string | number | boolean | readonly (string | number | boolean)[]>
+		>;
+	};
+	/** A ceiling over what its assertions are issued, within the client's allowance. */
+	readonly ceiling?: {
+		readonly scopes?: readonly string[];
+		readonly audiences?: readonly string[];
+	};
 };
 
 /** Clients, the token endpoint and what is offered beside it. */
