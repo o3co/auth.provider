@@ -301,7 +301,7 @@ jobs:
   # daily run's jobs test the same develop commit.
   conformance-plan:
     needs: conformance-due
-    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'develop') || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
     runs-on: ubuntu-latest
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
@@ -338,7 +338,7 @@ jobs:
   conformance-area:
     needs: conformance-plan
     # A skipped conformance-due above would otherwise skip this job too.
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && github.base_ref != 'develop' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -420,7 +420,7 @@ jobs:
   conformance-pattern:
     needs: conformance-plan
     # A skipped conformance-due above would otherwise skip this job too.
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && github.base_ref != 'develop' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
