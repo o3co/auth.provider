@@ -170,7 +170,6 @@ export function flowWith(parts: FlowParts): Flow {
 	};
 }
 
-/** The steps over the contracts the assembly gives, each step built by its own module. */
 /** What `flowOver` takes, its steps' included. */
 export const flowTakes = [
 	reauthsContract,
@@ -182,6 +181,7 @@ export const flowTakes = [
 	...targetCheckTakes,
 ];
 
+/** The steps over the contracts the assembly gives, each step built by its own module. */
 export async function flowOver(c: BuildContext<Settings>, place: Place): Promise<Flow> {
 	const reauths = await c.get(reauthsContract);
 	return flowWith({
