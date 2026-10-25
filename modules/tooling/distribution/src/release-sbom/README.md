@@ -22,6 +22,7 @@ Internal module of `distribution`: the release's lists of what it ships (SBOMs),
 - Every development dependency a workspace manifest names is in the build tools' list.
 - The image is built from the app's Dockerfile as the release check builds it, and removed, its base stage's too, however its build or listing ends; one Docker still lists after is a problem told.
 - The release workflow is held, by a test reading it, to make the lists in a job of its own that reads alone, from the tarballs the pack job kept; to give the publish job alone what publishing takes, running nothing the release packed there; and to publish only after the tarballs are held to the lists and to npm, the draft carrying both assets, no check's failure passed over.
+- The same test holds each artifact to be taken by the id the job that made it gave, never by name; the release check to test the very tarballs kept; no job or step that holds the release to be skipped but by success; every action from outside GitHub to be pinned by its commit; and the API site to keep the token out of its checkouts and its install, giving it to its push alone.
 
 ## Depends on
 - The package's `release` (the tarballs read) and `release-check` (the install and the image); `combinations` (the features that opt in); pnpm, Docker and tar, run.
