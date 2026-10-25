@@ -1,4 +1,4 @@
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
@@ -447,7 +447,8 @@ describe("jwt-bearer", () => {
 		const otherAlgorithm = await new SignJWT(base)
 			.setProtectedHeader({ alg: "ES256" })
 			.sign(ec.privateKey);
-		expect(await said(otherAlgorithm)).toBe("invalid_grant: algorithm not taken");
+		// Refused before the signature is checked, as one with no key would be.
+		expect(await said(otherAlgorithm)).toBe("invalid_grant: untrusted signer");
 	});
 
 	it("keeps each issuer's jti apart", async () => {
@@ -652,13 +653,72 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		);
 	});
 
+	/** An assertion signed over the header and claims as written, whatever they hold. */
+	const rawSigned = (header: object, claims: object, key = device.privateKey) => {
+		const part = (v: object) => Buffer.from(JSON.stringify(v)).toString("base64url");
+		const data = `${part(header)}.${part(claims)}`;
+		return `${data}.${sign(null, Buffer.from(data), key).toString("base64url")}`;
+	};
+
+	it("answers every refusal before the signature alike, whether the signer has keys or none", async () => {
+		const thumb = await thumbOf();
+		const held: Answer = { kind: "keys", keys: [await deviceKey()], algorithms: ["EdDSA"] };
+		let keys: Answer = held;
+		const s = await serveWith(entry({ subject: "as-is", "subject-is-key-thumbprint": true }), [
+			signing(async () => keys),
+		]);
+		const claims = { ...base, iss: fixedIss, sub: thumb };
+		const ec = generateKeyPairSync("ec", { namedCurve: "P-256" });
+		const refused = {
+			algorithm: await new SignJWT({ ...claims, jti: "j-alg" })
+				.setProtectedHeader({ alg: "ES256" })
+				.sign(ec.privateKey),
+			header: rawSigned({ alg: "EdDSA", crit: ["x"], x: 1 }, { ...claims, jti: "j-crit" }),
+			signature: rawSigned({ alg: "EdDSA" }, { ...claims, jti: "j-other" }, other.privateKey),
+		};
+		for (const answer of [held, { kind: "none" } as const]) {
+			keys = answer;
+			for (const [why, a] of Object.entries(refused)) {
+				expect(saidOf(await s.grant(a)), `${why}, ${answer.kind}`).toBe(
+					"invalid_grant: untrusted signer",
+				);
+			}
+		}
+		// Once the signature holds, a claim's refusal keeps its words.
+		keys = held;
+		const { exp: _, ...lasting } = claims;
+		expect(saidOf(await s.grant(await deviceAssertion(thumb)))).toBe("issued");
+		expect(saidOf(await s.grant(await assertion(lasting, device.privateKey)))).toBe(
+			"invalid_grant: malformed assertion",
+		);
+	});
+
+	it("refuses an issuer that is no string, before asking for any key", async () => {
+		const thumb = await thumbOf();
+		const asked: unknown[] = [];
+		const s = await serveWith(entry({ subject: "as-is" }), [
+			signing(
+				async () => ({ kind: "keys", keys: [await deviceKey()], algorithms: ["EdDSA"] }),
+				asked,
+			),
+		]);
+		for (const iss of [[fixedIss], 7, null]) {
+			const a = await assertion({ ...base, iss, sub: thumb }, device.privateKey);
+			expect(saidOf(await s.grant(a)), JSON.stringify(iss)).toBe("invalid_grant: untrusted signer");
+		}
+		expect(asked).toEqual([]);
+		expect(saidOf(await s.grant(await deviceAssertion(thumb)))).toBe("issued");
+	});
+
 	it("asks for no keys for a subject of the wrong shape", async () => {
 		const asked: unknown[] = [];
 		const s = await serveWith(entry({ subject: "as-is", "subject-is-key-thumbprint": true }), [
 			signing(async () => ({ kind: "none" }), asked),
 		]);
 		for (const sub of ["short", "s-\u00e9".padEnd(43, "x"), "a".repeat(300)]) {
-			expect(errorOf(await s.grant(await deviceAssertion(sub))), sub).toBe("invalid_grant");
+			expect(saidOf(await s.grant(await deviceAssertion(sub))), sub).toBe(
+				"invalid_grant: untrusted signer",
+			);
 		}
 		expect(asked).toEqual([]);
 	});
@@ -673,7 +733,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 			assertion({ ...base, iss: fixedIss, sub: thumb }, device.privateKey, { kid: kid as string });
 		for (const kid of ["k".repeat(257), "k\uD800", 7]) {
 			expect(saidOf(await s.grant(await signedWith(kid))), String(kid)).toBe(
-				"invalid_grant: malformed assertion",
+				"invalid_grant: untrusted signer",
 			);
 		}
 		expect(asked).toEqual([]);
