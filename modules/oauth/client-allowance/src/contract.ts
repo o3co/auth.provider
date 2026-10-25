@@ -9,6 +9,12 @@ export interface AllowanceLists {
 	readonly audiences: readonly string[];
 }
 
+/** A ceiling over an issuance: a list it holds narrows it, a list it leaves out does not; an empty list allows nothing. */
+export interface Ceiling {
+	readonly scopes?: readonly string[];
+	readonly audiences?: readonly string[];
+}
+
 /** The scope and audience of an issuance. */
 export interface Issued {
 	readonly scope: readonly string[];
@@ -44,6 +50,35 @@ export interface ClientAllowance {
 		  }
 		| { readonly kind: "error"; readonly error: "invalid_scope"; readonly description?: string };
 	/**
+	 * As `allowedIssuance`, within every ceiling given as well as the client's allowance: the scopes,
+	 * its defaults among them, and the audiences, the issuer's for a client allowed none, are narrowed
+	 * to what each ceiling holds. A default the ceilings leave none of is refused, never issued empty;
+	 * no audience left is `invalid_target`. With no ceiling it is `allowedIssuance`.
+	 */
+	allowedIssuanceWithin(
+		client: Client,
+		ceilings: readonly Ceiling[],
+		requested: string | undefined,
+		issuer: string,
+	):
+		| {
+				readonly kind: "allowed";
+				readonly scope: readonly string[];
+				readonly audience: readonly string[];
+		  }
+		| {
+				readonly kind: "error";
+				readonly error: "invalid_scope" | "invalid_target";
+				readonly description?: string;
+		  };
+	/** As `allowsAudience`, within every ceiling given as well. */
+	allowsAudienceWithin(
+		client: Client,
+		ceilings: readonly Ceiling[],
+		audience: string,
+		issuer: string,
+	): boolean;
+	/**
 	 * The section entry (name to value) for a client asking within a ceiling: each list keeps what
 	 * both hold, and a list not asked is the ceiling's. Undefined (refused) when the asked audiences
 	 * leave none of a ceiling that names some, since no audiences would mean the issuer.
@@ -70,6 +105,67 @@ const parseScope = (raw: string | undefined) => {
 		: undefined;
 };
 
+/** What every ceiling that holds such a list keeps of the values. */
+const narrowed = (
+	values: readonly string[],
+	ceilings: readonly Ceiling[],
+	name: keyof Ceiling,
+): readonly string[] =>
+	ceilings.reduce<readonly string[]>((kept, c) => {
+		const held = c[name];
+		return held === undefined ? kept : kept.filter((v) => held.includes(v));
+	}, values);
+
+const allowedIssuance: ClientAllowance["allowedIssuance"] = (client, requested, issuer) => {
+	const allowed = client.section(allowances);
+	const defaults = allowed["default-scopes"];
+	const named = parseScope(requested);
+	const omitted = named?.length === 0;
+	if (omitted && defaults === undefined && allowed.scopes.length > 0) {
+		return { kind: "error", error: "invalid_scope", description: "scope is required" };
+	}
+	const asked = omitted ? (defaults ?? []) : named;
+	if (!asked || asked.some((s) => !allowed.scopes.includes(s))) {
+		return { kind: "error", error: "invalid_scope" };
+	}
+	return {
+		kind: "allowed",
+		scope: [...new Set(asked)],
+		audience: audiencesOf(allowed, issuer).slice(0, 1),
+	};
+};
+
+const allowedIssuanceWithin: ClientAllowance["allowedIssuanceWithin"] = (
+	client,
+	ceilings,
+	requested,
+	issuer,
+) => {
+	if (ceilings.length === 0) return allowedIssuance(client, requested, issuer);
+	const allowed = client.section(allowances);
+	const scopes = narrowed(allowed.scopes, ceilings, "scopes");
+	const defaults = allowed["default-scopes"];
+	const kept = defaults === undefined ? undefined : narrowed(defaults, ceilings, "scopes");
+	const named = parseScope(requested);
+	const omitted = named?.length === 0;
+	// A default the ceilings take all of is refused, as no default would be, and never issued empty.
+	const lost = defaults !== undefined && defaults.length > 0 && kept?.length === 0;
+	if (omitted && (lost || (kept === undefined && scopes.length > 0))) {
+		return scopes.length > 0
+			? { kind: "error", error: "invalid_scope", description: "scope is required" }
+			: { kind: "error", error: "invalid_scope" };
+	}
+	const asked = omitted ? (kept ?? []) : named;
+	if (!asked || asked.some((s) => !scopes.includes(s))) {
+		return { kind: "error", error: "invalid_scope" };
+	}
+	const audiences = narrowed(audiencesOf(allowed, issuer), ceilings, "audiences");
+	if (audiences.length === 0) {
+		return { kind: "error", error: "invalid_target", description: "no audience is within reach" };
+	}
+	return { kind: "allowed", scope: [...new Set(asked)], audience: audiences.slice(0, 1) };
+};
+
 const covers: ClientAllowance["covers"] = (client, issued, issuer) => {
 	const allowed = client.section(allowances);
 	return (
@@ -90,24 +186,12 @@ export const clientAllowance: ClientAllowance = Object.freeze({
 		const visible = new Set([...client.section(allowances).audiences, client.id]);
 		return audience.some((a) => visible.has(a));
 	},
-	allowedIssuance: (client, requested, issuer) => {
-		const allowed = client.section(allowances);
-		const defaults = allowed["default-scopes"];
-		const named = parseScope(requested);
-		const omitted = named?.length === 0;
-		if (omitted && defaults === undefined && allowed.scopes.length > 0) {
-			return { kind: "error", error: "invalid_scope", description: "scope is required" };
-		}
-		const asked = omitted ? (defaults ?? []) : named;
-		if (!asked || asked.some((s) => !allowed.scopes.includes(s))) {
-			return { kind: "error", error: "invalid_scope" };
-		}
-		return {
-			kind: "allowed",
-			scope: [...new Set(asked)],
-			audience: audiencesOf(allowed, issuer).slice(0, 1),
-		};
-	},
+	allowedIssuance,
+	allowedIssuanceWithin,
+	allowsAudienceWithin: (client, ceilings, audience, issuer) =>
+		narrowed(audiencesOf(client.section(allowances), issuer), ceilings, "audiences").includes(
+			audience,
+		),
 	allowancesWithin: (ceiling, asked) => {
 		const within = (name: keyof AllowanceLists) => [
 			...new Set((asked[name] ?? ceiling[name]).filter((v) => ceiling[name].includes(v))),
