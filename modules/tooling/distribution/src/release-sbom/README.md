@@ -15,7 +15,7 @@ Internal module of `distribution`: the release's lists of what it ships (SBOMs),
 - `npmNamed`, `coverageProblems` and `insideBom`: the naming and the checks, apart from the tools.
 
 ## Invariants
-- The app is the full template with every feature that opts in, made by the packed entrance and installed from the tarballs alone, no script run; the entrance is installed alone, as an operator runs it.
+- The app is the full template with every feature that opts in, made by the packed entrance and installed from the tarballs alone, no script run (the tree an operator's install makes, which runs them, and the lists' README says so); the entrance is installed alone, as an operator runs it.
 - A component of a package this release packed is named as npm publishes it (purl, reference, distribution URL), its hash kept; one not named by the path of a tarball the release packed stops the release, nothing renamed. Every other component is as the tool wrote it.
 - Every tarball packed is in the app's list or the entrance's, by its name, version and SHA-512, with a dependency entry.
 - A bundled file no manifest declares, one declared in no tarball, and a package held inside that its declaration does not name, stop the release.

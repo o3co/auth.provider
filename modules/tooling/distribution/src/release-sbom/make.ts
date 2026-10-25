@@ -232,5 +232,7 @@ Lists in CycloneDX ${config.cyclonedx} JSON, made by the release from the tarbal
 - \`tarballs.json\`: each tarball published, its name, version and npm integrity, which the release's own components in the lists carry as their SHA-512.
 
 The release's own components are named as npm publishes them (\`pkg:npm/%40o3co/<name>@<version>\`), with the hash of the very tarball published.
+
+The app and the entrance are installed for these lists with no install script run (\`--ignore-scripts\`): what is installed, and so the tree listed, is the same as an operator's install, which runs them.
 `;
 }
