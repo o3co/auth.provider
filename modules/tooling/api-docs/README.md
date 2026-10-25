@@ -10,6 +10,7 @@
 ## Offers
 - `pnpm api-docs link <bundles> <project>`: the bundles built here (`pnpm bundles`) at their public names in a project, and each outside package their manifests name, from a workspace member that holds it; for a check before a release.
 - `pnpm api-docs build <project> <site> <version>`: the API of the bundles a project holds, into the version's minor's dir of the site, then the site's root and `versions.html`.
+- Each path given resolves from the dir `pnpm` was run in (`INIT_CWD`), or else the working dir: `pnpm` runs the script in this package's dir.
 
 ## Invariants
 - An entry is a shipped bundle's member's `.` export (`<bundle>/<member>`); its `testing`, `module` and `audit-events`, an unshipped bundle, and a package exporting none are not read.
