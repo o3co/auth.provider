@@ -54,10 +54,19 @@ export type TrustedIssuerScene = (
 			readonly alg: "EdDSA" | "ES256" | "RS256";
 			readonly publicPem: string;
 	  }
-	/** Linked: its signers' keys asked of a ledger at `keysUrl`, the subject the user found by `upstream`. */
+	/**
+	 * Linked: its signers' keys asked of a ledger at `keysUrl`, the subject the user found by `upstream`.
+	 * `thumbprint`: a signer's `sub` is its key's JWK thumbprint. `selfIssuedPrefix`: it takes too the
+	 * self-issued signers whose `iss` and `sub` are the prefix and their key's thumbprint.
+	 */
 	| {
 			readonly issuer: string;
-			readonly linked: { readonly upstream: string; readonly keysUrl: string };
+			readonly linked: {
+				readonly upstream: string;
+				readonly keysUrl: string;
+				readonly thumbprint?: true;
+				readonly selfIssuedPrefix?: string;
+			};
 	  }
 ) & {
 	/** Its assertions used up in this ledger in place of the store. */
