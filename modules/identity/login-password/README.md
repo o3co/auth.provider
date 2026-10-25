@@ -12,7 +12,7 @@
 - Contribution to `login-gates`: the amr a password login proves, `pwd`.
 - Route `POST /session/login`, taking a form or JSON with `username`, `password` and `redirect_to`.
 - Success is `200` with `{}` or `{redirect_to}`; a gate holding the login is `403` with the gate's answer and cookies, unread.
-- Errors: `csrf` (403), `repeated_parameter`, `invalid_redirect`, `invalid_request` (400), `too_many_attempts` (429), `service_unavailable` (503, attempts uncounted), `invalid_credentials` (401), `temporarily_unavailable` (503).
+- Errors: `csrf` (403), `repeated_parameter`, `invalid_redirect`, `invalid_request` (400), `too_many_attempts` (429), `service_unavailable` (503, attempts uncounted), `invalid_credentials` (401), `temporarily_unavailable` (503); no body, or one neither a form nor JSON, is `http`'s `415`, answered with no body.
 - Audit events to `audit`, with `method` `password` and the `source` where `request-source` determined it: declared in `./audit-events`, listed in the audit event reference.
 - Operator section: `attempts` per source (1–100, default 20) in `window` (1m–1d, default `15m`). Times are written with their unit; a bare number is refused.
 - Operator section, per identifier: `account-attempts` (1–100, default 10), `account-window` (1m–1d, default `1h`, no shorter than the longest wait), `account-max-wait` (1s–1h, default `5m`).
