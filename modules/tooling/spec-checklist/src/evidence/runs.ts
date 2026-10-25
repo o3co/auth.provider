@@ -93,14 +93,43 @@ export interface ItemStatus {
 	readonly failures: readonly Failure[];
 }
 
-/** Of the reports given, this commit's and run's for the new system, all of each entry and job's last attempt. */
+/** A job's mark that it was attempted, written before it can fail: the run, the attempt, and the runs it makes. */
+export interface Attempted {
+	readonly attempted: {
+		readonly run: string;
+		readonly attempt: number;
+		readonly job: string;
+		readonly kind: string;
+		readonly matrix?: string;
+	};
+}
+
+/** The last attempt of this run that each entry's job was marked attempted in, by the runs the marks name. */
+export function attemptsOf(marks: readonly Attempted[], runs: readonly Run[], run: string) {
+	const last = new Map<string, number>();
+	for (const { attempted: a } of marks.filter((m) => m.attempted.run === run)) {
+		const named = runs.filter((r) => r.kind === a.kind && r.matrix === a.matrix);
+		for (const r of named) last.set(r.entry, Math.max(last.get(r.entry) ?? 0, a.attempt));
+	}
+	return last;
+}
+
+/**
+ * Of the reports given, this commit's and run's for the new system, all of each entry and job's last
+ * attempt, and none older than the last attempt its job was marked in: a job that failed before it
+ * reported leaves its earlier attempt's evidence behind.
+ */
 export function selectReports(
 	reports: readonly EvidenceReport[],
 	of: { readonly commit: string; readonly run: string },
+	attempted: ReadonlyMap<string, number> = new Map(),
 ): EvidenceReport[] {
 	const ours = reports.filter(
 		(r) =>
-			r.identity.commit === of.commit && r.identity.run === of.run && r.identity.target === "new",
+			r.identity.commit === of.commit &&
+			r.identity.run === of.run &&
+			r.identity.target === "new" &&
+			r.identity.attempt >= (attempted.get(r.identity.entry) ?? 0),
 	);
 	const keyOf = (r: EvidenceReport) => JSON.stringify([r.identity.entry, r.identity.job]);
 	const lastAttempt = new Map<string, number>();

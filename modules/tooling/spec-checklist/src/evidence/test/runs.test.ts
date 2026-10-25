@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseItems } from "../../checklist.ts";
 import { type EvidenceReport, entryOf } from "../reporter.ts";
 import {
+	attemptsOf,
 	checkpoint,
 	complianceTable,
 	type Expected,
@@ -46,6 +47,43 @@ describe("entryOf", () => {
 				root,
 			),
 		).toBe("@mod/interop-oidf#basic");
+	});
+});
+
+describe("a job's marks that it was attempted", () => {
+	const runs = [
+		{ entry: "unit", kind: "unit" },
+		{ entry: "@mod/a@p", kind: "pattern", matrix: "p" },
+		{ entry: "@mod/b@p", kind: "pattern", matrix: "p" },
+		{ entry: "@mod/a@q", kind: "pattern", matrix: "q" },
+	];
+	const mark = (attempt: number, kind: string, matrix?: string, run = "r1") => ({
+		attempted: { run, attempt, job: "j", kind, ...(matrix ? { matrix } : {}) },
+	});
+
+	it("give each run of the job the last attempt it was marked in, this run's marks alone", () => {
+		const attempts = attemptsOf(
+			[
+				mark(1, "pattern", "p"),
+				mark(2, "pattern", "p"),
+				mark(1, "unit"),
+				mark(9, "unit", undefined, "r0"),
+			],
+			runs,
+			"r1",
+		);
+		expect(Object.fromEntries(attempts)).toEqual({ "@mod/a@p": 2, "@mod/b@p": 2, unit: 1 });
+	});
+
+	it("leave out an entry's reports older than its job's last attempt, and keep a job's not attempted again", () => {
+		const earlier: EvidenceReport = { identity: identity("@mod/a@p"), tests: [], errors: 0 };
+		const other: EvidenceReport = { identity: identity("@mod/a@q"), tests: [], errors: 0 };
+		const kept = selectReports(
+			[earlier, other],
+			{ commit: "c1", run: "r1" },
+			new Map([["@mod/a@p", 2]]),
+		);
+		expect(kept.map((r) => r.identity.entry)).toEqual(["@mod/a@q"]);
 	});
 });
 

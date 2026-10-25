@@ -20,8 +20,10 @@ const report = (commit: string): EvidenceReport => ({
 });
 
 /** `run compliance` over a directory holding this run's unit report and another commit's. */
-function compliance(release: boolean) {
+function compliance(release: boolean, marks: readonly unknown[] = []) {
 	const dir = mkdtempSync(join(tmpdir(), "spec-compliance-"));
+	for (const [k, m] of marks.entries())
+		writeFileSync(join(dir, `attempted-${k}.json`), JSON.stringify(m));
 	writeFileSync(join(dir, "unit-new-1.json"), JSON.stringify(report("c1")));
 	writeFileSync(join(dir, "unit-new-2.json"), JSON.stringify(report("c0")));
 	const ran = spawnSync(
@@ -62,6 +64,14 @@ describe("run compliance, from the reports to the table", { timeout: 120_000 }, 
 		]);
 		expect(table).toContain("# Compliance of this run");
 		expect(table).toContain("| Role | Class |");
+	});
+
+	it("takes no report of an earlier attempt where the job was attempted again and did not report", () => {
+		const { written } = compliance(false, [
+			{ attempted: { run: "r1", attempt: 2, job: "checks", kind: "unit" } },
+		]);
+		expect(written.missingRuns).toContain("unit");
+		expect(written.items.find((i) => i.id === "rfc7009-2-a")?.evidence).toEqual([]);
 	});
 
 	it("fails a release's run that lacks a run's report, a release's own among them", () => {
