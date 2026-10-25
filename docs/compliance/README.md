@@ -13,10 +13,10 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 7662: OAuth 2.0 Token Introspection](rfc7662.md) | 16 | 12 | 0 | 12 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 8414: OAuth 2.0 Authorization Server Metadata](rfc8414.md) | 26 | 18 | 0 | 18 | 0 | 2 | 0 | 2 | 0 | 6 |
-| [RFC 8628: OAuth 2.0 Device Authorization Grant](rfc8628.md) | 19 | 15 | 0 | 15 | 0 | 4 | 0 | 4 | 0 | 0 |
+| [RFC 8628: OAuth 2.0 Device Authorization Grant](rfc8628.md) | 18 | 14 | 0 | 14 | 0 | 4 | 0 | 4 | 0 | 0 |
 | [RFC 8693: OAuth 2.0 Token Exchange](rfc8693.md) | 18 | 15 | 0 | 15 | 0 | 2 | 0 | 2 | 0 | 1 |
 | [RFC 8705: OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](rfc8705.md) | 14 | 5 | 0 | 5 | 0 | 5 | 0 | 5 | 0 | 4 |
 | [RFC 8707: Resource Indicators for OAuth 2.0](rfc8707.md) | 3 | 2 | 0 | 2 | 0 | 1 | 0 | 1 | 0 | 0 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
 | [RFC 9449: OAuth 2.0 Demonstrating Proof of Possession (DPoP)](rfc9449.md) | 42 | 32 | 0 | 32 | 0 | 5 | 0 | 5 | 0 | 5 |
-| Total | 340 | 256 | 0 | 256 | 0 | 52 | 0 | 52 | 0 | 32 |
+| Total | 339 | 255 | 0 | 255 | 0 | 52 | 0 | 52 | 0 | 32 |
