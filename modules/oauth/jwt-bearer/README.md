@@ -19,15 +19,12 @@
 
 ## Invariants
 - Issued tokens do not outlive the assertion's expiry.
-- A `kid` an assertion names is text of 1 to 256 well-formed characters, or the assertion is malformed, before any key is asked for.
 - The assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under this section's policy: the algorithms of that issuer's keys (any the grant takes, for a key set), `clock-skew` as the allowance, `max-assertion-lifetime` as the longest lifetime. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
 - A key set is fetched only at https from its issuer's host (`issuers`). While no key set can be had, the grant is unavailable.
 - Boot is refused on an entry `issuers` cannot read as a trusted issuer, as its card says, each at its place (`jwt-bearer.issuers.<i>`), never by its value; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them.
-- The signer is read before anything is verified: a `sub` that is no well-formed subject, or no thumbprint where `subject-is-key-thumbprint` asks one, is refused before its keys are asked for. With thumbprints, only the key whose thumbprint is the `sub` verifies it; a contributed key is verified with the `sub` it was asked for.
-- An unknown signer, a key that does not fit and a signature that does not match get the same answer.
+- The signer is read, its shape checked and its keys asked for as the internal module `assertion` says, before anything is verified.
 - `as-is`: the token is for the `sub`. `linked`: for the subject `linkedSubjects` resolves (`upstream`, `sub`) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.
 - A refusal's reason is told in this grant's own words. Keys or subjects that cannot be told make the grant unavailable, using up no `jti`.
-- A signer's `sub` is a subject only as OpenID Connect Core bounds one: 1 to 255 ASCII characters.
 - Usable only when the client explicitly allows it.
 - The audience asked (`grants`' `target`, after the scope) narrows the token within what the client may be issued; it is asked before the `sessions` boundary and the `jti` is written, so a refusal leaves the assertion usable.
 - An assertion made at or before its subject's `sessions` boundary, widened by `clock-skew` as its issuer's clock may run that far ahead, gets no token: it is made at its `iat`, never later than now, and one without `iat` counts as made before any boundary. Checked before its `jti` is spent.
