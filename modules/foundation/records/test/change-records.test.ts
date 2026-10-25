@@ -244,7 +244,20 @@ it("pairs records of two places to change as one, apart by place, and refuses th
 	expect(() =>
 		pairedRecordsAcross({ ...listPlace, store: lacking as Store }, itemPlace, "user", refuse),
 	).toThrow();
-	expect(refusals).toEqual(["user: its store writes no records of two partitions as one"]);
+	// Two stores, or spaces of other guarantees, are refused at build too, before any change.
+	const another = { ...listPlace.store } as Store;
+	expect(() =>
+		pairedRecordsAcross(listPlace, { ...itemPlace, store: another }, "user", refuse),
+	).toThrow();
+	const loose: Space = { name: "many-items", guarantees: ["no-eviction"] };
+	expect(() =>
+		pairedRecordsAcross(listPlace, { ...itemPlace, space: loose }, "user", refuse),
+	).toThrow();
+	expect(refusals).toEqual([
+		"user: its store writes no records of two partitions as one",
+		"user: its two places are on two stores, which write nothing of both as one",
+		"user: its two spaces declare other guarantees, so a fault could keep one and drop the other",
+	]);
 });
 
 it("changes records of the stand-in as one, the watched ones too, as records does", async () => {

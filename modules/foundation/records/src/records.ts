@@ -265,6 +265,12 @@ export function pairedRecordsIn<T extends Json>(
 	};
 }
 
+/** Whether two spaces declare the same guarantees, compared as sets, as a batch across them asks. */
+const sameGuarantees = (a: Place["space"], b: Place["space"]) => {
+	const set = (space: Place["space"]) => JSON.stringify([...new Set(space.guarantees)].sort());
+	return set(a) === set(b);
+};
+
 /** Whether the store writes records of several partitions and spaces as one, as `changeTogether` asks. */
 export function changesTogether(target: Store): boolean {
 	return typeof target.batchAcross === "function";
@@ -442,7 +448,16 @@ export function pairedRecordsAcross<A extends Json, B extends Json>(
 	if (!changesTogether(first.store)) {
 		refuse(where, "its store writes no records of two partitions as one");
 	}
-	if (second.store !== first.store) throw new Error("records changed together share one store");
+	// Known at build, so refused at build: the store would refuse every change of them alike.
+	if (second.store !== first.store) {
+		refuse(where, "its two places are on two stores, which write nothing of both as one");
+	}
+	if (!sameGuarantees(first.space, second.space)) {
+		refuse(
+			where,
+			"its two spaces declare other guarantees, so a fault could keep one and drop the other",
+		);
+	}
 	claim(first, "records");
 	claim(second, "records");
 	type Read = {

@@ -9,7 +9,8 @@
 
 ## Offers
 - Keyed records: create if absent, read while it lives, change from what it holds, remove, and a scan of the keys of those living, by pages, as `store` walks (a scanned space holds records by key alone); a lifetime is ms from the write, or endless.
-- Records changed together: `changeRecords`, records of spaces of the same guarantees on one store, and the records the decision watches from them, any of them written, as one; `changeTogether`, two of them, only the two written; `changesTogether` tells whether a store can. `pairedRecordsIn` pairs a place's records so, and `pairedRecordsAcross` the records of two places, each refusing through the builder's `refuse` where its store cannot.
+- Records changed together: `changeRecords`, records of spaces of the same guarantees on one store, and the records the decision watches from them, any of them written, as one; `changeTogether`, two of them, only the two written; `changesTogether` tells whether a store can.
+- `pairedRecordsIn` pairs a place's records so, and `pairedRecordsAcross` the records of two places, each refusing through the builder's `refuse` where its store cannot; `pairedRecordsAcross` also where its places are on two stores or their spaces declare other guarantees.
 - Records under a secret: the same but the scan, kept under a name made from the secret, reached by secret or by name. They hold short-lived values only, so a rotation waits them out and they need no scan.
 - Deferred work: add, done, and each, which hands the work over; work that fails stays and is counted.
 - Keyed sets: add a member for a lifetime (answering those pushed out over the cap), the members with their time left, remove a member; the members pushed out and awaiting, and settling one.
