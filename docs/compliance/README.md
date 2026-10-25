@@ -6,4 +6,6 @@ Each specification has a page here, `<spec>.md`, with a row for each of its item
 
 A status here is read from the checklist and the tests alone: `mapped` (a test names the item), `hole` (no test does), `noncompliant` (a MUST known not met), `deviates` (a SHOULD not followed, by a decision), `out-of-scope` (a feature not offered). Whether a mapped item's tests ran and passed is told by each CI run's compliance report.
 
-The summary over every specification is not kept here: `pnpm --filter @mod/spec-checklist run summary` prints it from the checklist as it stands.
+An item's role is the role of the server's it binds: `as` the authorization server, `op` the OpenID Provider, `rs` the resource server at its own protected routes, `rp` the relying party to an upstream IdP, `client` the client sending tokens or assertions out.
+
+The summary over every specification, by specification and by role, is not kept here: `pnpm --filter @mod/spec-checklist run summary` prints it from the checklist as it stands.

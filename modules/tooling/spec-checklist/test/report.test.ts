@@ -43,6 +43,8 @@ describe("summaryTable", () => {
 		expect(summaryTable([spec, spec], tests)).toContain(
 			"| Total | 10 | 6 | 2 | 2 | 2 | 2 | 0 | 0 | 2 | 2 |",
 		);
+		expect(summaryTable([spec], tests)).toContain("| as | 5 | 3 | 1 | 1 | 1 | 1 | 0 | 0 | 1 | 1 |");
+		expect(summaryTable([spec], tests)).toContain("| rp | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |");
 	});
 });
 
@@ -53,10 +55,10 @@ describe("reportFiles", () => {
 		expect(files.get("README.md")).not.toContain("RFC 9999");
 		const table = files.get("rfc9999.md") ?? "";
 		expect(table).toContain(
-			"| rfc9999-4-a | MUST | mapped | tested \\| piped | @mod/x › test/x.test.ts › answers [rfc9999-4-a] |",
+			"| rfc9999-4-a | MUST | as | mapped | tested \\| piped | @mod/x › test/x.test.ts › answers [rfc9999-4-a] |",
 		);
 		expect(table).toContain(
-			"| rfc9999-4-e | MUST | noncompliant | broken |  | https://example.org/issues/1; updates rfc1111-3-a |",
+			"| rfc9999-4-e | MUST | as | noncompliant | broken |  | https://example.org/issues/1; updates rfc1111-3-a |",
 		);
 	});
 });
