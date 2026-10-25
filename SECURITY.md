@@ -5,7 +5,7 @@
 Security fixes are released for:
 
 - the latest minor version, in a patch release of it;
-- the minor version before it, for (to decide: the overlap) after the newer minor is released, so that a new minor never forces an upgrade on the day it comes out.
+- the minor version before it, for three months after the newer minor is released, so that a new minor never forces an upgrade on the day it comes out. This holds before 1.0, and is looked at again at 1.0.
 
 Release candidates are previews and get no fixes of their own: a fix found in one lands in the next. A version past its support is named in the changelog of the release that ends it.
 

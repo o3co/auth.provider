@@ -24,25 +24,25 @@ A change that breaks one of these is a major version after 1.0, and a minor vers
 
 1. **HTTP**: the routes, their methods and parameters, and their answers (status, error code, body members), as [the route reference](routes.md) lists them.
 2. **Configuration**: each setting's key, type, bounds and default, as [the configuration reference](configuration.md) lists them. A value refused at boot that was accepted before is a break.
-3. **Module contracts**: what each package exports at `.` and `./module`, and the names of the modules an app composes. (to decide: whether `./testing` is covered, or offered as is)
+3. **Module contracts**: what each package exports at `.` and `./module`, the names of the modules an app composes, and the contract tests a package offers (`*Contract`) for implementations of its contracts. The rest of `./testing` (fakes, configuration builders) is offered as is.
 4. **Audit events**: each kind and its attributes, as [the audit event reference](audit-events.md) lists them.
 5. **Metrics**: each metric's name, type and labels.
 6. **Data at rest**: a version reads what the version before it wrote to the store, so an upgrade needs no migration of stored records.
-7. (to decide: whether the names of log events, such as `kernel.stop_failed`, are covered, as operators alert on them)
+7. **Log events**: each event's name (such as `kernel.stop_failed`), as operators alert on it; not its fields or the wording of a message.
 
-Not covered: internal modules and anything a package does not export, the wording of error descriptions and log messages, behaviour no card or reference states, the conformance and tooling packages, and a feature marked preview on its card.
+Not covered: internal modules and anything a package does not export, the wording of error descriptions and log messages, `./testing` but for its contract tests, behaviour no card or reference states, the conformance and tooling packages, and a feature marked preview on its card.
 
 ### Deprecation
 
 A covered surface is removed or changed incompatibly only after it was deprecated:
 
 - The release that deprecates it says so in the changelog's **Deprecated** section, on the owning module's card, and in the migration guide, with what to use instead.
-- It stays as it was for at least (to decide: the notice period) after that release, and is removed no earlier than (to decide: the release that may remove it).
+- It stays as it was for at least two minor versions or three months after that release, whichever is longer, and is removed no earlier than in the release that ends that notice.
 - A security fix may shorten the notice where keeping the surface would keep the hole; the changelog says why.
 
 ### Upgrade notices
 
-Each change an operator must act on to upgrade carries a numbered notice, (to decide: the notice's form, such as `U-0.19-3`), at its line in the changelog and at its entry in [the migration guide](migration.md). A notice states what to change, and how to tell whether a deployment is affected. An operator checks off the notices between the version they run and the one they move to; a release with none says so.
+Each change an operator must act on to upgrade carries a numbered notice, `U-<minor>-<n>` numbered within the minor version that brings the change (`U-0.19-3`), at its line in the changelog and at its entry in [the migration guide](migration.md). A notice states what to change, and how to tell whether a deployment is affected. An operator checks off the notices between the version they run and the one they move to; a release with none says so.
 
 ## What a release publishes
 
