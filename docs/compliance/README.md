@@ -12,3 +12,13 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | [RFC 8414: OAuth 2.0 Authorization Server Metadata](rfc8414.md) | 26 | 18 | 0 | 18 | 0 | 2 | 0 | 2 | 0 | 6 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
 | Total | 165 | 117 | 0 | 117 | 0 | 31 | 0 | 31 | 0 | 17 |
+
+By the role of the server's each item binds: `as` the authorization server, `op` the OpenID Provider, `rs` the resource server at its own protected routes, `rp` the relying party to an upstream IdP, `client` the client sending tokens or assertions out.
+
+| Role | Items | MUST in scope | MUST mapped | MUST hole | MUST noncompliant | SHOULD in scope | SHOULD mapped | SHOULD hole | SHOULD deviates | Out of scope |
+|---|---|---|---|---|---|---|---|---|---|---|
+| as | 165 | 117 | 0 | 117 | 0 | 31 | 0 | 31 | 0 | 17 |
+| op | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| rs | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| rp | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| client | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
