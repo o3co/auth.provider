@@ -8,7 +8,7 @@ import {
 	type Handle,
 	kernelConfig,
 } from "../src/contract.ts";
-import { refusalsOf } from "./refusals.ts";
+import { refusalsOf, unreadable } from "./refusals.ts";
 
 const single = kernelConfig();
 const none = (label: string) => ({ where: "", reason: `no module provides ${label}` });
@@ -150,6 +150,32 @@ describe("a module's takes, checked before anything is built", () => {
 		expect(assembly.get(after)).toBe("o!");
 	});
 
+	it("holds a module taking its own contract undeclared to the contract's takenBy, as its factory runs", async () => {
+		const signer = contract<object>("signer", { takenBy: ["issuer"] });
+		for (const how of ["get", "late", "caught", "late-caught"] as const) {
+			let ran = false;
+			const tokens = defineModule({ name: "tokens", takes: [] }, (m) => [
+				m.provide(signer).by(() => ({})),
+				m.provide(contract<object>("tokens-out")).by(async (c) => {
+					ran = true;
+					if (how === "get") await c.get(signer);
+					else if (how === "late") c.late(signer);
+					else if (how === "caught") await c.get(signer).catch(() => undefined);
+					else
+						try {
+							c.late(signer);
+						} catch {}
+					return {};
+				}),
+			]);
+			const refusals = await refusalsOf(assemble({ modules: [tokens], config: single }));
+			expect(refusals, how).toEqual([
+				{ where: "tokens", reason: "signer is taken by issuer alone" },
+			]);
+			expect(ran, how).toBe(true);
+		}
+	});
+
 	it("counts every registered contribution, a failing one too, against a point's rule", async () => {
 		const one = extensionPoint<string>("one", { multiplicity: "one" });
 		const some = extensionPoint<string>("some", { multiplicity: "some" });
@@ -287,6 +313,30 @@ describe("a module's takes, held while it is built", () => {
 			}),
 		);
 		expect(refusals).toEqual([{ where: "untyped", reason: "declares no takes" }]);
+	});
+
+	it("refuses a module whose takes throw by its name, its text never kept, beside the other gaps", async () => {
+		const missing = contract<string>("missing");
+		for (const thrown of [new Error("private detail"), { private: "detail" }, ...unreadable()]) {
+			const refusals = await refusalsOf(
+				assemble({
+					modules: [
+						defineModule({
+							name: "thrower",
+							takes: () => {
+								throw thrown;
+							},
+						}),
+						defineModule({ name: "gap", takes: [missing] }),
+					],
+					config: single,
+				}),
+			);
+			expect(refusals).toEqual([
+				{ where: "thrower", reason: "its takes failed as they were asked" },
+				{ where: "gap", reason: "no module provides missing" },
+			]);
+		}
 	});
 });
 

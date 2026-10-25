@@ -19,6 +19,8 @@ Internal module of `kernel`: what a refused boot and an outage are, as values ev
 ## Invariants
 - `BootRefused`, `BuildRefused` and `Unavailable` are told by a mark (`Symbol.for`) every copy of the kernel shares, never by their class or name, and a value whose mark cannot be read (a revoked proxy, a trap that throws) is none of them, never an error; `RefusalSignal`, which never leaves the kernel, by its class.
 - A `BuildRefused`'s where and reason reach the operator as written: a public diagnostic, never a secret, which the kernel cannot tell by its form. Each is one line (`where` 1 to 200 characters, `reason` 1 to 500) with no control or format character; a constructor given another throws a TypeError, and a marked value holding another is no `BuildRefused`.
+- A `BootRefused` holds each refusal's where and reason as they were when it was made, frozen: whoever gave one may change it later.
+- The list a factory gives `refuseAll`, and the signal it throws, are left as given: a factory emptying the list or rethrowing the signal altered may leave no refusal read.
 - Assembly records a build's thrown `RefusalSignal` by its refusals and a `BuildRefused` by its where and reason. A build that failed because one it waited on failed adds nothing: that one's refusal is recorded already. Any other value, or one whose reading throws, is `failed during assembly`, its text never kept, and never passed over.
 
 ## Depends on

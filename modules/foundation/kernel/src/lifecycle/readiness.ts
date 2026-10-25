@@ -104,8 +104,15 @@ export function readinessOf(
 		const { promise: deadline, resolve } = Promise.withResolvers<Outcome>();
 		const timer = setTimeout(() => resolve({ outcome: "late" }), deadlineMs);
 		timer.unref();
-		return Promise.all(list.map((probe) => one(probe, deadline)))
-			.then((passed) => report(passed, passed.every(Boolean) ? "ready" : "unready"))
-			.finally(() => clearTimeout(timer));
+		return (
+			Promise.all(list.map((probe) => one(probe, deadline)))
+				// A stop begun while the probes ran reads them all down, as one begun before.
+				.then((passed) =>
+					stopping()
+						? report([], "unready")
+						: report(passed, passed.every(Boolean) ? "ready" : "unready"),
+				)
+				.finally(() => clearTimeout(timer))
+		);
 	};
 }

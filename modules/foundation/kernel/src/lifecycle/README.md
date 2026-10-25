@@ -15,7 +15,7 @@ Internal module of `kernel`: what runs once the assembly starts, and how it stop
 
 ## Invariants
 - A run still going takes the next tick too; a failed run is one warn line with the error's type, and the next follows.
-- A check still running is joined, and aborted once no caller waits; once stop begins, every probe answers down.
+- A check still running is joined, and aborted once no caller waits; once stop begins, every probe answers down, in a report asked before it too.
 - Stop waits for the periodic tasks, then calls the hooks in reverse order, each with a signal that aborts at the deadline; a hook that fails or runs past it is one warn line; the hooks left are called without waiting, their signal aborted, with no `late` line of their own, though a failure of theirs is still warned.
 - A hook past the deadline is warned `late`, and again `failed` should it reject later, which may come after a refused assembly's refusal is told.
 - A warn line names the thrown value's type, `unknown` where reading it throws (a revoked proxy, a `name` getter that throws), so a malformed throw never stops the hooks left.

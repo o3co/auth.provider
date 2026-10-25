@@ -32,7 +32,10 @@ export interface BuildContext<S> extends Runtime {
 	 */
 	every(intervalMs: number, task: (signal: AbortSignal) => Promise<void>): void;
 	refuse(where: string, reason: string): never;
-	/** Refuses with every problem found at once, so the operator sees them together. */
+	/**
+	 * Refuses with every problem found at once, so the operator sees them together. The list, and
+	 * the signal thrown, are left as given: one emptied or rethrown altered may leave no refusal read.
+	 */
 	refuseAll(refusals: readonly Refusal[]): never;
 }
 

@@ -78,6 +78,22 @@ describe("an assembly refused after its builds", () => {
 		).toEqual([{ where: "refusing", reason: "refused on purpose" }]);
 	});
 
+	it("refuses with each refusal's words as they were taken, whatever a stop hook does to the refusal given", async () => {
+		const given = { where: "given", reason: "as taken" };
+		const changing = holding("changing", () => {
+			given.where = "changed";
+			given.reason = "after rollback";
+		});
+		const giving = defineModule({ name: "giving", takes: [] }, (m) => [
+			m.provide(contract<void>("giving")).by((c) => c.refuseAll([given])),
+		]);
+		const refusals = await refusalsOf(
+			assemble({ modules: [changing.module, giving], config: single }),
+		);
+		expect(refusals).toEqual([{ where: "given", reason: "as taken" }]);
+		expect(Object.isFrozen(refusals[0])).toBe(true);
+	});
+
 	it("runs no hook registered once its build settled", async () => {
 		let later = false;
 		const registering = holding("registering", (c) => {
