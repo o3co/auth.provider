@@ -25,4 +25,4 @@ Internal module of `passkeys`: the passkey records, read in the shape written, a
 - Passkeys under `c-` and subjects under `s-`, each followed by the SHA-256 of the id or the subject in base64url, in the passkey store's two spaces.
 
 ## Depends on
-- `webauthn` (the canonical form, the credential); the package's contract and store interface
+- `kernel` (`Unavailable`), `webauthn` (the canonical form, the credential); the package's contract and store interface
