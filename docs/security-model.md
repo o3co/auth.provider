@@ -81,10 +81,13 @@ Each promise below holds across every module composed. Each names what keeps it 
 ## Boot
 
 - **Guaranteed:**
+  - In a production deployment (`kernel.environment`, `production` by default), boot refuses what each module declares a production deployment must not hold: a plain-http public origin or issuer, a page on a loopback host over plain http, an `http://localhost` WebAuthn origin. A declaration that throws refuses its module, never showing what it threw.
   - The app serves nothing while any setting is refused. Every refusal is reported at once, by setting path.
   - Key material has no default.
   - A sample value left in place (`REPLACE-…`) is refused.
-- **Left to you:** keeping the configuration files and environment that hold secrets readable only by the app.
+- **Left to you:**
+  - Keeping the configuration files and environment that hold secrets readable only by the app.
+  - Setting `kernel.environment = development` only to try the provider on one machine. Production still takes plain http on a loopback host for an upstream identity provider's browser endpoints, and loopback and private-use redirect and logout URIs for clients.
 
 ## Secrets and logs
 
