@@ -78,6 +78,22 @@ const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
 		},
 	})),
 ]);
+/** A way back a subject binds: guessable, not counting, adding no mfa, as a code by mail is by default. */
+const mailBack = defineModule({ name: "kind-mail-back", takes: [] }, (m) => [
+	m.contribute(factorKinds).by(() => ({
+		kind: "mail-back",
+		amr: ["email"],
+		addsSecondFactor: false,
+		guessable: true,
+		counts: false,
+		enroll: async () => {
+			const secret = randomBytes(6).toString("hex");
+			return { secret, show: { secret } };
+		},
+		verify: async (secret, _state, proof) =>
+			proof === secret ? { kind: "valid" as const, state: null } : { kind: "invalid" as const },
+	})),
+]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
 const backup = defineModule({ name: "kind-backup", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
@@ -1517,4 +1533,28 @@ it("takes all it names, with a witnessing and without", async () => {
 	expect(
 		(await takesUnused((await serve({}, { extra: [contributing] })).input)).mfa,
 	).toBeUndefined();
+});
+
+describe("a way back that does not count", () => {
+	it("is bound by its subject through begin, its proof adding its own amr and never mfa", async () => {
+		const { decided } = await serve({}, { kinds: [code, backup, mailBack] });
+		const begun = await decided.begin("wen", "mail-back");
+		expect(begun.kind).toBe("begun");
+		if (begun.kind !== "begun") return;
+		const secret = String((begun.show as { secret: string }).secret);
+		const proved = await decided.provePending("wen", begun.pending, secret);
+		expect(proved).toMatchObject({ kind: "valid" });
+		if (proved.kind !== "valid") return;
+		expect(proved.amr).toEqual(["email"]);
+		const bound = await decided.bind("wen", begun.pending, proved.state);
+		expect(bound.kind).toBe("bound");
+		expect((await decided.held("wen")).map((f) => f.kind)).toEqual(["mail-back"]);
+		// It is no counting factor: a required second factor is still to bind.
+		expect(await decided.countingHeld("wen", "login")).toBe(false);
+	});
+
+	it("is refused to begin where mfa issues it itself (one guessing cannot beat), as before", async () => {
+		const { decided } = await serve({}, { kinds: [code, backup, mailBack] });
+		expect(await decided.begin("wen", "backup")).toEqual({ kind: "unknown-kind" });
+	});
 });
