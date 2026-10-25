@@ -14,7 +14,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `oidc`)
-- IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (the asymmetric ones `external-jwt` knows; default RS256, PS256, ES256, EdDSA), `require-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
+- IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (the asymmetric ones `external-jwt` knows; default RS256, ES256, EdDSA, one for each kind of key), `require-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
 - IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `outbound` reads a host list: a host, or `.name` for the name and the names under it; default none)
 
 ## Invariants
