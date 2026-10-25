@@ -8,6 +8,7 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 |---|---|---|---|---|---|---|---|---|---|---|
 | [RFC 7009: OAuth 2.0 Token Revocation](rfc7009.md) | 9 | 7 | 0 | 7 | 0 | 2 | 0 | 2 | 0 | 0 |
 | [RFC 7521: Assertion Framework for OAuth 2.0 Client Authentication and Authorization Grants](rfc7521.md) | 31 | 28 | 0 | 28 | 0 | 1 | 0 | 1 | 0 | 2 |
+| [RFC 7523: JSON Web Token (JWT) Profile for OAuth 2.0 Client Authentication and Authorization Grants](rfc7523.md) | 30 | 28 | 0 | 28 | 0 | 0 | 0 | 0 | 0 | 2 |
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 8707: Resource Indicators for OAuth 2.0](rfc8707.md) | 3 | 2 | 0 | 2 | 0 | 1 | 0 | 1 | 0 | 0 |
-| Total | 55 | 45 | 0 | 45 | 0 | 7 | 0 | 7 | 0 | 3 |
+| Total | 85 | 73 | 0 | 73 | 0 | 7 | 0 | 7 | 0 | 5 |
