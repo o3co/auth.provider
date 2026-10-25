@@ -29,6 +29,7 @@
 - `deviates` is a SHOULD's alone and names a decision the decisions hold; `noncompliant` is a MUST's alone.
 - A ledger row names items of its own spec whose strength is its keyword's (MUST, REQUIRED and SHALL as MUST; SHOULD and RECOMMENDED as SHOULD), or excludes it by one of the reasons above, a row that restates an item naming one whose strength is its keyword's; every item is named by a row; a section's rows are numbered from 1 in order.
 - A file holds tests where it is a `.test.ts` or `.case.ts` file, or lies under a `test` directory.
+- A test that names an item is known by where it is written: its suites' titles, outermost first, and its own, a suite's title that is no plain string left unknown.
 - An ID is taken only from a test's title, written in brackets: the first argument, a plain string, of a call of `it`, `test` or `describe` that takes the title, directly, through `.only`, `.skip`, `.concurrent` and the like, or as the function `.each`, `.for`, `.runIf` and `.skipIf` return (`.each` and `.for` given their table as a tagged template too); their own arguments and tables are no title. Only files ending `.test.ts` or `.case.ts` hold titles.
 - Strings are read decoded, the rest of a source as written. Anything written like an ID (a spec's name, a dash and more) anywhere else in a workspace package's sources, or malformed, is a finding; so is an ID naming no item, or an out-of-scope item.
 - The report is held to the committed `docs/compliance`; a report that differs fails, naming the command.

@@ -63,7 +63,10 @@ export function workspaceTests(root: string) {
 				});
 			for (const t of read.titles)
 				for (const id of t.ids)
-					tests.set(id, [...(tests.get(id) ?? []), { pkg: p.name, file, title: t.title }]);
+					tests.set(id, [
+						...(tests.get(id) ?? []),
+						{ pkg: p.name, file, title: t.title, path: t.path, suite: t.suite },
+					]);
 		}
 	}
 	return { tests, stray };

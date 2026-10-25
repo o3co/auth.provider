@@ -175,6 +175,7 @@ export function entriesOfFile(pkg: string, file: string, expected: Expected): re
  * forms (`%s`, `%d`, `%#` and the rest) and a table's `$property` stand for what they expanded to.
  */
 export function titleMatches(title: string, name: string): boolean {
+	if (title === name) return true;
 	const parts = title.split(/(%%|%[sdifjoOc#]|\$[A-Za-z_]\w*(?:\.\w+)*)/);
 	const pattern = parts
 		.map((p, k) =>
@@ -255,8 +256,11 @@ export function itemStatuses(
 		// is met by a test in it; a run none of whose reports ran the file lacks it too.
 		const unrun = refs.flatMap((ref) => {
 			const path = join(pkgDirs.get(ref.pkg) ?? ref.pkg, ref.file);
-			const ran = (r: EvidenceReport) =>
-				r.tests.some((t) => t.file === path && t.names.some((n) => titleMatches(ref.title, n)));
+			// A test's names hold its path's; a suite's, its path's and then a test's inside it.
+			const meets = (names: readonly string[]) =>
+				(ref.suite ? names.length > ref.path.length : names.length === ref.path.length) &&
+				ref.path.every((s, k) => s === null || titleMatches(s, names[k] ?? ""));
+			const ran = (r: EvidenceReport) => r.tests.some((t) => t.file === path && meets(t.names));
 			return entriesOfFile(ref.pkg, ref.file, expected)
 				.filter((e) => present.has(e))
 				.filter((e) => {

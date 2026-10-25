@@ -6,6 +6,10 @@ export interface TestRef {
 	readonly pkg: string;
 	readonly file: string;
 	readonly title: string;
+	/** Where it is written: its suites' titles, outermost first, then its own (`null` for one not a plain string). */
+	readonly path: readonly (string | null)[];
+	/** Whether it is a suite's title, met by the tests inside it. */
+	readonly suite: boolean;
 }
 
 export type StaticStatus = "mapped" | "hole" | "out-of-scope" | "deviates" | "noncompliant";
