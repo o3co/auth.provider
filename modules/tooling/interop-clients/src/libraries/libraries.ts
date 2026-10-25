@@ -9,6 +9,9 @@ export const flows = [
 	"resource",
 	"client-credentials",
 	"revocation",
+	"dpop",
+	"device",
+	"logout",
 ] as const;
 export type Flow = (typeof flows)[number];
 
@@ -29,7 +32,17 @@ const java = () => (process.env.JAVA_HOME ? join(process.env.JAVA_HOME, "bin", "
 export const libraries: readonly Library[] = [
 	{
 		name: "openid-client",
-		flows: ["login", "public-login", "refresh", "resource", "client-credentials", "revocation"],
+		flows: [
+			"login",
+			"public-login",
+			"refresh",
+			"resource",
+			"client-credentials",
+			"revocation",
+			"dpop",
+			"device",
+			"logout",
+		],
 		build: [],
 		adapter: () => ({
 			command: process.execPath,
@@ -40,7 +53,17 @@ export const libraries: readonly Library[] = [
 	},
 	{
 		name: "nimbus",
-		flows: ["login", "public-login", "refresh", "resource", "client-credentials", "revocation"],
+		flows: [
+			"login",
+			"public-login",
+			"refresh",
+			"resource",
+			"client-credentials",
+			"revocation",
+			"dpop",
+			"device",
+			"logout",
+		],
 		// The runtime jars are checked against their pins before anything is compiled or shaded from them.
 		build: [
 			[

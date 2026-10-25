@@ -14,6 +14,8 @@ export interface Run {
 	readonly files?: string;
 	/** A test of it that is skipped, excused or not, or left todo, fails its items. */
 	readonly noSkip?: true;
+	/** A test of it that failed stops a release, whatever items it names or none. */
+	readonly gate?: true;
 }
 
 /** A package's printed runs, each checked to be a run; a value that is not refused naming the package. */
@@ -26,7 +28,8 @@ export function runsPrinted(pkg: string, printed: unknown): Run[] {
 			(o.matrix === undefined || typeof o.matrix === "string") &&
 			(o.releaseOnly === undefined || o.releaseOnly === true) &&
 			(o.files === undefined || (typeof o.files === "string" && o.files !== "")) &&
-			(o.noSkip === undefined || o.noSkip === true)
+			(o.noSkip === undefined || o.noSkip === true) &&
+			(o.gate === undefined || o.gate === true)
 		);
 	};
 	if (!Array.isArray(printed) || !printed.every(isRun))
@@ -56,6 +59,8 @@ export interface Expected {
 	}[];
 	/** The runs that take no skip. */
 	readonly noSkip: ReadonlySet<string>;
+	/** The runs whose failed tests stop a release. */
+	readonly gate: ReadonlySet<string>;
 }
 
 export type RunStatus =
@@ -153,6 +158,27 @@ export function selectReports(
 		lastAttempt.set(keyOf(r), Math.max(lastAttempt.get(keyOf(r)) ?? 0, r.identity.attempt));
 	// Every report of the last attempt: two processes of one entry, job and attempt both count.
 	return ours.filter((r) => r.identity.attempt === lastAttempt.get(keyOf(r)));
+}
+
+/**
+ * Each failed test of a gate run's reports, `<entry>: <names>`, and each file of one that failed
+ * outside its tests: what stops a release whatever items they name. An excused result is no failure.
+ */
+export function gateFailures(
+	reports: readonly EvidenceReport[],
+	gate: ReadonlySet<string>,
+): string[] {
+	return reports
+		.filter((r) => gate.has(r.identity.entry))
+		.flatMap((r) =>
+			r.tests
+				.filter((t) => t.state === "failed")
+				.map((t) =>
+					t.names.length === 0
+						? `${r.identity.entry}: ${t.file} failed outside its tests`
+						: `${r.identity.entry}: ${t.names.join(" > ")}`,
+				),
+		);
 }
 
 /** The expected runs a test file's tests run in. */

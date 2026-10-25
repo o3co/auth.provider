@@ -8,6 +8,7 @@ import {
 	complianceTable,
 	type Expected,
 	entriesOfFile,
+	gateFailures,
 	itemStatuses,
 	planOf,
 	runsPrinted,
@@ -160,6 +161,7 @@ describe("itemStatuses", () => {
 		runsOf: new Map(),
 		suffixed: [],
 		noSkip: new Set(),
+		gate: new Set(),
 	};
 	const pkgDirs = new Map([
 		["@mod/x", "modules/x/x"],
@@ -443,7 +445,14 @@ describe("each test of an item, in each run of its file", () => {
 				a ? [a] : [],
 				tests,
 				[r],
-				{ entries: ["unit"], areas: new Set(), runsOf: new Map(), suffixed: [], noSkip: new Set() },
+				{
+					entries: ["unit"],
+					areas: new Set(),
+					runsOf: new Map(),
+					suffixed: [],
+					noSkip: new Set(),
+					gate: new Set(),
+				},
 				new Map([["@mod/x", "modules/x/x"]]),
 			)[0];
 		// The suite's title is met by a test inside it.
@@ -506,6 +515,7 @@ describe("a test's results, matched to its title in the source", () => {
 		runsOf: new Map(),
 		suffixed: [],
 		noSkip: new Set(),
+		gate: new Set(),
 	};
 	const report = (names: string[][]): EvidenceReport => ({
 		identity: identity("unit"),
@@ -563,6 +573,7 @@ describe("a test's results, matched to where it is written", () => {
 		runsOf: new Map(),
 		suffixed: [],
 		noSkip: new Set(),
+		gate: new Set(),
 	};
 	const ref = (path: (string | null)[], suite = false) => ({
 		pkg: "@mod/x",
@@ -616,5 +627,54 @@ describe("a test's results, matched to where it is written", () => {
 		expect(
 			of([ref(["100%% ready [rfc9999-4-a]"])], report([["100%% ready [rfc9999-4-a]"]])),
 		).toMatchObject({ status: "passed", unrun: [] });
+	});
+});
+
+describe("a gate run", () => {
+	it("is taken as a run's own field, and refused where not true", () => {
+		const gated = [
+			{ entry: "@mod/oidf#basic", kind: "plan", matrix: "basic", gate: true as const },
+		];
+		expect(runsPrinted("@mod/oidf", gated)).toEqual(gated);
+		expect(() => runsPrinted("@mod/oidf", [{ entry: "e", kind: "k", gate: false }])).toThrow();
+		expect([...expectedOf([...gated, { entry: "unit", kind: "unit" }], false).gate]).toEqual([
+			"@mod/oidf#basic",
+		]);
+	});
+
+	it("fails on each test of its reports that failed, named by run and title; excused and passed ones count not", () => {
+		const gate: EvidenceReport = {
+			identity: identity("@mod/oidf#basic"),
+			errors: 0,
+			tests: [
+				{
+					file: "modules/o/oidf/test/plan.case.ts",
+					names: ["basic", "oidcc-server"],
+					state: "passed",
+				},
+				{
+					file: "modules/o/oidf/test/plan.case.ts",
+					names: ["basic", "oidcc-userinfo-get"],
+					state: "failed",
+				},
+				{
+					file: "modules/o/oidf/test/plan.case.ts",
+					names: ["basic", "oidcc-prompt-login"],
+					state: "skipped",
+					note: "excused: third-party",
+				},
+				{ file: "modules/o/oidf/test/broken.case.ts", names: [], state: "failed" },
+			],
+		};
+		const other: EvidenceReport = {
+			identity: identity("unit"),
+			errors: 0,
+			tests: [{ file: "modules/x/x/test/x.test.ts", names: ["fails"], state: "failed" }],
+		};
+		expect(gateFailures([gate, other], new Set(["@mod/oidf#basic"]))).toEqual([
+			"@mod/oidf#basic: basic > oidcc-userinfo-get",
+			"@mod/oidf#basic: modules/o/oidf/test/broken.case.ts failed outside its tests",
+		]);
+		expect(gateFailures([other], new Set(["@mod/oidf#basic"]))).toEqual([]);
 	});
 });
