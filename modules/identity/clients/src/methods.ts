@@ -96,10 +96,13 @@ export const secretBasic = (checker: SecretChecker): AuthMethod => ({
 	verify: async (request, client) => {
 		const credentials = basic(request);
 		if (credentials === undefined) return false;
-		// A client_id in the body must name the same client, so one request never names two.
+		// A client_id in the body must name the same client, so one request never names two. The secret
+		// is checked either way: refused without the work, a known id would answer sooner than an
+		// unknown one, whose refusal waits for the decoy's.
 		const named =
 			!sends(request, "client_id") || request.fields.single("client_id") === credentials.id;
-		return named && secretMatches(checker, client, credentials.secret);
+		const matches = await secretMatches(checker, client, credentials.secret);
+		return named && matches;
 	},
 	decoy: async (request) => {
 		await checker.check(undefined, basic(request)?.secret ?? "");
