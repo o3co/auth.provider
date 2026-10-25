@@ -27,7 +27,7 @@ A change that breaks one of these is a major version after 1.0, and a minor vers
 3. **Module contracts**: what each package exports at `.` and `./module`, the names of the modules an app composes, and the contract tests a package offers (`*Contract`) for implementations of its contracts. The rest of `./testing` (fakes, configuration builders) is offered as is.
 4. **Audit events**: each kind and its attributes, as [the audit event reference](audit-events.md) lists them.
 5. **Metrics**: each metric's name, type and labels.
-6. **Data at rest**: a version reads what the version before it wrote to the store, so an upgrade needs no migration of stored records.
+6. **Data at rest**: a version reads what the version before it wrote to the store, so an upgrade needs no migration of stored records. How a record's format changes is decided in 0.20; until then, a minor version that changes a record's format says so with an upgrade notice.
 7. **Log events**: each event's name (such as `kernel.stop_failed`), as operators alert on it; not its fields or the wording of a message.
 
 Not covered: internal modules and anything a package does not export, the wording of error descriptions and log messages, `./testing` but for its contract tests, behaviour no card or reference states, the conformance and tooling packages, and a feature marked preview on its card.
