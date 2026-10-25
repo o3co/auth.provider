@@ -7,5 +7,5 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | Specification | Items | MUST in scope | MUST mapped | MUST hole | MUST noncompliant | SHOULD in scope | SHOULD mapped | SHOULD hole | SHOULD deviates | Out of scope |
 |---|---|---|---|---|---|---|---|---|---|---|
 | [RFC 7009: OAuth 2.0 Token Revocation](rfc7009.md) | 9 | 7 | 0 | 7 | 0 | 2 | 0 | 2 | 0 | 0 |
-| [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 11 | 7 | 0 | 7 | 0 | 3 | 0 | 3 | 0 | 1 |
-| Total | 20 | 14 | 0 | 14 | 0 | 5 | 0 | 5 | 0 | 1 |
+| [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
+| Total | 21 | 15 | 0 | 15 | 0 | 5 | 0 | 5 | 0 | 1 |
