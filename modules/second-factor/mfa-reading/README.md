@@ -15,7 +15,7 @@
 - `Shown`, `Fence` (compared, never computed with), `Proved`, `Challenged`.
 
 ## Invariants
-- A counting factor is one of a kind declared counting. "optional" stops only subjects holding a factor; "required" asks one with no counting factor for a first binding, one of a unique value not yet claimed not counting as one.
+- A counting factor is one of a kind declared counting. "optional" stops only subjects holding a factor; "required" asks one with no counting factor for a first binding. A factor of a unique value not yet claimed counts there and for `countingHeld`, being the subject's own and provable; only the readings as written leave it out.
 - A factor's state is written only over the state judged, so one proof passes once; a factor gone meanwhile is raced. A store that cannot answer is unavailable, never a refusal.
 - A sealed value given back comes only from mfa's records or `mfa-flows`' transactions, so one that will not open is unavailable.
 - A proof adds its own amr kept to its kind's (else its kind's), and `mfa` when its kind adds it.
