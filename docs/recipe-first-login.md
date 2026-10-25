@@ -41,6 +41,7 @@ Write `config/local.conf` with the key and the hash:
 <!-- generated:local-conf -->
 ```hocon
 kernel.deployment = single
+kernel.environment = development
 issuer.url = "http://localhost:8080"
 http {
   public-origin = "http://localhost:8080"
