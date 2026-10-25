@@ -24,6 +24,15 @@ describe("a thrown value's kind", () => {
 		expect(thrownKind(undefined)).toBe("undefined");
 	});
 
+	it("names only what the kernel knows: any other error's name is Error, never told", () => {
+		const named = (name: unknown) => Object.assign(new Error("x"), { name });
+		expect(thrownKind(named("PRIVATE_NAME"))).toBe("Error");
+		expect(thrownKind(named("token=abc"))).toBe("Error");
+		expect(thrownKind(named(42))).toBe("Error");
+		expect(thrownKind(named("AbortError"))).toBe("AbortError");
+		expect(thrownKind({ name: "TypeError" })).toBe("object");
+	});
+
 	it("is unknown where reading it throws: a revoked proxy, a name getter that throws", () => {
 		const nameless = Object.defineProperty(new Error("x"), "name", {
 			get() {

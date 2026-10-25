@@ -17,6 +17,7 @@ import {
 	type Refusal,
 	RefusalSignal,
 	readThrown,
+	refusalsIn,
 } from "./refusal/refusal.ts";
 import { guardedLog, logSinks, routedLog } from "./runtime/log.ts";
 import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime/runtime.ts";
@@ -96,12 +97,9 @@ function recordFailure(error: unknown, where: string, refusals: Refusal[]): void
 		"unreadable",
 	);
 	if (seen === "signal") {
-		// Read as a thrown value is: a signal rethrown altered may hold none, or none readable.
-		const told = readThrown(
-			() => (error as RefusalSignal).refusals.map(({ where, reason }) => ({ where, reason })),
-			[],
-		);
-		refusals.push(...(told.length > 0 ? told : [failed]));
+		// Read as a thrown value is, into the kernel's own list: a signal rethrown altered may hold none.
+		const told = refusalsIn(readThrown(() => (error as RefusalSignal).refusals, undefined));
+		for (const refusal of told.length > 0 ? told : [failed]) refusals.push(refusal);
 	}
 	// A library's refusal names its own where and reason; any other error's text is never kept.
 	else if (seen !== "dependency") refusals.push(buildRefusalOf(error) ?? failed);

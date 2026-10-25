@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { refusalsOf } from "../../../test/refusals.ts";
-import { assemble, contract, defineModule, kernelConfig, type Refusal } from "../../contract.ts";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	kernelConfig,
+	type Refusal,
+} from "../../contract.ts";
 
 const single = kernelConfig();
 
@@ -76,5 +83,64 @@ describe("a refusal signal, as assembly records it", () => {
 				assemble({ modules: [refusing((_, signal) => signal, true)], config: single }),
 			),
 		).toEqual(failed);
+	});
+
+	it("reads a rethrown signal's refusals one at a time, by index, keeping only each where and reason that is a string", async () => {
+		/** A module whose factory refuses, then rethrows its signal with `list` for its refusals. */
+		const rethrowing = (list: unknown) =>
+			defineModule({ name: "a", takes: [] }, (m) => [
+				m.provide(contract("p")).by((c) => {
+					try {
+						c.refuse("a.x", "must refuse");
+					} catch (signal) {
+						throw new Proxy(signal as object, {
+							get: (target, key) => (key === "refusals" ? list : Reflect.get(target, key)),
+						});
+					}
+				}),
+			]);
+		const one = { where: "a.x", reason: "must refuse" };
+		const failed = [{ where: "a", reason: "failed during assembly" }];
+		const secret = {
+			where: "a.y",
+			get reason(): string {
+				throw new Error("secret=abc");
+			},
+		};
+		const cases: [string, unknown, readonly Refusal[]][] = [
+			["a map of its own answering nothing", Object.assign([one], { map: () => undefined }), [one]],
+			[
+				"a map of its own answering a length over an empty iterator",
+				Object.assign([], { map: () => ({ length: 1, *[Symbol.iterator]() {} }) }),
+				failed,
+			],
+			// biome-ignore lint/suspicious/noSparseArray: a list with a hole is the case.
+			["a list with a hole", [, one], [one]],
+			[
+				"a refusal whose reason throws a secret",
+				Object.assign([secret, one], {
+					map() {
+						return this;
+					},
+				}),
+				[one],
+			],
+			[
+				"refusals whose words are no strings, beside one whose reason is empty",
+				[{ where: 1, reason: "r" }, null, "text", { where: "a.z", reason: "" }],
+				[{ where: "a.z", reason: "" }],
+			],
+			["no list at all", 42, failed],
+		];
+		for (const [label, list, expected] of cases) {
+			let told: unknown;
+			try {
+				await assemble({ modules: [rethrowing(list)], config: single });
+				told = "assembled";
+			} catch (error) {
+				told = BootRefused.is(error) ? error.refusals : `raw: ${String(error)}`;
+			}
+			expect(told, label).toEqual(expected);
+		}
 	});
 });

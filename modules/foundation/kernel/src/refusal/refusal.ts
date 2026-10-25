@@ -21,12 +21,11 @@ export class BootRefused extends Error {
 	readonly refusals: readonly Refusal[];
 	readonly [bootRefusedMark] = true;
 	constructor(refusals: readonly Refusal[]) {
-		super(`boot refused (${refusals.length})`);
+		// Its own list, read one at a time: whoever gave the refusals may change them later.
+		const read = refusalsIn(refusals);
+		super(`boot refused (${read.length})`);
 		this.name = "BootRefused";
-		// Each refusal's words copied as they are now: whoever gave one may change it later.
-		this.refusals = Object.freeze(
-			refusals.map(({ where, reason }) => Object.freeze({ where, reason })),
-		);
+		this.refusals = Object.freeze(read);
 	}
 	/** Whether `error` is a refused boot, by its mark rather than its class, so two copies of the kernel agree; it never throws. */
 	static is(error: unknown): error is BootRefused {
@@ -85,9 +84,58 @@ export function readThrown<T>(read: () => T, otherwise: T): T {
 	}
 }
 
-/** The type a warn line names for a thrown value: its name, or `unknown` where reading it throws. */
+/** The error names a warn line may tell: the language's, the platform's for an abort or a timeout, and the kernel's. */
+const knownKinds: ReadonlySet<string> = new Set([
+	"Error",
+	"TypeError",
+	"RangeError",
+	"SyntaxError",
+	"ReferenceError",
+	"EvalError",
+	"URIError",
+	"AggregateError",
+	"AbortError",
+	"TimeoutError",
+	"Unavailable",
+	"BuildRefused",
+	"BootRefused",
+]);
+
+/**
+ * The type a warn line names for a thrown value: an error's name where the kernel knows it, else
+ * `Error` (a name is anyone's, a secret's too); a value's type; `unknown` where reading it throws.
+ */
 export const thrownKind = (error: unknown): string =>
-	readThrown(() => (error instanceof Error ? String(error.name) : typeof error), "unknown");
+	readThrown(() => {
+		if (!(error instanceof Error)) return typeof error;
+		const { name } = error;
+		return typeof name === "string" && knownKinds.has(name) ? name : "Error";
+	}, "unknown");
+
+/**
+ * The refusals a value holds, read as a thrown value is and never throwing: by index, one at a
+ * time, each kept only where its where and reason are strings (an empty one is still words), into a list of the
+ * kernel's own; a hole, a value of another shape or one whose reading throws is left out.
+ */
+export function refusalsIn(list: unknown): Refusal[] {
+	const read: Refusal[] = [];
+	const length = readThrown(() => {
+		const told = (list as { readonly length?: unknown }).length;
+		return typeof told === "number" && Number.isSafeInteger(told) && told > 0 ? told : 0;
+	}, 0);
+	for (let i = 0; i < length; i++) {
+		const one = readThrown((): Refusal | undefined => {
+			const item = (list as Readonly<Record<number, unknown>>)[i];
+			if (typeof item !== "object" || item === null) return undefined;
+			const { where, reason } = item as { readonly where?: unknown; readonly reason?: unknown };
+			return typeof where === "string" && typeof reason === "string"
+				? Object.freeze({ where, reason })
+				: undefined;
+		}, undefined);
+		if (one !== undefined) read.push(one);
+	}
+	return read;
+}
 
 /**
  * The refusal a thrown value is, read once and never throwing: one marked, whose where and reason
@@ -113,12 +161,10 @@ export function buildRefusalOf(error: unknown): Refusal | undefined {
 export class RefusalSignal extends Error {
 	readonly refusals: readonly Refusal[];
 	constructor(refusals: readonly Refusal[]) {
-		// Copied as given, each refusal's words too: the factory may change its list once it threw.
-		const copied = Object.freeze(
-			refusals.map(({ where, reason }) => Object.freeze({ where, reason })),
-		);
-		super(`${copied.length} refusal(s)`);
-		this.refusals = copied;
+		// Its own list, read one at a time: the factory may change what it gave once it threw.
+		const read = Object.freeze(refusalsIn(refusals));
+		super(`${read.length} refusal(s)`);
+		this.refusals = read;
 	}
 }
 
