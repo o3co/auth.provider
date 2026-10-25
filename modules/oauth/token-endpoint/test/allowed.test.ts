@@ -16,7 +16,7 @@ const quiet = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n).fill(1) },
 });
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 

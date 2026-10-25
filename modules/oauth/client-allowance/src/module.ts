@@ -2,6 +2,6 @@ import { metadataSections } from "@mod/clients";
 import { defineModule } from "@mod/kernel";
 import { allowances } from "./metadata.ts";
 
-export default defineModule({ name: "client-allowance", replicaSafe: true }, (m) => [
+export default defineModule({ name: "client-allowance", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(metadataSections).by(() => allowances),
 ]);

@@ -56,7 +56,7 @@ const section = z.strictObject({
 /** Kept longer than any proof is accepted by this much, so clock differences never let one back. */
 const clockAllowanceMs = 60_000;
 
-export default defineModule({ name: "dpop", section }, (m) => [
+export default defineModule({ name: "dpop", section, takes: [spentProofs] }, (m) => [
 	m.contribute(senderBindings).by(async (c) => {
 		const windowMs = c.section["proof-window"] * 1000;
 		const { required, ttl, secret } = c.section.nonce;

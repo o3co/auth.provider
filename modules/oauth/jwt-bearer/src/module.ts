@@ -124,7 +124,18 @@ const spentName = (issuer: string, jti: string) =>
 		.update(JSON.stringify([issuer, jti]))
 		.digest("base64url");
 
-export default defineModule({ name: "jwt-bearer", section }, (m) => [
+/** What the grant takes; its own `linkedIssuers` is not named, its own points it collects are. */
+const takes = [
+	issuer,
+	tokenEndpointLocation,
+	spentAssertions,
+	revocations,
+	externalJwt,
+	signerKeys,
+	linkedSubjects,
+];
+
+export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 	m
 		.provide(linkedIssuers)
 		.by((c) => [...linkedOf(c.section)].map(([issuer, upstream]) => ({ upstream, issuer }))),

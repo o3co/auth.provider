@@ -4,9 +4,12 @@ import { composedGrants } from "@mod/grants";
 import type { BuildContext } from "@mod/kernel";
 import { outboundLimits, withinHosts } from "@mod/outbound-policy";
 import { documentUrl } from "./document/document.ts";
-import { readingOver } from "./document/reading.ts";
+import { readingOver, readingTakes } from "./document/reading.ts";
 import { fetchingWith } from "./fetching/fetching.ts";
 import type { Settings } from "./section.ts";
+
+/** What `supportedOver` and `sourceOver` take from the build context. */
+export const sourceTakes = [...readingTakes, outboundLimits, composedGrants] as const;
 
 /** Whether document clients are taken: only with the code grant composed. */
 export const supportedOver = async (c: BuildContext<Settings>) =>

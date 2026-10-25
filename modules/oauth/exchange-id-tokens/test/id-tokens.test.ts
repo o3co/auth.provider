@@ -18,7 +18,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
@@ -76,13 +76,13 @@ const settings = {
 	},
 };
 
-const dpopKind = defineModule({ name: "dpop-kind" }, (m) => [
+const dpopKind = defineModule({ name: "dpop-kind", takes: [] }, (m) => [
 	m
 		.contribute(senderBindings)
 		.by(() => ({ member: "jkt", tokenType: "DPoP", read: async () => ({ kind: "absent" }) })),
 ]);
 /** The id_tokens taken, in memory, fresh for each composition. */
-const usedStandIn = defineModule({ name: "used-id-tokens" }, (m) => [
+const usedStandIn = defineModule({ name: "used-id-tokens", takes: [] }, (m) => [
 	m.provide(usedIdTokens).by(() => memoryUsedIdTokens().used),
 ]);
 
@@ -93,47 +93,50 @@ const linksFor = (section: unknown) =>
 		return taken ? [{ idp: taken.upstream ?? kind, subject: `${kind}-sub` }] : [];
 	});
 
-const boot = (section: unknown, extra: readonly Module[] = []) =>
-	assemble({
-		modules: [
-			http,
-			tokensStandIn(),
-			issuerModule,
-			clientsModule,
-			secretHashModule,
-			grantCaller,
-			clientAllowanceModule,
-			dpopKind,
-			outboundModule,
-			externalJwtModule,
-			usedStandIn,
-			subjectRevocationStandIn,
-			usersModule,
-			memoryUsersStores().module,
-			tokenExchange,
-			exchangeIdTokensOver(issuers),
-			...extra,
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...issuerConfig(),
-			...clientsConfig([
-				...["ios-app", "android-app", "web-backend"].map((id) =>
-					confidentialClient({ id, sections: allowed }),
-				),
-				publicClient({
-					id: "device",
-					sections: { ...allowed, "token-exchange": { "public-exchange": true } },
-				}),
-			]),
-			users: {
-				registered: [testUser("alice", "pw", { subject: "acct-1", upstream: linksFor(section) })],
-			},
-			"exchange-id-tokens": section,
+/** The grant's assembly, with this section. */
+const assembly = (section: unknown, extra: readonly Module[] = []) => ({
+	modules: [
+		http,
+		tokensStandIn(),
+		issuerModule,
+		clientsModule,
+		secretHashModule,
+		grantCaller,
+		clientAllowanceModule,
+		dpopKind,
+		outboundModule,
+		externalJwtModule,
+		usedStandIn,
+		subjectRevocationStandIn,
+		usersModule,
+		memoryUsersStores().module,
+		tokenExchange,
+		exchangeIdTokensOver(issuers),
+		...extra,
+	],
+	config: {
+		...kernelConfig(),
+		...httpConfig(),
+		...issuerConfig(),
+		...clientsConfig([
+			...["ios-app", "android-app", "web-backend"].map((id) =>
+				confidentialClient({ id, sections: allowed }),
+			),
+			publicClient({
+				id: "device",
+				sections: { ...allowed, "token-exchange": { "public-exchange": true } },
+			}),
+		]),
+		users: {
+			registered: [testUser("alice", "pw", { subject: "acct-1", upstream: linksFor(section) })],
 		},
-		runtime,
-	});
+		"exchange-id-tokens": section,
+	},
+	runtime,
+});
+
+const boot = (section: unknown, extra: readonly Module[] = []) =>
+	assemble(assembly(section, extra));
 
 async function serve(section: unknown = settings) {
 	const app = await boot(section);
@@ -196,7 +199,7 @@ describe("exchange-id-tokens", () => {
 
 	it("answers a foreign token for the one client that takes it, with no scope or audience of its own", async () => {
 		const verifiersSeen = contract<readonly ExchangeVerifier[]>("test.verifiers");
-		const reader = defineModule({ name: "verifier-reader" }, (m) => [
+		const reader = defineModule({ name: "verifier-reader", takes: [exchangeVerifiers] }, (m) => [
 			m.provide(verifiersSeen).by((c) => c.collect(exchangeVerifiers)),
 		]);
 		const app = await boot(settings, [reader]);
@@ -354,7 +357,7 @@ describe("exchange-id-tokens", () => {
 
 	it("tells users each upstream name it takes, with its issuer, so another module's same name refuses boot unless the issuer is the same", async () => {
 		const naming = (issuer: string) =>
-			defineModule({ name: "federation-like" }, (m) => [
+			defineModule({ name: "federation-like", takes: [] }, (m) => [
 				m.contribute(upstreamNames).by(() => ({
 					declaredBy: "federation-like",
 					names: [{ name: "google", issuer }],
@@ -372,4 +375,10 @@ describe("exchange-id-tokens", () => {
 			boot({ google: { ...settings.google, upstream: "work" } }, [naming("https://idp.example")]),
 		).resolves.toBeDefined();
 	});
+});
+
+it("takes all it names, with both kinds taken or one", async () => {
+	for (const section of [settings, { apple: settings.apple }]) {
+		expect(await takesUnused(assembly(section)), JSON.stringify(section)).toEqual({});
+	}
 });

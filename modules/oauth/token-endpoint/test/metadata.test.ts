@@ -13,14 +13,14 @@ const quiet = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n).fill(1) },
 });
 
-const echo = defineModule({ name: "echo-grant" }, (m) => [
+const echo = defineModule({ name: "echo-grant", takes: [] }, (m) => [
 	m.contribute(grants).by(() => ({
 		grantType: "urn:test:echo",
 		readsAmbient: "none",
 		handle: async () => ({ kind: "issued", body: {} }),
 	})),
 ]);
-const signed = defineModule({ name: "signed-method" }, (m) => [
+const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
 	m.contribute(authMethods).by(() => ({
 		name: "test_jwt",
 		signingAlgorithms: ["ES256"],
@@ -30,7 +30,7 @@ const signed = defineModule({ name: "signed-method" }, (m) => [
 ]);
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 

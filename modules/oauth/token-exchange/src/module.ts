@@ -47,25 +47,29 @@ const clientSection: Section<{
 	}),
 };
 
-export default defineModule({ name: "token-exchange", section }, (m) => [
-	m.contribute(metadataSections).by(() => clientSection),
-	m
-		.contribute(exchangeVerifiers)
-		.by(async (c) => selfIssued(await c.get(tokens), (await c.get(issuer)).url)),
-	m.contribute(grants).by(async (c) => {
-		const verifiers = await c.collect(exchangeVerifiers);
-		return exchangeGrant({
-			verifiers: new Map(verifiers.map((verifier) => [verifier.tokenType, verifier])),
-			tokens: await c.get(tokens),
-			ties: await c.collect(tokenTies),
-			issuer: (await c.get(issuer)).url,
-			maxActorDepth: c.section["max-actor-depth"],
-			...(c.section["max-lifetime"] === undefined
-				? {}
-				: { maxLifetimeSeconds: c.section["max-lifetime"] }),
-			othersTokens: (client) => client.section(clientSection)["others-tokens"],
-			publicExchange: (client) => client.section(clientSection)["public-exchange"],
-			now: c.clock.now,
-		});
-	}),
-]);
+export default defineModule(
+	// Its own verifiers are collected, so named; the tokens, the issuer and the ties are others'.
+	{ name: "token-exchange", section, takes: [tokens, issuer, exchangeVerifiers, tokenTies] },
+	(m) => [
+		m.contribute(metadataSections).by(() => clientSection),
+		m
+			.contribute(exchangeVerifiers)
+			.by(async (c) => selfIssued(await c.get(tokens), (await c.get(issuer)).url)),
+		m.contribute(grants).by(async (c) => {
+			const verifiers = await c.collect(exchangeVerifiers);
+			return exchangeGrant({
+				verifiers: new Map(verifiers.map((verifier) => [verifier.tokenType, verifier])),
+				tokens: await c.get(tokens),
+				ties: await c.collect(tokenTies),
+				issuer: (await c.get(issuer)).url,
+				maxActorDepth: c.section["max-actor-depth"],
+				...(c.section["max-lifetime"] === undefined
+					? {}
+					: { maxLifetimeSeconds: c.section["max-lifetime"] }),
+				othersTokens: (client) => client.section(clientSection)["others-tokens"],
+				publicExchange: (client) => client.section(clientSection)["public-exchange"],
+				now: c.clock.now,
+			});
+		}),
+	],
+);

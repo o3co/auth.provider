@@ -76,6 +76,9 @@ export function clientKeysUnder(refusals: OutboundRefusals): Section<ClientKeys>
 	};
 }
 
+/** What `clientKeysIn` takes from the build context. */
+export const keysTakes = [outboundRefusals] as const;
+
 /** The section as the composition gives it, with `outbound`'s refusals read from it. */
 export async function clientKeysIn(
 	c: Pick<BuildContext<unknown>, "get">,

@@ -15,7 +15,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import {
 	DestinationRefused,
 	type Narrower,
@@ -63,7 +63,7 @@ const wideCaps: Limits = { maxBytes: 65_536, timeoutMs: 5_000 };
 
 /** Outbound as a test stand-in: it records each request and answers from the script, under the caps given. */
 const outboundStandIn = (caps: Limits = wideCaps, lookups?: number) =>
-	defineModule({ name: "outbound" }, (m) => [
+	defineModule({ name: "outbound", takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async (url, request, narrower) => {
 				sent.push({ url, request, narrower });
@@ -84,7 +84,7 @@ const allowanceSection: Section<unknown> = {
 
 /** The owners' sections, and their copies from a document, as client-documents collects them. */
 const ownersOf = (sections: readonly Section<unknown>[], copies: readonly DocumentCopy[]) =>
-	defineModule({ name: "owners" }, (m) => [
+	defineModule({ name: "owners", takes: [] }, (m) => [
 		...sections.map((one) => m.contribute(metadataSections).by(() => one)),
 		...copies.map((one) => m.contribute(documentCopies).by(() => one)),
 	]);
@@ -94,12 +94,12 @@ const owners = ownersOf([redirects, clientSection, allowanceSection], [redirects
 
 /** Token-endpoint as a test stand-in: only the grant types it says are composed. */
 const tokenEndpointStandIn = (composed: readonly string[]) =>
-	defineModule({ name: "token-endpoint" }, (m) => [
+	defineModule({ name: "token-endpoint", takes: [] }, (m) => [
 		m.provide(composedGrants).by(() => new Set(composed)),
 	]);
 
 const items = contract<readonly { name: string; value: unknown }[]>("test.metadata");
-const collector = defineModule({ name: "test-collector" }, (m) => [
+const collector = defineModule({ name: "test-collector", takes: [metadata] }, (m) => [
 	m.provide(items).by((c) => c.collect(metadata)),
 ]);
 
@@ -116,7 +116,7 @@ async function boot(
 	} = {},
 ) {
 	const recording = recordingLog();
-	const app = await assemble({
+	const input = {
 		modules: [
 			outboundStandIn(options.caps, options.lookups),
 			clientsModule,
@@ -133,8 +133,10 @@ async function boot(
 			"clients-cimd": { scopes: ["openid", "read"], ...settings },
 		},
 		runtime: quietRuntime({ clock: { now: () => now }, log: recording.log }),
-	});
+	};
+	const app = await assemble(input);
 	return {
+		input,
 		find: (given = id) => app.get(clients).find(given),
 		supported: () =>
 			app.get(items).find((item) => item.name === "client_id_metadata_document_supported")?.value,
@@ -325,7 +327,7 @@ describe("clients-cimd: a refused document", () => {
 	});
 
 	it("is none and forgotten, as a failed fetch, when checking its record throws", async () => {
-		const throwing = defineModule({ name: "throwing-owner" }, (m) => [
+		const throwing = defineModule({ name: "throwing-owner", takes: [] }, (m) => [
 			m.contribute(metadataSections).by(() => ({
 				name: "throwing",
 				schema: z.unknown().transform(() => {
@@ -638,4 +640,10 @@ describe("clients-cimd: times and sizes in the section", () => {
 			"max-concurrent": 8,
 		});
 	});
+});
+
+it("takes all it names, the code grant composed or not", async () => {
+	for (const code of [true, false]) {
+		expect(await takesUnused((await boot({}, { code })).input), `code ${code}`).toEqual({});
+	}
 });

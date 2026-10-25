@@ -124,6 +124,9 @@ async function copiesIn(c: BuildContext<Settings>) {
 	return copies;
 }
 
+/** What `readingOver` takes from the build context (its copies' check included). */
+export const readingTakes = [documentCopies, metadataSections, clients, outbound] as const;
+
 /** The reading over `outbound` and the operator's section. */
 export async function readingOver(c: BuildContext<Settings>) {
 	const s = c.section;

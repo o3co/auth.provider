@@ -1,5 +1,5 @@
 import { assemble, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
 import revocationModule from "@mod/subject-revocation/module";
@@ -17,13 +17,19 @@ beforeEach(() => {
 });
 
 /** Tokens checked by subject-tokens, over subject-revocation on a simulated store. */
-async function boot() {
+const assembly = () => {
 	const simulated = simulatedStore();
-	const app = await assemble({
+	const input = {
 		modules: [tokensStandIn(), revocationModule, revocationStore, simulated.module, subjectTokens],
 		config: kernelConfig(),
 		runtime,
-	});
+	};
+	return { input, simulated };
+};
+
+async function boot() {
+	const { input, simulated } = assembly();
+	const app = await assemble(input);
 	const t = app.get(tokens);
 	const issue = async (subject: string) => {
 		const grant = { subject, issuedTo: "c", audience: ["api"], scope: [] };
@@ -56,4 +62,8 @@ it("is unavailable, never valid or revoked, while the revocation cannot be read"
 	const token = await s.issue("alice");
 	s.simulated.unreachable(true);
 	await expect(s.t.verifyAccess(token)).rejects.toSatisfy(isUnavailable);
+});
+
+it("takes all its module names", async () => {
+	expect(await takesUnused(assembly().input)).toEqual({});
 });
