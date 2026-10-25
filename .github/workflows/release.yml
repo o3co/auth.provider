@@ -9,8 +9,47 @@ permissions:
   id-token: write
 
 jobs:
+  # Before anything is published: the evidence of the CI run that tested what this tag publishes,
+  # the release pull request's run whose tested tree is the tag's (distribution's
+  # `release:evidence`), or the release stopped with what is missing and what to do. Reading another
+  # run's artifacts takes `actions: read`, given to this job alone. The workspace is installed, as the
+  # evidence is read again by the release's compliance (spec-checklist's) before it is taken.
+  evidence:
+    name: Evidence of the tested tree
+    runs-on: ubuntu-latest
+    # `pull-requests: read` finds the pull request the tag's commit merged; `actions: read`, its runs and their artifacts.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      # The token goes to the collector alone, never left in the checkout's git configuration.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # No lifecycle script runs in a job that holds the token.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: The CI run that tested the tag's tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node modules/tooling/distribution/src/release-evidence/collect.ts "$RUNNER_TEMP/evidence"
+      - name: Keep it for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 90
+          # A re-run of all jobs writes over the one an earlier attempt kept: an artifact's name is the run's.
+          overwrite: true
+
   publish:
     name: Publish to npm
+    needs: evidence
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +117,10 @@ jobs:
           echo "npm ${stated}"
 
       - run: pnpm install --frozen-lockfile
+      # Each test's result of this run's own checks, kept with the evidence below.
       - run: pnpm check
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/release-evidence/release-run
       # Each pattern made from the packed tarballs alone, type-checked and booted.
       - run: pnpm release:check
 
@@ -138,6 +180,35 @@ jobs:
       - name: Refuse what is published already as another tarball
         run: pnpm release:published "$RUNNER_TEMP/tarballs"
 
+      # The evidence the release keeps as an asset, past any artifact's days: the CI run's that tested
+      # the tag's tree, with its manifest, this run's own checks, the dependency audit, and the commands
+      # and environment they ran in.
+      - name: Take the evidence of the tested tree
+        uses: actions/download-artifact@v4
+        with:
+          name: release-evidence
+          path: ${{ runner.temp }}/release-evidence
+      - name: Pack the evidence
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          at="$RUNNER_TEMP/release-evidence"
+          # Kept as it is: a finding is reported, not a stop here; CI's audit job holds the gate.
+          pnpm audit --json > "$at/audit.json" || true
+          jq -n \
+            --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg node "$(node --version)" --arg pnpm "$(pnpm --version)" --arg npm "$(npm --version)" \
+            --arg os "$(. /etc/os-release && echo "$PRETTY_NAME")" --arg kernel "$(uname -sr)" \
+            --arg image "${ImageOS:-} ${ImageVersion:-}" \
+            --arg docker "$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo none)" \
+            '{commit: $commit, run: $run, attempt: $attempt,
+              commands: ["pnpm install --frozen-lockfile", "pnpm check", "pnpm release:check", "pnpm audit --json"],
+              environment: {node: $node, pnpm: $pnpm, npm: $npm, os: $os, kernel: $kernel, runnerImage: $image, docker: $docker}}' \
+            > "$at/environment.json"
+          tar -czf "$RUNNER_TEMP/auth-provider-${VERSION}-evidence.tar.gz" -C "$RUNNER_TEMP" release-evidence
+
       - name: Create GitHub Release (draft)
         id: draft
         uses: softprops/action-gh-release@v2
@@ -145,6 +216,8 @@ jobs:
           draft: true
           prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true
+          files: ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-evidence.tar.gz
+          fail_on_unmatched_files: true
 
       # The checked tarballs, one by one, the bundles first and the entrance
       # (`@o3co/create-auth-provider`, which depends on them) last. A name at
