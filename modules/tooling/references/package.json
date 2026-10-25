@@ -12,6 +12,7 @@
 		"@mod/combinations": "workspace:*",
 		"@mod/config-files": "workspace:*",
 		"@mod/create-app": "workspace:*",
+		"@mod/guard-imports": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/trial": "workspace:*"
 	},
