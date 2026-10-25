@@ -79,13 +79,13 @@ pnpm resolves it from your registry with your credentials and checks its integri
 Name the package `npm:<name>`, where you would name a module of the release: among the packages listed, in `--add`, or as an axis's choice. Give the project with `--outside-from`, from the directory holding it. Either list the modules of the app:
 
 ```sh
-npx @o3co/create-auth-provider@next my-app @mod/tokens npm:@example/did-grant --outside-from outside
+npx @o3co/create-auth-provider my-app @mod/tokens npm:@example/did-grant --outside-from outside
 ```
 
 or add the package to a pattern:
 
 ```sh
-npx @o3co/create-auth-provider@next my-app --pattern simple-web --add npm:@example/did-grant --outside-from outside
+npx @o3co/create-auth-provider my-app --pattern simple-web --add npm:@example/did-grant --outside-from outside
 ```
 
 The generator takes the version your project's lockfile resolved, and refuses the package where it lies outside the project's `node_modules`, where its manifest or its lockfile entry says other than the other, or where it breaks a rule of the first half of this page; it names every reason at once. A package outside the release is composed beside the published release alone, one recording the integrity of its own packages and of zod: never with `--workspace`. The `create-app` card and its internal module `outside` hold these rules.

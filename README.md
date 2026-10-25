@@ -1,7 +1,7 @@
 # auth-provider
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@o3co/create-auth-provider/next)](https://www.npmjs.com/package/@o3co/create-auth-provider)
+[![npm](https://img.shields.io/npm/v/@o3co/create-auth-provider)](https://www.npmjs.com/package/@o3co/create-auth-provider)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 English | [日本語](README.ja.md)
@@ -10,7 +10,7 @@ auth-provider is a self-hosted OAuth 2.0 authorization server and OpenID Connect
 
 The generator adds the modules those features depend on. At startup the app checks its configuration and lists every problem it finds, naming the setting or the module.
 
-0.18 rewrites 0.17 under new package names, and it is still in prerelease. Until 0.18.0 is final, install it with the npm `next` tag. Without the tag, npm installs 0.17. To move an existing 0.17 deployment, read the [migration guide](docs/migration.md) first: there is no in-place upgrade, the configuration must be rewritten, and stored state is not migrated.
+0.18 rewrites 0.17 under new package names, and npm installs it without a tag. Release candidates are published under the npm `next` tag. To move an existing 0.17 deployment, read the [migration guide](docs/migration.md) first: there is no in-place upgrade, the configuration must be rewritten, and stored state is not migrated.
 
 ## What it does
 
