@@ -20,7 +20,7 @@ import {
 	isUnavailable,
 	kernelConfig,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import { credentialPolicy, credentialRefusalText, outboundRefusals } from "@mod/outbound-policy";
@@ -261,6 +261,26 @@ it("says why its credential may not go to keys-url in outbound-policy's words", 
 	expect((error as BootRefused).refusals).toEqual([
 		{ where: "signer-keys-http.credential", reason: credentialRefusalText("scheme") },
 	]);
+});
+
+it("takes outbound's credential policy only with a credential, its takes naming it either way", async () => {
+	const unused = async (section: unknown) =>
+		(
+			await takesUnused({
+				modules: [outboundModule, signerKeysHttp, collector],
+				config: {
+					...kernelConfig(),
+					outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
+					"signer-keys-http": section,
+				},
+				runtime: quietRuntime(),
+			})
+		)["signer-keys-http"];
+	expect(await unused(settings())).toBeUndefined();
+	// The takes are static: outbound provides the policy beside the refusals the module always
+	// takes, so wherever it boots the policy is there, and without a credential it is left untaken.
+	const { credential: _, ...bare } = settings();
+	expect(await unused(bare)).toEqual(["outbound.credentials"]);
 });
 
 describe("signer-keys-http under jwt-bearer", () => {
