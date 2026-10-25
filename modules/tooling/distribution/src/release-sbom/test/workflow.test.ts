@@ -167,23 +167,36 @@ it("takes each artifact by the id the job that made it gave, never by a name ano
 	}
 });
 
-it("checks the very tarballs it keeps, packed or restored, before keeping them", () => {
+it("takes from the registry what npm holds, packs the rest, and checks the very tarballs it keeps", () => {
 	const pack = jobs.pack;
-	const restored = only(
+	// No artifact is restored: a run again takes what npm holds from the registry, of its integrity.
+	expect(downloads(pack)).toEqual([]);
+	const packed = only(
 		pack,
-		(s) => uses("actions/download-artifact")(s) && s.with?.name === "release-tarballs",
+		runs('.github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs" --from-registry'),
 	);
-	const packed = only(pack, runs(".github/scripts/pack-published.sh"));
 	const licensed = only(pack, runs("check-tarball-license.sh"));
 	const checked = only(pack, runs('pnpm release:check "$RUNNER_TEMP/tarballs"'));
 	const kept = only(
 		pack,
 		(s) => uses("actions/upload-artifact")(s) && s.with?.name === "release-tarballs",
 	);
-	expect([restored, packed, licensed, checked, kept]).toEqual(
-		[restored, packed, licensed, checked, kept].sort((a, b) => a - b),
+	const recorded = only(pack, runs("fetched.json"));
+	expect([packed, licensed, checked, kept]).toEqual(
+		[packed, licensed, checked, kept].sort((a, b) => a - b),
 	);
-	expect((pack?.steps ?? [])[kept]?.with?.overwrite).toBe(true);
+	const steps = pack?.steps ?? [];
+	expect(steps[kept]?.with?.overwrite).toBe(true);
+	expect(String(steps[kept]?.with?.path)).toContain("publish-order.json");
+	expect(steps[recorded]?.run).toContain("release-run");
+	for (const at of [packed, licensed, checked])
+		expect((steps[at] as Step & { if?: unknown }).if).toBeUndefined();
+});
+
+it("publishes in the order the pack wrote, the index's bundle after every bundle it seals over", () => {
+	const publish = jobs.publish;
+	const npm = only(publish, runs("npm publish"));
+	expect((publish?.steps ?? [])[npm]?.run).toContain('"$RUNNER_TEMP/tarballs/publish-order.json"');
 });
 
 it("skips no job of the release, nor a step that holds it, but by success", () => {
