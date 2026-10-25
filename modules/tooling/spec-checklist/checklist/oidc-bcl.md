@@ -9,6 +9,7 @@
 - **oidc-bcl-2.2-a** MUST: the OP refuses a client's `backchannel_logout_uri` that is not an absolute URI.
 - **oidc-bcl-2.2-b** MUST: the OP keeps the query of a `backchannel_logout_uri` when it adds parameters to it.
 - **oidc-bcl-2.2-c** MUST NOT: the OP takes a client's `backchannel_logout_uri` that has a fragment.
+- **oidc-bcl-2.2-d** SHOULD: the OP takes as a client's `backchannel_logout_uri` only an `https` URL, or an `http` one for a confidential client where the OP allows `http`.
 
 ## 2.4 Logout Token
 
@@ -29,15 +30,15 @@
 
 ## 2.5 Back-Channel Logout Request
 
-- **oidc-bcl-2.5-a** SHOULD: where a logout request may not have reached the RP, the OP waits an appropriate time before sending it again.
-- **oidc-bcl-2.5-b** SHOULD NOT: the OP sends a back-channel logout request again where nothing suggests it failed to reach the RP.
+- **oidc-bcl-2.5-a** SHOULD: where the OP suspects an earlier back-channel logout request failed through a potentially recoverable error (a network outage, a temporary service interruption at the OP or the RP), it waits an appropriate time before sending it again.
+- **oidc-bcl-2.5-b** SHOULD NOT: the OP sends a back-channel logout request again other than where it suspects an earlier one failed through a potentially recoverable error.
 
 ## 2.6 Logout Token Validation
 
 - **oidc-bcl-2.6-a** MUST NOT: a logout token is signed with `alg` `none`.
-- **oidc-bcl-2.6-b** SHOULD: a logout token is signed with the algorithm the client's ID tokens are signed with (`id_token_signing_alg_values_supported`, the client's `id_token_signed_response_alg`), else `RS256`.
+- **oidc-bcl-2.6-b** SHOULD: where neither `id_token_signing_alg_values_supported` nor the client's `id_token_signed_response_alg` is used, a logout token is signed with `RS256`.
 
 ## 2.7 Back-Channel Logout Actions
 
 - **oidc-bcl-2.7-a** SHOULD: refresh tokens issued without `offline_access` to a session that is logged out are revoked.
-- **oidc-bcl-2.7-b** SHOULD NOT: a refresh token issued with `offline_access` is revoked because its session is logged out.
+- **oidc-bcl-2.7-b** SHOULD NOT: a refresh token issued with `offline_access` is, as a rule, revoked because its session is logged out.
