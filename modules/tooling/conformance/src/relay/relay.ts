@@ -90,6 +90,8 @@ interface Link {
 	holding: boolean;
 	readonly waiting: Record<Direction, Buffer[]>;
 	chain: Record<Direction, Promise<void>>;
+	/** Frames on the chain not yet written, so a frame sent with no delay keeps behind them. */
+	readonly inFlight: Record<Direction, number>;
 }
 
 interface Rule<T> {
@@ -135,13 +137,15 @@ export async function startRelay(options: RelayOptions) {
 	const deliver = (link: Link, direction: Direction, bytes: Buffer) => {
 		const to = direction === "up" ? link.server : link.client;
 		const ms = delays[direction];
-		if (ms === 0) {
+		if (ms === 0 && link.inFlight[direction] === 0) {
 			to.write(bytes);
 			return;
 		}
+		link.inFlight[direction]++;
 		link.chain[direction] = link.chain[direction]
-			.then(() => new Promise((resolve) => setTimeout(resolve, ms)))
+			.then(() => (ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : undefined))
 			.then(() => {
+				link.inFlight[direction]--;
 				if (link.open) to.write(bytes);
 			});
 	};
@@ -199,7 +203,13 @@ export async function startRelay(options: RelayOptions) {
 			if (command.name === "MULTI") link.inMulti = true;
 			if (command.name === "EXEC" || command.name === "DISCARD") link.inMulti = false;
 			const hold = queued ? undefined : holds.find((h) => h.match.request(command));
-			if (hold) {
+			if (hold && link.holding) {
+				// Holds on one connection would share its release; a second is refused.
+				const why = `one hold per connection: a second matched (${command.name})`;
+				failures.push(why);
+				holds = holds.filter((h) => h !== hold);
+				hold.done.reject(new Error(why));
+			} else if (hold) {
 				holds = holds.filter((h) => h !== hold);
 				link.holding = true;
 				hold.done.resolve({
@@ -223,6 +233,8 @@ export async function startRelay(options: RelayOptions) {
 		} catch (error) {
 			return fail(link, `Redis: ${(error as Error).message}`);
 		}
+		// Answers read with a dropped one are recorded and observed, never passed on.
+		let cutHere = false;
 		for (const [i, frame] of read.entries()) {
 			const asked = link.asked.shift();
 			if (!asked) return fail(link, "an answer to no request");
@@ -244,6 +256,9 @@ export async function startRelay(options: RelayOptions) {
 						o.done.resolve(execution(o.match));
 					}
 				}
+			}
+			if (cutHere) continue;
+			if (!queued) {
 				const drop = drops.find(
 					(d) =>
 						!d.ended &&
@@ -259,13 +274,14 @@ export async function startRelay(options: RelayOptions) {
 					}));
 					const dropped = { ...execution(drop.rule.match), collateral };
 					cut(link);
+					cutHere = true;
 					if (drop.fired) drop.resent.push(dropped);
 					else {
 						drop.fired = dropped;
 						drop.rule.done.resolve(dropped);
 						if (!drop.resends) drop.ended = true;
 					}
-					return;
+					continue;
 				}
 				if (drop && !drop.fired) {
 					const why = `the matched answer showed no write (${command.name}), so no fault happened`;
@@ -291,6 +307,7 @@ export async function startRelay(options: RelayOptions) {
 			holding: false,
 			waiting: { up: [], down: [] },
 			chain: { up: Promise.resolve(), down: Promise.resolve() },
+			inFlight: { up: 0, down: 0 },
 		};
 		links.push(link);
 		const fromApp = frames();
@@ -375,6 +392,8 @@ export async function startRelay(options: RelayOptions) {
 		/** Stops the relay; fails with what it could not read or what did not happen. */
 		async close() {
 			for (const link of links) cut(link);
+			if (drops.some((d) => !d.fired && !d.ended)) failures.push("a drop asked for never happened");
+			if (holds.length > 0) failures.push("a hold asked for never happened");
 			for (const d of drops) d.rule.done.reject(new Error("the relay closed"));
 			for (const r of [...holds, ...observers]) r.done.reject(new Error("the relay closed"));
 			await new Promise<void>((resolve) => server.close(() => resolve()));

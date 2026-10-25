@@ -69,8 +69,11 @@ export async function ask(url: string, ...args: string[]): Promise<Reply | undef
 	return reply;
 }
 
-/** A server that answers each request with the next of `answers`, written a byte at a time. */
-export async function tricklingServer(answers: readonly Buffer[]) {
+/**
+ * A server that answers each request with the next of `answers`, written a byte at a time; or,
+ * `whole`, the answers to each chunk's requests in one write.
+ */
+export async function tricklingServer(answers: readonly Buffer[], opts: { whole?: boolean } = {}) {
 	let next = 0;
 	const sockets: Socket[] = [];
 	const server = createServer((socket) => {
@@ -81,6 +84,11 @@ export async function tricklingServer(answers: readonly Buffer[]) {
 		socket.on("data", (chunk: Buffer) => {
 			const asked = reader.push(chunk).length;
 			chain = chain.then(async () => {
+				if (opts.whole) {
+					socket.write(Buffer.concat(answers.slice(next, next + asked)));
+					next += asked;
+					return;
+				}
 				for (let i = 0; i < asked; i++) {
 					for (const b of answers[next++] ?? Buffer.from("-ERR none left\r\n")) {
 						socket.write(Buffer.from([b]));

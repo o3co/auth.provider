@@ -293,3 +293,75 @@ describe("what the relay cannot read", () => {
 		});
 	}
 });
+
+describe("what the relay keeps in order and on record", () => {
+	it("keeps a frame behind one still delayed, though the delay is lifted meanwhile, both ways", async () => {
+		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		const c = await rawClient(relay.url);
+		const k = fresh();
+		relay.delay(300, "up");
+		c.write(encode("SET", k, "1"));
+		relay.delay(0, "up");
+		c.write(encode("SET", k, "2"));
+		expect(await c.replies(2)).toEqual([ok, ok]);
+		expect(await ask(redis.url, "GET", k)).toEqual(bulk("2"));
+		relay.delay(300, "down");
+		c.write(encode("PING"));
+		await pause(50);
+		relay.delay(0, "down");
+		c.write(encode("ECHO", "after"));
+		expect(await c.replies(4)).toEqual([ok, ok, { kind: "simple", text: "PONG" }, bulk("after")]);
+		c.end();
+		await relay.close();
+	});
+
+	it("refuses a second hold on a connection already held, so one release never lets the other go", async () => {
+		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		const [a, b] = [fresh(), fresh()];
+		const first = relay.hold(setOf(a));
+		const second = relay.hold(setOf(b));
+		const c = await rawClient(relay.url);
+		c.write(encode("SET", a, "1"), encode("SET", b, "1"));
+		await first;
+		await expect(second).rejects.toThrow(/one hold/);
+		c.end();
+		await expect(relay.close()).rejects.toThrow(/one hold/);
+	});
+
+	it("records and observes the answers read with a dropped one, without passing them on", async () => {
+		const server = await tricklingServer([Buffer.from("+OK\r\n"), Buffer.from(":1\r\n")], {
+			whole: true,
+		});
+		const relay = await startRelay({ upstream: server.upstream });
+		const incr: Match = {
+			request: (c) => c.name === "INCR",
+			succeeded: (r) => r.kind === "integer",
+		};
+		const drop = relay.dropReplyTo(setOf("k"));
+		const counted = relay.observe(incr);
+		const c = await rawClient(relay.url);
+		c.write(encode("SET", "k", "v"), encode("INCR", "n"));
+		const dropped = await drop.first;
+		await c.closed;
+		expect(dropped.collateral).toEqual([
+			{ command: { name: "INCR", args: [Buffer.from("n")] }, answered: true },
+		]);
+		expect(relay.executions(incr)).toHaveLength(1);
+		expect((await counted).reply).toEqual({ kind: "integer", value: 1 });
+		expect(c.got()).toEqual([]);
+		await relay.close();
+		await server.stop();
+	});
+
+	it("fails its close where a drop asked for never happened", async () => {
+		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		relay.dropReplyTo(setOf(fresh()));
+		await expect(relay.close()).rejects.toThrow(/never/);
+	});
+
+	it("fails its close where a hold asked for never happened", async () => {
+		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		void relay.hold(setOf(fresh()));
+		await expect(relay.close()).rejects.toThrow(/never/);
+	});
+});
