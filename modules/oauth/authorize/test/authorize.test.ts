@@ -27,6 +27,7 @@ import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import {
 	assemble,
+	type BootRefused,
 	contract,
 	defineModule,
 	isUnavailable,
@@ -107,6 +108,8 @@ async function serve(
 		rateLimit?: Module;
 		/** False leaves out the consent page, so consent cannot ask. */
 		asking?: boolean;
+		/** The deployment's environment, production unless a test tries a page on this machine. */
+		environment?: "production" | "development";
 	} = {},
 ) {
 	const proving = defineModule({ name: "proving", takes: [] }, (m) => [
@@ -166,7 +169,7 @@ async function serve(
 			...(options.extra ?? []),
 		],
 		config: {
-			...kernelConfig(),
+			...kernelConfig({ environment: options.environment ?? "production" }),
 			...httpConfig({ "trusted-proxies": ["127.0.0.1"], "public-origin": issuer }),
 			...issuerConfig({ url: issuer }),
 			...clientsConfig([
@@ -1427,10 +1430,18 @@ it("boots with its pages at http on a loopback host, and refuses http on any oth
 		"login-page": "http://localhost:3000/login",
 		"step-up-page": "http://127.0.0.1:3000/raise",
 	};
-	await expect(serve({ authorize: local })).resolves.toBeDefined();
+	const development = "development" as const;
+	await expect(serve({ authorize: local, environment: development })).resolves.toBeDefined();
 	await expect(
-		serve({ authorize: { "step-up-page": "http://[::1]:3000/raise" } }),
+		serve({ authorize: { "step-up-page": "http://[::1]:3000/raise" }, environment: development }),
 	).resolves.toBeDefined();
+	const refused = await serve({ authorize: local }).catch((error: BootRefused) => error.refusals);
+	const reason =
+		"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to";
+	expect(refused).toEqual([
+		{ where: "authorize.login-page", reason },
+		{ where: "authorize.step-up-page", reason },
+	]);
 	for (const key of ["login-page", "step-up-page"]) {
 		for (const target of [
 			"http://as.example/x",
