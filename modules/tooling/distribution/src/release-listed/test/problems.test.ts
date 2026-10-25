@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listedProblems } from "../problems.ts";
+import { listedProblems, orderProblems } from "../problems.ts";
 
 describe("the tarballs publish takes, against those the lists were made of", () => {
 	const a = {
@@ -39,6 +39,26 @@ describe("the tarballs publish takes, against those the lists were made of", () 
 		]);
 		expect(listedProblems([a, b], [a, { ...b, file: "other.tgz" }])).toEqual([
 			"@o3co/create-auth-provider@1.0.0: in o3co-create-auth-provider-1.0.0.tgz, listed in other.tgz",
+		]);
+	});
+});
+
+describe("the order the release publishes in, against the tarballs it publishes", () => {
+	const files = ["a-1.0.0.tgz", "s-1.0.0.tgz", "e-1.0.0.tgz"];
+
+	it("names each tarball once, and nothing else", () => {
+		expect(orderProblems(["a-1.0.0.tgz", "s-1.0.0.tgz", "e-1.0.0.tgz"], files)).toEqual([]);
+	});
+
+	it("names a tarball it leaves out, one it names twice, and one that is not there", () => {
+		expect(orderProblems(["a-1.0.0.tgz", "s-1.0.0.tgz"], files)).toEqual([
+			"e-1.0.0.tgz: not in the order the release publishes in",
+		]);
+		expect(orderProblems([...files, "a-1.0.0.tgz"], files)).toEqual([
+			"a-1.0.0.tgz: named twice in the order",
+		]);
+		expect(orderProblems([...files, "x-1.0.0.tgz"], files)).toEqual([
+			"x-1.0.0.tgz: in the order, and not among the tarballs",
 		]);
 	});
 });

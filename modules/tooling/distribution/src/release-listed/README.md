@@ -10,10 +10,11 @@ Internal module of `distribution`: where the release publishes, the tarballs hel
 
 ## Offers
 - `pnpm release:listed <tarballs> <tarballs.json>`: prints each problem and exits 1.
-- `listedProblems` (the tarballs, the listed) → each problem.
+- `listedProblems` (the tarballs, the listed) and `orderProblems` (the order the release publishes in, the tarballs' files) → each problem.
 
 ## Invariants
 - Each name and version is one tarball, in the file npm packs it as (where the publish step finds the entrance), in the file the lists name, of the bytes they were made of; none unlisted, none listed missing.
+- The order beside the tarballs (`publish-order.json`) names each of them once, and nothing else.
 - It loads Node's own modules and the package's files alone, as it runs where the release publishes.
 
 ## Depends on

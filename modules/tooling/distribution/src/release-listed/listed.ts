@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { packedOf } from "../packed/packed.ts";
-import { listedProblems } from "./problems.ts";
+import { listedProblems, orderProblems } from "./problems.ts";
 
 const [directory, listing] = process.argv.slice(2);
 if (!directory || !listing) {
@@ -20,7 +20,15 @@ const at = resolve(directory);
 const tarballs = readdirSync(at)
 	.filter((file) => file.endsWith(".tgz"))
 	.map((file) => ({ ...packedOf(join(at, file)), file }));
-const problems = listedProblems(tarballs, JSON.parse(readFileSync(resolve(listing), "utf8")));
+// The order the release publishes in, beside the tarballs, must name each of them once.
+const order = JSON.parse(readFileSync(join(at, "publish-order.json"), "utf8")) as string[];
+const problems = [
+	...listedProblems(tarballs, JSON.parse(readFileSync(resolve(listing), "utf8"))),
+	...orderProblems(
+		order,
+		tarballs.map((t) => t.file),
+	),
+];
 for (const problem of problems) console.error(`release-listed: ${problem}`);
 console.log(
 	problems.length === 0

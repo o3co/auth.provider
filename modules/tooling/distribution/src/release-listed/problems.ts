@@ -35,3 +35,19 @@ export function listedProblems(tarballs: readonly Filed[], listed: readonly File
 			.map((l) => `${at(l)}: listed, and not among the tarballs to publish`),
 	];
 }
+
+/** Why the order the release publishes in (`publish-order.json`) is not of the tarballs it publishes: one left out, one named twice, one not there. */
+export function orderProblems(order: readonly string[], files: readonly string[]): string[] {
+	const counts = Map.groupBy(order, (file) => file);
+	return [
+		...files
+			.filter((file) => !counts.has(file))
+			.map((file) => `${file}: not in the order the release publishes in`),
+		...[...counts]
+			.filter(([, all]) => all.length > 1)
+			.map(([file]) => `${file}: named twice in the order`),
+		...[...counts.keys()]
+			.filter((file) => !files.includes(file))
+			.map((file) => `${file}: in the order, and not among the tarballs`),
+	];
+}
