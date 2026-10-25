@@ -10,6 +10,7 @@
 		"release-check": "node src/release-check/check.ts",
 		"release-pack": "node src/release/pack.ts",
 		"release-published": "node src/release/check-published.ts",
+		"release-evidence": "node src/release-evidence/collect.ts",
 		"release-sbom": "node src/release-sbom/make.ts"
 	},
 	"exports": {

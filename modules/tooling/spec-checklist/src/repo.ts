@@ -46,15 +46,16 @@ export function readChecklist(dir = checklistDir): Checklist {
 }
 
 /** Every test in the workspace that names an item, by item, and each ID written where no test's title is. */
+/** Whether a file holds tests: a `.test.ts` or `.case.ts` file, or any file under a `test` directory. */
+export const holdsTests = (file: string) =>
+	/\.(test|case)\.ts$/.test(file) || /(^|\/)test\//.test(file);
+
 export function workspaceTests(root: string) {
 	const tests = new Map<string, TestRef[]>();
 	const stray: Finding[] = [];
 	for (const p of readWorkspace(root).filter((p) => p.name !== self)) {
 		for (const file of p.files.filter((f) => /\.(ts|mjs)$/.test(f))) {
-			const read = titlesIn(
-				readFileSync(join(p.dir, file), "utf8"),
-				/\.(test|case)\.ts$/.test(file),
-			);
+			const read = titlesIn(readFileSync(join(p.dir, file), "utf8"), holdsTests(file));
 			for (const id of read.stray)
 				stray.push({
 					where: `${p.name} ${file}`,
@@ -62,7 +63,10 @@ export function workspaceTests(root: string) {
 				});
 			for (const t of read.titles)
 				for (const id of t.ids)
-					tests.set(id, [...(tests.get(id) ?? []), { pkg: p.name, file, title: t.title }]);
+					tests.set(id, [
+						...(tests.get(id) ?? []),
+						{ pkg: p.name, file, title: t.title, path: t.path, suite: t.suite },
+					]);
 		}
 	}
 	return { tests, stray };
@@ -128,12 +132,19 @@ export function runsOf(root: string): Run[] {
 export function expectedOf(runs: readonly Run[], release: boolean): Expected {
 	const entries = runs.filter((r) => release || !r.releaseOnly).map((r) => r.entry);
 	const areas = new Set(runs.filter((r) => r.kind === "area").map((r) => r.entry));
+	const pkgOf = (entry: string) => /^@?[^@#]+/.exec(entry)?.[0] ?? entry;
+	// Every run keeps its files and its package, a release's own too where this is none: the entries
+	// expected decide what must report.
 	const harness = new Map<string, string[]>();
-	for (const run of entries.filter((e) => e.includes("#"))) {
-		const pkg = run.slice(0, run.indexOf("#"));
-		harness.set(pkg, [...(harness.get(pkg) ?? []), run]);
+	for (const run of runs.filter((r) => r.entry.includes("#") && r.files === undefined)) {
+		const pkg = pkgOf(run.entry);
+		harness.set(pkg, [...(harness.get(pkg) ?? []), run.entry]);
 	}
-	return { entries, areas, runsOf: harness };
+	const suffixed = runs.flatMap((r) =>
+		r.files === undefined ? [] : [{ entry: r.entry, pkg: pkgOf(r.entry), files: r.files }],
+	);
+	const noSkip = new Set(runs.filter((r) => r.noSkip).map((r) => r.entry));
+	return { entries, areas, runsOf: harness, suffixed, noSkip };
 }
 
 /** Each workspace package's directory, relative to the root. */

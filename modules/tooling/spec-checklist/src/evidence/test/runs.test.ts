@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { parseItems } from "../../checklist.ts";
+import { expectedOf } from "../../repo.ts";
 import { type EvidenceReport, entryOf } from "../reporter.ts";
 import {
 	attemptsOf,
 	checkpoint,
 	complianceTable,
 	type Expected,
+	entriesOfFile,
 	itemStatuses,
 	planOf,
 	runsPrinted,
@@ -132,7 +134,13 @@ describe("itemStatuses", () => {
 			"  out-of-scope: not offered",
 		].join("\n"),
 	).items;
-	const ref = (pkg: string, file: string, title: string) => ({ pkg, file, title });
+	const ref = (pkg: string, file: string, title: string) => ({
+		pkg,
+		file,
+		title,
+		path: [title],
+		suite: false,
+	});
 	const tests = new Map([
 		["rfc9999-4-a", [ref("@mod/x", "test/x.test.ts", "a [rfc9999-4-a]")]],
 		[
@@ -150,6 +158,8 @@ describe("itemStatuses", () => {
 		entries: ["unit", "@mod/conformance-code", "@mod/conformance-code@simple-web"],
 		areas: new Set(["@mod/conformance-code"]),
 		runsOf: new Map(),
+		suffixed: [],
+		noSkip: new Set(),
 	};
 	const pkgDirs = new Map([
 		["@mod/x", "modules/x/x"],
@@ -253,7 +263,27 @@ describe("itemStatuses", () => {
 		};
 		const [a] = itemStatuses(
 			items.slice(0, 1),
-			tests,
+			new Map([
+				[
+					"rfc9999-4-a",
+					[
+						{
+							pkg: "@mod/x",
+							file: "test/x.test.ts",
+							title: "a suite [rfc9999-4-a]",
+							path: ["a suite [rfc9999-4-a]"],
+							suite: true,
+						},
+						{
+							pkg: "@mod/x",
+							file: "test/x.test.ts",
+							title: "a [rfc9999-4-a]",
+							path: ["a suite [rfc9999-4-a]", "a [rfc9999-4-a]"],
+							suite: false,
+						},
+					],
+				],
+			]),
 			[twice],
 			{ ...expected, entries: ["unit"] },
 			pkgDirs,
@@ -309,5 +339,282 @@ describe("the runs a package prints", () => {
 		];
 		expect(planOf(runs, "pattern")).toEqual(["p1", "p2"]);
 		expect(planOf(runs, "none")).toEqual([]);
+	});
+});
+
+describe("a run's files and its rule on skips", () => {
+	const runs = [
+		{ entry: "unit", kind: "unit" },
+		{ entry: "@mod/keys", kind: "area", matrix: "@mod/keys" },
+		{ entry: "@mod/keys@p", kind: "pattern", matrix: "p" },
+		{
+			entry: "@mod/keys#faults",
+			kind: "fault",
+			matrix: "@mod/keys",
+			files: ".faults.ts",
+			noSkip: true as const,
+		},
+	];
+	const expected = expectedOf(runs, false);
+
+	it("are taken as a run's own fields, and refused when not a suffix or not true", () => {
+		expect(runsPrinted("@mod/keys", runs)).toEqual(runs);
+		expect(() => runsPrinted("@mod/keys", [{ entry: "e", kind: "k", files: 1 }])).toThrow();
+		expect(() => runsPrinted("@mod/keys", [{ entry: "e", kind: "k", noSkip: false }])).toThrow();
+	});
+
+	it("send a file to the runs whose suffix it bears, and every other file by the default rules", () => {
+		expect(entriesOfFile("@mod/keys", "test/store.faults.ts", expected)).toEqual([
+			"@mod/keys#faults",
+		]);
+		expect(entriesOfFile("@mod/keys", "test/keys.case.ts", expected)).toEqual([
+			"@mod/keys",
+			"@mod/keys@p",
+		]);
+		expect(entriesOfFile("@mod/keys", "test/keys.test.ts", expected)).toEqual(["unit"]);
+	});
+
+	it("fail an item whose test was skipped, excused or not, in a run that takes no skip", () => {
+		const [a] = parseItems("rfc9999", "# X\n## 4 X\n- **rfc9999-4-a** MUST: a").items;
+		const tests = new Map([
+			[
+				"rfc9999-4-a",
+				[
+					{
+						pkg: "@mod/keys",
+						file: "test/store.faults.ts",
+						title: "a [rfc9999-4-a]",
+						path: ["a [rfc9999-4-a]"],
+						suite: false,
+					},
+				],
+			],
+		]);
+		const faults: EvidenceReport = {
+			identity: identity("@mod/keys#faults"),
+			errors: 0,
+			tests: [
+				{
+					file: "modules/k/keys/test/store.faults.ts",
+					names: ["a [rfc9999-4-a]"],
+					state: "skipped",
+					note: "excused: adaptation",
+				},
+			],
+		};
+		const [status] = itemStatuses(
+			a ? [a] : [],
+			tests,
+			[faults],
+			expected,
+			new Map([["@mod/keys", "modules/k/keys"]]),
+		);
+		expect(status).toMatchObject({ status: "failed" });
+		expect(status?.failures.map((f) => f.reason)).toEqual([
+			"modules/k/keys/test/store.faults.ts > a [rfc9999-4-a]: skipped in a run that takes no skip",
+		]);
+	});
+});
+
+describe("each test of an item, in each run of its file", () => {
+	it("leaves the item incomplete where a run reported without one of its tests, naming it", () => {
+		const [a] = parseItems("rfc9999", "# X\n## 4 X\n- **rfc9999-4-a** MUST: a").items;
+		const ref = (title: string, suite = false) => ({
+			pkg: "@mod/x",
+			file: "test/x.test.ts",
+			title,
+			path: [title],
+			suite,
+		});
+		const tests = new Map([
+			["rfc9999-4-a", [ref("one [rfc9999-4-a]"), ref("a suite [rfc9999-4-a]", true)]],
+		]);
+		const report = (names: string[][]): EvidenceReport => ({
+			identity: identity("unit"),
+			errors: 0,
+			tests: names.map((n) => ({
+				file: "modules/x/x/test/x.test.ts",
+				names: n,
+				state: "passed" as const,
+			})),
+		});
+		const of = (r: EvidenceReport) =>
+			itemStatuses(
+				a ? [a] : [],
+				tests,
+				[r],
+				{ entries: ["unit"], areas: new Set(), runsOf: new Map(), suffixed: [], noSkip: new Set() },
+				new Map([["@mod/x", "modules/x/x"]]),
+			)[0];
+		// The suite's title is met by a test inside it.
+		expect(of(report([["one [rfc9999-4-a]"], ["a suite [rfc9999-4-a]", "inside"]]))).toMatchObject({
+			status: "passed",
+			unrun: [],
+		});
+		expect(of(report([["one [rfc9999-4-a]"]]))).toMatchObject({
+			status: "incomplete",
+			unrun: ["unit: test/x.test.ts > a suite [rfc9999-4-a]"],
+		});
+	});
+});
+
+describe("the runs a suffix owns", () => {
+	it("are no area's or pattern's for a file that does not bear the suffix", () => {
+		const expected = expectedOf(
+			[
+				{ entry: "@mod/keys", kind: "area", matrix: "@mod/keys" },
+				{ entry: "@mod/keys@p", kind: "pattern", matrix: "p", files: ".special.case.ts" },
+			],
+			false,
+		);
+		expect(entriesOfFile("@mod/keys", "test/ordinary.case.ts", expected)).toEqual(["@mod/keys"]);
+		expect(entriesOfFile("@mod/keys", "test/a.special.case.ts", expected)).toEqual(["@mod/keys@p"]);
+	});
+
+	it("keep their files where only a release makes the run and the run is no release's", () => {
+		const expected = expectedOf(
+			[
+				{ entry: "@mod/keys", kind: "area", matrix: "@mod/keys" },
+				{
+					entry: "@mod/keys#release",
+					kind: "release",
+					files: ".release.ts",
+					releaseOnly: true as const,
+				},
+			],
+			false,
+		);
+		expect(entriesOfFile("@mod/keys", "test/x.release.ts", expected)).toEqual([
+			"@mod/keys#release",
+		]);
+		expect(expected.entries).toEqual(["@mod/keys"]);
+	});
+});
+
+describe("a test's results, matched to its title in the source", () => {
+	const [a] = parseItems("rfc9999", "# X\n## 4 X\n- **rfc9999-4-a** MUST: a").items;
+	const ref = (title: string, suite = false) => ({
+		pkg: "@mod/x",
+		file: "test/x.test.ts",
+		title,
+		path: [title],
+		suite,
+	});
+	const expected: Expected = {
+		entries: ["unit"],
+		areas: new Set(),
+		runsOf: new Map(),
+		suffixed: [],
+		noSkip: new Set(),
+	};
+	const report = (names: string[][]): EvidenceReport => ({
+		identity: identity("unit"),
+		errors: 0,
+		tests: names.map((n) => ({
+			file: "modules/x/x/test/x.test.ts",
+			names: n,
+			state: "passed" as const,
+		})),
+	});
+	const of = (title: string, reports: EvidenceReport[], suite = false) =>
+		itemStatuses(
+			a ? [a] : [],
+			new Map([["rfc9999-4-a", [ref(title, suite)]]]),
+			reports,
+			expected,
+			new Map([["@mod/x", "modules/x/x"]]),
+		)[0];
+
+	it("meets a parameterized title by the names it expands to: printf forms and a table's properties", () => {
+		expect(
+			of("case %s [rfc9999-4-a]", [report([["case 1 [rfc9999-4-a]"], ["case 2 [rfc9999-4-a]"]])]),
+		).toMatchObject({ status: "passed", unrun: [] });
+		expect(
+			of("suite %d, %# [rfc9999-4-a]", [report([["suite 1, 0 [rfc9999-4-a]", "inside"]])], true),
+		).toMatchObject({ status: "passed", unrun: [] });
+		expect(
+			of("with $user.name and $id [rfc9999-4-a]", [report([["with alice and 7 [rfc9999-4-a]"]])]),
+		).toMatchObject({ status: "passed", unrun: [] });
+		expect(of("100%% sure [rfc9999-4-a]", [report([["100% sure [rfc9999-4-a]"]])])).toMatchObject({
+			status: "passed",
+		});
+		expect(of("case %s [rfc9999-4-a]", [report([["another [rfc9999-4-a]"]])])).toMatchObject({
+			status: "incomplete",
+		});
+	});
+
+	it("is looked for in each report of the run that ran its file, not in any one of them", () => {
+		const both = [report([["one [rfc9999-4-a]"]]), report([["other test"]])];
+		expect(of("one [rfc9999-4-a]", both)).toMatchObject({
+			status: "incomplete",
+			unrun: ["unit: test/x.test.ts > one [rfc9999-4-a]"],
+		});
+		expect(
+			of("one [rfc9999-4-a]", [report([["one [rfc9999-4-a]"]]), report([["one [rfc9999-4-a]"]])]),
+		).toMatchObject({ status: "passed" });
+	});
+});
+
+describe("a test's results, matched to where it is written", () => {
+	const [a] = parseItems("rfc9999", "# X\n## 4 X\n- **rfc9999-4-a** MUST: a").items;
+	const expected: Expected = {
+		entries: ["unit"],
+		areas: new Set(),
+		runsOf: new Map(),
+		suffixed: [],
+		noSkip: new Set(),
+	};
+	const ref = (path: (string | null)[], suite = false) => ({
+		pkg: "@mod/x",
+		file: "test/x.test.ts",
+		title: path.at(-1) ?? "",
+		path,
+		suite,
+	});
+	const report = (names: string[][]): EvidenceReport => ({
+		identity: identity("unit"),
+		errors: 0,
+		tests: names.map((n) => ({
+			file: "modules/x/x/test/x.test.ts",
+			names: n,
+			state: "passed" as const,
+		})),
+	});
+	const of = (refs: ReturnType<typeof ref>[], r: EvidenceReport) =>
+		itemStatuses(
+			a ? [a] : [],
+			new Map([["rfc9999-4-a", refs]]),
+			[r],
+			expected,
+			new Map([["@mod/x", "modules/x/x"]]),
+		)[0];
+
+	it("tells apart two tests of one title in two suites, a suite's title met by a test inside it", () => {
+		const two = [ref(["first", "checks [rfc9999-4-a]"]), ref(["second", "checks [rfc9999-4-a]"])];
+		expect(of(two, report([["first", "checks [rfc9999-4-a]"]]))).toMatchObject({
+			status: "incomplete",
+			unrun: ["unit: test/x.test.ts > checks [rfc9999-4-a]"],
+		});
+		expect(
+			of(
+				two,
+				report([
+					["first", "checks [rfc9999-4-a]"],
+					["second", "checks [rfc9999-4-a]"],
+				]),
+			),
+		).toMatchObject({ status: "passed" });
+		expect(
+			of([ref(["outer [rfc9999-4-a]"], true)], report([["outer [rfc9999-4-a]", "inside"]])),
+		).toMatchObject({ status: "passed" });
+		expect(
+			of([ref([null, "deep [rfc9999-4-a]"])], report([["anything", "deep [rfc9999-4-a]"]])),
+		).toMatchObject({ status: "passed" });
+	});
+
+	it("takes a plain title as written before reading it as parameterized", () => {
+		expect(
+			of([ref(["100%% ready [rfc9999-4-a]"])], report([["100%% ready [rfc9999-4-a]"]])),
+		).toMatchObject({ status: "passed", unrun: [] });
 	});
 });

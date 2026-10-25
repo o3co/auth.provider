@@ -37,6 +37,7 @@
 		"release:check": "pnpm --filter @mod/distribution run release-check",
 		"release:pack": "pnpm --filter @mod/distribution run release-pack",
 		"release:published": "pnpm --filter @mod/distribution run release-published",
+		"release:evidence": "pnpm --filter @mod/distribution run release-evidence",
 		"release:sbom": "pnpm --filter @mod/distribution run release-sbom"
 	},
 	"devDependencies": {

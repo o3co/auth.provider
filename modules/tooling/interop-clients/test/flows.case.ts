@@ -185,3 +185,49 @@ describe(`${library.name}: a discovery that names plain http`, () => {
 		},
 	);
 });
+
+describe(`${library.name}: a token for one resource server`, () => {
+	it.runIf(runs("resource"))(
+		"asks a token for one resource server by `resource` in both requests, and gets one meant for it",
+		(context) =>
+			excusable(context, "resource", async () => {
+				const result = await run("resource", world.clients.basic, { resource: world.resource });
+				// Both requests carry the parameter: the token takes the code's audience, so its own tells neither.
+				expect(world.seen.authorizations.at(-1)?.searchParams.getAll("resource")).toEqual([
+					world.resource,
+				]);
+				expect(world.seen.tokenRequests.at(-1)?.getAll("resource")).toEqual([world.resource]);
+				const told = await world.introspect(String(result.accessToken));
+				expect(told.active).toBe(true);
+				// The client holds another audience, which a request asking none would get.
+				expect([told.aud].flat()).toEqual([world.resource]);
+			}),
+	);
+});
+
+describe(`${library.name}: a client's own token`, () => {
+	it.runIf(runs("client-credentials"))(
+		"gets a token by the client credentials grant, the client authenticated by a private key JWT naming the issuer",
+		(context) =>
+			excusable(context, "client-credentials", async () => {
+				const result = await run("client-credentials", world.clients.assertion, {
+					scope: "read",
+					assertionAudience: "issuer",
+				});
+				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+				const told = await world.introspect(String(result.accessToken));
+				expect(told).toMatchObject({ active: true, client_id: world.clients.assertion.id });
+			}),
+	);
+});
+
+describe(`${library.name}: revoking`, () => {
+	it.runIf(runs("revocation"))(
+		"introspects an access token as active, revokes it, and introspects it as inactive",
+		(context) =>
+			excusable(context, "revocation", async () => {
+				const result = await run("revocation", world.clients.basic);
+				expect(result).toEqual({ before: true, after: false });
+			}),
+	);
+});

@@ -10,6 +10,10 @@ export interface Run {
 	readonly kind: string;
 	readonly matrix?: string;
 	readonly releaseOnly?: true;
+	/** The test files it runs, by the suffix of their names; unset, the default rules say which. */
+	readonly files?: string;
+	/** A test of it that is skipped, excused or not, or left todo, fails its items. */
+	readonly noSkip?: true;
 }
 
 /** A package's printed runs, each checked to be a run; a value that is not refused naming the package. */
@@ -20,7 +24,9 @@ export function runsPrinted(pkg: string, printed: unknown): Run[] {
 			typeof o?.entry === "string" &&
 			typeof o.kind === "string" &&
 			(o.matrix === undefined || typeof o.matrix === "string") &&
-			(o.releaseOnly === undefined || o.releaseOnly === true)
+			(o.releaseOnly === undefined || o.releaseOnly === true) &&
+			(o.files === undefined || (typeof o.files === "string" && o.files !== "")) &&
+			(o.noSkip === undefined || o.noSkip === true)
 		);
 	};
 	if (!Array.isArray(printed) || !printed.every(isRun))
@@ -40,8 +46,16 @@ export interface Expected {
 	readonly entries: readonly string[];
 	/** The packages whose `.case.ts` tests run as their own entry and once per pattern (`<package>@<pattern>`). */
 	readonly areas: ReadonlySet<string>;
-	/** A harness's runs (`<package>#<run>`), by its package. */
+	/** A harness's runs (`<package>#<run>`) that name no files, by its package. */
 	readonly runsOf: ReadonlyMap<string, readonly string[]>;
+	/** The runs that name their files by a suffix, with their package. */
+	readonly suffixed: readonly {
+		readonly entry: string;
+		readonly pkg: string;
+		readonly files: string;
+	}[];
+	/** The runs that take no skip. */
+	readonly noSkip: ReadonlySet<string>;
 }
 
 export type RunStatus =
@@ -85,6 +99,8 @@ export interface ItemStatus {
 	readonly failed: number;
 	/** The expected runs of its tests that did not report. */
 	readonly missing: readonly string[];
+	/** Its tests absent from a run of their file that reported, as `<entry>: <file> > <title>`. */
+	readonly unrun: readonly string[];
 	/** Results a harness excused, by their class. */
 	readonly excused: Readonly<Record<string, number>>;
 	/** The reports its tests ran in, the status's provenance. */
@@ -142,12 +158,31 @@ export function selectReports(
 /** The expected runs a test file's tests run in. */
 export function entriesOfFile(pkg: string, file: string, expected: Expected): readonly string[] {
 	if (file.endsWith(".integration.test.ts")) return ["integration"];
+	const named = expected.suffixed.filter((r) => r.pkg === pkg && file.endsWith(r.files));
+	if (named.length > 0) return named.map((r) => r.entry);
 	const runs = expected.runsOf.get(pkg);
 	if (runs) return runs;
+	// An area's own run and its pattern runs, but those a suffix owns, which only their files reach.
+	const owned = new Set(expected.suffixed.map((r) => r.entry));
 	if (file.endsWith(".case.ts") && expected.areas.has(pkg))
-		return expected.entries.filter((e) => e === pkg || e.startsWith(`${pkg}@`));
+		return expected.entries.filter((e) => (e === pkg || e.startsWith(`${pkg}@`)) && !owned.has(e));
 	if (file.endsWith(".test.ts")) return ["unit"];
 	return [pkg];
+}
+
+/**
+ * Whether a name a report gives is the title written in the source: a parameterized title's printf
+ * forms (`%s`, `%d`, `%#` and the rest) and a table's `$property` stand for what they expanded to.
+ */
+export function titleMatches(title: string, name: string): boolean {
+	if (title === name) return true;
+	const parts = title.split(/(%%|%[sdifjoOc#]|\$[A-Za-z_]\w*(?:\.\w+)*)/);
+	const pattern = parts
+		.map((p, k) =>
+			k % 2 === 0 ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p === "%%" ? "%" : ".*?",
+		)
+		.join("");
+	return new RegExp(`^${pattern}$`, "s").test(name);
 }
 
 /** The items a test's names give, each once however many of its names give it. */
@@ -217,6 +252,25 @@ export function itemStatuses(
 		const entries = [...new Set(refs.flatMap((r) => entriesOfFile(r.pkg, r.file, expected)))];
 		const missing = entries.filter((e) => expected.entries.includes(e) && !present.has(e));
 		const broken = files.some((f) => brokenFiles.has(f)) || entries.some((e) => errored.has(e));
+		// Each test naming the item, in each report of each run of its file that reported: a suite's title
+		// is met by a test in it; a run none of whose reports ran the file lacks it too.
+		const unrun = refs.flatMap((ref) => {
+			const path = join(pkgDirs.get(ref.pkg) ?? ref.pkg, ref.file);
+			// A test's names hold its path's; a suite's, its path's and then a test's inside it.
+			const meets = (names: readonly string[]) =>
+				(ref.suite ? names.length > ref.path.length : names.length === ref.path.length) &&
+				ref.path.every((s, k) => s === null || titleMatches(s, names[k] ?? ""));
+			const ran = (r: EvidenceReport) => r.tests.some((t) => t.file === path && meets(t.names));
+			return entriesOfFile(ref.pkg, ref.file, expected)
+				.filter((e) => present.has(e))
+				.filter((e) => {
+					const covering = reports.filter(
+						(r) => r.identity.entry === e && r.tests.some((t) => t.file === path),
+					);
+					return covering.length === 0 || !covering.every(ran);
+				})
+				.map((e) => `${e}: ${ref.file} > ${ref.title}`);
+		});
 		const failures = reports.flatMap((r) => {
 			const { commit, run, attempt, job, entry } = r.identity;
 			const at = { commit, run, attempt, job, entry };
@@ -231,15 +285,29 @@ export function itemStatuses(
 				r.errors > 0 && entries.includes(entry)
 					? [{ ...at, reason: `${r.errors} error(s) no test owns` }]
 					: [];
-			return [...outside, ...errors];
+			const skipped = expected.noSkip.has(entry)
+				? r.tests
+						.filter(
+							(t) =>
+								(t.state === "skipped" || t.state === "pending") && idsIn(t.names).includes(i.id),
+						)
+						.map((t) => ({
+							...at,
+							reason: `${t.file} > ${t.names.join(" > ")}: skipped in a run that takes no skip`,
+						}))
+				: [];
+			return [...outside, ...errors, ...skipped];
 		});
+		const refusedSkip = failures.some((f) =>
+			f.reason.endsWith("skipped in a run that takes no skip"),
+		);
 		const status: RunStatus =
 			i.mark?.kind ??
 			(refs.length === 0
 				? "hole"
-				: s.failed > 0 || broken
+				: s.failed > 0 || broken || refusedSkip
 					? "failed"
-					: missing.length > 0
+					: missing.length > 0 || unrun.length > 0
 						? "incomplete"
 						: s.passed > 0
 							? "passed"
@@ -252,6 +320,7 @@ export function itemStatuses(
 			status,
 			...s,
 			missing,
+			unrun,
 			evidence: provenance,
 			failures,
 		};

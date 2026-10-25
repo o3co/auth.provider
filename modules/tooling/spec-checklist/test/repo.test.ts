@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	expectedOf,
+	holdsTests,
 	readChecklist,
 	repoFindings,
 	repoRoot,
@@ -69,5 +70,16 @@ describe("the workspace's runs", { timeout: 120_000 }, () => {
 			kind: "release",
 			releaseOnly: true,
 		});
+	});
+});
+
+describe("the files that hold tests", () => {
+	it("are the .test.ts and .case.ts files, and any file under a test directory", () => {
+		expect(holdsTests("src/a.test.ts")).toBe(true);
+		expect(holdsTests("test/keys.case.ts")).toBe(true);
+		expect(holdsTests("test/store.faults.ts")).toBe(true);
+		expect(holdsTests("src/evidence/test/fixtures/runs.sample.ts")).toBe(true);
+		expect(holdsTests("src/contract.ts")).toBe(false);
+		expect(holdsTests("src/latest/notes.ts")).toBe(false);
 	});
 });
