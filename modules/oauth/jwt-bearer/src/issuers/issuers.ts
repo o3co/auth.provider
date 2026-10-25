@@ -1,3 +1,5 @@
+import { clientAllowance } from "@mod/client-allowance";
+import { clients } from "@mod/clients";
 import { type ExternalJwt, externalJwt, type Policy } from "@mod/external-jwt";
 import { type BuildContext, type Refusal, setting } from "@mod/kernel";
 import { publicPem } from "@mod/keys";
@@ -83,6 +85,13 @@ const narrowing = {
 		.optional()
 		.describe(
 			"This issuer's clock allowance for what is taken, no wider than the section's; a revocation keeps the section's.",
+		),
+	client: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"The registered client this issuer's assertions identify where a request names none: public with method `none`, allowed this grant alone, no other entry's. Warned at boot.",
 		),
 };
 
@@ -222,6 +231,15 @@ export type Trust =
 	  }
 	| { readonly kind: "refused"; readonly refusals: readonly Refusal[] };
 
+/** A registered client, as an entry's `client` is held to it. */
+export interface RegisteredClient {
+	readonly id: string;
+	/** Public with method `none`: nothing it authenticates with. */
+	readonly credentialless: boolean;
+	/** Allowed this grant, and no other. */
+	readonly thisGrantAlone: boolean;
+}
+
 /** Each issuer's signers, from its written keys, its key set or the keys contributed for it. */
 export async function trustedWith(p: {
 	readonly jwt: ExternalJwt;
@@ -230,6 +248,8 @@ export async function trustedWith(p: {
 	readonly section: { readonly "max-assertion-lifetime": number; readonly "clock-skew": number };
 	readonly contributed: readonly SignerKeys[];
 	readonly ledgers: readonly JtiLedger[];
+	/** The registered clients, which an entry's `client` names. */
+	readonly clients: readonly RegisteredClient[];
 	readonly policyOf: (entry: IssuerEntry) => Policy;
 }): Promise<Trust> {
 	const contributed = new Map(p.contributed.map((k) => [k.issuer, k]));
@@ -238,6 +258,7 @@ export async function trustedWith(p: {
 	const refused: Refusal[] = [];
 	const warnings: { event: string; where: string }[] = [];
 	const firstAt = new Map<string, number>();
+	const clientAt = new Map<string, number>();
 	for (const [at, i] of p.issuers.entries()) {
 		const where = `jwt-bearer.issuers.${at}`;
 		const lifetime = i["max-assertion-lifetime"];
@@ -262,6 +283,10 @@ export async function trustedWith(p: {
 		refused.push(...anySubjectRefusals(i, where, keys));
 		if (i["accept-any-subject"] && !i.conditions)
 			warnings.push({ event: "jwt-bearer.any_subject", where });
+		if (i.client !== undefined) {
+			refused.push(...clientRefusals(i.client, at, p.clients, clientAt));
+			warnings.push({ event: "jwt-bearer.clientless_issuer", where });
+		}
 		trusted.set(
 			i.issuer,
 			"keys" in i
@@ -315,6 +340,9 @@ function anySubjectRefusals(
 	const whole = "keys" in i || "jwks-uri" in i || (keys !== undefined && keys.perSigner !== true);
 	const anySigner = i.subject === "as-is" && !i["subject-is-key-thumbprint"] && whole;
 	const at = `${where}.accept-any-subject`;
+	// A request naming no client has no authentication: conditions, a table or keys narrow it alone.
+	if (accepted && i.client !== undefined)
+		return [{ where: at, reason: "is written beside client" }];
 	if (accepted && i.conditions) return [{ where: at, reason: "is written beside conditions" }];
 	if (accepted && !anySigner)
 		return [{ where: at, reason: "is for an issuer whose every signer becomes a subject" }];
@@ -330,6 +358,35 @@ function anySubjectRefusals(
 	return [];
 }
 
+/**
+ * An entry's client: registered with nothing it authenticates with, allowed this grant alone and no
+ * other entry's, so a request naming none skips no client's authentication and opens no other grant.
+ */
+function clientRefusals(
+	id: string,
+	at: number,
+	registered: readonly RegisteredClient[],
+	firstAt: Map<string, number>,
+): Refusal[] {
+	const where = `jwt-bearer.issuers.${at}.client`;
+	const first = firstAt.get(id);
+	if (first !== undefined) {
+		return [{ where, reason: `names the same client as jwt-bearer.issuers.${first}` }];
+	}
+	firstAt.set(id, at);
+	const found = registered.find((k) => k.id === id);
+	if (found === undefined) return [{ where, reason: "names no registered client" }];
+	if (!found.credentialless) {
+		return [
+			{ where, reason: "names a client with credentials: it needs to be public with method none" },
+		];
+	}
+	if (!found.thisGrantAlone) {
+		return [{ where, reason: "names a client allowed another grant than this one" }];
+	}
+	return [];
+}
+
 /** Where an entry's key set is fetched from: its URL, from the issuer's host, or its own where accepted. */
 const keySetOf = (i: Extract<IssuerEntry, { readonly "jwks-uri": string }>) => ({
 	url: i["jwks-uri"],
@@ -337,7 +394,7 @@ const keySetOf = (i: Extract<IssuerEntry, { readonly "jwks-uri": string }>) => (
 });
 
 /** What `issuersIn` takes from the build context. */
-export const issuersTakes = [externalJwt, signerKeys, jtiLedgers] as const;
+export const issuersTakes = [externalJwt, signerKeys, jtiLedgers, clients] as const;
 
 /** The trusted issuers, their keys and ledgers taken from the composition. */
 export async function issuersIn(
@@ -346,13 +403,24 @@ export async function issuersIn(
 		readonly issuers: readonly IssuerEntry[];
 	},
 	policyOf: (entry: IssuerEntry) => Policy,
+	/** This grant's type, the one an entry's client may be allowed. */
+	grantType: string,
 ): Promise<Trust> {
+	const registered = (await c.get(clients)).registered().map((k) => {
+		const allowed = clientAllowance.grantsOf(k);
+		return {
+			id: k.id,
+			credentialless: k.kind === "public" && k.method === "none",
+			thisGrantAlone: allowed.length > 0 && allowed.every((g) => g === grantType),
+		};
+	});
 	const trust = await trustedWith({
 		jwt: await c.get(externalJwt),
 		issuers: section.issuers,
 		section,
 		contributed: await c.collect(signerKeys),
 		ledgers: await c.collect(jtiLedgers),
+		clients: registered,
 		policyOf,
 	});
 	// Told once each boot, by place: the operator's values are never written out.

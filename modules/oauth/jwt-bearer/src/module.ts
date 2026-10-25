@@ -72,7 +72,6 @@ const takes = [
 	spentAssertions,
 	revocations,
 	linkedSubjects,
-	clients,
 	...issuersTakes,
 	...delegatedTakes,
 ];
@@ -95,7 +94,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 		const boundaries = await c.get(revocations);
 		const skewMs = c.section["clock-skew"] * 1000;
 		const policyOf = (i: IssuerEntry) => verifierPolicy(i, c.section, [named, url]);
-		const trust = await issuersIn(c, c.section, policyOf);
+		const trust = await issuersIn(c, c.section, policyOf, jwtBearerGrantType);
 		const delegation = await delegatedIn(c, c.section.issuers, c.section["delegated-issuers"]);
 		const refused = [trust, delegation].flatMap((t) => (t.kind === "refused" ? t.refusals : []));
 		if (trust.kind === "refused" || delegation.kind === "refused") return c.refuseAll(refused);
