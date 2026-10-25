@@ -113,7 +113,7 @@ export async function withContainer<T>(
 	const removal = async () => {
 		const until = performance.now() + (options.teardownWithin ?? 30_000);
 		const time = () => Math.max(0, until - performance.now());
-		await docker(["rm", "-f", name], time()).catch((error: unknown) => {
+		await docker(["rm", "-f", "-v", name], time()).catch((error: unknown) => {
 			if (!absent(error)) throw error;
 		});
 		const still = await docker(["inspect", "--format", "{{.Id}}", name], time()).then(
@@ -233,7 +233,7 @@ async function labelled(docker: Docker, within: number, run: string) {
 async function removedAll(docker: Docker, within: number, names: readonly string[]) {
 	const refused = new Map<string, unknown>();
 	for (const name of names) {
-		await docker(["rm", "-f", name], within).catch((error: unknown) => {
+		await docker(["rm", "-f", "-v", name], within).catch((error: unknown) => {
 			if (!absent(error)) refused.set(name, error);
 		});
 	}
