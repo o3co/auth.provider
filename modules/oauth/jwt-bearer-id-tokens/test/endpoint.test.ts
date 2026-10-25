@@ -84,9 +84,10 @@ afterEach(async () => {
 	clock.at = start;
 });
 
-/** The tokens module, each access token it was asked to revoke kept. */
+/** The tokens module, each access token it was asked to revoke kept, and how many it issued. */
 function watchedTokens() {
 	const revoked: string[] = [];
+	const issued = { count: 0 };
 	const module: Module = {
 		...tokensModule,
 		provides: (tokensModule.provides ?? []).map((part) =>
@@ -98,6 +99,10 @@ function watchedTokens() {
 							const real = (await part.create(context)) as Tokens;
 							return {
 								...real,
+								issue: (...given: Parameters<Tokens["issue"]>) => {
+									issued.count += 1;
+									return real.issue(...given);
+								},
 								revokeAccess: (token: string) => {
 									revoked.push(token);
 									return real.revokeAccess(token);
@@ -107,13 +112,14 @@ function watchedTokens() {
 					},
 		),
 	};
-	return { module, revoked };
+	return { module, revoked, issued };
 }
 
 interface Served {
 	readonly app: Awaited<ReturnType<typeof assemble>>;
 	readonly store: SimulatedStore;
 	readonly revoked: readonly string[];
+	readonly issued: { readonly count: number };
 	bearer(
 		client: string,
 		idToken: string,
@@ -223,6 +229,7 @@ async function serve(settings: { maxAge?: string; on?: Served } = {}): Promise<S
 		app,
 		store,
 		revoked: watched.revoked,
+		issued: watched.issued,
 		bearer: (client, idToken, headers = {}) =>
 			post({ grant_type: bearer, assertion: idToken, ...credentials(client) }, headers),
 		exchange: (client, idToken) =>
@@ -271,7 +278,11 @@ describe("the JWT bearer grant over the whole token endpoint, for id_tokens", ()
 		expect(said(await s.bearer("phone", bound))).toBe(refusedKey);
 		const other = generateKeyPairSync("ed25519");
 		expect(said(await s.bearer("phone", bound, { dpop: await proof(other) }))).toBe(refusedKey);
-		expect(said(await s.bearer("phone", bound, { dpop: await proof() }))).toBe("200 DPoP");
+		const taken = await s.bearer("phone", bound, { dpop: await proof() });
+		expect(said(taken)).toBe("200 DPoP");
+		// Bound to that key: its confirmation is the key's thumbprint.
+		const checked = await s.app.get(tokens).verifyAccess(String(taken.body.access_token));
+		expect(checked).toMatchObject({ kind: "valid", binding: { member: "jkt", confirmation: jkt } });
 		const unbound = await idToken("com.example.phone");
 		expect(said(await s.bearer("phone", unbound, { dpop: await proof() }))).toBe(refusedKey);
 	});
@@ -328,6 +339,8 @@ describe("the JWT bearer grant over the whole token endpoint, for id_tokens", ()
 			const late = await s.bearer("app", token);
 			expect(first && said(first)).toBe("200 Bearer");
 			expect(said(late)).toBe(replayed);
+			// The exchange's token alone: the JWT bearer grant issued none and revoked none.
+			expect(s.issued.count).toBe(1);
 			expect(s.revoked).toEqual([]);
 		});
 	});
@@ -363,6 +376,17 @@ describe("the JWT bearer grant over the whole token endpoint, for id_tokens", ()
 		expect(said(await s.bearer("app", short))).toBe("200 Bearer");
 		clock.at += 1;
 		expect(said(await s.bearer("app", shorter))).toBe("400 invalid_grant: expired");
+	});
+
+	it("hands out no token the time of its spend left without life, though two seconds were left before it", async () => {
+		const s = await serve();
+		const token = await idToken("com.example.app", { exp: nowS() + 2 });
+		// Two seconds pass at the write of the record, after the second left was asked.
+		s.store.beforeNext("putIfAbsent", usedSpace, async () => {
+			clock.at += 2 * second;
+		});
+		expect(said(await s.bearer("app", token))).toBe("400 invalid_grant: expired");
+		expect(said(await s.bearer("app", token))).not.toMatch(/^200/);
 	});
 
 	it("never takes again an id_token this version kept once max-age widens to an hour, but takes one an earlier version kept", async () => {
