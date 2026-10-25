@@ -19,7 +19,7 @@
 - A JSON body is one object in well-formed UTF-8, frozen, naming no member twice in one object; anything else is `400`.
 - Values with the same name keep the order sent: `single` gives a name's only value, `repeated` the names with more, and whether one must be single is the route's.
 - A request's fields are its body's values by name; a JSON member that is not a string is told apart as `mistyped`, its meaning the route's.
-- Cross-origin routes: a preflight is answered before the policies, and answers vary by `Origin`, naming the request's origin only when listed, never `*` and never with credentials.
+- Cross-origin routes: a preflight is answered before the policies, and answers vary by `Origin`, naming the request's origin only when listed, never `*` and never with credentials; a route's own `access-control-*` headers pass as it wrote them.
 - A preflight from a listed origin, for a method a declared route takes, names the methods of the path's declared routes, the request headers the route takes, and a max age of 600 seconds.
 - Any other preflight on such a path gets `204` with nothing to read by.
 - `loads`: what a page declares it loads (the origins it frames, its inline scripts); its answer's policy allows those and nothing else, and a frame a policy cannot name makes the answer `500`.
@@ -29,7 +29,7 @@
 - `listening` (the port) and `site` (the public origin; cookies can be made secure unless it is http; `proxied`, whether `trusted-proxies` names a proxy, without which no request's scheme is https nor its source told past a proxy); an answer's `cookies` are sent one `Set-Cookie` each; `client-certificate`'s `certificateForwarding` is provided from this section.
 - `requestEnds`: each request's end, once, answered or closed: the method sent, the declared path of the route reached (none when none), the status written or `closed` when the client closed first, and the milliseconds taken (never negative); an observer's throw is dropped.
 - Observers are told after the request, asynchronously, and what they throw or reject is dropped.
-- `jsonAnswer`: status, a JSON value, and any cookies and headers → an answer kept out of caches (`noStore`).
+- `jsonAnswer`: status, a JSON value, and any cookies and headers → an answer kept out of caches (`noStore`), but where the headers given replace its `cache-control` or `pragma`.
 - `./testing`: test configuration and request builders with working defaults.
 
 ## Invariants
