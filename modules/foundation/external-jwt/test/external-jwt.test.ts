@@ -628,10 +628,19 @@ describe("a key set at a URL", () => {
 		const one = jwt.verifierOf(source, { ...policy, algorithms: ["RS256"] });
 		const two = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
 		expect((await one.verify(token)).kind).toBe("valid");
-		// The set holds the key; it is unused here, so the answer is no key, not a fetch or an outage.
+		// The set holds the key; it is unused here, so the answer is no key, not a fetch or an outage,
+		// however long since the last fetch: a fresh set would read the key no other way.
+		expect(await two.verify(token)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(1);
+		now += 61_000;
+		expect(await two.verify(token)).toEqual(invalid("no-key"));
 		expect(await two.verify(token)).toEqual(invalid("no-key"));
 		expect(s.asked).toHaveLength(1);
 		expect((await one.verify(token)).kind).toBe("valid");
+		// A key the set lacks is still fetched for, past the minute.
+		const unknown = await (await testSigner("RS256", "k2")).sign(fresh());
+		expect(await two.verify(unknown)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(2);
 	});
 
 	it("keeps one set for a URL and its hosts, whichever verifier asks", async () => {
