@@ -152,6 +152,9 @@ export function refreshGrant(
 	};
 }
 
+/** What `grantOver` takes beside `settlingIn`'s. */
+export const grantTakes = [sessions, subjectRevocation, issuer, audit];
+
 /** The refresh_token grant over the contracts the assembly gives; it sweeps the families to settle. */
 export async function grantOver(c: BuildContext<Settings>) {
 	const { stores, revoker } = await settlingIn(c);

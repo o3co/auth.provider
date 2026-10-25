@@ -87,6 +87,17 @@ export function settling(
 
 export type Revoker = ReturnType<typeof settling>;
 
+/** What `settlingIn` takes, and so every factory built on it. */
+export const settlingTakes = [
+	familyStore,
+	redemptionStore,
+	sessionFamilies,
+	issuedAccess,
+	tokenFamilies,
+	settleList,
+	tokens,
+];
+
 /** The stores and the revoker over the contracts the assembly gives; refuses where access tokens cannot be revoked. */
 export async function settlingIn(c: BuildContext<Settings>) {
 	const stores: Stores = {

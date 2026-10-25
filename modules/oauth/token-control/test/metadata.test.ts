@@ -8,7 +8,7 @@ import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { grantCaller } from "@mod/token-endpoint/testing";
@@ -19,39 +19,42 @@ import tokenControl from "../src/module.ts";
 
 const runtime = quietRuntime();
 
-const refreshKind = defineModule({ name: "refresh-kind" }, (m) => [
+const refreshKind = defineModule({ name: "refresh-kind", takes: [] }, (m) => [
 	m.contribute(revocableKinds).by(() => ({ hint: "refresh_token", revoke: async () => "unknown" })),
 ]);
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
+/** What `documentOf` assembles: tokens revocable or not, the public origin if one is written. */
+const assembly = (revocable: boolean, origin?: string, extra: Module[] = []) => ({
+	modules: [
+		http,
+		tokensStandIn({ revocable }),
+		issuerModule,
+		clientsModule,
+		secretHashModule,
+		grantCaller,
+		clientAllowanceModule,
+		tokenControl,
+		rateLimitStandIn,
+		auditStandIn().module,
+		reader,
+		...extra,
+	],
+	config: {
+		...kernelConfig(),
+		...httpConfig(origin ? { "public-origin": origin } : {}),
+		...issuerConfig({ url: origin ?? "https://issuer.example" }),
+	},
+	runtime,
+});
+
 /** The metadata items with a value of a deployment reached at `origin` if one is written. */
 async function documentOf(revocable: boolean, origin?: string, extra: Module[] = []) {
-	const app = await assemble({
-		modules: [
-			http,
-			tokensStandIn({ revocable }),
-			issuerModule,
-			clientsModule,
-			secretHashModule,
-			grantCaller,
-			clientAllowanceModule,
-			tokenControl,
-			rateLimitStandIn,
-			auditStandIn().module,
-			reader,
-			...extra,
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(origin ? { "public-origin": origin } : {}),
-			...issuerConfig({ url: origin ?? "https://issuer.example" }),
-		},
-		runtime,
-	});
+	const app = await assemble(assembly(revocable, origin, extra));
 	const items = app.get(published).filter((item) => item.value !== undefined);
 	return Object.fromEntries(items.map((item) => [item.name, item.value]));
 }
@@ -73,7 +76,7 @@ it("publishes revocation only where some token can be revoked, and nothing witho
 });
 
 /** A signed method, as client-assertion contributes one. */
-const signed = defineModule({ name: "signed-method" }, (m) => [
+const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
 	m.contribute(authMethods).by(() => ({
 		name: "private_key_jwt",
 		signingAlgorithms: ["ES256"],
@@ -103,4 +106,13 @@ it("publishes how a client authenticates at each: no public client at introspect
 	const unrevocable = await documentOf(false, "https://as.example", [signed]);
 	expect(unrevocable).not.toHaveProperty("revocation_endpoint_auth_methods_supported");
 	expect(unrevocable).not.toHaveProperty("revocation_endpoint_auth_signing_alg_values_supported");
+});
+
+it("takes all its module names, tokens revocable or not, a kind contributed or not, with an origin or none", async () => {
+	for (const revocable of [true, false])
+		for (const extra of [[], [refreshKind]])
+			for (const origin of ["https://as.example", undefined]) {
+				const input = assembly(revocable, origin, extra);
+				expect(await takesUnused(input), `${revocable} ${extra.length} ${origin}`).toEqual({});
+			}
 });

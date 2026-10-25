@@ -138,7 +138,9 @@ const sessionTie = (index: TokenIndex, open: Pick<Sessions, "entryOf">): TokenTi
 /** The parts built once, so the margin is checked once. */
 const built = contract<Parts>("session-tokens.parts");
 
-export default defineModule({ name: "session-tokens", section }, (m) => [
+const takes = [issuedTokens, tokenIndex, pendingSessions, tokens, sessions];
+
+export default defineModule({ name: "session-tokens", section, takes }, (m) => [
 	m.provide(built).by(partsOf),
 	m.provide(sessionTokens).by(async (c) => {
 		const parts = await c.get(built);

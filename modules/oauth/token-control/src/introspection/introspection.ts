@@ -29,6 +29,9 @@ function activeAnswer(issuer: string, checked: Valid): HttpResponse {
 	});
 }
 
+/** What `introspectionIn` takes. */
+export const introspectionTakes = [clients, tokens, issuer, audit];
+
 /** The introspection route's handler and its answer to Unavailable, which records it. */
 /** The introspection handler over the contracts the assembly gives. */
 export const introspectionIn = async (c: BuildContext<unknown>) =>

@@ -4,6 +4,9 @@ import { sessions } from "@mod/session";
 import type { Settings } from "../section.ts";
 import { sessionClients } from "../store.ts";
 
+/** What `remembering`'s contribution takes from the composition (`sessions` late). */
+export const rememberingTakes = [sessionClients, sessions] as const;
+
 /**
  * The package's contribution, under `name`, to `code-grant`'s session redemptions: each client that
  * redeemed a code in a session is kept until the session ends, and at least `remember-for`.

@@ -207,6 +207,16 @@ export function endingOver(p: EndingParts) {
 	};
 }
 
+/** What `endingFrom` takes from the composition. */
+export const endingTakes = [
+	idTokenHints,
+	clients,
+	sessions,
+	sessionClients,
+	audit,
+	issuer,
+] as const;
+
 /** The route's handler, from the composition's contracts. */
 export async function endingFrom(c: BuildContext<Settings>, upstream: UpstreamEnd | undefined) {
 	return endingOver({

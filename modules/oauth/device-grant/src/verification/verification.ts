@@ -141,6 +141,9 @@ export function verificationWith(v: Verifying): Pick<Route, "handle" | "unavaila
 	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
 
+/** What `verificationOver` takes. */
+export const verificationTakes = [sessions, attemptLimit, audit, deviceStore, userCodes, tokens];
+
 /** The handler over the contracts the assembly gives. */
 export const verificationOver = async (c: BuildContext<Settings>) =>
 	verificationWith({

@@ -6,7 +6,7 @@ import { revokedTokens } from "@mod/token-denylist";
 export function revokedInMemory(now: () => number) {
 	const place = { shift: 0, down: false };
 	const stand = memoryRecords<true>(() => now() + place.shift, { shards: 1, perShard: 1 });
-	const module = defineModule({ name: "revoked-tokens" }, (m) => [
+	const module = defineModule({ name: "revoked-tokens", takes: [] }, (m) => [
 		m.provide(revokedTokens).by(() => ({
 			save: async (id: string, lifetimeMs: number) => {
 				if (place.down) throw new Unavailable("revoked tokens");

@@ -4,7 +4,7 @@ import { upstreamNames, users } from "@mod/users";
 
 const declaredBy = "jwt-bearer-users";
 
-export default defineModule({ name: declaredBy }, (m) => [
+export default defineModule({ name: declaredBy, takes: [users, linkedIssuers] }, (m) => [
 	m.contribute(linkedSubjects).by(async (c) => {
 		const people = await c.get(users);
 		return {

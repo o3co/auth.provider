@@ -86,5 +86,8 @@ export function stepUpWith({ acr: table, stepUpPage, reauths }: StepUpParts): St
 }
 
 /** The step over `acr`'s table the assembly gives and the package's `step-up-page`. */
+/** What `stepUpOver` takes. */
+export const stepUpTakes = [acr];
+
 export const stepUpOver = async (c: BuildContext<Settings>, reauths: Reauths) =>
 	stepUpWith({ acr: await c.get(acr), stepUpPage: c.section["step-up-page"], reauths });

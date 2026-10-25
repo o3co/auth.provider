@@ -3,7 +3,7 @@ import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { type Assembly, assemble, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
@@ -37,7 +37,7 @@ function around() {
 	const revoked = new Set<string>();
 	const known = { member: "one", tokenType: "ONE" };
 	const runtime = quietRuntime({ clock: { now: () => now } });
-	const module = defineModule({ name: "around" }, (m) => [
+	const module = defineModule({ name: "around", takes: [] }, (m) => [
 		m.contribute(senderBindings).by(() => ({ ...known, read: async () => ({ kind: "absent" }) })),
 		m.contribute(subjectChecks).by(() => ({
 			holds: async (token) => (revoked.has(token.subject) ? "revoked" : "holds"),
@@ -66,7 +66,7 @@ async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
 
 /** The policies given, contributed. */
 const contributing = (policies: readonly IssuancePolicy[] = []) =>
-	defineModule({ name: "policies" }, (m) =>
+	defineModule({ name: "policies", takes: [] }, (m) =>
 		policies.map((policy) => m.contribute(issuancePolicies).by(() => policy)),
 	);
 
@@ -130,4 +130,16 @@ it("the stand-in tells who a token was issued to for the allowance past its expi
 	expect(await stand.tokens.issuedToOf(issued.token)).toEqual({ kind: "issued", issuedTo: "c" });
 	stand.advance(1);
 	expect(await stand.tokens.issuedToOf(issued.token)).toEqual({ kind: "invalid" });
+});
+
+it("the stand-in takes all it names, revocable or not", async () => {
+	for (const revocable of [true, false]) {
+		const { runtime, module } = around();
+		const input = {
+			modules: [tokensStandIn({ revocable }), module],
+			config: kernelConfig(),
+			runtime,
+		};
+		expect(await takesUnused(input), String(revocable)).toEqual({});
+	}
 });

@@ -6,7 +6,9 @@ import { sessions } from "@mod/session";
 import { tokens } from "@mod/tokens";
 import { sessionGrant } from "./grant.ts";
 
-export default defineModule({ name: "session-grant" }, (m) => [
+const takes = [sessionIssuances, originEvidence, sessions, tokens, issuer];
+
+export default defineModule({ name: "session-grant", takes }, (m) => [
 	m.contribute(grants).by(async (c) => {
 		if ((await c.collect(sessionIssuances)).length === 0) {
 			return c.refuse(

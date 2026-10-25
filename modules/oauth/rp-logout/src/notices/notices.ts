@@ -136,6 +136,16 @@ export function noticesOver(p: NoticeParts) {
 
 export type Notices = ReturnType<typeof noticesOver>;
 
+/** What `noticesFrom` takes from the composition. */
+export const noticesTakes = [
+	keys,
+	outbound,
+	clients,
+	issuer,
+	pendingNotices,
+	sessionClients,
+] as const;
+
 /** The notices, from the composition's contracts. */
 export async function noticesFrom(c: BuildContext<Settings>): Promise<Notices> {
 	return noticesOver({

@@ -122,6 +122,9 @@ export function grantWith(
 	};
 }
 
+/** What `grantOver` takes. */
+export const grantTakes = [deviceStore, subjectRevocation, sessions];
+
 /** The grant over the contracts the assembly gives. */
 export const grantOver = async (c: BuildContext<unknown>) =>
 	grantWith(await c.get(deviceStore), await c.get(subjectRevocation), await c.get(sessions), c);

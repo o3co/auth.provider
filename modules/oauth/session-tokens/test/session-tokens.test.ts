@@ -11,7 +11,13 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import {
+	quietRuntime,
+	recordingLog,
+	switchedModule,
+	takesUnused,
+	unavailableSwitch,
+} from "@mod/kernel/testing";
 import { entryJudge, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
@@ -54,7 +60,7 @@ afterEach(() => stop());
 
 /** What modules contribute to `token-endpoint`'s session issuances, read back after assembly. */
 const told = contract<readonly SessionIssuance[]>("told");
-const telling = defineModule({ name: "telling" }, (m) => [
+const telling = defineModule({ name: "telling", takes: [sessionIssuances] }, (m) => [
 	m.provide(told).by((c) => c.collect(sessionIssuances)),
 ]);
 /** Records a token as token-endpoint does: by telling session-tokens it was issued from a session. */
@@ -66,18 +72,19 @@ const recording =
 		return one.issued(session, token);
 	};
 
-async function boot(
-	options: {
-		revocation?: "denylist" | "unsupported";
-		size?: number;
-		margin?: number;
-		tokens?: Module;
-		extra?: Module[];
-	} = {},
-) {
+type Options = {
+	revocation?: "denylist" | "unsupported";
+	size?: number;
+	margin?: number;
+	tokens?: Module;
+	extra?: Module[];
+};
+
+/** What `boot` assembles, with the stores and the switch it reaches into. */
+function assembly(options: Options = {}) {
 	const issued = issuedInMemory(options.size);
 	const down = unavailableSwitch<Tokens>("tokens");
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			options.tokens ??
@@ -100,7 +107,13 @@ async function boot(
 			"session-tokens": { "sweep-interval": "1s", "push-out-margin": options.margin ?? 0 },
 		},
 		runtime,
-	});
+	};
+	return { input, issued, down };
+}
+
+async function boot(options: Options = {}) {
+	const { input, issued, down } = assembly(options);
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const opened = app.get(sessions);
@@ -328,7 +341,7 @@ it("revokes every token the place pushes out, and keeps the record", async () =>
 });
 
 it("leaves the session closing when tokens answers that it cannot revoke after all", async () => {
-	const refusing = defineModule({ name: "tokens" }, (m) => [
+	const refusing = defineModule({ name: "tokens", takes: [] }, (m) => [
 		m.provide(tokens).by(
 			() =>
 				({
@@ -344,7 +357,7 @@ it("leaves the session closing when tokens answers that it cannot revoke after a
 
 it("fails the record at the first pushed-out token tokens cannot revoke, as closing does", async () => {
 	const asked: string[] = [];
-	const refusing = defineModule({ name: "tokens" }, (m) => [
+	const refusing = defineModule({ name: "tokens", takes: [] }, (m) => [
 		m.provide(tokens).by(
 			() =>
 				({
@@ -392,7 +405,7 @@ it("answers the session a recorded token was issued for, and unbound for any oth
 
 it("ties a token to its session as `session` while the session lets it in, and joins one issued from it only then, recording nothing", async () => {
 	let short = false;
-	const judge = defineModule({ name: "judge" }, (m) => [
+	const judge = defineModule({ name: "judge", takes: [] }, (m) => [
 		m.contribute(entryJudge).by(() => ({
 			judge: async () =>
 				short
@@ -401,7 +414,7 @@ it("ties a token to its session as `session` while the session lets it in, and j
 		})),
 	]);
 	const tied = contract<readonly TokenTie[]>("ties");
-	const reader = defineModule({ name: "tie-reader" }, (m) => [
+	const reader = defineModule({ name: "tie-reader", takes: [tokenTies] }, (m) => [
 		m.provide(tied).by((c) => c.collect(tokenTies)),
 	]);
 	const s = await boot({ extra: [judge, reader] });
@@ -498,4 +511,14 @@ it("sweeps every 30s unless set, taking a time only with its unit and in whole s
 			takes,
 		),
 	).toEqual([true, false, false]);
+});
+
+it("takes all its module names, its ties read or not", async () => {
+	const tied = contract<unknown>("ties");
+	const reader = defineModule({ name: "tie-reader", takes: [tokenTies] }, (m) => [
+		m.provide(tied).by((c) => c.collect(tokenTies)),
+	]);
+	for (const extra of [[], [reader]]) {
+		expect(await takesUnused(assembly({ extra }).input), String(extra.length)).toEqual({});
+	}
 });

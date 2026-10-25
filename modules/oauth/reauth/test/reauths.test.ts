@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { describe, expect, it } from "vitest";
 import { reauthStore, reauths, type StoredReauth } from "../src/contract.ts";
@@ -97,12 +98,14 @@ describe("re-authentication records", () => {
 	});
 });
 
-it("provides the records over the store the assembly wires", async () => {
+it("provides the records over the store the assembly wires, taking all it names", async () => {
 	const stand = memoryRecords<StoredReauth>(() => 0, { shards: 1, perShard: 1 });
-	const place = defineModule({ name: "reauth-place" }, (m) => [
+	const place = defineModule({ name: "reauth-place", takes: [] }, (m) => [
 		m.provide(reauthStore).by(() => ({ save: stand.records.create, update: stand.records.change })),
 	]);
-	const app = await assemble({ modules: [reauthModule, place], config: kernelConfig() });
+	const input = { modules: [reauthModule, place], config: kernelConfig() };
+	expect(await takesUnused(input)).toEqual({});
+	const app = await assemble(input);
 	const records = app.get(reauths);
 	const name = await records.remember(params({ a: "1" }), 5);
 	expect((await records.take(name, params({ a: "1" })))?.at).toBe(5);

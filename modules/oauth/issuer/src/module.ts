@@ -10,7 +10,7 @@ import { section } from "./section.ts";
  */
 const itemsChecked = contract<readonly MetadataItem[]>("issuer.items");
 
-export default defineModule({ name: "issuer", section }, (m) => [
+export default defineModule({ name: "issuer", section, takes: [site, metadata] }, (m) => [
 	m.provide(issuer).by(async (c) => {
 		const url = c.section.url;
 		const publicOrigin = (await c.get(site)).origin;

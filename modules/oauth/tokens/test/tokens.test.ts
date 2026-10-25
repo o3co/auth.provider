@@ -13,7 +13,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { accessTokenSigning } from "@mod/keys";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
@@ -60,35 +60,38 @@ async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
 const claimsOf = (token: string) =>
 	JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
 
-async function assembled(
+/** The assembly the tests boot: keys, issuer, sender binding and tokens, with this tokens section. */
+const assembly = (
 	section: Record<string, unknown>,
 	{
 		extra = [],
 		origin,
 		issuerUrl = "https://issuer.example",
 	}: { readonly extra?: Module[]; readonly origin?: string; readonly issuerUrl?: string } = {},
-) {
-	return assemble({
-		modules: [
-			http,
-			keysModule,
-			issuerModule,
-			senderBindingModule,
-			tokensModule,
-			revokedInMemory(() => runtime.clock.now()).module,
-			...extra,
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(origin ? { "public-origin": origin } : {}),
-			// One key across boots, so a token from one boot can be read by another.
-			...keysConfig({ signing: { kid: "k", alg: "EdDSA", "private-key": privateKey } }),
-			...issuerConfig({ url: issuerUrl }),
-			// Most tests compose no subject check, so the section states none unless a test says otherwise.
-			tokens: { "subject-check": "none", ...section },
-		},
-		runtime,
-	});
+) => ({
+	modules: [
+		http,
+		keysModule,
+		issuerModule,
+		senderBindingModule,
+		tokensModule,
+		revokedInMemory(() => runtime.clock.now()).module,
+		...extra,
+	],
+	config: {
+		...kernelConfig(),
+		...httpConfig(origin ? { "public-origin": origin } : {}),
+		// One key across boots, so a token from one boot can be read by another.
+		...keysConfig({ signing: { kid: "k", alg: "EdDSA", "private-key": privateKey } }),
+		...issuerConfig({ url: issuerUrl }),
+		// Most tests compose no subject check, so the section states none unless a test says otherwise.
+		tokens: { "subject-check": "none", ...section },
+	},
+	runtime,
+});
+
+async function assembled(...args: Parameters<typeof assembly>) {
+	return assemble(assembly(...args));
 }
 
 describe("tokens", () => {
@@ -121,7 +124,7 @@ describe("tokens", () => {
 	});
 
 	it("stamps a binding into cnf, and takes the token type from the kind that writes the member", async () => {
-		const kind = defineModule({ name: "binding-one" }, (m) => [
+		const kind = defineModule({ name: "binding-one", takes: [] }, (m) => [
 			m.contribute(senderBindings).by(() => ({
 				member: "one",
 				tokenType: "ONE",
@@ -168,7 +171,7 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 	const seen: { id: string; subject: string; issuedAt: number }[] = [];
 	let answer: "holds" | "revoked" = "holds";
 	const down = unavailableSwitch<AccessCondition>();
-	const condition = defineModule({ name: "condition" }, (m) => [
+	const condition = defineModule({ name: "condition", takes: [] }, (m) => [
 		m.contribute(accessConditions).by(() =>
 			down.wrap({
 				name: "test",
@@ -191,7 +194,7 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 
 it("asks the subject check whether a token's subject was revoked since it was issued", async () => {
 	let answer: "holds" | "revoked" = "holds";
-	const check = defineModule({ name: "check" }, (m) => [
+	const check = defineModule({ name: "check", takes: [] }, (m) => [
 		m.contribute(subjectChecks).by(() => ({ holds: async () => answer })),
 	]);
 	const t = await boot(
@@ -206,7 +209,7 @@ it("asks the subject check whether a token's subject was revoked since it was is
 
 it("refuses to start unless exactly one module checks subjects, or the section states that none does", async () => {
 	const check = (name: string) =>
-		defineModule({ name }, (m) => [
+		defineModule({ name, takes: [] }, (m) => [
 			m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
 		]);
 	const unchecked = {
@@ -234,7 +237,7 @@ it("names and stamps the issuer that issuer owns", async () => {
 
 it("names among the issuer's metadata where the keys its tokens are signed with are published, on the public origin", async () => {
 	let seen: readonly MetadataItem[] = [];
-	const reader = defineModule({ name: "reader" }, (m) => [
+	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 		m.provide(contract<readonly MetadataItem[]>("seen")).by(async (c) => {
 			seen = await c.collect(metadata);
 			return seen;
@@ -325,7 +328,7 @@ it("issues a token already at its end when the cap has passed", async () => {
 });
 
 it("refuses a token another issuer stamped, and one bound by two members", async () => {
-	const kinds = defineModule({ name: "two-kinds" }, (m) =>
+	const kinds = defineModule({ name: "two-kinds", takes: [] }, (m) =>
 		["one", "two"].map((member) =>
 			m.contribute(senderBindings).by(() => ({
 				member,
@@ -368,4 +371,10 @@ it("reads the access token's lifetime with its unit, in whole seconds, an hour u
 		{ "access-token-lifetime": "1500ms" },
 	];
 	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
+});
+
+it("takes all it names under either revocation, the denylist only where it keeps one", async () => {
+	for (const revocation of ["denylist", "unsupported"]) {
+		expect(await takesUnused(assembly({ revocation })), revocation).toEqual({});
+	}
 });

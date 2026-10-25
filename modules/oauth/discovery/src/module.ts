@@ -15,7 +15,7 @@ function pathsOf(issuer: string): readonly string[] {
 	return [`${path}${openid}`, `${oauth}${path}`].flatMap((p) => [p, `${p}/`]);
 }
 
-export default defineModule({ name: "discovery" }, (m) =>
+export default defineModule({ name: "discovery", takes: [named, metadata] }, (m) =>
 	// Every issuer has the same number of places, so each route is one of them.
 	[0, 1, 2, 3].map((place) =>
 		m.contribute(routes).by(async (c): Promise<Route> => {

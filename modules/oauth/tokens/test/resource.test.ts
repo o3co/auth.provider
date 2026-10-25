@@ -26,7 +26,7 @@ async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
 }
 
 /** A kind proving the key named in a header. */
-const keyed = defineModule({ name: "keyed" }, (m) => [
+const keyed = defineModule({ name: "keyed", takes: [] }, (m) => [
 	m.contribute(senderBindings).by(() => ({
 		member: "jkt",
 		tokenType: "DPoP",

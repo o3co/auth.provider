@@ -4,15 +4,17 @@ import { routes, site, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
-import { authorizationOver } from "./authorization/authorization.ts";
-import { grantOver } from "./grant/grant.ts";
+import { authorizationOver, authorizationTakes } from "./authorization/authorization.ts";
+import { grantOver, grantTakes } from "./grant/grant.ts";
 import { section } from "./section.ts";
-import { verificationOver } from "./verification/verification.ts";
+import { verificationOver, verificationTakes } from "./verification/verification.ts";
 
 export const authorizationPath = "/oauth/device_authorization";
 export const verificationPath = "/oauth/device/verification";
 
-export default defineModule({ name: "device-grant", section }, (m) => [
+const takes = [...authorizationTakes, ...verificationTakes, ...grantTakes, site, sessionIssuances];
+
+export default defineModule({ name: "device-grant", section, takes }, (m) => [
 	m.contribute(routes).by(async (c) => {
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		return {

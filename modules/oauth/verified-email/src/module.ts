@@ -11,7 +11,7 @@ const unverified: IssuanceVerdict = Object.freeze({
 	description: "email address is not verified",
 });
 
-export default defineModule({ name: "verified-email" }, (m) => [
+export default defineModule({ name: "verified-email", takes: [subjectAttributes] }, (m) => [
 	m.contribute(issuancePolicies).by((c) => {
 		// Late: subject-attributes needs sessions, and sessions get tokens while being built, so an early get would cycle.
 		const attributes = c.late(subjectAttributes);

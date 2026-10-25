@@ -10,7 +10,7 @@ import { determinedSource } from "@mod/request-source";
 import { oauthError } from "@mod/token-endpoint";
 import events from "../audit-events.ts";
 import { type Decision, refusal } from "../decision.ts";
-import { type Flow, flowOver, type Place } from "../flow/flow.ts";
+import { type Flow, flowOver, flowTakes, type Place } from "../flow/flow.ts";
 import type { Settings } from "../section.ts";
 
 export const path = "/oauth/authorize";
@@ -128,6 +128,9 @@ export function routeWith({
 }
 
 /** This endpoint's URL on `http`'s public origin; none without one. */
+/** What `endpointOver` and `routeOver` take, the flow's included: what the module takes. */
+export const routeTakes = [site, named, clients, audit, targets, ...flowTakes];
+
 export const endpointOver = async (c: BuildContext<Settings>) => {
 	const origin = (await c.get(site)).origin;
 	return origin && `${origin}${path}`;

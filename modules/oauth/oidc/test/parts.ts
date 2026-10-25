@@ -25,7 +25,7 @@ import oidc from "../src/module.ts";
 
 /** Sessions known by handle, entered as given. */
 export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
-	defineModule({ name: "sessions" }, (m) => [
+	defineModule({ name: "sessions", takes: [] }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
 				entryOf: async (handle) => {
@@ -39,7 +39,7 @@ export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
 	]);
 
 /** A ledger that cannot look users up by subject. */
-export const unanswering = defineModule({ name: "ledger" }, (m) => [
+export const unanswering = defineModule({ name: "ledger", takes: [] }, (m) => [
 	m.contribute(ledgers).by(() => ({
 		verify: async () => ({ kind: "none" }),
 		bySubject: async () => ({ kind: "unanswerable" }),
@@ -64,35 +64,37 @@ export const published = contract<readonly MetadataItem[]>("published");
  * oidc with its dependencies. `config` is written over the defaults section by section;
  * `usersAs` stands in for users' modules, `sessionsAs` for the sessions subject-attributes reads.
  */
-export const booted = (p: {
+export const composed = (p: {
 	readonly runtime: Runtime;
 	readonly config?: Record<string, unknown>;
 	readonly usersAs?: readonly Module[];
 	readonly sessionsAs?: Module;
-}) =>
-	assemble({
-		modules: [
-			http,
-			keysModule,
-			issuerModule,
-			memoryUsersStores().module,
-			...(p.usersAs ?? [usersModule]),
-			secretHashModule,
-			p.sessionsAs ?? sessionsOf(),
-			subjectAttributes,
-			oidc,
-			defineModule({ name: "reader" }, (m) => [
-				m.provide(makers).by((c) => c.collect(idTokens)),
-				m.provide(published).by((c) => c.collect(metadata)),
-			]),
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...keysConfig(),
-			...issuerConfig({ url: "https://as.example" }),
-			...usersConfig([]),
-			...p.config,
-		},
-		runtime: p.runtime,
-	});
+}) => ({
+	modules: [
+		http,
+		keysModule,
+		issuerModule,
+		memoryUsersStores().module,
+		...(p.usersAs ?? [usersModule]),
+		secretHashModule,
+		p.sessionsAs ?? sessionsOf(),
+		subjectAttributes,
+		oidc,
+		defineModule({ name: "reader", takes: [idTokens, metadata] }, (m) => [
+			m.provide(makers).by((c) => c.collect(idTokens)),
+			m.provide(published).by((c) => c.collect(metadata)),
+		]),
+	],
+	config: {
+		...kernelConfig(),
+		...httpConfig(),
+		...keysConfig(),
+		...issuerConfig({ url: "https://as.example" }),
+		...usersConfig([]),
+		...p.config,
+	},
+	runtime: p.runtime,
+});
+
+/** The composition of `composed`, assembled. */
+export const booted = (p: Parameters<typeof composed>[0]) => assemble(composed(p));

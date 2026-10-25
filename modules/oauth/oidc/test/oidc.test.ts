@@ -1,14 +1,14 @@
 import { randomBytes } from "node:crypto";
 import type { IdTokenRequest } from "@mod/code-grant";
 import type { Assembly } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { keys } from "@mod/keys";
 import { userAttribute } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { testUser, usersConfig } from "@mod/users/testing";
 import { describe, expect, it } from "vitest";
 import oidc from "../src/module.ts";
-import { booted, loginOf, makers, published, sessionsOf, unanswering } from "./parts.ts";
+import { booted, composed, loginOf, makers, published, sessionsOf, unanswering } from "./parts.ts";
 
 const now = 1_800_000_000_000;
 const runtime = quietRuntime({ clock: { now: () => now } });
@@ -234,4 +234,11 @@ describe("issuer's metadata", () => {
 			value: ["EdDSA"],
 		});
 	});
+});
+
+it("takes all it names, with users and with a ledger that cannot answer", async () => {
+	const runtime = quietRuntime();
+	for (const usersAs of [[usersModule], [usersModule, unanswering]]) {
+		expect(await takesUnused(composed({ runtime, usersAs }))).toEqual({});
+	}
 });
