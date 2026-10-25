@@ -39,6 +39,18 @@ jobs:
         # The lowest version engines admits, and the newest.
         node: ['24', '26']
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        if: matrix.node == '24'
+        env:
+          KIND: unit
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
         with:
           # The commit-message scan and the per-commit install check walk the
@@ -68,7 +80,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-checks-${{ matrix.node }}
+          name: evidence-checks-${{ matrix.node }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
           if-no-files-found: ignore
           retention-days: 30
@@ -176,6 +188,18 @@ jobs:
         # The lowest version engines admits, and the newest.
         node: ['24', '26']
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        if: matrix.node == '24'
+        env:
+          KIND: integration
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -199,7 +223,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-integration-${{ matrix.node }}
+          name: evidence-integration-${{ matrix.node }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
           if-no-files-found: ignore
           retention-days: 30
@@ -322,6 +346,17 @@ jobs:
       LEGACY_SOURCE: ${{ github.workspace }}
       LEGACY_BRANCH: v0.17.0
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: area
+          MATRIX: ${{ matrix.area }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       # The runner context is not available in a job's env, so the legacy
       # build's directory is set here.
       - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
@@ -373,7 +408,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-area-${{ strategy.job-index }}
+          name: evidence-area-${{ strategy.job-index }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
           if-no-files-found: ignore
           retention-days: 30
@@ -390,6 +425,17 @@ jobs:
       matrix:
         pattern: ${{ fromJSON(needs.conformance-plan.outputs.patterns) }}
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: pattern
+          MATRIX: ${{ matrix.pattern }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
@@ -427,7 +473,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-pattern-${{ matrix.pattern }}
+          name: evidence-pattern-${{ matrix.pattern }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
           if-no-files-found: ignore
           retention-days: 30
@@ -455,6 +501,17 @@ jobs:
     if: (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: release
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -488,7 +545,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-release-check
+          name: evidence-release-check-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
           if-no-files-found: ignore
           retention-days: 30
@@ -519,6 +576,8 @@ jobs:
           path: ${{ runner.temp }}/evidence
       - name: Each item's status from this run's evidence
         env:
+          # A release's run fails where a job it needs did not succeed, even one that ended before it marked its attempt.
+          NEEDS: ${{ toJSON(needs) }}
           RELEASE: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) }}
         run: |
           set -euo pipefail
@@ -526,6 +585,14 @@ jobs:
           release=""
           if [ "$RELEASE" = true ]; then release=--release; fi
           status=0
+          if [ "$RELEASE" = true ]; then
+            unsucceeded=$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<<"$NEEDS")
+            if [ -n "$unsucceeded" ]; then
+              echo "jobs this release needs did not succeed:"
+              echo "$unsucceeded"
+              status=1
+            fi
+          fi
           pnpm --silent --filter @mod/spec-checklist run compliance "$RUNNER_TEMP/evidence" $release > "$RUNNER_TEMP/compliance.out" || status=$?
           cat "$RUNNER_TEMP/compliance.out" >> "$GITHUB_STEP_SUMMARY"
           # The summary over every specification, from the checklist alone, which the repository does not keep.
