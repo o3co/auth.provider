@@ -24,4 +24,4 @@
 - Touches only the HTTP interface and boot refusals: an operator's reset and the backfill are their packages' tests'.
 
 ## Depends on
-- `conformance`, `conformance-legacy`, `conformance-oauth`, `ledger-fakes` (the fake passkey witness ledger); `webauthn` in tests, for its software authenticator
+- `conformance`, `conformance-legacy`, `conformance-oauth`, `ledger-fakes` (the fake passkey witness ledger); in tests, `conformance-code`, `conformance-identity`, `conformance-keys` and `conformance-second-factor` (their areas, with `conformance-code`'s scene builder and `conformance-second-factor`'s test tools), and `webauthn`, for its software authenticator
