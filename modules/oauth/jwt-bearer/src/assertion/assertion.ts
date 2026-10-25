@@ -82,7 +82,8 @@ export async function check(
 		issuer = claims.iss;
 		signer = { sub: claims.sub, kid: decodeProtectedHeader(assertion).kid };
 	} catch {
-		return invalid("not a JWT");
+		// Not read as a JWT: refused as any other before the signature.
+		return untrusted;
 	}
 	// An issuer is a string, never coerced to one.
 	if (typeof issuer !== "string") return untrusted;
