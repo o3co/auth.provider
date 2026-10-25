@@ -12,8 +12,8 @@ jobs:
   # Before anything is published: the evidence of the CI run that tested what this tag publishes,
   # the release pull request's run whose tested tree is the tag's (distribution's
   # `release:evidence`), or the release stopped with what is missing and what to do. Reading another
-  # run's artifacts takes `actions: read`, given to this job alone; the script imports nothing that
-  # needs installing.
+  # run's artifacts takes `actions: read`, given to this job alone. The workspace is installed, as the
+  # evidence is read again by the release's compliance (spec-checklist's) before it is taken.
   evidence:
     name: Evidence of the tested tree
     runs-on: ubuntu-latest
@@ -22,9 +22,11 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - run: pnpm install --frozen-lockfile
       - name: The CI run that tested the tag's tree
         env:
           GH_TOKEN: ${{ github.token }}
