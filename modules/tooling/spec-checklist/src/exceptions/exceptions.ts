@@ -1,5 +1,5 @@
-import type { Decision, Item, Ledger } from "./checklist.ts";
-import { classOf } from "./ids.ts";
+import type { Decision, Item, Ledger } from "../checklist.ts";
+import { classOf } from "../ids.ts";
 
 /** An accepted difference in a run against another implementation, as its harness records it. */
 export interface ExceptionEntry {

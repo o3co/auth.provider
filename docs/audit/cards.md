@@ -354,6 +354,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `audit-index` (`src/audit-index`): the generated parts of the audit index, the cards and what each package depends on.
 - `@mod/spec-checklist` (verification, `modules/tooling/spec-checklist`): Holds the checklist of the specifications this provider implements: each requirement on a role the server takes as an item, and, for each spec's version, a ledger tying every requirement keyword in its text to items or to the reason it is not one.
   - `evidence` (`src/evidence`): what a CI run's tests proved of the checklist's items.
+  - `exceptions` (`src/exceptions`): whether an accepted difference in a run against another implementation may be taken.
 
 ## upstream-login
 

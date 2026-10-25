@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseDecisions, parseItems, parseLedger } from "../src/checklist.ts";
-import { exceptionProblems } from "../src/exceptions.ts";
+import { parseDecisions, parseItems, parseLedger } from "../../checklist.ts";
+import { exceptionProblems } from "../exceptions.ts";
 
 const read = parseItems(
 	"rfc9999",
