@@ -74,8 +74,9 @@ const boot = (witnesses: { readonly module: ReturnType<typeof defineModule> }[])
 	assemble(composition(witnesses));
 
 it("takes all it names, with a witnessing and without", async () => {
-	expect(await takesUnused(composition([]))).toEqual({});
-	expect(await takesUnused(composition([scriptedWitnessing()]))).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(composition([]))).passkeys).toBeUndefined();
+	expect((await takesUnused(composition([scriptedWitnessing()]))).passkeys).toBeUndefined();
 });
 
 it("refuses to boot a passkey store that cannot change both its spaces as one", async () => {
