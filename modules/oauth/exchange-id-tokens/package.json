@@ -41,5 +41,11 @@
 		"vitest": {
 			"optional": true
 		}
+	},
+	"takenBy": {
+		"idTokenChecks": [
+			"@mod/exchange-id-tokens",
+			"@mod/jwt-bearer-id-tokens"
+		]
 	}
 }
