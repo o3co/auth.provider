@@ -35,7 +35,7 @@ const withinOutbound = async (c: BuildContext<Settings>) => {
 					{
 						where: "clients-cimd",
 						reason:
-							"outbound resolves no name a metadata document chooses: run with UV_THREADPOOL_SIZE of 4 or more",
+							"outbound resolves no name a metadata document chooses: set outbound.max-lookups to 2 or more (and, resolving in process, UV_THREADPOOL_SIZE to 4 or more)",
 					},
 				]
 			: []),

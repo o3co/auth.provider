@@ -514,14 +514,14 @@ describe("clients-cimd: the operator's section", () => {
 		expect(JSON.stringify(refusals)).not.toMatch(/4096|5120|1000|2000/);
 	});
 
-	it("refuses boot where outbound gives a metadata document's names no lookup, naming the threadpool", async () => {
+	it("refuses boot where outbound gives a metadata document's names no lookup, naming what gives them one", async () => {
 		const error = await boot({}, { lookups: 0 }).catch((e: unknown) => e);
 		expect(error).toBeInstanceOf(BootRefused);
 		expect((error as BootRefused).refusals).toEqual([
 			{
 				where: "clients-cimd",
 				reason:
-					"outbound resolves no name a metadata document chooses: run with UV_THREADPOOL_SIZE of 4 or more",
+					"outbound resolves no name a metadata document chooses: set outbound.max-lookups to 2 or more (and, resolving in process, UV_THREADPOOL_SIZE to 4 or more)",
 			},
 		]);
 		await expect(boot({}, { lookups: 1 })).resolves.toBeDefined();
