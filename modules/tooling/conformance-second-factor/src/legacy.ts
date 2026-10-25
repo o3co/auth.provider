@@ -19,8 +19,8 @@ onLegacy(secondFactorArea, {
 			...(part.mail
 				? {
 						MFA_EMAIL_FACTOR_ENABLED: "true",
-						// As on the new target, its proof adds `mfa`.
-						MFA_EMAIL_FACTOR_ADDS_MFA: "true",
+						// As on the new target, its proof adds `mfa` unless the scene keeps the default.
+						MFA_EMAIL_FACTOR_ADDS_MFA: String(part.mail.addsSecondFactor ?? true),
 						STANDARD_SMTP_MAIL_SENDER_SECURE: "none",
 					}
 				: {}),
@@ -33,5 +33,8 @@ onLegacy(secondFactorArea, {
 	differs: [
 		// A login a second factor held loses where it was going back to.
 		"mfa-login-loses-return-target",
+		// Recovery codes are made for a first factor that does not count (a code by mail kept as a way
+		// back); the new target makes them only where a factor that counts stands, as its reissue asks.
+		"mfa-codes-for-a-first-way-back",
 	],
 });
