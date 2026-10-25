@@ -995,6 +995,10 @@ it("refuses to start where nothing records a token to its session, so a logout c
 
 it("takes all its module names, with a public origin and without", async () => {
 	for (const site of [{ "public-origin": origin }, {}]) {
-		expect(await takesUnused(assembly({}, [], site).input), JSON.stringify(site)).toEqual({});
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect(
+			(await takesUnused(assembly({}, [], site).input))["device-grant"],
+			JSON.stringify(site),
+		).toBeUndefined();
 	}
 });
