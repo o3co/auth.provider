@@ -134,3 +134,19 @@ export function memoryJtiLedger(issuer: string, now: () => number): JtiLedger {
 		},
 	};
 }
+
+/** A test configuration of the section: one trusted issuer at a key set, its subjects named by a prefix. */
+export function jwtBearerConfig() {
+	return {
+		"jwt-bearer": {
+			issuers: [
+				{
+					issuer: "https://issuer.example.invalid",
+					"jwks-uri": "https://issuer.example.invalid/jwks",
+					subject: "as-is",
+					conditions: { "subject-prefix": "test:" },
+				},
+			],
+		},
+	};
+}

@@ -65,12 +65,14 @@ const trustedUpstream = [
 	{
 		issuer: "https://idp.example",
 		subject: "as-is",
+		"accept-any-subject": true,
 		keys: [{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") }],
 	},
 ];
 
-/** Each name the store was asked to save, in order, across the tests. */
+/** Each name the store was asked to save, in order, across the tests, and the lifetime asked for it. */
 const saved: string[] = [];
+const keptFor: number[] = [];
 /** Spent assertions on records' stand-in, whose own clock runs `aheadMs` past the kernel's. */
 const spentOn = (aheadMs = 0) =>
 	defineModule({ name: "spent-assertions", takes: [] }, (m) => [
@@ -79,6 +81,7 @@ const spentOn = (aheadMs = 0) =>
 			return {
 				save: (name: string, lifetimeMs: number) => {
 					saved.push(name);
+					keptFor.push(lifetimeMs);
 					return stand.records.create(name, true, lifetimeMs);
 				},
 			};
@@ -286,6 +289,114 @@ describe("jwt-bearer", () => {
 		}
 	});
 
+	it("holds an issuer's assertions to its own lifetime and clock skew, narrower than the section's", async () => {
+		const own = (more: Record<string, unknown>) =>
+			serve(undefined, issuer, `${issuer}/oauth/token`, [{ ...trustedUpstream[0], ...more }]);
+		const short = await own({ "max-assertion-lifetime": "10m" });
+		expect(saidOf(await short.grant(await assertion({ ...base, exp: now / 1000 + 1200 })))).toBe(
+			"invalid_grant: lives too long",
+		);
+		expect(saidOf(await short.grant(await assertion(base)))).toBe("issued");
+		const ahead = { ...base, nbf: now / 1000 + 10 };
+		const tight = await own({ "clock-skew": "5s" });
+		expect(saidOf(await tight.grant(await assertion(ahead)))).toBe("invalid_grant: not yet valid");
+		// The section's own 30 seconds take it.
+		expect(saidOf(await (await own({})).grant(await assertion(ahead)))).toBe("issued");
+	});
+
+	it("keeps a spent assertion past the widest clock skew any setting takes, whatever its issuer's", async () => {
+		for (const skew of ["0s", "30s"]) {
+			const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
+				{ ...trustedUpstream[0], "clock-skew": skew },
+			]);
+			expect(errorOf(await s.grant(await assertion(base))), skew).toBe("issued");
+			expect(keptFor.at(-1), skew).toBe(base.exp * 1000 + 300_000 + 60_000 - now);
+		}
+	});
+
+	it("takes an issuer's assertion only where its verified claims meet the issuer's conditions", async () => {
+		const { "accept-any-subject": _any, ...shared } = trustedUpstream[0] as Record<string, unknown>;
+		const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
+			{
+				...shared,
+				conditions: { "subject-prefix": "org:acme/", claims: { env: ["prod", "staging"] } },
+			},
+		]);
+		const before = saved.length;
+		const met = { ...base, sub: "org:acme/ci", env: "prod" };
+		for (const claims of [
+			{ ...met, sub: "org:other/ci" },
+			{ ...met, env: "dev" },
+			{ ...met, env: ["prod"] },
+			{ ...base, sub: "org:acme/ci" },
+		]) {
+			expect(saidOf(await s.grant(await assertion(claims))), JSON.stringify(claims)).toBe(
+				"invalid_grant: assertion does not meet its issuer's conditions",
+			);
+		}
+		// Its signature is checked first: a stranger's, meeting no condition either, is untrusted.
+		const strangers = await assertion({ ...met, env: "dev" }, stranger.privateKey);
+		expect(saidOf(await s.grant(strangers))).toBe("invalid_grant: untrusted signer");
+		// Refused before its jti is used up, and telling no value of a claim or a condition.
+		expect(saved.length).toBe(before);
+		expect(errorOf(await s.grant(await assertion(met)))).toBe("issued");
+		expect(errorOf(await s.grant(await assertion({ ...met, env: "staging" })))).toBe("issued");
+	});
+
+	it("issues within its issuer's ceiling as well as the client's allowance, refusing before the jti is used up", async () => {
+		const under = (ceiling: Record<string, unknown>) =>
+			serve(undefined, issuer, `${issuer}/oauth/token`, [{ ...trustedUpstream[0], ceiling }]);
+		const before = saved.length;
+		// The client's default, read, is outside a ceiling of write alone: refused, never issued empty.
+		const write = await under({ scopes: ["write"] });
+		expect(errorOf(await write.grant(await assertion(base)))).toBe("invalid_scope");
+		expect(errorOf(await write.grant(await assertion(base), { scope: "read" }))).toBe(
+			"invalid_scope",
+		);
+		// The audience the client is given, the issuer's for a client allowed none, is held to it too.
+		const elsewhere = await under({ audiences: ["https://api.example"] });
+		expect(errorOf(await elsewhere.grant(await assertion(base)))).toBe("invalid_target");
+		// So is a resource asked that the client may have but the ceiling does not name.
+		const set = assembly(
+			undefined,
+			issuer,
+			`${issuer}/oauth/token`,
+			[{ ...trustedUpstream[0], ceiling: { audiences: [issuer] } }],
+			outboundModule,
+			[narrowing],
+		);
+		const wide = allowancesFor({
+			grants: [grantType],
+			scopes: ["read"],
+			"default-scopes": ["read"],
+			audiences: [issuer, "https://api.example"],
+		});
+		const app = await assemble({
+			...set,
+			config: {
+				...set.config,
+				...clientsConfig([confidentialClient({ id: "app", sections: wide })]),
+			},
+		});
+		const ask = async (resource: string) =>
+			saidOf(
+				await app.get(grantCalls).call(grantType, "app", {
+					grant_type: grantType,
+					assertion: await assertion(base),
+					resource,
+				}),
+			);
+		expect(await ask("https://api.example")).toBe("invalid_target: not https://api.example");
+		expect(saved.length).toBe(before);
+		expect(errorOf(await (await under({ scopes: ["read"] })).grant(await assertion(base)))).toBe(
+			"issued",
+		);
+		expect(await ask(issuer)).toBe("issued");
+		expect(errorOf(await (await under({ audiences: [issuer] })).grant(await assertion(base)))).toBe(
+			"issued",
+		);
+	});
+
 	it("asks the issuance policies before the jti is used up, and again when issuing", async () => {
 		const asked: IssuanceRequest[] = [];
 		let refusing = new Set([1]);
@@ -349,6 +460,25 @@ describe("jwt-bearer", () => {
 		}
 	});
 
+	it("holds a revocation by the section's clock skew, however narrow its issuer's own", async () => {
+		const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
+			{ ...trustedUpstream[0], "clock-skew": "5s" },
+		]);
+		await s.revoke("alice");
+		try {
+			// Signed before the boundary on a clock 20s ahead, taken 25s on, within the issuer's 5s.
+			clock.at = now + 25_000;
+			const ahead = await assertion({ ...base, iat: now / 1000 + 20 });
+			expect(saidOf(await s.grant(ahead))).toBe("invalid_grant: assertion revoked");
+			// Made past the boundary by more than the section's 30s: issued.
+			clock.at = now + 33_000;
+			const past = await assertion({ ...base, iat: now / 1000 + 31 });
+			expect(errorOf(await s.grant(past))).toBe("issued");
+		} finally {
+			clock.at = now;
+		}
+	});
+
 	it("refuses an assertion an issuer whose clock runs ahead signed just before its subject's revocation", async () => {
 		const s = await serve();
 		await s.revoke("alice");
@@ -407,6 +537,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [{ alg: "EdDSA", "public-key": signer.pem }],
 			},
 		]);
@@ -421,6 +552,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [
 					{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") },
 					{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") },
@@ -440,6 +572,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [
 					{ kid: "k0", alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") },
 					{ kid: "k1", alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") },
@@ -506,6 +639,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://other.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") }],
 			},
 		];
@@ -521,6 +655,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [{ alg: "EdDSA", "public-key": pem(upstream.privateKey, "pkcs8") }],
 			},
 		];
@@ -545,6 +680,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [{ alg: "EdDSA", "public-key": "not a PEM" }],
 			},
 		];
@@ -556,7 +692,7 @@ describe("jwt-bearer", () => {
 	describe("with a key set at a URL", () => {
 		const located = `${issuer}/oauth/token`;
 		const at = (uri: string, named = "https://idp.example") => [
-			{ issuer: named, subject: "as-is", "jwks-uri": uri },
+			{ issuer: named, subject: "as-is", "accept-any-subject": true, "jwks-uri": uri },
 		];
 		/** An outbound answering the key set, keeping what it was asked. */
 		function keySetAt(keys: unknown[]) {
@@ -647,6 +783,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		defineModule({ name: "device-keys", takes: [] }, (m) => [
 			m.contribute(signerKeys).by(() => ({
 				issuer: fixedIss,
+				perSigner: true,
 				keysOf: async (signer) => {
 					asked.push(signer);
 					return answer();
@@ -676,13 +813,45 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 	const otherSigning = defineModule({ name: "phone-keys", takes: [] }, (m) => [
 		m
 			.contribute(signerKeys)
-			.by(() => ({ issuer: otherIss, keysOf: async () => ({ kind: "none" }) })),
+			.by(() => ({ issuer: otherIss, perSigner: true, keysOf: async () => ({ kind: "none" }) })),
 	]);
 	const located = `${issuer}/oauth/token`;
 	const serveWith = (issuers: Record<string, unknown>[], extra: Module[]) =>
 		serve(undefined, issuer, located, issuers, outboundModule, extra);
 	const deviceAssertion = async (sub: string, key = device.privateKey) =>
 		assertion({ ...base, iss: fixedIss, sub }, key);
+
+	it("takes a contributed key under the algorithms its answer and its issuer both take", async () => {
+		const thumb = await thumbOf();
+		const both = {
+			kind: "keys",
+			keys: [await deviceKey()],
+			algorithms: ["EdDSA", "ES256"],
+		} as const;
+		const own = entry({ subject: "as-is", "subject-is-key-thumbprint": true });
+		expect(
+			errorOf(
+				await (await serveWith(own, [signing(async () => both)])).grant(
+					await deviceAssertion(thumb),
+				),
+			),
+		).toBe("issued");
+		const narrowed = entry({
+			subject: "as-is",
+			"subject-is-key-thumbprint": true,
+			algorithms: ["ES256"],
+		});
+		const s = await serveWith(narrowed, [signing(async () => both)]);
+		expect(saidOf(await s.grant(await deviceAssertion(thumb)))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+		// An answer naming only an algorithm there is to take but its issuer does not: no key, not an outage.
+		const pss = { kind: "keys", keys: [await deviceKey()], algorithms: ["PS256"] } as const;
+		const past = await serveWith(own, [signing(async () => pss)]);
+		expect(saidOf(await past.grant(await deviceAssertion(thumb)))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+	});
 
 	it("takes a contributed signer's keys asked for each assertion, never kept, and the thumbprint's own key only", async () => {
 		const thumb = await thumbOf();
@@ -980,6 +1149,29 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		]);
 	});
 
+	it("asks for a linked subject only once an assertion meets its issuer's conditions", async () => {
+		const thumb = await thumbOf();
+		const keys = async (): Promise<Answer> => ({
+			kind: "keys",
+			keys: [await deviceKey()],
+			algorithms: ["EdDSA"],
+		});
+		const asked: unknown[] = [];
+		const conditions = { claims: { env: "prod" } };
+		const s = await serveWith(entry({ subject: "linked", upstream: "device", conditions }), [
+			signing(keys),
+			resolving(async () => ({ kind: "subject", subject: "account-7" }), asked),
+		]);
+		const made = (env: string) =>
+			assertion({ ...base, iss: fixedIss, sub: thumb, env }, device.privateKey);
+		expect(saidOf(await s.grant(await made("dev")))).toBe(
+			"invalid_grant: assertion does not meet its issuer's conditions",
+		);
+		expect(asked).toEqual([]);
+		expect(errorOf(await s.grant(await made("prod")))).toBe("issued");
+		expect(asked).toEqual([["device", thumb]]);
+	});
+
 	describe("self-issued signers", () => {
 		const prefix = "device:";
 		const own = { "subject-is-key-thumbprint": true, "self-issued-prefix": prefix };
@@ -1195,6 +1387,7 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 	const other = {
 		issuer: "https://other.example",
 		subject: "as-is",
+		"accept-any-subject": true,
 		keys: [{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") }],
 	};
 	const located = `${issuer}/oauth/token`;
@@ -1215,7 +1408,7 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 				sentIssuer: "https://idp.example",
 				jti: "j-ledger",
 				expiresAt: base.exp * 1000,
-				keepUntil: base.exp * 1000 + 30_000 + 60_000,
+				keepUntil: base.exp * 1000 + 300_000 + 60_000,
 			},
 			expect.objectContaining({ jti: "j-ledger" }),
 		]);
@@ -1252,6 +1445,21 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 			);
 		}
 		expect(errorOf(await fresh.grant(await assertion(base)))).toBe("issued");
+		expect(spends).toHaveLength(1);
+	});
+
+	it("asks no ledger for an assertion that does not meet its issuer's conditions", async () => {
+		const spends: Spend[] = [];
+		const { "accept-any-subject": _any, ...shared } = trustedUpstream[0] as Record<string, unknown>;
+		const s = await serveWith(
+			[ledgerOf(kept(), spends)],
+			[{ ...shared, conditions: { claims: { env: "prod" } } }],
+		);
+		expect(saidOf(await s.grant(await assertion({ ...base, env: "dev" })))).toBe(
+			"invalid_grant: assertion does not meet its issuer's conditions",
+		);
+		expect(spends).toEqual([]);
+		expect(errorOf(await s.grant(await assertion({ ...base, env: "prod" })))).toBe("issued");
 		expect(spends).toHaveLength(1);
 	});
 
