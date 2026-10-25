@@ -35,7 +35,9 @@ export function differencesIn(
 		const run = libraries.includes(d.library)
 			? []
 			: [`${at}: names ${d.library}, which the harness does not run`];
-		return [...narrow, ...run, ...exceptionProblems(d, known).map((p) => `${at}: ${p}`)];
+		// The items the excused check names, written in its title as the checklist reads titles.
+		const tested = [...(d.check ?? "").matchAll(/\[([^\]\s]+)\]/g)].map((m) => m[1] ?? "");
+		return [...narrow, ...run, ...exceptionProblems(d, known, tested).map((p) => `${at}: ${p}`)];
 	});
 	if (problems.length > 0) throw new Error(`known differences:\n${problems.join("\n")}`);
 	return differences;

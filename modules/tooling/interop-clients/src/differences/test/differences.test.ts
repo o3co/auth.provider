@@ -53,4 +53,46 @@ describe("the known differences", () => {
 		expect(of.unmet()).toEqual([]);
 		expect(differencesOf([third], "nimbus").unmet()).toEqual([]);
 	});
+
+	it("take an optional behaviour by its spec's ledger, refusing one whose check names an item the section binds", () => {
+		const ledgers = new Map([
+			[
+				"rfc7523",
+				{
+					source: "https://example.org/rfc7523.txt",
+					version: "1",
+					sha256: "0".repeat(64),
+					rows: [
+						{
+							section: "3",
+							ordinal: 1,
+							keyword: "MUST" as const,
+							to: { kind: "items" as const, ids: ["rfc7523-3-i"] },
+						},
+					],
+				},
+			],
+		]);
+		const optional: Difference = {
+			library: "nimbus",
+			flow: "client-credentials",
+			check: "gets a token, its assertion naming the token endpoint",
+			class: "optional",
+			spec: "rfc7523",
+			section: "3",
+			reason:
+				"the provider takes no token endpoint as an assertion's audience, which RFC 7523 §3 leaves to the client",
+		};
+		const withLedgers = { ...known, ledgers };
+		expect(
+			differencesIn(JSON.stringify({ differences: [optional] }), withLedgers, registry),
+		).toEqual([optional]);
+		const bound = {
+			...optional,
+			check: "gets a token, its assertion naming the token endpoint [rfc7523-3-i]",
+		};
+		expect(() =>
+			differencesIn(JSON.stringify({ differences: [bound] }), withLedgers, registry),
+		).toThrow("its test names rfc7523-3-i, which section 3's MUST names");
+	});
 });
