@@ -27,7 +27,7 @@
 
 ## Offers
 - The check command.
-- `measures` (packages, budget → every unit's budget measures, each with its limit, whether past it or not), for a record that compares two states.
+- `measures` (packages, budget, and the surfaces where the caller read them already → every unit's budget measures, each with its limit, whether past it or not), for a record that compares two states.
 - `pnpm --filter @mod/guard run change-record <base> <head>`: a change record's machine rows between two commits, as Markdown on standard output (internal module `change-record`).
 
 ## Invariants

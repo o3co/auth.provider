@@ -165,9 +165,12 @@ export function check(
 	return violations;
 }
 
-/** Every unit's budget measures, each with its limit where G7 holds one, whether past it or not. */
-export function measures(packages: readonly Pkg[], budget: Budget): Measure[] {
+/** Every unit's budget measures, each with its limit where G7 holds one, whether past it or not; on the surfaces given, read once by the caller, or read here. */
+export function measures(
+	packages: readonly Pkg[],
+	budget: Budget,
+	surfaces: ReadonlyMap<string, Surface> = surfacesOf(packages),
+): Measure[] {
 	const s = scopeOf(packages, budget, () => {}, helpersOf(packages));
-	const surfaces = surfacesOf(packages);
 	return packages.flatMap((p) => budgetMeasures(s, p, surfaces));
 }

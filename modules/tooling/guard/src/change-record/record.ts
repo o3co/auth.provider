@@ -50,11 +50,11 @@ export function readingOf(
 			];
 		}),
 	);
-	const signatures = new Map(
-		[...surfacesOf(packages)].map(([name, surface]) => [name, surface.signatures]),
-	);
+	// Each package's surface builds a program of its own: read once, for the signatures and the measures.
+	const surfaces = surfacesOf(packages);
+	const signatures = new Map([...surfaces].map(([name, surface]) => [name, surface.signatures]));
 	const measured = new Map(
-		measures(packages, budget).map(({ where, what, value, limit }) => [
+		measures(packages, budget, surfaces).map(({ where, what, value, limit }) => [
 			`${where}\t${what}`,
 			limit === undefined ? { value } : { value, limit },
 		]),

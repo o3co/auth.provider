@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Pkg } from "@mod/guard-imports";
+import { type Pkg, surfacesOf } from "@mod/guard-imports";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	branchingImports,
@@ -241,6 +241,17 @@ describe("guard", () => {
 			dependencies: [0, budget.dependencies],
 		});
 		expect(of("@t/measured/src/inner")).not.toHaveProperty("contract values");
+	});
+
+	it("measures on the surfaces it is given, read once by its caller, without reading them again", () => {
+		const p = pkg("@t/given", { "src/contract.ts": "export const n = 1;\n" });
+		const [read] = [...surfacesOf([p]).values()];
+		if (!read) throw new Error("no surface");
+		const given = new Map([[p.name, { ...read, members: 7 }]]);
+		const members = measures([p], budget, given).find(
+			(m) => m.where === "@t/given" && m.what === "contract members",
+		);
+		expect(members?.value).toBe(7);
 	});
 
 	it("measures each internal module, a directory with a card, apart from the rest of its package", () => {
