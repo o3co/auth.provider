@@ -29,7 +29,7 @@
 - The composed entry imports the build's own files and packages as they are.
 - Cannot meet the need of reading audit events (`conformance`'s), whatever the scene: the build sends none over HTTP.
 - Starts a throwaway Redis for every scene, since the build wires stores on Redis whatever the scene.
-- If the scene asks for a store failure, stops the scene's throwaway Redis.
+- If the scene asks for a store failure, pauses the scene's throwaway Redis, which keeps its connections open and answers nothing, and resumes it after.
 
 ## Depends on
 - `conformance`

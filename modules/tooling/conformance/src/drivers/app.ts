@@ -198,6 +198,6 @@ export async function started(
 		},
 		audit: sink.trail,
 		...(smtp ? { mail: smtp } : {}),
-		...(redis ? { fault: redis.pause } : {}),
+		...(redis && scene.storeFaults ? { fault: redis.pause } : {}),
 	};
 }

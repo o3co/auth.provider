@@ -19,4 +19,4 @@
 - Each ledger draws a credential of its own.
 
 ## Depends on
-- `ledger-wire` (the wire's words).
+- `ledger-wire` (the wire's words); `zod`, as `ledger-wire`'s peer.

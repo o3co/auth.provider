@@ -56,7 +56,7 @@ One package per concern, `@o3co/auth-provider-<concern>`, and the entrance `@o3c
 2. **The migration guide.** Every change an operator must act on has its line in [the migration guide](migration.md), with its numbered upgrade notice ([What a version promises](#upgrade-notices)); a deprecation also has its line in the changelog's **Deprecated** section.
 3. **Pull request titles.** The release notes are generated from the titles of the pull requests merged since the last tag. Read them: a security fix's title names the kind of hole it closes and the module, never how to reach it. Retitle one on GitHub before tagging; the notes read the titles when the release is made.
 4. **The version.** One commit changes the root `package.json` version, by itself, and reaches `main` with the rest.
-5. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on `main` runs the conformance scenes and `pnpm release:check`; wait for both.
+5. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on the pull request to `main` runs the conformance scenes and `pnpm release:check`; wait for both.
 
 ## Tagging
 

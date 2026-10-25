@@ -6,7 +6,7 @@
 - Owns the scenes of handing a login's upstream tokens to receiving clients (only once a login a gate holds opens), refreshing them, and logging out of an upstream.
 - Owns the scenes of a federation login a gate holds: going on at the held page, or answered with the gate's answer where none is set.
 - Owns the scenes of federation grants, from a client's intent through the user's connection to the upstream token, its refresh and its end.
-- Sets up the federation area's part (the IdPs, the landing, the held page, the return targets, federation grants' page, connections and lodging limit) on each of the legacy and new targets; on the new, the page goes to `federation-grants-connect`, composed with the grants.
+- Sets up the federation area's part (the IdPs, the landing, the held page, the return targets, federation grants' page, connections and lodging limit, and a link's step-up page) on each of the legacy and new targets; on the new, the grants' page goes to `federation-grants-connect`, composed with the grants, and the step-up page to `federation-link`.
 - The legacy build turns federation grants on only when enabled.
 - The legacy set-up enables federation grants.
 - The legacy set-up keeps federation grants in Redis.
@@ -22,6 +22,7 @@
 ## Offers
 - Area `federation` and the shape of its part
 - Scene builder (builds the key, identity, OAuth, code-flow and federation parts from the form written in a scene)
+- The needs `grantsLoginPage` and `linkStepUpPage`, which the legacy target cannot meet
 
 ## Invariants
 - The legacy set-up, the needs the legacy system cannot provide, and the differences it answers otherwise, live only in `src/legacy.ts`.

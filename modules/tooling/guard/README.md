@@ -21,6 +21,8 @@
 ## Not here
 - Lists of names, fixed places, snapshots, lists of exceptions.
 - Whether a card's dependency item agrees with the package's dependencies, whether a verification base holds legacy-system names, and whether a card holds only the current contract beyond the phrase match: review judges.
+- The map, which review reads as the README of the deepest folder that holds every package: an owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
+- A dependency item, which review reads as naming modules with the lowercase names it opens with, before any note in brackets or sentence after a full stop.
 
 ## Offers
 - The check command.
@@ -31,12 +33,10 @@
 - A document copies a configuration list when one line lays out more consecutive values of a list (nested lists flattened) than the configuration allows, in order, with no word between them but `and`, `or` or `then`.
 - Documents are all Markdown in the repository. A target is a link target, or an inline path that is explicitly relative or whose first part is beside the document (any other, `/`-rooted ones too, names a place outside it); it resolves from the document's directory, and is refused if it leaves it or names a missing file with an extension.
 - G12 reads no fenced code block: a block's samples show another project's files, not references to this one. G11 and G21 read blocks as any text.
-- The map is the README of the deepest folder that holds every package. An owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
-- A dependency item names modules with the lowercase names it opens with, before any note in brackets or sentence after a full stop.
 
 ## Data
 - The configuration: the budget numbers.
-- The kinds' roles (common, protocol, wiring, capability, verification, product, taking the runtime from `kernel`), in the kind words `kinds` gives; their order and the kinds never depending on a capability are `kinds`'s.
+- The kinds' roles (common, protocol, wiring, capability, verification, product, adapter, feature, the wider surface, taking the runtime from `kernel`), in the kind words `kinds` gives; their order and the kinds never depending on a capability are `kinds`'s.
 - Nothing is written; the workspace is read on each run.
 
 ## Depends on
