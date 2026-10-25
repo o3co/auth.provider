@@ -162,10 +162,26 @@ export function entriesOfFile(pkg: string, file: string, expected: Expected): re
 	if (named.length > 0) return named.map((r) => r.entry);
 	const runs = expected.runsOf.get(pkg);
 	if (runs) return runs;
+	// An area's own run and its pattern runs, but those a suffix owns, which only their files reach.
+	const owned = new Set(expected.suffixed.map((r) => r.entry));
 	if (file.endsWith(".case.ts") && expected.areas.has(pkg))
-		return expected.entries.filter((e) => e === pkg || e.startsWith(`${pkg}@`));
+		return expected.entries.filter((e) => (e === pkg || e.startsWith(`${pkg}@`)) && !owned.has(e));
 	if (file.endsWith(".test.ts")) return ["unit"];
 	return [pkg];
+}
+
+/**
+ * Whether a name a report gives is the title written in the source: a parameterized title's printf
+ * forms (`%s`, `%d`, `%#` and the rest) and a table's `$property` stand for what they expanded to.
+ */
+export function titleMatches(title: string, name: string): boolean {
+	const parts = title.split(/(%%|%[sdifjoOc#]|\$[A-Za-z_]\w*(?:\.\w+)*)/);
+	const pattern = parts
+		.map((p, k) =>
+			k % 2 === 0 ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p === "%%" ? "%" : ".*?",
+		)
+		.join("");
+	return new RegExp(`^${pattern}$`, "s").test(name);
 }
 
 /** The items a test's names give, each once however many of its names give it. */
@@ -235,24 +251,22 @@ export function itemStatuses(
 		const entries = [...new Set(refs.flatMap((r) => entriesOfFile(r.pkg, r.file, expected)))];
 		const missing = entries.filter((e) => expected.entries.includes(e) && !present.has(e));
 		const broken = files.some((f) => brokenFiles.has(f)) || entries.some((e) => errored.has(e));
-		// Each test naming the item, in each run of its file that reported: a suite's title is met by a test in it.
-		const unrun = refs.flatMap((ref) =>
-			entriesOfFile(ref.pkg, ref.file, expected)
+		// Each test naming the item, in each report of each run of its file that reported: a suite's title
+		// is met by a test in it; a run none of whose reports ran the file lacks it too.
+		const unrun = refs.flatMap((ref) => {
+			const path = join(pkgDirs.get(ref.pkg) ?? ref.pkg, ref.file);
+			const ran = (r: EvidenceReport) =>
+				r.tests.some((t) => t.file === path && t.names.some((n) => titleMatches(ref.title, n)));
+			return entriesOfFile(ref.pkg, ref.file, expected)
 				.filter((e) => present.has(e))
-				.filter(
-					(e) =>
-						!reports.some(
-							(r) =>
-								r.identity.entry === e &&
-								r.tests.some(
-									(t) =>
-										t.file === join(pkgDirs.get(ref.pkg) ?? ref.pkg, ref.file) &&
-										t.names.includes(ref.title),
-								),
-						),
-				)
-				.map((e) => `${e}: ${ref.file} > ${ref.title}`),
-		);
+				.filter((e) => {
+					const covering = reports.filter(
+						(r) => r.identity.entry === e && r.tests.some((t) => t.file === path),
+					);
+					return covering.length === 0 || !covering.every(ran);
+				})
+				.map((e) => `${e}: ${ref.file} > ${ref.title}`);
+		});
 		const failures = reports.flatMap((r) => {
 			const { commit, run, attempt, job, entry } = r.identity;
 			const at = { commit, run, attempt, job, entry };

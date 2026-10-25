@@ -417,3 +417,94 @@ describe("each test of an item, in each run of its file", () => {
 		});
 	});
 });
+
+describe("the runs a suffix owns", () => {
+	it("are no area's or pattern's for a file that does not bear the suffix", () => {
+		const expected = expectedOf(
+			[
+				{ entry: "@mod/keys", kind: "area", matrix: "@mod/keys" },
+				{ entry: "@mod/keys@p", kind: "pattern", matrix: "p", files: ".special.case.ts" },
+			],
+			false,
+		);
+		expect(entriesOfFile("@mod/keys", "test/ordinary.case.ts", expected)).toEqual(["@mod/keys"]);
+		expect(entriesOfFile("@mod/keys", "test/a.special.case.ts", expected)).toEqual(["@mod/keys@p"]);
+	});
+
+	it("keep their files where only a release makes the run and the run is no release's", () => {
+		const expected = expectedOf(
+			[
+				{ entry: "@mod/keys", kind: "area", matrix: "@mod/keys" },
+				{
+					entry: "@mod/keys#release",
+					kind: "release",
+					files: ".release.ts",
+					releaseOnly: true as const,
+				},
+			],
+			false,
+		);
+		expect(entriesOfFile("@mod/keys", "test/x.release.ts", expected)).toEqual([
+			"@mod/keys#release",
+		]);
+		expect(expected.entries).toEqual(["@mod/keys"]);
+	});
+});
+
+describe("a test's results, matched to its title in the source", () => {
+	const [a] = parseItems("rfc9999", "# X\n## 4 X\n- **rfc9999-4-a** MUST: a").items;
+	const ref = (title: string) => ({ pkg: "@mod/x", file: "test/x.test.ts", title });
+	const expected: Expected = {
+		entries: ["unit"],
+		areas: new Set(),
+		runsOf: new Map(),
+		suffixed: [],
+		noSkip: new Set(),
+	};
+	const report = (names: string[][]): EvidenceReport => ({
+		identity: identity("unit"),
+		errors: 0,
+		tests: names.map((n) => ({
+			file: "modules/x/x/test/x.test.ts",
+			names: n,
+			state: "passed" as const,
+		})),
+	});
+	const of = (title: string, reports: EvidenceReport[]) =>
+		itemStatuses(
+			a ? [a] : [],
+			new Map([["rfc9999-4-a", [ref(title)]]]),
+			reports,
+			expected,
+			new Map([["@mod/x", "modules/x/x"]]),
+		)[0];
+
+	it("meets a parameterized title by the names it expands to: printf forms and a table's properties", () => {
+		expect(
+			of("case %s [rfc9999-4-a]", [report([["case 1 [rfc9999-4-a]"], ["case 2 [rfc9999-4-a]"]])]),
+		).toMatchObject({ status: "passed", unrun: [] });
+		expect(
+			of("suite %d, %# [rfc9999-4-a]", [report([["suite 1, 0 [rfc9999-4-a]", "inside"]])]),
+		).toMatchObject({ status: "passed", unrun: [] });
+		expect(
+			of("with $user.name and $id [rfc9999-4-a]", [report([["with alice and 7 [rfc9999-4-a]"]])]),
+		).toMatchObject({ status: "passed", unrun: [] });
+		expect(of("100%% sure [rfc9999-4-a]", [report([["100% sure [rfc9999-4-a]"]])])).toMatchObject({
+			status: "passed",
+		});
+		expect(of("case %s [rfc9999-4-a]", [report([["another [rfc9999-4-a]"]])])).toMatchObject({
+			status: "incomplete",
+		});
+	});
+
+	it("is looked for in each report of the run that ran its file, not in any one of them", () => {
+		const both = [report([["one [rfc9999-4-a]"]]), report([["other test"]])];
+		expect(of("one [rfc9999-4-a]", both)).toMatchObject({
+			status: "incomplete",
+			unrun: ["unit: test/x.test.ts > one [rfc9999-4-a]"],
+		});
+		expect(
+			of("one [rfc9999-4-a]", [report([["one [rfc9999-4-a]"]]), report([["one [rfc9999-4-a]"]])]),
+		).toMatchObject({ status: "passed" });
+	});
+});

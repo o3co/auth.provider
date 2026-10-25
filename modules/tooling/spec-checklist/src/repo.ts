@@ -129,17 +129,18 @@ export function runsOf(root: string): Run[] {
 export function expectedOf(runs: readonly Run[], release: boolean): Expected {
 	const entries = runs.filter((r) => release || !r.releaseOnly).map((r) => r.entry);
 	const areas = new Set(runs.filter((r) => r.kind === "area").map((r) => r.entry));
-	const taken = runs.filter((r) => entries.includes(r.entry));
 	const pkgOf = (entry: string) => /^@?[^@#]+/.exec(entry)?.[0] ?? entry;
+	// Every run keeps its files and its package, a release's own too where this is none: the entries
+	// expected decide what must report.
 	const harness = new Map<string, string[]>();
-	for (const run of taken.filter((r) => r.entry.includes("#") && r.files === undefined)) {
+	for (const run of runs.filter((r) => r.entry.includes("#") && r.files === undefined)) {
 		const pkg = pkgOf(run.entry);
 		harness.set(pkg, [...(harness.get(pkg) ?? []), run.entry]);
 	}
-	const suffixed = taken.flatMap((r) =>
+	const suffixed = runs.flatMap((r) =>
 		r.files === undefined ? [] : [{ entry: r.entry, pkg: pkgOf(r.entry), files: r.files }],
 	);
-	const noSkip = new Set(taken.filter((r) => r.noSkip).map((r) => r.entry));
+	const noSkip = new Set(runs.filter((r) => r.noSkip).map((r) => r.entry));
 	return { entries, areas, runsOf: harness, suffixed, noSkip };
 }
 
