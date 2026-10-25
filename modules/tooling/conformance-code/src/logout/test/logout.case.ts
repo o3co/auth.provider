@@ -51,7 +51,6 @@ beforeAll(async () => {
 		frontchannelLogoutUri: "https://app.example/fc",
 		backchannelLogoutUri: `${told.base}/bc`,
 	});
-	const far = client("far", { backchannelLogoutUri: `${unlisted.base}/bc` });
 	// A second front channel, at another origin, that does not ask for the session.
 	const side = client("side", {
 		frontchannelLogoutUri: "https://side.example/fc",
@@ -66,9 +65,7 @@ beforeAll(async () => {
 		backchannelLogoutUri: `${told.base}/lean`,
 		backchannelLogoutSessionRequired: false,
 	});
-	running = await areaTarget().start(
-		codeScene(sceneWith([app, far, keen, lean, side], [told.base])),
-	);
+	running = await areaTarget().start(codeScene(sceneWith([app, keen, lean, side], [told.base])));
 	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
 	base = running.baseUrl;
 });
@@ -411,14 +408,18 @@ describe("telling the session's clients", () => {
 	describe.runIf(!areaTarget().differs("back-channel-by-host-and-port"))(
 		"the back channel's destinations",
 		() => {
-			it("sends nothing to a client's back channel the operator did not allow", async () => {
-				const at = await signedIn();
-				await at.tokensFor("far");
-				const before = told.received.length;
-				await logout(at, "POST", { id_token_hint: at.idToken });
-				await toldSince(before);
-				await new Promise((resolve) => setTimeout(resolve, 500));
-				expect(told.received.length).toBe(before + 1);
+			it("refuses to start with a client whose back channel the operator did not allow", async () => {
+				const far = client("far", { backchannelLogoutUri: `${unlisted.base}/bc` });
+				const started = await areaTarget().start(codeScene(sceneWith([far], [told.base])));
+				try {
+					expect(started.kind).toBe("refused");
+					if (started.kind === "refused") {
+						expect(started.output).toContain("backchannel-logout-uri");
+						expect(started.output).not.toContain(unlisted.base);
+					}
+				} finally {
+					if (started.kind === "running") await started.stop();
+				}
 				expect(unlisted.received).toEqual([]);
 			});
 		},
