@@ -36,13 +36,9 @@
 - **oidc-core-3.1.2.1-e** MUST: the OP refuses an authentication request without `redirect_uri`.
 - **oidc-core-3.1.2.1-f** MUST: `redirect_uri` exactly matches one the client pre-registered, by simple string comparison.
 - **oidc-core-3.1.2.1-g** SHOULD: with `display=page`, the OP shows its authentication and consent UI as a full user-agent page.
-  out-of-scope: the `display` parameter is not read: the login and consent pages are the deployment's, not the provider's (`authorize`'s card, Not here).
 - **oidc-core-3.1.2.1-h** SHOULD: with `display=popup`, the OP shows its authentication and consent UI as a popup.
-  out-of-scope: the `display` parameter is not read: the login and consent pages are the deployment's, not the provider's (`authorize`'s card, Not here).
 - **oidc-core-3.1.2.1-i** SHOULD: with `display=touch`, the OP shows its authentication and consent UI for a touch interface.
-  out-of-scope: the `display` parameter is not read: the login and consent pages are the deployment's, not the provider's (`authorize`'s card, Not here).
 - **oidc-core-3.1.2.1-j** SHOULD: with `display=wap`, the OP shows its authentication and consent UI for a feature phone.
-  out-of-scope: the `display` parameter is not read: the login and consent pages are the deployment's, not the provider's (`authorize`'s card, Not here).
 - **oidc-core-3.1.2.1-k** MUST NOT: with `prompt=none`, the OP shows an authentication or consent page.
 - **oidc-core-3.1.2.1-l** SHOULD: with `prompt=login`, the OP prompts the End-User to authenticate again.
 - **oidc-core-3.1.2.1-m** MUST: with `prompt=login`, an OP that cannot authenticate the End-User again returns an error.
@@ -54,8 +50,8 @@
 - **oidc-core-3.1.2.1-s** MUST: where `max_age` was asked, the ID token carries `auth_time`.
 - **oidc-core-3.1.2.1-t** SHOULD NOT: `ui_locales` naming locales the OP does not support makes the request an error.
 - **oidc-core-3.1.2.1-u** MUST: with `id_token_hint`, where the End-User the hint names is not logged in and is not logged in by the request, the OP returns an error.
-- **oidc-core-3.1.2.1-v** SHOULD: with `prompt=none` and no `id_token_hint`, the OP answers successfully where it can.
-- **oidc-core-3.1.2.1-w** SHOULD: a redirection URI of the code flow uses `https`; `http` only for a confidential client where the OP allows it, or a native client's loopback host.
+- **oidc-core-3.1.2.1-v** SHOULD: with `prompt=none` and no `id_token_hint`, the OP answers successfully where it can (it may otherwise return `invalid_request`).
+- **oidc-core-3.1.2.1-w** SHOULD: a redirection URI of the code flow uses `https`; it may instead use `http` for a confidential client where the OP allows it, or for a native client with `localhost`, `127.0.0.1` or `[::1]` as its host, or an alternate scheme, such as one identifying a callback into a native application.
 
 ## 3.1.2.2 Authentication Request Validation
 
@@ -102,14 +98,14 @@
 - **oidc-core-3.1.3.2-b** MUST: the OP checks that the authorization code was issued to the authenticated client.
 - **oidc-core-3.1.3.2-c** MUST: the OP checks that the authorization code is valid.
 - **oidc-core-3.1.3.2-d** MUST: where it can, the OP checks that the authorization code was not used before.
-- **oidc-core-3.1.3.2-e** MUST: the OP checks that `redirect_uri` is identical to the one in the initial authorization request.
-- **oidc-core-3.1.3.2-f** MUST: the OP checks that the authorization code was issued in answer to an OpenID Connect authentication request.
+- **oidc-core-3.1.3.2-e** MUST: the OP checks that `redirect_uri` is identical to the one in the initial authorization request; where it is absent and the client registered only one, the OP may return an error or proceed.
+- **oidc-core-3.1.3.2-f** MUST: the OP checks whether the authorization code was issued in answer to an OpenID Connect authentication request, so that an ID token is returned for such a code.
 
 ## 3.1.3.3 Successful Token Response
 
 - **oidc-core-3.1.3.3-a** MUST: the token response's `token_type` is `Bearer`, unless another token type was negotiated with the client.
 - **oidc-core-3.1.3.3-b** SHOULD: the OP supports the `Bearer` token type.
-- **oidc-core-3.1.3.3-c** MUST: a successful token response of the code flow carries `id_token`.
+- **oidc-core-3.1.3.3-c** MUST: a successful token response for a code issued in answer to an OpenID Connect authentication request carries `id_token`.
 - **oidc-core-3.1.3.3-d** MUST: a token response holding tokens, secrets or other sensitive information carries `Cache-Control: no-store`.
 
 ## 3.1.3.7 ID Token Validation
@@ -209,16 +205,15 @@
 
 ## 5.2 Claims Languages and Scripts
 
-- **oidc-core-5.2-a** SHOULD: a language tag in a claim name is spelled with the characters case BCP 47 recommends.
-  out-of-scope: `claims_locales`, `ui_locales` and language-tagged claim names are not read, and the fixed claim table holds untagged claims (`oidc`'s card).
+- **oidc-core-5.2-a** SHOULD: a language tag in a claim name is spelled in the character case it is registered with in the IANA Language Subtag Registry.
+  out-of-scope: the OP writes no language tag: the fixed claim table holds untagged claims (`oidc`'s card).
 - **oidc-core-5.2-b** SHOULD: the OP reads language tags case-insensitively.
-  out-of-scope: `claims_locales`, `ui_locales` and language-tagged claim names are not read, and the fixed claim table holds untagged claims (`oidc`'s card).
 - **oidc-core-5.2-c** SHOULD: a claim's language tag is only as specific as needed.
-  out-of-scope: `claims_locales`, `ui_locales` and language-tagged claim names are not read, and the fixed claim table holds untagged claims (`oidc`'s card).
+  out-of-scope: the OP writes no language tag: the fixed claim table holds untagged claims (`oidc`'s card).
 - **oidc-core-5.2-d** SHOULD: where possible, the OP matches the claim locales asked with the claims it has.
-  out-of-scope: `claims_locales`, `ui_locales` and language-tagged claim names are not read, and the fixed claim table holds untagged claims (`oidc`'s card).
+  out-of-scope: the OP has no claim in more than one language or script to match with: the fixed claim table holds untagged claims (`oidc`'s card).
 - **oidc-core-5.2-e** SHOULD NOT: `claims_locales` naming locales the OP does not support makes the request an error.
-- **oidc-core-5.2-f** SHOULD: claims in the one language and script the OP employs are returned without language tags.
+- **oidc-core-5.2-f** SHOULD: where the OP determines, by `claims_locales` or otherwise, that the End-User and client ask for claims in one set of languages and scripts, claims in that language and script are returned without language tags.
 
 ## 5.3 UserInfo Endpoint
 
@@ -256,21 +251,17 @@
 
 - **oidc-core-5.5.1-a** MUST NOT: claims requested but not returned, essential or voluntary, make the OP return an error, unless a claim's own description says otherwise.
 - **oidc-core-5.5.1-b** MUST: a requested `sub` value that does not match fails the authentication.
-  out-of-scope: of the `claims` request parameter, a requested `sub` value is ignored and `acr` asked through it is refused (`invalid_request`); `authorize`'s step-up reads an essential `auth_time` alone (authorize/src/step-up/step-up.ts).
 - **oidc-core-5.5.1-c** MUST: the OP ignores members of an individual claim request it does not understand.
 
 ## 5.5.1.1 Requesting the "acr" Claim
 
-- **oidc-core-5.5.1.1-a** MUST: where `acr` is requested as essential with values, the OP returns an `acr` matching one of them.
-  out-of-scope: of the `claims` request parameter, a requested `sub` value is ignored and `acr` asked through it is refused (`invalid_request`); `authorize`'s step-up reads an essential `auth_time` alone (authorize/src/step-up/step-up.ts).
-- **oidc-core-5.5.1.1-b** MUST: where an essential `acr` request cannot be met, the OP treats it as a failed authentication.
-  out-of-scope: of the `claims` request parameter, a requested `sub` value is ignored and `acr` asked through it is refused (`invalid_request`); `authorize`'s step-up reads an essential `auth_time` alone (authorize/src/step-up/step-up.ts).
+- **oidc-core-5.5.1.1-a** MUST: where the OP supports the `claims` parameter and `acr` is requested for the ID token as essential with `value` or `values`, the OP returns an `acr` matching one of them.
+- **oidc-core-5.5.1.1-b** MUST: where such an essential `acr` request for the ID token cannot be met, the OP treats it as a failed authentication.
 - **oidc-core-5.5.1.1-c** SHOULD: where a voluntary `acr` value asked cannot be provided, the OP returns the session's current `acr`.
 
 ## 5.5.2 Languages and Scripts for Individual Claims
 
 - **oidc-core-5.5.2-a** SHOULD: a claim returned in another language or script than the one asked uses a language tag in its name.
-  out-of-scope: `claims_locales`, `ui_locales` and language-tagged claim names are not read, and the fixed claim table holds untagged claims (`oidc`'s card).
 
 ## 5.6 Claim Types
 
@@ -289,11 +280,11 @@
 - **oidc-core-5.6.2-e** MUST: a distributed claim's endpoint returns the claim as a JWT.
   out-of-scope: aggregated and distributed claims are not offered: claims are released from the fixed claim table alone (`oidc`'s card).
 - **oidc-core-5.6.2-f** MUST: a claims provider takes the access token in the `Authorization` header.
-  out-of-scope: aggregated and distributed claims are not offered: claims are released from the fixed claim table alone (`oidc`'s card).
+  out-of-scope: aggregated and distributed claims are not offered, and no endpoint of o3co's is a claims provider's: claims come from the fixed claim table alone (`oidc`'s card) and userinfo answers JSON, not a JWT (`userinfo`'s card).
 - **oidc-core-5.6.2-g** SHOULD NOT: a claims provider returns a `sub` that does not identify the End-User at that provider.
-  out-of-scope: aggregated and distributed claims are not offered: claims are released from the fixed claim table alone (`oidc`'s card).
+  out-of-scope: aggregated and distributed claims are not offered, and no endpoint of o3co's is a claims provider's: claims come from the fixed claim table alone (`oidc`'s card) and userinfo answers JSON, not a JWT (`userinfo`'s card).
 - **oidc-core-5.6.2-h** SHOULD: a JWT a claims provider issues carries `iss`.
-  out-of-scope: aggregated and distributed claims are not offered: claims are released from the fixed claim table alone (`oidc`'s card).
+  out-of-scope: aggregated and distributed claims are not offered, and no endpoint of o3co's is a claims provider's: claims come from the fixed claim table alone (`oidc`'s card) and userinfo answers JSON, not a JWT (`userinfo`'s card).
 
 ## 5.7 Claim Stability and Uniqueness
 
@@ -334,7 +325,7 @@
 
 ## 6.2.3 Authorization Server Fetches Request Object
 
-- **oidc-core-6.2.3-a** MUST: the OP retrieves a request object by `GET` at its `request_uri`.
+- **oidc-core-6.2.3-a** MUST: the OP retrieves the request object at a `request_uri` by `GET`, unless it already holds it cached, and parses it to recreate the request's parameters.
   out-of-scope: request objects are not offered: a request carrying `request` or `request_uri` is refused, and `request_uri_parameter_supported` is false (`authorize`'s card).
 
 ## 6.3.1 Encrypted Request Object
@@ -387,7 +378,7 @@
   out-of-scope: pairwise subject identifiers are not offered: `subject_types_supported` is `public` alone (`oidc`'s card).
 - **oidc-core-8.1-d** MUST: the pairwise calculation is deterministic.
   out-of-scope: pairwise subject identifiers are not offered: `subject_types_supported` is `public` alone (`oidc`'s card).
-- **oidc-core-8.1-e** SHOULD: a client using pairwise identifiers and Dynamic Client Registration registers a `sector_identifier_uri`.
+- **oidc-core-8.1-e** SHOULD: an OP that uses pairwise subject identifiers and supports Dynamic Client Registration uses the `sector_identifier_uri` parameter.
   out-of-scope: pairwise subject identifiers are not offered: `subject_types_supported` is `public` alone (`oidc`'s card).
 - **oidc-core-8.1-f** MUST: the OP refuses a pairwise client whose `redirect_uris` span several hosts without a `sector_identifier_uri`.
   out-of-scope: pairwise subject identifiers are not offered: `subject_types_supported` is `public` alone (`oidc`'s card).
@@ -426,7 +417,7 @@
 ## 10 Signatures and Encryption
 
 - **oidc-core-10-a** MUST: a message the OP both signs and encrypts is signed first, then encrypted, as a nested JWT.
-  out-of-scope: ID tokens are signed, never encrypted: `oidc` publishes `id_token_signing_alg_values_supported` alone and no `id_token_encryption_alg_values_supported` (`oidc`'s card).
+  out-of-scope: the OP encrypts nothing: ID tokens are signed alone, with no `id_token_encryption_alg_values_supported` (`oidc`'s card), and userinfo answers JSON (`userinfo`'s card).
 
 ## 10.1 Signing
 
@@ -517,7 +508,7 @@
 - **oidc-core-14-a** MUST: the OP compares a JSON string with another string after removing JSON escaping, as arrays of Unicode code points.
 - **oidc-core-14-b** MUST NOT: the OP applies Unicode normalization to a string it compares.
 - **oidc-core-14-c** MUST: the OP compares two strings code point by code point.
-- **oidc-core-14-d** MUST: a space-delimited list of this specification's, as the OP writes it, has one ASCII space between its strings.
+- **oidc-core-14-d** MUST: a space-delimited list of this specification's has one ASCII space between its strings, as the OP writes it, and the OP splits such a list it reads on that space alone.
 
 ## 15.1 Mandatory to Implement Features for All OpenID Providers
 
@@ -532,24 +523,16 @@
 ## 15.2 Mandatory to Implement Features for Dynamic OpenID Providers
 
 - **oidc-core-15.2-a** MUST: a dynamic OP supports the `id_token` response type.
-  out-of-scope: not a dynamic OpenID Provider, one meeting RPs it has no pre-configured relationship with: clients are the operator's configuration.
 - **oidc-core-15.2-b** MUST: a dynamic OP that is not self-issued supports the `code` and `id_token token` response types.
-  out-of-scope: not a dynamic OpenID Provider, one meeting RPs it has no pre-configured relationship with: clients are the operator's configuration.
 - **oidc-core-15.2-c** MUST: a dynamic OP supports Discovery.
-  out-of-scope: not a dynamic OpenID Provider, one meeting RPs it has no pre-configured relationship with: clients are the operator's configuration.
 - **oidc-core-15.2-d** MUST: a dynamic OP supports Dynamic Client Registration.
-  out-of-scope: not a dynamic OpenID Provider, one meeting RPs it has no pre-configured relationship with: clients are the operator's configuration.
 - **oidc-core-15.2-e** MUST: a dynamic OP that issues access tokens supports the UserInfo endpoint.
-  out-of-scope: not a dynamic OpenID Provider, one meeting RPs it has no pre-configured relationship with: clients are the operator's configuration.
 - **oidc-core-15.2-f** MUST: a dynamic OP publishes its public keys as bare JWKs.
-  out-of-scope: not a dynamic OpenID Provider, one meeting RPs it has no pre-configured relationship with: clients are the operator's configuration.
 - **oidc-core-15.2-g** MUST: a dynamic OP supports request objects retrieved by `request_uri`.
-  out-of-scope: not a dynamic OpenID Provider, one meeting RPs it has no pre-configured relationship with: clients are the operator's configuration.
 
 ## 15.3 Discovery and Registration
 
 - **oidc-core-15.3-a** SHOULD: an OP meeting RPs without a pre-configured relationship does so by Discovery and Dynamic Client Registration.
-  out-of-scope: not a dynamic OpenID Provider, one meeting RPs it has no pre-configured relationship with: clients are the operator's configuration.
 
 ## 16.4 Access Token Disclosure
 
@@ -575,11 +558,13 @@
 ## 16.15 Issuer Identifier
 
 - **oidc-core-16.15-a** MUST: the issuer discovery returns exactly matches `iss` in the ID token.
-- **oidc-core-16.15-b** SHOULD: one host serves a single issuer.
+- **oidc-core-16.15-b** SHOULD: one host serves a single issuer, unless the host serves several tenants.
 
 ## 16.17 TLS Requirements
 
 - **oidc-core-16.17-a** MUST: the TLS connections the OP makes check the server's certificate (RFC 6125).
+- **oidc-core-16.17-b** SHOULD: the TLS connections the OP makes follow BCP 195.
+- **oidc-core-16.17-c** MUST: the OP's outbound requests are protected by TLS with a ciphersuite giving confidentiality and integrity.
 
 ## 16.18 Lifetimes of Access Tokens and Refresh Tokens
 
