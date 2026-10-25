@@ -97,4 +97,18 @@ describe("the login page the harness serves for the suite's browser", () => {
 		expect(answer.status).toBe(200);
 		expect(answer.headers.location).toBeUndefined();
 	});
+
+	it("gives up on a provider that never answers the login, refusing it", async () => {
+		const silent = createServer(() => {});
+		await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+		stops.push(() => new Promise((resolve) => silent.close(() => resolve())));
+		silent.unref();
+		const base = `http://127.0.0.1:${(silent.address() as AddressInfo).port}`;
+		const answer = await loginPage(base, origin, 200).submit(
+			new URLSearchParams({ username: "alice", password: "pw" }),
+			{ address: "172.17.0.2" },
+		);
+		expect(answer.status).toBe(504);
+		expect(answer.body).toContain("did not answer");
+	});
 });
