@@ -1,0 +1,37 @@
+{
+	"name": "@mod/jwt-bearer-id-tokens",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"joins": [
+		"@mod/jwt-bearer",
+		"@mod/exchange-id-tokens"
+	],
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/exchange-id-tokens": "workspace:*",
+		"@mod/jwt-bearer": "workspace:*",
+		"@mod/kernel": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/client-allowance": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/external-jwt": "workspace:*",
+		"@mod/grants": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/outbound": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"@mod/token-exchange": "workspace:*",
+		"@mod/tokens": "workspace:*",
+		"@mod/users": "workspace:*",
+		"vitest": "5.0.5"
+	}
+}
