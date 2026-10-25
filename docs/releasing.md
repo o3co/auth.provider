@@ -40,6 +40,8 @@ A covered surface is removed or changed incompatibly only after it was deprecate
 - It stays as it was for at least two minor versions or three months after that release, whichever is longer, and is removed no earlier than in the release that ends that notice.
 - A security fix may shorten the notice where keeping the surface would keep the hole; the changelog says why.
 
+This notice holds for what is deprecated from 0.19 on; what 0.19 itself removes or changes without a deprecation is announced by its [upgrade notices](#upgrade-notices).
+
 ### Upgrade notices
 
 Each change an operator must act on to upgrade carries a numbered notice, `U-<minor>-<n>` numbered within the minor version that brings the change (`U-0.19-3`), at its line in the changelog and at its entry in [the migration guide](migration.md). A notice states what to change, and how to tell whether a deployment is affected. An operator checks off the notices between the version they run and the one they move to; a release with none says so.
