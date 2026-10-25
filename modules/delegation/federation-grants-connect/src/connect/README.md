@@ -23,7 +23,7 @@ Internal module of `federation-grants-connect`: the browser half of a connection
 - From the take on, every answer clears the round trip's cookie, unavailable and an unreadable round trip included; a callback that takes nothing is refused as expired.
 - Two round trips of one connection begun in one browser leave only the later one's callback.
 - The upstream start is built before the question is spent: a throw is `503` and keeps it; a refusal ends the intent as `grant_not_authorizable`.
-- A failure after the round trip is taken ends the intent, is audited, and returns to the client only while it lists the URI.
+- A refusal after the round trip is taken ends the intent, is audited, and returns to the client only while it lists the URI; an outage answers `503` and leaves the intent as it is, until its time.
 - The upstream's tokens are judged before the session and revocations are checked again: tokens not to hold end the intent, whatever that check would find.
 
 ## Depends on
