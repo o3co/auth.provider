@@ -71,8 +71,14 @@ export function npmNamed(
 			problems.push(`${at}: its distribution URL is not its tarball's path`);
 			return c;
 		}
+		// Its reference must be the purl the tarball gave it, or the dependencies naming it would be renamed blind.
+		const tarballPurl = c.purl ?? "";
+		if (c["bom-ref"] !== tarballPurl) {
+			problems.push(`${at}: its reference is not its tarball's purl (${c["bom-ref"] ?? "none"})`);
+			return c;
+		}
 		const purl = npmPurl(name, c.version ?? "");
-		if (c["bom-ref"]) renamed.set(c["bom-ref"], purl);
+		renamed.set(tarballPurl, purl);
 		const registry = `https://registry.npmjs.org/${name}/-/${c.name}-${c.version}.tgz`;
 		return {
 			...c,

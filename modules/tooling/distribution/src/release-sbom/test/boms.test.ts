@@ -84,6 +84,26 @@ describe("the published names of the release's own components", () => {
 		]);
 	});
 
+	it("stops, renaming nothing, where a packed component's reference is not its tarball's purl", () => {
+		const own = local("@o3co/auth-provider-oauth", "1.0.0");
+		const { "bom-ref": _, ...unreferenced } = own;
+		expect(npmNamed(bomOf([unreferenced as typeof own]), packed)).toEqual({
+			problems: [
+				expect.stringMatching(
+					/@o3co\/auth-provider-oauth@1\.0\.0: its reference is not its tarball's purl \(none\)/,
+				),
+			],
+		});
+		const registryRef = { ...own, "bom-ref": "pkg:npm/%40o3co/auth-provider-oauth@1.0.0" };
+		expect(npmNamed(bomOf([registryRef]), packed)).toEqual({
+			problems: [
+				expect.stringMatching(
+					/its reference is not its tarball's purl \(pkg:npm\/%40o3co\/auth-provider-oauth@1\.0\.0\)/,
+				),
+			],
+		});
+	});
+
 	it("stops, renaming nothing, where a component this release packed is not named by its tarball's path", () => {
 		const own = local("@o3co/auth-provider-oauth", "1.0.0");
 		const fromRegistry = {
