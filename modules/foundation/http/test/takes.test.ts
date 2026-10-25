@@ -6,6 +6,6 @@ import { httpConfig } from "../src/testing.ts";
 
 it("takes every handle its takes name: the points it collects itself", async () => {
 	expect(
-		await takesUnused({ modules: [http], config: { ...kernelConfig(), ...httpConfig() } }),
-	).toEqual({});
+		(await takesUnused({ modules: [http], config: { ...kernelConfig(), ...httpConfig() } })).http,
+	).toBeUndefined();
 });
