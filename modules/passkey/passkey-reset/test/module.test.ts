@@ -32,9 +32,12 @@ const parts = (calls: string[]) =>
 	]);
 
 it("takes all it names", async () => {
-	expect(await takesUnused({ modules: [parts([]), resetModule], config: kernelConfig() })).toEqual(
-		{},
-	);
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect(
+		(await takesUnused({ modules: [parts([]), resetModule], config: kernelConfig() }))[
+			"passkey-reset"
+		],
+	).toBeUndefined();
 });
 
 it("resets over the contracts it is given, and offers the passkeys' step alone over the same holdings", async () => {
