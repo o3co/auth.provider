@@ -20,6 +20,7 @@
 
 ## Not here
 - Lists of names, fixed places, snapshots, lists of exceptions.
+- Findings, approvals and past change records: the private ledger's. A change record is written from the two commits each time, and kept by no one here.
 - Whether a card's dependency item agrees with the package's dependencies, whether a verification base holds legacy-system names, and whether a card holds only the current contract beyond the phrase match: review judges.
 - The map, which review reads as the README of the deepest folder that holds every package: an owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
 - A dependency item, which review reads as naming modules with the lowercase names it opens with, before any note in brackets or sentence after a full stop.
@@ -27,6 +28,7 @@
 ## Offers
 - The check command.
 - `measures` (packages, budget → every unit's budget measures, each with its limit, whether past it or not), for a record that compares two states.
+- `pnpm --filter @mod/guard run change-record <base> <head>`: a change record's machine rows between two commits, as Markdown on standard output (internal module `change-record`).
 
 ## Invariants
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
