@@ -334,6 +334,9 @@ describe("jwt-bearer", () => {
 				"invalid_grant: assertion does not meet its issuer's conditions",
 			);
 		}
+		// Its signature is checked first: a stranger's, meeting no condition either, is untrusted.
+		const strangers = await assertion({ ...met, env: "dev" }, stranger.privateKey);
+		expect(saidOf(await s.grant(strangers))).toBe("invalid_grant: untrusted signer");
 		// Refused before its jti is used up, and telling no value of a claim or a condition.
 		expect(saved.length).toBe(before);
 		expect(errorOf(await s.grant(await assertion(met)))).toBe("issued");
@@ -1095,6 +1098,29 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		]);
 	});
 
+	it("asks for a linked subject only once an assertion meets its issuer's conditions", async () => {
+		const thumb = await thumbOf();
+		const keys = async (): Promise<Answer> => ({
+			kind: "keys",
+			keys: [await deviceKey()],
+			algorithms: ["EdDSA"],
+		});
+		const asked: unknown[] = [];
+		const conditions = { claims: { env: "prod" } };
+		const s = await serveWith(entry({ subject: "linked", upstream: "device", conditions }), [
+			signing(keys),
+			resolving(async () => ({ kind: "subject", subject: "account-7" }), asked),
+		]);
+		const made = (env: string) =>
+			assertion({ ...base, iss: fixedIss, sub: thumb, env }, device.privateKey);
+		expect(saidOf(await s.grant(await made("dev")))).toBe(
+			"invalid_grant: assertion does not meet its issuer's conditions",
+		);
+		expect(asked).toEqual([]);
+		expect(errorOf(await s.grant(await made("prod")))).toBe("issued");
+		expect(asked).toEqual([["device", thumb]]);
+	});
+
 	describe("self-issued signers", () => {
 		const prefix = "device:";
 		const own = { "subject-is-key-thumbprint": true, "self-issued-prefix": prefix };
@@ -1368,6 +1394,21 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 			);
 		}
 		expect(errorOf(await fresh.grant(await assertion(base)))).toBe("issued");
+		expect(spends).toHaveLength(1);
+	});
+
+	it("asks no ledger for an assertion that does not meet its issuer's conditions", async () => {
+		const spends: Spend[] = [];
+		const { "accept-any-subject": _any, ...shared } = trustedUpstream[0] as Record<string, unknown>;
+		const s = await serveWith(
+			[ledgerOf(kept(), spends)],
+			[{ ...shared, conditions: { claims: { env: "prod" } } }],
+		);
+		expect(saidOf(await s.grant(await assertion({ ...base, env: "dev" })))).toBe(
+			"invalid_grant: assertion does not meet its issuer's conditions",
+		);
+		expect(spends).toEqual([]);
+		expect(errorOf(await s.grant(await assertion({ ...base, env: "prod" })))).toBe("issued");
 		expect(spends).toHaveLength(1);
 	});
 
