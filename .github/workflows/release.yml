@@ -17,16 +17,22 @@ jobs:
   evidence:
     name: Evidence of the tested tree
     runs-on: ubuntu-latest
+    # `pull-requests: read` finds the pull request the tag's commit merged; `actions: read`, its runs and their artifacts.
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     steps:
+      # The token goes to the collector alone, never left in the checkout's git configuration.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: pnpm install --frozen-lockfile
+      # No lifecycle script runs in a job that holds the token.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: The CI run that tested the tag's tree
         env:
           GH_TOKEN: ${{ github.token }}
@@ -38,6 +44,8 @@ jobs:
           path: ${{ runner.temp }}/evidence
           if-no-files-found: error
           retention-days: 90
+          # A re-run of all jobs writes over the one an earlier attempt kept: an artifact's name is the run's.
+          overwrite: true
 
   publish:
     name: Publish to npm
