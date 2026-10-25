@@ -22,7 +22,7 @@ Internal module of `distribution`: the release's lists of what it ships (SBOMs),
 - A bundled file no manifest declares, one declared in no tarball, a package held inside that its declaration does not name, and one declared that the bundle's regions do not name, stop the release: the packages held are the packages declared.
 - Every development dependency a workspace manifest names is in the build tools' list.
 - The image is built from the app's Dockerfile as the release check builds it, and removed, its base stage's too, however its build or listing ends; one Docker still lists after is a problem told.
-- The release workflow is held, by a test reading it, to make the lists after the tarballs are checked against npm and before the draft release, and to attach them to it.
+- The release workflow is held, by a test reading it, to make the lists in a job of its own that reads alone, from the tarballs the pack job kept; to give the publish job alone what publishing takes, running nothing the release packed there; and to publish only after the tarballs are held to the lists and to npm, the draft carrying both assets, no check's failure passed over.
 
 ## Depends on
 - The package's `release` (the tarballs read) and `release-check` (the install and the image); `combinations` (the features that opt in); pnpm, Docker and tar, run.
