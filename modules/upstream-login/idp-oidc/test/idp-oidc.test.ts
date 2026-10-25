@@ -960,6 +960,26 @@ describe("idp-oidc", () => {
 		);
 	});
 
+	it("reads each key of the IdP's set under one algorithm, its own alg or the one taken for its kind", async () => {
+		const both = { settings: { algorithms: ["RS256", "PS256"] } };
+		// Two RSA algorithms taken: a key naming no alg is used under neither.
+		expect(await exchanged(await idToken(), both)).toBe("refused");
+		expect(await exchanged(await idToken({}, pss, "PS256"), { ...both, keys: [pss.jwk] })).toBe(
+			"refused",
+		);
+		// A key naming its alg is read under that one alone, never under the other.
+		const named = { ...both, keys: [{ ...pss.jwk, alg: "PS256" }] };
+		expect(await exchanged(await idToken({}, pss, "PS256"), named)).toMatchObject({
+			subject: "u-alice",
+		});
+		const rs = { ...both, keys: [{ ...rsa.jwk, alg: "RS256" }] };
+		expect(await exchanged(await idToken(), rs)).toMatchObject({ subject: "u-alice" });
+		expect(await exchanged(await idToken({}, pss, "PS256"), rs)).toBe("refused");
+		// A key whose alg is not taken is used under none.
+		const untaken = { keys: [{ ...rsa.jwk, alg: "RS256" }], settings: { algorithms: ["ES256"] } };
+		expect(await exchanged(await idToken(), untaken)).toBe("refused");
+	});
+
 	it("refuses an id_token without a numeric issue time, or one issued past the upstream's skew", async () => {
 		const answered = async (iat: unknown) => exchanged(await idToken({ iat }));
 		expect(await answered(null)).toBe("refused");

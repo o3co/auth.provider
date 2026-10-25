@@ -95,7 +95,7 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 				.min(1)
 				.prefault(["RS256", "ES256", "EdDSA"])
 				.describe(
-					"The algorithms an id_token may be signed with: asymmetric ones only, by default one for each kind of key.",
+					"The algorithms an id_token may be signed with: asymmetric ones only, by default one for each kind of key. Two for one kind (RS256 and PS256) leave a key of the IdP's set naming no alg unused.",
 				),
 			"endpoint-hosts": z
 				.array(z.string().refine((entry) => hostEntryOf(entry) !== undefined, "a host, or .name"))

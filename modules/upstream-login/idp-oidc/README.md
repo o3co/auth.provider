@@ -27,7 +27,7 @@
 - An answer naming another issuer in `iss` is refused before its code is used.
 - An answer without `iss` is refused where the issuer's description offers `iss` or the operator requires it.
 - Where neither requires `iss`, boot logs a warning naming the IdP (answers are then taken without `iss`).
-- The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences.
+- The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences. A key is read under one algorithm (`external-jwt`): with RS256 and PS256 both taken, one naming no `alg` is unused; an IdP signing with PS256 alone takes `["PS256"]`.
 - An id_token that gives `at_hash` must give the access token's, by its signature's digest; one that does not refuses the exchange.
 - Any reason `external-jwt` gives refuses the login.
 - The id_token must name the client as `azp` where it names other audiences, or wherever it gives `azp`.
