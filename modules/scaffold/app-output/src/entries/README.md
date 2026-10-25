@@ -15,9 +15,11 @@ Internal module of `app-output`: a generated app's entries besides `start`.
 ## Invariants
 - With `seal` composed, the project has a `reseal` script, running the modules' resealers.
 - With `mfa-witnessing` composed, the project has a `witness-backfill` script. It settles each subject read from standard input, one a line, empty lines skipped, each other line used as sent, through `witnessBackfill`, and writes only how many were marked, held, none, unclaimed, inconsistent, unknown (an answer it does not know) and failed (unavailable), never a subject.
+- Beside the counts, a backfill writes on standard error only why a boot was refused (exit 78) and the warning naming the 0.17 variables: neither holds a subject or a configured value.
 - The `witness-backfill` script exits 0 where none failed and none was unknown, else 1, and 78 on a refused boot, told by the kernel's mark as the app's is.
 - With `passkey-witnessing` composed, the project has a `passkey-backfill` script, read and exiting as `witness-backfill` does, through `passkeyBackfill`: it writes only how many were marked, held, none, pending, inconsistent, unknown and failed.
 - With `mfa-reset` composed, the project has an `unclaimed-factors` script, reading subjects as the backfills do. It writes each subject given whose counting factor stands for nothing (`resetCandidates`), one a line on standard output, as the operator gave it, and the counts (named, clear, failed) on standard error. It exits 0 where none failed, else 1, and 78 on a refused boot.
+- In a backfill or `unclaimed-factors`, a failure other than unavailable is counted and stops the run there: the subjects after it are not read.
 - What an entry writes is handed on before it exits: a slow pipe holds the script, never drops a line.
 - The entries that read subjects read them one way: a line longer than a subject may be (255 bytes) is counted failed, and no more of it is held.
 

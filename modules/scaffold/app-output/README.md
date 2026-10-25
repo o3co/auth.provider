@@ -40,7 +40,7 @@
 - Writes the target only; reads its templates and the fragment files it is pointed at.
 
 ## Depends on
-- The HOCON library, through `fragments`.
+- The HOCON library, through `fragments`; `yaml` and `semver`, through `lockfile` and `outside`.
 
 ## Vocabulary
 - output: a project written from the templates.
