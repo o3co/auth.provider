@@ -32,4 +32,46 @@ describe("a module's section, as the kernel reads it", () => {
 		);
 		expect(refusals).toEqual([{ where: "same", reason: "duplicate module name" }]);
 	});
+
+	it("refuses a section whose schema throws a schema error with no issue it can read, in production too, building nothing", async () => {
+		const empty = new z.ZodError([]);
+		// A schema error whose issues are no list.
+		const holed = new Proxy(new z.ZodError([]), {
+			get: (target, key) => (key === "issues" ? "none" : Reflect.get(target, key)),
+		});
+		const malformed = new z.ZodError([{ code: "custom", message: 42, path: "x" } as never]);
+		for (const thrown of [empty, holed, malformed]) {
+			let built = false;
+			let asked = false;
+			const m = defineModule(
+				{
+					name: "m",
+					section: z.object({}).transform(() => {
+						throw thrown;
+					}),
+					takes: [],
+					refusedInProduction: () => {
+						asked = true;
+						return [];
+					},
+				},
+				(m) => [
+					m.provide(contract<object>("m-out")).by(() => {
+						built = true;
+						return {};
+					}),
+				],
+			);
+			const refusals = await refusalsOf(
+				assemble({
+					modules: [m],
+					config: { ...kernelConfig({ environment: "production" }), m: {} },
+				}),
+			);
+			expect(refusals).toEqual([
+				{ where: "m", reason: "its schema failed as it read the section" },
+			]);
+			expect([built, asked]).toEqual([false, false]);
+		}
+	});
 });

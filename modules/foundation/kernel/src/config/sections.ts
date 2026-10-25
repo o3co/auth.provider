@@ -45,6 +45,9 @@ function absentAt(raw: unknown, path: readonly PropertyKey[]): boolean {
 	return at === undefined;
 }
 
+/** What a section is refused with where its schema fails and tells no issue it can read. */
+const schemaFailed: Issue = Object.freeze({ message: "its schema failed as it read the section" });
+
 /** Checks a section with the HOCON library's typed reading: a string converts as the schema asks. */
 function readSection<T>(
 	schema: ZodType<T>,
@@ -68,9 +71,16 @@ function readSection<T>(
 			const path = readThrown(() => keysOf((error as ConfigError).path), []);
 			return { issues: [{ message: "holds a value configuration cannot hold", path }] };
 		}
-		if (kind === "schema") return { issues: (error as z.core.$ZodError).issues };
+		// A schema error's issues, where it holds a list of any; one holding none fails as any other throw.
+		const issues =
+			kind === "schema"
+				? readThrown(() => {
+						const told = (error as z.core.$ZodError).issues;
+						return Array.isArray(told) && told.length > 0 ? told : undefined;
+					}, undefined)
+				: undefined;
 		// Anything else the schema threw: refused by the module's name, its text never kept.
-		return { issues: [{ message: "its schema failed as it read the section" }] };
+		return { issues: issues ?? [schemaFailed] };
 	}
 }
 
@@ -146,17 +156,22 @@ function refuseIssues(
 	raw: unknown,
 ): void {
 	for (const issue of issues) {
-		const keys = issue.path ?? [];
-		const path = keys.map(String).join(".");
-		const notSet =
-			issue.code !== undefined &&
-			typeCodes.has(issue.code) &&
-			absentAt(raw, keys) &&
-			inZodsWords(issue);
-		refusals.push({
-			where: path ? `${name}.${path}` : name,
-			reason: notSet ? "required, and not set" : issue.message,
-		});
+		// An issue is the schema's, so read as a thrown value is: one of another shape is the schema's failure.
+		const refusal = readThrown((): Refusal | undefined => {
+			const keys = issue.path ?? [];
+			if (!Array.isArray(keys) || typeof issue.message !== "string") return undefined;
+			const path = keys.map(String).join(".");
+			const notSet =
+				issue.code !== undefined &&
+				typeCodes.has(issue.code) &&
+				absentAt(raw, keys) &&
+				inZodsWords(issue);
+			return {
+				where: path ? `${name}.${path}` : name,
+				reason: notSet ? "required, and not set" : issue.message,
+			};
+		}, undefined);
+		refusals.push(refusal ?? { where: name, reason: schemaFailed.message });
 	}
 }
 
