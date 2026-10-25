@@ -18,6 +18,9 @@ export type Checked =
 			readonly expiresAt: number;
 			/** When it says it was made (epoch ms); none when it does not say. */
 			readonly issuedAt?: number;
+			/** Its header and every claim, as the verifier answered them: verified, frozen. */
+			readonly header: Readonly<Record<string, unknown>>;
+			readonly claims: Readonly<Record<string, unknown>>;
 	  }
 	| { readonly kind: "invalid"; readonly reason: string };
 
@@ -121,5 +124,7 @@ export async function check(
 		jti: parsed.data.jti,
 		expiresAt: Number(verified.claims.exp) * 1000,
 		...(typeof iat === "number" ? { issuedAt: iat * 1000 } : {}),
+		header: verified.header,
+		claims: verified.claims,
 	};
 }

@@ -12,6 +12,7 @@
 		"@mod/conformance": "workspace:*",
 		"@mod/conformance-code": "workspace:*",
 		"@mod/conformance-device": "workspace:*",
+		"@mod/conformance-exchange": "workspace:*",
 		"@mod/conformance-front": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",

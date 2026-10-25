@@ -9,7 +9,7 @@ Internal module of `jwt-bearer`: checking a JWT assertion, all but its single us
 - Which issuers are trusted and their signers (`issuers`, over the package's `signers`). Spending the `jti`, the subject a token is for, and issuing it (the package).
 
 ## Offers
-- `check` (assertion, signers by issuer, the prefixes of issuers that take self-issued signers) → valid (the trusted issuer it is read as, the `iss` as sent, the subject it stands for, `jti`, expiry, and when it says it was made) / invalid with the reason the grant answers.
+- `check` (assertion, signers by issuer, the prefixes of issuers that take self-issued signers) → valid (the trusted issuer it is read as, the `iss` as sent, the subject it stands for, `jti`, expiry, and when it says it was made) / invalid with the reason the grant answers; a valid one carries its verified header and every claim, frozen.
 
 ## Invariants
 - Nothing read unverified reaches a key source unchecked: the issuer must be a string and trusted, the subject well formed as `users` bounds a subject (1 to 255 ASCII characters, as OpenID Connect Core bounds one; a key thumbprint where its issuer says so), and a `kid` text of 1 to 256 well-formed characters.

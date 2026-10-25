@@ -4,38 +4,14 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { selfSigned } from "@mod/conformance-front";
-import { readChecklist } from "@mod/spec-checklist";
-import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { converse } from "../src/dialog/dialog.ts";
-import { differencesOf, readDifferences } from "../src/differences/differences.ts";
-import { type Flow, libraries, libraryNamed } from "../src/libraries/libraries.ts";
+import { type Flow, flows } from "../src/libraries/libraries.ts";
+import { excusable, library, runs, unmetOf } from "./library.ts";
 import { startWorld, type World, type WorldClient } from "./world/world.ts";
 
-const library = libraryNamed(process.env.INTEROP_LIBRARY);
-const runs = (flow: Flow) => library.flows.includes(flow);
-const checklist = readChecklist();
-const differences = differencesOf(
-	readDifferences(
-		join(import.meta.dirname, "..", "known-differences.json"),
-		{
-			items: new Map(checklist.specs.flatMap((s) => s.items.map((i) => [i.id, i] as const))),
-			decisions: checklist.decisions,
-		},
-		libraries.map((l) => l.name),
-	),
-	library.name,
-);
-
-/** Runs a check; a failure a known difference names is skipped as excused, by its class. */
-async function excusable(context: TestContext, flow: Flow, check: () => Promise<void>) {
-	try {
-		await check();
-	} catch (failure) {
-		const known = differences.excusing(flow, context.task.name);
-		if (!known) throw failure;
-		context.skip(`excused: ${known.class}`);
-	}
-}
+/** The flows of this file: every one but those the services' app runs. */
+const here = flows.filter((f) => f !== "jwt-bearer");
 
 let world: World;
 beforeAll(async () => {
@@ -116,7 +92,7 @@ describe(`${library.name}: refreshing`, () => {
 
 describe(`${library.name}: the known differences`, () => {
 	it("are each met by a check of this run, so a fixed one is taken out", () => {
-		expect(differences.unmet()).toEqual([]);
+		expect(unmetOf(here)).toEqual([]);
 	});
 });
 
@@ -275,6 +251,21 @@ describe(`${library.name}: logging out`, () => {
 				const back = new URL(String(result.location));
 				expect(`${back.origin}${back.pathname}`).toBe(world.postLogoutRedirectUri);
 				expect(back.searchParams.get("state")).toBe(result.state);
+			}),
+	);
+});
+
+describe(`${library.name}: exchanging a token`, () => {
+	it.runIf(runs("token-exchange"))(
+		"exchanges a signed-in user's access token for another of the same subject, by token exchange",
+		(context) =>
+			excusable(context, "token-exchange", async () => {
+				const result = await run("token-exchange", world.clients.basic);
+				expect(result.issuedTokenType).toBe("urn:ietf:params:oauth:token-type:access_token");
+				expect(await world.introspect(String(result.accessToken))).toMatchObject({
+					active: true,
+					sub: result.sub,
+				});
 			}),
 	);
 });
