@@ -30,7 +30,7 @@ import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { issuancePolicies, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	type DelegatedAssertions,
 	delegatedAssertions,
@@ -39,6 +39,22 @@ import {
 	spentAssertions,
 } from "../src/contract.ts";
 import jwtBearer from "../src/module.ts";
+
+/** Each assertion the grant's own checking was asked of, so a test can tell no delegated one reaches it. */
+const ordinary = vi.hoisted(() => ({ asked: [] as string[] }));
+vi.mock("../src/assertion/assertion.ts", async (original) => {
+	const real = await original<typeof import("../src/assertion/assertion.ts")>();
+	return {
+		...real,
+		check: (
+			assertion: string,
+			...rest: Parameters<typeof real.check> extends [string, ...infer R] ? R : never
+		) => {
+			ordinary.asked.push(assertion);
+			return real.check(assertion, ...rest);
+		},
+	};
+});
 
 const now = 1_800_000_000_000;
 const issuer = "https://as.example";
@@ -294,12 +310,18 @@ describe("delegated issuers", () => {
 			"delegated-issuers": [idp],
 		};
 		const s = await serve([d.module, spies], undefined, section);
+		ordinary.asked.length = 0;
 		for (const answer of [{ kind: "invalid" }, valid]) {
 			await s.grant("app", sent(answer));
 		}
+		expect(ordinary.asked).toEqual([]);
 		expect(asked).toEqual([]);
 		expect(stored).toEqual([]);
 		expect(d.spent).toHaveLength(1);
+		// The ordinary checking is what an assertion of any other issuer reaches: the spy sees it.
+		const ownAssertion = sent(valid, own);
+		expect(saidOf(await s.grant("app", ownAssertion))).toBe("invalid_grant: untrusted signer");
+		expect(ordinary.asked).toEqual([ownAssertion]);
 	});
 
 	describe("a public client", () => {
