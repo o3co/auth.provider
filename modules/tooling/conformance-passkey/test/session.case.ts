@@ -48,6 +48,10 @@ const sceneWith = (session: NonNullable<PasskeyPart["session"]>) =>
 type Browser = ReturnType<typeof browser>;
 type Authenticator = ReturnType<typeof softwareAuthenticator>;
 
+/** Holds the answer to `status`, naming its body (and what it answers) where it is another. */
+const expectStatus = (answer: { status: number; body: unknown }, status: number, what = "") =>
+	expect(answer.status, `${what}${what ? ": " : ""}${JSON.stringify(answer.body)}`).toBe(status);
+
 /** POSTs `body` as JSON, the way the passkey routes take it. */
 const postJson = (b: Browser, path: string, body: Record<string, unknown> = {}) =>
 	b.send("POST", path, body, {}, "json");
@@ -55,17 +59,17 @@ const postJson = (b: Browser, path: string, body: Record<string, unknown> = {}) 
 /** Registers a passkey from the browser's session; the authenticator keeping it. */
 async function registerFrom(b: Browser, authenticator = softwareAuthenticator()) {
 	const offered = await postJson(b, "/oauth/webauthn/registration/options");
-	expect(offered.status, "the creation options").toBe(200);
+	expectStatus(offered, 200, "the creation options");
 	const response = authenticator.create(offered.body as unknown as CreationOptions, at);
 	const done = await postJson(b, "/oauth/webauthn/registration/verify", { response });
-	expect(done.status, "the registration").toBe(200);
+	expectStatus(done, 200, "the registration");
 	return authenticator;
 }
 
 /** The request options a browser asks, through its own cookies. */
 const optionsFor = async (b: Browser) => {
 	const asked = await postJson(b, "/session/login/passkey/options");
-	expect(asked.status, "the request options").toBe(200);
+	expectStatus(asked, 200, "the request options");
 	return asked.body as unknown as RequestOptions;
 };
 
@@ -83,7 +87,7 @@ describe.runIf(areaTarget().can("passkey-session-login"))("a passkey login into 
 	/** Signs `username` in by password and registers a passkey from that session. */
 	const holding = async (username: string) => {
 		const b = fresh();
-		expect((await b.login(username)).status).toBe(200);
+		expectStatus(await b.login(username), 200);
 		return registerFrom(b);
 	};
 
@@ -93,7 +97,7 @@ describe.runIf(areaTarget().can("passkey-session-login"))("a passkey login into 
 		const { answer } = await passkeyLogin(b, key);
 		expect(answer).toEqual({ status: 200, body: {} });
 		// The session it opened is one the registration routes take.
-		expect((await postJson(b, "/oauth/webauthn/registration/options")).status).toBe(200);
+		expectStatus(await postJson(b, "/oauth/webauthn/registration/options"), 200);
 	});
 
 	it("refuses alike an assertion from another browser's options, one sent twice, and a credential it does not keep", async () => {
@@ -106,7 +110,7 @@ describe.runIf(areaTarget().can("passkey-session-login"))("a passkey login into 
 		);
 		const b = fresh();
 		const { response, answer } = await passkeyLogin(b, key);
-		expect(answer.status).toBe(200);
+		expectStatus(answer, 200);
 		const again = fresh();
 		await optionsFor(again);
 		expect(await postJson(again, "/session/login/passkey", { response })).toEqual(failed);
@@ -138,7 +142,7 @@ describe.runIf(areaTarget().can("passkey-session-login"))("a passkey login into 
 			factor_id: factor?.id ?? "",
 			proof: totp(secret, 1),
 		});
-		expect(verified.status).toBe(200);
+		expectStatus(verified, 200);
 		const key = await registerFrom(b);
 		const { answer } = await passkeyLogin(fresh(), key);
 		expect(answer).toEqual({ status: 200, body: {} });
@@ -178,7 +182,7 @@ describe.runIf(areaTarget().can("passkey-session-login"))(
 				browser(() => s.at.base),
 				key,
 			);
-			expect(answer.status).toBe(403);
+			expectStatus(answer, 403);
 			expect(answer.body.transaction).toEqual(expect.any(String));
 		});
 	},
@@ -203,13 +207,13 @@ describe.runIf(areaTarget().can("passkey-session-login"))(
 
 		it("refuses the password of a subject holding a passkey as a wrong one, and lets another's in", async () => {
 			const b = fresh();
-			expect((await b.login("erin")).status).toBe(200);
+			expectStatus(await b.login("erin"), 200);
 			await registerFrom(b);
 			expect(await fresh().login("erin")).toEqual({
 				status: 401,
 				body: { error: "invalid_credentials" },
 			});
-			expect((await fresh().login("gus")).status).toBe(200);
+			expectStatus(await fresh().login("gus"), 200);
 		});
 
 		it("refuses it before the second factor holds the login, and again when a held login resumes", async () => {
@@ -217,13 +221,13 @@ describe.runIf(areaTarget().can("passkey-session-login"))(
 			// Held by TOTP while frank holds no passkey yet.
 			const waiting = fresh();
 			const held = await waiting.login("frank");
-			expect(held.status).toBe(403);
+			expectStatus(held, 403);
 			const transaction = String(held.body.transaction);
 			// Another login let in by a recovery code, its TOTP step left for the held one, registers a passkey.
 			const kept = fresh();
 			const other = await kept.login("frank");
 			const letIn = await letInByRecovery(kept, String(other.body.transaction), codes[0] ?? "");
-			expect(letIn.status).toBe(200);
+			expectStatus(letIn, 200);
 			await registerFrom(kept);
 			// The held login resumes past TOTP: refused, as frank now holds a passkey.
 			const factor = (await waiting.factors(transaction)).find((f) => f.kind === "totp");
@@ -232,7 +236,7 @@ describe.runIf(areaTarget().can("passkey-session-login"))(
 				factor_id: factor?.id ?? "",
 				proof: totp(secret, 1),
 			});
-			expect(resumed.status).toBe(403);
+			expectStatus(resumed, 403);
 			// A new password login is refused before TOTP holds it.
 			expect(await fresh().login("frank")).toEqual({
 				status: 401,
@@ -250,7 +254,7 @@ describe.runIf(areaTarget().can("passkey-session-login"))(
 			const b = browser(() => s.at.base);
 			await optionsFor(b);
 			await optionsFor(b);
-			expect((await postJson(b, "/session/login/passkey/options")).status).toBe(429);
+			expectStatus(await postJson(b, "/session/login/passkey/options"), 429);
 		});
 	},
 );
