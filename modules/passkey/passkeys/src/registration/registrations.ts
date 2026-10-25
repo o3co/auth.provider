@@ -20,13 +20,16 @@ export interface RegistrationParts {
 const refused = (reason: RegistrationRefusal) => ({ kind: "refused" as const, reason });
 
 /**
- * What the caller's check answers, having `undo` run where it says no or throws; a throw is passed on
- * once `undo` was tried, as that failure is the answer whether or not `undo` could run.
+ * What the caller's check answers, having `undo` run where it says no or throws, at once or later; a
+ * throw is passed on once `undo` was tried, as that failure is the answer whether or not `undo` could run.
  */
-async function settled(check: Promise<boolean>, undo: () => Promise<unknown>): Promise<boolean> {
+async function settled(
+	check: () => Promise<boolean>,
+	undo: () => Promise<unknown>,
+): Promise<boolean> {
 	let admitted: boolean;
 	try {
-		admitted = await check;
+		admitted = await check();
 	} catch (error) {
 		await undo().catch(() => undefined);
 		throw error;
@@ -65,7 +68,7 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 			});
 		if (wrote !== "written") return refused(wrote);
 		// Once more, written and listed: a revocation landing between the first ask and the write ends it.
-		if (!(await settled(admitted(challengedAt), end))) return refused("revoked");
+		if (!(await settled(() => admitted(challengedAt), end))) return refused("revoked");
 		// Usable only now, both asks having admitted. Not this write's record any more (removed or cleared): nothing registered.
 		if ((await p.records.activated(credential.id, written)) !== "activated") {
 			await end();
