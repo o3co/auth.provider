@@ -13,7 +13,7 @@ Internal module of `mfa-flows`: a session's permit to release its subject's lock
 
 ## Invariants
 - A permit is named by a hash of the session's handle in the transaction store; the handle is never kept in clear.
-- A later proof's permit replaces the session's, used or not, under a new id; a use names its proof, so it leaves a later one alone.
+- A later proof's permit replaces the session's, used or not, under a new id; a use names its proof, so it leaves a later one alone. A permit is named by its proof's time: two proofs of one session in the same millisecond share one, and a use of either uses it (a release refused, never one more granted).
 - A permit counts while its proof is recent (`session`), and lasts at most an hour from the session's first: the record is kept that long and not renewed, which fails closed.
 - Used is a mark in the record, not a time: a used permit answers what it answered, however clocks drift.
 

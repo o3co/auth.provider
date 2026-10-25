@@ -106,14 +106,16 @@ it("writes nothing where the first ask says no or fails, as it is asked before t
 it("ends its own write where the second ask says no or fails: off the list, its record stripped", async () => {
 	const t = jointStores();
 	const { registrations, answered } = registering(t);
-	for (const second of ["no", "throws"] as const) {
+	for (const second of ["no", "throws", "throws at once"] as const) {
 		const response = await answered("sam");
 		let asks = 0;
-		const admitted = async () => {
-			if (++asks === 1) return true;
-			if (second === "no") return false;
+		// "throws at once": a check that is no async function, throwing before it gives a promise.
+		const admitted = (() => {
+			if (++asks === 1) return Promise.resolve(true);
+			if (second === "no") return Promise.resolve(false);
+			if (second === "throws") return Promise.reject(new Unavailable("subject-revocation"));
 			throw new Unavailable("subject-revocation");
-		};
+		}) as () => Promise<boolean>;
 		const answer = registrations.register("sam", response, undefined, admitted);
 		if (second === "no") expect(await answer).toEqual({ kind: "refused", reason: "revoked" });
 		else await expect(answer, second).rejects.toSatisfy(isUnavailable);

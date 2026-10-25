@@ -2,7 +2,8 @@ import { extensionPoint } from "@mod/kernel";
 
 export type Verified =
 	/**
-	 * `state` is kept with the factor and given to the next verification; `amr` is this proof's,
+	 * `state` is kept with the factor and given to the next verification, as JSON: a value JSON writes
+	 * and reads back as it is (no BigInt, cycle or function), which mfa compares by its text; `amr` is this proof's,
 	 * among its kind's; `remaining` is how many proofs a way back has left, recorded with its use.
 	 */
 	| {
