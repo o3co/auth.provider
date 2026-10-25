@@ -12,7 +12,7 @@
 
 ## Invariants
 - Internal modules: `binding-proof` asks, judges and sends again the binding proof; `completion` begins and completes a binding. Where an enrollment goes on, and what a binding keeps in its transaction, are the package's.
-- A first factor bound after a binding proof passed counts at once: its login goes on, or its session is raised. Bound without one, it counts from the next sign-in.
+- A first factor of a kind that counts, bound after a binding proof passed, counts at once: its login goes on, or its session is raised. Bound without one, it counts from the next sign-in. One of a kind that does not count (a way back) is answered as one bound without a proof: no login goes on and no session is raised.
 - A first binding another factor beat while it was under way binds nothing (`mfa` decides): a login gets `401 login_required`, a session `409 mfa_enrollment_conflict`.
 - A login's transaction binds only the subject's first factor (`mfa` decides, told the login it came from): begun or completed once a factor counts, it gets `401 login_required` and binds nothing.
 - Enrollment from a session enters the session at the credential-changing level (`mfa-entry` contributes the requirement, named `mfa`).
@@ -25,4 +25,4 @@
 - What a binding keeps (the binding begun, the binding proof's challenge and pass, whether a proof passed) is what the transaction holds, each change made by `transactions`' `keep` from what it holds.
 
 ## Depends on
-- `kernel`, `http`, `mfa` (composed with it), `mfa-binding` (binding a factor), `mfa-managing` (`reissue`), `labels` (the label's shape), `mfa-binding-proof` (the binding proof), `mfa-extensions` (whom `mfa` is asked for), `session` (entry, raising), `subject-revocation`, `mfa-flows` (`flowParts`, `enrollmentFlow`).
+- `kernel`, `http`, `mfa` (composed with it), `mfa-binding` (binding a factor), `mfa-managing` (`reissue`), `labels` (the label's shape), `mfa-binding-proof` (the binding proof), `mfa-extensions` (whom `mfa` is asked for, whether a kind counts), `session` (entry, raising), `subject-revocation`, `mfa-flows` (`flowParts`, `enrollmentFlow`).

@@ -1,6 +1,7 @@
 import { defineModule } from "@mod/kernel";
 import { factorBinding } from "@mod/mfa-binding";
 import { bindingProof } from "@mod/mfa-binding-proof";
+import { factorKinds } from "@mod/mfa-extensions";
 import { enrollmentFlow, flowParts } from "@mod/mfa-flows";
 import { factorManaging } from "@mod/mfa-managing";
 import { sessions } from "@mod/session";
@@ -12,11 +13,21 @@ import { placeOver } from "./place.ts";
 export default defineModule(
 	{
 		name: "mfa-enrollment",
-		takes: [bindingProof, flowParts, factorBinding, factorManaging, sessions, subjectRevocation],
+		takes: [
+			bindingProof,
+			factorKinds,
+			flowParts,
+			factorBinding,
+			factorManaging,
+			sessions,
+			subjectRevocation,
+		],
 	},
 	(m) => [
 		m.contribute(enrollmentFlow).by(async (c) => {
+			const kinds = await c.collect(factorKinds);
 			const parts = {
+				counts: (kind: string) => kinds.some((k) => k.kind === kind && k.counts),
 				binding: await c.get(factorBinding),
 				managing: await c.get(factorManaging),
 				bindingProof: await c.get(bindingProof),

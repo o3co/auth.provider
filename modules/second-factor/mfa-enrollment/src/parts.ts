@@ -7,6 +7,8 @@ import type { SubjectRevocation } from "@mod/subject-revocation";
 
 /** What an enrollment takes: `mfa-flows`' parts, and the contracts it asks itself. */
 export interface EnrollmentParts {
+	/** Whether a factor of the kind meets a required second factor, as its kind says. */
+	readonly counts: (kind: string) => boolean;
 	readonly binding: FactorBinding;
 	/** The recovery codes a binding leaves due. */
 	readonly managing: Pick<FactorManaging, "reissue">;

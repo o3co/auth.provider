@@ -136,15 +136,16 @@ export function completionOver(
 			return { adds: { ...factor, recovery_codes: reissued.codes } };
 		};
 		// A first factor bound on the password alone counts from the next sign-in: binding it during a
-		// login never finishes that login.
-		if (!heldOf(t).proved) {
+		// login never finishes that login. One of a kind that does not count (a way back) is answered
+		// alike, proof or none: it never meets the login's gate, nor raises a session.
+		if (!heldOf(t).proved || !p.counts(bound.factor.kind)) {
 			const made = await shown();
 			const cleared = [transactions.cleared()];
 			if ("adds" in made) return jsonAnswer(200, made.adds, { cookies: cleared });
 			return made.full ? { ...made.answer, cookies: cleared } : made.answer;
 		}
-		// Bound on a binding proof, it counts at once by its first proof: the login goes on, its codes
-		// made once it opened, or the session is raised, and its codes made once it is.
+		// Of a kind that counts, bound on a binding proof, it counts at once by its first proof: the login
+		// goes on, its codes made once it opened, or the session is raised, and its codes made once it is.
 		if (t.purpose === "enroll-login") return resumeWith(request, t, proved.amr, shown);
 		const raised = await p.sessions.raise(request, proved.amr);
 		const cookies = [...(raised?.cookies ?? []), transactions.cleared()];

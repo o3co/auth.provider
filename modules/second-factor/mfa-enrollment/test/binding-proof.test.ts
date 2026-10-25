@@ -62,6 +62,19 @@ const pairKind = defineModule({ name: "kind-pair", takes: [] }, (m) => [
 				: { kind: "invalid" as const },
 	})),
 ]);
+/** A kind that does not count and adds no `mfa`, as email's is by default: a way back a subject binds. */
+const mailedKind = defineModule({ name: "kind-mailed", takes: [] }, (m) => [
+	m.contribute(factorKinds).by(() => ({
+		kind: "mailed",
+		amr: ["email"],
+		addsSecondFactor: false,
+		guessable: true,
+		counts: false,
+		enroll: async () => ({ secret: "m1", show: {} }),
+		verify: async (secret: string, _state: unknown, proof: string) =>
+			proof === secret ? { kind: "valid" as const, state: null } : { kind: "invalid" as const },
+	})),
+]);
 afterEach(() => {
 	contact.answer = undefined;
 	contact.unreadable = false;
@@ -85,7 +98,7 @@ const boundOnProof = async (s: Served, tx: string, kind = "code") => {
 	const enroll = (more: Record<string, string>) =>
 		s.call("POST", "/session/mfa/enrollment", { kind, transaction_id: tx, ...more });
 	const begun = await enroll({ proof: `c-${contact.sent}` });
-	const proof = kind === "code" ? `${begun.body.secret}:0` : "p1";
+	const proof = kind === "code" ? `${begun.body.secret}:0` : kind === "mailed" ? "m1" : "p1";
 	return s.call("POST", "/session/mfa/enrollment/complete", { transaction_id: tx, proof });
 };
 
@@ -136,6 +149,32 @@ describe("a binding proof before a first factor", () => {
 		});
 		expect([done.status, done.body.redirect_to]).toEqual([200, "https://app.example/back"]);
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
+	});
+
+	it("lets no login go on, nor raises a session, on a first factor bound on it of a kind that does not count", async () => {
+		const s = await serve({ mode: "required" }, [contactProof, mailedKind]);
+		const { tx } = await s.heldLogin("una");
+		await s.call("POST", "/session/mfa/enrollment", { kind: "mailed", transaction_id: tx });
+		const atLogin = await boundOnProof(s, tx, "mailed");
+		// Answered as one bound on the password alone: the factor, and the login asked again.
+		expect([atLogin.status, (atLogin.body.factor as { kind: string }).kind]).toEqual([
+			200,
+			"mailed",
+		]);
+		expect(atLogin.body).not.toHaveProperty("redirect_to");
+		expect(s.jar().has("__Host-session")).toBe(false);
+		expect((await s.app.get(factorReading).held("una")).map((f) => f.kind)).toEqual(["mailed"]);
+		const optional = await serve({}, [contactProof, mailedKind]);
+		await optional.signIn("uli");
+		const old = optional.jar().get("__Host-session");
+		const asked = await optional.call("POST", "/session/mfa/enrollment", { kind: "mailed" });
+		const inSession = await boundOnProof(optional, String(asked.body.transaction), "mailed");
+		expect([inSession.status, (inSession.body.factor as { kind: string }).kind]).toEqual([
+			200,
+			"mailed",
+		]);
+		expect(optional.jar().get("__Host-session")).toBe(old);
+		expect(await amrOf(optional)).toEqual(["pwd"]);
 	});
 
 	it("counts a factor whose kind declares several amr values at once, by the amr its first proof adds", async () => {
