@@ -11,8 +11,10 @@ import type { ClientScene } from "@mod/conformance-oauth";
 /** A client the world registers, as an adapter is told of it. */
 export interface WorldClient {
 	readonly id: string;
-	readonly method: "client_secret_basic" | "client_secret_post" | "none";
+	readonly method: "client_secret_basic" | "client_secret_post" | "none" | "private_key_jwt";
 	readonly secret?: string;
+	/** Its private key, as a JWK with its `kid` and `alg`, under `private_key_jwt`. */
+	readonly privateJwk?: Readonly<Record<string, unknown>>;
 }
 
 /** The provider the libraries meet, behind its https front, and what the driver does as the browser. */
@@ -21,8 +23,12 @@ export interface World {
 	readonly issuer: string;
 	/** The front's certificate, as PEM, which every adapter trusts and nothing else. */
 	readonly ca: string;
-	readonly clients: Readonly<Record<"basic" | "post" | "public", WorldClient>>;
+	readonly clients: Readonly<Record<"basic" | "post" | "public" | "assertion", WorldClient>>;
 	readonly redirectUri: string;
+	/** The resource server a client may ask its token for (RFC 8707). */
+	readonly resource: string;
+	/** What the provider's introspection answers of a token, asked as the `post` client. */
+	introspect(token: string): Promise<Record<string, unknown>>;
 	/** A browser with its own session: it logs in and follows an authorization URL to the redirect. */
 	browser(): { authorize(url: string): Promise<string> };
 	stop(): Promise<void>;
@@ -32,6 +38,7 @@ export interface World {
 const sender = "198.51.100.30";
 const user = { username: "alice", password: "correct horse battery" };
 const redirectUri = "https://rp.example/cb";
+const resource = "https://api.example";
 // A secret with the characters RFC 6749 §2.3.1 form-encodes before Basic, where libraries part ways.
 const awkward = "s3cret+with%odd:chars and space";
 
@@ -55,9 +62,20 @@ const client = (id: string, method: WorldClient["method"], secret?: string): Cli
 	...(secret === undefined ? {} : { secret }),
 	grants: ["authorization_code", "refresh_token"],
 	scopes: ["openid", "profile", "email", "offline_access"],
+	audiences: [resource],
 	redirectUris: [redirectUri],
 	firstParty: true,
 });
+
+/** An ES256 key of this run's own for the client that authenticates by its assertions. */
+function assertionKey() {
+	const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+	const kid = `assertion-${Date.now().toString(36)}`;
+	return {
+		privateJwk: { ...privateKey.export({ format: "jwk" }), kid, alg: "ES256" },
+		publicJwk: { ...publicKey.export({ format: "jwk" }), kid, alg: "ES256", use: "sig" },
+	};
+}
 
 /** An RS256 signing key of this run's own, the algorithm every library takes for an ID token. */
 function signing() {
@@ -100,21 +118,37 @@ export async function startWorld(
 		tls,
 		sender,
 	});
+	const key = assertionKey();
 	const clients = {
 		basic: { id: "basic", method: "client_secret_basic", secret: awkward },
 		post: { id: "post", method: "client_secret_post", secret: "post-secret-0123456789abcdef" },
 		public: { id: "public", method: "none" },
+		assertion: { id: "assertion", method: "private_key_jwt", privateJwk: key.privateJwk },
 	} as const;
+	const byCode = [clients.basic, clients.post, clients.public].map((c) =>
+		client(c.id, c.method, "secret" in c ? c.secret : undefined),
+	);
+	const byAssertion: ClientScene = {
+		id: clients.assertion.id,
+		kind: "confidential",
+		method: "private_key_jwt",
+		keys: [key.publicJwk],
+		grants: ["client_credentials"],
+		scopes: ["read"],
+		defaultScopes: ["read"],
+		audiences: [resource],
+	};
 	const scene = codeScene({
 		issuer: front.origin,
 		keys: { signing: signing() },
 		users: [{ identifier: user.username, password: user.password }],
-		clients: Object.values(clients).map((c) =>
-			client(c.id, c.method, "secret" in c ? c.secret : undefined),
-		),
+		clients: [...byCode, byAssertion],
 		discovery: true,
 		userinfo: true,
 		refresh: {},
+		resourceIndicators: true,
+		introspection: true,
+		revocation: true,
 	});
 	const cleared = async () => {
 		await front.stop();
@@ -137,6 +171,27 @@ export async function startWorld(
 		ca: tls.cert,
 		clients,
 		redirectUri,
+		resource,
+		async introspect(token: string) {
+			const answer = await fetch(`${base}/oauth/introspect`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					"x-forwarded-proto": "https",
+					"x-forwarded-for": sender,
+				},
+				body: new URLSearchParams({
+					token,
+					client_id: clients.post.id,
+					client_secret: clients.post.secret,
+				}),
+			});
+			if (!answer.ok)
+				throw new Error(
+					`introspection answered ${answer.status}: ${(await answer.text()).slice(0, 200)}`,
+				);
+			return (await answer.json()) as Record<string, unknown>;
+		},
 		browser() {
 			const at = browserAt(() => base, front.origin, user);
 			return {
