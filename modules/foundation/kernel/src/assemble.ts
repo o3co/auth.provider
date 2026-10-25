@@ -184,8 +184,8 @@ export async function assembleWatching(
 	/** Each take beyond a declaring module's takes, refused once, even where the taker catches the throw. */
 	const beyondTakes = new Map<Module, Set<Handle>>();
 	const mayName = (handle: Handle, item: Item) => {
-		const held = heldTakes.get(item.module);
-		if (held === undefined) return;
+		// Every module is held once the preflight passed; one it could not ask holds nothing.
+		const held = heldTakes.get(item.module) ?? new Set<Handle>();
 		if (held.has(handle)) {
 			watch?.took(item.module.name, handle);
 			return;

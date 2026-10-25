@@ -43,7 +43,11 @@ export function checkTakes(
 	const pointsChecked = new Set<Handle>();
 	for (const module of modules) {
 		const { takes } = module;
-		if (takes === undefined) continue;
+		// One written without the types (plain JavaScript, or cast past them) may hold none.
+		if (takes === undefined) {
+			refusals.push({ where: module.name, reason: "declares no takes" });
+			continue;
+		}
 		const passed = module.section === undefined || sections.has(module);
 		if (typeof takes === "function" && !passed) continue;
 		const handles = new Set(typeof takes === "function" ? takes(sections.get(module)) : takes);

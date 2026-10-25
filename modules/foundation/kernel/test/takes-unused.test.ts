@@ -81,8 +81,8 @@ describe("takesUnused, a test's view of the takes no factory took", () => {
 		});
 	});
 
-	it("leaves out a module without takes, and refuses as the boot does", async () => {
-		const older = defineModule({ name: "older" }, (m) => [
+	it("leaves out a module that took all it names, and refuses as the boot does", async () => {
+		const older = defineModule({ name: "older", takes: [] }, (m) => [
 			m.provide(contract<string>("o")).by(() => "o"),
 		]);
 		expect(await takesUnused({ modules: [provider, older], config: single })).toEqual({});
