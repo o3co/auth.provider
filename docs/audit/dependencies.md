@@ -296,6 +296,7 @@ flowchart LR
 | `@mod/conformance-passkey` | verification | `@mod/conformance`, `@mod/conformance-legacy`, `@mod/conformance-oauth`, `@mod/ledger-fakes` |
 | `@mod/conformance-recipes` | verification | `@mod/conformance`, `@mod/create-app` |
 | `@mod/conformance-second-factor` | verification | `@mod/conformance`, `@mod/conformance-legacy` |
+| `@mod/conformance-tunnel` | verification | none |
 | `@mod/distribution` | assembly | `@mod/create-app`, `@mod/trial` |
 | `@mod/guard` | verification | `@mod/guard-imports`, `@mod/kinds` |
 | `@mod/guard-imports` | verification | none |
