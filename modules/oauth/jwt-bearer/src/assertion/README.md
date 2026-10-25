@@ -6,7 +6,7 @@ Internal module of `jwt-bearer`: checking a JWT assertion, all but its single us
 - Reads an assertion's issuer and signer unverified, checks the signer's shape, and verifies it with that issuer's signers' keys through `external-jwt`.
 
 ## Not here
-- Which issuers are trusted and their signers (the package's `signers`). Spending the `jti`, the subject a token is for, and issuing it (the package).
+- Which issuers are trusted and their signers (`issuers`, over the package's `signers`). Spending the `jti`, the subject a token is for, and issuing it (the package).
 
 ## Offers
 - `check` (assertion, signers by issuer) → valid (issuer, subject, `jti`, expiry, and when it says it was made) / invalid with the reason the grant answers.
