@@ -643,6 +643,27 @@ describe("a key set at a URL", () => {
 		expect(s.asked).toHaveLength(2);
 	});
 
+	it("takes a key of the set naming another alg as no key for the token, fetching nothing past the minute", async () => {
+		const rsa = await testSigner("RS256", "k1");
+		const s = served();
+		s.serve([{ ...rsa.jwk, alg: "RS256" }]);
+		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
+		const both = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
+		expect((await both.verify(await rsa.sign(fresh()))).kind).toBe("valid");
+		// The header asks PS256 of the key the set names RS256: no key, and a fresh set would not change it.
+		const asked = await rsa.sign(fresh(), { alg: "PS256" });
+		expect(await both.verify(asked)).toEqual(invalid("no-key"));
+		now += 61_000;
+		expect(await both.verify(asked)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(1);
+		// A key the set lacks is still fetched for.
+		expect(await both.verify(await rsa.sign(fresh(), { alg: "PS256", kid: "k9" }))).toEqual(
+			invalid("no-key"),
+		);
+		expect(s.asked).toHaveLength(2);
+	});
+
 	it("keeps one set for a URL and its hosts, whichever verifier asks", async () => {
 		const signer = await testSigner("ES256", "k1");
 		const s = served();

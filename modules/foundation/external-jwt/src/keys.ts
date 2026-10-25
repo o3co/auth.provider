@@ -45,9 +45,9 @@ function boundTo(jwk: Jwk, allowed: readonly Algorithm[]): Algorithm | undefined
 }
 
 /**
- * The one key that may verify under the header's algorithm and id, each key read under its one
- * algorithm among those allowed. `unbound`: a key fits but is read under another algorithm, or
- * under none, which a fresh set would not change.
+ * The one key that may verify under the header's algorithm and id, each fitting by its kind, curve,
+ * use and id, and read under its one algorithm among those allowed. `unbound`: a key fits but is
+ * read under another algorithm, or none, which a fresh set would not change.
  */
 export function picked(
 	candidates: readonly Candidate[],
@@ -55,9 +55,10 @@ export function picked(
 	kid: string | undefined,
 	allowed: readonly Algorithm[],
 ): Candidate | "no-key" | "ambiguous-key" | "unbound" {
-	const fit = candidates.filter(
-		({ jwk }) => verifiesUnder(jwk, alg) && (kid === undefined || jwk.kid === kid),
-	);
+	const fit = candidates.filter(({ jwk }) => {
+		const { alg: _named, ...unnamed } = jwk;
+		return verifiesUnder(unnamed, alg) && (kid === undefined || jwk.kid === kid);
+	});
 	const [only, ...more] = fit.filter(({ jwk }) => boundTo(jwk, allowed) === alg);
 	if (!only) return fit.length > 0 ? "unbound" : "no-key";
 	return more.length > 0 ? "ambiguous-key" : only;
