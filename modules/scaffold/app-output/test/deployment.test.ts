@@ -123,7 +123,9 @@ it("adds the witness-backfill entry when mfa-witnessing is composed", async () =
 		"node --env-file-if-exists=.env src/witness-backfill.ts",
 	);
 	expect(manifest.scripts.reseal).toBeUndefined();
-	expect(await read(target, "src/witness-backfill.ts")).toContain('from "@o3co/x-mfa-witnessing"');
+	expect(await read(target, "src/witness-backfill.ts")).toContain(
+		'import("@o3co/x-mfa-witnessing")',
+	);
 });
 
 it("adds the passkey-backfill entry when passkey-witnessing is composed, settling through passkeyBackfill", async () => {
@@ -136,7 +138,8 @@ it("adds the passkey-backfill entry when passkey-witnessing is composed, settlin
 	);
 	expect(manifest.scripts["witness-backfill"]).toBeUndefined();
 	const entry = await read(target, "src/passkey-backfill.ts");
-	expect(entry).toContain('import { passkeyBackfill } from "@o3co/x-passkey-witnessing"');
+	expect(entry).toContain("{ passkeyBackfill }");
+	expect(entry).toContain('import("@o3co/x-passkey-witnessing")');
 	expect(entry).toContain('["marked", "held", "none", "pending", "inconsistent"]');
 });
 
@@ -148,9 +151,9 @@ it("adds the unclaimed-factors entry where mfa-reset is composed, asking resetCa
 	expect(manifest.scripts["unclaimed-factors"]).toBe(
 		"node --env-file-if-exists=.env src/unclaimed-factors.ts",
 	);
-	expect(await read(target, "src/unclaimed-factors.ts")).toContain(
-		'import { resetCandidates } from "@o3co/x-mfa-reset"',
-	);
+	const entry = await read(target, "src/unclaimed-factors.ts");
+	expect(entry).toContain("{ resetCandidates }");
+	expect(entry).toContain('import("@o3co/x-mfa-reset")');
 });
 
 it("refuses a target that holds anything, and writes nothing", async () => {

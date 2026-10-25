@@ -1,0 +1,48 @@
+import { writeSync } from "node:fs";
+
+// Read first, with node's own modules alone: from here on nothing the app or a dependency writes,
+// warns or throws reaches the terminal. The script tells only fixed lines and counts, written by
+// `tell` itself; the app's own start, run with the same configuration, tells why.
+const pause = new Int32Array(new SharedArrayBuffer(4));
+/** Writes `text` whole to the descriptor, waiting out a full pipe; throws where it cannot be written, as to a closed one. */
+const tell = (fd: 1 | 2, text: string) => {
+	const bytes = Buffer.from(text);
+	for (let at = 0; at < bytes.length; ) {
+		try {
+			at += writeSync(fd, bytes, at);
+		} catch (error) {
+			if ((error as { code?: unknown }).code !== "EAGAIN") throw error;
+			Atomics.wait(pause, 0, 0, 5);
+		}
+	}
+};
+let ended: number | undefined;
+/**
+ * Ends the run now with `code`, after its fixed line if one is given. An end that comes while the
+ * run ends (an exit handler that throws) fails a run that ended 0, and leaves a failure as it was.
+ */
+const end = (line: string | undefined, code: number): never => {
+	if (ended === undefined || ended === 0) {
+		ended = code;
+		// A standard error that takes no line leaves the code to tell it.
+		if (line !== undefined) {
+			try {
+				tell(2, `${line}\n`);
+			} catch {}
+		}
+	}
+	process.exit(ended);
+};
+// Anything thrown or rejected outside a subject's own call, an exit handler's included, ends it alike.
+const unexpected = () => end("failed: the run stopped on an unexpected error", 1);
+process.on("uncaughtException", unexpected);
+process.on("unhandledRejection", unexpected);
+// What anything else writes to the streams goes nowhere, the console's lines and node's warnings
+// among them; one that waits for its write to be handed on is answered.
+const discard = ((_chunk: unknown, encoding?: unknown, done?: unknown) => {
+	const callback = typeof encoding === "function" ? encoding : done;
+	if (typeof callback === "function") queueMicrotask(() => callback());
+	return true;
+}) as typeof process.stdout.write;
+process.stdout.write = discard;
+process.stderr.write = discard;
