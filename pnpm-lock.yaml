@@ -1487,6 +1487,64 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/oauth/jwt-bearer-id-tokens:
+    dependencies:
+      '@mod/exchange-id-tokens':
+        specifier: workspace:*
+        version: link:../exchange-id-tokens
+      '@mod/jwt-bearer':
+        specifier: workspace:*
+        version: link:../jwt-bearer
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      '@mod/client-allowance':
+        specifier: workspace:*
+        version: link:../client-allowance
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      '@mod/external-jwt':
+        specifier: workspace:*
+        version: link:../../foundation/external-jwt
+      '@mod/grants':
+        specifier: workspace:*
+        version: link:../grants
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/issuer':
+        specifier: workspace:*
+        version: link:../issuer
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      '@mod/token-endpoint':
+        specifier: workspace:*
+        version: link:../token-endpoint
+      '@mod/token-exchange':
+        specifier: workspace:*
+        version: link:../token-exchange
+      '@mod/tokens':
+        specifier: workspace:*
+        version: link:../tokens
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/oauth/jwt-bearer-users:
     dependencies:
       '@mod/jwt-bearer':
