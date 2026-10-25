@@ -144,7 +144,8 @@ export function expectedOf(runs: readonly Run[], release: boolean): Expected {
 		r.files === undefined ? [] : [{ entry: r.entry, pkg: pkgOf(r.entry), files: r.files }],
 	);
 	const noSkip = new Set(runs.filter((r) => r.noSkip).map((r) => r.entry));
-	return { entries, areas, runsOf: harness, suffixed, noSkip };
+	const gate = new Set(runs.filter((r) => r.gate).map((r) => r.entry));
+	return { entries, areas, runsOf: harness, suffixed, noSkip, gate };
 }
 
 /** Each workspace package's directory, relative to the root. */
