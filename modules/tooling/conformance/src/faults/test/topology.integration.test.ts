@@ -303,6 +303,29 @@ describe("what a topology keeps true across its faults", () => {
 		await expect(t.promote({ replica: stays, catchUpMs: 1_000 })).rejects.toThrow(/history/);
 	});
 
+	it("fails a promotion whose step outlasts the barrier, before the old primary goes, its writes free again", async () => {
+		const t = await topology({ replicas: 2 });
+		const [next, other] = t.replicas();
+		if (!next || !other) throw new Error("no replicas");
+		const old = t.primary();
+		await expect(
+			t.promote({
+				replica: next,
+				reattach: [other],
+				catchUpMs: 1_000,
+				holdMs: 1_500,
+				between: () => new Promise((resolve) => setTimeout(resolve, 3_000)),
+			}),
+		).rejects.toThrow(/barrier/);
+		expect(old.state().running).toBe(true);
+		expect(t.primary().name).toBe(old.name);
+		expect(await role(next)).toBe("slave");
+		expect(await ask(old.upstream(), ["SET", "after", "1"], 1_000)).toEqual({
+			kind: "simple",
+			text: "OK",
+		});
+	});
+
 	it("takes no write on the old primary from its barrier until the promotion ends", async () => {
 		const t = await topology({ replicas: 2 });
 		const [next, other] = t.replicas();

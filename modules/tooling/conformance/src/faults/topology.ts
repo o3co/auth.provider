@@ -2,6 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { ask, askAll, microsOf } from "../ask/ask.ts";
 import { clockImage, faketimeEnv } from "../clock/clock.ts";
+import { type PromoteOptions, promote } from "../promotion/promotion.ts";
 import type { Reply, Upstream } from "../relay/relay.ts";
 
 /** The Redis every fault scene runs, by version and digest. */
@@ -168,7 +169,6 @@ export async function startTopology(spec: TopologySpec) {
 	/** Each node's primary by name, none for a primary: what a restart puts back. */
 	const follows = new Map<string, string | undefined>();
 	const killed = new Set<string>();
-	const replicasOf = async (p: Node) => Number(field(await info(p), "connected_slaves") ?? 0);
 	const onlineAt = async (p: Node, count: number) =>
 		(await info(p)).split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length >= count;
 	const following = async (n: Node, upstream: string) => {
@@ -196,7 +196,6 @@ export async function startTopology(spec: TopologySpec) {
 		throw error;
 	}
 	let primary = nodes[0] as Node;
-	const replid = async (n: Node) => field(await info(n), "master_replid");
 
 	return {
 		network,
@@ -205,72 +204,21 @@ export async function startTopology(spec: TopologySpec) {
 		/** The nodes following the current primary, none killed. */
 		replicas: () =>
 			nodes.filter((n) => follows.get(n.name) === primary.name && !killed.has(n.name)),
-		/**
-		 * Promotes a replica: refused unless it follows the primary's replication history and has
-		 * caught up with it within `catchUpMs`, writes to the primary held from a barrier until the
-		 * old primary is killed (SIGKILL) or, kept on, released. The replicas named follow the new
-		 * one; keeping the old one on needs one of them. `between` is a step taken once writes are
-		 * held, before the old primary goes. Answers the barrier's span on the base's monotonic clock.
-		 */
-		async promote(o: {
-			replica: Node;
-			reattach?: readonly Node[];
-			keepOld?: boolean;
-			catchUpMs?: number;
-			between?: () => Promise<void>;
-		}) {
-			const old = primary;
-			const reattach = o.reattach ?? [];
-			if (o.keepOld && reattach.length === 0)
-				throw new Error("keeping the old primary on needs a replica reattached to the new one");
-			const moving = new Set([o.replica.name, ...reattach.map((r) => r.name)]);
-			const staying = nodes.filter(
-				(n) => follows.get(n.name) === old.name && !killed.has(n.name) && !moving.has(n.name),
-			);
-			if (o.keepOld && staying.length === 0)
-				throw new Error("keeping the old primary on needs one of its replicas to stay with it");
-			// Offsets compare only within one replication history.
-			if ((await replid(o.replica)) !== (await replid(old)))
-				throw new Error(
-					`not eligible: ${o.replica.name} follows another replication history than ${old.name}`,
-				);
-			const catchUpMs = o.catchUpMs ?? 5_000;
-			await old.ask("CLIENT", "PAUSE", String(catchUpMs + 60_000), "WRITE");
-			const from = performance.now();
-			// Whatever fails from here, an old primary not killed takes writes again.
-			try {
-				const offset = Number(field(await info(old), "master_repl_offset"));
-				const caughtUp = async () =>
-					Number(field(await info(o.replica), "slave_repl_offset") ?? -1) >= offset;
-				await until(`not eligible: ${o.replica.name} lags behind ${old.name}`, caughtUp, catchUpMs);
-				await o.between?.();
-				if (!o.keepOld) {
-					docker("kill", "-s", "KILL", old.name);
-					killed.add(old.name);
-				}
-				await o.replica.ask("REPLICAOF", "NO", "ONE");
-				follows.set(o.replica.name, undefined);
-				for (const r of reattach) {
-					await r.ask("REPLICAOF", o.replica.name, "6379");
-					follows.set(r.name, o.replica.name);
-				}
-				primary = o.replica;
-				await until("the replicas named did not follow", () =>
-					onlineAt(o.replica, reattach.length),
-				);
-				if (o.keepOld) {
-					await old.ask("CLIENT", "UNPAUSE");
-					await until(
-						"the old primary lost every replica",
-						async () => (await replicasOf(old)) > 0,
-					);
-				}
-			} catch (error) {
-				if (!killed.has(old.name)) await old.ask("CLIENT", "UNPAUSE").catch(() => undefined);
-				throw error;
-			}
-			return { primary: o.replica, old, barrier: { from, to: performance.now() } };
-		},
+		/** Promotes a replica, as `promotion` does, in this topology. */
+		promote: (o: PromoteOptions<Node>) =>
+			promote(
+				{
+					nodes,
+					follows,
+					killed,
+					primary: () => primary,
+					setPrimary: (n) => {
+						primary = n;
+					},
+					kill: (n) => docker("kill", "-s", "KILL", n.name),
+				},
+				o,
+			),
 		/**
 		 * Ends the node with SIGKILL, as a crash does, and starts it again in the role it had,
 		 * following the primary it followed; answers how it ended.
