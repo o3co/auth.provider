@@ -8,7 +8,7 @@ It writes an OAuth grant as an npm package outside this repository, modelled on 
 
 Depend on the published packages your module imports, all at the one version of the release you run: every package of a release shares it. Keep them as peers, so the app installs one copy of each. The kernel finds contracts and extension points by the object itself, never by name, so a second copy of a package is a different contract, and your grant would reach no token endpoint (the `kernel` card).
 
-Export the module the app imports at `./module`, as every module of the provider does (the `guard` card's G5).
+Export the module the app imports at `./module`, as every module of the provider does: the app's `src/main.ts` imports it from there, as does the generator when it composes your package ([packages outside the release](outside-modules.md#export-the-module)).
 
 <!-- generated:package-json -->
 ```json
@@ -37,7 +37,7 @@ Export the module the app imports at `./module`, as every module of the provider
 
 ## The grant
 
-A grant is a contribution to the `grants` extension point (the `grants` card). This one gives a confidential client a token for itself, within what its allowance lets it ask, as the client credentials grant does (the `client-credentials` card). `readsAmbient` says the grant reads nothing the request carries beside its parameters; a grant that reads the session's cookie must say `cookie` and check the request's origin itself.
+A grant is a contribution to the `grants` extension point (the `grants` card). This one gives a confidential client a token for itself, within what its allowance lets it ask, as the client credentials grant does (the `client-credentials` card). `readsAmbient` says the grant reads nothing the request carries beside its parameters; a grant that reads the session's cookie must say `cookie` and check the request's origin itself. The module's head declares `takes`, the handles its factories take from other modules: here `issuer`, the one contract its factory gets (the `kernel` card). Boot refuses a module that declares none; one that takes nothing declares `[]`.
 
 <!-- generated:module -->
 ```ts

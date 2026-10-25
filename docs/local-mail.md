@@ -2,7 +2,7 @@
 
 The module cards are the source of truth. Where this page and a card disagree, the card wins.
 
-No sender writes a mailed code to the log or to a file: the `mail` module's own sender (`mail.accept-unsent = true`) logs the purpose and a hash of the address alone. To read the codes a second factor by email sends while you develop, run [Mailpit](https://mailpit.axllent.org/) on your machine, bound to loopback, and point `mail-smtp` at it. Mailpit takes each message over SMTP, keeps it, and shows it in its web UI; nothing leaves the machine.
+No sender writes a mailed code to the log or to a file: the `mail` module's own sender (`mail.accept-unsent = true`) logs the purpose, a hash of the address and the names of the message's values, never a value. To read the codes a second factor by email sends while you develop, run [Mailpit](https://mailpit.axllent.org/) on your machine, bound to loopback, and point `mail-smtp` at it. Mailpit takes each message over SMTP, keeps it, and shows it in its web UI; nothing leaves the machine.
 
 This is for a developer's machine alone. Mailpit's UI shows every message, codes included, to whoever reaches it.
 

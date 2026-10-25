@@ -1,6 +1,6 @@
 # Security model
 
-What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each guarantee holds only while the conditions in "Left to you" hold.
+What auth-provider 0.19 guarantees, and what it leaves to the deployment. Each guarantee holds only while the conditions in "Left to you" hold.
 
 ## Contents
 
@@ -47,7 +47,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
    - Does not hold for federation grants where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations: an established grant then answers only to the `delegations` boundary, which such a revocation leaves where it was.
    - A session opened before a revocation removes no factor and reissues no codes once the revocation is complete: `mfa-management` reads the subject's fence before the session's last check, and `mfa` compares it in the write. Recovery codes go out only after a last check of the revocation, with nothing waited on after it; a request past that check is one a revocation cannot stop, as for any request already past its checks. This holds as far as each check reads the boundary as it now stands.
-   - Bridges such as `mfa-revocation` come in every app composed through `combinations`; an app composed by hand must compose them itself, or an enrollment begun before a revocation may still bind. After an account is taken over, also reset the subject's second factors (`mfa-reset`'s `mfaReset`): a revocation ends what was made before it, while a reset removes the factors themselves.
+   - Bridges such as `mfa-revocation` come in every app composed through `combinations`; an app composed by hand must compose them itself, and without `mfa-revocation` `mfa-flows` refuses to boot, so no enrollment begun before a revocation binds. After an account is taken over, also reset the subject's second factors (`mfa-reset`'s `mfaReset`): a revocation ends what was made before it, while a reset removes the factors themselves.
    - Scenes: code ("a subject the ledger revokes over HTTP"), exchange ("a subject the ledger revokes: every way to a token", which covers a code redeemed and one not yet, refresh, token exchange, a device code polled and one not yet, and the back-channel logout token), federation ("federation grants: a subject the ledger revokes"), second factor ("second factor: a subject the ledger revokes").
 5. **What is used once is used once, on any number of instances.**
    - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that declares itself unsafe on several instances: `store`, the store kept in memory, and `mail`, which only logs mail (a module that declares nothing is taken as safe).
@@ -66,7 +66,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - What it hands out on purpose: tokens and codes to the one they are issued to, and a secret a registration shows once to its owner (a one-time password app's secret, recovery codes).
    - Boot refusals name a setting by its key path, never its value.
    - Log lines carry no secret, credential, token, request body or header value, but for header values from a fixed set (such as `Sec-Fetch-Site`). They may carry the identifiers an operator traces a problem by: a peer's or a proxy's address, a host name, a client's id (a metadata document's URL among them), a request's path, and a session's handle.
-   - Kept by: `kernel`'s refusals, by key path; `audit`, whose events carry no token or secret; `http`, which logs a failure by its kind only; and each module's own log lines.
+   - Kept by: `kernel`'s refusals, by key path; a library's `BuildRefused`, whose where and reason it writes as a public diagnostic, never a secret (the kernel checks their form, not what they say); `audit`, whose events carry no token or secret; `http`, which logs a failure by its kind only; and each module's own log lines.
    - Scenes: keys ("refusals about keys"), ops (metrics, readiness, refusals about the operations routes), identity (a ledger's credential at boot), and the audit scenes of the authorization endpoint, client credentials and second factor.
    - No scene reads a running server's log lines.
 9. **A browser route that changes state needs CSRF or origin evidence.**
@@ -91,7 +91,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 - **Guaranteed:**
   - A refusal or a log line names a setting, an error's kind or a key path, never a value.
   - The Redis URL, an `Authorization` value, a proxy's credentials, session attributes and outbound answers' bodies are never logged.
-  - Secrets given as bytes must be strict base64 with at least 8 distinct byte values.
+  - A secret given as bytes (a sealing key, the DPoP nonce's key) must be strict base64 with at least 8 distinct byte values. The HS256 signing secret is read as `keys.signing.secret-encoding` names (hex, base64 or utf8), and a ledger's `credential` is an RFC 6750 b64token; each needs at least 8 distinct byte values however read, as the `keys` card says.
 - **Left to you:** where logs go and who can read them.
 
 ## Requests and proxies
@@ -100,7 +100,7 @@ Each promise below holds across every module composed. Each names what keeps it 
   - The public origin comes only from configuration, never from `Host` or forwarded headers.
   - `X-Forwarded-For` is followed only from a peer in `http.trusted-proxies`, and at most `http.proxy-hops` deep. The forwarded scheme is taken only as a single value from a trusted peer. `Forwarded` is never read.
   - A forwarded client certificate is read only from a trusted peer.
-  - Security headers (CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy: no-referrer`) are set on every answer.
+  - Security headers (CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy: no-referrer`) are set on every answer the app writes. Node's own `400`, `408` and `431`, to a request it cannot read or that comes too slowly, carry none.
 - **Left to you:**
   - Terminating TLS. The app speaks plain HTTP behind your proxy; an http public origin needs `http.insecure-origin = true`.
   - Setting `http.trusted-proxies` whenever a proxy is in front.
@@ -115,7 +115,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 - **Guaranteed:**
   - Each login gets a new session handle, so a session cannot be fixed in advance. The cookie holds an unguessable secret.
   - Where the public origin is https, cookies are `__Host-` and Secure. Cookies are always `Path=/` and `HttpOnly`, and `SameSite=Lax` but for one: the transaction cookie of an upstream identity provider that answers in a posted form is `SameSite=None`, and so always `__Host-` and Secure. Cookies on a plain-http request are not read.
-  - Every request that changes state needs same-origin evidence or the double-submit token. Any cross-origin evidence refuses it with 403.
+  - Every request that changes state needs same-origin evidence or the double-submit token. An `Origin` or `Referer` naming another origin refuses it with 403, even with the token.
   - Every route declares whether it changes state, and one that does either uses a policy that keeps other sites' requests out and one that limits each source, or says why not; boot refuses a route that does neither. The [route reference](routes.md) lists each route's. A declaration is its owner's claim, not a proof.
   - Revoking a subject's sessions closes each of them.
   - With second factors composed, `mfa-entry` holds sessions to them: under `mfa.mode = required` using a session needs one, and changing credentials needs one proven recently (or a recent sign-in while none is held). Every credentials entry first reads the subject's factors, judged against the witness, so a factor store that cannot answer makes every credentials route unavailable, witness or not. `mfa` refuses to boot without it, whatever the mode, so no app holds factors that sessions are not held to.
@@ -181,7 +181,7 @@ Each promise below holds across every module composed. Each names what keeps it 
   - No host is reached by name unless `outbound.allow` lists it or `outbound.allow-any-public` is set. `outbound.deny` is checked first.
   - A name is resolved once, every address it resolves to is checked, and the request connects only to a checked address. For plain http to a `host:port` in `outbound.plain-ipv4`, the name is resolved for IPv4 addresses alone: every one of those is checked, and IPv6 addresses are neither checked nor reached.
   - Loopback, link-local, the cloud metadata addresses, Azure's platform address (`168.63.129.16`) and other special-purpose addresses are never reached, but loopback ones over plain http at a `plain-loopback` or `plain-internal` pair the operator names.
-  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger, an OpenID Connect IdP's issuer and the endpoints you give it, a GitHub Enterprise's endpoints), at hosts in `outbound.internal-hosts`, or over plain http at a `host:port` in `outbound.plain-internal`, where every address the name resolves to (every IPv4 one, for a pair in `outbound.plain-ipv4`) must be private or loopback. Each is reached only at that URL's origin: an endpoint an IdP's description names on another origin reaches public addresses only.
+  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http, mfa-witness-http, passkey-witness-http and signer-keys-http ledgers, an OpenID Connect IdP's issuer and the endpoints you give it, a GitHub Enterprise's endpoints: the modules `outbound-policy`'s `internalBy` names), at hosts in `outbound.internal-hosts`, or over plain http at a `host:port` in `outbound.plain-internal`, where every address the name resolves to (every IPv4 one, for a pair in `outbound.plain-ipv4`) must be private or loopback. Each is reached only at that URL's origin: an endpoint an IdP's description names on another origin reaches public addresses only.
   - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` or `plain-internal` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
   - Proxy environment variables are never read.
   - An IdP's authorization and end-of-session endpoints, where the browser goes and outbound never does, are https, or plain http only at a loopback name or, for an OpenID Connect IdP or a GitHub Enterprise, at the origin of an issuer or endpoint of your own configuration that `outbound.plain-internal` names; any other refuses boot. Plain http there carries the user's password and the IdP's cookies in the clear between the browser and the IdP, which the browser reaches by its own resolver, outside any mesh.
@@ -216,7 +216,8 @@ Each promise below holds across every module composed. Each names what keeps it 
 - **Guaranteed:**
   - Signing keys and sealing keys are read from configuration only.
   - A previous signing key verifies only until its `expires-at`.
-  - Stored secrets (TOTP secrets, upstream tokens, delegated credentials) are sealed with AES-256-GCM.
+  - Stored secrets (TOTP secrets, the upstream tokens `federation-tokens` keeps, delegated credentials) are sealed by `seal`, with AES-256-GCM; a held login's upstream tokens too, where the default `upstream-handoff-seal` is composed.
 - **Left to you:**
   - Rotating keys as the [runbook](runbook.md#rotating-the-signing-key) describes.
+  - The strength of a sealing of your own, contributed to `upstream-handoff`'s `handoffSealing` in place of `upstream-handoff-seal`.
   - Retiring a sealing key only after a `reseal` run that exited 0, as the [runbook](runbook.md#rotating-the-sealing-key) describes. A value a removed key still sealed becomes unavailable until the key is put back.
