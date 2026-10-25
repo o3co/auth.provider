@@ -77,14 +77,25 @@ export function candidatesOf(runs: readonly RunSeen[], pull: ReleasePull): RunSe
 		.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.attempt - a.attempt);
 }
 
-/** Every evidence report's artifact and the compliance table's, the newest of each name; or which is missing or expired. */
+/** An evidence artifact's job (its name without the attempt CI ends it with) and that attempt; the compliance table's, by its name alone. */
+const keyOf = (a: ArtifactSeen) => {
+	const ended = /^(evidence-.+)-(\d+)$/.exec(a.name);
+	return ended
+		? { job: ended[1] as string, attempt: Number(ended[2]) }
+		: { job: a.name, attempt: 0 };
+};
+
+/** Each job's evidence from its newest attempt, and the newest compliance table; or which of those is missing or expired, an older attempt's never. */
 export function artifactsOf(
 	listed: readonly ArtifactSeen[],
 ): { readonly take: ArtifactSeen[] } | { readonly problem: string } {
 	const newest = new Map<string, ArtifactSeen>();
 	for (const a of listed.filter((a) => a.name.startsWith("evidence-") || a.name === "compliance")) {
-		const kept = newest.get(a.name);
-		if (!kept || a.createdAt > kept.createdAt) newest.set(a.name, a);
+		const { job, attempt } = keyOf(a);
+		const kept = newest.get(job);
+		const later =
+			kept && (attempt - keyOf(kept).attempt || a.createdAt.localeCompare(kept.createdAt));
+		if (!kept || (later ?? 0) > 0) newest.set(job, a);
 	}
 	const take = [...newest.values()].sort((a, b) => a.name.localeCompare(b.name));
 	if (!newest.has("compliance")) return { problem: "the run kept no compliance artifact" };

@@ -89,6 +89,27 @@ describe("the artifacts a run's evidence is taken from", () => {
 		});
 	});
 
+	it("takes each job's newest attempt, an older attempt's expiry stopping nothing", () => {
+		const listed = [
+			artifact("evidence-area-0-1", { id: 1, expired: true }),
+			artifact("evidence-area-0-2", { id: 2 }),
+			artifact("evidence-checks-24-1", { id: 3 }),
+			artifact("compliance", { id: 4 }),
+		];
+		expect(artifactsOf(listed)).toEqual({
+			take: [
+				artifact("compliance", { id: 4 }),
+				artifact("evidence-area-0-2", { id: 2 }),
+				artifact("evidence-checks-24-1", { id: 3 }),
+			],
+		});
+		expect(
+			artifactsOf([...listed, artifact("evidence-area-0-3", { id: 5, expired: true })]),
+		).toEqual({
+			problem: "evidence-area-0-3 has expired",
+		});
+	});
+
 	it("names an expired or missing one, and what to run again", () => {
 		const expired = artifactsOf([
 			artifact("evidence-area-0-1", { expired: true }),
