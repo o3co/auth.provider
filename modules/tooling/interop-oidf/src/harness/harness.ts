@@ -41,6 +41,20 @@ export const pattern = "simple-web";
  */
 const suiteSender = "198.51.100.40";
 
+/** Where a plan keeps its records under the directory named: one of its own, so plans never mix theirs. */
+export const artifactsOf = (plan: string, named: string | undefined): string | undefined =>
+	named === undefined ? undefined : join(named, plan);
+
+/** A stop that keeps its records first and stops however keeping them went, the records' failure told. */
+export const keptThenStopped =
+	(keep: () => Promise<void>, stop: () => Promise<void>) => async (): Promise<void> => {
+		try {
+			await keep();
+		} finally {
+			await stop();
+		}
+	};
+
 /** The longest one plan may run. */
 const planWithinMs = 15 * 60_000;
 
@@ -128,7 +142,7 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 	const pin = await readJson<SuitePin>(join(packageDir, "suite-pin.json"));
 	const work = await mkdtemp(join(tmpdir(), `interop-oidf-${plan.name}-`));
 	const artifacts =
-		process.env.OIDF_ARTIFACTS_DIR ??
+		artifactsOf(plan.name, process.env.OIDF_ARTIFACTS_DIR) ??
 		(await mkdtemp(join(tmpdir(), `interop-oidf-artifacts-${plan.name}-`)));
 	await mkdir(artifacts, { recursive: true });
 	const stops: (() => Promise<unknown>)[] = [];
@@ -210,11 +224,18 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 				if (typeof location === "string") shim.redirected(new URL(location, front.origin).href);
 			},
 		});
-		stops.push(async () => {
-			await writeFile(join(artifacts, "pkce-shim.json"), JSON.stringify(shim.records(), null, 2));
-			await writeFile(join(artifacts, "front.log"), `${passed.join("\n")}\n`);
-			await front.stop();
-		});
+		stops.push(
+			keptThenStopped(
+				async () => {
+					await writeFile(
+						join(artifacts, "pkce-shim.json"),
+						JSON.stringify(shim.records(), null, 2),
+					);
+					await writeFile(join(artifacts, "front.log"), `${passed.join("\n")}\n`);
+				},
+				() => front.stop(),
+			),
+		);
 		const alias = `o3co-${plan.name}-${randomBytes(4).toString("hex")}`;
 		const secret = () => randomBytes(24).toString("base64url");
 		const secrets = { client: secret(), client2: secret(), post: secret() };

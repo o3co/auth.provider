@@ -15,7 +15,8 @@ interface Pending {
 	readonly client: string | undefined;
 	readonly redirectUri: string | undefined;
 	readonly state: string | undefined;
-	readonly verifier: string;
+	/** None for a request with PKCE of its own: its code gets nothing. */
+	readonly verifier: string | undefined;
 }
 
 /** The PKCE a request carries of its own: then the shim leaves it as it is. */
@@ -36,26 +37,35 @@ export function pkceShim(
 	const verifierOf = given.verifier ?? (() => randomBytes(32).toString("base64url"));
 	const now = given.now ?? (() => new Date());
 	const pending: Pending[] = [];
+	/** The challenges the shim gave, to know a request it challenged when the login brings it back. */
+	const challenged = new Set<string>();
 	const codes = new Map<string, Pending>();
 	const added: Added[] = [];
 	const note = (entry: Omit<Added, "at">) => added.push({ at: now().toISOString(), ...entry });
 	return {
 		/** The authorization request's fields as sent on, from its query or its form. */
 		authorization(fields: URLSearchParams): URLSearchParams {
-			if (ownPkce(fields)) return fields;
-			const waiting: Pending = {
+			const at = {
 				client: fields.get("client_id") ?? undefined,
 				redirectUri: fields.get("redirect_uri") ?? undefined,
 				state: fields.get("state") ?? undefined,
-				verifier: verifierOf(),
 			};
-			pending.push(waiting);
-			const challenge = createHash("sha256").update(waiting.verifier).digest("base64url");
+			if (ownPkce(fields)) {
+				// The login resuming a request the shim challenged passes as it is, its verifier still waiting;
+				// a request with PKCE of its own waits too, so its code is never tied to an older verifier.
+				if (!challenged.has(fields.get("code_challenge") ?? ""))
+					pending.push({ ...at, verifier: undefined });
+				return fields;
+			}
+			const verifier = verifierOf();
+			pending.push({ ...at, verifier });
+			const challenge = createHash("sha256").update(verifier).digest("base64url");
+			challenged.add(challenge);
 			note({
 				added: "code_challenge",
 				value: challenge,
-				client: waiting.client,
-				state: waiting.state,
+				client: at.client,
+				state: at.state,
 			});
 			const sent = new URLSearchParams(fields);
 			sent.set("code_challenge", challenge);
@@ -78,7 +88,7 @@ export function pkceShim(
 			if (form.get("grant_type") !== "authorization_code" || form.has("code_verifier")) return form;
 			const code = form.get("code");
 			const answered = code === null ? undefined : codes.get(code);
-			if (code === null || answered === undefined) return form;
+			if (code === null || answered?.verifier === undefined) return form;
 			note({
 				added: "code_verifier",
 				value: answered.verifier,

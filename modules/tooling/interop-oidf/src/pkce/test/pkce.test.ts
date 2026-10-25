@@ -126,4 +126,27 @@ describe("the PKCE shim in front of the provider", () => {
 			},
 		]);
 	});
+
+	it("gives no verifier to the code of a later request with PKCE of its own, at the same state and redirect URI", () => {
+		const s = shim();
+		s.authorization(asked({ state: "a" }));
+		s.redirected(`${callback}?code=c1&state=a`);
+		s.authorization(
+			asked({ state: "a", code_challenge: "x".repeat(43), code_challenge_method: "S256" }),
+		);
+		s.redirected(`${callback}?code=own&state=a`);
+		const token = new URLSearchParams({ grant_type: "authorization_code", code: "own" });
+		expect(s.token(token).has("code_verifier")).toBe(false);
+	});
+
+	it("still gives the verifier where the login resumes the request with the shim's own challenge", () => {
+		const s = shim();
+		const sent = s.authorization(asked({ state: "a" }));
+		// The provider sends the browser back to the request as it got it, the shim's challenge in it.
+		const resumed = s.authorization(sent);
+		expect(resumed.toString()).toBe(sent.toString());
+		s.redirected(`${callback}?code=c1&state=a`);
+		const token = s.token(new URLSearchParams({ grant_type: "authorization_code", code: "c1" }));
+		expect(token.get("code_verifier")).toBe("verifier-1".padEnd(43, "v"));
+	});
 });
