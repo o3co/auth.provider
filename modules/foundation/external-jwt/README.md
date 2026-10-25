@@ -35,4 +35,4 @@
 - Key sets, one per URL, set of hosts and configured URL (one fetched as the operator's URL is never shared with one that is not), held in the process; nothing is stored.
 
 ## Depends on
-- `kernel`, `keys`, `outbound`
+- `kernel`, `keys`, `outbound`; `jose` (`compactVerify` and `decodeProtectedHeader`, in the verifier)
