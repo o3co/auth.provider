@@ -994,9 +994,12 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 				);
 			}
 			expect(asked).toEqual([]);
-			// One differing only in its last character's unused bits is asked for, and no key's own.
+			// One differing only in its last character's unused bits is asked for, and no key's own:
+			// under the key's own kid, so only the thumbprint computed from the key refuses it.
 			const near = `${prefix}${thumb.slice(0, 42)}${unused}`;
-			expect(saidOf(await s.grant(await selfIssued(near)))).toBe("invalid_grant: untrusted signer");
+			expect(saidOf(await s.grant(await selfIssued(near, {}, device.privateKey, thumb)))).toBe(
+				"invalid_grant: untrusted signer",
+			);
 		});
 
 		it("takes a self-issued signer only where its sub is its iss, and its own key only", async () => {
@@ -1008,9 +1011,10 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 					"invalid_grant: untrusted signer",
 				);
 			}
-			// Another signer's name, signed with this key.
+			// Another signer's name, signed with this key under its own kid: only the thumbprint
+			// computed from the key, which is not the one the name holds, refuses it.
 			const otherName = prefix + (await thumbOf(other));
-			expect(saidOf(await s.grant(await selfIssued(otherName)))).toBe(
+			expect(saidOf(await s.grant(await selfIssued(otherName, {}, device.privateKey, thumb)))).toBe(
 				"invalid_grant: untrusted signer",
 			);
 		});
