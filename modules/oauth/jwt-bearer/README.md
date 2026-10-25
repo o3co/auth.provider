@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Contributes the grant by JWT assertion.
-- Its internal module `issuers` holds the list of trusted issuers and their signers; `assertion` checks an assertion, all but its single use; `delegated` takes a delegated issuer's, which another module checks; `conditions` reads the conditions an issuer holds verified claims to.
+- Its internal module `issuers` holds the list of trusted issuers and their signers; `assertion` checks an assertion, all but its single use; `delegated` takes a delegated issuer's, which another module checks; `conditions` reads the conditions an issuer holds verified claims to; `policy` makes each issuer's own policy of the section's.
 
 ## Not here
 - Client authentication (`token-endpoint`).
@@ -30,11 +30,11 @@
 - The audience asked (`grants`' `target`, after the scope) narrows the token within what the client may be issued; it is asked before the `sessions` boundary and the `jti` is written, so a refusal leaves the assertion usable.
 - An assertion made at or before its subject's `sessions` boundary, widened by `clock-skew` as its issuer's clock may run that far ahead, gets no token: it is made at its `iat`, never later than now, and one without `iat` counts as made before any boundary. Checked before its `jti` is spent.
 - An assertion's `jti` is once only: spent in its issuer's ledger where one is contributed, else through the store interface, by a hash of the `iss` as sent and the `jti`, unless spent already. In the store, a self-issued signer's assertions are spent apart from its issuer's own; a ledger keeps them apart only where it is told the `iss`, and one that is not counts both as one, which refuses more and never lets a reuse through.
-- A ledger is asked with the `iss` and `jti` as sent, the `exp`, and the time it must stay used until (`exp`, `clock-skew` and a minute). A throw, or an answer neither `first` nor `replayed`, is unavailable, issuing nothing; the store is never written or read for that issuer, so a ledger out never falls back to it. One whose answer is lost may stay used: the client signs another.
+- A ledger is asked with the `iss` and `jti` as sent, the `exp`, and the time it must stay used until (`policy`'s, set by no setting). A throw, or an answer neither `first` nor `replayed`, is unavailable, issuing nothing; the store is never written or read for that issuer, so a ledger out never falls back to it. One whose answer is lost may stay used: the client signs another.
 - The token is issued through `tokens`' issuance policies, without a session. They are asked before the `jti` is written, so a refusal leaves the assertion usable, and again when issuing.
 
 ## Data
-- Spent assertions, through the store interface (a wiring keeps them) or an issuer's ledger, each by a hash of its `iss` as sent and `jti`. The lifetime is a relative value: the assertion's remaining lifetime plus the clock skew allowance and a margin (since the store judges it by its own clock). Only well-formed `jti` strings (without lone surrogates) are accepted.
+- Spent assertions, through the store interface (a wiring keeps them) or an issuer's ledger, each by a hash of its `iss` as sent and `jti`. The lifetime is a relative value, as the store judges it by its own clock: until `policy`'s time. Only well-formed `jti` strings (without lone surrogates) are accepted.
 - Needs: never evicted, survives a crash and a failover (losing one lets an assertion be reused).
 
 ## Depends on

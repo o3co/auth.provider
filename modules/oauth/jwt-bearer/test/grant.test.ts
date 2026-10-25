@@ -70,8 +70,9 @@ const trustedUpstream = [
 	},
 ];
 
-/** Each name the store was asked to save, in order, across the tests. */
+/** Each name the store was asked to save, in order, across the tests, and the lifetime asked for it. */
 const saved: string[] = [];
+const keptFor: number[] = [];
 /** Spent assertions on records' stand-in, whose own clock runs `aheadMs` past the kernel's. */
 const spentOn = (aheadMs = 0) =>
 	defineModule({ name: "spent-assertions", takes: [] }, (m) => [
@@ -80,6 +81,7 @@ const spentOn = (aheadMs = 0) =>
 			return {
 				save: (name: string, lifetimeMs: number) => {
 					saved.push(name);
+					keptFor.push(lifetimeMs);
 					return stand.records.create(name, true, lifetimeMs);
 				},
 			};
@@ -284,6 +286,31 @@ describe("jwt-bearer", () => {
 			expect(saidOf(await s.grant(await assertion(base)))).toBe("issued");
 		} finally {
 			clock.at = now;
+		}
+	});
+
+	it("holds an issuer's assertions to its own lifetime and clock skew, narrower than the section's", async () => {
+		const own = (more: Record<string, unknown>) =>
+			serve(undefined, issuer, `${issuer}/oauth/token`, [{ ...trustedUpstream[0], ...more }]);
+		const short = await own({ "max-assertion-lifetime": "10m" });
+		expect(saidOf(await short.grant(await assertion({ ...base, exp: now / 1000 + 1200 })))).toBe(
+			"invalid_grant: lives too long",
+		);
+		expect(saidOf(await short.grant(await assertion(base)))).toBe("issued");
+		const ahead = { ...base, nbf: now / 1000 + 10 };
+		const tight = await own({ "clock-skew": "5s" });
+		expect(saidOf(await tight.grant(await assertion(ahead)))).toBe("invalid_grant: not yet valid");
+		// The section's own 30 seconds take it.
+		expect(saidOf(await (await own({})).grant(await assertion(ahead)))).toBe("issued");
+	});
+
+	it("keeps a spent assertion past the widest clock skew any setting takes, whatever its issuer's", async () => {
+		for (const skew of ["0s", "30s"]) {
+			const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
+				{ ...trustedUpstream[0], "clock-skew": skew },
+			]);
+			expect(errorOf(await s.grant(await assertion(base))), skew).toBe("issued");
+			expect(keptFor.at(-1), skew).toBe(base.exp * 1000 + 300_000 + 60_000 - now);
 		}
 	});
 
@@ -691,6 +718,38 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		serve(undefined, issuer, located, issuers, outboundModule, extra);
 	const deviceAssertion = async (sub: string, key = device.privateKey) =>
 		assertion({ ...base, iss: fixedIss, sub }, key);
+
+	it("takes a contributed key under the algorithms its answer and its issuer both take", async () => {
+		const thumb = await thumbOf();
+		const both = {
+			kind: "keys",
+			keys: [await deviceKey()],
+			algorithms: ["EdDSA", "ES256"],
+		} as const;
+		const own = entry({ subject: "as-is", "subject-is-key-thumbprint": true });
+		expect(
+			errorOf(
+				await (await serveWith(own, [signing(async () => both)])).grant(
+					await deviceAssertion(thumb),
+				),
+			),
+		).toBe("issued");
+		const narrowed = entry({
+			subject: "as-is",
+			"subject-is-key-thumbprint": true,
+			algorithms: ["ES256"],
+		});
+		const s = await serveWith(narrowed, [signing(async () => both)]);
+		expect(saidOf(await s.grant(await deviceAssertion(thumb)))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+		// An answer naming only an algorithm there is to take but its issuer does not: no key, not an outage.
+		const pss = { kind: "keys", keys: [await deviceKey()], algorithms: ["PS256"] } as const;
+		const past = await serveWith(own, [signing(async () => pss)]);
+		expect(saidOf(await past.grant(await deviceAssertion(thumb)))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+	});
 
 	it("takes a contributed signer's keys asked for each assertion, never kept, and the thumbprint's own key only", async () => {
 		const thumb = await thumbOf();
@@ -1224,7 +1283,7 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 				sentIssuer: "https://idp.example",
 				jti: "j-ledger",
 				expiresAt: base.exp * 1000,
-				keepUntil: base.exp * 1000 + 30_000 + 60_000,
+				keepUntil: base.exp * 1000 + 300_000 + 60_000,
 			},
 			expect.objectContaining({ jti: "j-ledger" }),
 		]);

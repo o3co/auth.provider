@@ -9,7 +9,6 @@ import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { z } from "zod";
 import { check } from "./assertion/assertion.ts";
 import {
-	algorithms,
 	type DelegatedAssertions,
 	linkedIssuers,
 	linkedSubjects,
@@ -35,6 +34,7 @@ import {
 	selfIssuedOf,
 } from "./issuers/issuers.ts";
 import { spentIn } from "./ledgers.ts";
+import { keepUntilOf, skewOf, verifierPolicy } from "./policy/policy.ts";
 
 /** The grant type it serves (RFC 7523). */
 export const jwtBearerGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -55,9 +55,6 @@ const section = z.strictObject({
 			"How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds.",
 		),
 });
-
-/** Kept longer than any assertion is accepted by this much, so clock differences never let one back. */
-const usedAllowanceMs = 60_000;
 
 /** A spent assertion's name; JSON keeps the issuer and the jti apart, whatever either holds. */
 const spentName = (issuer: string, jti: string) =>
@@ -94,17 +91,13 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 		const spent = await c.get(spentAssertions);
 		const boundaries = await c.get(revocations);
 		const skewMs = c.section["clock-skew"] * 1000;
-		const policyOf = (i: IssuerEntry) => ({
-			algorithms: "keys" in i ? [...new Set(i.keys.map((k) => k.alg))] : algorithms,
-			skewMs,
-			maxLifetimeMs: c.section["max-assertion-lifetime"] * 1000,
-			expect: { aud: [named, url] },
-		});
+		const policyOf = (i: IssuerEntry) => verifierPolicy(i, c.section, [named, url]);
 		const trust = await issuersIn(c, c.section, policyOf);
 		const delegation = await delegatedIn(c, c.section.issuers, c.section["delegated-issuers"]);
 		const refused = [trust, delegation].flatMap((t) => (t.kind === "refused" ? t.refusals : []));
 		if (trust.kind === "refused" || delegation.kind === "refused") return c.refuseAll(refused);
 		const { trusted, ledgers } = trust;
+		const entries = new Map(c.section.issuers.map((i) => [i.issuer, i]));
 		// Told at boot by client: each lets a leaked delegated assertion be used once, before its owner.
 		for (const client of (await c.get(clients)).registered()) {
 			if (acceptsUnbound(client)) c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
@@ -147,6 +140,8 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			{ client, param, admits, issue, target }: GrantInput,
 			checked: { readonly subject: string; readonly issuedAt?: number; readonly expiresAt: number },
 			spend: () => Promise<"spent" | "replayed">,
+			/** The clock allowance its issuer's clock may run ahead by, for the `sessions` boundary. */
+			boundarySkewMs: number,
 		): Promise<GrantOutcome | Refused> => {
 			const allowed = clientAllowance.allowedIssuance(client, param("scope"), named);
 			if (allowed.kind === "error") return allowed;
@@ -157,7 +152,8 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			// Made at its `iat`, never later than now; one that does not say is as old as can be. The
 			// boundary is widened by the skew allowed, as an issuer's clock may run that far ahead.
 			const madeAt = Math.min(checked.issuedAt ?? 0, c.clock.now());
-			if ((await boundaries.compare(checked.subject, madeAt, "sessions", skewMs)) === "revoked") {
+			const revoked = await boundaries.compare(checked.subject, madeAt, "sessions", boundarySkewMs);
+			if (revoked === "revoked") {
 				return { kind: "error", error: "invalid_grant", description: "assertion revoked" };
 			}
 			const { scope } = allowed;
@@ -206,7 +202,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			if (client.kind !== "confidential" && !unbound && !holds(input.binding, told.holderDigest)) {
 				return refusedGrant("the request does not prove the key the assertion names");
 			}
-			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion));
+			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion), skewMs);
 			if (client.kind !== "confidential" && unbound && outcome.kind === "issued") {
 				c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
 			}
@@ -228,7 +224,8 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 				const subject = await subjectOf(verified.entry, verified.subject);
 				if (subject === undefined) return refusedGrant("unknown subject");
 				const checked = { ...verified, subject };
-				const keepUntil = checked.expiresAt + skewMs + usedAllowanceMs;
+				const entry = entries.get(checked.entry) as IssuerEntry;
+				const keepUntil = keepUntilOf(checked.expiresAt);
 				// An issuer with a ledger uses its jti up there alone, never the store, whatever it answers;
 				// the store keeps it by the `iss` as sent, so a self-issued signer's assertions are apart from its issuer's own.
 				const ledger = ledgers.get(checked.entry);
@@ -247,7 +244,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 							);
 					return told === "replayed" || told === "exists" ? "replayed" : "spent";
 				};
-				return issueFor(input, checked, spend);
+				return issueFor(input, checked, spend, skewOf(entry, c.section));
 			},
 		};
 	}),

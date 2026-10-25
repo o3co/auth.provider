@@ -141,6 +141,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `conditions` (`src/conditions`): the conditions an issuer holds an assertion's verified claims to, and whether claims meet them.
   - `delegated` (`src/delegated`): an assertion of a delegated issuer, which another module checks by its own rules (`delegatedAssertions`).
   - `issuers` (`src/issuers`): the trusted issuers, each entry of the section's `issuers`, and the signers and ledgers each is read with.
+  - `policy` (`src/policy`): what a trusted issuer's own policy makes of the section's, for verifying its assertions, keeping them used and issuing their tokens.
 - `@mod/jwt-bearer-id-tokens` (feature, `modules/oauth/jwt-bearer-id-tokens`): Ties `jwt-bearer` and `exchange-id-tokens` together: Apple's and Google's id_tokens, sent as JWT bearer assertions, are checked and taken once by `exchange-id-tokens`' rules, for the apps already sent out that send them so.
 - `@mod/jwt-bearer-users` (feature, `modules/oauth/jwt-bearer-users`): Joins `jwt-bearer` and `users`: resolves the subject a linked issuer's signer stands for through `users`, and declares the linked issuers' IdP names to `users`.
 - `@mod/logout` (feature, `modules/oauth/logout`): Provides the session logout endpoint.
