@@ -18,7 +18,7 @@
 - 2.2 #1 MUST: oidc-bcl-2.2-a
 - 2.2 #2 MUST: oidc-bcl-2.2-b
 - 2.2 #3 MUST NOT: oidc-bcl-2.2-c
-- 2.2 #4 SHOULD: excluded client-only
+- 2.2 #4 SHOULD: oidc-bcl-2.2-d
 - 2.2 #5 SHOULD: excluded client-only
 - 2.4 #1 REQUIRED: oidc-bcl-2.4-a
 - 2.4 #2 REQUIRED: oidc-bcl-2.4-b
