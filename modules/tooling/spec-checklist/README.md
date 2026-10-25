@@ -18,7 +18,7 @@
 - `checklist/<spec>.ledger.md`: the spec's source URL, version and the SHA-256 of its plain text, then a row per keyword occurrence, `- <section> #<n> <keyword>: <ids>` or `: excluded <client-only|rs-only|definition|iana|example|deployment|not-a-bearer-route: route|restates <id>|other: reason>`.
 - `checklist/decisions.md`: the decisions a `deviates:` or an exception names, `- **D-<n>** <date> (<who>): <what>`.
 - A test names the items it checks in its title, as `[<id>]`; a `describe` names them for every test in it.
-- `pnpm --filter @mod/spec-checklist run report` writes the report to `docs/compliance`; `run check` prints every finding; `run ledger <spec> <text file>` compares a ledger with the spec's plain text.
+- `pnpm --filter @mod/spec-checklist run report` writes the report to `docs/compliance`: a page per spec and a README of fixed text; `run summary` prints the summary over every spec, which is not kept; `run check` prints every finding; `run ledger <spec> <text file>` compares a ledger with the spec's plain text.
 - `readChecklist` (the items, ledgers and decisions as written) and `exceptionProblems` (an exception and the items → why it may not be taken).
 
 ## Invariants

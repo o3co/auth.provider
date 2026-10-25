@@ -10,7 +10,7 @@ import {
 	updatedByOf,
 	workspaceTests,
 } from "./repo.ts";
-import { reportFiles } from "./report.ts";
+import { reportFiles, summaryTable } from "./report.ts";
 import { ledgerAgainstText } from "./text.ts";
 
 const [command, ...args] = process.argv.slice(2);
@@ -22,6 +22,8 @@ if (command === "report") {
 	mkdirSync(reportDir, { recursive: true });
 	for (const [name, text] of files) writeFileSync(join(reportDir, name), text);
 	say(`spec-checklist: wrote ${files.size} files to docs/compliance`);
+} else if (command === "summary") {
+	process.stdout.write(summaryTable(readChecklist().specs, workspaceTests(root).tests));
 } else if (command === "check") {
 	const found = repoFindings(readChecklist(), workspaceTests(root));
 	for (const f of found) say(`${f.where}  ${f.detail}`);
@@ -56,6 +58,6 @@ if (command === "report") {
 		process.exitCode = found.length === 0 ? 0 : 1;
 	}
 } else {
-	say("usage: report | check | ledger <spec> <the spec's plain text file>");
+	say("usage: report | summary | check | ledger <spec> <the spec's plain text file>");
 	process.exitCode = 2;
 }
