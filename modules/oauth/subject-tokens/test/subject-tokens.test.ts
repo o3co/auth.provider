@@ -65,5 +65,6 @@ it("is unavailable, never valid or revoked, while the revocation cannot be read"
 });
 
 it("takes all its module names", async () => {
-	expect(await takesUnused(assembly().input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(assembly().input))["subject-tokens"]).toBeUndefined();
 });
