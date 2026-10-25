@@ -152,14 +152,34 @@ it("refuses an assertion whose count another changed first", async () => {
 	expect(await passkeys.assert(response, "app")).toEqual({ kind: "refused", reason: "raced" });
 });
 
-it("refuses an assertion whose passkey another subject took over meanwhile, its key and count the same", async () => {
-	const { passkeys, answer, stores } = await kept();
+it("refuses an assertion whose passkey another subject took over meanwhile, its key and count the same, leaving the new record as it is", async () => {
+	const { passkeys, answer, stores, records, credential } = await kept();
 	const response = await answer();
 	// Removed and registered again by another subject between the signature and the count.
 	stores.raceCredentials(
 		(record) => ({ ...(record as object), subject: "kim" }) as unknown as typeof record,
 	);
 	expect(await passkeys.assert(response, "app")).toEqual({ kind: "refused", reason: "raced" });
+	// The record that took the id over is not touched: its subject, key and count as written.
+	expect(await records.passkey(credential.id)).toMatchObject({
+		subject: "kim",
+		credential: { publicKey: credential.publicKey, signCount: credential.signCount },
+	});
+});
+
+it("refuses an assertion whose passkey was registered again by its subject with another key meanwhile, leaving that record as it is", async () => {
+	const { passkeys, answer, stores, records, credential } = await kept();
+	const response = await answer();
+	// The same subject and id, the same count, another key: the passkey judged is gone.
+	const other = randomBytes(65).toString("base64url");
+	stores.raceCredentials(
+		(record) => ({ ...(record as object), publicKey: other }) as unknown as typeof record,
+	);
+	expect(await passkeys.assert(response, "app")).toEqual({ kind: "refused", reason: "raced" });
+	expect(await records.passkey(credential.id)).toMatchObject({
+		subject: "sam",
+		credential: { publicKey: other, signCount: credential.signCount },
+	});
 });
 
 it("answers unavailable when the store cannot tell, never a refusal", async () => {
