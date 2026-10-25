@@ -201,6 +201,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `redis.durability` | `@mod/redis` |  | named so (`accept-*` and the like) |
 | `redis.replication` | `@mod/redis` |  | named so (`accept-*` and the like) |
 | `sections.client-assertion.accept-loose-audience` | `@mod/client-assertion` | `false` | named so (`accept-*` and the like) |
+| `sections.jwt-bearer.accept-unbound` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
 | `store.accept-volatile` | `@mod/store` | `false` | named so (`accept-*` and the like) |
 | `tokens.revocation` | `@mod/tokens` |  | `unsupported`: nothing issued can be revoked |
 | `tokens.subject-check` | `@mod/tokens` |  | named so (`accept-*` and the like) |
