@@ -42,6 +42,15 @@ A covered surface is removed or changed incompatibly only after it was deprecate
 
 This notice holds for what is deprecated from 0.19 on; what 0.19 itself removes or changes without a deprecation is announced by its [upgrade notices](#upgrade-notices).
 
+### Preview features
+
+A feature that follows an Internet-Draft is preview until the draft is published as an RFC:
+
+- Adopting one is the maintainers' decision, recorded in the changelog line that brings it.
+- Its card says it is preview and names the one draft revision it follows (`draft-ietf-oauth-…-04`); a feature follows one revision at a time.
+- A later revision may change it in a minor version. A change an operator must act on still carries an upgrade notice, and so does a change to a value other implementations rely on, such as a media type or a metadata name.
+- Once the RFC is published and the feature is checked against it, the feature leaves preview in a minor version whose changelog says so; from then on, semver covers it.
+
 ### Upgrade notices
 
 Each change an operator must act on to upgrade carries a numbered notice, `U-<minor>-<n>` numbered within the minor version that brings the change (`U-0.19-3`), at its line in the changelog and at its entry in [the migration guide](migration.md). A notice states what to change, and how to tell whether a deployment is affected. An operator checks off the notices between the version they run and the one they move to; a release with none says so.
@@ -56,9 +65,10 @@ One package per concern, `@o3co/auth-provider-<concern>`, and the entrance `@o3c
 
 1. **The changelog.** The version's section in `CHANGELOG.md` is complete, and its `Unreleased` becomes the date.
 2. **The migration guide.** Every change an operator must act on has its line in [the migration guide](migration.md), with its numbered upgrade notice ([What a version promises](#upgrade-notices)); a deprecation also has its line in the changelog's **Deprecated** section.
-3. **Pull request titles.** The release notes are generated from the titles of the pull requests merged since the last tag. Read them: a security fix's title names the kind of hole it closes and the module, never how to reach it. Retitle one on GitHub before tagging; the notes read the titles when the release is made.
-4. **The version.** One commit changes the root `package.json` version, by itself, and reaches `main` with the rest.
-5. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on the pull request to `main` runs the conformance scenes and `pnpm release:check`; wait for both.
+3. **Preview features.** For each feature a card marks preview, look for a newer revision of the draft it follows. Where one changes the rules the feature applies, open an issue for the next minor version ([Preview features](#preview-features)).
+4. **Pull request titles.** The release notes are generated from the titles of the pull requests merged since the last tag. Read them: a security fix's title names the kind of hole it closes and the module, never how to reach it. Retitle one on GitHub before tagging; the notes read the titles when the release is made.
+5. **The version.** One commit changes the root `package.json` version, by itself, and reaches `main` with the rest.
+6. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on the pull request to `main` runs the conformance scenes and `pnpm release:check`; wait for both.
 
 ## Tagging
 
