@@ -98,6 +98,7 @@ What each module contains is described by that module's contract card (each modu
 | User ledger, upstream identity, link, verified contact, claimed contact | vocabulary | users |
 | The names and value types of user attributes (the OIDC claim names), and a subject's shape | contract / vocabulary | users |
 | The HTTP user ledger (verifying passwords at the operator's URL), its request shape and credential | contribution / setting | users-http |
+| An outside user ledger's revocation of a subject, received over https with a credential from a listed source, and recorded through subject-revocation | contribution / setting | subject-revocation-http |
 | The words of the wire spoken with the operator's HTTP ledgers (the user ledger's and the witness ledgers' calls): bodies, answers' schemas, statuses, the fakes' routes | vocabulary | ledger-wire |
 | Logging in through an upstream IdP (start and callback) | contract | federation |
 | Linking an upstream identity to the account a browser is logged in as (start and callback) | contract | federation |
@@ -230,6 +231,7 @@ What each module contains is described by that module's contract card (each modu
 | What `begin` asks before a subject's first counting factor | extension point kind | mfa-extensions |
 | The enrollment witness: who remembers, apart from mfa's store, that a subject holds a counting factor, and its promises | extension point kind / contract | mfa-witness |
 | The enrollment witness kept at the operator's HTTP ledger, its request shape, deadline and credential | contribution / setting | mfa-witness-http |
+| The passkey witness kept at the operator's HTTP ledger, its request shape, deadline and credential | contribution / setting | passkey-witness-http |
 | Keeping the enrollment witness in line with mfa's counting factors, and filling a missing mark | contribution / contract | mfa-witnessing |
 | WebAuthn ceremonies (options and when their challenge ends, verifying responses, the signature count, the user handle) | contract | webauthn |
 | Passkeys (each subject's user handle and credentials), assertions by them, registering them for a subject, reading a credential and making a user handle | contract / setting / data | webauthn |
