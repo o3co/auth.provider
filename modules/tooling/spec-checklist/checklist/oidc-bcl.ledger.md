@@ -19,7 +19,7 @@
 - 2.2 #2 MUST: oidc-bcl-2.2-b
 - 2.2 #3 MUST NOT: oidc-bcl-2.2-c
 - 2.2 #4 SHOULD: oidc-bcl-2.2-d
-- 2.2 #5 SHOULD: excluded client-only
+- 2.2 #5 SHOULD: oidc-bcl-2.2-e
 - 2.4 #1 REQUIRED: oidc-bcl-2.4-a
 - 2.4 #2 REQUIRED: oidc-bcl-2.4-b
 - 2.4 #3 REQUIRED: oidc-bcl-2.4-c
@@ -31,23 +31,23 @@
 - 2.4 #9 MUST: oidc-bcl-2.4-i
 - 2.4 #10 MUST NOT: oidc-bcl-2.4-j
 - 2.4 #11 MUST NOT: oidc-bcl-2.4-j
-- 2.4 #12 MUST: excluded client-only
+- 2.4 #12 MUST: oidc-bcl-2.4-n
 - 2.4 #13 MUST: oidc-bcl-2.4-k
 - 2.4 #14 SHOULD: oidc-bcl-2.4-l
 - 2.4 #15 RECOMMENDED: oidc-bcl-2.4-m
-- 2.5 #1 MUST: excluded client-only
+- 2.5 #1 MUST: oidc-bcl-2.5-c
 - 2.5 #2 SHOULD: oidc-bcl-2.5-a
 - 2.5 #3 SHOULD NOT: oidc-bcl-2.5-b
-- 2.6 #1 MUST: excluded client-only
-- 2.6 #2 SHOULD: excluded client-only
+- 2.6 #1 MUST: oidc-bcl-2.6-c
+- 2.6 #2 SHOULD: oidc-bcl-2.6-d
 - 2.6 #3 SHOULD: oidc-bcl-2.6-b
 - 2.6 #4 MUST NOT: oidc-bcl-2.6-a
 - 2.7 #1 SHOULD: oidc-bcl-2.7-a
 - 2.7 #2 SHOULD NOT: oidc-bcl-2.7-b
-- 2.8 #1 MUST: excluded client-only
-- 2.8 #2 MUST: excluded client-only
-- 2.8 #3 REQUIRED: excluded client-only
-- 2.8 #4 SHOULD: excluded client-only
+- 2.8 #1 MUST: oidc-bcl-2.8-a
+- 2.8 #2 MUST: oidc-bcl-2.8-b
+- 2.8 #3 REQUIRED: oidc-bcl-2.8-c
+- 2.8 #4 SHOULD: oidc-bcl-2.8-d
 - 3 #1 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
 - 3 #2 REQUIRED: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
 - 3 #3 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
