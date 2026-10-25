@@ -14,6 +14,7 @@ import {
 	issuersSetting,
 	issuersTakes,
 	linkedOf,
+	selfIssuedOf,
 } from "./issuers/issuers.ts";
 import { spentIn } from "./ledgers.ts";
 
@@ -80,6 +81,13 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 		const trust = await issuersIn(c, c.section.issuers, policyOf);
 		if (trust.kind === "refused") return c.refuseAll(trust.refusals);
 		const { trusted, ledgers } = trust;
+		const selfIssued = selfIssuedOf(c.section.issuers);
+		// Told once, by place: the prefixes are the operator's, never written out.
+		if (selfIssued.length > 0) {
+			c.log.info("jwt-bearer.self_issued_signers", {
+				at: selfIssued.map((s) => s.where).join(","),
+			});
+		}
 		const linked = linkedOf(c.section.issuers);
 		const resolvers = await c.collect(linkedSubjects);
 		if (linked.size > 0 && resolvers.length === 0) {
