@@ -298,9 +298,9 @@ export async function trustedWith(p: {
 }
 
 /**
- * accept-any-subject is for an issuer whose every signer becomes a subject (as-is, no thumbprint, its
- * keys the issuer's whole: written, a key set, or contributed without the promise of answering each
- * signer's own alone), and never beside conditions.
+ * An issuer whose every signer becomes a subject (as-is, no thumbprint, its keys the issuer's whole:
+ * written, a key set, or contributed without the promise of answering each signer's own alone) is
+ * held to conditions, or to accept-any-subject, and accept-any-subject to such an issuer alone.
  */
 function anySubjectRefusals(
 	i: IssuerEntry,
@@ -314,6 +314,15 @@ function anySubjectRefusals(
 	if (accepted && i.conditions) return [{ where: at, reason: "is written beside conditions" }];
 	if (accepted && !anySigner)
 		return [{ where: at, reason: "is for an issuer whose every signer becomes a subject" }];
+	if (anySigner && !accepted && !i.conditions) {
+		return [
+			{
+				where,
+				reason:
+					"an issuer whose every signer becomes a subject needs conditions, or accept-any-subject",
+			},
+		];
+	}
 	return [];
 }
 

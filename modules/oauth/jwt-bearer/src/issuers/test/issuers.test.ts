@@ -177,6 +177,35 @@ describe("an issuer whose every signer becomes a subject", () => {
 			"an issuer whose every signer becomes a subject needs conditions, or accept-any-subject",
 	};
 
+	it("needs conditions, or accept-any-subject, where its keys are the issuer's whole", async () => {
+		for (const entry of [written, fetched]) {
+			expect(await trustWith(entry)).toEqual({ kind: "refused", refusals: [needs] });
+			expect(await trustWith({ ...entry, conditions })).toMatchObject({
+				kind: "trusted",
+				warnings: [],
+			});
+		}
+		// Keys contributed without the promise of answering each signer's own alone are the issuer's whole too.
+		expect(await trustWith(contributed, [keysFor(contributed.issuer)])).toEqual({
+			kind: "refused",
+			refusals: [needs],
+		});
+		expect(await trustWith(contributed, [keysFor(contributed.issuer, true)])).toMatchObject({
+			kind: "trusted",
+		});
+	});
+
+	it("needs none where the table of links, a thumbprint or the keys' own promise names each signer", async () => {
+		expect(await trustWith({ ...written, subject: "linked", upstream: "idp" })).toMatchObject({
+			kind: "trusted",
+		});
+		expect(
+			await trustWith({ ...contributed, "subject-is-key-thumbprint": true }, [
+				keysFor(contributed.issuer),
+			]),
+		).toMatchObject({ kind: "trusted" });
+	});
+
 	it("takes accept-any-subject alone, warning of it each boot at its place, never by its issuer", async () => {
 		const told = await trustWith({ ...written, "accept-any-subject": true });
 		expect(told).toEqual(

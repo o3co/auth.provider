@@ -65,6 +65,7 @@ const trustedUpstream = [
 	{
 		issuer: "https://idp.example",
 		subject: "as-is",
+		"accept-any-subject": true,
 		keys: [{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") }],
 	},
 ];
@@ -407,6 +408,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [{ alg: "EdDSA", "public-key": signer.pem }],
 			},
 		]);
@@ -421,6 +423,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [
 					{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") },
 					{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") },
@@ -440,6 +443,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [
 					{ kid: "k0", alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") },
 					{ kid: "k1", alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") },
@@ -506,6 +510,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://other.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") }],
 			},
 		];
@@ -521,6 +526,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [{ alg: "EdDSA", "public-key": pem(upstream.privateKey, "pkcs8") }],
 			},
 		];
@@ -545,6 +551,7 @@ describe("jwt-bearer", () => {
 			{
 				issuer: "https://idp.example",
 				subject: "as-is",
+				"accept-any-subject": true,
 				keys: [{ alg: "EdDSA", "public-key": "not a PEM" }],
 			},
 		];
@@ -556,7 +563,7 @@ describe("jwt-bearer", () => {
 	describe("with a key set at a URL", () => {
 		const located = `${issuer}/oauth/token`;
 		const at = (uri: string, named = "https://idp.example") => [
-			{ issuer: named, subject: "as-is", "jwks-uri": uri },
+			{ issuer: named, subject: "as-is", "accept-any-subject": true, "jwks-uri": uri },
 		];
 		/** An outbound answering the key set, keeping what it was asked. */
 		function keySetAt(keys: unknown[]) {
@@ -647,6 +654,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		defineModule({ name: "device-keys", takes: [] }, (m) => [
 			m.contribute(signerKeys).by(() => ({
 				issuer: fixedIss,
+				perSigner: true,
 				keysOf: async (signer) => {
 					asked.push(signer);
 					return answer();
@@ -676,7 +684,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 	const otherSigning = defineModule({ name: "phone-keys", takes: [] }, (m) => [
 		m
 			.contribute(signerKeys)
-			.by(() => ({ issuer: otherIss, keysOf: async () => ({ kind: "none" }) })),
+			.by(() => ({ issuer: otherIss, perSigner: true, keysOf: async () => ({ kind: "none" }) })),
 	]);
 	const located = `${issuer}/oauth/token`;
 	const serveWith = (issuers: Record<string, unknown>[], extra: Module[]) =>
@@ -1195,6 +1203,7 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 	const other = {
 		issuer: "https://other.example",
 		subject: "as-is",
+		"accept-any-subject": true,
 		keys: [{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") }],
 	};
 	const located = `${issuer}/oauth/token`;
