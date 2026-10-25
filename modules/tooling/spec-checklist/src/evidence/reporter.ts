@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { Reporter, TestCase, TestModule, Vitest } from "vitest/node";
@@ -44,6 +45,23 @@ export function entryOf(
 	return `${pkg ?? relative(rootDir, dirname(configFile))}${pattern}${run}`;
 }
 
+/** The commit a run tested: `SPEC_EVIDENCE_COMMIT` where set, else the checkout's HEAD, never the event's. */
+export function commitOf(
+	env: Readonly<Record<string, string | undefined>>,
+	rootDir = repoRoot,
+): string {
+	if (env.SPEC_EVIDENCE_COMMIT) return env.SPEC_EVIDENCE_COMMIT;
+	try {
+		return execFileSync("git", ["rev-parse", "HEAD"], {
+			cwd: rootDir,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+	} catch {
+		return "local";
+	}
+}
+
 const packageOf = (root: string): string | undefined => {
 	try {
 		return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).name;
@@ -69,7 +87,6 @@ function testsOf(module: TestModule): EvidenceTest[] {
 	const file = relative(repoRoot, module.moduleId);
 	const tests: EvidenceTest[] = [...module.children.allTests()].map((t) => {
 		const result = t.result();
-		// A test that passed in a suite that failed proves nothing: its hook may not have run its part.
 		const state = suiteFailed(t) ? "failed" : result.state;
 		const note = state === "skipped" && result.state === "skipped" ? result.note : undefined;
 		return { file, names: namesOf(t), state, ...(note ? { note } : {}) };
@@ -78,7 +95,7 @@ function testsOf(module: TestModule): EvidenceTest[] {
 }
 
 /**
- * Writes each run's results to `SPEC_EVIDENCE_DIR`, named by the commit, the run, the job and the
+ * Writes each run's results to `SPEC_EVIDENCE_DIR`, named by the commit tested, the run, the job and the
  * entry, so a later step can tell which expected runs passed; without the directory, does nothing.
  */
 export function evidenceReporter(env: NodeJS.ProcessEnv = process.env): Reporter {
@@ -96,7 +113,7 @@ export function evidenceReporter(env: NodeJS.ProcessEnv = process.env): Reporter
 			const target = env.CONFORMANCE_TARGET === "legacy" ? "legacy" : "new";
 			const report: EvidenceReport = {
 				identity: {
-					commit: env.GITHUB_SHA ?? "local",
+					commit: commitOf(env),
 					run: env.GITHUB_RUN_ID ?? "local",
 					attempt: Number(env.GITHUB_RUN_ATTEMPT ?? 1),
 					job: env.GITHUB_JOB ?? "local",

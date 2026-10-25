@@ -17,12 +17,7 @@ const isReport = (r: unknown): r is EvidenceReport => {
 	);
 };
 
-/**
- * Reads every report under `dir`, keeps this run's (`of`), expects the runs a run makes (a release's
- * too where it is one), and writes `compliance.json` and
- * `compliance.md` beside them: each item's status and the counts the checkpoint takes. Answers the
- * table and whether a release may go on: none failed, incomplete or unverified.
- */
+/** Writes this run's `compliance.json` and `compliance.md` beside its reports; answers the table and whether a release may go on. */
 export function complianceOf(
 	root: string,
 	dir: string,

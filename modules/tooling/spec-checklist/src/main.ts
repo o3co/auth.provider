@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checklistFindings } from "./checklist.ts";
 import { complianceOf } from "./evidence/compliance.ts";
+import { commitOf } from "./evidence/reporter.ts";
 import { planOf } from "./evidence/runs.ts";
 import {
 	expectedOf,
@@ -67,7 +68,7 @@ if (command === "report") {
 	say(JSON.stringify(planOf(runsOf(root), args[0])));
 } else if (command === "compliance" && args[0]) {
 	const of = {
-		commit: process.env.GITHUB_SHA ?? "local",
+		commit: commitOf(process.env),
 		run: process.env.GITHUB_RUN_ID ?? "local",
 		release: args.includes("--release"),
 	};

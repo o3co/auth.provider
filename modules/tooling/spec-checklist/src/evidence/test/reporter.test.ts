@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import type { EvidenceReport } from "../reporter.ts";
+import { commitOf, type EvidenceReport } from "../reporter.ts";
 
 const fixture = join(import.meta.dirname, "fixtures", "evidence");
 const root = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
@@ -21,7 +21,8 @@ it("writes a run's results, named by what ran them, even where tests fail, a fil
 			env: {
 				...process.env,
 				SPEC_EVIDENCE_DIR: dir,
-				GITHUB_SHA: "c1",
+				SPEC_EVIDENCE_COMMIT: "c1",
+				GITHUB_SHA: "the event's",
 				GITHUB_RUN_ID: "r1",
 				GITHUB_RUN_ATTEMPT: "2",
 				GITHUB_JOB: "checks",
@@ -96,4 +97,14 @@ it("writes nothing without SPEC_EVIDENCE_DIR, where it runs nor beside the confi
 	expect(ran.stdout + ran.stderr).toContain("passes [rfc7009-2-b]");
 	expect(readdirSync(cwd)).toEqual([]);
 	expect(readdirSync(fixture)).toEqual(before);
+});
+
+it("names the commit the checkout holds, not the event's, unless one is given", () => {
+	const head = spawnSync("git", ["rev-parse", "HEAD"], {
+		cwd: root,
+		encoding: "utf8",
+	}).stdout.trim();
+	expect(commitOf({ GITHUB_SHA: "the event's" }, root)).toBe(head);
+	expect(commitOf({ SPEC_EVIDENCE_COMMIT: "c1", GITHUB_SHA: "the event's" }, root)).toBe("c1");
+	expect(commitOf({}, tmpdir())).toBe("local");
 });

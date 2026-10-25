@@ -4,10 +4,7 @@ import { classOf, itemId } from "../ids.ts";
 import type { TestRef } from "../report.ts";
 import type { EvidenceReport } from "./reporter.ts";
 
-/**
- * A run a CI run makes: the entry its report names, the kind of job that makes it and the value the
- * job's matrix takes for it, and whether only a release's run makes it.
- */
+/** A run a CI run makes: its report's entry, its job's kind and matrix value, and whether only a release makes it. */
 export interface Run {
 	readonly entry: string;
 	readonly kind: string;
@@ -101,12 +98,7 @@ const idsIn = (names: readonly string[]) =>
 		.flatMap((n) => [...n.matchAll(/\[([^\]\s]+)\]/g)].map((m) => m[1] ?? ""))
 		.filter((id) => itemId.test(id));
 
-/**
- * Each item's status from the reports: its mark; a hole without a test; failed where a test of it
- * failed, its file failed to load, or a run of it had an error no test owns; incomplete where an
- * expected run of its tests did not report; passed where one passed; else unverified. A result the
- * harness excused (skipped with a note `excused: <class>`) is counted apart, as neither.
- */
+/** Each item's status from the reports, in the order the card's invariant gives; an excused result counted apart. */
 export function itemStatuses(
 	items: readonly Item[],
 	tests: ReadonlyMap<string, readonly TestRef[]>,

@@ -11,7 +11,7 @@ Internal module of `spec-checklist`: what a CI run's tests proved of the checkli
 - The runs themselves and their jobs: CI's.
 
 ## Offers
-- `evidenceReporter` (through the package's `./testing`), a vitest reporter: with `SPEC_EVIDENCE_DIR` set, each run writes one JSON report there: its identity (`GITHUB_SHA`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_JOB`, the entry, the target, `legacy` where `CONFORMANCE_TARGET` says so), each test's file, names (suites first) and state with a skipped test's note, and the count of errors no test owns. Without the variable it writes nothing.
+- `evidenceReporter` (through the package's `./testing`), a vitest reporter: with `SPEC_EVIDENCE_DIR` set, each run writes one JSON report there: its identity (the commit tested, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_JOB`, the entry, the target, `legacy` where `CONFORMANCE_TARGET` says so), each test's file, names (suites first) and state with a skipped test's note, and the count of errors no test owns. Without the variable it writes nothing.
 - An entry names the run: `unit` and `integration` for the root's two configs; else the package beside the config, then `@<pattern>` with `CONFORMANCE_PATTERN` and `#<run>` with `SPEC_EVIDENCE_RUN`.
 - `run expected [--release]`: the runs a CI run must report, a release's own too with `--release`, as JSON.
 - `run plan <kind>`: the values a kind of job's matrix takes, as JSON, from the same runs.
@@ -19,7 +19,8 @@ Internal module of `spec-checklist`: what a CI run's tests proved of the checkli
 
 ## Invariants
 - Every vitest config the workspace tracks registers the reporter, its fixtures' aside.
-- Only this run's reports count: the commit and run of `GITHUB_SHA` and `GITHUB_RUN_ID`, the new system's target, and the last attempt of each entry and job.
+- The commit a report names and compliance takes is `SPEC_EVIDENCE_COMMIT` where set, else the checkout's HEAD; never the event's `GITHUB_SHA`.
+- Only this run's reports count: the commit tested and the run of `GITHUB_RUN_ID`, the new system's target, and the last attempt of each entry and job.
 - The runs are `unit`, `integration`, each package with a `conformance` script (kind `area`), and each run a package's `evidence-runs` script prints as a JSON list of `{ entry, kind, matrix?, releaseOnly? }` (entries `<package>@<pattern>`, `<package>#<run>`).
 - A CI run expects every run, but a `releaseOnly` one only where it is a release's; its jobs' matrices are the runs' `matrix` values by kind.
 - A test file runs in: `integration` for `.integration.test.ts`; a harness package's printed runs; an area's own run and its pattern runs for its `.case.ts`; `unit` for any other `.test.ts`; its package's run otherwise.
