@@ -25,7 +25,15 @@ export interface Launch {
 	readonly env: Readonly<Record<string, string>>;
 	/** The port the target was told to listen on; readiness is the first HTTP answer there. */
 	readonly port: number;
+	/** How long a stop waits after SIGTERM before SIGKILL: past the kernel's stop deadline (30 s) unless given. */
+	readonly stopGraceMs?: number;
+	/** How long a stop waits after SIGKILL before it fails. */
+	readonly killWithinMs?: number;
 }
+
+/** A target draining within the kernel's stop deadline (30 s) is never cut short. */
+const stopGraceMs = 40_000;
+const killWithinMs = 5_000;
 
 export function freePort(): Promise<number> {
 	return new Promise((resolve, reject) => {
@@ -62,11 +70,24 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 		output += chunk;
 	});
 	const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+	/** Whether the target ended within `ms`; the timer is cleared either way. */
+	const endedWithin = async (ms: number) => {
+		let timer: NodeJS.Timeout | undefined;
+		const late = new Promise<false>((resolve) => {
+			timer = setTimeout(() => resolve(false), ms);
+		});
+		const ended = await Promise.race([exited.then(() => true as const), late]);
+		clearTimeout(timer);
+		return ended;
+	};
+	// SIGTERM, then SIGKILL past its grace; one still there after that fails the stop.
 	const stop = async () => {
-		if (child.exitCode === null && child.signalCode === null) {
-			child.kill("SIGTERM");
-			await exited;
-		}
+		if (child.exitCode !== null || child.signalCode !== null) return;
+		child.kill("SIGTERM");
+		if (await endedWithin(spec.stopGraceMs ?? stopGraceMs)) return;
+		child.kill("SIGKILL");
+		if (await endedWithin(spec.killWithinMs ?? killWithinMs)) return;
+		throw new Error(`target ${child.pid} did not end after SIGTERM and SIGKILL:\n${output}`);
 	};
 	const baseUrl = `http://127.0.0.1:${spec.port}`;
 	const deadline = Date.now() + timeoutMs;
