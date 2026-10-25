@@ -70,13 +70,15 @@ export async function promote<N extends Member>(m: Membership<N>, o: PromoteOpti
 	const catchUpMs = o.catchUpMs ?? 5_000;
 	const held = catchUpMs + (o.holdMs ?? 60_000);
 	const paused = performance.now();
-	await done(old, "CLIENT", "PAUSE", String(held), "WRITE");
-	const from = performance.now();
 	// The pause lapses on its own: past this, the old primary may have taken writes the target
 	// missed, so the promotion fails instead, a second before it can.
 	const deadline = paused + held - 1_000;
-	// Whatever fails from here, an old primary not killed takes writes again.
+	let from = paused;
+	// Whatever fails from here, the pause itself among it (its answer may be lost after Redis
+	// applied it), an old primary not killed takes writes again.
 	try {
+		await done(old, "CLIENT", "PAUSE", String(held), "WRITE");
+		from = performance.now();
 		const offset = Number(field(await replication(old), "master_repl_offset"));
 		const caughtUp = async () =>
 			Number(field(await replication(o.replica), "slave_repl_offset") ?? -1) >= offset;
@@ -86,11 +88,17 @@ export async function promote<N extends Member>(m: Membership<N>, o: PromoteOpti
 			const lapse = new Promise<void>((resolve) => {
 				timer = setTimeout(resolve, Math.max(0, deadline - performance.now()));
 			});
+			let first: "step" | "lapse";
 			try {
-				await Promise.race([o.between(), lapse]);
+				first = await Promise.race([
+					o.between().then(() => "step" as const),
+					lapse.then(() => "lapse" as const),
+				]);
 			} finally {
 				clearTimeout(timer);
 			}
+			// A timer can fire a little before the clock reads the deadline: its firing is enough.
+			if (first === "lapse") throw new Error(`the barrier ran out before ${old.name} could go`);
 		}
 		const inTime = (what: string) => {
 			if (performance.now() >= deadline) throw new Error(`the barrier ran out ${what}`);
