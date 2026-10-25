@@ -91,3 +91,19 @@ it("keeps a signature where its declaration moves to another file of the package
 		"value most: 3",
 	]);
 });
+
+it("names a member keyed by a symbol as written, never by the checker's id, so two readings agree", () => {
+	const marked = `
+declare const mark: unique symbol;
+export interface Marked { readonly [mark]: true }
+export type Names = ReadonlyMap<string, string>;
+`;
+	const one = surface("@mod/sig-marked-one", marked);
+	const other = surface("@mod/sig-marked-other", `export const before = 1;\n${marked}`);
+	expect(one.signatures.get("Marked")).toBe("type Marked\n  readonly [mark]: true");
+	expect(one.signatures.get("Names")).toContain("  [Symbol.iterator]: ");
+	for (const name of ["Marked", "Names"]) {
+		expect(one.signatures.get(name)).not.toMatch(/__@/);
+		expect(other.signatures.get(name)).toBe(one.signatures.get(name));
+	}
+});

@@ -15,6 +15,7 @@ Internal module of `guard-imports`: a package's public surface, read from its `.
 ## Invariants
 - A signature is the export's structure as text: a type's members, each with `readonly`, optionality and its type, sorted by name, with its calls, constructions and index signatures; a type's parameters as written; a value's type; an enum's members and their values.
 - Two surfaces' signatures differ wherever their contract does: a member's type, one member put in another's place, a member made optional, a type parameter's bound. They are the same wherever a declaration only moves to another file of the package. A type a signature names by name has its own signature, or is `hidden`.
+- A member keyed by a symbol is named as written (`[mark]`, `[Symbol.iterator]`), never by the id the checker gives it, so two programs over the same contract write the same signature.
 - A primitive, or a union of them, counts no members: the platform's own are not the contract's.
 - Only declarations inside the package count: none from `node_modules` or another package.
 
