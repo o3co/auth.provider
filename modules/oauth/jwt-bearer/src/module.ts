@@ -189,6 +189,8 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			const told = await checkedBy(delegate, assertion);
 			// As an unknown signer is: the answer tells nothing of which issuers are delegated.
 			if (told.kind === "invalid") return refusedGrant("untrusted signer");
+			// A delegate may take one within its clock allowance past its end: a token needs a second left.
+			if (told.expiresAt - c.clock.now() < 1000) return refusedGrant("expired");
 			const { client } = input;
 			if (!told.clients.includes(client.id)) return refusedGrant("assertion is for another client");
 			// A key it names is proved always: leaving out the proof never skips it.
