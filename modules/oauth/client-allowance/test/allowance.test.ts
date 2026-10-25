@@ -270,3 +270,57 @@ describe("an issuance within ceilings", () => {
 		});
 	});
 });
+
+describe("ceilings never widen an issuance", () => {
+	const { allowedIssuance, allowedIssuanceWithin } = clientAllowance;
+	const as = "https://as";
+	const clients = [
+		holding({ scopes: ["read"] }),
+		holding({ scopes: ["read", "write"], "default-scopes": ["read"] }),
+		holding({ scopes: ["read"], "default-scopes": [] }),
+		holding({ scopes: [], audiences: ["https://api"] }),
+		holding({ scopes: ["read"], audiences: ["https://api", "https://other"] }),
+	];
+	const ceilings = [
+		[{ scopes: [] }],
+		[{ scopes: ["admin"] }],
+		[{ scopes: ["read"] }],
+		[{ audiences: [] }],
+		[{ audiences: [as] }],
+		[{ scopes: ["read", "write"], audiences: ["https://other"] }],
+		[{ scopes: ["read"] }, { scopes: [] }],
+	];
+
+	it("refuses a client that must name a scope and names none, under any ceiling", () => {
+		const must = holding({ scopes: ["read"] });
+		expect(allowedIssuance(must, undefined, as).kind).toBe("error");
+		for (const within of ceilings) {
+			for (const asked of [undefined, ""]) {
+				expect(
+					allowedIssuanceWithin(must, within, asked, as),
+					JSON.stringify(within),
+				).toMatchObject({ kind: "error", error: "invalid_scope" });
+			}
+		}
+	});
+
+	it("refuses under every ceiling what it refuses under none, and allows only what it would", () => {
+		for (const client of clients) {
+			for (const asked of [undefined, "", "read", "write", "read write", "admin"]) {
+				const alone = allowedIssuance(client, asked, as);
+				for (const within of ceilings) {
+					const narrowed = allowedIssuanceWithin(client, within, asked, as);
+					const label = JSON.stringify({ section: client.section(allowances), asked, within });
+					if (alone.kind === "error") expect(narrowed.kind, label).toBe("error");
+					if (narrowed.kind === "allowed") {
+						expect(alone.kind, label).toBe("allowed");
+						const allowed = client.section(allowances);
+						for (const s of narrowed.scope) expect(allowed.scopes, label).toContain(s);
+						const reach = allowed.audiences.length > 0 ? allowed.audiences : [as];
+						for (const a of narrowed.audience) expect(reach, label).toContain(a);
+					}
+				}
+			}
+		}
+	});
+});

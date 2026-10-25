@@ -148,9 +148,10 @@ const allowedIssuanceWithin: ClientAllowance["allowedIssuanceWithin"] = (
 	const kept = defaults === undefined ? undefined : narrowed(defaults, ceilings, "scopes");
 	const named = parseScope(requested);
 	const omitted = named?.length === 0;
-	// A default the ceilings take all of is refused, as no default would be, and never issued empty.
+	// A client that must name a scope still must, by its own allowance whatever the ceilings keep of
+	// it; a default the ceilings take all of is refused as no default would be, never issued empty.
 	const lost = defaults !== undefined && defaults.length > 0 && kept?.length === 0;
-	if (omitted && (lost || (kept === undefined && scopes.length > 0))) {
+	if (omitted && (lost || (kept === undefined && allowed.scopes.length > 0))) {
 		return scopes.length > 0
 			? { kind: "error", error: "invalid_scope", description: "scope is required" }
 			: { kind: "error", error: "invalid_scope" };
