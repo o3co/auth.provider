@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checklistFindings } from "./checklist.ts";
+import { complianceOf } from "./evidence/compliance.ts";
 import {
+	expectedOf,
 	readChecklist,
 	repoFindings,
 	reportDir,
@@ -57,7 +59,20 @@ if (command === "report") {
 		);
 		process.exitCode = found.length === 0 ? 0 : 1;
 	}
+} else if (command === "expected") {
+	say(JSON.stringify(expectedOf(root).entries));
+} else if (command === "compliance" && args[0]) {
+	const of = {
+		commit: process.env.GITHUB_SHA ?? "local",
+		run: process.env.GITHUB_RUN_ID ?? "local",
+	};
+	const { table, releasable } = complianceOf(root, args[0], of);
+	say(table);
+	// A release needs every expected run reported and every mapped item passed.
+	process.exitCode = args.includes("--release") && !releasable ? 1 : 0;
 } else {
-	say("usage: report | summary | check | ledger <spec> <the spec's plain text file>");
+	say(
+		"usage: report | summary | check | ledger <spec> <the spec's plain text file> | expected | compliance <reports dir> [--release]",
+	);
 	process.exitCode = 2;
 }

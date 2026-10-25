@@ -5,10 +5,11 @@
 - Reads which tests name which items, and refuses an item ID written anywhere else.
 - Writes the compliance report from the checklist and those tests.
 - Decides whether an accepted difference in a run against another implementation may be taken (`exceptionProblems`).
+- Its internal module `evidence` tells what a CI run's tests proved of each item, from the reports its vitest reporter writes.
 
 ## Not here
 - The tests that check a requirement: the owning module's, or its area's conformance scenes.
-- Running tests, and whether an item's tests passed in a run.
+- Running tests.
 - The text of the specifications: kept outside the repository, read by `run ledger`.
 
 ## Offers
@@ -21,6 +22,7 @@
 - A test names the items it checks in its title, as `[<id>]`; a `describe` names them for every test in it.
 - `pnpm --filter @mod/spec-checklist run report` writes the report to `docs/compliance`: a page per spec, each item with its role, and a README of fixed text; `run summary` prints the summary over every spec, by spec and by role, which is not kept; `run check` prints every finding; `run ledger <spec> <text file>` compares a ledger with the spec's plain text.
 - `readChecklist` (the items, ledgers and decisions as written) and `exceptionProblems` (an exception and the items → why it may not be taken).
+- `./testing`: `evidenceReporter`, a vitest reporter writing a run's results for `run compliance`; `run expected` and `run compliance` (the `evidence` card).
 
 ## Invariants
 - An item's line, its marks and its heading follow the forms above; an ID is of its file's spec and of the section it is written under, once only. A mark belongs to the item just above it in its section, none after a heading or a refused item; an item has one `updates` line and one `role` line at most, and a file one head `role` line at most, a role one of the five.
