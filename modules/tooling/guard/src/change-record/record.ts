@@ -141,8 +141,13 @@ function contractChanges(base: Reading, head: Reading): ContractChange[] {
 					!before.has(other) &&
 					!taken.has(`${p}\t${other}`),
 			);
+			// A destination another removal took is no move for this one, which stays removed.
 			const moved = packages.find(
-				(q) => q !== p && of(head, q).get(name) === signature && !of(base, q).has(name),
+				(q) =>
+					q !== p &&
+					of(head, q).get(name) === signature &&
+					!of(base, q).has(name) &&
+					!taken.has(`${q}\t${name}`),
 			);
 			if (renamed) {
 				taken.add(`${p}\t${renamed[0]}`);

@@ -195,3 +195,27 @@ it("tells an export renamed in its package from the real signatures, which name 
 		{ package: "@t/renaming", name: "Store", kind: "renamed", to: "Shop" },
 	]);
 });
+
+it("lets one removal alone take a destination as its move, the others staying removed", () => {
+	const shared = "{ s: 1 }";
+	const changes = changesOf(
+		reading({
+			signatures: new Map([
+				["@t/a", new Map([["x", shared]])],
+				["@t/b", new Map([["x", shared]])],
+				["@t/c", new Map()],
+			]),
+		}),
+		reading({
+			signatures: new Map([
+				["@t/a", new Map()],
+				["@t/b", new Map()],
+				["@t/c", new Map([["x", shared]])],
+			]),
+		}),
+	).contract;
+	expect(changes).toEqual([
+		{ package: "@t/a", name: "x", kind: "moved", to: "@t/c" },
+		{ package: "@t/b", name: "x", kind: "removed" },
+	]);
+});
