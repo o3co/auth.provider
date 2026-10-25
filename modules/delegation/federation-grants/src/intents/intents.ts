@@ -94,11 +94,16 @@ export function intentsWith(p: IntentsParts): GrantIntents {
 		if (intent.endsAt <= p.clock.now() || grant.status === "revoked") return undefined;
 		return { grant, intent };
 	};
-	/** Changes the intent only while it is still the grant's current one. */
-	const changeIntent = ({ grant, intent }: Found, next: (intent: Intent) => Intent | undefined) =>
+	/** Changes the intent only while it is still the grant's current one, unended and, unless the change ends it, within its time. */
+	const changeIntent = (
+		{ grant, intent }: Found,
+		next: (intent: Intent) => Intent | undefined,
+		{ ending = false } = {},
+	) =>
 		p.grants.change(grant.id, (stored) => {
 			const now = records.grantOf(stored);
 			if (!now?.intent || now.intent.id !== intent.id || now.intent.ended) return undefined;
+			if (!ending && now.intent.endsAt <= p.clock.now()) return undefined;
 			const changed = next(now.intent);
 			return changed && { value: records.stored({ ...now, intent: changed }) };
 		});
@@ -136,7 +141,7 @@ export function intentsWith(p: IntentsParts): GrantIntents {
 	};
 	const failed: GrantIntents["failed"] = async (ref, error, from) => {
 		const found = foundOf(ref);
-		await changeIntent(found, (i) => ({ ...i, ended: error }));
+		await changeIntent(found, (i) => ({ ...i, ended: error }), { ending: true });
 		failure(found, from.outcome ?? error, from);
 		return back(found, error);
 	};

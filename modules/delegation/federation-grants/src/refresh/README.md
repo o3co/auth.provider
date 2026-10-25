@@ -22,7 +22,7 @@ Internal module of `federation-grants`: handing a grant's upstream token, and re
 - A rotated refresh token is written before the rest is judged; an answer that cannot be held marks the grant ineligible.
 
 ## Data
-- The lock lives 10 seconds unless kept, as it is every 5 while its holder refreshes; a request waits up to 5.
+- The lock lives 10 seconds unless kept, as it is every 5 while its holder refreshes; a request waits up to 5 between its asks for it, and the time each ask takes to answer comes on top.
 - A held token serves in place of a refresh that cannot be made only while the grant, read again then, is still in use, not past its end, and not ended by its subject's revocation: one revoked or ended while the upstream was asked hands out nothing (`gone`).
 - A refresh the upstream answered hands out and writes nothing when the grant is past its end by then, or its subject's revocation ends it, even a grant its subject's listing missed, which only the boundary ends.
 

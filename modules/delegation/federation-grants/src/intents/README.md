@@ -17,7 +17,7 @@ Internal module of `federation-grants`: a grant's intent through the browser, as
 - Binding the first session and making its question are two writes: a session that loses the binding is stale, and a failed question leaves the binding for that session to try again.
 - The upstream's tokens are judged here, writing nothing; the browser half ends an intent they refuse.
 - An activation writes only over its own intent, unended and within its time as read then, never over a revoked grant, and seals the tokens as judged, at the time judged. A race that refuses it ends the intent and is audited.
-- Only an intent still the grant's current one, unended and within its time, is read or changed.
+- Only an intent still the grant's current one, unended and within its time, is read or changed, at the change too; ending one with an error is written past its time as well.
 
 ## Depends on
 - `clients`, `upstreams` (the delegation), `audit`, `kernel`; `grant`, the package's store interfaces
