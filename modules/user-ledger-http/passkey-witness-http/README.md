@@ -9,7 +9,7 @@
 
 ## Offers
 - Composition definition only (a contribution to `passkeys.witnesses`). Opt-in: no axis's default, so composing `passkeys` alone never brings it.
-- `./testing`: `passkeyWitnessHttpConfig`, the section of a test's configuration.
+- `./testing`: `passkeyWitnessHttpConfig`, the section of a test's configuration, and `testCredential`, the credential it names.
 - Operator section:
   - `read-url`, `enroll-url` and `withdraw-url` (required: each URL whole, https or a plain-http pair outbound names, no fragment, all three at one origin).
   - A section still naming `clear-url` refuses boot at `passkey-witness-http`, naming the key: the mark is only withdrawn by its token.
