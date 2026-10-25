@@ -146,14 +146,16 @@ export async function roundProblems(
 			);
 		}
 	}
-	// Each run on a key of the store's own, writing nothing: the batch across only checks a condition.
-	const runs: readonly (readonly [string, string, readonly string[]])[] = [
-		["read", scripts.read, [`${options.prefix}:{#check}:r`]],
+	// Each run on keys of the store's own, writing nothing: the batch across only checks a condition,
+	// over two partitions (hash tags), as a batch across spaces runs, so a server that splits keys
+	// across nodes refuses it here rather than on the first write across partitions.
+	const runs: readonly (readonly [string, string, readonly string[], readonly string[]])[] = [
+		["read", scripts.read, [`${options.prefix}:{#check}:r`], []],
 		[
 			"batchAcross",
 			scripts.batchAcross,
+			[`${options.prefix}:{#check}:a`, `${options.prefix}:{#check-2}:a`],
 			[
-				`${options.prefix}:{#check}:a`,
 				JSON.stringify({
 					conditions: [{ i: 1, absent: true }],
 					writes: [],
@@ -166,13 +168,19 @@ export async function roundProblems(
 			],
 		],
 	];
-	for (const [name, script, [key, ...args]] of runs) {
+	for (const [name, script, keys, args] of runs) {
 		try {
-			await client.eval(script, 1, key ?? "", ...args);
+			await client.eval(script, keys.length, ...keys, ...args);
 		} catch (error) {
+			const message = error instanceof ReplyError ? (error as Error).message : "";
+			if (/^CROSSSLOT\b/.test(message)) {
+				problems.push(
+					`the server splits keys across nodes, refusing a store script (${name}) over two partitions: point the store at one server, not a cluster or a proxy that splits keys`,
+				);
+				continue;
+			}
 			// The script's own failure, never a passing state of the server (BUSY, LOADING and the like).
-			if (!(error instanceof ReplyError) || !/^ERR\b.*script/i.test((error as Error).message))
-				throw error;
+			if (!/^ERR\b.*script/i.test(message)) throw error;
 			problems.push(
 				`the server fails a store script (${name}): it lacks what the store's scripts use`,
 			);
