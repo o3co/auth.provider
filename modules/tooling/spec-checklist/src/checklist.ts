@@ -102,6 +102,7 @@ export function parseItems(spec: string, text: string) {
 	let updated = false;
 	let roled = false;
 	let role = defaultRoleOf(spec);
+	let headRoled = false;
 	for (const line of text.split("\n")) {
 		const item = itemLine.exec(line);
 		const mark = markLine.exec(line);
@@ -111,8 +112,10 @@ export function parseItems(spec: string, text: string) {
 		if (line.startsWith("# ") && title === "") title = line.slice(2);
 		else if (head && current === undefined) {
 			const given = head[1] as Role;
-			if (roles.includes(given)) role = given;
+			if (headRoled) found("the file has more than one role line");
+			else if (roles.includes(given)) role = given;
 			else found(`the file's role ${given} is none of ${roles.join(", ")}`);
+			headRoled = true;
 		} else if (sectionHead) {
 			current = sectionHead[1] ?? "";
 			last = undefined;

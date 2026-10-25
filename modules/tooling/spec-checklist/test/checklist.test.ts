@@ -64,6 +64,15 @@ describe("items", () => {
 		]);
 	});
 
+	it("refuses a second role line at the file's head, keeping the first for the items", () => {
+		const twice = parseItems(
+			"rfc9999",
+			items("- role: as\n- role: rp\n\n## 4 X\n\n- **rfc9999-4-a** MUST: a\n"),
+		);
+		expect(twice.findings.map((f) => f.detail)).toEqual(["the file has more than one role line"]);
+		expect(twice.items.map((i) => i.role)).toEqual(["as"]);
+	});
+
 	it("refuses a line that is no item, heading, mark or blank", () => {
 		const read = parseItems("rfc9999", items("## 4 X\n\nsome prose\n- **rfc9999-4-a** MAY: x\n"));
 		expect(read.findings.map((f) => f.detail)).toEqual([
