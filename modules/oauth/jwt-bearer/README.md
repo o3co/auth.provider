@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Contributes the grant by JWT assertion.
-- Its internal module `issuers` holds the list of trusted issuers and their signers; `assertion` checks an assertion, all but its single use; `delegated` takes a delegated issuer's, which another module checks.
+- Its internal module `issuers` holds the list of trusted issuers and their signers; `assertion` checks an assertion, all but its single use; `delegated` takes a delegated issuer's, which another module checks; `conditions` reads the conditions an issuer holds verified claims to.
 
 ## Not here
 - Client authentication (`token-endpoint`).
