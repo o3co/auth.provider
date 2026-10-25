@@ -4196,6 +4196,9 @@ importers:
       '@mod/ledger-fakes':
         specifier: workspace:*
         version: link:../ledger-fakes
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
