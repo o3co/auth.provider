@@ -17,7 +17,7 @@
 - `known-differences.json`: each accepted difference, by library, flow and the check's title, with its class and reason.
 
 ## Invariants
-- An adapter is one program per library, its library pinned in its own manifest (`package.json` for Node, `pom.xml` for Maven) and installed from the library's registry.
+- An adapter is one program per library, its library pinned in its own manifest (`package.json` for Node, `pom.xml` for Maven) and installed from the library's registry; a jar is pinned by its SHA-256 too (`jars.sha256`), as npm's are by the lockfile's integrity.
 - An adapter trusts the front's certificate and nothing else, and no library is told to take plain http.
 - The front tells the app the libraries send from `198.51.100.30`: on loopback the sender would be the app's trusted proxy, and its source undetermined.
 - A check that fails is skipped as excused only where a known difference names its library, flow and title; a difference no check met fails the run.

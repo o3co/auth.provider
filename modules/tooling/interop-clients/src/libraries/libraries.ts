@@ -39,7 +39,19 @@ export const libraries: readonly Library[] = [
 	{
 		name: "nimbus",
 		flows: ["login", "public-login", "refresh"],
-		build: [["mvn", "-B", "-q", "package", "-f", join("adapters", "nimbus", "pom.xml")]],
+		// The runtime jars are checked against their pins before anything is compiled or shaded from them.
+		build: [
+			[
+				"mvn",
+				"-B",
+				"-q",
+				"-f",
+				join("adapters", "nimbus", "pom.xml"),
+				"dependency:copy-dependencies",
+			],
+			[process.execPath, join("src", "main.ts"), "verify-jars", join("adapters", "nimbus")],
+			["mvn", "-B", "-q", "-f", join("adapters", "nimbus", "pom.xml"), "package"],
+		],
 		adapter: () => ({
 			command: java(),
 			args: ["-jar", join(packageDir, "adapters", "nimbus", "target", "nimbus-adapter.jar")],
