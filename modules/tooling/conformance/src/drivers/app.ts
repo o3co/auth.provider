@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { X509Certificate } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -69,6 +70,17 @@ export const sceneRedis = (url: string, pauses: boolean) => ({
 /** Tries at a new port when another process takes the one chosen before the app binds it. */
 const portAttempts = 3;
 
+const certificateBlock = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+
+const isCertificate = (pem: string) => {
+	try {
+		new X509Certificate(pem);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
 /** NODE_EXTRA_CA_CERTS, which names one file: a bundle in `dir` of the PEM files `files`. */
 export async function trustedEnv(
 	files: readonly string[] | undefined,
@@ -80,8 +92,11 @@ export async function trustedEnv(
 			const text = await readFile(file, "utf8").catch((error: unknown) => {
 				throw new Error(`a trusted certificate file cannot be read: ${file}`, { cause: error });
 			});
-			if (!text.includes("-----BEGIN CERTIFICATE-----")) {
-				throw new Error(`a trusted certificate file holds no certificate: ${file}`);
+			const blocks = text.match(certificateBlock) ?? [];
+			if (blocks.length === 0 || !blocks.every(isCertificate)) {
+				throw new Error(
+					`a trusted certificate file holds no X.509 certificate, or a broken one: ${file}`,
+				);
 			}
 			return text.endsWith("\n") ? text : `${text}\n`;
 		}),
@@ -110,12 +125,15 @@ export async function started(
 	layers: readonly string[] = [],
 	options: StartOptions = {},
 ): Promise<Started> {
+	const parties = trial?.parties ?? [];
+	const stopParties = () => Promise.all(parties.map((p) => p.stop()));
 	const trusted = await trustedEnv(
 		options.trustedCertificates,
 		await mkdtemp(join(tmpdir(), "conformance-trusted-")),
-	);
-	const parties = trial?.parties ?? [];
-	const stopParties = () => Promise.all(parties.map((p) => p.stop()));
+	).catch(async (error: unknown) => {
+		await stopParties();
+		throw error;
+	});
 	const sink = await auditSink();
 	const smtp = trial?.smtp ? await fakeSmtp() : undefined;
 	// The settings the Redis store requires of a server before it starts.
