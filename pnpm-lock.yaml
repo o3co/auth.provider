@@ -4376,6 +4376,9 @@ importers:
       '@mod/conformance-code':
         specifier: workspace:*
         version: link:../conformance-code
+      '@mod/conformance-device':
+        specifier: workspace:*
+        version: link:../conformance-device
       '@mod/conformance-front':
         specifier: workspace:*
         version: link:../conformance-front

@@ -33,6 +33,8 @@ interface Instruction {
 	readonly assertionAudience?: string;
 	/** The resource server the token is asked for (RFC 8707), in the authorization and token requests. */
 	readonly resource?: string;
+	/** Where the logout is to send the browser back. */
+	readonly postLogoutRedirectUri?: string;
 }
 
 async function authOf(c: Client): Promise<client.ClientAuth> {
@@ -87,7 +89,7 @@ async function configOf(i: Instruction) {
 }
 
 /** The authorization code flow with PKCE, nonce and state, the browser's part asked of the driver. */
-async function signIn(config: client.Configuration, i: Instruction) {
+async function signIn(config: client.Configuration, i: Instruction, dpop?: client.DPoPHandle) {
 	const verifier = client.randomPKCECodeVerifier();
 	const state = client.randomState();
 	const nonce = client.randomNonce();
@@ -111,6 +113,7 @@ async function signIn(config: client.Configuration, i: Instruction) {
 			idTokenExpected: true,
 		},
 		i.resource ? { resource: i.resource } : undefined,
+		dpop ? { DPoP: dpop } : undefined,
 	);
 }
 
@@ -170,6 +173,50 @@ async function revocation(i: Instruction) {
 	return { before: before.active, after: after.active };
 }
 
+/** Signs in with the access token bound to a DPoP key, and reads userinfo with it; the handle answers each nonce asked. */
+async function dpop(i: Instruction) {
+	const config = await configOf(i);
+	const handle = client.getDPoPHandle(config, await client.randomDPoPKeyPair("ES256"));
+	const tokens = await signIn(config, i, handle);
+	const claims = tokens.claims();
+	const userinfo = await client.fetchUserInfo(config, tokens.access_token, claims?.sub ?? "", {
+		DPoP: handle,
+	});
+	return {
+		tokenType: tokens.token_type,
+		accessToken: tokens.access_token,
+		sub: claims?.sub,
+		userinfo,
+	};
+}
+
+/** The device authorization grant: the user code is approved by the driver as the user, then polled for. */
+async function device(i: Instruction) {
+	const config = await configOf(i);
+	const started = await client.initiateDeviceAuthorization(config, { scope: i.scope ?? "openid" });
+	await ask({
+		ask: "device",
+		userCode: started.user_code,
+		verificationUri: started.verification_uri,
+	});
+	const tokens = await client.pollDeviceAuthorizationGrant(config, started);
+	return { accessToken: tokens.access_token, tokenType: tokens.token_type };
+}
+
+/** Signs in, then ends the session by the provider's end-session endpoint, as the relying party starts it. */
+async function logout(i: Instruction) {
+	const config = await configOf(i);
+	const tokens = await signIn(config, i);
+	const state = client.randomState();
+	const url = client.buildEndSessionUrl(config, {
+		id_token_hint: tokens.id_token ?? "",
+		post_logout_redirect_uri: i.postLogoutRedirectUri ?? "",
+		state,
+	});
+	const { location } = await ask({ ask: "logout", url: url.href });
+	return { location, state };
+}
+
 const flows: Record<string, (i: Instruction) => Promise<unknown>> = {
 	login,
 	"public-login": login,
@@ -177,6 +224,9 @@ const flows: Record<string, (i: Instruction) => Promise<unknown>> = {
 	resource,
 	"client-credentials": clientCredentials,
 	revocation,
+	dpop,
+	device,
+	logout,
 };
 
 const instruction = (await read()) as unknown as Instruction;
