@@ -43,8 +43,8 @@ export default defineModule({ name: "code-grant", section, takes }, (m) => [
 			issue: async (facts) => {
 				if (!challengeShape.test(facts.challenge)) throw new TypeError("code-grant: bad challenge");
 				const entry = await opened.entryOf(facts.session);
-				if (entry.kind !== "entered")
-					throw new TypeError(`code-grant: the session is ${entry.kind} at use`);
+				// One closed or short since the caller read it is no fault of the caller's: it answers as it can.
+				if (entry.kind !== "entered") throw new Unavailable("code-grant");
 				const context = entry.session.context;
 				if (context.subject !== facts.subject)
 					throw new TypeError("code-grant: not this session's subject");

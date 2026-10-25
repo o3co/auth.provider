@@ -1101,6 +1101,22 @@ describe("token-exchange: what any verifier may answer", () => {
 		await expect(u.exchange("app", outsider)).rejects.toThrow(Unavailable);
 	});
 
+	it("uses a once-only token up only once the token is issued, revoking that token where it was used meanwhile", async () => {
+		const replayed = answering({ kind: "foreign", clients: ["app"] }, async () => "replayed");
+		const s = await serve({ verifier: replayed.verifier });
+		expect(said(await s.exchange("app", outsider))).toEqual([
+			"invalid_request",
+			"subject_token has been used",
+		]);
+		expect(s.revoked).toHaveLength(1);
+		const blind = answering({ kind: "foreign", clients: ["app"] }, async () => {
+			throw new Unavailable("outside");
+		});
+		const t = await serve({ verifier: blind.verifier });
+		await expect(t.exchange("app", outsider)).rejects.toThrow(Unavailable);
+		expect(t.revoked).toHaveLength(1);
+	});
+
 	it("refuses a once-only token, or a foreign one, as the actor", async () => {
 		for (const [more, consume] of [
 			[{}, async () => "consumed" as const],

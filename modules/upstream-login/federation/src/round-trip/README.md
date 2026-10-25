@@ -28,7 +28,7 @@ Internal module of `federation`: one round trip through an upstream IdP, a login
 - From the take on, every answer clears the round trip's cookie, unavailable included.
 - An `error` or no code is `upstream_refused`, with no exchange. The exchange gets the take's verifier and nonce, the redirect URI and the callback's `iss`.
 - A failed exchange is `exchange_failed`, logged with the IdP and its kind (`refused` or `failed`) only. An unavailable upstream is 503.
-- With `prompt=login` or `max_age`, the upstream must say when the user logged in. That time, plus the type's clock allowance, is not before the start's whole second and is within the max age of now.
+- With `prompt=login` or `max_age`, the upstream must say when the user logged in. With `prompt=login`, that time plus the IdP's `fresh-login-allowance` is not before the start's whole second; with `max_age`, it is within the max age of now, by the same allowance.
 - Audit records come only after the take, with `idp` and the source when `request-source` determined it: the local subject on success or hold, the reason on failure. None records an unavailable answer.
 
 ## Data

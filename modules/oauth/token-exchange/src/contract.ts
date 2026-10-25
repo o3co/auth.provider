@@ -52,7 +52,7 @@ export type Exchanged = OwnToken | ForeignToken;
 export interface ExchangeVerifier {
 	readonly tokenType: string;
 	verify(token: string): Promise<Exchanged | { readonly kind: "invalid" }>;
-	/** Records a once-only token, once, after the second check and the policies' leave; throws Unavailable when it cannot tell. */
+	/** Records a once-only token, once, after the token it is exchanged for is issued; throws Unavailable when it cannot tell. */
 	consume?(token: string): Promise<"consumed" | "replayed">;
 }
 

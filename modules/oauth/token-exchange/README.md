@@ -36,7 +36,7 @@
 - The claims a grant added to a token it takes (`claims`) are never carried into the token it issues.
 - It issues through `tokens`' issuance policies, from the subject token's session when it was recorded to one; their refusal is `token-endpoint`'s answer.
 - A verifier's answer is checked for shape once (each scope one RFC 6749 scope-token) and frozen; only that copy is read. An answer marked invalid, or a malformed one, is a failed validation, never a skipped tie.
-- Both tokens and their ties are checked again right before issuing, and the ties then answered are joined. A once-only token is then used up, once the policies admit the grant: a refusal or Unavailable leaves it unused, and `replayed` is refused.
+- Both tokens and their ties are checked again right before issuing, and the ties then answered are joined. A once-only token is used up last, once the token is issued and joined: a refusal or Unavailable before leaves it unused. Where `consume` answers `replayed` or cannot tell, the token issued is revoked, never handed out, and `replayed` is refused.
 - `requested_token_type` other than an access token is refused. Unavailable is `503`, never a refusal.
 
 ## Depends on

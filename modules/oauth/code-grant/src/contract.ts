@@ -17,6 +17,11 @@ export interface CodeFacts {
 }
 
 export interface Codes {
+	/**
+	 * A code for the facts. Throws Unavailable where the store cannot tell, or the session is not
+	 * entered at use (closed or short since the caller read it); TypeError for facts the session or
+	 * the client contradict.
+	 */
 	issue(facts: CodeFacts): Promise<string>;
 	idTokenScope(): string | undefined;
 }

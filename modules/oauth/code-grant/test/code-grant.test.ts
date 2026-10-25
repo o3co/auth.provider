@@ -565,7 +565,7 @@ it("issues nothing for a code whose session falls short of a requirement to be u
 	short.now = true;
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 	expect(keptOf(s, code)?.token).toBeUndefined();
-	await expect(s.app.get(codes).issue(s.facts), "a code for it").rejects.toThrow(TypeError);
+	await expect(s.app.get(codes).issue(s.facts), "a code for it").rejects.toThrow(Unavailable);
 });
 
 it("keeps an unused code for code-lifetime, and no longer", async () => {
@@ -871,11 +871,14 @@ it("refuses to issue a code for facts the session or the client contradict", asy
 		"audience outside the client": { audience: ["https://other"] },
 		"malformed challenge": { challenge: "short" },
 		"unknown client": { clientId: "nobody" },
-		"unknown session": { session: "x".repeat(43) },
 	};
 	for (const [label, over] of Object.entries(bad)) {
 		await expect(issue({ ...s.facts, ...over }), label).rejects.toThrow(TypeError);
 	}
+	// A session not entered at use may have closed meanwhile: the caller answers it as it can.
+	await expect(issue({ ...s.facts, session: "x".repeat(43) }), "unknown session").rejects.toThrow(
+		Unavailable,
+	);
 	expect(typeof (await issue(s.facts))).toBe("string");
 });
 

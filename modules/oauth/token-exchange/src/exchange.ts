@@ -289,15 +289,6 @@ export function exchangeGrant(parts: Parts): Grant {
 				...(own?.acr === undefined ? {} : { acr: own.acr }),
 			};
 			const from = tie.session ? { session: tie.session } : {};
-			// A once-only token is used up last: after the policies' leave, so a refusal leaves it usable.
-			const verifier = parts.verifiers.get(subjectType);
-			if (verifier?.consume) {
-				const admitted = await input.admits(access, from);
-				if (admitted.kind === "refused") return admitted;
-				const used = await verifier.consume(subjectToken);
-				if (used === "replayed") return refused("subject_token has been used");
-				if (used !== "consumed") throw new Unavailable("token-exchange");
-			}
 			const allowed = await input.issue(access, {
 				notAfter,
 				...(lifetimeSeconds === undefined ? {} : { lifetimeSeconds }),
@@ -306,6 +297,22 @@ export function exchangeGrant(parts: Parts): Grant {
 			if (allowed.kind === "refused") return allowed;
 			const issued = allowed.access;
 			if (!(await join(tie, issued))) return refused("subject_token has ended");
+			// A once-only token is used up last, once its token is issued, so a refusal or a failure
+			// before leaves it usable. That token is never handed out unless it was used up here; one
+			// whose revocation fails is held by no one.
+			const verifier = parts.verifiers.get(subjectType);
+			if (verifier?.consume) {
+				const withdrawn = () => parts.tokens.revokeAccess(issued.token).catch(() => undefined);
+				const used = await verifier.consume(subjectToken).catch(async (error: unknown) => {
+					await withdrawn();
+					throw error;
+				});
+				if (used !== "consumed") {
+					await withdrawn();
+					if (used === "replayed") return refused("subject_token has been used");
+					throw new Unavailable("token-exchange");
+				}
+			}
 			return {
 				kind: "issued",
 				body: {
