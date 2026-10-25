@@ -8,6 +8,7 @@ import { revocations } from "@mod/subject-revocation";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { z } from "zod";
 import { check } from "./assertion/assertion.ts";
+import { meets } from "./conditions/conditions.ts";
 import {
 	type DelegatedAssertions,
 	linkedIssuers,
@@ -221,10 +222,13 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 				if (delegate) return delegated(input, delegate, assertion);
 				const verified = await check(assertion, trusted, selfIssued);
 				if (verified.kind === "invalid") return refusedGrant(verified.reason);
+				const entry = entries.get(verified.entry) as IssuerEntry;
+				// Held to its issuer's conditions once verified, before any subject is looked up or jti spent.
+				if (entry.conditions && !meets(entry.conditions, verified.claims))
+					return refusedGrant("assertion does not meet its issuer's conditions");
 				const subject = await subjectOf(verified.entry, verified.subject);
 				if (subject === undefined) return refusedGrant("unknown subject");
 				const checked = { ...verified, subject };
-				const entry = entries.get(checked.entry) as IssuerEntry;
 				const keepUntil = keepUntilOf(checked.expiresAt);
 				// An issuer with a ledger uses its jti up there alone, never the store, whatever it answers;
 				// the store keeps it by the `iss` as sent, so a self-issued signer's assertions are apart from its issuer's own.

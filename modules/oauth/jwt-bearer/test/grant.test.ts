@@ -314,6 +314,32 @@ describe("jwt-bearer", () => {
 		}
 	});
 
+	it("takes an issuer's assertion only where its verified claims meet the issuer's conditions", async () => {
+		const { "accept-any-subject": _any, ...shared } = trustedUpstream[0] as Record<string, unknown>;
+		const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
+			{
+				...shared,
+				conditions: { "subject-prefix": "org:acme/", claims: { env: ["prod", "staging"] } },
+			},
+		]);
+		const before = saved.length;
+		const met = { ...base, sub: "org:acme/ci", env: "prod" };
+		for (const claims of [
+			{ ...met, sub: "org:other/ci" },
+			{ ...met, env: "dev" },
+			{ ...met, env: ["prod"] },
+			{ ...base, sub: "org:acme/ci" },
+		]) {
+			expect(saidOf(await s.grant(await assertion(claims))), JSON.stringify(claims)).toBe(
+				"invalid_grant: assertion does not meet its issuer's conditions",
+			);
+		}
+		// Refused before its jti is used up, and telling no value of a claim or a condition.
+		expect(saved.length).toBe(before);
+		expect(errorOf(await s.grant(await assertion(met)))).toBe("issued");
+		expect(errorOf(await s.grant(await assertion({ ...met, env: "staging" })))).toBe("issued");
+	});
+
 	it("asks the issuance policies before the jti is used up, and again when issuing", async () => {
 		const asked: IssuanceRequest[] = [];
 		let refusing = new Set([1]);
