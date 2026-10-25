@@ -8,6 +8,15 @@ import com.nimbusds.oauth2.sdk.AuthorizationCode;
 import com.nimbusds.oauth2.sdk.AuthorizationCodeGrant;
 import com.nimbusds.oauth2.sdk.ErrorObject;
 import com.nimbusds.oauth2.sdk.RefreshTokenGrant;
+import com.nimbusds.oauth2.sdk.ClientCredentialsGrant;
+import com.nimbusds.oauth2.sdk.TokenIntrospectionRequest;
+import com.nimbusds.oauth2.sdk.TokenIntrospectionResponse;
+import com.nimbusds.oauth2.sdk.TokenRevocationRequest;
+import com.nimbusds.oauth2.sdk.auth.PrivateKeyJWT;
+import com.nimbusds.oauth2.sdk.auth.JWTAuthenticationClaimsSet;
+import com.nimbusds.oauth2.sdk.id.Audience;
+import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.oauth2.sdk.token.AccessToken;
 import com.nimbusds.oauth2.sdk.TokenResponse;
 import com.nimbusds.oauth2.sdk.AuthorizationGrant;
 import com.nimbusds.oauth2.sdk.token.RefreshToken;
@@ -137,22 +146,107 @@ public final class Main {
     return JSONObjectUtils.getJSONObject(instruction, "client");
   }
 
-  private ClientAuthentication authentication() throws Exception {
+  /** The client's authentication at the token endpoint, which a private key JWT names as its audience. */
+  private ClientAuthentication authentication(URI tokenEndpoint) throws Exception {
     Map<String, Object> c = client();
     ClientID id = new ClientID(JSONObjectUtils.getString(c, "id"));
     String method = JSONObjectUtils.getString(c, "method");
     Secret secret = new Secret(orElse(c, "secret", ""));
     if ("client_secret_basic".equals(method)) return new ClientSecretBasic(id, secret);
     if ("client_secret_post".equals(method)) return new ClientSecretPost(id, secret);
+    if ("private_key_jwt".equals(method)) {
+      ECKey key = ECKey.parse(JSONObjectUtils.getJSONObject(c, "privateJwk"));
+      // The library's own default names the token endpoint; told so, the assertion names the issuer.
+      if ("issuer".equals(instruction.get("assertionAudience")))
+        return new PrivateKeyJWT(
+            new JWTAuthenticationClaimsSet(
+                id, new Audience(JSONObjectUtils.getString(instruction, "issuer"))),
+            JWSAlgorithm.ES256,
+            key.toECPrivateKey(),
+            key.getKeyID(),
+            null);
+      return new PrivateKeyJWT(
+          id, tokenEndpoint, JWSAlgorithm.ES256, key.toECPrivateKey(), key.getKeyID(), null);
+    }
     if ("none".equals(method)) return null;
     throw new Refused("unsupported", "no client authentication " + method);
   }
 
-  /** A token request with the client's authentication, or its id alone for a public client. */
+  private URI resource() {
+    Object r = instruction.get("resource");
+    return r instanceof String s ? URI.create(s) : null;
+  }
+
+  /** A token request with the client's authentication, or its id alone for a public client, for the resource asked. */
   private TokenRequest tokenRequest(URI endpoint, AuthorizationGrant grant) throws Exception {
-    ClientAuthentication auth = authentication();
-    if (auth != null) return new TokenRequest(endpoint, auth, grant);
-    return new TokenRequest(endpoint, new ClientID(JSONObjectUtils.getString(client(), "id")), grant);
+    ClientAuthentication auth = authentication(endpoint);
+    TokenRequest.Builder builder =
+        auth != null
+            ? new TokenRequest.Builder(endpoint, auth, grant)
+            : new TokenRequest.Builder(endpoint, new ClientID(JSONObjectUtils.getString(client(), "id")), grant);
+    if (resource() != null) builder.resources(resource());
+    Object scope = instruction.get("scope");
+    if (grant instanceof ClientCredentialsGrant && scope instanceof String s) builder.scope(Scope.parse(s));
+    return builder.build();
+  }
+
+  /** Signs in asking for a token for one resource server, by the parameter in both requests. */
+  private Map<String, Object> resourceFlow() throws Exception {
+    SignedIn in = signIn();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("accessToken", in.tokens().getOIDCTokens().getAccessToken().getValue());
+    return result;
+  }
+
+  /** The client credentials grant, the client authenticating as its configuration says. */
+  private Map<String, Object> clientCredentials() throws Exception {
+    OIDCProviderMetadata op = provider();
+    TokenResponse answer =
+        TokenResponse.parse(
+            sending(tokenRequest(op.getTokenEndpointURI(), new ClientCredentialsGrant()).toHTTPRequest())
+                .send());
+    if (!answer.indicatesSuccess()) throw Refused.of(answer.toErrorResponse().getErrorObject());
+    AccessToken token = answer.toSuccessResponse().getTokens().getAccessToken();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("accessToken", token.getValue());
+    result.put("tokenType", token.getType().getValue());
+    result.put("scope", token.getScope() == null ? null : token.getScope().toString());
+    return result;
+  }
+
+  private boolean active(OIDCProviderMetadata op, AccessToken token) throws Exception {
+    TokenIntrospectionResponse told =
+        TokenIntrospectionResponse.parse(
+            sending(
+                    new TokenIntrospectionRequest(
+                            op.getIntrospectionEndpointURI(),
+                            authentication(op.getTokenEndpointURI()),
+                            token)
+                        .toHTTPRequest())
+                .send());
+    if (!told.indicatesSuccess()) throw Refused.of(told.toErrorResponse().getErrorObject());
+    return told.toSuccessResponse().isActive();
+  }
+
+  /** Signs in, introspects the access token, revokes it, and introspects it again. */
+  private Map<String, Object> revocation() throws Exception {
+    SignedIn in = signIn();
+    AccessToken token = in.tokens().getOIDCTokens().getAccessToken();
+    boolean before = active(in.op(), token);
+    var revoked =
+        sending(
+                new TokenRevocationRequest(
+                        in.op().getRevocationEndpointURI(),
+                        authentication(in.op().getTokenEndpointURI()),
+                        token)
+                    .toHTTPRequest())
+            .send();
+    if (revoked.getStatusCode() != 200)
+      throw new Refused("revocation", revoked.getStatusCode() + ": " + revoked.getContent());
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("before", before);
+    result.put("after", active(in.op(), token));
+    return result;
   }
 
   private OIDCProviderMetadata provider() throws Exception {
@@ -224,6 +318,7 @@ public final class Main {
             .state(state)
             .nonce(nonce)
             .codeChallenge(verifier, CodeChallengeMethod.S256)
+            .resources(resource() == null ? null : new URI[] {resource()})
             .build();
     Map<String, Object> question = new LinkedHashMap<>();
     question.put("ask", "browse");
@@ -259,6 +354,9 @@ public final class Main {
           switch (flow) {
             case "login", "public-login" -> main.login();
             case "refresh" -> main.refresh();
+            case "resource" -> main.resourceFlow();
+            case "client-credentials" -> main.clientCredentials();
+            case "revocation" -> main.revocation();
             default -> throw new Refused("unsupported", "no flow " + flow);
           });
     } catch (Refused refused) {

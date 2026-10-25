@@ -2,7 +2,14 @@ import { join } from "node:path";
 import type { AdapterCommand } from "../dialog/dialog.ts";
 
 /** A flow an adapter runs, by the name its instruction gives. */
-export const flows = ["login", "public-login", "refresh"] as const;
+export const flows = [
+	"login",
+	"public-login",
+	"refresh",
+	"resource",
+	"client-credentials",
+	"revocation",
+] as const;
 export type Flow = (typeof flows)[number];
 
 /** A client library the harness runs: its adapter, how it is built, and the flows it runs first-class. */
@@ -22,7 +29,7 @@ const java = () => (process.env.JAVA_HOME ? join(process.env.JAVA_HOME, "bin", "
 export const libraries: readonly Library[] = [
 	{
 		name: "openid-client",
-		flows: ["login", "public-login", "refresh"],
+		flows: ["login", "public-login", "refresh", "resource", "client-credentials", "revocation"],
 		build: [],
 		adapter: () => ({
 			command: process.execPath,
@@ -33,7 +40,7 @@ export const libraries: readonly Library[] = [
 	},
 	{
 		name: "nimbus",
-		flows: ["login", "public-login", "refresh"],
+		flows: ["login", "public-login", "refresh", "resource", "client-credentials", "revocation"],
 		// The runtime jars are checked against their pins before anything is compiled or shaded from them.
 		build: [
 			[
