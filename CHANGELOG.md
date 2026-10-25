@@ -4,6 +4,12 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
+## [0.18.6] - 2026-10-25
+
+### Security
+
+- `client-assertion`: a client's assertion (`private_key_jwt`) must now name the issuer alone, as one string, as its `aud`. Until now it could also name the token endpoint URL, or an array with one matching member. That left clients open to the audience injection OpenID Foundation disclosed in 2025: a client that also uses the same key and `client_id` at a malicious or compromised authorization server could have an assertion collected there and redeemed first here. With `client_credentials` allowed, that issues tokens within the client's allowances. Clients that already send the issuer as a string keep working. Others must change how they build assertions; `sections.client-assertion.accept-loose-audience: true` on a client keeps the old acceptance for that client for now, warning `client-assertion.loose_audience` each time, and leaves it exposed while set. See the migration guide (From 0.18.5). Rolling back to 0.18.5 needs that key removed, since 0.18.5 refuses it.
+
 ## [0.18.5] - 2026-10-24
 
 ### Security
