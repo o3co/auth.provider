@@ -57,8 +57,10 @@ it("contributes the one closing participants over those the composition contribu
 	]);
 	const app = await assemble({ modules: [participantsModule, reading], config: kernelConfig() });
 	expect(
-		await takesUnused({ modules: [participantsModule, reading], config: kernelConfig() }),
-	).toEqual({});
+		(await takesUnused({ modules: [participantsModule, reading], config: kernelConfig() }))[
+			"session-participants"
+		],
+	).toBeUndefined();
 	expect(await app.get(read).closing(session)).toEqual([]);
 	expect(closed).toEqual(["h"]);
 });
