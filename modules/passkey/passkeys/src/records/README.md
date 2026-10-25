@@ -17,7 +17,7 @@ Internal module of `passkeys`: the passkey records, read in the shape written, a
 - A holder is version 1, with its handle, its list and an optional fence, read as 0 where 0.18 kept none. A passkey is version 1. A pending one is version 2 with its write's token, so a host reading only version 1 finds it broken, never a passkey. A removed one keeps only its subject.
 - `handleFor` makes a holder only where the subject has none, and answers the one kept.
 - An activation turns only the pending record its write's token names into a passkey, keeping its subject and every list; any other (written over, taken by another subject, or removed) is `taken`.
-- A count moves on only over the count judged, as the record before the change tells; a removed or pending record has none.
+- A count moves on only over the passkey judged (its subject, key and count), as the record before the change tells; a removed or pending record has none, and one registered again by another subject is not the one judged.
 - A name is set only on a passkey the subject's holder lists and that names the subject.
 - `listed` follows the holder's list in its order, leaving out each id whose record is not the subject's passkey.
 
