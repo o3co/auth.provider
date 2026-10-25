@@ -11,10 +11,16 @@ const foundValue = (looked: CookieLookup) => (looked.kind === "found" ? looked.v
 
 /** The cookies of a deployment at this public origin, logging to `logged`. */
 async function at(origin: string, logged = recordingLog()) {
-	const insecure = origin.startsWith("http:") ? { "insecure-origin": true } : {};
+	// A plain-http origin is one only a development deployment takes.
+	const plain = origin.startsWith("http:");
+	const insecure = plain ? { "insecure-origin": true } : {};
+	const environment = plain ? "development" : "production";
 	const app = await assemble({
 		modules: [http, cookiesModule],
-		config: { ...kernelConfig(), http: { port: 0, "public-origin": origin, ...insecure } },
+		config: {
+			...kernelConfig({ environment }),
+			http: { port: 0, "public-origin": origin, ...insecure },
+		},
 		runtime: quietRuntime({ log: logged.log }),
 	});
 	return app.get(cookies);
