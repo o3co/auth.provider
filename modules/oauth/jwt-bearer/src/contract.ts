@@ -7,7 +7,11 @@ export type SignerAlgorithm = (typeof algorithms)[number];
 /** A public key as a JWK. */
 export type SignerKey = Readonly<Record<string, unknown>>;
 
-/** The keys of the signers of one issuer, asked for each assertion it names; a signer is the assertion's `sub` and `kid`. */
+/**
+ * The keys of the signers of one issuer, asked for each assertion it names. A signer is asked by
+ * its `subject` (the assertion's `sub`; its key's thumbprint where the issuer's subject is one) and
+ * the assertion's `kid`.
+ */
 export interface SignerKeys {
 	/** The `iss` it answers for. */
 	readonly issuer: string;
