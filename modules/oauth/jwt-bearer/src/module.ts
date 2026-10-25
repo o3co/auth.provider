@@ -173,8 +173,9 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			const issued = await issue(access, { notAfter: checked.expiresAt });
 			if (issued.kind === "refused") return issued;
 			const token = issued.access;
-			// Cut to the assertion's end at the time of issue, it may have no life left: handed to no one.
-			if (lasting && token.expiresIn < 1) return refusedGrant("expired");
+			// Cut to the assertion's end, and signed after its end was fixed, it may have less than a second
+			// left by now, whatever its expires_in says: handed to no one.
+			if (lasting && token.expiresAt - c.clock.now() < 1000) return refusedGrant("expired");
 			return {
 				kind: "issued",
 				body: {

@@ -27,7 +27,7 @@ import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { issuancePolicies, tokens } from "@mod/tokens";
+import { issuancePolicies, type Tokens, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -115,6 +115,33 @@ function delegating(
 	return { module, spent };
 }
 
+/** How long each signing of an access token takes, after its end is fixed: none unless a test sets it. */
+const signing = { ms: 0 };
+/** The tokens module, its issuing taking `signing.ms` on the kernel's clock after it fixed the token's end. */
+function signingTakes(module: Module): Module {
+	return {
+		...module,
+		provides: (module.provides ?? []).map((part) =>
+			part.contract !== tokens
+				? part
+				: {
+						contract: part.contract,
+						create: async (context: Parameters<typeof part.create>[0]) => {
+							const real = (await part.create(context)) as Tokens;
+							return {
+								...real,
+								issue: async (...given: Parameters<Tokens["issue"]>) => {
+									const issued = await real.issue(...given);
+									clock.at += signing.ms;
+									return issued;
+								},
+							};
+						},
+					},
+		),
+	};
+}
+
 const allowed = allowancesFor({
 	grants: [grantType],
 	scopes: ["read"],
@@ -146,7 +173,7 @@ function assembly(
 		modules: [
 			location,
 			http,
-			tokensStandIn(),
+			signingTakes(tokensStandIn()),
 			issuerModule,
 			clientsModule,
 			secretHashModule,
@@ -261,6 +288,7 @@ describe("delegated issuers", () => {
 	describe("the second left, while the grant works", () => {
 		afterEach(() => {
 			clock.at = now;
+			signing.ms = 0;
 		});
 		const lasting = { ...valid, expiresAt: now + 2000 };
 
@@ -290,6 +318,18 @@ describe("delegated issuers", () => {
 			const s = await serve([d.module]);
 			expect(saidOf(await s.grant("app", sent(lasting)))).toBe("invalid_grant: expired");
 			expect(d.spent).toHaveLength(1);
+		});
+
+		it("is held to the token's own end on the clock after it is signed: one whose signing outlasts it is handed to no one", async () => {
+			const d = delegating();
+			const s = await serve([d.module]);
+			// Its end fixed at two seconds, its expires_in two; then signing takes those two seconds.
+			signing.ms = 2000;
+			expect(saidOf(await s.grant("app", sent(lasting)))).toBe("invalid_grant: expired");
+			expect(d.spent).toHaveLength(1);
+			signing.ms = 0;
+			clock.at = now;
+			expect(saidOf(await s.grant("app", sent(lasting)))).toBe("issued");
 		});
 	});
 
