@@ -37,7 +37,7 @@ export function memoryFactors(now: () => number = () => 0) {
 			return changed;
 		},
 	});
-	const module = defineModule({ name: "factor-store" }, (m) => [
+	const module = defineModule({ name: "factor-store", takes: [] }, (m) => [
 		m.provide(factorStore).by(() => factors),
 	]);
 	return { module, factors, down, hooks, ...stand };

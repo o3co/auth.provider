@@ -20,7 +20,7 @@ import bridge from "../src/module.ts";
  * counting kind `code` (the proof is the secret and a counter that must go up) and a way back
  * `backup`. A copy of mfa's own harness, cut to what the witness needs.
  */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -41,7 +41,7 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 		},
 	})),
 ]);
-const backup = defineModule({ name: "kind-backup" }, (m) => [
+const backup = defineModule({ name: "kind-backup", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -52,10 +52,10 @@ const backup = defineModule({ name: "kind-backup" }, (m) => [
 		verify: async () => ({ kind: "invalid" as const }),
 	})),
 ]);
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
-const enforcer = defineModule({ name: "enforcer" }, (m) => [
+const enforcer = defineModule({ name: "enforcer", takes: [] }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
@@ -72,7 +72,7 @@ function memoryFactors() {
 		updateTogether: (...given: Parameters<ReturnType<typeof updatingTogether>>) =>
 			updatingTogether(stand.records)(...given),
 	});
-	const module = defineModule({ name: "factor-store" }, (m) => [
+	const module = defineModule({ name: "factor-store", takes: [] }, (m) => [
 		m.provide(factorStore).by(() => store),
 	]);
 	return {
@@ -96,7 +96,7 @@ export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Modu
 	const audit = auditStandIn();
 	const place = memoryFactors();
 	const witness = witnessStandIn();
-	const app = await assemble({
+	const input = {
 		modules: [
 			audit.module,
 			place.module,
@@ -112,7 +112,8 @@ export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Modu
 		],
 		config: { ...kernelConfig(), ...sealConfig(), ...mfaConfig(settings) },
 		runtime: quietRuntime(),
-	});
+	};
+	const app = await assemble(input);
 	// mfa's three faces, as one for the scenes.
 	const decided: FactorReading & FactorBinding & FactorManaging = {
 		...app.get(factorReading),
@@ -140,6 +141,7 @@ export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Modu
 		(await decided.held(subject)).filter((f) => f.kind === "code").length;
 	return {
 		app,
+		input,
 		decided,
 		provedCode,
 		bindCode,

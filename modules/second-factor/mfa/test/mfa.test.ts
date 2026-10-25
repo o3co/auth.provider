@@ -11,7 +11,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { isLabel } from "@mod/labels";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
@@ -57,7 +57,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -79,7 +79,7 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 	})),
 ]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
-const backup = defineModule({ name: "kind-backup" }, (m) => [
+const backup = defineModule({ name: "kind-backup", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -103,12 +103,12 @@ const backup = defineModule({ name: "kind-backup" }, (m) => [
 ]);
 
 /** A step that proves factors, as a login flow contributes one. */
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 
 /** A counting kind whose proof names its amr: the secret, then the amr it claims. */
-const key = defineModule({ name: "kind-key" }, (m) => [
+const key = defineModule({ name: "kind-key", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "key",
 		amr: ["hwk", "swk"],
@@ -125,7 +125,7 @@ const key = defineModule({ name: "kind-key" }, (m) => [
 	})),
 ]);
 /** A counting kind that does not add a second factor. */
-const mail = defineModule({ name: "kind-mail" }, (m) => [
+const mail = defineModule({ name: "kind-mail", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "mail",
 		amr: ["otp"],
@@ -150,7 +150,7 @@ const ping = {
 	from: [] as unknown[],
 };
 /** A counting kind that sends a challenge: its proof is the code the challenge kept. */
-const pinged = defineModule({ name: "kind-ping" }, (m) => [
+const pinged = defineModule({ name: "kind-ping", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "ping",
 		amr: ["otp"],
@@ -179,7 +179,7 @@ const pinged = defineModule({ name: "kind-ping" }, (m) => [
 ]);
 
 /** A counting kind whose first proof names a credential no two factors may hold. */
-const card = defineModule({ name: "kind-card" }, (m) => [
+const card = defineModule({ name: "kind-card", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "card",
 		amr: ["hwk"],
@@ -194,7 +194,7 @@ const card = defineModule({ name: "kind-card" }, (m) => [
 
 /** How the told kind answers its next enrolment; its secret is the value no two factors may hold. */
 const told = { answer: undefined as Enrolled | undefined };
-const toldKind = defineModule({ name: "kind-told" }, (m) => [
+const toldKind = defineModule({ name: "kind-told", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -208,7 +208,7 @@ const toldKind = defineModule({ name: "kind-told" }, (m) => [
 	})),
 ]);
 /** A way back that will not enrol now. */
-const stuck = defineModule({ name: "kind-stuck" }, (m) => [
+const stuck = defineModule({ name: "kind-stuck", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "stuck",
 		amr: [],
@@ -221,7 +221,7 @@ const stuck = defineModule({ name: "kind-stuck" }, (m) => [
 ]);
 
 /** A module holding sessions to the factors, as `mfa-entry` does in an app. */
-const enforcer = defineModule({ name: "enforcer" }, (m) => [
+const enforcer = defineModule({ name: "enforcer", takes: [] }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
@@ -237,7 +237,7 @@ async function serve(
 ) {
 	const audit = auditStandIn();
 	const place = memoryFactors();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			audit.module,
@@ -259,7 +259,8 @@ async function serve(
 			...mfaConfig(settings),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	stop = () => app.stop(1000);
 	// mfa's three faces, as one for these tests.
 	const decided: Decisions = {
@@ -300,6 +301,7 @@ async function serve(
 		(await decided.held(subject)).find((f) => f.kind === kind)?.id ?? "";
 	return {
 		app,
+		input,
 		decided,
 		provedCode,
 		bindCode,
@@ -468,7 +470,7 @@ describe("decisions on the subject's factors", () => {
 
 	it("takes a kind that does not say whether guessing beats it as one guessing does, as 0.17 did", async () => {
 		/** A kind written without the declaration, as untyped code could contribute one. */
-		const silent = defineModule({ name: "kind-silent" }, (m) => [
+		const silent = defineModule({ name: "kind-silent", takes: [] }, (m) => [
 			m.contribute(factorKinds).by(
 				() =>
 					({
@@ -1089,7 +1091,7 @@ describe("a binding begun", () => {
 });
 
 it("refuses to start under required when no composed kind counts", async () => {
-	const told = defineModule({ name: "kind-told" }, (m) => [
+	const told = defineModule({ name: "kind-told", takes: [] }, (m) => [
 		m.contribute(factorKinds).by(() => ({
 			kind: "told",
 			amr: ["sms"],
@@ -1124,7 +1126,7 @@ it("refuses to start without a module holding sessions to the factors, whatever 
 it("refuses to start over a factor store that cannot write a list and a claim as one", async () => {
 	const { factors } = memoryFactors();
 	const { updateTogether: _, ...lacking } = factors;
-	const store = defineModule({ name: "factor-store" }, (m) => [
+	const store = defineModule({ name: "factor-store", takes: [] }, (m) => [
 		m.provide(factorStore).by(() => lacking as FactorStore),
 	]);
 	const refused = await serve({}, { store }).catch((error) => error);
@@ -1173,7 +1175,7 @@ it("passes where an ask came from to the kind unread", async () => {
 
 describe("a gate contributed before a first counting factor", () => {
 	const asked: unknown[] = [];
-	const gate = defineModule({ name: "gate" }, (m) => [
+	const gate = defineModule({ name: "gate", takes: [] }, (m) => [
 		m.contribute(firstBindingGates).by(() => ({
 			admits: async (ask) => {
 				asked.push(ask);
@@ -1220,12 +1222,12 @@ describe("the extension points mfa-extensions offers", () => {
 	});
 
 	it("asks a gate contributed through mfa-extensions before a first binding, and a kind through it", async () => {
-		const gate = defineModule({ name: "gate-by-extensions" }, (m) => [
+		const gate = defineModule({ name: "gate-by-extensions", takes: [] }, (m) => [
 			m.contribute(extensions.firstBindingGates).by(() => ({ admits: async () => false })),
 		]);
 		const { decided } = await serve({}, { extra: [gate] });
 		expect(await decided.begin("zed", "code")).toEqual({ kind: "binding-proof-required" });
-		const kind = defineModule({ name: "kind-by-extensions" }, (m) => [
+		const kind = defineModule({ name: "kind-by-extensions", takes: [] }, (m) => [
 			m.contribute(extensions.factorKinds).by(() => ({
 				kind: "other",
 				amr: [],
@@ -1277,7 +1279,7 @@ describe("an enrollment witness", () => {
 			},
 		};
 		const contributing = (name: string) =>
-			defineModule({ name }, (m) => [m.contribute(witnessing).by(() => told)]);
+			defineModule({ name, takes: [] }, (m) => [m.contribute(witnessing).by(() => told)]);
 		const { decided, bindCode } = await serve({}, { extra: [contributing("told")] });
 		await bindCode("ola");
 		await decided.clear("ola");
@@ -1298,7 +1300,7 @@ describe("an enrollment witness", () => {
 					if (after) afters.push(after);
 				},
 			};
-			const module = defineModule({ name: "keeping" }, (m) => [
+			const module = defineModule({ name: "keeping", takes: [] }, (m) => [
 				m.contribute(witnessing).by(() => told),
 			]);
 			return { module, afters };
@@ -1498,4 +1500,18 @@ describe("a binding writing its factor and the claim on its value together", () 
 		expect((await decided.bind("eve", six.pending, six.state)).kind).toBe("full");
 		expect(place.peek(claimKeyOf("card", "c-6"))).toBeUndefined();
 	});
+});
+
+it("takes all it names, with a witnessing and without", async () => {
+	const told: Witnessing = {
+		standing: async (_subject, counts) => (counts ? "held" : "none"),
+		settle: async () => {},
+		cleared: async () => {},
+	};
+	const contributing = defineModule({ name: "told", takes: [] }, (m) => [
+		m.contribute(witnessing).by(() => told),
+	]);
+	expect(await takesUnused((await serve()).input)).toEqual({});
+	await stop();
+	expect(await takesUnused((await serve({}, { extra: [contributing] })).input)).toEqual({});
 });

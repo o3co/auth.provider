@@ -7,7 +7,7 @@ import {
 	kernelConfig,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { type Message, mail } from "@mod/mail";
 import {
 	type BindingProof,
@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 const seen = contract<BindingProof>("seen");
-const outside = defineModule({ name: "outside" }, (m) => [
+const outside = defineModule({ name: "outside", takes: [bindingProofs] }, (m) => [
 	m.provide(mail).by(() => ({
 		send: async (message) => {
 			if (answer === "unavailable") throw new Unavailable("mail");
@@ -78,18 +78,16 @@ const outside = defineModule({ name: "outside" }, (m) => [
 ]);
 
 /** `mfa-binding-proof`, which hears this proof; only that it is there. */
-const proofPlace = defineModule({ name: "binding-proof-place" }, (m) => [
+const proofPlace = defineModule({ name: "binding-proof-place", takes: [] }, (m) => [
 	m.provide(bindingProof).by(() => ({}) as BindingProofs),
 ]);
 
-const boot = async () =>
-	(
-		await assemble({
-			modules: [outside, proofPlace, proofModule],
-			config: kernelConfig(),
-			runtime,
-		})
-	).get(seen);
+const composition = {
+	modules: [outside, proofPlace, proofModule],
+	config: kernelConfig(),
+	runtime,
+};
+const boot = async () => (await assemble(composition)).get(seen);
 const last = () => sent.at(-1) as Message;
 
 it("refuses to boot without mfa-binding-proof composed, naming its contract, so the proof is never left unheard", async () => {
@@ -181,4 +179,8 @@ it("joins mfa-email, so it comes wherever a code by email is composed, and opts 
 		await readFile(new URL("../package.json", import.meta.url), "utf8"),
 	) as { joins?: unknown; optIn?: unknown };
 	expect([manifest.joins, manifest.optIn]).toEqual([["@mod/mfa-email"], true]);
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused(composition)).toEqual({});
 });

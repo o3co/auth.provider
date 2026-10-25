@@ -9,19 +9,25 @@ import { bindingProofOver } from "./binding-proof/binding-proof.ts";
 import { completionOver } from "./completion/completion.ts";
 import { placeOver } from "./place.ts";
 
-export default defineModule({ name: "mfa-enrollment" }, (m) => [
-	m.contribute(enrollmentFlow).by(async (c) => {
-		const parts = {
-			binding: await c.get(factorBinding),
-			managing: await c.get(factorManaging),
-			bindingProof: await c.get(bindingProof),
-			sessions: await c.get(sessions),
-			revocation: await c.get(subjectRevocation),
-			flow: await c.get(flowParts),
-		};
-		const place = placeOver(parts);
-		const proofs = bindingProofOver(parts, place);
-		const { enroll, complete } = completionOver(parts, place, proofs);
-		return { enroll, complete, challenge: proofs.challengeBinding };
-	}),
-]);
+export default defineModule(
+	{
+		name: "mfa-enrollment",
+		takes: [bindingProof, flowParts, factorBinding, factorManaging, sessions, subjectRevocation],
+	},
+	(m) => [
+		m.contribute(enrollmentFlow).by(async (c) => {
+			const parts = {
+				binding: await c.get(factorBinding),
+				managing: await c.get(factorManaging),
+				bindingProof: await c.get(bindingProof),
+				sessions: await c.get(sessions),
+				revocation: await c.get(subjectRevocation),
+				flow: await c.get(flowParts),
+			};
+			const place = placeOver(parts);
+			const proofs = bindingProofOver(parts, place);
+			const { enroll, complete } = completionOver(parts, place, proofs);
+			return { enroll, complete, challenge: proofs.challengeBinding };
+		}),
+	],
+);

@@ -1,20 +1,24 @@
 import { assemble, contract, defineModule, kernelConfig, type Random } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
 import { expect, it } from "vitest";
 import recoveryModule from "../src/module.ts";
 
 const kinds = contract<readonly FactorKind[]>("kinds");
 
+const composition = (random?: Random) => ({
+	modules: [
+		recoveryModule,
+		defineModule({ name: "reader", takes: [factorKinds] }, (m) => [
+			m.provide(kinds).by((c) => c.collect(factorKinds)),
+		]),
+	],
+	config: kernelConfig(),
+	runtime: quietRuntime({ clock: { now: () => 0 }, ...(random ? { random } : {}) }),
+});
+
 async function boot(random?: Random) {
-	const app = await assemble({
-		modules: [
-			recoveryModule,
-			defineModule({ name: "reader" }, (m) => [m.provide(kinds).by((c) => c.collect(factorKinds))]),
-		],
-		config: kernelConfig(),
-		runtime: quietRuntime({ clock: { now: () => 0 }, ...(random ? { random } : {}) }),
-	});
+	const app = await assemble(composition(random));
 	return app.get(kinds)[0] as FactorKind;
 }
 
@@ -116,4 +120,8 @@ it("refuses a code not in the set as invalid, used ones included", async () => {
 	const first = await recovery.verify(secret, null, codes[0] ?? "");
 	const state = first.kind === "valid" ? first.state : null;
 	expect(await recovery.verify(other.secret, state, codes[0] ?? "")).toEqual({ kind: "invalid" });
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused(composition())).toEqual({});
 });

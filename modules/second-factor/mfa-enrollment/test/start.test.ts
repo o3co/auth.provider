@@ -1,4 +1,5 @@
 import { defineModule } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { bindingProofs } from "@mod/mfa-binding-proof";
 import { type AskedFrom, type Enrolled, factorKinds, type Sending } from "@mod/mfa-extensions";
 import { afterEach, expect, it } from "vitest";
@@ -16,7 +17,7 @@ afterEach(() => {
 	next.sent = undefined;
 	froms.length = 0;
 });
-const parts = defineModule({ name: "start-parts" }, (m) => [
+const parts = defineModule({ name: "start-parts", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -108,4 +109,8 @@ it("asks the kind and the binding proof for a session's enrollment by its handle
 	await s.call("POST", "/session/mfa/enrollment", { kind: "told", transaction_id: bo.tx });
 	expect(froms.length).toBeGreaterThan(0);
 	expect(froms.every((from) => from?.kind === "login")).toBe(true);
+});
+
+it("takes all it names, composed with mfa-flows and mfa", async () => {
+	expect(await takesUnused((await serve()).input)).toEqual({});
 });

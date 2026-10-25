@@ -6,7 +6,7 @@ import { algorithm, base32, digits, matchedStep, periodSeconds } from "./totp.ts
 /** RFC 4226 recommends 160 bits, the length of a SHA-1 output. */
 const secretBytes = 20;
 
-export default defineModule({ name: "mfa-totp", replicaSafe: true }, (m) => [
+export default defineModule({ name: "mfa-totp", replicaSafe: true, takes: [site] }, (m) => [
 	m.contribute(factorKinds).by(async (c) => {
 		const origin = (await c.get(site)).origin;
 		const issuer = origin ? new URL(origin).host : "auth";

@@ -1,7 +1,7 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
 import { expect, it } from "vitest";
 import totpModule from "../src/module.ts";
@@ -18,18 +18,24 @@ const runtime = quietRuntime({
 const kinds = contract<readonly FactorKind[]>("kinds");
 const secret = base32(Buffer.alloc(20, 0x61));
 
+const composition = (
+	site: Parameters<typeof httpConfig>[0] = { "public-origin": "https://as.example" },
+) => ({
+	modules: [
+		http,
+		totpModule,
+		defineModule({ name: "reader", takes: [factorKinds] }, (m) => [
+			m.provide(kinds).by((c) => c.collect(factorKinds)),
+		]),
+	],
+	config: { ...kernelConfig(), ...httpConfig(site) },
+	runtime,
+});
+
 async function boot(
 	site: Parameters<typeof httpConfig>[0] = { "public-origin": "https://as.example" },
 ) {
-	const app = await assemble({
-		modules: [
-			http,
-			totpModule,
-			defineModule({ name: "reader" }, (m) => [m.provide(kinds).by((c) => c.collect(factorKinds))]),
-		],
-		config: { ...kernelConfig(), ...httpConfig(site) },
-		runtime,
-	});
+	const app = await assemble(composition(site));
 	return app.get(kinds)[0] as FactorKind;
 }
 
@@ -154,4 +160,8 @@ it("judges a wrong code as invalid, not replayed, whatever step was used", async
 	expect(await totp.verify(secret, step + 1, codeAt(secret, step + 2))).toEqual({
 		kind: "invalid",
 	});
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused(composition())).toEqual({});
 });

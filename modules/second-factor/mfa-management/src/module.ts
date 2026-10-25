@@ -32,25 +32,32 @@ const withUnavailable =
 		}
 	};
 
-export default defineModule({ name: "mfa-management", section, replicaSafe: true }, (m) =>
-	table.map(([method, path, name]) =>
-		m.contribute(routes).by(async (c): Promise<Route> => {
-			const handlers = handlersOver({
-				reading: await c.get(factorReading),
-				managing: await c.get(factorManaging),
-				secondFactors: await c.get(secondFactors),
-				sessions: await c.get(sessions),
-			});
-			const handle = withUnavailable(handlers[name]);
-			if (method === "GET") return { method, path, changesState: false, handle };
-			const window = { limit: c.section.requests, ms: c.section.window * 1000 };
-			return {
-				method,
-				path,
-				uses: [use(csrfChecked), use(requestsPerSource, { name: "mfa-management", window })],
-				takes: ["form", "json"],
-				handle,
-			};
-		}),
-	),
+export default defineModule(
+	{
+		name: "mfa-management",
+		section,
+		replicaSafe: true,
+		takes: [secondFactors, factorManaging, factorReading, sessions],
+	},
+	(m) =>
+		table.map(([method, path, name]) =>
+			m.contribute(routes).by(async (c): Promise<Route> => {
+				const handlers = handlersOver({
+					reading: await c.get(factorReading),
+					managing: await c.get(factorManaging),
+					secondFactors: await c.get(secondFactors),
+					sessions: await c.get(sessions),
+				});
+				const handle = withUnavailable(handlers[name]);
+				if (method === "GET") return { method, path, changesState: false, handle };
+				const window = { limit: c.section.requests, ms: c.section.window * 1000 };
+				return {
+					method,
+					path,
+					uses: [use(csrfChecked), use(requestsPerSource, { name: "mfa-management", window })],
+					takes: ["form", "json"],
+					handle,
+				};
+			}),
+		),
 );

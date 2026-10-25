@@ -1,3 +1,4 @@
+import { takesUnused } from "@mod/kernel/testing";
 import { factorReading } from "@mod/mfa-reading";
 import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
@@ -286,4 +287,8 @@ describe("management bodies", () => {
 		const stale = await rename({ factor_id: id });
 		expect([stale[0], (stale[1] as { error: string }).error]).toEqual([403, "step_up_required"]);
 	});
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused((await serve()).input)).toEqual({});
 });

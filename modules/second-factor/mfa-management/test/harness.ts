@@ -54,7 +54,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -76,7 +76,7 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 	})),
 ]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
-const backup = defineModule({ name: "kind-backup" }, (m) => [
+const backup = defineModule({ name: "kind-backup", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -91,14 +91,14 @@ const backup = defineModule({ name: "kind-backup" }, (m) => [
 	})),
 ]);
 /** The step that proves factors at login, which `mfa` asks for; these routes prove none. */
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 
 /** mfa's factor lists on the records stand-in, kept without end. */
 const factorStand = () => {
 	const stand = memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
-	return defineModule({ name: "factor-store" }, (m) => [
+	return defineModule({ name: "factor-store", takes: [] }, (m) => [
 		m.provide(factorStore).by(() =>
 			factorsDown.wrap({
 				save: (key: string, record: StoredFactors) => stand.records.create(key, record, "endless"),
@@ -141,7 +141,7 @@ const ownKeys = Object.keys(section.shape);
 export async function serve(settings: Settings = {}) {
 	const pick = (own: boolean) =>
 		Object.fromEntries(Object.entries(settings).filter(([k]) => ownKeys.includes(k) === own));
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			auditStandIn().module,
@@ -170,7 +170,8 @@ export async function serve(settings: Settings = {}) {
 			"mfa-management": pick(true),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -227,5 +228,13 @@ export async function serve(settings: Settings = {}) {
 		if (bound.codesDue) await app.get(factorManaging).reissue(subject, bound.fence);
 		return bound.factor.id;
 	};
-	return { app, call, signIn, bindCode, jar: () => jar, port: () => app.get(listening).port() };
+	return {
+		app,
+		input,
+		call,
+		signIn,
+		bindCode,
+		jar: () => jar,
+		port: () => app.get(listening).port(),
+	};
 }

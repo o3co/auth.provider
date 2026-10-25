@@ -48,6 +48,9 @@ export interface TransactionParts {
 
 export type Transactions = ReturnType<typeof transactionsOver>;
 
+/** What `transactionsIn` takes from the build context. */
+export const transactionsTakes = [transactionStore, transactionListings, cookies] as const;
+
 /** The transactions over the contracts the assembly gives and the package's section. */
 export const transactionsIn = async (c: BuildContext<Settings>) =>
 	transactionsOver({

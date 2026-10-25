@@ -7,7 +7,7 @@ import {
 	kernelConfig,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { type Message, mail, mailPurposes, mailTemplates } from "@mod/mail";
 import {
 	type BindingProof,
@@ -52,49 +52,52 @@ const seen = contract<{
 	purposes: readonly string[];
 	templates: readonly string[];
 }>("seen");
-const outside = defineModule({ name: "outside" }, (m) => [
-	m.provide(mail).by(() => ({
-		send: async (message) => {
-			if (answer === "unavailable") throw new Unavailable("mail");
-			sent.push(message);
-			return answer;
-		},
-	})),
-	m.provide(users).by(
-		() =>
-			({
-				claimedContacts: async (subject: string) => {
-					const value = contacts.get(subject);
-					if (value === null) return { kind: "unanswerable" };
-					return value === undefined ? [] : [{ kind: "email", value }];
-				},
-				verifiedContact: async (subject: string, contact: unknown) => {
-					if (contactsFull) throw new RangeError("users: a subject keeps at most 20 contacts");
-					verified.push([subject, contact]);
-				},
-			}) satisfies Pick<Users, "claimedContacts" | "verifiedContact"> as never,
-	),
-	m.provide(subjectAttributes).by(() => ({
-		of: async (_subject: string, handle?: string) => {
-			const told = handle === undefined ? undefined : sessions.get(handle);
-			if (!told) return { kind: "unknown" as const };
-			return {
-				kind: "known" as const,
-				vouched: told.vouched,
-				attributes: { email: told.email },
-			};
-		},
-	})),
-	m.provide(seen).by(async (c) => ({
-		kind: (await c.collect(factorKinds))[0] as FactorKind,
-		proofs: await c.collect(bindingProofs),
-		purposes: (await c.collect(mailPurposes)).map((p) => p.purpose),
-		templates: (await c.collect(mailTemplates)).map((t) => t.purpose),
-	})),
-]);
+const outside = defineModule(
+	{ name: "outside", takes: [mailPurposes, mailTemplates, bindingProofs, factorKinds] },
+	(m) => [
+		m.provide(mail).by(() => ({
+			send: async (message) => {
+				if (answer === "unavailable") throw new Unavailable("mail");
+				sent.push(message);
+				return answer;
+			},
+		})),
+		m.provide(users).by(
+			() =>
+				({
+					claimedContacts: async (subject: string) => {
+						const value = contacts.get(subject);
+						if (value === null) return { kind: "unanswerable" };
+						return value === undefined ? [] : [{ kind: "email", value }];
+					},
+					verifiedContact: async (subject: string, contact: unknown) => {
+						if (contactsFull) throw new RangeError("users: a subject keeps at most 20 contacts");
+						verified.push([subject, contact]);
+					},
+				}) satisfies Pick<Users, "claimedContacts" | "verifiedContact"> as never,
+		),
+		m.provide(subjectAttributes).by(() => ({
+			of: async (_subject: string, handle?: string) => {
+				const told = handle === undefined ? undefined : sessions.get(handle);
+				if (!told) return { kind: "unknown" as const };
+				return {
+					kind: "known" as const,
+					vouched: told.vouched,
+					attributes: { email: told.email },
+				};
+			},
+		})),
+		m.provide(seen).by(async (c) => ({
+			kind: (await c.collect(factorKinds))[0] as FactorKind,
+			proofs: await c.collect(bindingProofs),
+			purposes: (await c.collect(mailPurposes)).map((p) => p.purpose),
+			templates: (await c.collect(mailTemplates)).map((t) => t.purpose),
+		})),
+	],
+);
 
 /** `mfa-binding-proof`, which this kind's proof needs composed; only that it is there. */
-const proofPlace = defineModule({ name: "binding-proof-place" }, (m) => [
+const proofPlace = defineModule({ name: "binding-proof-place", takes: [] }, (m) => [
 	m.provide(bindingProof).by(() => ({}) as BindingProofs),
 ]);
 
@@ -105,16 +108,17 @@ const accountEmail: BindingProof = {
 	send: async () => ({ kind: "refused" }),
 	check: async () => false,
 };
-const proofStand = defineModule({ name: "account-email-stand" }, (m) => [
+const proofStand = defineModule({ name: "account-email-stand", takes: [] }, (m) => [
 	m.contribute(bindingProofs).by(() => accountEmail),
 ]);
 
+const composition = (settings: Record<string, unknown> = {}) => ({
+	modules: [outside, proofPlace, proofStand, emailModule],
+	config: { ...kernelConfig(), "mfa-email": settings },
+	runtime,
+});
 async function boot(settings: Record<string, unknown> = {}) {
-	const app = await assemble({
-		modules: [outside, proofPlace, proofStand, emailModule],
-		config: { ...kernelConfig(), "mfa-email": settings },
-		runtime,
-	});
+	const app = await assemble(composition(settings));
 	return app.get(seen);
 }
 const last = () => sent.at(-1) as Message;
@@ -381,4 +385,8 @@ it("reads only ASCII letters, digits, hyphens and spaces, never a character that
 	]) {
 		expect(readLongCode(typed), JSON.stringify(typed)).toBeUndefined();
 	}
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused(composition())).toEqual({});
 });

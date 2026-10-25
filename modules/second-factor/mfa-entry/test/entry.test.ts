@@ -10,7 +10,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type Enforcer, enforcers } from "@mod/mfa";
 import { type FactorKind, factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
 import { type FactorReading, factorReading } from "@mod/mfa-reading";
@@ -40,7 +40,7 @@ const kind = (counts: boolean, addsSecondFactor: boolean) =>
 /** mfa's decisions as the entry judgments ask them: the subjects holding a counting factor, or one unreadable. */
 function decided(holding: Set<string>, required = false, unreadable = new Set<string>()) {
 	const asked: string[] = [];
-	const module = defineModule({ name: "factors-stand-in" }, (m) => [
+	const module = defineModule({ name: "factors-stand-in", takes: [] }, (m) => [
 		m.provide(factorReading).by(
 			() =>
 				({
@@ -62,10 +62,10 @@ async function serve(
 	extra: Module[] = [],
 ) {
 	const stand = decided(holding, required, unreadable);
-	const kindsModule = defineModule({ name: "kinds" }, (m) =>
+	const kindsModule = defineModule({ name: "kinds", takes: [] }, (m) =>
 		kinds.map((k) => m.contribute(factorKinds).by(() => k)),
 	);
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			sessionStandIn,
@@ -78,7 +78,8 @@ async function serve(
 		],
 		config: { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) },
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	const opened = app.get(sessions);
 	const signedIn = async (
 		subject: string,
@@ -88,16 +89,21 @@ async function serve(
 		const { cookies } = await opened.complete(testRequest(), { subject, amr, authenticatedAt });
 		return withCookie(cookies[0] ?? "");
 	};
-	return { app, opened, signedIn, asked: stand.asked };
+	return { app, input, opened, signedIn, asked: stand.asked };
 }
 
 const withCookie = (set: string) =>
 	testRequest({ headers: new Map([["cookie", set.split(";")[0] ?? ""]]) });
 
+it("takes all it names, a second factor required or not", async () => {
+	expect(await takesUnused((await serve()).input)).toEqual({});
+	expect(await takesUnused((await serve(new Set(), { required: true })).input)).toEqual({});
+});
+
 describe("the entry requirements a second factor sets", () => {
 	it("judges using a session and changing credentials, under mfa's name", async () => {
 		const seen = contract<readonly EntryRequirement[]>("seen");
-		const reader = defineModule({ name: "reader" }, (m) => [
+		const reader = defineModule({ name: "reader", takes: [entryRequirements] }, (m) => [
 			m.provide(seen).by((c) => c.collect(entryRequirements)),
 		]);
 		const { app } = await serve(new Set(), {}, [reader]);
@@ -185,7 +191,7 @@ it("takes only a second factor proven recently as proven, never a recent sign-in
 
 it("names itself among the modules holding sessions to the subject's factors", async () => {
 	const seen = contract<readonly Enforcer[]>("seen-enforcers");
-	const reader = defineModule({ name: "reader" }, (m) => [
+	const reader = defineModule({ name: "reader", takes: [enforcers] }, (m) => [
 		m.provide(seen).by((c) => c.collect(enforcers)),
 	]);
 	const { app } = await serve(new Set(), {}, [reader]);
