@@ -26,7 +26,10 @@ export function checkRequest(
 	const responseType = one("response_type");
 	if (!responseType) return refusal("invalid_request", "response_type is required");
 	if (responseType !== "code") return refusal("unsupported_response_type");
-	if (params.has("request") || params.has("request_uri")) return refusal("request_not_supported");
+	// OpenID Connect Core §6.1 and §6.2: no request object is taken, by value or by URI, each
+	// told by its own code.
+	if (params.has("request")) return refusal("request_not_supported");
+	if (params.has("request_uri")) return refusal("request_uri_not_supported");
 	const mode = one("response_mode");
 	if (mode !== undefined && mode !== "query")
 		return refusal("invalid_request", "response_mode must be query");
