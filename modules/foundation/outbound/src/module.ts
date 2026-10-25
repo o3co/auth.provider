@@ -22,7 +22,7 @@ import {
 	type SignedOutbound,
 	signedOutbound,
 } from "./contract.ts";
-import { requestSent } from "./credential/credential.ts";
+import { sentRequest } from "./credential/credential.ts";
 import {
 	inProcessPool,
 	LookupRefused,
@@ -34,7 +34,6 @@ import {
 import { plainIpv4Rules, plainIpv4Setting, takesIpv4 } from "./plain-ipv4.ts";
 import { type ResolverPool, resolverPool } from "./resolver-process/contract.ts";
 import {
-	decided,
 	type Lookup,
 	type Resolver,
 	type Route,
@@ -193,7 +192,6 @@ export function outboundOver(
 					direct: (host) => policy.listed(host, direct),
 				};
 	const requestPlace = places(settings["max-concurrent"]);
-	const sentRequest = requestSent(decided);
 	const go = async (url: string, request: OutboundRequest, narrower: Narrower, signed: boolean) => {
 		const limits = policy.limitsOf(narrower, signed);
 		const sent = sentRequest(request, signed);

@@ -18,7 +18,7 @@
 - Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
 - A request goes only to a URL the policy admits; a name is resolved once, as the URL writes it (a trailing dot kept), and the request connects only to the first of the addresses the policy checked, all it resolved to.
 - outbound alone sets `User-Agent` (`auth-provider`), `Accept-Encoding`, `Host` and the headers that frame and carry the message.
-- A credential goes only as a request's `credential`, as `Authorization` or the header `credentialHeader` names, never told and never for signed material, under the internal module `credential`'s rules. A redirect never carries it, being refused.
+- A credential goes only as a request's `credential`, as `Authorization` or the header `credentialHeader` names, never told and never for signed material, under the internal module `credential`'s rules (`credentialHeaderRefusal` answers a name at boot). A redirect never carries it, being refused.
 - A 3xx other than 304 is refused as a redirect; a 101, an encoded answer, a body past the size cap, or headers past Node's 16 KiB are unavailable, and the connection is closed; other 1xx answers are waited past.
 - One deadline, the policy's limit, covers resolving (or the tunnel), connecting, the headers and the body; the body is cut at the policy's size.
 - A request past `max-concurrent` is unavailable at once, and each request gives its place back however it ends. Name lookups count apart: `max-lookups` at once (four unless set, never more than `max-concurrent`); one more is unavailable at once.

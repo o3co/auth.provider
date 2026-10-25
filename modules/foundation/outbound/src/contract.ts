@@ -3,6 +3,7 @@ import type { Narrower } from "@mod/outbound-policy";
 
 // The destination policy's own, as `fetch` takes and throws them.
 export { DestinationRefused, type Narrower, type RefusalReason } from "@mod/outbound-policy";
+export { credentialHeaderRefusal } from "./credential/credential.ts";
 
 /** Why no usable answer came, for a caller to log by; it carries no value and no body. */
 export type OutboundFailure =

@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { credentialPolicy } from "@mod/outbound-policy";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { DestinationRefused } from "../../contract.ts";
+import { credentialHeaderRefusal, DestinationRefused } from "../../contract.ts";
 import outboundModule, { outboundOver, section } from "../../module.ts";
 import type { Lookup } from "../../transport.ts";
 
@@ -155,6 +155,23 @@ it("refuses a credential header the caller writes too, in any case, or one outbo
 		expect(told).not.toContain("other-value");
 	}
 	expect(seen.length).toBe(before);
+});
+
+it("answers at boot whether a header may carry a credential, as a request would be refused", () => {
+	for (const name of ["x-internal-token", "X-Internal-Token", "authorization"]) {
+		expect(credentialHeaderRefusal(name), name).toBeUndefined();
+	}
+	for (const name of [
+		"Host",
+		"content-length",
+		"TE",
+		"cookie",
+		"proxy-authorization",
+		"x token",
+		"",
+	]) {
+		expect(credentialHeaderRefusal(name), name).toMatch(/^a credential /);
+	}
 });
 
 it("never sends a credential under a named header for signed material", async () => {

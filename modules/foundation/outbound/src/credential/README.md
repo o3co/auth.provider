@@ -7,10 +7,11 @@ Internal module of `outbound`: how a request's credential is sent, and the heade
 
 ## Not here
 - Where a credential may go (more than one origin, neither https nor a named plain pair): `outbound-policy`'s credential policy, which outbound answers at boot.
-- The headers outbound sets alone and how the message is framed: the package's transport, which hands this module their names.
+- The headers outbound sets alone and how the message is framed: the package's transport, whose names this module reads.
 
 ## Offers
-- `requestSent(decided)` (the names of the headers outbound sets alone) → the sent request of a request, for plain or signed material.
+- `sentRequest` (request, signed) → the request as sent, for plain or signed material.
+- `credentialHeaderRefusal` (name), offered on the package's contract: why a credential may not go as that header, in the words a request naming it is refused with, or none; for a caller refusing its own setting at boot.
 
 ## Invariants
 - A credential goes as `Authorization`, or as the header `credentialHeader` names, lowercased, its value as given; a caller writing either header itself, in any case, is a TypeError.
@@ -19,4 +20,4 @@ Internal module of `outbound`: how a request's credential is sent, and the heade
 - A TypeError or refusal tells no header's value.
 
 ## Depends on
-- The package's request and refusal types.
+- The package's request type and transport (the headers it sets alone); `outbound-policy` (`DestinationRefused`).
