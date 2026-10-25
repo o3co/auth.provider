@@ -45,33 +45,39 @@ const claimsShape = z.object({ sub: z.string().min(1), jti: bounded });
 /**
  * Checks everything but single use: the signer is read unverified, its subject's shape checked,
  * and only then are its keys looked up, among the signers of the issuer the assertion names.
+ * Every refusal before the signature holds answers alike, so the answer tells nothing of which
+ * signers have keys; one after keeps its own words.
  */
 export async function check(
 	assertion: string,
 	trusted: ReadonlyMap<string, Signers>,
 ): Promise<Checked> {
 	const invalid = (reason: string) => ({ kind: "invalid", reason }) as const;
-	let issuer: string;
+	const untrusted = invalid("untrusted signer");
+	let issuer: unknown;
 	let signer: { readonly sub: unknown; readonly kid: unknown };
 	try {
 		const claims = decodeJwt(assertion);
-		issuer = String(claims.iss);
+		issuer = claims.iss;
 		signer = { sub: claims.sub, kid: decodeProtectedHeader(assertion).kid };
 	} catch {
 		return invalid("not a JWT");
 	}
+	// An issuer is a string, never coerced to one.
+	if (typeof issuer !== "string") return untrusted;
 	const signers = trusted.get(issuer);
-	if (!signers) return invalid("untrusted signer");
+	if (!signers) return untrusted;
 	const { sub, kid } = signer;
-	if (!isWellFormedSubject(sub)) return invalid("missing or malformed claims");
+	if (!isWellFormedSubject(sub)) return untrusted;
 	// Read unverified, so bounded before it reaches a key source.
-	if (kid !== undefined && !bounded.safeParse(kid).success) return invalid("malformed assertion");
-	if (signers.thumbprint && !isThumbprint(sub)) return invalid("subject is no key thumbprint");
+	if (kid !== undefined && !bounded.safeParse(kid).success) return untrusted;
+	if (signers.thumbprint && !isThumbprint(sub)) return untrusted;
 	const verifier = await signers.verifierFor(sub, kid as string | undefined);
-	if (!verifier) return invalid("untrusted signer");
+	if (!verifier) return untrusted;
 	const verified = await verifier.verify(assertion);
 	if (verified.kind === "unavailable") throw new Unavailable("jwt-bearer");
-	if (verified.kind === "invalid") return invalid(said[verified.reason]);
+	if (verified.kind === "invalid")
+		return verified.signed ? invalid(said[verified.reason]) : untrusted;
 	const parsed = claimsShape.safeParse(verified.claims);
 	if (!parsed.success) return invalid("missing or malformed claims");
 	if (parsed.data.sub !== sub) return invalid("wrong subject");

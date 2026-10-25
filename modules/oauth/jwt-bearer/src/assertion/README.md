@@ -12,7 +12,8 @@ Internal module of `jwt-bearer`: checking a JWT assertion, all but its single us
 - `check` (assertion, signers by issuer) → valid (issuer, subject, `jti`, expiry, and when it says it was made) / invalid with the reason the grant answers.
 
 ## Invariants
-- Nothing read unverified reaches a key source unchecked: the issuer must be trusted, the subject well formed as `users` bounds a subject (a key thumbprint where its issuer says so), and a `kid` text of 1 to 256 well-formed characters.
+- Nothing read unverified reaches a key source unchecked: the issuer must be a string and trusted, the subject well formed as `users` bounds a subject (a key thumbprint where its issuer says so), and a `kid` text of 1 to 256 well-formed characters.
+- Every refusal before the signature holds is `untrusted signer`: no trusted issuer, a signer of the wrong shape, no key or none that fits, an algorithm not taken, a malformed header, a signature that does not hold. One after it (`external-jwt`'s `signed`) keeps its words.
 - The verified `sub` must be the one read unverified; `jti` is text of 1 to 256 well-formed characters.
 - A key source that cannot answer throws Unavailable.
 

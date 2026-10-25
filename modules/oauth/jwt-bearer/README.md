@@ -19,7 +19,7 @@
 
 ## Invariants
 - Issued tokens do not outlive the assertion's expiry.
-- A `kid` an assertion names is text of 1 to 256 well-formed characters, or the assertion is malformed, before any key is asked for.
+- A `kid` an assertion names is text of 1 to 256 well-formed characters, and its `iss` a string, before any key is asked for. Every refusal before the signature holds answers `untrusted signer`, so the answer tells nothing of which signers have keys.
 - The assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under this section's policy: the algorithms of that issuer's keys (any the grant takes, for a key set), `clock-skew` as the allowance, `max-assertion-lifetime` as the longest lifetime. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
 - A key set is fetched only at https from its issuer's host; a `jwks-uri` not at https or on another host, or with an issuer that is no URL, refuses the boot. While no key set can be had, the grant is unavailable.
 - Boot is refused on an issuer with keys both written and contributed, or neither; on `upstream` without `linked`, or `linked` without it; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them; on `subject-is-key-thumbprint` with a key set, which cannot tell which key signed; and on an issuer without `subject`.
