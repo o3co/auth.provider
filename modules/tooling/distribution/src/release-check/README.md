@@ -8,7 +8,7 @@
 - Packing and sealing them: `release`, whose packing it uses, so it checks the tarballs the release would publish.
 
 ## Offers
-- `pnpm release:check`: builds and packs the release as `release-pack` does, the index sealed, then checks it; it tells each problem and exits 1 on any.
+- `pnpm release:check [<tarballs>]`: checks the tarballs in the directory named, the very ones the release publishes; named none, builds and packs the release as `release-pack` does, the index sealed, and checks those. It tells each problem and exits 1 on any.
   - Each pattern: an app made with the packed `create-auth-provider`, installed from the tarballs alone, type-checked, and booted to `/readyz` or to its refusals, each told.
   - By hand, as one keeping its own composition root does: `combinations`' full names, made published, installed from the tarballs, each module imported, and assembled to the kernel's refusals.
   - Outside: a package outside the release composed beside it, from a registry of the check's own (`outside-scene`).
