@@ -1,5 +1,10 @@
 import type { Audit } from "@mod/audit";
-import { type Client, type Clients, recordRefusedAuthentication } from "@mod/clients";
+import {
+	type Authentication,
+	type Client,
+	type Clients,
+	recordRefusedAuthentication,
+} from "@mod/clients";
 import type { OAuthError } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { contract } from "@mod/kernel";
@@ -68,20 +73,18 @@ export async function authenticateClient(
 		return { kind: "client", client: authenticated.client, challenges: authenticated.challenges };
 	}
 	recordRefusedAuthentication(audit, request, authenticated);
-	if (authenticated.reason === "multiple_methods") {
-		return {
-			kind: "refused",
-			response: oauthError(400, "invalid_request", "use one client authentication method"),
-		};
+	return { kind: "refused", response: refusedAuthenticationAnswer(authenticated) };
+}
+
+/** The answer to a refused authentication: two methods or malformed credentials `400`, any other `401` with its challenges. */
+export function refusedAuthenticationAnswer(
+	refused: Extract<Authentication, { readonly kind: "refused" }>,
+): HttpResponse {
+	if (refused.reason === "multiple_methods") {
+		return oauthError(400, "invalid_request", "use one client authentication method");
 	}
-	if (authenticated.reason === "malformed_credentials") {
-		return {
-			kind: "refused",
-			response: oauthError(400, "invalid_request", "malformed client credentials"),
-		};
+	if (refused.reason === "malformed_credentials") {
+		return oauthError(400, "invalid_request", "malformed client credentials");
 	}
-	return {
-		kind: "refused",
-		response: challenged(oauthError(401, "invalid_client"), authenticated.challenges),
-	};
+	return challenged(oauthError(401, "invalid_client"), refused.challenges);
 }

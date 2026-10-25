@@ -1,13 +1,15 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
-import type { Client, Clients } from "@mod/clients";
-import type { Grant, GrantInput, SessionIssuance, TargetRule } from "@mod/grants";
+import { type Client, type Clients, recordRefusedAuthentication } from "@mod/clients";
+import type { Grant, GrantInput, GrantOutcome, SessionIssuance, TargetRule } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
+import { Unavailable } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
 import type { Tokens } from "@mod/tokens";
 import events from "../audit-events.ts";
-import { authenticateClient, oauthError } from "../contract.ts";
+import { oauthError, refusedAuthenticationAnswer } from "../contract.ts";
+import { identifiedClient, identifierOf } from "../identified/identified.ts";
 import { answeredBody } from "./answer.ts";
 import { challenged } from "./challenges.ts";
 import { issuanceFor, refusedAnswer } from "./issuance.ts";
@@ -53,8 +55,10 @@ export function grantInputOf(parts: {
 	readonly told: readonly SessionIssuance[];
 	/** Told the names of the claims the grant added to each token issued. */
 	readonly added?: (names: readonly string[]) => void;
+	/** What the grant's own `identify` answered with the client; none for a client that authenticated. */
+	readonly identified?: unknown;
 }): GrantInput {
-	const { request, client, grantType, binding, targets, tokens, told, added } = parts;
+	const { request, client, grantType, binding, targets, tokens, told, added, identified } = parts;
 	const { param, value } = readerOf(request);
 	return {
 		request,
@@ -63,6 +67,7 @@ export function grantInputOf(parts: {
 		value,
 		target: (audience, within) => targets.target({ param, audience, within }),
 		...(binding ? { binding } : {}),
+		...(identified === undefined ? {} : { identified }),
 		...issuanceFor(tokens, grantType, binding, told, added),
 	};
 }
@@ -99,10 +104,31 @@ export function tokenEndpoint(
 	audit: Audit,
 ): Pick<Route, "handle" | "unavailable"> {
 	const recorded = declaredAudit(audit, events);
+	/** A grant's error as answered; a `401` carries the challenges given. */
+	const grantError = (
+		outcome: Extract<GrantOutcome, { readonly kind: "error" }>,
+		challenges: readonly string[],
+	) => {
+		// A status but 400 or 401 is answered as if the grant named none.
+		const named = outcome.status === 400 || outcome.status === 401 ? outcome.status : undefined;
+		const status = named ?? (outcome.error === "invalid_client" ? 401 : 400);
+		const response = oauthError(status, outcome.error, outcome.description, outcome.members);
+		return status === 401 ? challenged(response, challenges) : response;
+	};
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
-		const authenticated = await authenticateClient(clients, request, audit);
-		if (authenticated.kind === "refused") return authenticated.response;
-		const client = authenticated.client;
+		const authenticated = await clients.authenticate(request);
+		const named = readerOf(request).param("grant_type");
+		const identifier = identifierOf(clients, grants, request, named);
+		// Any other refusal is answered and recorded as `authenticateClient` does; a request a grant
+		// identifies the client of has not tried to authenticate, so no failure is recorded.
+		if (authenticated.kind === "refused" && !identifier) {
+			recordRefusedAuthentication(audit, request, authenticated);
+			return refusedAuthenticationAnswer(authenticated);
+		}
+		let client = authenticated.kind === "authenticated" ? authenticated.client : undefined;
+		const { challenges } = authenticated;
+		// Every record of a request whose client a grant identifies says so, the client once it is known.
+		const identified = identifier ? { identified: "grant" } : {};
 		const source = determinedSource(request);
 		// Once the client is known, each answer but an unavailable one is recorded; a known grant type is named.
 		// The claims grants added to the tokens issued for this request, by name; never their values.
@@ -112,9 +138,10 @@ export function tokenEndpoint(
 			failure?: { reason: string; error: string; policy?: string; refusal?: string },
 		) => {
 			const attributes = {
-				client: client.id,
+				...(client === undefined ? {} : { client: client.id }),
 				...(source === undefined ? {} : { source }),
 				...(grantType === undefined ? {} : { grant_type: grantType }),
+				...identified,
 			};
 			if (failure)
 				recorded.record("token.issued.failure", { attributes: { ...attributes, ...failure } });
@@ -164,6 +191,21 @@ export function tokenEndpoint(
 				description: `no ${body} body for this grant`,
 			});
 		}
+		let identifiedBy: unknown;
+		if (identifier) {
+			const identity = await identifiedClient(clients, identifier, {
+				request,
+				...readerOf(request),
+			});
+			if (identity.kind === "error") {
+				record(grantType, { reason: "client_not_identified", error: identity.error });
+				return grantError(identity, challenges);
+			}
+			client = identity.client;
+			identifiedBy = identity.identified;
+		}
+		// Cannot come: a request is past here authenticated, or its client identified just above.
+		if (client === undefined) throw new Unavailable("token-endpoint");
 		if (!clientAllowance.allowsGrant(client, grantType)) {
 			return refuse({ grantType, reason: "grant_type_not_allowed", error: "unauthorized_client" });
 		}
@@ -209,7 +251,7 @@ export function tokenEndpoint(
 			return refuse({ grantType, reason: "untargeted", error, description });
 		}
 		const input = grantInputOf({
-			...{ request, client, grantType, binding, targets, tokens, told },
+			...{ request, client, grantType, binding, targets, tokens, told, identified: identifiedBy },
 			added: (names) => {
 				for (const name of names) addedNames.add(name);
 			},
@@ -224,11 +266,7 @@ export function tokenEndpoint(
 		}
 		if (outcome.kind === "error") {
 			record(grantType, { reason: "grant_refused", error: outcome.error });
-			// A status but 400 or 401 is answered as if the grant named none.
-			const named = outcome.status === 400 || outcome.status === 401 ? outcome.status : undefined;
-			const status = named ?? (outcome.error === "invalid_client" ? 401 : 400);
-			const response = oauthError(status, outcome.error, outcome.description, outcome.members);
-			return status === 401 ? challenged(response, authenticated.challenges) : response;
+			return grantError(outcome, challenges);
 		}
 		record(grantType);
 		return jsonAnswer(200, answeredBody(outcome.body));
