@@ -37,13 +37,13 @@ import {
 	linkedSubjects,
 	signerKeys,
 	spentAssertions,
-} from "../src/contract.ts";
-import jwtBearer from "../src/module.ts";
+} from "../../contract.ts";
+import jwtBearer from "../../module.ts";
 
 /** Each assertion the grant's own checking was asked of, so a test can tell no delegated one reaches it. */
 const ordinary = vi.hoisted(() => ({ asked: [] as string[] }));
-vi.mock("../src/assertion/assertion.ts", async (original) => {
-	const real = await original<typeof import("../src/assertion/assertion.ts")>();
+vi.mock("../../assertion/assertion.ts", async (original) => {
+	const real = await original<typeof import("../../assertion/assertion.ts")>();
 	return {
 		...real,
 		check: (
