@@ -8,8 +8,9 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 |---|---|---|---|---|---|---|---|---|---|---|
 | [RFC 6749: The OAuth 2.0 Authorization Framework](rfc6749.md) | 112 | 79 | 0 | 79 | 0 | 24 | 0 | 24 | 0 | 9 |
 | [RFC 7009: OAuth 2.0 Token Revocation](rfc7009.md) | 9 | 7 | 0 | 7 | 0 | 2 | 0 | 2 | 0 | 0 |
+| [RFC 7521: Assertion Framework for OAuth 2.0 Client Authentication and Authorization Grants](rfc7521.md) | 31 | 28 | 0 | 28 | 0 | 1 | 0 | 1 | 0 | 2 |
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 8414: OAuth 2.0 Authorization Server Metadata](rfc8414.md) | 26 | 18 | 0 | 18 | 0 | 2 | 0 | 2 | 0 | 6 |
 | [RFC 8707: Resource Indicators for OAuth 2.0](rfc8707.md) | 3 | 2 | 0 | 2 | 0 | 1 | 0 | 1 | 0 | 0 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
-| Total | 168 | 119 | 0 | 119 | 0 | 32 | 0 | 32 | 0 | 17 |
+| Total | 199 | 147 | 0 | 147 | 0 | 33 | 0 | 33 | 0 | 19 |
