@@ -272,3 +272,18 @@ it("builds the API site where nothing can write, and pushes it where none of its
 	);
 	expect(tokened.map((s) => s.name)).toEqual(["Publish the pages"]);
 });
+
+it("pushes the site onto the very pages commit it was built on, so pages moved since refuse it", () => {
+	const { build, push } = site.jobs as Record<string, Job & { outputs?: Record<string, string> }>;
+	const output = build?.outputs?.pages ?? "";
+	const step = /steps\.(\w+)\.outputs\./.exec(output)?.[1];
+	expect(step, "the build gives the pages commit it built on").toBeDefined();
+	const read = (build?.steps ?? []).find((s) => (s as Step & { id?: string }).id === step);
+	expect(read?.run).toMatch(/git -C pages rev-parse HEAD/);
+	const checkout = (push?.steps ?? []).find(uses("actions/checkout"));
+	expect(checkout?.with?.ref).toBe("${{ needs.build.outputs.pages }}");
+	// No force: onto pages moved since, the push is no fast-forward and is refused.
+	const pushed = (push?.steps ?? []).filter(runs(" push ")).map((s) => s.run ?? "");
+	expect(pushed.length).toBe(1);
+	expect(pushed[0]).not.toMatch(/--force|-f\b|\+HEAD|--force-with-lease/);
+});
