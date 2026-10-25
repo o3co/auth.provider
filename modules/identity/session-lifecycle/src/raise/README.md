@@ -20,7 +20,7 @@ Internal module of `session-lifecycle`: raising a session's authentication (step
 ## Invariants
 - A raise keeps the handle and the authentication time.
 - It writes the new secret's index, confirms the removal of the old one, then raises the record.
-- When the removal cannot be confirmed, the raise is unavailable (it becomes a logout).
+- When the removal cannot be confirmed, the raise is unavailable: nothing is raised and no new cookie is given; the old cookie still enters the unraised session unless its removal landed.
 - The new cookie lives for what is left of the session, counted from its opening.
 
 ## Depends on

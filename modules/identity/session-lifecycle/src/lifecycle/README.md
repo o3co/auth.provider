@@ -37,7 +37,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - Every state change is written, and a step answers that the state moved only after the confirmed write returns.
 - Without a record, a close writes a closed mark before it answers closed.
 - A handle to close is added to the closings first, and taken off once closed.
-- A closing whose participants keep failing is retried after half its age (at least the sweep interval, at most 1 hour), and that time is logged.
+- A closing whose participants keep failing is retried after half its age (at least the sweep interval, at most 1 hour), and the closing's age is logged (`session-lifecycle.closing_pending`).
 - A closing whose record a host cannot read is put off the same way, by that host alone.
 - The cookie secret is 256 random bits, checked for its shape before any lookup.
 - The index's place keeps the secret only as a name it cannot be had from.
