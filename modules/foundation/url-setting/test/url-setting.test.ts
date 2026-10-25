@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import {
 	type ConfiguredUrl,
+	isLoopbackHttp,
 	isLoopbackName,
 	sameTarget,
 	urlSetting,
@@ -481,6 +482,22 @@ describe("two configured URLs naming one target", () => {
 			"https://ledger.example/w%2Fclear",
 		]) {
 			expect(same(clear, other), other).toBe(false);
+		}
+	});
+});
+
+describe("isLoopbackHttp", () => {
+	it("tells a plain-http URL on a loopback host from any other", () => {
+		for (const url of ["http://localhost:3000/login", "http://127.0.0.1/x", "http://[::1]:8080/"]) {
+			expect(isLoopbackHttp(url), url).toBe(true);
+		}
+		for (const url of [
+			"https://localhost/login",
+			"http://a.example/",
+			"https://a.example/",
+			"not a url",
+		]) {
+			expect(isLoopbackHttp(url), url).toBe(false);
 		}
 	});
 });

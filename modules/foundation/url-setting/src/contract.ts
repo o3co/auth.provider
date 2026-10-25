@@ -76,6 +76,15 @@ export function isLoopbackName(host: string): boolean {
 	return labels.at(-1) === "localhost" && labels.every((label) => label !== "");
 }
 
+/**
+ * Whether a URL is plain `http` on a loopback host (`isLoopbackName`), as a module's own production
+ * check asks of a URL `loopbackHttp` took: such a page is the operator's machine, never a user's.
+ */
+export function isLoopbackHttp(url: string): boolean {
+	const parsed = URL.parse(url);
+	return parsed?.protocol === "http:" && isLoopbackName(parsed.hostname);
+}
+
 function form(kind: string): string {
 	return `a URL as the URL parser writes it; refused for ${kind}`;
 }
