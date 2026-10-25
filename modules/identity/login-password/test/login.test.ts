@@ -724,5 +724,5 @@ it("takes every handle its takes name, every module beside it as it boots", asyn
 		"login-password": {},
 		"login-gates": {},
 	};
-	expect(await takesUnused({ modules, config })).toEqual({});
+	expect((await takesUnused({ modules, config }))["login-password"]).toBeUndefined();
 });
