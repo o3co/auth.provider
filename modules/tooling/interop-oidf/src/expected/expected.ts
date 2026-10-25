@@ -3,6 +3,7 @@ import {
 	type ExceptionEntry,
 	exceptionProblems,
 	type Item,
+	type Ledger,
 } from "@mod/spec-checklist";
 
 /** A result of the suite's the harness expects, as written in the package: the suite's fields and its class. */
@@ -43,6 +44,7 @@ export function expectedProblems(
 	known: {
 		readonly items: ReadonlyMap<string, Item>;
 		readonly decisions: ReadonlyMap<string, Decision>;
+		readonly ledgers?: ReadonlyMap<string, Ledger>;
 	},
 ): string[] {
 	const problems: string[] = [];
@@ -57,7 +59,10 @@ export function expectedProblems(
 		if (typeof e.variant !== "object" || e.variant === null)
 			problems.push(`${at}: variant is the test's own, written out`);
 		if (kind === "failure") {
-			for (const field of ["current-block", "condition", "expected-result"] as const) {
+			// A failure outside any block is logged with the empty block, which names it exactly.
+			if (typeof e["current-block"] !== "string")
+				problems.push(`${at}: current-block is written out`);
+			for (const field of ["condition", "expected-result"] as const) {
 				if (!e[field]) problems.push(`${at}: ${field} is written out`);
 			}
 		}

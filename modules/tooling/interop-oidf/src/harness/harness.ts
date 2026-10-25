@@ -53,6 +53,9 @@ async function expectedOf(name: string) {
 	const known = {
 		items: new Map(checklist.specs.flatMap((s) => s.items.map((i) => [i.id, i] as const))),
 		decisions: checklist.decisions,
+		ledgers: new Map(
+			checklist.specs.flatMap((s) => (s.ledger ? [[s.spec, s.ledger] as const] : [])),
+		),
 	};
 	const failures = await readJson<Expected[]>(
 		join(packageDir, "expected", `${name}.failures.json`),

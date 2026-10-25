@@ -1,1 +1,62 @@
-[]
+[
+	{
+		"test-name": "oidcc-userinfo-post-body",
+		"variant": {
+			"client_auth_type": "client_secret_basic",
+			"response_type": "code",
+			"response_mode": "default"
+		},
+		"configuration-filename": "op.json",
+		"current-block": "",
+		"condition": "UserInfoEndpointWithAccessTokenInBodyNotSupported",
+		"expected-result": "warning",
+		"class": "optional",
+		"spec": "rfc6750",
+		"section": "2.2"
+	},
+	{
+		"test-name": "oidcc-scope-profile",
+		"variant": {
+			"client_auth_type": "client_secret_basic",
+			"response_type": "code",
+			"response_mode": "default"
+		},
+		"configuration-filename": "op.json",
+		"current-block": "",
+		"condition": "VerifyScopesReturnedInUserInfoClaims",
+		"expected-result": "warning",
+		"class": "optional",
+		"spec": "oidc-core",
+		"section": "5.4"
+	},
+	{
+		"test-name": "oidcc-scope-email",
+		"variant": {
+			"client_auth_type": "client_secret_basic",
+			"response_type": "code",
+			"response_mode": "default"
+		},
+		"configuration-filename": "op.json",
+		"current-block": "Verify authorization endpoint response",
+		"condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
+		"expected-result": "warning",
+		"class": "optional",
+		"spec": "oidc-core",
+		"section": "5.4"
+	},
+	{
+		"test-name": "oidcc-alternate-happy-flow",
+		"variant": {
+			"client_auth_type": "client_secret_basic",
+			"response_type": "code",
+			"response_mode": "default"
+		},
+		"configuration-filename": "op.json",
+		"current-block": "Verify authorization endpoint response",
+		"condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
+		"expected-result": "warning",
+		"class": "optional",
+		"spec": "oidc-core",
+		"section": "5.4"
+	}
+]

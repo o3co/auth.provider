@@ -140,4 +140,26 @@ describe("an expected result the harness gives the suite", () => {
 			},
 		]);
 	});
+
+	it("takes a failure outside any block, as the suite logs some, by its empty block", () => {
+		expect(expectedProblems([failure({ "current-block": "" })], "failure", known)).toEqual([]);
+	});
+
+	it("takes an optional result where its spec and section are named, as the checklist judges it", () => {
+		const optional = failure({
+			class: "optional",
+			spec: "oidc-core",
+			section: "5.4",
+			adaptation: undefined,
+		});
+		const withLedgers = { ...known, ledgers: new Map([["oidc-core", { rows: [] } as never]]) };
+		expect(expectedProblems([optional], "failure", withLedgers)).toEqual([]);
+		expect(
+			expectedProblems(
+				[failure({ class: "optional", spec: "oidc-core", adaptation: undefined })],
+				"failure",
+				withLedgers,
+			),
+		).toEqual([expect.stringContaining("section")]);
+	});
 });
