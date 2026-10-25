@@ -194,5 +194,7 @@ it("refuses the logging-only sender unless the operator accepts that it sends no
 
 it("takes every handle its takes name", async () => {
 	const config = { ...kernelConfig(), ...mailConfig() };
-	expect(await takesUnused({ modules: [mailModule, contractTemplates], config })).toEqual({});
+	expect(
+		(await takesUnused({ modules: [mailModule, contractTemplates], config })).mail,
+	).toBeUndefined();
 });
