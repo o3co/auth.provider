@@ -18,25 +18,27 @@ export async function startTunnel(given: {
 }): Promise<Tunnel> {
 	const opened: string[] = [];
 	const sockets = new Set<Socket>();
+	// Own entries alone: a name like `constructor` is no destination.
+	const allowed = new Map(Object.entries(given.allow));
 	const server = createServer((_req, res) => {
 		res.writeHead(405, { allow: "CONNECT" });
 		res.end();
 	});
 	server.on("connect", (req, client: Socket, head: Buffer) => {
 		sockets.add(client);
-		client.on("close", () => sockets.delete(client));
 		client.on("error", () => client.destroy());
 		const target = req.url ?? "";
-		const at = given.allow[target];
+		const at = allowed.get(target);
 		if (at === undefined) {
+			client.on("close", () => sockets.delete(client));
 			client.end("HTTP/1.1 403 Forbidden\r\n\r\n");
 			return;
 		}
-		const [host, port] = [
-			at.slice(0, at.lastIndexOf(":")),
-			Number(at.slice(at.lastIndexOf(":") + 1)),
-		];
-		const upstream = connect(port, host, () => {
+		const colon = at.lastIndexOf(":");
+		/** Whether this request's own tunnel opened: an error before is a 502, after it ends the tunnel. */
+		let established = false;
+		const upstream = connect(Number(at.slice(colon + 1)), at.slice(0, colon), () => {
+			established = true;
 			opened.push(target);
 			client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
 			if (head.length > 0) upstream.write(head);
@@ -44,13 +46,17 @@ export async function startTunnel(given: {
 			client.pipe(upstream);
 		});
 		sockets.add(upstream);
+		// A client gone, however abruptly, takes its tunnel's other side with it, opened or opening.
+		client.on("close", () => {
+			sockets.delete(client);
+			upstream.destroy();
+		});
 		upstream.on("close", () => {
 			sockets.delete(upstream);
 			client.destroy();
 		});
 		upstream.on("error", () => {
-			if (!client.destroyed && opened.at(-1) !== target)
-				client.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+			if (!established && !client.destroyed) client.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
 			else client.destroy();
 		});
 	});

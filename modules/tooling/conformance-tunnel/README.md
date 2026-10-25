@@ -11,7 +11,8 @@
 - `startTunnel({ allow })`: a CONNECT proxy on a port of loopback it takes; `allow` maps each destination, `host:port` as the app names it, to where it listens. Its `opened()` lists the destinations it opened, in order; `stop()` closes every tunnel and the proxy.
 
 ## Invariants
-- A tunnel opens only to a destination `allow` names; any other is `403`, any method but CONNECT `405`, and a destination that cannot be reached `502`.
+- A tunnel opens only to a destination `allow` names as its own entry (a name like `constructor` is none); any other is `403`, any method but CONNECT `405`, and a destination that cannot be reached `502`, judged for each request alone.
+- A client gone, however abruptly, takes its tunnel's other side with it, opened or still opening.
 - Bytes are carried as they come, both ways: the tunnel neither ends TLS nor reads what it carries.
 
 ## Depends on
