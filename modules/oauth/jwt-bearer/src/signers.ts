@@ -6,12 +6,22 @@ import { algorithms, type SignerAlgorithm, type SignerKey, type SignerKeys } fro
 /** A JWK thumbprint's shape (RFC 7638, SHA-256): 43 characters of base64url. */
 export const isThumbprint = (value: string) => /^[A-Za-z0-9_-]{43}$/.test(value);
 
+/**
+ * An assertion's signer, read unverified: `lookup`, the subject its keys are asked by (its key's
+ * thumbprint where its issuer says so); `expectedSub`, the `sub` its signature must hold; `kid`.
+ */
+export interface Signer {
+	readonly lookup: string;
+	readonly expectedSub: string;
+	readonly kid: string | undefined;
+}
+
 /** One issuer's signers: the verifier for an assertion's signer, picked before anything is verified. */
 export interface Signers {
 	/** Whether a signer's subject is its signing key's JWK thumbprint. */
 	readonly thumbprint: boolean;
 	/** None where no key is known for the signer; throws Unavailable where that cannot be told. */
-	verifierFor(subject: string, kid: string | undefined): Promise<Verifier | undefined>;
+	verifierFor(signer: Signer): Promise<Verifier | undefined>;
 }
 
 const thumbprintOf = (jwk: SignerKey) => keyThumbprint(jwk).catch(() => undefined);
@@ -33,7 +43,7 @@ export async function writtenSigners(
 		const own = read && (await keyThumbprint(read).catch(() => undefined));
 		if (own) byThumbprint.set(own, jwt.verifierOf({ pem: [key] }, policy));
 	}
-	return { thumbprint, verifierFor: async (subject) => byThumbprint.get(subject) };
+	return { thumbprint, verifierFor: async (signer) => byThumbprint.get(signer.lookup) };
 }
 
 /** A key set fetched from its URL. */
@@ -61,20 +71,24 @@ export function contributedSigners(
 	};
 	return {
 		thumbprint,
-		verifierFor: async (subject, kid) => {
-			const answer = await asked(subject, kid);
+		verifierFor: async ({ lookup, expectedSub, kid }) => {
+			const answer = await asked(lookup, kid);
 			if (answer?.kind === "none") return undefined;
 			if (answer?.kind !== "keys" || !Array.isArray(answer.keys) || !taken(answer.algorithms)) {
 				throw new Unavailable("jwt-bearer");
 			}
 			const chosen: SignerKey[] = [];
 			for (const key of answer.keys) {
-				if (!thumbprint || (await thumbprintOf(key)) === subject) chosen.push(key);
+				if (!thumbprint || (await thumbprintOf(key)) === lookup) chosen.push(key);
 			}
 			if (chosen.length === 0) return undefined;
 			return jwt.verifierOf(
 				{ inline: chosen },
-				{ ...policy, algorithms: answer.algorithms, expect: { ...policy.expect, sub: subject } },
+				{
+					...policy,
+					algorithms: answer.algorithms,
+					expect: { ...policy.expect, sub: expectedSub },
+				},
 			);
 		},
 	};
