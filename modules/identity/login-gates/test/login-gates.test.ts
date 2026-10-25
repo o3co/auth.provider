@@ -35,11 +35,12 @@ async function boot(
 	gates: Record<string, unknown> = {},
 	log = runtime.log,
 	session: Module = sessionStandIn,
+	environment: "production" | "development" = "production",
 ) {
 	const app = await assemble({
 		modules: [http, session, subjectRevocationStandIn, gatesModule, ...extra],
 		config: {
-			...kernelConfig(),
+			...kernelConfig({ environment }),
 			...httpConfig({ "public-origin": "https://as.example" }),
 			"login-gates": gates,
 		},
@@ -388,7 +389,8 @@ it("refuses to start with a return target that is not an https URL (http only on
 
 it("starts with a return target as http on a loopback host, and refuses http on any other host", async () => {
 	const local = ["http://localhost:3000/", "http://127.0.0.1:3000/home", "http://[::1]:3000/"];
-	const l = await boot([], { "return-targets": local });
+	// Plain http on a loopback host is for trying it on one machine: a development deployment.
+	const l = await boot([], { "return-targets": local }, runtime.log, sessionStandIn, "development");
 	for (const target of local) expect(l.returnAllowed(target), target).toBe(true);
 	for (const target of [
 		"http://app.example/",
@@ -521,4 +523,13 @@ it("takes every handle its takes name", async () => {
 	const modules = [http, sessionStandIn, subjectRevocationStandIn, gatesModule];
 	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
 	expect((await takesUnused({ modules, config }))["login-gates"]).toBeUndefined();
+});
+
+it("refuses in production a return target on a loopback host", () => {
+	const ask = (targets: string[]) =>
+		gatesModule.refusedInProduction?.(gatesModule.section?.parse({ "return-targets": targets }));
+	expect(
+		ask(["https://app.example/back", "http://127.0.0.1:3000/back"])?.map((r) => r.key),
+	).toEqual(["return-targets"]);
+	expect(ask(["https://app.example/back"])).toEqual([]);
 });

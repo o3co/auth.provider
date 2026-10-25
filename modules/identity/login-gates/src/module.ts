@@ -1,7 +1,7 @@
 import { type HttpRequest, site } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { type LoginFacts, type Session, sessions } from "@mod/session";
-import { urlSetting } from "@mod/url-setting";
+import { loopbackPagesRefused, urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 import {
 	amrSources,
@@ -26,6 +26,7 @@ const section = z.strictObject({
 export default defineModule(
 	{
 		name: "login-gates",
+		refusedInProduction: (s) => loopbackPagesRefused({ "return-targets": s["return-targets"] }),
 		section,
 		replicaSafe: true,
 		takes: [site, amrSources, loginGates, openedAfterHold, returnPaths, sessions],
