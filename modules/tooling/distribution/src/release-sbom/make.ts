@@ -23,6 +23,7 @@ import { readBundles } from "../contract.ts";
 import { packedOf } from "../release/seal.ts";
 import { images, overridesFile } from "../release-check/image.ts";
 import { type Bom, coverageProblems, type Declared, insideBom, npmNamed } from "./boms.ts";
+import { notRemoved } from "./removal.ts";
 
 const [given, into] = process.argv.slice(2);
 if (!given || !into) {
@@ -192,8 +193,18 @@ try {
 			note: "the reference image this release built from its Dockerfile; an operator's own build takes the Node of its day",
 		});
 	} finally {
-		// Removed however the build or the listing ended, the base stage's image too.
-		spawnSync("docker", ["image", "rm", "-f", image, `${run}:base`], { stdio: "ignore" });
+		// Removed however the build or the listing ended, the base stage's image too, and held to be gone.
+		const removing = [image, `${run}:base`];
+		const answer = spawnSync("docker", ["image", "rm", "-f", ...removing], { encoding: "utf8" });
+		const listed = spawnSync("docker", ["image", "ls", "--format", "{{.Repository}}:{{.Tag}}"], {
+			encoding: "utf8",
+		});
+		const left = notRemoved(
+			removing,
+			{ status: answer.status, stderr: answer.stderr ?? "" },
+			(listed.stdout ?? "").split("\n"),
+		);
+		if (left) problems.push(left);
 	}
 
 	write(
