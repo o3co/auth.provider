@@ -72,22 +72,34 @@ export function keysOf(command: Command): StoreKey[] {
 	});
 }
 
+type Decoded = StoreKey & { readonly prefix: string };
+
+/**
+ * The keys a call writes, each with its own prefix and what it puts where it puts one: a batch's
+ * written entries (removals among them), never a key it only checks.
+ */
+function targets(command: Command): { key: Decoded; put?: unknown }[] {
+	const call = callOf(command);
+	if (!call || call.operation === "read") return [];
+	const at = (i: number) => decode(call.keys[i] ?? "");
+	if (call.operation === "batch") {
+		return (specOf(call.argv[0]) ?? []).flatMap((w) => {
+			const key = at(w.i - 1);
+			if (!key) return [];
+			return [w.put === undefined ? { key } : { key, put: parsed(w.put) }];
+		});
+	}
+	const key = at(0);
+	if (!key) return [];
+	const puts = call.operation === "putIfAbsent" || call.operation === "replaceIf";
+	return [puts ? { key, put: parsed(call.argv[1]) } : { key }];
+}
+
+const bare = ({ space, partition, name }: Decoded): StoreKey => ({ space, partition, name });
+
 /** What a write puts, by key: a value read as JSON. */
 export function writtenValues(command: Command): { key: StoreKey; value: unknown }[] {
-	const call = callOf(command);
-	const keyAt = (at: number) => {
-		const k = decode(call?.keys[at] ?? "");
-		return k && { space: k.space, partition: k.partition, name: k.name };
-	};
-	if (call?.operation === "putIfAbsent" || call?.operation === "replaceIf") {
-		const key = keyAt(0);
-		return key ? [{ key, value: parsed(call.argv[1]) }] : [];
-	}
-	if (call?.operation !== "batch") return [];
-	return (specOf(call.argv[0]) ?? []).flatMap((w) => {
-		const key = keyAt(w.i - 1);
-		return key && w.put !== undefined ? [{ key, value: parsed(w.put) }] : [];
-	});
+	return targets(command).flatMap((t) => ("put" in t ? [{ key: bare(t.key), value: t.put }] : []));
 }
 
 /** The answer of a store script: the server's run id on its first line, then its JSON. */
@@ -131,12 +143,8 @@ export function storeWrite(w: StoreWrite): Match {
 			const call = callOf(command);
 			if (!call || call.operation === "read") return false;
 			if (w.operations && !w.operations.includes(call.operation)) return false;
-			if (!w.value)
-				return call.keys.some((key) => ((k) => k !== undefined && ours(k))(decode(key)));
 			const { value } = w;
-			return writtenValues(command).some(
-				({ key, value: put }) => ours({ ...key, prefix: w.prefix }) && value(put),
-			);
+			return targets(command).some((t) => ours(t.key) && (!value || ("put" in t && value(t.put))));
 		},
 		succeeded: wrote,
 	};

@@ -60,6 +60,27 @@ const batch = (space: string, names: string[], puts: unknown[]) =>
 			"0",
 		],
 	);
+/** A batch as the adapter sends it: every key it reaches, its conditions and its writes by index. */
+const batchOf = (
+	keyNames: string[],
+	conditions: { i: number; version: string }[],
+	writes: ({ i: number; put: unknown } | { i: number; remove: true })[],
+	p = prefix,
+) =>
+	evalOf(
+		[...keyNames.map((n) => `${p}:{s:}:v:${n}`), `${p}:{s:}:#version`, `${p}:{s:}:#mark:`],
+		[
+			JSON.stringify({
+				conditions,
+				writes: writes.map((w) =>
+					"put" in w ? { i: w.i, put: JSON.stringify(w.put), kind: "never", arg: "" } : w,
+				),
+			}),
+			"",
+			"digest",
+			"0",
+		],
+	);
 const answer = (kind: string): Reply => ({
 	kind: "bulk",
 	data: Buffer.from(`run1\n${JSON.stringify({ kind })}`),
@@ -101,6 +122,33 @@ describe("a store write", () => {
 		const match = storeWrite({ prefix, space: "s", name: "b", value: (v) => v === 2 });
 		expect(match.request(batch("s", ["a", "b"], [1, 2]))).toBe(true);
 		expect(match.request(batch("s", ["a", "b"], [2, 1]))).toBe(false);
+	});
+
+	it("does not match a batch whose key in the space only stands in a condition", () => {
+		const a = storeWrite({ prefix, space: "s", name: "a" });
+		const checksAWritesB = batchOf(["a", "b"], [{ i: 1, version: "3" }], [{ i: 2, put: 1 }]);
+		expect(a.request(checksAWritesB)).toBe(false);
+		expect(storeWrite({ prefix, space: "s", name: "b" }).request(checksAWritesB)).toBe(true);
+		expect(a.request(batchOf(["a"], [], [{ i: 1, remove: true }]))).toBe(true);
+		expect(keysOf(checksAWritesB).map((k) => k.name)).toEqual(["a", "b"]);
+	});
+
+	it("matches only the deployment's prefix, a value asked for or not", () => {
+		const put = (p: string) => batchOf(["a"], [], [{ i: 1, put: 1 }], p);
+		const write = (p: string) =>
+			evalOf(
+				[`${p}:{s:}:v:a`, `${p}:{s:}:#version`, `${p}:{s:}:#mark:`],
+				["putIfAbsent", "1", "", "never", "", "", "d", "0"],
+			);
+		for (const match of [
+			storeWrite({ prefix, space: "s", name: "a", value: (v) => v === 1 }),
+			storeWrite({ prefix, space: "s", name: "a" }),
+		]) {
+			expect(match.request(put("other"))).toBe(false);
+			expect(match.request(write("other"))).toBe(false);
+			expect(match.request(put(prefix))).toBe(true);
+			expect(match.request(write(prefix))).toBe(true);
+		}
 	});
 
 	it("succeeds only where the answer's kind wrote", () => {

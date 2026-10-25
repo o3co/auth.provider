@@ -13,6 +13,7 @@ Internal module of `conformance`: the Redis adapter's wire, read in one place, s
 
 ## Invariants
 - An operation is told by the shape of its call (its keys and arguments), never by the script's text.
+- A write matches on the keys it writes, each by its own prefix: a batch's written entries (removals among them), never a key it only checks.
 - A write took effect only where its answer's kind is `written`, `removed`, `taken`, `committed` or `counted`, as the adapter counts them.
 - A call without a mark is the resend of nothing.
 - Its tests hold copies of the wire as it is now; each scene's control checks the real one, so a change of the wire fails a scene rather than passing it.
