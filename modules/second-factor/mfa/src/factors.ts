@@ -6,6 +6,7 @@ import type { AfterReset, Asked, Witnessing } from "@mod/mfa-extensions";
 import {
 	type FactorKind,
 	type FirstBindingGate,
+	issuedWayBack,
 	type Opened,
 	secondFactorAmr,
 } from "@mod/mfa-extensions";
@@ -64,15 +65,13 @@ interface Pending {
 	readonly fences?: number;
 }
 
-const isWayBack = (kind: FactorKind) => !kind.counts && !guessing(kind);
-
 /** mfa's decisions: the members of the three contracts it provides, one implementation in each app. */
 export type Decisions = FactorReading & FactorBinding & FactorManaging;
 
 export function factorDecisions(p: FactorParts): Decisions {
 	const wayBack = (factor: Factor) => {
 		const kind = p.kinds.get(factor.kind);
-		return kind !== undefined && isWayBack(kind);
+		return kind !== undefined && issuedWayBack(kind);
 	};
 	const records = factorRecords(p.stored);
 	const audited = declaredAudit(p.audit, events);
@@ -109,7 +108,7 @@ export function factorDecisions(p: FactorParts): Decisions {
 		return kind ? { kind, secret: value.secret, first: value.first === true, fences } : undefined;
 	};
 	const recovery = async (subject: string) => {
-		const kind = [...p.kinds.values()].find(isWayBack);
+		const kind = [...p.kinds.values()].find(issuedWayBack);
 		if (!kind) return undefined;
 		const enrolled = await kind.enroll(
 			subject,
@@ -267,7 +266,7 @@ export function factorDecisions(p: FactorParts): Decisions {
 				return { next, verdict: true };
 			});
 			if (!written) return { kind: "raced" };
-			if (isWayBack(kind)) {
+			if (issuedWayBack(kind)) {
 				const remaining =
 					result.remaining === undefined ? {} : { remaining: String(result.remaining) };
 				recorded("recovery_code.used", subject, {
@@ -280,7 +279,8 @@ export function factorDecisions(p: FactorParts): Decisions {
 		},
 		begin: async (subject, name, passed, transaction, from) => {
 			const kind = p.kinds.get(name);
-			if (!kind?.counts) return { kind: "unknown-kind" };
+			// A way back mfa issues itself is reissued, never begun; any other kind a subject binds.
+			if (!kind || issuedWayBack(kind)) return { kind: "unknown-kind" };
 			const all = await records.list(subject);
 			const fences = await records.fences(subject);
 			if (all.length >= p.maxFactors) return { kind: "full" };
@@ -340,7 +340,7 @@ export function factorDecisions(p: FactorParts): Decisions {
 				boundAt: p.now(),
 				...(unique !== undefined ? { claims: true as const } : {}),
 			};
-			const backed = [...p.kinds.values()].some(isWayBack);
+			const backed = [...p.kinds.values()].some(issuedWayBack);
 			// Decided on the factors as written: of two first bindings at once, one binds.
 			const judge = (
 				all: readonly Factor[],
@@ -349,8 +349,9 @@ export function factorDecisions(p: FactorParts): Decisions {
 				if (fences !== found.fences) return { verdict: "fenced" };
 				// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
 				if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
-				// A subject holding no codes keeps them a place, for the reissue to write them in.
-				const due = backed && !all.some(wayBack);
+				// A subject holding no codes keeps them a place, for the reissue to write them in: only where
+				// a factor that counts stands once this one is written, as the reissue asks one.
+				const due = backed && !all.some(wayBack) && counting([...all, factor], p.kinds).length > 0;
 				if (all.length + 1 + (due ? 1 : 0) > p.maxFactors) return { verdict: "full" };
 				return { next: [...all, factor], verdict: { due } };
 			};
