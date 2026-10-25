@@ -1,9 +1,0 @@
-node_modules
-dist
-.git
-.gitignore
-.env*
-!.env.example
-*.md
-docker-compose*.yml
-Makefile
