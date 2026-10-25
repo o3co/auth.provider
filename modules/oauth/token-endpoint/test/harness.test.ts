@@ -231,8 +231,9 @@ it("gives a test that calls a grant itself the input the harness hands the grant
 		readsAmbient: "none",
 		bodies: ["json"],
 		handle: async (input) => {
-			const { client, binding, request } = input;
-			seen.push({ client: client.id, s: input.param("s"), n: input.value("n"), binding, request });
+			const { client, binding, request, identified } = input;
+			const n = input.value("n");
+			seen.push({ client: client.id, s: input.param("s"), n, binding, request, identified });
 			return { kind: "error", error: "invalid_grant" };
 		},
 	};
@@ -251,12 +252,16 @@ it("gives a test that calls a grant itself the input the harness hands the grant
 	});
 	const binding = { member: "one", confirmation: "thumb", tokenType: "ONE" };
 	const params = { grant_type: "urn:test:record", s: "x", n: 1 };
-	await harness.get(grantCalls).call("urn:test:record", "rec", params, { binding });
+	// What the grant's own `identify` answered, handed back as the endpoint does.
+	const identified = { checked: "a" };
+	await harness.get(grantCalls).call("urn:test:record", "rec", params, { binding, identified });
 	const client = await harness.get(clients).find("rec");
 	if (!client) throw new Error("no client");
-	await grant.handle(grantInput(harness.get(tokens), grant, client, params, { binding }));
+	const given = { binding, identified };
+	await grant.handle(grantInput(harness.get(tokens), grant, client, params, given));
 	expect(seen).toHaveLength(2);
 	expect(seen[1]).toEqual(seen[0]);
+	expect(seen[0]).toMatchObject({ identified });
 	// A request of the test's own replaces only the request; the parameters read as given.
 	const own = testRequest();
 	const input = grantInput(harness.get(tokens), grant, client, params, { request: own });

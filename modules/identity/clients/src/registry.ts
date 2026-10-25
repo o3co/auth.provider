@@ -12,7 +12,18 @@ import type {
 	RecordRefusal,
 	Section,
 } from "./contract.ts";
-import { none } from "./methods.ts";
+import { none, sends } from "./methods.ts";
+
+/**
+ * The parameters a client authenticates with (RFC 6749 §2.3.1, RFC 7521 §4.2), sent at all,
+ * whether or not their method is composed.
+ */
+const credentialParameters = [
+	"client_id",
+	"client_secret",
+	"client_assertion",
+	"client_assertion_type",
+];
 
 type Refused = Extract<Authentication, { kind: "refused" }>;
 
@@ -135,6 +146,11 @@ export function registry(
 			const found = await lookup(id);
 			return found === "invalid" ? undefined : found;
 		},
+		bare: (request) =>
+			!request.headers.has("authorization") &&
+			request.source.clientCertificate === undefined &&
+			!credentialParameters.some((name) => sends(request, name)) &&
+			!methods.some((m) => m.claimed(request) !== undefined || m.malformed?.(request) === true),
 		authenticate: async (request: HttpRequest): Promise<Authentication> => {
 			const claim = (method: AuthMethod) => {
 				const id = method.claimed(request);

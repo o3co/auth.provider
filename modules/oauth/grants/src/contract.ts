@@ -75,6 +75,8 @@ export interface GrantInput {
 	target(audience: readonly string[], within: (audience: string) => boolean): TargetVerdict;
 	/** The binding every token issued for this request carries. */
 	readonly binding?: Binding;
+	/** What the grant's own `identify` answered with the client, handed back unread; none for a client that authenticated. */
+	readonly identified?: unknown;
 	/** Whether `issue` would allow the grant now; asked before anything is used up. */
 	admits(
 		grant: AccessGrant,
@@ -99,7 +101,23 @@ export interface Grant {
 	 * which then checks the request's origin itself; `none` otherwise. A declaration, never a proof.
 	 */
 	readonly readsAmbient: "none" | "cookie";
+	/**
+	 * For a request that names no client and carries nothing a client authenticates with: the client
+	 * the grant's own credential identifies, with what it checked to tell (`identified`), or its
+	 * refusal. Only a grant that can tell has it. The client it names is one the operator registered
+	 * with no credentials (public, method `none`); the endpoint refuses any other.
+	 */
+	identify?(
+		input: Pick<GrantInput, "request" | "param" | "value">,
+	): Promise<IdentifiedClient | Extract<GrantOutcome, { readonly kind: "error" }>>;
 	handle(input: GrantInput): Promise<GrantOutcome | Refused>;
+}
+
+/** The client a grant's own credential identifies, and what the grant checked to tell, for its `handle`. */
+export interface IdentifiedClient {
+	readonly kind: "client";
+	readonly client: string;
+	readonly identified?: unknown;
 }
 
 export const grants = extensionPoint<Grant>("grants", {

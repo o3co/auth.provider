@@ -90,6 +90,14 @@ export interface Clients {
 	checkRecord(record: ClientRecord): Promise<readonly RecordRefusal[] | undefined>;
 	authenticate(request: HttpRequest): Promise<Authentication>;
 	/**
+	 * Whether the request carries nothing a client authenticates with, whichever methods are
+	 * composed: no `authorization` header, no client certificate (malformed included), none of the
+	 * credential parameters (`client_id`, `client_secret`, `client_assertion`,
+	 * `client_assertion_type`) sent at all, and nothing a composed method claims or finds malformed.
+	 * `no_credentials` from `authenticate` says only that no composed method claimed it.
+	 */
+	bare(request: HttpRequest): boolean;
+	/**
 	 * The clients the operator registered, in the settings' order: the `i`th is at
 	 * `clients.registered.<i>`, where a boot check names it by its place, never its id.
 	 */

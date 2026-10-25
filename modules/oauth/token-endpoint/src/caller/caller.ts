@@ -28,7 +28,12 @@ export interface GrantCalls {
 		grantType: string,
 		clientId: string,
 		params: Readonly<Record<string, unknown>>,
-		options?: { readonly binding?: Binding; readonly request?: HttpRequest },
+		options?: {
+			readonly binding?: Binding;
+			readonly request?: HttpRequest;
+			/** What the grant's own `identify` answered with the client, as the endpoint hands it back. */
+			readonly identified?: unknown;
+		},
 	): Promise<GrantOutcome>;
 }
 
@@ -80,6 +85,7 @@ export function grantInput(
 		readonly binding?: Binding;
 		readonly request?: HttpRequest;
 		readonly targets?: TargetRule;
+		readonly identified?: unknown;
 	} = {},
 	told: readonly SessionIssuance[] = [],
 ): GrantInput {
@@ -88,6 +94,7 @@ export function grantInput(
 		client,
 		grantType: grant.grantType,
 		binding: options.binding,
+		identified: options.identified,
 		targets: options.targets ?? unread,
 		tokens: issuing,
 		told,
