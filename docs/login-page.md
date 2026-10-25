@@ -51,11 +51,12 @@ Every answer is never cached.
 |---|---|
 | `200 {"redirect_to": "…"}` | Send the browser to that `redirect_to`, the answer's, not the one you sent. `200 {}` has none to go to. |
 | `403` with another body, and cookies | A step after the password holds the login, such as a second factor. The body and cookies are that step's; pass them on as it describes. |
-| `401 {"error": "invalid_credentials"}` | Say the sign-in failed. The answer never tells whether the user exists or what was wrong. |
+| `401 {"error": "invalid_credentials"}` | Say the sign-in failed. The answer never tells whether the user exists or what was wrong. Where `login-passkey.password = refused-when-held`, a passkey holder's right password is answered the same and counts toward the waits: offer the passkey beside the message. |
 | `429 {"error": "too_many_attempts"}` | Wait as `Retry-After` says before trying again. Too many failures for one username make each next try wait; the password is not checked meanwhile. |
 | `403 {"error": "csrf"}` | Get a new token, then post again. If it keeps failing, the page is not served from the public origin: a login from another origin is always refused. |
-| `400` `invalid_redirect` | The `redirect_to` is not one a login may return to. A login returns to the paths the composed modules let it, such as the authorization endpoint's, and to the URLs listed in `login-gates.return-targets`, matched exactly. |
+| `400` `invalid_redirect` | The `redirect_to` is not one a login may return to. A login returns to the paths the composed modules let it, such as the authorization endpoint's, written as the public origin and the path exactly (a spelling the URL parser rewrites, such as a dot segment or a backslash, is refused), and to the URLs listed in `login-gates.return-targets`, matched exactly. |
 | `400` `invalid_request` or `repeated_parameter` | The request is malformed: fix the page. |
+| `415`, with no body | The body is empty, or neither a form nor JSON: fix the page. |
 | `503` `temporarily_unavailable` or `service_unavailable` | The provider cannot answer now; try again later. |
 
 After a `200`, the browser holds the session cookie, and the authorization endpoint it returns to goes on to consent or straight to the client.
@@ -64,10 +65,10 @@ After a `200`, the browser holds the session cookie, and the authorization endpo
 
 Where `login-passkey` is composed, the page can offer a passkey beside the password. It makes two requests of its own, both carrying the CSRF token as the password login does.
 
-1. `POST /session/login/passkey/options`, with no body. `200` with WebAuthn request options in JSON (base64url values: `challenge`, `rpId`, `userVerification`, `timeout`, and an empty `allowCredentials`), and a cookie naming this browser. Pass them to `navigator.credentials.get({ publicKey })` after decoding the base64url values, or give them to a library that does. They ask for a discoverable credential, so `mediation: "conditional"` works: the browser offers the user's passkeys in the username field's autofill.
+1. `POST /session/login/passkey/options`, with no body. `200` with WebAuthn request options in JSON (`challenge` in base64url, `rpId`, `userVerification`, `timeout` in milliseconds, and an empty `allowCredentials`), and a cookie naming this browser. Pass them to `navigator.credentials.get({ publicKey })` after decoding the challenge, or give them to a library that does. They ask for a discoverable credential, so `mediation: "conditional"` works: the browser offers the user's passkeys in the username field's autofill.
 2. `POST /session/login/passkey` with JSON `{"response": <the credential, as JSON>, "redirect_to": "…"}`: the credential `navigator.credentials.get` answered, serialized as `PublicKeyCredential.toJSON()` writes it (base64url `id`, `rawId`, `response.clientDataJSON`, `response.authenticatorData`, `response.signature`, `response.userHandle`, and `type`).
 
-The options' challenge is good for `webauthn.challenge-lifetime` (2 minutes unless set) and only in the browser that asked: the cookie ties the two. A page that asks options when it loads, for conditional mediation, asks them again before that time runs out, and again after every answer to the login, which ends the challenge whatever it says.
+The options' challenge is good for `webauthn.challenge-lifetime` (2 minutes unless set) and only in the browser that asked: the cookie ties the two. A page that asks options when it loads, for conditional mediation, asks them again before that time runs out, and again after every answer the login gives past the CSRF check and the request count, which ends the challenge whatever it says. A `403 csrf` or a `429` leaves the challenge as it was.
 
 | Answer | What the page does |
 |---|---|
@@ -77,7 +78,7 @@ The options' challenge is good for `webauthn.challenge-lifetime` (2 minutes unle
 | `429 {"error": "too_many_attempts"}` | Too many requests from this address on that route: wait as `Retry-After` says before trying again. |
 | `403 {"error": "csrf"}`, `400` and `503` | As for a password login. |
 
-A user registers passkeys from a signed-in session, through `passkey-registration`'s routes under `/oauth/webauthn/registration/`, which also list, rename and remove them. Where the operator refuses passwords of users holding a passkey (`login-passkey.password = refused-when-held`), a user who removes their last passkey can sign in by password again, and a user who loses every passkey signs in by password only if they are in the exempt group; otherwise the operator resets their passkeys.
+A user registers passkeys from a signed-in session, through `passkey-registration`'s routes: `/oauth/webauthn/registration/options` and `/oauth/webauthn/registration/verify` register one, and `/oauth/webauthn/registrations`, `/oauth/webauthn/registrations/rename` and `/oauth/webauthn/registrations/remove` list, rename and remove them (see [the routes](routes.md)). Where the operator refuses passwords of users holding a passkey (`login-passkey.password = refused-when-held`), a user who removes their last passkey can sign in by password again, unless the ledger could not answer that removal: their password logins then answer `503` until the operator resets their passkeys. A user who loses every passkey signs in by password only if they are in the exempt group; otherwise the operator resets their passkeys.
 
 ## A login through an upstream that a second factor holds
 
@@ -85,9 +86,9 @@ A login through an upstream (`federation`) ends in the upstream's callback, a na
 
 That page goes on with the login:
 
-1. `GET /session/mfa/transaction` with no `MFA-Transaction` header. The browser's cookie names its transaction, and the answer carries `transaction`, `purpose` and `factors`. A `400` means none is in progress: start the sign-in again.
+1. `GET /session/mfa/transaction` with no `MFA-Transaction` header. The browser's cookie names its transaction, and the answer carries `transaction`, `purpose` and `factors`. A `400` means none is in progress, and `401 {"error": "login_required"}` that the user was revoked since it began: start the sign-in again.
 2. With `purpose` `login`, prove a factor as the [second-factor recipe](recipe-mfa-page.md) does after a password login: `challenge` where the factor needs one, then `verify`, naming `transaction` in each body. With `enroll-login`, the user has no second factor yet and binds a first one through `enrollment` and `enrollment/complete`, as the recipe's first steps show; `verify` refuses that transaction.
-3. Send the browser to the answer's `redirect_to`: where the login was going, else `federation.landing`, else the public origin's root. A first factor bound without a binding proof counts only from the next sign-in: its answer carries the factor and its recovery codes but no `redirect_to`, and no session opens, so show the codes, then start the sign-in through the upstream again.
+3. Send the browser to the answer's `redirect_to`: where the login was going, else `federation.landing`, else the public origin's root. A first factor bound without a binding proof counts only from the next sign-in: its answer carries the factor, and its recovery codes where recovery codes are composed, but no `redirect_to`, and no session opens, so show any codes, then start the sign-in through the upstream again.
 
 The transaction's identifier never goes in a URL; only this `GET` takes it from the cookie alone.
 
