@@ -31,6 +31,12 @@ describe("a flow's dialog with an adapter", () => {
 		expect(dialog.stderr).toContain("the library speaks here");
 	});
 
+	it("reads a character parted between two writes whole, on both streams", async () => {
+		const dialog = await run(["split"]);
+		expect(dialog.outcome).toEqual({ kind: "result", result: { name: "日本語" } });
+		expect(dialog.stderr).toContain("ü");
+	});
+
 	it("ends with the adapter's error, its type and message", async () => {
 		const dialog = await run([{ error: { type: "OPError", message: "invalid_grant" } }]);
 		expect(dialog.outcome).toEqual({ kind: "error", type: "OPError", message: "invalid_grant" });

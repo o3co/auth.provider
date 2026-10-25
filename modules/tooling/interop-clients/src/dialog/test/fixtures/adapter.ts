@@ -11,6 +11,18 @@ const next = () => {
 	const at = script[step++];
 	if (at === "exit") process.exit(4);
 	if (at === "hang") return;
+	if (at === "split") {
+		// One line in two writes, parted inside a character, as a pipe may part it.
+		const bytes = Buffer.from(`${JSON.stringify({ result: { name: "日本語" } })}\n`);
+		const cut = bytes.indexOf(Buffer.from("本")) + 1;
+		process.stderr.write(Buffer.from("ü").subarray(0, 1));
+		process.stdout.write(bytes.subarray(0, cut));
+		setTimeout(() => {
+			process.stderr.write(Buffer.from("ü").subarray(1));
+			process.stdout.write(bytes.subarray(cut));
+		}, 50);
+		return;
+	}
 	write(at);
 	if (typeof at === "object" && at !== null && "ask" in at) return;
 	next();

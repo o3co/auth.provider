@@ -12,3 +12,4 @@ Internal module of `interop-clients`: one flow's exchange with an adapter.
 - Each line is one JSON object: the instruction goes in first; each line out is an `ask`, answered by one line in, or a `result` or an `error`, which ends the flow.
 - A line that is no JSON object or none of those, an exit before the end, an answer that fails, or the time running out ends the flow as a `protocol` error.
 - Lines after the end are no part of the flow.
+- Both streams are read as UTF-8 across chunks: a character parted between two stays whole.

@@ -95,7 +95,10 @@ export function converse(
 				);
 			protocol(`neither an ask, a result nor an error: ${text.slice(0, 200)}`);
 		};
-		child.stdout.on("data", (chunk: Buffer) => {
+		// Decoded as UTF-8 across chunks, so a character a pipe parts between two of them stays whole.
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk: string) => {
 			pending += chunk;
 			for (let at = pending.indexOf("\n"); at >= 0; at = pending.indexOf("\n")) {
 				const text = pending.slice(0, at).trim();
@@ -103,7 +106,7 @@ export function converse(
 				if (text !== "") take(text);
 			}
 		});
-		child.stderr.on("data", (chunk: Buffer) => {
+		child.stderr.on("data", (chunk: string) => {
 			stderr += chunk;
 		});
 		child.on("error", (error) => protocol(`could not start: ${error.message}`));
