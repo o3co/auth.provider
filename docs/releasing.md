@@ -67,8 +67,9 @@ One package per concern, `@o3co/auth-provider-<concern>`, and the entrance `@o3c
 2. **The migration guide.** Every change an operator must act on has its line in [the migration guide](migration.md), with its numbered upgrade notice ([What a version promises](#upgrade-notices)); a deprecation also has its line in the changelog's **Deprecated** section.
 3. **Preview features.** For each feature a card marks preview, look for a newer revision of the draft it follows. Where one changes the rules the feature applies, open an issue for the next minor version ([Preview features](#preview-features)).
 4. **Pull request titles.** The release notes are generated from the titles of the pull requests merged since the last tag. Read them: a security fix's title names the kind of hole it closes and the module, never how to reach it. Retitle one on GitHub before tagging; the notes read the titles when the release is made.
-5. **The version.** One commit changes the root `package.json` version, by itself, and reaches `main` with the rest.
-6. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on the pull request to `main` runs the conformance scenes and `pnpm release:check`; wait for both.
+5. **The attack surface.** Read the diff of [the attack surface reference](attack-surface.md) since the last tag: each route, outbound reach, secret or weakening setting it adds was meant to open, and is declared as [What a version promises](#what-a-version-promises) asks.
+6. **The version.** One commit changes the root `package.json` version, by itself, and reaches `main` with the rest.
+7. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on the pull request to `main` runs the conformance scenes and `pnpm release:check`; wait for both.
 
 ## Tagging
 
