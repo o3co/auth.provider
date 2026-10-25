@@ -17,6 +17,7 @@ Internal module of `spec-checklist`: what a CI run's tests proved of the checkli
 - `run compliance <dir> [--release]`: reads every report under `dir`, writes `compliance.json` (each item's status, the runs that did not report, the counts by class and status) and `compliance.md` beside them; with `--release`, fails where an expected run did not report or an item is `failed`, `incomplete` or `unverified`.
 
 ## Invariants
+- Every vitest config the workspace tracks registers the reporter, its fixtures' aside.
 - Only this run's reports count: the commit and run of `GITHUB_SHA` and `GITHUB_RUN_ID`, the new system's target, and the last attempt of each entry and job.
 - The expected runs are `unit`, `integration`, each package with a `conformance` script, and each run a package's `evidence-runs` script prints as JSON (`<package>@<pattern>`, `<package>#<run>`).
 - A test file runs in: `integration` for `.integration.test.ts`; a harness package's printed runs; an area's own run and its pattern runs for its `.case.ts`; `unit` for any other `.test.ts`; its package's run otherwise.
