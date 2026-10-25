@@ -261,6 +261,18 @@ it("gives back the attempt of a proof that cannot be judged, and never one a fau
 	expect(await left()).toBe(4);
 });
 
+it("gives back the last attempt too, the transaction still found to prove again", async () => {
+	const s = standIn();
+	const { request } = await s.login();
+	const proving = (proof: string) => s.proof.verify(request({ factor_id: "f", proof }));
+	for (let wrong = 0; wrong < 4; wrong++) expect((await proving("wrong")).status).toBe(401);
+	// The last attempt's proof cannot be judged: the attempt comes back, and so does the transaction.
+	await expect(proving("unreadable")).rejects.toSatisfy(isUnavailable);
+	const read = statusOf(await s.proof.transaction(request({}, "GET")));
+	expect(read).toEqual([200, expect.objectContaining({ attempts_remaining: 1 })]);
+	expect((await proving("right")).status).toBe(200);
+});
+
 it("answers a transaction's time left in whole seconds, rounded down", async () => {
 	const s = standIn();
 	const { request } = await s.login();
