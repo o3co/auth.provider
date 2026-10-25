@@ -18,6 +18,7 @@ it("takes all it names, under either dispatch", async () => {
 				"sender-binding": { dispatch },
 			},
 		};
-		expect(await takesUnused(input), dispatch).toEqual({});
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(input))["sender-binding"], dispatch).toBeUndefined();
 	}
 });

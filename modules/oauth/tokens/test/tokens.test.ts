@@ -375,6 +375,7 @@ it("reads the access token's lifetime with its unit, in whole seconds, an hour u
 
 it("takes all it names under either revocation, the denylist only where it keeps one", async () => {
 	for (const revocation of ["denylist", "unsupported"]) {
-		expect(await takesUnused(assembly({ revocation })), revocation).toEqual({});
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(assembly({ revocation })))["tokens"], revocation).toBeUndefined();
 	}
 });

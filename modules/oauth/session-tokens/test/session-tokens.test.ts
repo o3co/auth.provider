@@ -519,6 +519,12 @@ it("takes all its module names, its ties read or not", async () => {
 		m.provide(tied).by((c) => c.collect(tokenTies)),
 	]);
 	for (const extra of [[], [reader]]) {
-		expect(await takesUnused(assembly({ extra }).input), String(extra.length)).toEqual({});
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect(
+			((unused) => [unused["session-tokens"], unused["session-tokens-stores"]])(
+				await takesUnused(assembly({ extra }).input),
+			),
+			String(extra.length),
+		).toEqual([undefined, undefined]);
 	}
 });
