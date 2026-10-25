@@ -55,4 +55,27 @@ describe("a client's returns", () => {
 			expect("issues" in checked && checked.issues, name).toBeTruthy();
 		}
 	});
+
+	it("takes only a return URI a client may register to be sent back to, as redirect-uris says", () => {
+		const takes = (uri: string) =>
+			!("issues" in clientSection.schema["~standard"].validate({ "return-uris": [uri] }));
+		for (const uri of [
+			"https://worker.example/back",
+			"http://127.0.0.1:8080/back",
+			"http://localhost/back",
+			"com.example.worker:/back",
+		]) {
+			expect(takes(uri), uri).toBe(true);
+		}
+		for (const uri of [
+			"javascript:alert(1)",
+			"data:text/html,x",
+			"http://worker.example/back",
+			"ftp://worker.example/back",
+			"https://worker.example/back#here",
+			"https://user:pass@worker.example/back",
+		]) {
+			expect(takes(uri), uri).toBe(false);
+		}
+	});
 });

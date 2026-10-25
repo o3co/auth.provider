@@ -1,5 +1,6 @@
 import type { Client, Section } from "@mod/clients";
 import type { Log, Random } from "@mod/kernel";
+import { registrable } from "@mod/redirect-uris";
 import type { Seal } from "@mod/seal";
 import type { BoundaryKind, Revocations } from "@mod/subject-revocation";
 import { refreshedExpiry, type Upstreams } from "@mod/upstreams";
@@ -132,12 +133,15 @@ export const clientSection: Section<{
 		"return-uris": z
 			.array(
 				z
-					.url()
+					.string()
+					// The rule for URIs a client may register to be sent back to is redirect-uris': https,
+					// http to localhost or a loopback address, or a private-use scheme; never `javascript:`.
+					.refine(registrable, "a return URI a client may register to be sent back to")
 					.refine((uri) => !reserved(uri), "a return URI may not hold grant_id, state or error"),
 			)
 			.prefault([])
 			.describe(
-				"Where the browser may be sent back after the user connects or declines, each matched exactly; none may hold `grant_id`, `state` or `error`.",
+				"Where the browser may be sent back after the user connects or declines, each matched exactly: https, http to localhost or a loopback address, or a private-use scheme, as redirect-uris takes one; none may hold `grant_id`, `state` or `error`.",
 			),
 	}),
 };

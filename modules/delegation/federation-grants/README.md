@@ -20,7 +20,7 @@
 - Browser routes: `GET …/session/federation-grants/connect?request=`, `GET` and `POST …/consent` (`challenge`, `decision`; the POST under `csrf`), `GET …/callback/<connection>`, which returns to the intent's URI with `grant_id`, `state` and any `error`; answered by the one browser half at `grantsBrowsers`. Their connect path is a `login-gates` return path, so a browser sent to log in or raise its session comes back to it.
 - The client routes and the connect and callback `GET`s take other sites' requests, each with its reason declared (a client's own authenticated call, the client's navigation, the upstream's redirect); the consent's `POST` is checked by `csrf` before its source is counted.
 - `grantIntents`: the browser half's intent steps on an opaque `IntentRef`; `grantsBrowsers`: its route handlers, exactly one.
-- Client metadata `federation-grants`: `connections`, `return-uris` (exact, holding no `grant_id`, `state` or `error`).
+- Client metadata `federation-grants`: `connections`, `return-uris` (exact, each one `redirect-uris`' `registrable` takes, holding no `grant_id`, `state` or `error`).
 - Operator section:
   - `connections.<name>` (`idp`, `scopes` with `openid`, `resource?`, `max-access-token-lifetime`, `scope-subsets`)
   - `default-lifetime`, `max-lifetime` (`30d`)
@@ -47,7 +47,7 @@
 - Tokens, secrets and upstream text reach neither answers, logs nor audit.
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `clients`, `csrf`, `upstreams`, `seal`, `subject-revocation`, `rate-limit`, `audit`, `login-gates`
+- `kernel`, `http`, `request-source`, `clients`, `csrf`, `upstreams`, `seal`, `subject-revocation`, `rate-limit`, `audit`, `login-gates`, `redirect-uris` (`registrable`, the rule for return URIs)
 
 ## Vocabulary
 - intent: a client's asking for a grant, connected once by the user. connection: an entry of the operator's `connections`, and the user's steps for an intent.
