@@ -3,6 +3,7 @@ import { type BuildContext, type Refusal, setting } from "@mod/kernel";
 import { publicPem } from "@mod/keys";
 import { withinHosts } from "@mod/outbound-policy";
 import { z } from "zod";
+import { conditionsSetting } from "../conditions/conditions.ts";
 import {
 	type DelegatedAssertions,
 	delegatedAssertions,
@@ -55,6 +56,13 @@ const listed = z.array(z.string().min(1)).min(1);
 
 /** What an entry narrows of the section's policy. */
 const narrowing = {
+	conditions: conditionsSetting.optional(),
+	"accept-any-subject": z
+		.boolean()
+		.prefault(false)
+		.describe(
+			"Takes any signer of an issuer whose every signer becomes a subject, with no conditions. Warned at boot.",
+		),
 	ceiling: z
 		.strictObject({ scopes: listed.optional(), audiences: listed.optional() })
 		.refine((c) => c.scopes !== undefined || c.audiences !== undefined, "names no list")
@@ -247,6 +255,9 @@ export async function trustedWith(p: {
 		if (written && keys) refused.push({ where, reason: "has its keys written and contributed" });
 		if (!written && !keys) refused.push({ where, reason: "has no keys written or contributed" });
 		const thumbprint = i["subject-is-key-thumbprint"];
+		refused.push(...anySubjectRefusals(i, where, keys));
+		if (i["accept-any-subject"] && !i.conditions)
+			warnings.push({ event: "jwt-bearer.any_subject", where });
 		trusted.set(
 			i.issuer,
 			"keys" in i
@@ -284,6 +295,26 @@ export async function trustedWith(p: {
 	}
 	if (refused.length > 0) return { kind: "refused", refusals: refused };
 	return { kind: "trusted", trusted, ledgers, warnings };
+}
+
+/**
+ * accept-any-subject is for an issuer whose every signer becomes a subject (as-is, no thumbprint, its
+ * keys the issuer's whole: written, a key set, or contributed without the promise of answering each
+ * signer's own alone), and never beside conditions.
+ */
+function anySubjectRefusals(
+	i: IssuerEntry,
+	where: string,
+	keys: SignerKeys | undefined,
+): Refusal[] {
+	const accepted = i["accept-any-subject"];
+	const whole = "keys" in i || "jwks-uri" in i || (keys !== undefined && keys.perSigner !== true);
+	const anySigner = i.subject === "as-is" && !i["subject-is-key-thumbprint"] && whole;
+	const at = `${where}.accept-any-subject`;
+	if (accepted && i.conditions) return [{ where: at, reason: "is written beside conditions" }];
+	if (accepted && !anySigner)
+		return [{ where: at, reason: "is for an issuer whose every signer becomes a subject" }];
+	return [];
 }
 
 /** Where an entry's key set is fetched from: its URL, from the issuer's host, or its own where accepted. */

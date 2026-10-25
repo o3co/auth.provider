@@ -18,6 +18,8 @@ const fetched = {
 };
 const contributed = { issuer: "https://c.example", subject: "as-is" };
 const read = (entry: Record<string, unknown>) => issuersSetting.safeParse([entry]);
+/** Conditions, so an entry whose every signer becomes a subject boots for what else a test asks of it. */
+const held = { conditions: { "subject-prefix": "s-" } };
 
 /** An external-jwt that records the key sources asked of it. */
 function recording() {
@@ -77,7 +79,10 @@ describe("a key set elsewhere", () => {
 		).toBe(false);
 		expect(read({ ...written, "accept-key-set-elsewhere": true }).success).toBe(false);
 		const { jwt, sources } = recording();
-		const told = await trust(parsed({ ...elsewhere, "accept-key-set-elsewhere": true }), jwt);
+		const told = await trust(
+			parsed({ ...elsewhere, ...held, "accept-key-set-elsewhere": true }),
+			jwt,
+		);
 		expect(sources).toEqual([
 			{ jwks: { url: "https://keys.example/jwks", hosts: ["keys.example"] } },
 		]);
@@ -89,7 +94,10 @@ describe("a key set elsewhere", () => {
 		expect(JSON.stringify(told.kind === "trusted" ? told.warnings : [])).not.toContain(
 			"keys.example",
 		);
-		expect(await trust(parsed(fetched))).toMatchObject({ kind: "trusted", warnings: [] });
+		expect(await trust(parsed({ ...fetched, ...held }))).toMatchObject({
+			kind: "trusted",
+			warnings: [],
+		});
 	});
 });
 
@@ -112,16 +120,20 @@ describe("an entry's ceiling", () => {
 describe("an entry's lifetime and clock skew", () => {
 	it("narrows the section's, and refuses one wider, at its place", async () => {
 		expect(
-			await trust(parsed({ ...written, "max-assertion-lifetime": "10m", "clock-skew": "5s" })),
+			await trust(
+				parsed({ ...written, ...held, "max-assertion-lifetime": "10m", "clock-skew": "5s" }),
+			),
 		).toMatchObject({
 			kind: "trusted",
 		});
 		expect(
-			await trust(parsed({ ...written, "max-assertion-lifetime": "1h", "clock-skew": "30s" })),
+			await trust(
+				parsed({ ...written, ...held, "max-assertion-lifetime": "1h", "clock-skew": "30s" }),
+			),
 		).toMatchObject({
 			kind: "trusted",
 		});
-		expect(await trust(parsed({ ...written, "max-assertion-lifetime": "2h" }))).toEqual({
+		expect(await trust(parsed({ ...written, ...held, "max-assertion-lifetime": "2h" }))).toEqual({
 			kind: "refused",
 			refusals: [
 				{
@@ -130,12 +142,79 @@ describe("an entry's lifetime and clock skew", () => {
 				},
 			],
 		});
-		expect(await trust(parsed({ ...written, "clock-skew": "31s" }))).toEqual({
+		expect(await trust(parsed({ ...written, ...held, "clock-skew": "31s" }))).toEqual({
 			kind: "refused",
 			refusals: [
 				{ where: "jwt-bearer.issuers.0.clock-skew", reason: "is wider than the section's" },
 			],
 		});
 		expect(read({ ...written, "clock-skew": "6m" }).success).toBe(false);
+	});
+});
+
+describe("an issuer whose every signer becomes a subject", () => {
+	const conditions = { "subject-prefix": "repo:acme/" };
+	const keysFor = (issuer: string, perSigner?: true) => ({
+		issuer,
+		...(perSigner ? { perSigner } : {}),
+		keysOf: async () => ({ kind: "none" as const }),
+	});
+	const trustWith = (
+		entry: Record<string, unknown>,
+		contributions: ReturnType<typeof keysFor>[] = [],
+	) =>
+		trustedWith({
+			jwt: recording().jwt,
+			issuers: parsed(entry),
+			section,
+			contributed: contributions,
+			ledgers: [],
+			policyOf: () => ({ algorithms: ["EdDSA"], skewMs: 0 }),
+		});
+	const needs = {
+		where: "jwt-bearer.issuers.0",
+		reason:
+			"an issuer whose every signer becomes a subject needs conditions, or accept-any-subject",
+	};
+
+	it("takes accept-any-subject alone, warning of it each boot at its place, never by its issuer", async () => {
+		const told = await trustWith({ ...written, "accept-any-subject": true });
+		expect(told).toEqual(
+			expect.objectContaining({
+				kind: "trusted",
+				warnings: [{ event: "jwt-bearer.any_subject", where: "jwt-bearer.issuers.0" }],
+			}),
+		);
+		expect(JSON.stringify(told.kind === "trusted" ? told.warnings : [])).not.toContain("a.example");
+		expect(await trustWith({ ...written, conditions, "accept-any-subject": true })).toEqual({
+			kind: "refused",
+			refusals: [
+				{
+					where: "jwt-bearer.issuers.0.accept-any-subject",
+					reason: "is written beside conditions",
+				},
+			],
+		});
+		expect(
+			await trustWith({
+				...written,
+				subject: "linked",
+				upstream: "idp",
+				"accept-any-subject": true,
+			}),
+		).toEqual({
+			kind: "refused",
+			refusals: [
+				{
+					where: "jwt-bearer.issuers.0.accept-any-subject",
+					reason: "is for an issuer whose every signer becomes a subject",
+				},
+			],
+		});
+	});
+
+	it("reads conditions as the conditions module does, refusing ones that hold no predicate", () => {
+		expect(read({ ...written, conditions: {} }).success).toBe(false);
+		expect(read({ ...written, conditions: { claims: { aud: "x" } } }).success).toBe(false);
 	});
 });
