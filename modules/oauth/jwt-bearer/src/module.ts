@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { clientAllowance } from "@mod/client-allowance";
+import { type Ceiling, clientAllowance } from "@mod/client-allowance";
 import { clients, metadataSections } from "@mod/clients";
 import { type GrantInput, type GrantOutcome, grants, type Refused } from "@mod/grants";
 import { issuer } from "@mod/issuer";
@@ -35,7 +35,7 @@ import {
 	selfIssuedOf,
 } from "./issuers/issuers.ts";
 import { spentIn } from "./ledgers.ts";
-import { keepUntilOf, skewOf, verifierPolicy } from "./policy/policy.ts";
+import { ceilingsOf, keepUntilOf, skewOf, verifierPolicy } from "./policy/policy.ts";
 
 /** The grant type it serves (RFC 7523). */
 export const jwtBearerGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -143,11 +143,18 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			spend: () => Promise<"spent" | "replayed">,
 			/** The clock allowance its issuer's clock may run ahead by, for the `sessions` boundary. */
 			boundarySkewMs: number,
+			/** The ceilings its issuer holds its tokens to, within the client's allowance. */
+			ceilings: readonly Ceiling[],
 		): Promise<GrantOutcome | Refused> => {
-			const allowed = clientAllowance.allowedIssuance(client, param("scope"), named);
+			const allowed = clientAllowance.allowedIssuanceWithin(
+				client,
+				ceilings,
+				param("scope"),
+				named,
+			);
 			if (allowed.kind === "error") return allowed;
 			const asked = target(allowed.audience, (a) =>
-				clientAllowance.allowsAudience(client, a, named),
+				clientAllowance.allowsAudienceWithin(client, ceilings, a, named),
 			);
 			if (asked.kind === "error") return asked;
 			// Made at its `iat`, never later than now; one that does not say is as old as can be. The
@@ -203,7 +210,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			if (client.kind !== "confidential" && !unbound && !holds(input.binding, told.holderDigest)) {
 				return refusedGrant("the request does not prove the key the assertion names");
 			}
-			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion), skewMs);
+			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion), skewMs, []);
 			if (client.kind !== "confidential" && unbound && outcome.kind === "issued") {
 				c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
 			}
@@ -248,7 +255,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 							);
 					return told === "replayed" || told === "exists" ? "replayed" : "spent";
 				};
-				return issueFor(input, checked, spend, skewOf(entry, c.section));
+				return issueFor(input, checked, spend, skewOf(entry, c.section), ceilingsOf(entry));
 			},
 		};
 	}),

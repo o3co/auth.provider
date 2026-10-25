@@ -340,6 +340,28 @@ describe("jwt-bearer", () => {
 		expect(errorOf(await s.grant(await assertion({ ...met, env: "staging" })))).toBe("issued");
 	});
 
+	it("issues within its issuer's ceiling as well as the client's allowance, refusing before the jti is used up", async () => {
+		const under = (ceiling: Record<string, unknown>) =>
+			serve(undefined, issuer, `${issuer}/oauth/token`, [{ ...trustedUpstream[0], ceiling }]);
+		const before = saved.length;
+		// The client's default, read, is outside a ceiling of write alone: refused, never issued empty.
+		const write = await under({ scopes: ["write"] });
+		expect(errorOf(await write.grant(await assertion(base)))).toBe("invalid_scope");
+		expect(errorOf(await write.grant(await assertion(base), { scope: "read" }))).toBe(
+			"invalid_scope",
+		);
+		// The audience the client is given, the issuer's for a client allowed none, is held to it too.
+		const elsewhere = await under({ audiences: ["https://api.example"] });
+		expect(errorOf(await elsewhere.grant(await assertion(base)))).toBe("invalid_target");
+		expect(saved.length).toBe(before);
+		expect(errorOf(await (await under({ scopes: ["read"] })).grant(await assertion(base)))).toBe(
+			"issued",
+		);
+		expect(errorOf(await (await under({ audiences: [issuer] })).grant(await assertion(base)))).toBe(
+			"issued",
+		);
+	});
+
 	it("asks the issuance policies before the jti is used up, and again when issuing", async () => {
 		const asked: IssuanceRequest[] = [];
 		let refusing = new Set([1]);
