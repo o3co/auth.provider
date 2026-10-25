@@ -85,6 +85,8 @@ describe("a container a check runs", () => {
 		]);
 		expect(d.held.size).toBe(0);
 		expect(d.calls.map((c) => c.args[0])).toEqual(["run", "rm", "inspect"]);
+		// Its anonymous volumes go with it, as an image's VOLUME would otherwise stay behind.
+		expect(d.calls[1]?.args).toEqual(["rm", "-f", "-v", value]);
 	});
 
 	it("never shares a name with another of the same run and purpose", async () => {
@@ -499,6 +501,10 @@ describe("a run's containers swept by its label", () => {
 		const swept = await sweptRun("release-check-1", { docker: d.docker, settle: 80 });
 		expect(swept).toHaveLength(1);
 		expect(d.held.size).toBe(0);
+		// The one swept goes with its anonymous volumes too.
+		const removals = d.calls.filter((c) => c.args[0] === "rm").map((c) => c.args.slice(0, 3));
+		expect(removals.length).toBeGreaterThan(0);
+		for (const args of removals) expect(args).toEqual(["rm", "-f", "-v"]);
 	});
 
 	it("fails where one is still there after it, naming it", async () => {

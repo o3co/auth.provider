@@ -60,7 +60,7 @@ beforeAll(async () => {
 
 afterAll(() => {
 	app?.kill("SIGKILL");
-	if (container) docker("rm", "-f", container);
+	if (container) docker("rm", "-f", "-v", container);
 });
 
 const answers = async (url: string) => {
