@@ -65,17 +65,18 @@ function namedIn017(names: readonly string[]): string {
 	return `${count} named in 0.17 ${verb} set and never read: ${names.join(", ")}`;
 }
 
-/** The variable an app's entry reads to choose what the check does: `warn` (unset), `refuse` or `ignore`. */
+/** The variable an app's entry reads to choose what the check does: `warn` (unset or empty), `refuse` or `ignore`. */
 const modeVariable = "APP_LEGACY_VARIABLES";
 
 /**
  * The boot's check for 0.17's variables left in `source.env`, as `APP_LEGACY_VARIABLES` there says:
- * unset or `warn`, the warning `legacyVariablesWarning` gives, or none; `refuse`, a refused boot
+ * unset, empty or `warn`, the warning `legacyVariablesWarning` gives, or none; `refuse`, a refused boot
  * naming them where any is set; `ignore`, nothing, as nothing is read. Any other value refuses boot
  * at the variable, never showing it. The names come in order, never their values.
  */
 export async function legacyVariablesCheck(source: ConfigSource): Promise<string | undefined> {
-	const mode = source.env[modeVariable] ?? "warn";
+	// Empty as unset: an env file or a compose file can write the variable with no value.
+	const mode = source.env[modeVariable] || "warn";
 	if (mode === "ignore") return undefined;
 	if (mode !== "warn" && mode !== "refuse") {
 		throw new BootRefused([{ where: modeVariable, reason: "one of warn, refuse or ignore" }]);
