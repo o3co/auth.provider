@@ -12,6 +12,7 @@ export {
 	type Party,
 	type PatternPart,
 	registerDriver,
+	type StartOptions,
 	sceneOf,
 } from "./areas.ts";
 export { type AuditTrail, auditEvents, type SentEvent } from "./audit/audit.ts";

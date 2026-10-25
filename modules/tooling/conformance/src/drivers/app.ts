@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { generate, type Plan } from "@mod/create-app";
 import { trialLayer } from "@mod/trial";
-import type { AreaScene, NewPart, Party } from "../areas.ts";
+import type { AreaScene, NewPart, Party, StartOptions } from "../areas.ts";
 import { auditSink } from "../audit/audit.ts";
 import { baseEnv, launch, type Started, startRedis, untilPortHeld } from "../driver.ts";
 import { fakeSmtp } from "../smtp.ts";
@@ -69,11 +69,33 @@ export const sceneRedis = (url: string, pauses: boolean) => ({
 /** Tries at a new port when another process takes the one chosen before the app binds it. */
 const portAttempts = 3;
 
+/** NODE_EXTRA_CA_CERTS, which names one file: a bundle in `dir` of the PEM files `files`. */
+export async function trustedEnv(
+	files: readonly string[] | undefined,
+	dir: string,
+): Promise<Record<string, string>> {
+	if (files === undefined || files.length === 0) return {};
+	const texts = await Promise.all(
+		files.map(async (file) => {
+			const text = await readFile(file, "utf8").catch((error: unknown) => {
+				throw new Error(`a trusted certificate file cannot be read: ${file}`, { cause: error });
+			});
+			if (!text.includes("-----BEGIN CERTIFICATE-----")) {
+				throw new Error(`a trusted certificate file holds no certificate: ${file}`);
+			}
+			return text.endsWith("\n") ? text : `${text}\n`;
+		}),
+	);
+	const bundle = join(dir, "trusted.pem");
+	await writeFile(bundle, texts.join(""));
+	return { NODE_EXTRA_CA_CERTS: bundle };
+}
+
 /**
  * Starts the generated app at `dir` on the scene's sections, its audit sink and its store. With
  * `trial`, `trial`'s layer fills the keys the scene leaves unset, except in the sections it leaves:
  * a local layer between the scene and the generated configuration.
- * With `trial.smtp`, a fake relay takes the app's mail.
+ * With `trial.smtp`, a fake relay takes the app's mail. `options` are the start's own (`StartOptions`).
  */
 export async function started(
 	dir: string,
@@ -86,7 +108,12 @@ export async function started(
 		readonly smtp?: boolean;
 	},
 	layers: readonly string[] = [],
+	options: StartOptions = {},
 ): Promise<Started> {
+	const trusted = await trustedEnv(
+		options.trustedCertificates,
+		await mkdtemp(join(tmpdir(), "conformance-trusted-")),
+	);
 	const parties = trial?.parties ?? [];
 	const stopParties = () => Promise.all(parties.map((p) => p.stop()));
 	const sink = await auditSink();
@@ -175,7 +202,7 @@ export async function started(
 			command: process.execPath,
 			args: ["src/main.ts"],
 			cwd: dir,
-			env: { ...baseEnv(), APP_CONFIG: appConfig(file, written, local) },
+			env: { ...baseEnv(), ...trusted, APP_CONFIG: appConfig(file, written, local) },
 			port,
 		});
 	};
