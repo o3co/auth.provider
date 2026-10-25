@@ -12,6 +12,33 @@
   out-of-scope: issuer discovery by WebFinger is not offered (no `/.well-known/webfinger` route in docs/routes.md).
 - **oidc-discovery-2-e** MUST: the issuer location WebFinger returns uses the `https` scheme.
   out-of-scope: issuer discovery by WebFinger is not offered (no `/.well-known/webfinger` route in docs/routes.md).
+- **oidc-discovery-2-f** MUST: a Web form where the End-User gives o3co's RP an identifier for issuer discovery uses CSRF prevention.
+  role: rp
+  out-of-scope: o3co's RP never discovers an issuer from a user's identifier: each upstream's issuer is the operator's setting or fixed, and no module speaks WebFinger.
+- **oidc-discovery-2-g** SHOULD: o3co's RP's WebFinger request carries `rel` `http://openid.net/specs/connect/1.0/issuer`.
+  role: rp
+  out-of-scope: o3co's RP never discovers an issuer from a user's identifier: each upstream's issuer is the operator's setting or fixed, and no module speaks WebFinger.
+
+## 2.1 Identifier Normalization
+
+- **oidc-discovery-2.1-a** SHOULD: the user input identifier o3co's RP normalizes is a URL or URI relative reference (RFC 3986).
+  role: rp
+  out-of-scope: o3co's RP never discovers an issuer from a user's identifier: each upstream's issuer is the operator's setting or fixed, and no module speaks WebFinger.
+- **oidc-discovery-2.1-b** MUST: the user input identifier o3co's RP normalizes includes the authority component.
+  role: rp
+  out-of-scope: o3co's RP never discovers an issuer from a user's identifier: each upstream's issuer is the operator's setting or fixed, and no module speaks WebFinger.
+
+## 2.1.1 User Input Identifier Types
+
+- **oidc-discovery-2.1.1-a** MUST: o3co's RP treats a user input identifier that does not start with an XRI global context symbol as a URI in one of the forms this section lists.
+  role: rp
+  out-of-scope: o3co's RP never discovers an issuer from a user's identifier: each upstream's issuer is the operator's setting or fixed, and no module speaks WebFinger.
+
+## 2.1.2 Normalization Steps
+
+- **oidc-discovery-2.1.2-a** MUST: o3co's RP strips a fragment, with its `#`, from the normalized URI.
+  role: rp
+  out-of-scope: o3co's RP never discovers an issuer from a user's identifier: each upstream's issuer is the operator's setting or fixed, and no module speaks WebFinger.
 
 ## 3 OpenID Provider Metadata
 
@@ -74,6 +101,10 @@
 ## 4.1 OpenID Provider Configuration Request
 
 - **oidc-discovery-4.1-a** MUST: the configuration is answered to a `GET`.
+- **oidc-discovery-4.1-b** MUST: idp-oidc fetches an upstream's configuration by `GET`.
+  role: rp
+- **oidc-discovery-4.1-c** MUST: idp-oidc, where the issuer has a path component, removes a terminating `/` before appending `/.well-known/openid-configuration`.
+  role: rp
 
 ## 4.2 OpenID Provider Configuration Response
 
@@ -83,7 +114,25 @@
 ## 4.3 OpenID Provider Configuration Validation
 
 - **oidc-discovery-4.3-a** MUST: the `issuer` the configuration returns is identical to the issuer URL its location was formed from.
+- **oidc-discovery-4.3-b** MUST: idp-oidc aborts any operation that needs information which failed a validation this specification defines.
+  role: rp
+- **oidc-discovery-4.3-c** MUST NOT: idp-oidc uses information that failed a validation this specification defines.
+  role: rp
+
+## 5 String Operations
+
+- **oidc-discovery-5-a** MUST: idp-oidc, idp-google and idp-apple, comparing a value of an OpenID Connect message with another Unicode string, first remove its JSON escaping to get an array of code points.
+  role: rp
+- **oidc-discovery-5-b** MUST NOT: idp-oidc, idp-google and idp-apple apply Unicode Normalization to either string of such a comparison.
+  role: rp
+- **oidc-discovery-5-c** MUST: idp-oidc, idp-google and idp-apple compare the two strings of such a comparison code point by code point for equality.
+  role: rp
 
 ## 7.1 TLS Requirements
 
 - **oidc-discovery-7.1-a** MUST: the TLS connections the OP makes check the server's certificate (RFC 6125).
+
+## 7.2 Impersonation Attacks
+
+- **oidc-discovery-7.2-a** MUST: idp-oidc, with discovery, ensures the issuer URL it fetches the description under exactly matches the description's `issuer`, and that this exactly matches the `iss` of the id_tokens meant to be from that issuer.
+  role: rp

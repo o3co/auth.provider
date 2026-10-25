@@ -14,17 +14,17 @@
 - 1.1 #8 RECOMMENDED: excluded definition
 - 1.1 #9 NOT RECOMMENDED: excluded definition
 - 1.1 #10 MUST NOT: excluded definition
-- 2 #1 MUST: excluded client-only
-- 2 #2 RECOMMENDED: excluded client-only
+- 2 #1 MUST: oidc-discovery-2-f
+- 2 #2 RECOMMENDED: oidc-discovery-2-g
 - 2 #3 MUST: oidc-discovery-2-a
 - 2 #4 SHOULD: oidc-discovery-2-b
 - 2 #5 MUST: oidc-discovery-2-c
 - 2 #6 MUST: oidc-discovery-2-d
 - 2 #7 MUST: oidc-discovery-2-e
-- 2.1 #1 SHOULD: excluded client-only
-- 2.1 #2 MUST: excluded client-only
-- 2.1.1 #1 MUST: excluded client-only
-- 2.1.2 #1 MUST: excluded client-only
+- 2.1 #1 SHOULD: oidc-discovery-2.1-a
+- 2.1 #2 MUST: oidc-discovery-2.1-b
+- 2.1.1 #1 MUST: oidc-discovery-2.1.1-a
+- 2.1.2 #1 MUST: oidc-discovery-2.1.2-a
 - 3 #1 REQUIRED: oidc-discovery-3-a
 - 3 #2 MUST: oidc-discovery-3-b
 - 3 #3 MUST: oidc-discovery-3-c
@@ -66,17 +66,17 @@
 - 4 #2 MUST: oidc-discovery-4-b
 - 4 #3 MUST: oidc-discovery-4-c
 - 4 #4 SHOULD: oidc-discovery-4-d
-- 4.1 #1 MUST: oidc-discovery-4.1-a
-- 4.1 #2 MUST: excluded client-only
+- 4.1 #1 MUST: oidc-discovery-4.1-a, oidc-discovery-4.1-b
+- 4.1 #2 MUST: oidc-discovery-4.1-c
 - 4.2 #1 MUST: oidc-discovery-4.2-a
 - 4.2 #2 MUST: oidc-discovery-4.2-b
-- 4.3 #1 MUST: excluded client-only
-- 4.3 #2 MUST NOT: excluded client-only
+- 4.3 #1 MUST: oidc-discovery-4.3-b
+- 4.3 #2 MUST NOT: oidc-discovery-4.3-c
 - 4.3 #3 MUST: oidc-discovery-4.3-a
 - 4.3 #4 MUST: oidc-discovery-3-c
-- 5 #1 MUST: excluded client-only
-- 5 #2 MUST NOT: excluded client-only
-- 5 #3 MUST: excluded client-only
+- 5 #1 MUST: oidc-discovery-5-a
+- 5 #2 MUST NOT: oidc-discovery-5-b
+- 5 #3 MUST: oidc-discovery-5-c
 - 6 #1 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
 - 6 #2 REQUIRED: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
 - 6 #3 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
@@ -85,4 +85,4 @@
 - 7.1 #3 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
 - 7.1 #4 MUST: oidc-discovery-7.1-a
 - 7.2 #1 MUST: oidc-discovery-7.1-a
-- 7.2 #2 MUST: excluded client-only
+- 7.2 #2 MUST: oidc-discovery-7.2-a
