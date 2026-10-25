@@ -50,11 +50,18 @@ afterEach(async () => {
 /** http with these http settings and modules, on any free port. */
 export function boot(
 	settings: Record<string, unknown> = {},
-	options: { modules?: Module[]; runtime?: Runtime } = {},
+	options: {
+		modules?: Module[];
+		runtime?: Runtime;
+		environment?: "production" | "development";
+	} = {},
 ) {
 	return assemble({
 		modules: [http, ...(options.modules ?? [])],
-		config: { ...kernelConfig(), http: { port: 0, ...settings } },
+		config: {
+			...kernelConfig({ environment: options.environment ?? "production" }),
+			http: { port: 0, ...settings },
+		},
 		runtime: options.runtime ?? quiet,
 	});
 }

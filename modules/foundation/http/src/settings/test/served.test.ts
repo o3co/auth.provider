@@ -61,8 +61,21 @@ it("refuses an empty or unparsable public origin or CORS origin at boot, never t
 
 it("refuses a plain-http public origin unless it is accepted explicitly, and then says cookies cannot be secure", async () => {
 	await expect(boot({ "public-origin": "http://as.example" })).rejects.toThrow(BootRefused);
-	const app = await boot({ "public-origin": "http://as.example", "insecure-origin": true });
+	const plain = { "public-origin": "http://as.example", "insecure-origin": true };
+	const app = await boot(plain, { environment: "development" });
 	expect(app.get(site).secureCookies).toBe(false);
+});
+
+it("refuses the plain-http public origin it accepts in a production deployment", async () => {
+	const plain = { "public-origin": "http://as.example", "insecure-origin": true };
+	const refused = await boot(plain).catch((error: BootRefused) => error.refusals);
+	expect(refused).toEqual([
+		{
+			where: "http.insecure-origin",
+			reason:
+				"takes a plain-http public origin, which a production deployment does not; set kernel.environment = development to try one",
+		},
+	]);
 });
 
 it("refuses a port an environment variable gives empty, signed, fractional or not in decimal", async () => {
