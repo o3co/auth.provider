@@ -24,10 +24,10 @@ import {
 	artifactsOf,
 	candidatesOf,
 	type Examined,
+	firstTaken,
 	type RunSeen,
 	releasePullOf,
 	testedCommitOf,
-	verdictOf,
 } from "./evidence.ts";
 
 const directory = process.argv[2];
@@ -127,7 +127,7 @@ function examined(run: RunSeen): Examined {
 }
 
 try {
-	const verdict = verdictOf(tag, candidatesOf(runs, release).map(examined));
+	const verdict = firstTaken(tag, candidatesOf(runs, release), examined);
 	if (verdict.kind === "stopped") stop(verdict.problems);
 	else {
 		const at = resolve(directory);

@@ -121,14 +121,30 @@ export function testedCommitOf(reports: readonly unknown[], run: string): string
 	return commits.size === 1 ? [...commits][0] : undefined;
 }
 
-/** The newest run that tested the tag's tree with its compliance passed; else each candidate's reason, with what to do. */
-export function verdictOf(
+/** Why a run examined will not do, with what to do; none where it will. */
+function refusalOf(tag: Tag, e: Examined): string | undefined {
+	if ("problem" in e) return `${e.run.url}: ${e.problem}; ${rerun(e.run)}`;
+	if (e.tested.tree !== tag.tree) {
+		return `${e.run.url} tested tree ${e.tested.tree}, but the tag's tree is ${tag.tree}: main moved after it ran, so what it tested is not what the tag publishes; see "When the release finds no evidence" in docs/releasing.md`;
+	}
+	if (e.compliance !== "success") {
+		return `${e.run.url}: its compliance job ended ${e.compliance ?? "without running"}; ${rerun(e.run)}`;
+	}
+	return undefined;
+}
+
+/**
+ * Examines the candidates in turn, the newest first, and takes the first that will do, examining no
+ * older one; else stops with each candidate's reason, one that could not be examined among them.
+ */
+export function firstTaken(
 	tag: Tag,
-	examined: readonly Examined[],
+	candidates: readonly RunSeen[],
+	examine: (run: RunSeen) => Examined,
 ):
 	| ({ readonly kind: "taken" } & Extract<Examined, { readonly tested: unknown }>)
 	| { readonly kind: "stopped"; readonly problems: string[] } {
-	if (examined.length === 0) {
+	if (candidates.length === 0) {
 		return {
 			kind: "stopped",
 			problems: [
@@ -137,17 +153,19 @@ export function verdictOf(
 		};
 	}
 	const problems: string[] = [];
-	for (const e of examined) {
-		if ("problem" in e) problems.push(`${e.run.url}: ${e.problem}; ${rerun(e.run)}`);
-		else if (e.tested.tree !== tag.tree) {
-			problems.push(
-				`${e.run.url} tested tree ${e.tested.tree}, but the tag's tree is ${tag.tree}: main moved after it ran, so what it tested is not what the tag publishes; see "When the release finds no evidence" in docs/releasing.md`,
-			);
-		} else if (e.compliance !== "success") {
-			problems.push(
-				`${e.run.url}: its compliance job ended ${e.compliance ?? "without running"}; ${rerun(e.run)}`,
-			);
-		} else return { kind: "taken", ...e };
+	for (const run of candidates) {
+		let e: Examined;
+		try {
+			e = examine(run);
+		} catch (error) {
+			e = {
+				run,
+				problem: `could not be examined (${error instanceof Error ? error.message : String(error)})`,
+			};
+		}
+		const refused = refusalOf(tag, e);
+		if (refused === undefined && "tested" in e) return { kind: "taken", ...e };
+		problems.push(refused ?? `${run.url}: could not be judged`);
 	}
 	return { kind: "stopped", problems };
 }

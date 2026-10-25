@@ -3,10 +3,11 @@ import {
 	type ArtifactSeen,
 	artifactsOf,
 	candidatesOf,
+	type Examined,
+	firstTaken,
 	type RunSeen,
 	releasePullOf,
 	testedCommitOf,
-	verdictOf,
 } from "../evidence.ts";
 
 const head = "h".repeat(40);
@@ -149,23 +150,83 @@ describe("whether the release may go on with a run's evidence", () => {
 		compliance: "success",
 		artifacts: [artifact("compliance")],
 	};
+	/** Examines each candidate by its id, from what the case lays out; a function, to throw. */
+	const by =
+		(found: Record<number, Examined | (() => never)>) =>
+		(r: RunSeen): Examined => {
+			const f = found[r.id];
+			if (typeof f === "function") return f();
+			if (!f) throw new Error(`run ${r.id} not laid out`);
+			return f;
+		};
 
 	it("takes the newest run that tested the tag's tree with its compliance passed", () => {
 		const moved = { ...taken, run: run({ id: 8 }), tested: { commit: "n", tree: "other" } };
-		expect(verdictOf(tag, [moved, taken])).toEqual({ kind: "taken", ...taken });
+		expect(firstTaken(tag, [moved.run, taken.run], by({ 8: moved, 7: taken }))).toEqual({
+			kind: "taken",
+			...taken,
+		});
+	});
+
+	it("examines the candidates in turn, the newest first, and stops at the first that will do", () => {
+		const examined: number[] = [];
+		const older = run({ id: 3 });
+		const result = firstTaken(tag, [taken.run, older], (r) => {
+			examined.push(r.id);
+			return by({
+				7: taken,
+				3: () => {
+					throw new Error("unzip failed");
+				},
+			})(r);
+		});
+		expect(result.kind).toBe("taken");
+		expect(examined).toEqual([7]);
+	});
+
+	it("tells a candidate that could not be examined, and goes on to the next", () => {
+		const failing = run({ id: 9 });
+		const result = firstTaken(
+			tag,
+			[failing, taken.run],
+			by({
+				9: () => {
+					throw new Error("unzip failed");
+				},
+				7: taken,
+			}),
+		);
+		expect(result.kind).toBe("taken");
+		const stopped = firstTaken(
+			tag,
+			[failing],
+			by({
+				9: () => {
+					throw new Error("unzip failed");
+				},
+			}),
+		);
+		expect(stopped).toEqual({
+			kind: "stopped",
+			problems: [expect.stringMatching(/runs\/1: could not be examined \(unzip failed\)/)],
+		});
 	});
 
 	it("stops, naming what is missing and what to do, where no run will do", () => {
-		const none = verdictOf(tag, []);
+		const none = firstTaken(tag, [], by({}));
 		expect(none.kind).toBe("stopped");
 		expect(none.kind === "stopped" && none.problems[0]).toMatch(
 			/no successful CI run of a pull request to main tested .*re-run/,
 		);
-		const stopped = verdictOf(tag, [
-			{ ...taken, tested: { commit: "n", tree: "other" } },
-			{ ...taken, run: run({ id: 9 }), compliance: "failure" },
-			{ run: run({ id: 10 }), problem: "evidence-area-0-1 has expired" },
-		]);
+		const stopped = firstTaken(
+			tag,
+			[run({ id: 8 }), run({ id: 9 }), run({ id: 10 })],
+			by({
+				8: { ...taken, run: run({ id: 8 }), tested: { commit: "n", tree: "other" } },
+				9: { ...taken, run: run({ id: 9 }), compliance: "failure" },
+				10: { run: run({ id: 10 }), problem: "evidence-area-0-1 has expired" },
+			}),
+		);
 		expect(stopped).toEqual({
 			kind: "stopped",
 			problems: [
