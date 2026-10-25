@@ -12,6 +12,7 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 | [RFC 7523: JSON Web Token (JWT) Profile for OAuth 2.0 Client Authentication and Authorization Grants](rfc7523.md) | 30 | 28 | 0 | 28 | 0 | 0 | 0 | 0 | 0 | 2 |
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 8414: OAuth 2.0 Authorization Server Metadata](rfc8414.md) | 26 | 18 | 0 | 18 | 0 | 2 | 0 | 2 | 0 | 6 |
+| [RFC 8693: OAuth 2.0 Token Exchange](rfc8693.md) | 18 | 15 | 0 | 15 | 0 | 2 | 0 | 2 | 0 | 1 |
 | [RFC 8707: Resource Indicators for OAuth 2.0](rfc8707.md) | 3 | 2 | 0 | 2 | 0 | 1 | 0 | 1 | 0 | 0 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
-| Total | 229 | 175 | 0 | 175 | 0 | 33 | 0 | 33 | 0 | 21 |
+| Total | 247 | 190 | 0 | 190 | 0 | 35 | 0 | 35 | 0 | 22 |
