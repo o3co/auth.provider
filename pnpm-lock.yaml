@@ -4094,6 +4094,9 @@ importers:
       '@mod/conformance-identity':
         specifier: workspace:*
         version: link:../conformance-identity
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       jose:
         specifier: 6.2.12
         version: 6.2.12
