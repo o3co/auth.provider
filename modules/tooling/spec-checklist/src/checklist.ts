@@ -84,37 +84,41 @@ export function parseItems(spec: string, text: string) {
 	const items: { -readonly [K in keyof Item]: Item[K] }[] = [];
 	let title = "";
 	let current: string | undefined;
+	// The item a mark belongs to: the last one written in the section, none after a heading or a refused item.
+	let last: (typeof items)[number] | undefined;
+	let updated = false;
 	for (const line of text.split("\n")) {
 		const item = itemLine.exec(line);
 		const mark = markLine.exec(line);
 		const sectionHead = heading.exec(line);
 		if (line.trim() === "") continue;
 		if (line.startsWith("# ") && title === "") title = line.slice(2);
-		else if (sectionHead) current = sectionHead[1] ?? "";
-		else if (item) {
+		else if (sectionHead) {
+			current = sectionHead[1] ?? "";
+			last = undefined;
+		} else if (item) {
 			const [, id = "", strength = "", text = ""] = item;
 			const parts = itemId.exec(id);
+			last = undefined;
+			updated = false;
 			if (!parts) found(`${id}: not an item ID`);
 			else if (parts[1] !== spec) found(`${id}: names another spec than its file`);
 			else if (current === undefined) found(`${id}: is written under no section heading`);
 			else if (parts[2] !== current)
 				found(`${id}: is not of section ${current}, under which it is written`);
 			else if (items.some((i) => i.id === id)) found(`${id}: is written twice`);
-			else
-				items.push({
-					id,
-					spec,
-					section: current,
-					strength: strength as Strength,
-					text,
-					updates: [],
-				});
+			else {
+				last = { id, spec, section: current, strength: strength as Strength, text, updates: [] };
+				items.push(last);
+			}
 		} else if (mark) {
-			const last = items.at(-1);
 			const [, kind, value = ""] = mark;
 			if (!last) found(`a mark with no item before it: ${line.trim()}`);
-			else if (kind === "updates") last.updates = value.split(",").map((s) => s.trim());
-			else if (last.mark)
+			else if (kind === "updates" && updated) found(`${last.id}: has more than one updates line`);
+			else if (kind === "updates") {
+				last.updates = value.split(",").map((s) => s.trim());
+				updated = true;
+			} else if (last.mark)
 				found(`${last.id}: has more than one of out-of-scope, deviates and noncompliant`);
 			else
 				last.mark =
@@ -227,10 +231,16 @@ function ledgerFindings(s: Spec, ledger: Ledger, all: ReadonlyMap<string, Item>)
 		const place = `${r.section} #${r.ordinal}`;
 		bySection.set(r.section, [...(bySection.get(r.section) ?? []), r.ordinal]);
 		if (r.to.kind === "excluded") {
-			if (r.to.category === "restates" && !all.has(r.to.detail ?? ""))
+			const restated = r.to.category === "restates" ? all.get(r.to.detail ?? "") : undefined;
+			if (r.to.category === "restates" && !restated)
 				findings.push({
 					where,
 					detail: `${place}: restates ${r.to.detail}, which the checklist does not hold`,
+				});
+			else if (restated && classOf(r.keyword) !== classOf(restated.strength))
+				findings.push({
+					where,
+					detail: `${place}: ${r.keyword} restates ${restated.id}, a ${restated.strength}`,
 				});
 			continue;
 		}

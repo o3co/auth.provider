@@ -61,6 +61,22 @@ describe("items", () => {
 		]);
 	});
 
+	it("refuses a second updates line, and a mark after a heading, which no item of its section precedes", () => {
+		const read = parseItems(
+			"rfc9999",
+			items(
+				"## 4 X\n\n- **rfc9999-4-a** MUST: a\n  updates: rfc1111-3-a\n  updates: rfc1111-3-b\n\n## 5 Y\n\n  out-of-scope: x\n",
+			),
+		);
+		expect(read.findings.map((f) => f.detail)).toEqual([
+			"rfc9999-4-a: has more than one updates line",
+			"a mark with no item before it: out-of-scope: x",
+		]);
+		expect(read.items.map((i) => [i.id, i.updates, i.mark])).toEqual([
+			["rfc9999-4-a", ["rfc1111-3-a"], undefined],
+		]);
+	});
+
 	it("refuses an item before any section heading, and a mark with no item before it", () => {
 		const read = parseItems(
 			"rfc9999",
@@ -177,6 +193,29 @@ describe("ledger", () => {
 			"has no version",
 			"has no sha256 of 64 hex digits",
 		]);
+	});
+
+	it("holds a row that restates another spec's item to that item's strength", () => {
+		const other = parseItems(
+			"rfc1111",
+			"# RFC 1111: Old\n\n## 3 Y\n\n- **rfc1111-3-a** SHOULD: old\n  deviates: D-1\n",
+		);
+		const mine = parseItems("rfc9999", items("## 4 X\n\n- **rfc9999-4-a** MUST: a\n"));
+		const rows = parseLedger(
+			"rfc9999",
+			ledger(
+				"- 4 #1 MUST: rfc9999-4-a\n- 4 #2 MUST: excluded restates rfc1111-3-a\n- 4 #3 SHOULD: excluded restates rfc1111-3-a\n",
+			),
+		);
+		const result = checklistFindings({
+			specs: [
+				{ spec: "rfc1111", title: other.title, items: other.items, ledger: undefined },
+				{ spec: "rfc9999", title: mine.title, items: mine.items, ledger: rows.ledger },
+			],
+			decisions: parseDecisions("- **D-1** 2026-10-26 (owner): keep it.").decisions,
+			parsing: [],
+		}).map((f) => f.detail);
+		expect(result).toEqual(["rfc1111: has no ledger", "4 #2: MUST restates rfc1111-3-a, a SHOULD"]);
 	});
 
 	it("holds every item to a row, rows to items of its spec, and a row's keyword to its item's strength", () => {

@@ -1,30 +1,23 @@
 import ts from "typescript";
-import { idLike, itemId } from "./ids.ts";
+import { idCandidate, itemId } from "./ids.ts";
 
 const runners = new Set(["it", "test", "describe"]);
-const modifiers = new Set([
-	"each",
-	"for",
-	"runIf",
-	"skipIf",
-	"only",
-	"skip",
-	"todo",
-	"concurrent",
-	"sequential",
-	"fails",
-	"shuffle",
-]);
+/** Modifiers that take the title themselves. */
+const direct = new Set(["only", "skip", "todo", "concurrent", "sequential", "fails", "shuffle"]);
+/** Modifiers that take a table or a condition, and return what takes the title. */
+const factories = new Set(["each", "for", "runIf", "skipIf"]);
 
-/** Whether a call's callee is `it`, `test` or `describe`, through modifiers and the calls they return. */
-function isRunner(callee: ts.Expression): boolean {
-	let at = callee;
-	for (;;) {
-		if (ts.isIdentifier(at)) return runners.has(at.text);
-		if (ts.isPropertyAccessExpression(at) && modifiers.has(at.name.text)) at = at.expression;
-		else if (ts.isCallExpression(at)) at = at.expression;
-		else return false;
-	}
+/** A runner, through modifiers that take the title and the calls of those that return what does. */
+function isChain(e: ts.Expression): boolean {
+	if (ts.isIdentifier(e)) return runners.has(e.text);
+	if (ts.isPropertyAccessExpression(e)) return direct.has(e.name.text) && isChain(e.expression);
+	if (ts.isCallExpression(e))
+		return (
+			ts.isPropertyAccessExpression(e.expression) &&
+			factories.has(e.expression.name.text) &&
+			isChain(e.expression.expression)
+		);
+	return false;
 }
 
 export interface Title {
@@ -32,44 +25,77 @@ export interface Title {
 	readonly ids: readonly string[];
 }
 
+interface Literal {
+	readonly start: number;
+	readonly end: number;
+	readonly text: string;
+	readonly title: boolean;
+}
+
+/** Every string and template part in a source, decoded, and whether it is a test's title. */
+function literalsOf(source: string, holdsTests: boolean): Literal[] {
+	const file = ts.createSourceFile("t.ts", source, ts.ScriptTarget.Latest, true);
+	const titles = new Set<ts.Node>();
+	const literals: Literal[] = [];
+	const visit = (node: ts.Node) => {
+		const [first] = ts.isCallExpression(node) ? node.arguments : [];
+		if (
+			holdsTests &&
+			ts.isCallExpression(node) &&
+			first &&
+			ts.isStringLiteral(first) &&
+			isChain(node.expression)
+		)
+			titles.add(first);
+		if (
+			ts.isStringLiteral(node) ||
+			ts.isNoSubstitutionTemplateLiteral(node) ||
+			ts.isTemplateHead(node) ||
+			ts.isTemplateMiddle(node) ||
+			ts.isTemplateTail(node)
+		)
+			literals.push({
+				start: node.getStart(file),
+				end: node.end,
+				text: node.text,
+				title: titles.has(node),
+			});
+		ts.forEachChild(node, visit);
+	};
+	visit(file);
+	return literals;
+}
+
 /**
  * The titles that name items, each with the IDs written in brackets in it, and every ID written
- * anywhere else (`stray`): outside a title, in a title but not in brackets, or anywhere in a file that
- * holds no tests. A title is the first argument of `it`, `test` or `describe`, a string with no
- * substitution.
+ * anywhere else (`stray`): outside a title, in a title but not in brackets or malformed, or anywhere
+ * in a file that holds no tests. A title is a plain string, the first argument of a call of `it`,
+ * `test` or `describe` that takes it. Strings are read decoded; the rest of the source as written.
  */
 export function titlesIn(
 	source: string,
 	holdsTests: boolean,
 ): { titles: Title[]; stray: string[] } {
-	const spans: { start: number; end: number; text: string }[] = [];
-	if (holdsTests) {
-		const file = ts.createSourceFile("t.ts", source, ts.ScriptTarget.Latest, true);
-		const visit = (node: ts.Node) => {
-			const [first] = ts.isCallExpression(node) ? node.arguments : [];
-			if (
-				ts.isCallExpression(node) &&
-				first &&
-				(ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first)) &&
-				isRunner(node.expression)
-			)
-				spans.push({ start: first.getStart(file), end: first.end, text: first.text });
-			ts.forEachChild(node, visit);
-		};
-		visit(file);
+	const literals = literalsOf(source, holdsTests);
+	const found: { at: number; id: string }[] = [];
+	const titles: { at: number; title: Title }[] = [];
+	for (const l of literals) {
+		const ids: string[] = [];
+		const candidates = [...l.text.matchAll(idCandidate)];
+		for (const m of candidates) {
+			const bracketed = l.text[m.index - 1] === "[" && l.text[m.index + m[0].length] === "]";
+			if (l.title && bracketed && itemId.test(m[0])) ids.push(m[0]);
+			else found.push({ at: l.start + m.index, id: m[0] });
+		}
+		if (l.title && candidates.length > 0)
+			titles.push({ at: l.start, title: { title: l.text, ids } });
 	}
-	const stray: string[] = [];
-	const titled = new Map<number, string[]>();
-	for (const m of source.matchAll(idLike)) {
-		const at = m.index;
-		const span = spans.findIndex((s) => s.start <= at && at < s.end);
-		const bracketed = source[at - 1] === "[" && source[at + m[0].length] === "]";
-		if (span >= 0) titled.set(span, titled.get(span) ?? []);
-		if (span >= 0 && bracketed && itemId.test(m[0])) titled.get(span)?.push(m[0]);
-		else stray.push(m[0]);
-	}
-	const titles = [...titled]
-		.sort(([a], [b]) => a - b)
-		.map(([k, ids]) => ({ title: spans[k]?.text ?? "", ids }));
-	return { titles, stray };
+	let rest = source;
+	for (const l of literals)
+		rest = rest.slice(0, l.start) + " ".repeat(l.end - l.start) + rest.slice(l.end);
+	for (const m of rest.matchAll(idCandidate)) found.push({ at: m.index, id: m[0] });
+	return {
+		titles: titles.sort((a, b) => a.at - b.at).map((t) => t.title),
+		stray: found.sort((a, b) => a.at - b.at).map((f) => f.id),
+	};
 }

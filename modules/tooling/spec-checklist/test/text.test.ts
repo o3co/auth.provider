@@ -60,6 +60,14 @@ describe("ledgerAgainstText", () => {
 		expect(ledgerAgainstText(ledger, text, digest)).toEqual([]);
 	});
 
+	it("names a place the ledger writes twice, which no text can match", () => {
+		const twice: LedgerRow[] = [...rows, at(0)];
+		const ledger = { source: "x", version: "x", sha256: digest, rows: twice };
+		expect(ledgerAgainstText(ledger, text, digest)).toEqual([
+			"front #1: the ledger has 2 rows for it",
+		]);
+	});
+
 	it("names a missing row, an extra one, one whose keyword differs, and another digest", () => {
 		const changed: LedgerRow[] = [
 			...rows.slice(0, 2),

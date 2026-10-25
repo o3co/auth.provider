@@ -3,8 +3,8 @@ export const itemId =
 	/^(rfc\d{4}|oidc-(?:core|discovery|rpinit|bcl))-((?:\d+|[A-Z])(?:\.\d+)*)-([a-z]{1,2})$/;
 
 /** Anything written like an item ID, well formed or not, so that none goes unseen. */
-export const idLike =
-	/(?<![\w-])(?:rfc\d{4}|oidc-(?:core|discovery|rpinit|bcl))-[0-9A-Za-z.]+-[a-z]{1,2}(?![\w-])/g;
+export const idCandidate =
+	/(?<![\w-])(?:rfc\d{4}|oidc-(?:core|discovery|rpinit|bcl))-[0-9A-Za-z.-]*[0-9A-Za-z]/g;
 
 export type Strength = "MUST" | "MUST NOT" | "SHOULD" | "SHOULD NOT";
 

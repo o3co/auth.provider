@@ -40,6 +40,10 @@ export function ledgerAgainstText(ledger: Ledger, text: string, digest: string):
 	const found =
 		digest === ledger.sha256 ? [] : [`the text's sha256 is ${digest}, not the ledger's`];
 	const key = (o: { section: string; ordinal: number }) => `${o.section} #${o.ordinal}`;
+	const counts = new Map<string, number>();
+	for (const r of ledger.rows) counts.set(key(r), (counts.get(key(r)) ?? 0) + 1);
+	for (const [place, n] of counts)
+		if (n > 1) found.push(`${place}: the ledger has ${n} rows for it`);
 	const rows = new Map(ledger.rows.map((r) => [key(r), r.keyword]));
 	const places = occurrences(text);
 	for (const o of places) {

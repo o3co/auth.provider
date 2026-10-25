@@ -1,4 +1,5 @@
-import type { Item } from "./checklist.ts";
+import type { Decision, Item } from "./checklist.ts";
+import { classOf } from "./ids.ts";
 
 /** An accepted difference in a run against another implementation, as its harness records it. */
 export interface ExceptionEntry {
@@ -13,12 +14,15 @@ export interface ExceptionEntry {
 
 /**
  * What keeps an exception from being taken: one for an item's mark names that item, marked so;
- * an adaptation's or a third party's names no item (its test's items are reached through the test)
+ * a deviation's is a SHOULD's with a decision the decisions hold; an adaptation's or a third party's names no item (its test's items are reached through the test)
  * and carries its name or issue.
  */
 export function exceptionProblems(
 	entry: ExceptionEntry,
-	items: ReadonlyMap<string, Item>,
+	known: {
+		readonly items: ReadonlyMap<string, Item>;
+		readonly decisions: ReadonlyMap<string, Decision>;
+	},
 ): string[] {
 	if (entry.class === "adaptation" || entry.class === "third-party") {
 		const whose = entry.class === "adaptation" ? "an adaptation's" : "a third party's";
@@ -31,7 +35,14 @@ export function exceptionProblems(
 		];
 	}
 	if (!entry.item) return ["names no item"];
-	const item = items.get(entry.item);
+	const item = known.items.get(entry.item);
 	if (!item) return [`names ${entry.item}, which the checklist does not hold`];
-	return item.mark?.kind === entry.class ? [] : [`${entry.item} is not marked ${entry.class}`];
+	if (item.mark?.kind !== entry.class) return [`${entry.item} is not marked ${entry.class}`];
+	if (item.mark.kind === "deviates" && classOf(item.strength) === "MUST")
+		return [`${entry.item} is a ${item.strength}, and deviates is for a SHOULD alone`];
+	if (item.mark.kind === "deviates" && !known.decisions.has(item.mark.decision))
+		return [
+			`${entry.item} names the decision ${item.mark.decision}, which the decisions do not hold`,
+		];
+	return [];
 }

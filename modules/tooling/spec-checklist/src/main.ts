@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { checklistFindings } from "./checklist.ts";
 import {
 	readChecklist,
 	repoFindings,
@@ -28,8 +29,15 @@ if (command === "report") {
 	process.exitCode = found.length === 0 ? 0 : 1;
 } else if (command === "ledger" && args.length === 2) {
 	const [spec = "", file = ""] = args;
-	const ledger = readChecklist().specs.find((s) => s.spec === spec)?.ledger;
-	if (!ledger) {
+	const c = readChecklist();
+	const ledger = c.specs.find((s) => s.spec === spec)?.ledger;
+	// The checklist is held to its own rules first, so a ledger that breaks them never reads as matching.
+	const broken = checklistFindings(c);
+	for (const f of broken) say(`${f.where}  ${f.detail}`);
+	if (broken.length > 0) {
+		say(`spec-checklist: ${broken.length} finding(s) in the checklist; fix them before comparing`);
+		process.exitCode = 1;
+	} else if (!ledger) {
 		say(`spec-checklist: ${spec} has no ledger`);
 		process.exitCode = 1;
 	} else {
