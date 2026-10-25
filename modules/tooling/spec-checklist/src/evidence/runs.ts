@@ -93,20 +93,21 @@ export interface ItemStatus {
 	readonly failures: readonly Failure[];
 }
 
-/** Of the reports given, this commit's and run's for the new system, the last attempt of each entry and job. */
+/** Of the reports given, this commit's and run's for the new system, all of each entry and job's last attempt. */
 export function selectReports(
 	reports: readonly EvidenceReport[],
 	of: { readonly commit: string; readonly run: string },
 ): EvidenceReport[] {
-	const last = new Map<string, EvidenceReport>();
-	for (const r of reports) {
-		const { commit, run, entry, job, target, attempt } = r.identity;
-		if (commit !== of.commit || run !== of.run || target !== "new") continue;
-		const key = JSON.stringify([entry, job]);
-		const kept = last.get(key);
-		if (!kept || kept.identity.attempt < attempt) last.set(key, r);
-	}
-	return [...last.values()];
+	const ours = reports.filter(
+		(r) =>
+			r.identity.commit === of.commit && r.identity.run === of.run && r.identity.target === "new",
+	);
+	const keyOf = (r: EvidenceReport) => JSON.stringify([r.identity.entry, r.identity.job]);
+	const lastAttempt = new Map<string, number>();
+	for (const r of ours)
+		lastAttempt.set(keyOf(r), Math.max(lastAttempt.get(keyOf(r)) ?? 0, r.identity.attempt));
+	// Every report of the last attempt: two processes of one entry, job and attempt both count.
+	return ours.filter((r) => r.identity.attempt === lastAttempt.get(keyOf(r)));
 }
 
 /** The expected runs a test file's tests run in. */
@@ -120,10 +121,14 @@ export function entriesOfFile(pkg: string, file: string, expected: Expected): re
 	return [pkg];
 }
 
-const idsIn = (names: readonly string[]) =>
-	names
-		.flatMap((n) => [...n.matchAll(/\[([^\]\s]+)\]/g)].map((m) => m[1] ?? ""))
-		.filter((id) => itemId.test(id));
+/** The items a test's names give, each once however many of its names give it. */
+const idsIn = (names: readonly string[]) => [
+	...new Set(
+		names
+			.flatMap((n) => [...n.matchAll(/\[([^\]\s]+)\]/g)].map((m) => m[1] ?? ""))
+			.filter((id) => itemId.test(id)),
+	),
+];
 
 /** Each item's status from the reports, in the order the card's invariant gives; an excused result counted apart. */
 export function itemStatuses(

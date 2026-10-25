@@ -21,7 +21,8 @@ Internal module of `spec-checklist`: what a CI run's tests proved of the checkli
 ## Invariants
 - Every vitest config the workspace tracks registers the reporter, its fixtures' aside.
 - The commit a report names and compliance takes is `SPEC_EVIDENCE_COMMIT` where set, else the checkout's HEAD; never the event's `GITHUB_SHA`.
-- Only this run's reports count: the commit tested and the run of `GITHUB_RUN_ID`, the new system's target, and the last attempt of each entry and job.
+- Only this run's reports count: the commit tested and the run of `GITHUB_RUN_ID`, the new system's target, and every report of each entry and job's last attempt.
+- A test counts once for each item its names give, however many of its names give it.
 - The runs are `unit`, `integration`, each package with a `conformance` script (kind `area`), and each run a package's `evidence-runs` script prints as a JSON list of `{ entry, kind, matrix?, releaseOnly? }` (entries `<package>@<pattern>`, `<package>#<run>`).
 - A CI run expects every run, but a `releaseOnly` one only where it is a release's; its jobs' matrices are the runs' `matrix` values by kind.
 - A test file runs in: `integration` for `.integration.test.ts`; a harness package's printed runs; an area's own run and its pattern runs for its `.case.ts`; `unit` for any other `.test.ts`; its package's run otherwise.

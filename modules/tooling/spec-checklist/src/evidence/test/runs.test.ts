@@ -50,6 +50,18 @@ describe("entryOf", () => {
 });
 
 describe("selectReports", () => {
+	it("keeps every report of an entry and job's last attempt, in whatever order they come", () => {
+		const passing: EvidenceReport = { identity: identity("unit"), tests: [], errors: 0 };
+		const failing: EvidenceReport = { identity: identity("unit"), tests: [], errors: 1 };
+		for (const order of [
+			[passing, failing],
+			[failing, passing],
+		]) {
+			const kept = selectReports(order, { commit: "c1", run: "r1" });
+			expect(kept.map((r) => r.errors).sort()).toEqual([0, 1]);
+		}
+	});
+
 	it("keeps the reports of this commit and run, the last attempt of each entry and job, and not the legacy target's", () => {
 		const reports: EvidenceReport[] = [
 			{ identity: identity("unit"), tests: [], errors: 0 },
@@ -187,6 +199,29 @@ describe("itemStatuses", () => {
 		expect(complianceTable(statuses, [])).toContain(
 			"| as | MUST | 1 | 2 | 1 | 1 | 1 | 0 | 0 | 1 |",
 		);
+	});
+
+	it("counts a test once for an item its suite and itself both name", () => {
+		const twice: EvidenceReport = {
+			identity: identity("unit"),
+			errors: 0,
+			tests: [
+				{
+					file: "modules/x/x/test/x.test.ts",
+					names: ["a suite [rfc9999-4-a]", "a [rfc9999-4-a]"],
+					state: "passed",
+				},
+			],
+		};
+		const [a] = itemStatuses(
+			items.slice(0, 1),
+			tests,
+			[twice],
+			{ ...expected, entries: ["unit"] },
+			pkgDirs,
+		);
+		expect(a).toMatchObject({ status: "passed", passed: 1 });
+		expect(a?.evidence.map((e) => e.passed)).toEqual([1]);
 	});
 
 	it("does not count a test the harness excused as passed, nor as failed", () => {
