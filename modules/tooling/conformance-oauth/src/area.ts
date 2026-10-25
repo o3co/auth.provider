@@ -13,6 +13,8 @@ export interface ClientScene {
 	readonly keys?: readonly Readonly<Record<string, unknown>>[];
 	/** Where the client publishes those keys instead, under `private_key_jwt`; plain http on loopback only. */
 	readonly jwksUri?: string;
+	/** Its assertions are also taken for the token endpoint, or naming their audience in a list. */
+	readonly looseAudience?: boolean;
 	readonly grants: readonly string[];
 	readonly scopes: readonly string[];
 	readonly defaultScopes?: readonly string[];
