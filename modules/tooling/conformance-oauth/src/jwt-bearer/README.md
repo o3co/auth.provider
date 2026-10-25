@@ -3,7 +3,7 @@
 Internal module of `conformance-oauth`: the scenes of the jwt-bearer grant.
 
 ## Responsibilities
-- Owns the conformance scenes of the jwt-bearer grant: issuers whose keys are written, linked issuers whose signers' keys a ledger answers, an issuer whose assertions are used up in a ledger shared with another service, and the grant's absence.
+- Owns the conformance scenes of the jwt-bearer grant: issuers whose keys are written, linked issuers whose signers' keys a ledger answers (self-issued signers among them), an issuer whose assertions are used up in a ledger shared with another service, and the grant's absence.
 
 ## Not here
 - Setting the grant up on each target, and the shape of a trusted issuer (the package's area and set-up). Scene composition and drivers (`conformance`).
