@@ -5,7 +5,7 @@ import { areaTarget, type Started, sceneOf } from "@mod/conformance";
 import { identityArea } from "@mod/conformance-identity";
 import { keysArea } from "@mod/conformance-keys";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type ClientScene, oauthArea } from "../src/main.ts";
+import { type ClientScene, oauthArea } from "../../main.ts";
 
 const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const issuer = "https://issuer.example";

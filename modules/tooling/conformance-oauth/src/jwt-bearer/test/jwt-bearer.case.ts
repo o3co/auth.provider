@@ -1,7 +1,7 @@
 import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import { areaTarget, faultyTarget, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type ClientScene, oauthScene } from "../src/main.ts";
+import { type ClientScene, oauthScene } from "../../main.ts";
 
 const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const issuer = "https://issuer.example";
