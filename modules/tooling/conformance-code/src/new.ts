@@ -33,11 +33,15 @@ onNew(codeArea, (part, scene) => {
 			...(part.withoutConsent ? {} : { consent: { page: `${origin}/consent` } }),
 			...(part.acr ? { acr: { values: part.acr.values } } : {}),
 			...(part.documents ? { "clients-cimd": part.documents } : {}),
-			// The back channel reaches the allowed origins alone, those on plain http at loopback as such.
+			// The back channel reaches the allowed origins alone, those on plain http at loopback as such;
+			// the documents' hosts stay within reach beside them.
 			...(part.logout
 				? {
 						outbound: {
-							allow: part.logout.allowed.map((origin) => new URL(origin).hostname),
+							allow: [
+								...part.logout.allowed.map((origin) => new URL(origin).hostname),
+								...(part.documents?.allow ?? []),
+							],
 							"plain-loopback": part.logout.allowed
 								.filter((origin) => origin.startsWith("http:"))
 								.map((origin) => new URL(origin).host),
