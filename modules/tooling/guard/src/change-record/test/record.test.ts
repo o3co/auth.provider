@@ -175,3 +175,23 @@ it("reads a workspace's state: each unit's files, the signatures, the edges and 
 		other.signatures.get("@t/read-right")?.get("Shape"),
 	);
 });
+
+it("tells an export renamed in its package from the real signatures, which name it, and a rename with a new type as removed and added", () => {
+	const version = (contract: string) =>
+		readingOf([pkg("@t/renaming", { "src/contract.ts": contract })], budget, {
+			commit: "c",
+			tree: "t",
+		});
+	const before = version(
+		"export const limit = 3;\nexport interface Store { readonly a: string }\nexport const kept = 1;\n",
+	);
+	const after = version(
+		'export const most = 3;\nexport interface Shop { readonly a: string }\nexport const fresh = "x";\n',
+	);
+	expect(changesOf(before, after).contract).toEqual([
+		{ package: "@t/renaming", name: "fresh", kind: "added" },
+		{ package: "@t/renaming", name: "kept", kind: "removed" },
+		{ package: "@t/renaming", name: "limit", kind: "renamed", to: "most" },
+		{ package: "@t/renaming", name: "Store", kind: "renamed", to: "Shop" },
+	]);
+});

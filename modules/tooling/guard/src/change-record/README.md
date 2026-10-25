@@ -15,7 +15,7 @@ Internal module of `guard`: a change record's machine rows, what two commits of 
 - The script `change-record <base> <head>`, any revisions git resolves to commits.
 
 ## Invariants
-- A contract change is an export's: added, removed, changed (its signature differs, a member's type or a member put in another's place with the count kept), renamed (gone, and another name with its signature comes in its package) or moved (gone, and its name with its signature comes in another package).
+- A contract change is an export's: added, removed, changed (its signature differs, a member's type or a member put in another's place with the count kept), renamed (gone, and another name comes in its package with its signature, the export's own name in it aside) or moved (gone, and its name with its signature comes in another package).
 - A unit is moved where it is the one gone and another the one come with the same last part of its place, else added and removed; changed where its files or their content differ.
 - An edge is a manifest's: `dependencies` and `peerDependencies` at run time, `devDependencies` for tests, to workspace packages.
 - A commit is measured on its own budget numbers, or on the current ones where it has none.

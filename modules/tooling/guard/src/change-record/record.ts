@@ -116,6 +116,10 @@ function unitChanges(base: Reading, head: Reading) {
 	};
 }
 
+/** A signature with its export's own name masked, wherever it names it: what a rename keeps. */
+const shapeOf = (name: string, signature: string) =>
+	signature.replace(new RegExp(`(?<![\\w$])${name.replace(/[$]/g, "\\$")}(?![\\w$])`, "g"), "·");
+
 /** Each export added, removed, changed, renamed (another name, the same signature, in its package) or moved (the same name and signature, in another). */
 function contractChanges(base: Reading, head: Reading): ContractChange[] {
 	const of = (r: Reading, p: string) => r.signatures.get(p) ?? new Map<string, string>();
@@ -132,7 +136,10 @@ function contractChanges(base: Reading, head: Reading): ContractChange[] {
 				continue;
 			}
 			const renamed = [...after].find(
-				([other, s]) => s === signature && !before.has(other) && !taken.has(`${p}\t${other}`),
+				([other, s]) =>
+					shapeOf(other, s) === shapeOf(name, signature) &&
+					!before.has(other) &&
+					!taken.has(`${p}\t${other}`),
 			);
 			const moved = packages.find(
 				(q) => q !== p && of(head, q).get(name) === signature && !of(base, q).has(name),
