@@ -23,9 +23,18 @@ import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime
 import { checkTakes, countRefusal, takenByRefusal } from "./takes/takes.ts";
 
 export interface Assembly {
+	/** The contract's interface; one no module provides throws an Error at once. */
 	get<T>(contract: Contract<T>): T;
+	/**
+	 * Runs the start hooks in the order registered, one at a time; the first that rejects stops the
+	 * rest and the periodic tasks from starting, and `start` rejects with it. It has no deadline and
+	 * is called once: a second call runs the hooks and starts the periodic tasks again.
+	 */
 	start(): Promise<void>;
-	/** Without a deadline, the kernel section's `stop-deadline`. */
+	/**
+	 * Without a deadline, the kernel section's `stop-deadline`. It is called once: each call runs the
+	 * stop hooks again, and calls made side by side are not joined, so the caller stops once.
+	 */
 	stop(deadlineMs?: number): Promise<void>;
 }
 
@@ -106,6 +115,7 @@ export interface TakesWatch {
 	took(module: string, handle: Handle): void;
 }
 
+/** Builds the modules; it waits on each factory without a deadline (`stop-deadline` bounds stopping alone). */
 export function assemble(input: AssemblyInput): Promise<Assembly> {
 	return assembleWatching(input);
 }

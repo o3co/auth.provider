@@ -61,7 +61,7 @@ export interface Contribution<S> {
 export interface ModuleHead<S> {
 	readonly name: string;
 	readonly section?: ZodType<S>;
-	/** A function is asked only with a section that passed its schema. */
+	/** Safe on multiple instances unless it says otherwise; a function is asked only with a section that passed its schema. */
 	readonly replicaSafe?: boolean | ((section: S) => boolean);
 	/**
 	 * What a production deployment must not hold in this section: each a key path below the section

@@ -14,6 +14,7 @@ Internal module of `kernel`: what runs once the assembly starts, and how it stop
 - `stopWithin` (deadline, the periodic tasks, the stop hooks, log, `during`?) and `StopHook`; `during: "refusal"` for a refused assembly's rollback.
 
 ## Invariants
+- A periodic task's first run comes one interval after start; its timer, and readiness's deadline timer, leave the process free to end.
 - A run still going takes the next tick too; a failed run is one warn line with the error's type, and the next follows.
 - A check still running is joined, and aborted once no caller waits; once stop begins, every probe answers down, in a report asked before it too.
 - Stop waits for the periodic tasks, then calls the hooks in reverse order, each with a signal that aborts at the deadline; a hook that fails or runs past it is one warn line; the hooks left are called without waiting, their signal aborted, with no `late` line of their own, though a failure of theirs is still warned.
