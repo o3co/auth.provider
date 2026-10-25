@@ -23,7 +23,7 @@
 - `readChecklist` (the items, ledgers and decisions as written) and `exceptionProblems` (an exception and the items → why it may not be taken).
 
 ## Invariants
-- An item's line, its marks and its heading follow the forms above; an ID is of its file's spec and of the section it is written under, once only. A mark belongs to the item just above it in its section, none after a heading or a refused item; an item has one `updates` line and one `role` line at most, a role one of the five.
+- An item's line, its marks and its heading follow the forms above; an ID is of its file's spec and of the section it is written under, once only. A mark belongs to the item just above it in its section, none after a heading or a refused item; an item has one `updates` line and one `role` line at most, and a file one head `role` line at most, a role one of the five.
 - `deviates` is a SHOULD's alone and names a decision the decisions hold; `noncompliant` is a MUST's alone.
 - A ledger row names items of its own spec whose strength is its keyword's (MUST, REQUIRED and SHALL as MUST; SHOULD and RECOMMENDED as SHOULD), or excludes it by one of the reasons above, a row that restates an item naming one whose strength is its keyword's; every item is named by a row; a section's rows are numbered from 1 in order.
 - An ID is taken only from a test's title, written in brackets: the first argument, a plain string, of a call of `it`, `test` or `describe` that takes the title, directly, through `.only`, `.skip`, `.concurrent` and the like, or as the function `.each`, `.for`, `.runIf` and `.skipIf` return (`.each` and `.for` given their table as a tagged template too); their own arguments and tables are no title. Only files ending `.test.ts` or `.case.ts` hold titles.
