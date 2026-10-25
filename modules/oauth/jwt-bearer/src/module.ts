@@ -100,7 +100,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			maxLifetimeMs: c.section["max-assertion-lifetime"] * 1000,
 			expect: { aud: [named, url] },
 		});
-		const trust = await issuersIn(c, c.section.issuers, policyOf);
+		const trust = await issuersIn(c, c.section, policyOf);
 		const delegation = await delegatedIn(c, c.section.issuers, c.section["delegated-issuers"]);
 		const refused = [trust, delegation].flatMap((t) => (t.kind === "refused" ? t.refusals : []));
 		if (trust.kind === "refused" || delegation.kind === "refused") return c.refuseAll(refused);
