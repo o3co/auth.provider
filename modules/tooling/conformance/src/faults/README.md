@@ -7,21 +7,23 @@ Internal module of `conformance`: a Redis topology a fault scene runs on, and th
 - Promotes a replica, crashes a node, makes one slow, pauses one, and moves the clock of every node.
 
 ## Offers
-- `startTopology` (a number of replicas, settings every node starts with, a clock offset), giving the nodes, the current `primary`, its `replicas`, and `stop`; `ask` a node one command.
+- `startTopology` (a number of replicas, settings every node starts with, a clock offset), giving the nodes, the current `primary`, the nodes following it (`replicas`), and `stop`.
 - A node: its name, `upstream` (where it answers on this host now), `ask`, `runId`, `state` (running, exit code).
-- `promote` a replica (only once it has caught up with the primary, within a wait given), killing the old primary or keeping it on, and reattaching the replicas named to the new one.
+- `promote` a replica (only once it has caught up with the primary, within a wait given), killing the old primary or keeping it on, and reattaching the replicas named to the new one; a step a scene takes while writes are held (`between`); the barrier's span.
 - `crash` a node (SIGKILL, then started again, answering how it ended), and `pause` a node's container.
 - `sleep` a node (`DEBUG SLEEP`): `awake` with when it began and ended on Redis's clock, from a `TIME` on either side in the same write; `asleep` only a hint, a PING unanswered.
-- `askAll` several commands in one write, and `microsOf` a `TIME` reply.
-- `redisImage` and `libfaketime`: the Redis image by version and digest, and the libfaketime package by version.
+- `redisImage`: the Redis image by version and digest.
 
 ## Invariants
 - Every node fsyncs every write (`appendonly`, `appendfsync always`) and runs Redis as its own user from the start, its debug command allowed, for a slow server.
-- A replica that has not caught up is never promoted; its refusal says it is not eligible.
+- A replica that has not caught up, or follows another replication history than the primary, is never promoted; its refusal says it is not eligible.
+- Writes to the primary are held from the barrier at which the target is taken until the old primary is killed or, kept on, released.
+- Keeping the old primary on needs a replica reattached to the new one.
+- A node follows its primary by command, never by a start argument, so one crashed starts again in its current role, following its current primary, checked before `crash` answers.
 - A request was held by a sleep only where Redis served it at or after the sleep's end; the hint alone proves nothing.
 - With the old primary kept on, each primary keeps a replica online.
-- A moved clock is libfaketime preloaded with its offset from start, the monotonic clock left alone; the image is the pinned Redis image with the pinned libfaketime, built the same wherever it runs.
-- Containers and networks carry the run's process label; those of a process no longer running are removed at the next start, and a start that fails removes what it started.
+- A moved clock is `clock`'s, on the pinned Redis image.
+- Containers and networks carry the run's process label; those of a process no longer running are removed at the next start, and a start that fails removes what it started. A container goes with its volume; a crash keeps both.
 
 ## Depends on
-- Docker; the relay's RESP reader and its upstream.
+- Docker; `ask`; `clock`; the relay's answer and upstream.

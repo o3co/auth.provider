@@ -1,0 +1,74 @@
+import { createConnection } from "node:net";
+import type { Reply, Upstream } from "../relay/relay.ts";
+import { frames } from "../relay/resp.ts";
+
+const command = (args: readonly string[]) =>
+	Buffer.from(
+		`*${args.length}\r\n${args.map((a) => `$${Buffer.byteLength(a)}\r\n${a}\r\n`).join("")}`,
+	);
+
+/** One command on a connection of its own, and its reply. */
+export function ask(to: Upstream, args: readonly string[], timeoutMs = 30_000): Promise<Reply> {
+	return new Promise((resolve, reject) => {
+		const socket = createConnection(to, () => socket.write(command(args)));
+		const reader = frames();
+		const timer = setTimeout(() => socket.destroy(new Error(`no reply to ${args[0]}`)), timeoutMs);
+		let done = false;
+		socket.on("data", (chunk: Buffer) => {
+			const [frame] = reader.push(chunk);
+			if (!frame) return;
+			done = true;
+			clearTimeout(timer);
+			socket.end();
+			resolve(frame.value);
+		});
+		socket.on("error", (error) => {
+			done = true;
+			clearTimeout(timer);
+			reject(error);
+		});
+		socket.on("close", () => {
+			clearTimeout(timer);
+			if (!done) reject(new Error(`closed before its reply to ${args[0]}`));
+		});
+	});
+}
+
+/** Several commands in one write on a connection of its own, and their replies in order. */
+export function askAll(
+	to: Upstream,
+	commands: readonly (readonly string[])[],
+	timeoutMs = 30_000,
+): Promise<Reply[]> {
+	return new Promise((resolve, reject) => {
+		const socket = createConnection(to, () => socket.write(Buffer.concat(commands.map(command))));
+		const reader = frames();
+		const replies: Reply[] = [];
+		const timer = setTimeout(() => socket.destroy(new Error("no reply")), timeoutMs);
+		let done = false;
+		socket.on("data", (chunk: Buffer) => {
+			replies.push(...reader.push(chunk).map((f) => f.value));
+			if (replies.length < commands.length) return;
+			done = true;
+			clearTimeout(timer);
+			socket.end();
+			resolve(replies);
+		});
+		socket.on("error", (error) => {
+			done = true;
+			clearTimeout(timer);
+			reject(error);
+		});
+		socket.on("close", () => {
+			clearTimeout(timer);
+			if (!done) reject(new Error("closed before all its replies"));
+		});
+	});
+}
+
+/** A `TIME` reply as microseconds on Redis's clock. */
+export const microsOf = (reply: Reply | undefined): number => {
+	const items = reply?.kind === "array" ? (reply.items ?? []) : [];
+	const [s, us] = items.map((i) => (i.kind === "bulk" ? Number(i.data?.toString()) : Number.NaN));
+	return (s ?? Number.NaN) * 1_000_000 + (us ?? Number.NaN);
+};

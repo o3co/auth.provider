@@ -1,20 +1,13 @@
 import { execFile, execFileSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { createConnection } from "node:net";
+import { randomBytes } from "node:crypto";
+import { ask, askAll, microsOf } from "../ask/ask.ts";
+import { clockImage, faketimeEnv } from "../clock/clock.ts";
 import type { Reply, Upstream } from "../relay/relay.ts";
-import { frames } from "../relay/resp.ts";
 
 /** The Redis every fault scene runs, by version and digest. */
 export const redisImage =
 	"redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499";
-/** The libfaketime a node with a moved clock preloads, by its Alpine package version. */
-export const libfaketime = "libfaketime=0.9.10-r3";
-
 const owner = "conformance.owner";
-const command = (args: readonly string[]) =>
-	Buffer.from(
-		`*${args.length}\r\n${args.map((a) => `$${Buffer.byteLength(a)}\r\n${a}\r\n`).join("")}`,
-	);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
 /** Docker, without holding the process while it works, so several containers start at once. */
@@ -26,73 +19,6 @@ const dockerAsync = (...args: string[]) =>
 	);
 const field = (info: string, name: string) =>
 	new RegExp(`^${name}:(.*)$`, "m").exec(info)?.[1]?.trim();
-
-/** One command on a connection of its own, and its reply. */
-export function ask(to: Upstream, args: readonly string[], timeoutMs = 30_000): Promise<Reply> {
-	return new Promise((resolve, reject) => {
-		const socket = createConnection(to, () => socket.write(command(args)));
-		const reader = frames();
-		const timer = setTimeout(() => socket.destroy(new Error(`no reply to ${args[0]}`)), timeoutMs);
-		socket.on("data", (chunk: Buffer) => {
-			const [frame] = reader.push(chunk);
-			if (!frame) return;
-			clearTimeout(timer);
-			socket.end();
-			resolve(frame.value);
-		});
-		socket.on("error", (error) => {
-			clearTimeout(timer);
-			reject(error);
-		});
-	});
-}
-
-/** Several commands in one write on a connection of its own, and their replies in order. */
-export function askAll(
-	to: Upstream,
-	commands: readonly (readonly string[])[],
-	timeoutMs = 30_000,
-): Promise<Reply[]> {
-	return new Promise((resolve, reject) => {
-		const socket = createConnection(to, () => socket.write(Buffer.concat(commands.map(command))));
-		const reader = frames();
-		const replies: Reply[] = [];
-		const timer = setTimeout(() => socket.destroy(new Error("no reply")), timeoutMs);
-		socket.on("data", (chunk: Buffer) => {
-			replies.push(...reader.push(chunk).map((f) => f.value));
-			if (replies.length < commands.length) return;
-			clearTimeout(timer);
-			socket.end();
-			resolve(replies);
-		});
-		socket.on("error", (error) => {
-			clearTimeout(timer);
-			reject(error);
-		});
-	});
-}
-
-/** A `TIME` reply as microseconds on Redis's clock. */
-export const microsOf = (reply: Reply | undefined): number => {
-	const items = reply?.kind === "array" ? (reply.items ?? []) : [];
-	const [s, us] = items.map((i) => (i.kind === "bulk" ? Number(i.data?.toString()) : Number.NaN));
-	return (s ?? Number.NaN) * 1_000_000 + (us ?? Number.NaN);
-};
-
-/** The image a node with a moved clock runs: the Redis image with libfaketime, built once. */
-function clockImage(): string {
-	const recipe = `FROM ${redisImage}\nRUN apk add --no-cache ${libfaketime}\n`;
-	const tag = `conformance-redis-clock:${createHash("sha256").update(recipe).digest("hex").slice(0, 16)}`;
-	try {
-		docker("image", "inspect", tag);
-	} catch {
-		execFileSync("docker", ["build", "-q", "-t", tag, "-"], {
-			input: recipe,
-			stdio: ["pipe", "ignore", "inherit"],
-		});
-	}
-	return tag;
-}
 
 /** Removes the topologies a process no longer running left behind. */
 function sweepLeftBehind() {
@@ -115,7 +41,8 @@ function sweepLeftBehind() {
 			const [id, pid] = line.split(" ");
 			if (!id || alive(Number(pid))) continue;
 			try {
-				docker(what, "rm", "-f", id);
+				// A container's anonymous volume (its /data) goes with it.
+				docker(what, "rm", "-f", ...(what === "container" ? ["-v"] : []), id);
 			} catch {}
 		}
 	}
@@ -146,18 +73,9 @@ export async function startTopology(spec: TopologySpec) {
 	sweepLeftBehind();
 	const id = `${process.pid}-${randomBytes(4).toString("hex")}`;
 	const network = `conformance-net-${id}`;
-	docker("network", "create", "--label", `${owner}=${process.pid}`, network);
-	const image = spec.clock ? clockImage() : redisImage;
-	const clockEnv = spec.clock
-		? [
-				"-e",
-				"LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1",
-				"-e",
-				`FAKETIME=${spec.clock}`,
-				"-e",
-				"FAKETIME_DONT_FAKE_MONOTONIC=1",
-			]
-		: [];
+	// The image comes first: a build that fails leaves no network behind.
+	const image = spec.clock ? clockImage(redisImage) : redisImage;
+	const clockEnv = spec.clock ? faketimeEnv(spec.clock) : [];
 	const ports = new Map<string, Upstream>();
 	const portOf = (name: string): Upstream => {
 		const bound = docker("port", name, "6379/tcp");
@@ -204,7 +122,7 @@ export async function startTopology(spec: TopologySpec) {
 		const r = await n.ask("INFO", "replication");
 		return r.kind === "bulk" ? (r.data?.toString() ?? "") : "";
 	};
-	const start = async (name: string, extra: readonly string[]) => {
+	const start = async (name: string) => {
 		await dockerAsync(
 			"run",
 			"-d",
@@ -232,7 +150,6 @@ export async function startTopology(spec: TopologySpec) {
 			"always",
 			"--enable-debug-command",
 			"yes",
-			...extra,
 			...(spec.settings ?? []),
 		);
 		ports.set(name, portOf(name));
@@ -241,78 +158,127 @@ export async function startTopology(spec: TopologySpec) {
 	const names = Array.from({ length: spec.replicas + 1 }, (_, i) => `conformance-redis-${id}-${i}`);
 	const removeAll = () => {
 		try {
-			docker("rm", "-f", ...names);
+			docker("rm", "-f", "-v", ...names);
 		} catch {}
 		try {
 			docker("network", "rm", network);
 		} catch {}
 	};
 	const nodes: Node[] = [];
+	/** Each node's primary by name, none for a primary: what a restart puts back. */
+	const follows = new Map<string, string | undefined>();
+	const killed = new Set<string>();
+	const replicasOf = async (p: Node) => Number(field(await info(p), "connected_slaves") ?? 0);
+	const onlineAt = async (p: Node, count: number) =>
+		(await info(p)).split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length >= count;
+	const following = async (n: Node, upstream: string) => {
+		const i = await info(n);
+		return field(i, "master_host") === upstream && field(i, "master_link_status") === "up";
+	};
 	try {
-		const started = await Promise.allSettled(
-			names.map((name, i) => start(name, i === 0 ? [] : ["--replicaof", names[0] ?? "", "6379"])),
-		);
+		docker("network", "create", "--label", `${owner}=${process.pid}`, network);
+		// Every node starts on its own: a replica is pointed at its primary by command, never by a
+		// start argument a restart would reuse.
+		const started = await Promise.allSettled(names.map((name) => start(name)));
 		for (const s of started) {
 			if (s.status === "rejected") throw s.reason;
 			nodes.push(s.value);
 		}
+		for (const n of nodes) await answering(n);
+		const first = names[0] ?? "";
+		for (const [i, n] of nodes.entries()) follows.set(n.name, i === 0 ? undefined : first);
+		for (const n of nodes.slice(1)) await n.ask("REPLICAOF", first, "6379");
+		await until("the replicas did not come online", () =>
+			onlineAt(nodes[0] as Node, nodes.length - 1),
+		);
 	} catch (error) {
 		removeAll();
 		throw error;
 	}
 	let primary = nodes[0] as Node;
-	const replicasOf = async (p: Node) => Number(field(await info(p), "connected_slaves") ?? 0);
-	const onlineAt = async (p: Node, count: number) =>
-		(await info(p)).split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length >= count;
-	try {
-		for (const n of nodes) await answering(n);
-		await until("the replicas did not come online", () => onlineAt(primary, spec.replicas));
-	} catch (error) {
-		removeAll();
-		throw error;
-	}
+	const replid = async (n: Node) => field(await info(n), "master_replid");
 
 	return {
 		network,
 		nodes,
 		primary: () => primary,
-		replicas: () => nodes.filter((n) => n !== primary),
+		/** The nodes following the current primary, none killed. */
+		replicas: () =>
+			nodes.filter((n) => follows.get(n.name) === primary.name && !killed.has(n.name)),
 		/**
-		 * Promotes a replica: refused unless it has caught up with the primary within `catchUpMs`;
-		 * the old primary is killed (SIGKILL) unless kept on; the replicas named follow the new one.
+		 * Promotes a replica: refused unless it follows the primary's replication history and has
+		 * caught up with it within `catchUpMs`, writes to the primary held from a barrier until the
+		 * old primary is killed (SIGKILL) or, kept on, released. The replicas named follow the new
+		 * one; keeping the old one on needs one of them. `between` is a step taken once writes are
+		 * held, before the old primary goes. Answers the barrier's span on the base's monotonic clock.
 		 */
 		async promote(o: {
 			replica: Node;
 			reattach?: readonly Node[];
 			keepOld?: boolean;
 			catchUpMs?: number;
+			between?: () => Promise<void>;
 		}) {
 			const old = primary;
-			const offset = Number(field(await info(old), "master_repl_offset"));
-			const caughtUp = async () =>
-				Number(field(await info(o.replica), "slave_repl_offset") ?? -1) >= offset;
-			await until(
-				`not eligible: ${o.replica.name} lags behind ${old.name}`,
-				caughtUp,
-				o.catchUpMs ?? 5_000,
-			);
-			if (!o.keepOld) docker("kill", "-s", "KILL", old.name);
+			const reattach = o.reattach ?? [];
+			if (o.keepOld && reattach.length === 0)
+				throw new Error("keeping the old primary on needs a replica reattached to the new one");
+			// Offsets compare only within one replication history.
+			if ((await replid(o.replica)) !== (await replid(old)))
+				throw new Error(
+					`not eligible: ${o.replica.name} follows another replication history than ${old.name}`,
+				);
+			const catchUpMs = o.catchUpMs ?? 5_000;
+			await old.ask("CLIENT", "PAUSE", String(catchUpMs + 60_000), "WRITE");
+			const from = performance.now();
+			try {
+				const offset = Number(field(await info(old), "master_repl_offset"));
+				const caughtUp = async () =>
+					Number(field(await info(o.replica), "slave_repl_offset") ?? -1) >= offset;
+				await until(`not eligible: ${o.replica.name} lags behind ${old.name}`, caughtUp, catchUpMs);
+				await o.between?.();
+			} catch (error) {
+				await old.ask("CLIENT", "UNPAUSE").catch(() => undefined);
+				throw error;
+			}
+			if (!o.keepOld) {
+				docker("kill", "-s", "KILL", old.name);
+				killed.add(old.name);
+			}
 			await o.replica.ask("REPLICAOF", "NO", "ONE");
-			for (const r of o.reattach ?? []) await r.ask("REPLICAOF", o.replica.name, "6379");
+			follows.set(o.replica.name, undefined);
+			for (const r of reattach) {
+				await r.ask("REPLICAOF", o.replica.name, "6379");
+				follows.set(r.name, o.replica.name);
+			}
 			primary = o.replica;
-			const count = o.reattach?.length ?? 0;
-			await until("the replicas named did not follow", () => onlineAt(o.replica, count));
-			if (o.keepOld)
+			await until("the replicas named did not follow", () => onlineAt(o.replica, reattach.length));
+			if (o.keepOld) {
+				await old.ask("CLIENT", "UNPAUSE");
 				await until("the old primary lost every replica", async () => (await replicasOf(old)) > 0);
-			return { primary: o.replica, old };
+			}
+			return { primary: o.replica, old, barrier: { from, to: performance.now() } };
 		},
-		/** Ends the node with SIGKILL, as a crash does, and starts it again; answers how it ended. */
+		/**
+		 * Ends the node with SIGKILL, as a crash does, and starts it again in the role it had,
+		 * following the primary it followed; answers how it ended.
+		 */
 		async crash(n: Node) {
 			docker("kill", "-s", "KILL", n.name);
 			const { exitCode } = n.state();
 			docker("start", n.name);
 			ports.set(n.name, portOf(n.name));
 			await answering(n);
+			const upstream = follows.get(n.name);
+			if (upstream === undefined) {
+				const r = await n.ask("ROLE");
+				const head = r.kind === "array" ? r.items?.[0] : undefined;
+				if (!(head?.kind === "bulk" && head.data?.toString() === "master"))
+					throw new Error(`${n.name} did not start again as a primary`);
+			} else {
+				await n.ask("REPLICAOF", upstream, "6379");
+				await until(`${n.name} did not follow ${upstream} again`, () => following(n, upstream));
+			}
 			return { exitCode };
 		},
 		/**
