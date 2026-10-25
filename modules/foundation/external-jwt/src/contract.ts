@@ -58,13 +58,21 @@ export type Reason =
 	| "audience"
 	| "subject";
 
+/**
+ * What a verifier answers: valid, invalid with its reason, or unavailable. An invalid answer found
+ * once the signature held, a claim refused after it, carries `signed: true`; one before carries none.
+ */
 export type Verified =
 	| {
 			readonly kind: "valid";
 			readonly header: Readonly<Record<string, unknown>>;
 			readonly claims: Readonly<Record<string, unknown>>;
 	  }
-	| { readonly kind: "invalid"; readonly reason: Reason }
+	| {
+			readonly kind: "invalid";
+			readonly reason: Reason;
+			readonly signed?: true;
+	  }
 	| { readonly kind: "unavailable" };
 
 export interface Verifier {
