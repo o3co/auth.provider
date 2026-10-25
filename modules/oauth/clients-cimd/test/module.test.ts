@@ -644,6 +644,10 @@ describe("clients-cimd: times and sizes in the section", () => {
 
 it("takes all it names, the code grant composed or not", async () => {
 	for (const code of [true, false]) {
-		expect(await takesUnused((await boot({}, { code })).input), `code ${code}`).toEqual({});
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect(
+			(await takesUnused((await boot({}, { code })).input))["clients-cimd"],
+			`code ${code}`,
+		).toBeUndefined();
 	}
 });

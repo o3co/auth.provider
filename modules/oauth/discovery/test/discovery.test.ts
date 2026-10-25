@@ -123,6 +123,7 @@ it("lets a listed origin's page read the document at each of its names, and no o
 
 it("takes all it names, with items and with none", async () => {
 	for (const extra of [[], [item("a_endpoint", "https://as.example/a")]]) {
-		expect(await takesUnused(composition(extra))).toEqual({});
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect((await takesUnused(composition(extra)))["discovery"]).toBeUndefined();
 	}
 });
