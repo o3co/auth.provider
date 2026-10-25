@@ -28,7 +28,7 @@
 - `resume` after a name no gate has, or a `from` naming no caller, throws `TypeError` before any gate runs.
 - Only a `resume` that opens the session tells the caller that `from` names.
 - If that caller's `opened` throws, the login still opens and only the caller's name and the error's kind are logged.
-- A return path taking a segment is a path below the root that does not end in a slash; one at the root, or ending in a slash, refuses boot.
+- A return path taking a segment is a path below the root, beginning with a slash and not ending in one; any other (the root, an empty path, one ending in a slash) refuses boot.
 - A login returns only to a listed target exactly, or to a contributed path, or one name segment (letters, digits, `-` or `_`, up to 64) below a path contributed with `segment`, written as the public origin and that path exactly, with any query but no fragment, whitespace or control character: a spelling the URL parser rewrites (a dot segment, a backslash) is refused.
 - A gate that passes writes nothing, and a gate that holds cleans up its own state. A gate that refuses writes nothing the login keeps.
 
@@ -37,6 +37,6 @@
 
 ## Vocabulary
 - held: a gate stopped the login, kept `done` and `from`, and answers the client itself.
-- refused: a gate ended the login: no session opens, and the caller answers with its own failure, as for wrong credentials.
+- refused: a gate ended the login: no session opens, and the caller answers with its own failure (as for wrong credentials where it took them; a held login's resume answers as its route does).
 - done: what the caller answers once the session opens, carried across gates.
 - from: the caller to tell once a held login opens, a carry that only that caller reads, and an optional deadline on `kernel`'s clock.

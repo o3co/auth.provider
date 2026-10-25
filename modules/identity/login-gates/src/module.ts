@@ -41,12 +41,13 @@ export default defineModule(
 			const contributed = await c.collect(returnPaths);
 			const paths = new Set(contributed.filter((p) => !p.segment).map((p) => p.path));
 			const parents = new Set(contributed.filter((p) => p.segment).map((p) => p.path));
-			// Below the root, or a path ending in a slash, a segment would be told apart by doubled slashes.
+			// Below the root, or a path ending in a slash, a segment would be told apart by doubled slashes;
+			// below an empty path, every segment at the root would match.
 			for (const parent of parents) {
-				if (parent === "/" || parent.endsWith("/")) {
+				if (!parent.startsWith("/") || parent === "/" || parent.endsWith("/")) {
 					c.refuse(
 						"login-gates",
-						`a return path taking a segment below it is a path below the root, not ending in a slash: ${parent}`,
+						`a return path taking a segment below it is a path below the root, beginning with a slash and not ending in one: ${parent}`,
 					);
 				}
 			}
