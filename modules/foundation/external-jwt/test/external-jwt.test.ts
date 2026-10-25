@@ -22,6 +22,8 @@ const unreached = {
 	},
 } as unknown as Outbound;
 const invalid = (reason: Reason) => ({ kind: "invalid", reason });
+/** A refusal found once the signature held: it says so. */
+const signedInvalid = (reason: Reason) => ({ kind: "invalid", reason, signed: true });
 const verifierOf = (keys: KeySource, rules: Policy) =>
 	externalJwtOver({ clock, outbound: unreached, keySetMaxAgeMs: 86_400_000 }).verifierOf(
 		keys,
@@ -286,12 +288,14 @@ describe("claims", () => {
 
 	it("needs a JSON object with an expiry", async () => {
 		const { exp: _, ...lasting } = fresh();
-		expect(await signed(lasting)).toEqual(invalid("malformed"));
-		expect(await signed(fresh({ exp: "soon" }))).toEqual(invalid("malformed"));
-		expect(await signed(fresh({ nbf: "now" }))).toEqual(invalid("malformed"));
-		expect(await signed(fresh({ iat: "then" }))).toEqual(invalid("malformed"));
+		expect(await signed(lasting)).toEqual(signedInvalid("malformed"));
+		expect(await signed(fresh({ exp: "soon" }))).toEqual(signedInvalid("malformed"));
+		expect(await signed(fresh({ nbf: "now" }))).toEqual(signedInvalid("malformed"));
+		expect(await signed(fresh({ iat: "then" }))).toEqual(signedInvalid("malformed"));
 		for (const payload of [null, "x", [fresh()]]) {
-			expect(await signed(payload as never), JSON.stringify(payload)).toEqual(invalid("malformed"));
+			expect(await signed(payload as never), JSON.stringify(payload)).toEqual(
+				signedInvalid("malformed"),
+			);
 		}
 	});
 
@@ -301,7 +305,7 @@ describe("claims", () => {
 		for (const claim of ["exp", "nbf", "iat"]) {
 			const text = JSON.stringify(fresh()).replace("}", `,"${claim}":1e400}`);
 			expect(await verifier.verify(await signer.signBytes(Buffer.from(text))), claim).toEqual(
-				invalid("malformed"),
+				signedInvalid("malformed"),
 			);
 		}
 	});
@@ -314,26 +318,28 @@ describe("claims", () => {
 			"valid",
 		);
 		const broken = Buffer.from(text("\u0000")).map((byte) => (byte === 0 ? 0xff : byte));
-		expect(await verifier.verify(await signer.signBytes(broken))).toEqual(invalid("malformed"));
+		expect(await verifier.verify(await signer.signBytes(broken))).toEqual(
+			signedInvalid("malformed"),
+		);
 	});
 
 	it("judges its times on the caller's clock, allowing the caller's skew", async () => {
 		const at = seconds(now);
 		expect((await signed(fresh({ exp: at - 29 }))).kind).toBe("valid");
-		expect(await signed(fresh({ exp: at - 30 }))).toEqual(invalid("expired"));
+		expect(await signed(fresh({ exp: at - 30 }))).toEqual(signedInvalid("expired"));
 		expect((await signed(fresh({ nbf: at + 30 }))).kind).toBe("valid");
-		expect(await signed(fresh({ nbf: at + 31 }))).toEqual(invalid("not-yet"));
+		expect(await signed(fresh({ nbf: at + 31 }))).toEqual(signedInvalid("not-yet"));
 		expect((await signed(fresh({ iat: at + 30 }))).kind).toBe("valid");
-		expect(await signed(fresh({ iat: at + 31 }))).toEqual(invalid("future-iat"));
+		expect(await signed(fresh({ iat: at + 31 }))).toEqual(signedInvalid("future-iat"));
 	});
 
 	it("refuses a token that lives, or was issued, longer than the caller allows", async () => {
 		const at = seconds(now);
 		const rules = { maxLifetimeMs: 3_600_000 };
 		expect((await signed(fresh({ exp: at + 3630 }), rules)).kind).toBe("valid");
-		expect(await signed(fresh({ exp: at + 3631 }), rules)).toEqual(invalid("too-long"));
+		expect(await signed(fresh({ exp: at + 3631 }), rules)).toEqual(signedInvalid("too-long"));
 		expect((await signed(fresh({ iat: at - 3630 }), rules)).kind).toBe("valid");
-		expect(await signed(fresh({ iat: at - 3631 }), rules)).toEqual(invalid("too-long"));
+		expect(await signed(fresh({ iat: at - 3631 }), rules)).toEqual(signedInvalid("too-long"));
 		expect((await signed(fresh({ exp: at + 86_400 }))).kind).toBe("valid");
 	});
 
@@ -343,7 +349,7 @@ describe("claims", () => {
 			"valid",
 		);
 		expect(await signed(fresh(), expecting({ iss: "https://other.example" }))).toEqual(
-			invalid("issuer"),
+			signedInvalid("issuer"),
 		);
 		expect((await signed(fresh(), expecting({ aud: ["https://as.example"] }))).kind).toBe("valid");
 		const audiences = fresh({ aud: ["https://rs.example", "https://as.example"] });
@@ -356,18 +362,22 @@ describe("claims", () => {
 			).kind,
 		).toBe("valid");
 		expect(await signed(audiences, expecting({ aud: ["https://as.example/token"] }))).toEqual(
-			invalid("audience"),
+			signedInvalid("audience"),
 		);
 		expect(
 			await signed(
 				fresh({ aud: [1, "https://as.example"] }),
 				expecting({ aud: ["https://as.example"] }),
 			),
-		).toEqual(invalid("audience"));
-		expect(await signed(fresh({ aud: 7 }), expecting({ aud: ["7"] }))).toEqual(invalid("audience"));
+		).toEqual(signedInvalid("audience"));
+		expect(await signed(fresh({ aud: 7 }), expecting({ aud: ["7"] }))).toEqual(
+			signedInvalid("audience"),
+		);
 		expect((await signed(fresh(), expecting({ sub: "s-1" }))).kind).toBe("valid");
-		expect(await signed(fresh(), expecting({ sub: "s-2" }))).toEqual(invalid("subject"));
-		expect(await signed(fresh({ sub: 1 }), expecting({ sub: "1" }))).toEqual(invalid("subject"));
+		expect(await signed(fresh(), expecting({ sub: "s-2" }))).toEqual(signedInvalid("subject"));
+		expect(await signed(fresh({ sub: 1 }), expecting({ sub: "1" }))).toEqual(
+			signedInvalid("subject"),
+		);
 	});
 });
 

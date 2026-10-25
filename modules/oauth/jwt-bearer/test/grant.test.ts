@@ -1,4 +1,4 @@
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
@@ -18,7 +18,13 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import {
+	quietRuntime,
+	recordingLog,
+	switchedModule,
+	takesUnused,
+	unavailableSwitch,
+} from "@mod/kernel/testing";
 import { type Narrower, type Outbound, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
@@ -447,7 +453,8 @@ describe("jwt-bearer", () => {
 		const otherAlgorithm = await new SignJWT(base)
 			.setProtectedHeader({ alg: "ES256" })
 			.sign(ec.privateKey);
-		expect(await said(otherAlgorithm)).toBe("invalid_grant: algorithm not taken");
+		// Refused before the signature is checked, as one with no key would be.
+		expect(await said(otherAlgorithm)).toBe("invalid_grant: untrusted signer");
 	});
 
 	it("keeps each issuer's jti apart", async () => {
@@ -621,6 +628,13 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		]);
 
 	const entry = (more: Record<string, unknown> = {}) => [{ issuer: fixedIss, ...more }];
+	const otherIss = "app.phones";
+	/** Keys contributed for the second issuer, answering none. */
+	const otherSigning = defineModule({ name: "phone-keys", takes: [] }, (m) => [
+		m
+			.contribute(signerKeys)
+			.by(() => ({ issuer: otherIss, keysOf: async () => ({ kind: "none" }) })),
+	]);
 	const located = `${issuer}/oauth/token`;
 	const serveWith = (issuers: Record<string, unknown>[], extra: Module[]) =>
 		serve(undefined, issuer, located, issuers, outboundModule, extra);
@@ -652,13 +666,76 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		);
 	});
 
+	/** An assertion signed over the header and claims as written, whatever they hold. */
+	const rawSigned = (header: object, claims: object, key = device.privateKey) => {
+		const part = (v: object) => Buffer.from(JSON.stringify(v)).toString("base64url");
+		const data = `${part(header)}.${part(claims)}`;
+		return `${data}.${sign(null, Buffer.from(data), key).toString("base64url")}`;
+	};
+
+	it("answers every refusal before the signature alike, whether the signer has keys or none", async () => {
+		const thumb = await thumbOf();
+		const held: Answer = { kind: "keys", keys: [await deviceKey()], algorithms: ["EdDSA"] };
+		let keys: Answer = held;
+		const s = await serveWith(entry({ subject: "as-is", "subject-is-key-thumbprint": true }), [
+			signing(async () => keys),
+		]);
+		const claims = { ...base, iss: fixedIss, sub: thumb };
+		const ec = generateKeyPairSync("ec", { namedCurve: "P-256" });
+		const refused = {
+			algorithm: await new SignJWT({ ...claims, jti: "j-alg" })
+				.setProtectedHeader({ alg: "ES256" })
+				.sign(ec.privateKey),
+			header: rawSigned({ alg: "EdDSA", crit: ["x"], x: 1 }, { ...claims, jti: "j-crit" }),
+			signature: rawSigned({ alg: "EdDSA" }, { ...claims, jti: "j-other" }, other.privateKey),
+			// Not read as a JWT at all: two parts, a header or payload that is no JSON object.
+			compact: "a.b",
+			unreadHeader: `${Buffer.from("not json").toString("base64url")}.e30.AA`,
+			unreadPayload: `${Buffer.from(JSON.stringify({ alg: "EdDSA" })).toString("base64url")}.${Buffer.from("[1]").toString("base64url")}.AA`,
+		};
+		for (const answer of [held, { kind: "none" } as const]) {
+			keys = answer;
+			for (const [why, a] of Object.entries(refused)) {
+				expect(saidOf(await s.grant(a)), `${why}, ${answer.kind}`).toBe(
+					"invalid_grant: untrusted signer",
+				);
+			}
+		}
+		// Once the signature holds, a claim's refusal keeps its words.
+		keys = held;
+		const { exp: _, ...lasting } = claims;
+		expect(saidOf(await s.grant(await deviceAssertion(thumb)))).toBe("issued");
+		expect(saidOf(await s.grant(await assertion(lasting, device.privateKey)))).toBe(
+			"invalid_grant: malformed assertion",
+		);
+	});
+
+	it("refuses an issuer that is no string, before asking for any key", async () => {
+		const thumb = await thumbOf();
+		const asked: unknown[] = [];
+		const s = await serveWith(entry({ subject: "as-is" }), [
+			signing(
+				async () => ({ kind: "keys", keys: [await deviceKey()], algorithms: ["EdDSA"] }),
+				asked,
+			),
+		]);
+		for (const iss of [[fixedIss], 7, null]) {
+			const a = await assertion({ ...base, iss, sub: thumb }, device.privateKey);
+			expect(saidOf(await s.grant(a)), JSON.stringify(iss)).toBe("invalid_grant: untrusted signer");
+		}
+		expect(asked).toEqual([]);
+		expect(saidOf(await s.grant(await deviceAssertion(thumb)))).toBe("issued");
+	});
+
 	it("asks for no keys for a subject of the wrong shape", async () => {
 		const asked: unknown[] = [];
 		const s = await serveWith(entry({ subject: "as-is", "subject-is-key-thumbprint": true }), [
 			signing(async () => ({ kind: "none" }), asked),
 		]);
 		for (const sub of ["short", "s-\u00e9".padEnd(43, "x"), "a".repeat(300)]) {
-			expect(errorOf(await s.grant(await deviceAssertion(sub))), sub).toBe("invalid_grant");
+			expect(saidOf(await s.grant(await deviceAssertion(sub))), sub).toBe(
+				"invalid_grant: untrusted signer",
+			);
 		}
 		expect(asked).toEqual([]);
 	});
@@ -673,12 +750,98 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 			assertion({ ...base, iss: fixedIss, sub: thumb }, device.privateKey, { kid: kid as string });
 		for (const kid of ["k".repeat(257), "k\uD800", 7]) {
 			expect(saidOf(await s.grant(await signedWith(kid))), String(kid)).toBe(
-				"invalid_grant: malformed assertion",
+				"invalid_grant: untrusted signer",
 			);
 		}
 		expect(asked).toEqual([]);
 		await s.grant(await signedWith("k1"));
 		expect(asked).toEqual([{ subject: thumb, kid: "k1" }]);
+	});
+
+	it("takes a self-issued prefix of 1 to 64 printable ASCII characters, only beside contributed thumbprint keys", () => {
+		const takes = (more: Record<string, unknown>) =>
+			jwtBearer.section?.safeParse({
+				issuers: entry({ subject: "as-is", "subject-is-key-thumbprint": true, ...more }),
+			}).success;
+		expect(takes({ "self-issued-prefix": "device:" })).toBe(true);
+		expect(takes({ "self-issued-prefix": "~".repeat(64) })).toBe(true);
+		for (const prefix of [
+			"",
+			"~".repeat(65),
+			"d\u00e9vice:",
+			"dev ice:",
+			"dev\tice:",
+			"dev\u0000",
+		]) {
+			expect(takes({ "self-issued-prefix": prefix }), JSON.stringify(prefix)).toBe(false);
+		}
+		expect(takes({ "self-issued-prefix": "device:", "subject-is-key-thumbprint": false })).toBe(
+			false,
+		);
+		const key = [{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") }];
+		expect(takes({ "self-issued-prefix": "device:", keys: key })).toBe(false);
+	});
+
+	it("refuses to boot on a self-issued prefix that starts an issuer or another prefix, whichever is written first, by place", async () => {
+		const refusalsOf = (issuers: Record<string, unknown>[]) =>
+			serveWith(issuers, [
+				signing(async () => ({ kind: "none" })),
+				...(issuers.length > 1 ? [otherSigning] : []),
+			]).then(
+				() => [],
+				(error: BootRefused) => error.refusals,
+			);
+		const own = { subject: "as-is", "subject-is-key-thumbprint": true };
+		const at = (i: number) => `jwt-bearer.issuers.${i}.self-issued-prefix`;
+		// A prefix that starts an issuer: its own, or another's.
+		expect(await refusalsOf(entry({ ...own, "self-issued-prefix": "app." }))).toEqual([
+			{ where: at(0), reason: "starts the issuer of jwt-bearer.issuers.0" },
+		]);
+		const two = (a: string, b: string) => [
+			{ issuer: fixedIss, ...own, "self-issued-prefix": a },
+			{ issuer: otherIss, ...own, "self-issued-prefix": b },
+		];
+		for (const [a, b] of [
+			["device:", "device:x"],
+			["device:x", "device:"],
+			["device:", "device:"],
+		] as const) {
+			expect(await refusalsOf(two(a, b)), `${a} ${b}`).toEqual([
+				{ where: at(0), reason: "overlaps the self-issued prefix of jwt-bearer.issuers.1" },
+				{ where: at(1), reason: "overlaps the self-issued prefix of jwt-bearer.issuers.0" },
+			]);
+		}
+		expect(await refusalsOf(two("device:", "phone:"))).toEqual([]);
+	});
+
+	it("tells at boot which issuers take self-issued signers, by place and never by prefix", async () => {
+		const logged = recordingLog();
+		const issuers = [
+			{ issuer: fixedIss, subject: "as-is", "subject-is-key-thumbprint": true },
+			{
+				issuer: otherIss,
+				subject: "as-is",
+				"subject-is-key-thumbprint": true,
+				"self-issued-prefix": "device:",
+			},
+		];
+		const given = assembly(undefined, issuer, located, issuers, outboundModule, [
+			signing(async () => ({ kind: "none" })),
+			otherSigning,
+		]);
+		await assemble({
+			...given,
+			runtime: quietRuntime({ clock: { now: () => clock.at }, log: logged.log }),
+		});
+		const told = logged.lines().filter((l) => l.event === "jwt-bearer.self_issued_signers");
+		expect(told).toEqual([
+			{
+				level: "info",
+				event: "jwt-bearer.self_issued_signers",
+				fields: { at: "jwt-bearer.issuers.1" },
+			},
+		]);
+		expect(JSON.stringify(logged.lines())).not.toContain("device:");
 	});
 
 	it("refuses to boot on an issuer named twice, and on keys contributed for an issuer it does not name, by path and never by value", async () => {
@@ -772,6 +935,150 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 			["device", thumb],
 			["device", thumb],
 		]);
+	});
+
+	describe("self-issued signers", () => {
+		const prefix = "device:";
+		const own = { "subject-is-key-thumbprint": true, "self-issued-prefix": prefix };
+		/** The signer's key as a ledger answers it, under the `kid` its assertions name: its thumbprint. */
+		const held = async (k = device): Promise<Answer> => ({
+			kind: "keys",
+			keys: [{ ...(await deviceKey(k)), kid: await thumbOf(k) }],
+			algorithms: ["EdDSA"],
+		});
+		/** An assertion as a self-issued signer makes it: `iss` and `sub` its own name, `kid` its thumbprint. */
+		const selfIssued = async (
+			name: string,
+			more: Record<string, unknown> = {},
+			key = device.privateKey,
+			kid?: string,
+		) =>
+			assertion(
+				{ ...base, iss: name, sub: name, iat: now / 1000, exp: now / 1000 + 120, ...more },
+				key,
+				{ kid: kid ?? name.slice(prefix.length) },
+			);
+		const subjectOfIssued = async (s: Awaited<ReturnType<typeof serve>>, outcome: GrantOutcome) => {
+			const token = outcome.kind === "issued" ? String(outcome.body.access_token) : "";
+			const verified = await s.verify(token);
+			return verified.kind === "valid" ? verified.grant.subject : verified.reason;
+		};
+
+		it("takes a self-issued signer as its issuer's, asking its keys by its thumbprint, the subject that thumbprint", async () => {
+			const thumb = await thumbOf();
+			const asked: unknown[] = [];
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [
+				signing(() => held(), asked),
+			]);
+			const issued = await s.grant(await selfIssued(prefix + thumb));
+			expect(errorOf(issued)).toBe("issued");
+			expect(asked).toEqual([{ subject: thumb, kid: thumb }]);
+			expect(await subjectOfIssued(s, issued)).toBe(thumb);
+			// The same key under the issuer's own `iss` stands for the same subject.
+			expect(await subjectOfIssued(s, await s.grant(await deviceAssertion(thumb)))).toBe(thumb);
+		});
+
+		it("reads only the prefix as written and a thumbprint's 43 characters, asking no key for any other", async () => {
+			const thumb = await thumbOf();
+			const asked: unknown[] = [];
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [
+				signing(() => held(), asked),
+			]);
+			const last = thumb.at(-1) ?? "A";
+			const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+			const unused = alphabet[(alphabet.indexOf(last) + 1) % 64] ?? "A";
+			const unread = [
+				`Device:${thumb}`,
+				`device\uff1a${thumb}`,
+				`${prefix}${thumb}=`,
+				`${prefix}${thumb.slice(0, 42)}`,
+				`${prefix}${thumb}A`,
+				`${prefix}${thumb.slice(0, 42)}+`,
+			];
+			for (const name of unread) {
+				expect(saidOf(await s.grant(await selfIssued(name))), name).toBe(
+					"invalid_grant: untrusted signer",
+				);
+			}
+			expect(asked).toEqual([]);
+			// One differing only in its last character's unused bits is asked for, and no key's own:
+			// under the key's own kid, so only the thumbprint computed from the key refuses it.
+			const near = `${prefix}${thumb.slice(0, 42)}${unused}`;
+			expect(saidOf(await s.grant(await selfIssued(near, {}, device.privateKey, thumb)))).toBe(
+				"invalid_grant: untrusted signer",
+			);
+		});
+
+		it("takes a self-issued signer only where its sub is its iss, and its own key only", async () => {
+			const thumb = await thumbOf();
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [signing(() => held())]);
+			const name = prefix + thumb;
+			for (const sub of [thumb, prefix + (await thumbOf(other))]) {
+				expect(saidOf(await s.grant(await selfIssued(name, { sub }))), sub).toBe(
+					"invalid_grant: untrusted signer",
+				);
+			}
+			// Another signer's name, signed with this key under its own kid: only the thumbprint
+			// computed from the key, which is not the one the name holds, refuses it.
+			const otherName = prefix + (await thumbOf(other));
+			expect(saidOf(await s.grant(await selfIssued(otherName, {}, device.privateKey, thumb)))).toBe(
+				"invalid_grant: untrusted signer",
+			);
+		});
+
+		it("stands a linked self-issued signer for the account its thumbprint links, revoked at that account's boundary", async () => {
+			const thumb = await thumbOf();
+			const asked: unknown[] = [];
+			let found: Linked = { kind: "none" };
+			const s = await serveWith(entry({ subject: "linked", upstream: "device", ...own }), [
+				signing(() => held()),
+				resolving(async () => found, asked),
+			]);
+			expect(saidOf(await s.grant(await selfIssued(prefix + thumb)))).toBe(
+				"invalid_grant: unknown subject",
+			);
+			found = { kind: "subject", subject: "account-7" };
+			expect(await subjectOfIssued(s, await s.grant(await selfIssued(prefix + thumb)))).toBe(
+				"account-7",
+			);
+			expect(asked).toEqual([
+				["device", thumb],
+				["device", thumb],
+			]);
+			await s.revoke("account-7");
+			expect(saidOf(await s.grant(await selfIssued(prefix + thumb)))).toBe(
+				"invalid_grant: assertion revoked",
+			);
+		});
+
+		it("uses a self-issued assertion up once, apart from the issuer's own iss with the same jti", async () => {
+			const thumb = await thumbOf();
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [signing(() => held())]);
+			const once = await selfIssued(prefix + thumb, { jti: "j-1" });
+			const [a, b] = await Promise.all([s.grant(once), s.grant(once)]);
+			expect([errorOf(a), errorOf(b)].sort()).toEqual(["invalid_grant", "issued"]);
+			expect(saidOf(await s.grant(once))).toBe("invalid_grant: assertion replayed");
+			const fixed = await assertion(
+				{ ...base, iss: fixedIss, sub: thumb, jti: "j-1" },
+				device.privateKey,
+			);
+			expect(errorOf(await s.grant(fixed))).toBe("issued");
+		});
+
+		it("holds a self-issued assertion to the audience, times and lifetime as any other", async () => {
+			const thumb = await thumbOf();
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [signing(() => held())]);
+			const name = prefix + thumb;
+			expect(saidOf(await s.grant(await selfIssued(name, { aud: "https://elsewhere" })))).toBe(
+				"invalid_grant: wrong audience",
+			);
+			expect(saidOf(await s.grant(await selfIssued(name, { exp: now / 1000 - 600 })))).toBe(
+				"invalid_grant: expired",
+			);
+			expect(saidOf(await s.grant(await selfIssued(name, { exp: now / 1000 + 86_400 })))).toBe(
+				"invalid_grant: lives too long",
+			);
+		});
 	});
 
 	it("refuses to boot on an issuer that does not say how its subject is read, naming the key", async () => {

@@ -154,7 +154,15 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 						"jwt-bearer": {
 							issuers: part.jwtBearer.issuers.map((i) =>
 								"linked" in i
-									? { issuer: i.issuer, subject: "linked", upstream: i.linked.upstream }
+									? {
+											issuer: i.issuer,
+											subject: "linked",
+											upstream: i.linked.upstream,
+											...(i.linked.thumbprint ? { "subject-is-key-thumbprint": true } : {}),
+											...(i.linked.selfIssuedPrefix
+												? { "self-issued-prefix": i.linked.selfIssuedPrefix }
+												: {}),
+										}
 									: {
 											issuer: i.issuer,
 											subject: "as-is",

@@ -38,6 +38,13 @@ const subjectOf = {
 		.describe(
 			"Whether `sub` must be the JWK thumbprint (RFC 7638, SHA-256) of the key that signed.",
 		),
+	"self-issued-prefix": z
+		.string()
+		.regex(/^[\x21-\x7e]{1,64}$/, "1 to 64 printable ASCII characters")
+		.optional()
+		.describe(
+			"Takes self-issued signers too: an assertion whose `iss` and `sub` are both this prefix and its key's JWK thumbprint, read as this issuer's. Needs `subject-is-key-thumbprint` and keys contributed.",
+		),
 };
 
 const issuerEntry = z
@@ -78,7 +85,16 @@ const issuerEntry = z
 	.refine((i) => (i.subject === "linked") === (i.upstream !== undefined), {
 		message: 'upstream is written with subject = "linked", and only then',
 		path: ["upstream"],
-	});
+	})
+	.refine(
+		(i) =>
+			i["self-issued-prefix"] === undefined ||
+			(i["subject-is-key-thumbprint"] && !("keys" in i) && !("jwks-uri" in i)),
+		{
+			message: "a self-issued prefix needs subject-is-key-thumbprint and keys contributed",
+			path: ["self-issued-prefix"],
+		},
+	);
 
 /** One trusted issuer, as the section gives it. */
 export type IssuerEntry = z.output<typeof issuerEntry>;
@@ -90,6 +106,44 @@ export const issuersSetting = z
 	.describe(
 		"The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`.",
 	);
+
+/** A trusted issuer that takes self-issued signers: the prefix of their names, and its place. */
+export interface SelfIssuedEntry {
+	readonly prefix: string;
+	readonly issuer: string;
+	readonly where: string;
+}
+
+/** The entries that take self-issued signers, in the settings' order. */
+export const selfIssuedOf = (issuers: readonly IssuerEntry[]): readonly SelfIssuedEntry[] =>
+	issuers.flatMap((i, at) => {
+		const prefix = i["self-issued-prefix"];
+		return prefix === undefined
+			? []
+			: [{ prefix, issuer: i.issuer, where: `jwt-bearer.issuers.${at}` }];
+	});
+
+/** Refusals of prefixes that could read one assertion as two issuers', each at its place, whatever the order. */
+function prefixRefusals(issuers: readonly IssuerEntry[]) {
+	const refused: Refusal[] = [];
+	for (const own of selfIssuedOf(issuers)) {
+		const where = `${own.where}.self-issued-prefix`;
+		for (const [b, other] of issuers.entries()) {
+			if (other.issuer.startsWith(own.prefix)) {
+				refused.push({ where, reason: `starts the issuer of jwt-bearer.issuers.${b}` });
+			}
+		}
+		for (const theirs of selfIssuedOf(issuers)) {
+			if (
+				theirs.where !== own.where &&
+				(theirs.prefix.startsWith(own.prefix) || own.prefix.startsWith(theirs.prefix))
+			) {
+				refused.push({ where, reason: `overlaps the self-issued prefix of ${theirs.where}` });
+			}
+		}
+	}
+	return refused;
+}
 
 /** Each linked issuer, by the IdP name its signers are known by. */
 export const linkedOf = (issuers: readonly IssuerEntry[]): ReadonlyMap<string, string> =>
@@ -145,6 +199,7 @@ export async function trustedWith(p: {
 					: contributedSigners(p.jwt, keys as NonNullable<typeof keys>, p.policyOf(i), thumbprint),
 		);
 	}
+	refused.push(...prefixRefusals(p.issuers));
 	const ledgers = new Map(p.ledgers.map((l) => [l.issuer, l]));
 	for (const [what, named] of [
 		["keys are", [...contributed.keys()]],

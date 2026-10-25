@@ -29,9 +29,9 @@ const app: ClientScene = {
 	defaultScopes: ["read"],
 };
 
-/** The device ledger: a device's public key by its handle, 410 once revoked, 404 when not known. */
+/** The device ledger: a device's public key by its handle, for its issuer and no kid alone; 410 once revoked, 404 when not known. */
 let ledger: Server;
-const asked: { subject?: unknown }[] = [];
+const asked: { issuer?: unknown; subject?: unknown; kid?: unknown }[] = [];
 function startLedger(): Promise<string> {
 	ledger = createServer((request, response) => {
 		let body = "";
@@ -39,9 +39,19 @@ function startLedger(): Promise<string> {
 			body += chunk;
 		});
 		request.on("end", () => {
-			const { subject } = JSON.parse(body || "{}") as { subject?: unknown };
-			asked.push({ subject });
-			const known = typeof subject === "string" && subject in deviceKeys;
+			const read = JSON.parse(body || "{}") as {
+				issuer?: unknown;
+				subject?: unknown;
+				kid?: unknown;
+			};
+			const { issuer: named, subject, kid } = read;
+			asked.push(read);
+			// Its devices name no kid: one asked for another issuer, or by a kid, is none it knows.
+			const known =
+				named === devices &&
+				kid === undefined &&
+				typeof subject === "string" &&
+				subject in deviceKeys;
 			const status = !known ? 404 : subject === "device-revoked" ? 410 : 200;
 			response.writeHead(status, { "content-type": "application/json" });
 			const jwk = known ? deviceKeys[subject as Handle].publicKey.export({ format: "jwk" }) : {};
@@ -137,7 +147,7 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a linked
 		expect(res.status).toBe(200);
 		const [, payload = ""] = (res.body.access_token ?? "").split(".");
 		expect(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")).sub).toBe("user-alice");
-		expect(asked.at(-1)).toEqual({ subject: "device-alice" });
+		expect(asked.at(-1)).toEqual({ issuer: devices, subject: "device-alice" });
 	});
 
 	it("refuses a device no user is linked to", async () => {
