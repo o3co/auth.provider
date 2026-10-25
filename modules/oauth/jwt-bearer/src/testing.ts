@@ -98,20 +98,26 @@ export function jtiLedgerContract(name: string, open: () => Promise<LedgerPlace>
 			expect(await place.ledger.spend(used)).toBe("replayed");
 		});
 
-		it("keeps a jti used through a lost answer, restarts, failovers and memory pressure", async (context) => {
+		it("keeps a jti used whose answer was lost", async (context) => {
 			const place = await open();
-			const { loseNextAnswer: lose, failover, restart, pressMemory } = place;
-			if (!lose || !failover || !restart || !pressMemory) return context.skip();
-			const [kept, lost] = [fresh(), fresh()];
-			expect(await place.ledger.spend(kept)).toBe("first");
-			lose();
+			if (!place.loseNextAnswer) return context.skip();
+			const lost = fresh();
+			place.loseNextAnswer();
 			await place.ledger.spend(lost).catch(() => undefined);
-			await failover();
-			await restart();
-			await pressMemory();
-			expect(await place.ledger.spend(kept)).toBe("replayed");
 			expect(await place.ledger.spend(lost)).toBe("replayed");
 		});
+
+		for (const fault of ["failover", "restart", "pressMemory"] as const) {
+			it(`keeps a jti used through ${fault}`, async (context) => {
+				const place = await open();
+				const happen = place[fault];
+				if (!happen) return context.skip();
+				const kept = fresh();
+				expect(await place.ledger.spend(kept)).toBe("first");
+				await happen();
+				expect(await place.ledger.spend(kept)).toBe("replayed");
+			});
+		}
 	});
 }
 

@@ -890,13 +890,19 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 		expect(saidOf(await s.grant(await assertion({ ...base, iat: now / 1000 - 1 })))).toBe(
 			"invalid_grant: assertion revoked",
 		);
+		expect(spends).toEqual([]);
+		// On a grant whose subject is not revoked, so the jti's shape alone refuses it.
+		const fresh = await serveWith([ledgerOf(kept(), spends)]);
 		for (const jti of [undefined, "", "j".repeat(257), "lone-\ud800"]) {
 			const signed = await new SignJWT({ ...base, ...(jti === undefined ? {} : { jti }) })
 				.setProtectedHeader({ alg: "EdDSA" })
 				.sign(upstream.privateKey);
-			expect(errorOf(await s.grant(signed)), String(jti)).toBe("invalid_grant");
+			expect(saidOf(await fresh.grant(signed)), String(jti)).toBe(
+				"invalid_grant: missing or malformed claims",
+			);
 		}
-		expect(spends).toEqual([]);
+		expect(errorOf(await fresh.grant(await assertion(base)))).toBe("issued");
+		expect(spends).toHaveLength(1);
 	});
 
 	it("is unavailable, issuing nothing and writing no store, where the ledger cannot tell or answers in another shape", async () => {
