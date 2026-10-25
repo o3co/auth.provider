@@ -1,14 +1,14 @@
 # jwt-bearer-id-tokens
 
 ## Responsibilities
-- Joins `jwt-bearer` and `exchange-id-tokens`: Apple's and Google's id_tokens, sent as JWT bearer assertions, are checked and taken once by `exchange-id-tokens`' rules, for the apps already sent out that send them so.
+- Ties `jwt-bearer` and `exchange-id-tokens` together: Apple's and Google's id_tokens, sent as JWT bearer assertions, are checked and taken once by `exchange-id-tokens`' rules, for the apps already sent out that send them so.
 
 ## Not here
 - The grant, which issuers are delegated, and what a client must prove: `jwt-bearer` (its `delegated-issuers`, its internal module `delegated`).
 - The checks, the account, the clients each app's id_token is for, and the record of those taken: `exchange-id-tokens`.
 
 ## Offers
-- Composition definition only: one contribution at `jwt-bearer`'s `delegatedAssertions`, for each `iss` of the kinds `exchange-id-tokens` takes. It opts in, and joins an app composing both.
+- Composition definition only: one contribution at `jwt-bearer`'s `delegatedAssertions`, for each `iss` of the kinds `exchange-id-tokens` takes. It opts in, and comes only where named, bringing both; composing both never brings it.
 
 ## Invariants
 - Not RFC 7523 §3: an id_token's audience is the app's client ID upstream, never this server. The standard way for an app is the token exchange (`exchange-id-tokens`).
