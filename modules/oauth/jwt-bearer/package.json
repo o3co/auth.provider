@@ -16,6 +16,7 @@
 	},
 	"dependencies": {
 		"@mod/client-allowance": "workspace:*",
+		"@mod/clients": "workspace:*",
 		"@mod/external-jwt": "workspace:*",
 		"@mod/grants": "workspace:*",
 		"@mod/issuer": "workspace:*",
@@ -30,7 +31,6 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"@mod/clients": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",

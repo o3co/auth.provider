@@ -5,6 +5,8 @@ import { withinHosts } from "@mod/outbound-policy";
 import { z } from "zod";
 import {
 	algorithms,
+	type DelegatedAssertions,
+	delegatedAssertions,
 	type JtiLedger,
 	jtiLedgers,
 	type SignerKeys,
@@ -234,3 +236,87 @@ export async function issuersIn(
 		policyOf,
 	});
 }
+
+/** The section's `delegated-issuers`. */
+export const delegatedSetting = z
+	.array(z.string().min(1))
+	.prefault([])
+	.describe(
+		"Issuers whose assertions another module checks by its own rules, each exactly as sent: their audience is an app, not this server, so RFC 7523 §3 does not hold. Each needs the one module that checks it.",
+	);
+
+/** The delegate of each delegated issuer, or why boot is refused. */
+export type Delegation =
+	| { readonly kind: "delegated"; readonly by: ReadonlyMap<string, DelegatedAssertions> }
+	| { readonly kind: "refused"; readonly refusals: readonly Refusal[] };
+
+/**
+ * Each delegated issuer's one delegate. An issuer another way reads too, the issuer of an entry or one
+ * a self-issued prefix starts, is refused, so no assertion is read by two rules (RFC 8725 §3.12).
+ */
+export function delegatedWith(p: {
+	readonly issuers: readonly IssuerEntry[];
+	readonly delegated: readonly string[];
+	readonly contributed: readonly DelegatedAssertions[];
+}): Delegation {
+	const refused: Refusal[] = [];
+	const by = new Map<string, DelegatedAssertions>();
+	const firstAt = new Map<string, number>();
+	for (const [at, iss] of p.delegated.entries()) {
+		const where = `jwt-bearer.delegated-issuers.${at}`;
+		const first = firstAt.get(iss);
+		if (first !== undefined) {
+			refused.push({
+				where,
+				reason: `names the same issuer as jwt-bearer.delegated-issuers.${first}`,
+			});
+			continue;
+		}
+		firstAt.set(iss, at);
+		for (const [b, entry] of p.issuers.entries()) {
+			if (entry.issuer === iss) {
+				refused.push({ where, reason: `is the issuer of jwt-bearer.issuers.${b}` });
+			}
+			// Stricter than reading a self-issued signer, which also needs a thumbprint after the prefix.
+			const prefix = entry["self-issued-prefix"];
+			if (prefix !== undefined && iss.startsWith(prefix)) {
+				refused.push({
+					where,
+					reason: `starts with the self-issued prefix of jwt-bearer.issuers.${b}`,
+				});
+			}
+		}
+		const checking = p.contributed.filter((d) => d.issuers.includes(iss));
+		const [one] = checking;
+		if (one === undefined)
+			refused.push({ where, reason: "no module checks this issuer's assertions" });
+		else if (checking.length > 1) {
+			const names = checking.map((d) => d.declaredBy).join(", ");
+			refused.push({
+				where,
+				reason: `more than one module checks this issuer's assertions: ${names}`,
+			});
+		} else by.set(iss, one);
+	}
+	const unnamed = new Set(p.contributed.flatMap((d) => d.issuers).filter((i) => !firstAt.has(i)))
+		.size;
+	if (unnamed > 0) {
+		refused.push({
+			where: "jwt-bearer.delegated-issuers",
+			reason: `assertions are delegated for ${unnamed} issuer${unnamed === 1 ? "" : "s"} none of these names: name ${unnamed === 1 ? "it" : "them"} here, or leave out the module that contributes them`,
+		});
+	}
+	return refused.length > 0 ? { kind: "refused", refusals: refused } : { kind: "delegated", by };
+}
+
+/** The delegated issuers' delegates, taken from the composition. */
+export async function delegatedIn(
+	c: Pick<BuildContext<unknown>, "collect">,
+	issuers: readonly IssuerEntry[],
+	delegated: readonly string[],
+): Promise<Delegation> {
+	return delegatedWith({ issuers, delegated, contributed: await c.collect(delegatedAssertions) });
+}
+
+/** What `delegatedIn` takes from the build context. */
+export const delegatedTakes = [delegatedAssertions] as const;
