@@ -147,11 +147,11 @@ export function parseItems(spec: string, text: string) {
 			const [, kind, value = ""] = mark;
 			if (!last) found(`a mark with no item before it: ${line.trim()}`);
 			else if (kind === "role" && roled) found(`${last.id}: has more than one role line`);
-			else if (kind === "role" && !roles.includes(value as Role))
-				found(`${last.id}: its role ${value} is none of ${roles.join(", ")}`);
 			else if (kind === "role") {
-				last.role = value as Role;
+				// A role line seen, taken or not, so a second one is refused either way.
 				roled = true;
+				if (roles.includes(value as Role)) last.role = value as Role;
+				else found(`${last.id}: its role ${value} is none of ${roles.join(", ")}`);
 			} else if (kind === "updates" && updated) found(`${last.id}: has more than one updates line`);
 			else if (kind === "updates") {
 				last.updates = value.split(",").map((s) => s.trim());

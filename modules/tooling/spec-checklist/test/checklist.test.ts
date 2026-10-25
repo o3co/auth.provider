@@ -64,6 +64,18 @@ describe("items", () => {
 		]);
 	});
 
+	it("refuses an item's second role line even after a first one it refused, keeping the role it took", () => {
+		const twice = parseItems(
+			"rfc9999",
+			items("## 4 X\n\n- **rfc9999-4-a** MUST: a\n  role: browser\n  role: rp\n"),
+		);
+		expect(twice.findings.map((f) => f.detail)).toEqual([
+			"rfc9999-4-a: its role browser is none of as, op, rs, rp, client",
+			"rfc9999-4-a: has more than one role line",
+		]);
+		expect(twice.items.map((i) => i.role)).toEqual(["as"]);
+	});
+
 	it("refuses a second role line at the file's head, keeping the first for the items", () => {
 		const twice = parseItems(
 			"rfc9999",
