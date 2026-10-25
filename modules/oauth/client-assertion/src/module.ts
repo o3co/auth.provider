@@ -25,6 +25,7 @@ export default defineModule({ name: "client-assertion", section, takes }, (m) =>
 			tokenEndpoint: url,
 			maxLifetimeMs: c.section["max-lifetime"] * 1000,
 			skewMs: c.section["clock-skew"] * 1000,
+			algorithms: c.section.algorithms,
 			clock: c.clock,
 			log: c.log,
 		});

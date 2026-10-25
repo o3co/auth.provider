@@ -110,9 +110,11 @@ const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
 
 let rsa: { privateKey: CryptoKey; jwk: JWK };
 let other: { privateKey: CryptoKey; jwk: JWK };
+/** An RSA key for PSS signatures, its JWK naming no `alg`, as an IdP's set may hold one. */
+let pss: { privateKey: CryptoKey; jwk: JWK };
 beforeAll(async () => {
-	const made = async (kid: string) => {
-		const pair = await generateKeyPair("RS256", { extractable: true });
+	const made = async (kid: string, alg = "RS256") => {
+		const pair = await generateKeyPair(alg, { extractable: true });
 		return {
 			privateKey: pair.privateKey,
 			jwk: { ...(await exportJWK(pair.publicKey)), kid },
@@ -120,6 +122,7 @@ beforeAll(async () => {
 	};
 	rsa = await made("k1");
 	other = await made("k2");
+	pss = await made("p1", "PS256");
 });
 
 /** An id_token issued now, unless `iat` says otherwise (`null` leaves it out). */
@@ -155,6 +158,8 @@ interface World {
 	readonly token?: Handler;
 	/** The issuer's key set cannot be reached. */
 	readonly keysUnreachable?: boolean;
+	/** The issuer's key set, in place of the RSA key alone. */
+	readonly keys?: readonly JWK[];
 	readonly settings?: Record<string, unknown>;
 	readonly more?: Record<string, Handler>;
 	/** Hosts outbound's destination policy refuses. */
@@ -180,7 +185,8 @@ async function open(world: World = {}) {
 					jwks_uri: `${issuer}/jwks`,
 					...world.description,
 				})),
-		[`${issuer}/jwks`]: () => (world.keysUnreachable ? "unreachable" : ok({ keys: [rsa.jwk] })),
+		[`${issuer}/jwks`]: () =>
+			world.keysUnreachable ? "unreachable" : ok({ keys: world.keys ?? [rsa.jwk] }),
 		[`${issuer}/token`]: world.token ?? (() => ok({ id_token: "missing" })),
 	});
 	const app = await assemble({
@@ -937,6 +943,41 @@ describe("idp-oidc", () => {
 			const listed = await idToken({ aud, ...(aud.length > 1 ? { azp: "client" } : {}) });
 			expect(await exchanged(listed), aud.join()).toMatchObject({ subject: "u-alice" });
 		}
+	});
+
+	it("takes by default one algorithm for each kind of key, PS256 only where the operator names it", async () => {
+		const base = { issuer, "client-id": "c", "client-secret": "s" };
+		const read = settingsOf(asymmetric, policyRefusing()).parse(base);
+		expect(read.algorithms).toEqual(["RS256", "ES256", "EdDSA"]);
+		const ps = await idToken({}, pss, "PS256");
+		const keys = [pss.jwk];
+		expect(await exchanged(ps, { keys })).toBe("refused");
+		// One RSA algorithm named, so a key of the IdP's set with no `alg` is not ambiguous.
+		const named = { keys, settings: { algorithms: ["PS256"] } };
+		expect(await exchanged(ps, named)).toMatchObject({ subject: "u-alice" });
+		expect(await exchanged(await idToken(), { settings: { algorithms: ["PS256"] } })).toBe(
+			"refused",
+		);
+	});
+
+	it("reads each key of the IdP's set under one algorithm, its own alg or the one taken for its kind", async () => {
+		const both = { settings: { algorithms: ["RS256", "PS256"] } };
+		// Two RSA algorithms taken: a key naming no alg is used under neither.
+		expect(await exchanged(await idToken(), both)).toBe("refused");
+		expect(await exchanged(await idToken({}, pss, "PS256"), { ...both, keys: [pss.jwk] })).toBe(
+			"refused",
+		);
+		// A key naming its alg is read under that one alone, never under the other.
+		const named = { ...both, keys: [{ ...pss.jwk, alg: "PS256" }] };
+		expect(await exchanged(await idToken({}, pss, "PS256"), named)).toMatchObject({
+			subject: "u-alice",
+		});
+		const rs = { ...both, keys: [{ ...rsa.jwk, alg: "RS256" }] };
+		expect(await exchanged(await idToken(), rs)).toMatchObject({ subject: "u-alice" });
+		expect(await exchanged(await idToken({}, pss, "PS256"), rs)).toBe("refused");
+		// A key whose alg is not taken is used under none.
+		const untaken = { keys: [{ ...rsa.jwk, alg: "RS256" }], settings: { algorithms: ["ES256"] } };
+		expect(await exchanged(await idToken(), untaken)).toBe("refused");
 	});
 
 	it("refuses an id_token without a numeric issue time, or one issued past the upstream's skew", async () => {

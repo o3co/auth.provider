@@ -34,16 +34,32 @@ export function fromPem(given: PemKey): Candidate | undefined {
 	return { jwk, key };
 }
 
-/** The one key that may verify under the header's algorithm and id. */
+/**
+ * The one algorithm a key is read under (RFC 8725 §3.1): its own `alg` where allowed, else the one
+ * allowed algorithm its kind and curve fit; none where it names none and two or more fit.
+ */
+function boundTo(jwk: Jwk, allowed: readonly Algorithm[]): Algorithm | undefined {
+	if (jwk.alg !== undefined) return allowed.find((a) => a === jwk.alg && verifiesUnder(jwk, a));
+	const fitting = [...new Set(allowed)].filter((a) => verifiesUnder(jwk, a));
+	return fitting.length === 1 ? fitting[0] : undefined;
+}
+
+/**
+ * The one key that may verify under the header's algorithm and id, each fitting by its kind, curve,
+ * use and id, and read under its one algorithm among those allowed. `unbound`: the key the `kid`
+ * names is read under another algorithm, or none, which a fresh set would not change.
+ */
 export function picked(
 	candidates: readonly Candidate[],
 	alg: Algorithm,
 	kid: string | undefined,
-): Candidate | "no-key" | "ambiguous-key" {
-	const matching = candidates.filter(
-		({ jwk }) => verifiesUnder(jwk, alg) && (kid === undefined || jwk.kid === kid),
-	);
-	const [only, ...more] = matching;
-	if (!only) return "no-key";
+	allowed: readonly Algorithm[],
+): Candidate | "no-key" | "ambiguous-key" | "unbound" {
+	const fit = candidates.filter(({ jwk }) => {
+		const { alg: _named, ...unnamed } = jwk;
+		return verifiesUnder(unnamed, alg) && (kid === undefined || jwk.kid === kid);
+	});
+	const [only, ...more] = fit.filter(({ jwk }) => boundTo(jwk, allowed) === alg);
+	if (!only) return fit.length > 0 && kid !== undefined ? "unbound" : "no-key";
 	return more.length > 0 ? "ambiguous-key" : only;
 }

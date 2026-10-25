@@ -21,7 +21,11 @@ type Claims = Readonly<Record<string, unknown>>;
 type Choose = (
 	alg: Algorithm,
 	kid: string | undefined,
+	allowed: readonly Algorithm[],
 ) => Promise<Candidate | "no-key" | "ambiguous-key" | "unavailable">;
+
+/** A key read under another algorithm, or none, is no key for this one. */
+const settled = (pick: ReturnType<typeof picked>) => (pick === "unbound" ? "no-key" : pick);
 
 /** A `typ` as RFC 7515 compares it: without case and without `application/`. */
 const mediaTypeOf = (typ: unknown) =>
@@ -59,7 +63,7 @@ export function externalJwtOver(deps: {
 			"inline" in keys
 				? keys.inline.flatMap((jwk) => fromJwk(jwk) ?? [])
 				: keys.pem.flatMap((given) => fromPem(given) ?? []);
-		return async (alg, kid) => picked(written, alg, kid);
+		return async (alg, kid, allowed) => settled(picked(written, alg, kid, allowed));
 	};
 	return {
 		algorithms,
@@ -69,13 +73,13 @@ export function externalJwtOver(deps: {
 
 /** Picks from the kept set, and from a fresh one only when the kept set has no key that fits. */
 function fromSet(set: KeySet): Choose {
-	return async (alg, kid) => {
+	return async (alg, kid, allowed) => {
 		const held = await set.keys();
-		const first = held ? picked(held, alg, kid) : undefined;
-		// An ambiguous pick is the set's own answer; fetching again would not settle it.
-		if (first !== undefined && first !== "no-key") return first;
+		const first = held ? picked(held, alg, kid, allowed) : undefined;
+		// An ambiguous or unbound pick is the set's own answer; fetching again would not settle it.
+		if (first !== undefined && first !== "no-key") return settled(first);
 		const again = await set.again();
-		return again ? picked(again, alg, kid) : "unavailable";
+		return again ? settled(picked(again, alg, kid, allowed)) : "unavailable";
 	};
 }
 
@@ -151,7 +155,7 @@ function verifierWith(choose: Choose, policy: Policy, clock: Clock): Verifier {
 			if (kid !== undefined && typeof kid !== "string") return invalid("malformed");
 			const alg = header.alg;
 			if (!isAlgorithm(alg) || !policy.algorithms.includes(alg)) return invalid("algorithm");
-			const key = await choose(alg, kid);
+			const key = await choose(alg, kid, policy.algorithms);
 			if (key === "unavailable") return { kind: "unavailable" };
 			if (typeof key === "string") return invalid(key);
 			const payload = await signedPayload(jwt, key);

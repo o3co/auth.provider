@@ -14,7 +14,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `oidc`)
-- IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (the asymmetric ones `external-jwt` knows; default RS256, PS256, ES256, EdDSA), `require-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
+- IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (the asymmetric ones `external-jwt` knows; default RS256, ES256, EdDSA, one for each kind of key), `require-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
 - IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `outbound` reads a host list: a host, or `.name` for the name and the names under it; default none)
 
 ## Invariants
@@ -27,7 +27,7 @@
 - An answer naming another issuer in `iss` is refused before its code is used.
 - An answer without `iss` is refused where the issuer's description offers `iss` or the operator requires it.
 - Where neither requires `iss`, boot logs a warning naming the IdP (answers are then taken without `iss`).
-- The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences.
+- The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences. A key is read under one algorithm (`external-jwt`): with RS256 and PS256 both taken, one naming no `alg` is unused; an IdP signing with PS256 alone takes `["PS256"]`.
 - An id_token that gives `at_hash` must give the access token's, by its signature's digest; one that does not refuses the exchange.
 - Any reason `external-jwt` gives refuses the login.
 - The id_token must name the client as `azp` where it names other audiences, or wherever it gives `azp`.

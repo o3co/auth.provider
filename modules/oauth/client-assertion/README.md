@@ -18,7 +18,7 @@
   - Any other key is refused at boot.
 - Store interface for spent assertions: save a name for a lifetime, answering `created` or `exists`.
   - Requirements: no eviction, survives a crash, never rolled back by failover.
-- Operator section, each written with its unit: `max-lifetime` (`1s` to `1d` in whole seconds, default `1h`), `clock-skew` (`0s` to `5m`, default `30s`).
+- Operator section: `max-lifetime` (`1s` to `1d` in whole seconds, default `1h`) and `clock-skew` (`0s` to `5m`, default `30s`), each written with its unit; `algorithms` (asymmetric ones `external-jwt` knows; default RS256, ES256, ES384, ES512, EdDSA, one for each kind of key).
 - Test configuration builders, the section for test clients, and the contract test of the store interface (`./testing`).
 
 ## Invariants
@@ -31,7 +31,7 @@
 - `aud` is `issuer`'s URL as one string, judged before the `jti` is spent: the token endpoint's URL, or a list, could be for another authorization server that names this one's token endpoint.
 - A client whose section sets `accept-loose-audience` is also taken with a loose audience: the token endpoint's absolute URL from `token-endpoint`, or a list holding either URL. Each is logged as a `client-assertion.loose_audience` warning with the client.
 - Without the token endpoint's URL from `token-endpoint`, boot is refused, whether or not a client accepts a loose audience.
-- The assertion is checked against the client's own keys, written or at its `jwks-uri`, in any asymmetric algorithm `external-jwt` knows. A key set is fetched from its URL's host alone; while it cannot be fetched, the answer is unavailable.
+- The assertion is checked against the client's own keys, written or at its `jwks-uri`, in the operator's `algorithms`; the method names them. Each key is read under one algorithm (`external-jwt`): with two taken for one kind (RS256 and PS256), every client's key of that kind naming no `alg` is unused, so a client's JWK best names its `alg`. A key set is fetched from its URL's host alone; while it cannot be fetched, the answer is unavailable.
 - The longest lifetime is `max-lifetime`; the clock allowance is `clock-skew`.
 - `jti` is a well-formed string of 1–256 characters.
 - The `jti` is spent last, after every other check.

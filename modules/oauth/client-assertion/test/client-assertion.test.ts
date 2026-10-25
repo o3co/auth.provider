@@ -64,6 +64,8 @@ async function boot({
 	tokenEndpoint = tokenUrl as string | null,
 	/** The clients whose section accepts a loose audience. */
 	loose = [] as readonly string[],
+	/** The operator section's settings. */
+	settings = {} as Parameters<typeof clientAssertionConfig>[0],
 } = {}) {
 	const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
 	const down = unavailableSwitch<SpentAssertions>("spent assertions");
@@ -113,7 +115,7 @@ async function boot({
 			outbound: {},
 			...httpConfig({ "public-origin": issuer }),
 			...issuerConfig({ url: issuerUrl }),
-			...clientAssertionConfig(),
+			...clientAssertionConfig(settings),
 			...clientsConfig([
 				registeredAs("app"),
 				registeredAs("app:twin"),
@@ -188,14 +190,14 @@ describe("private_key_jwt", () => {
 		expect(await tried(c, { jti: "kept" })).toBe("app");
 	});
 
-	it("names the asymmetric algorithms an assertion may be signed with, and no shared secret", async () => {
+	it("names the asymmetric algorithms an assertion may be signed with: by default one for each kind of key", async () => {
 		const { c } = await boot();
-		expect(c.signingAlgorithms()).toEqual(
-			expect.arrayContaining(["ES256", "EdDSA", "RS256", "PS256"]),
-		);
-		expect(
-			c.signingAlgorithms().filter((alg) => !/^(RS|PS|ES)(256|384|512)$|^EdDSA$/.test(alg)),
-		).toEqual([]);
+		expect(c.signingAlgorithms()).toEqual(["RS256", "ES256", "ES384", "ES512", "EdDSA"]);
+		const named = await boot({ settings: { algorithms: ["RS256", "PS256", "RS256"] } });
+		expect(named.c.signingAlgorithms()).toEqual(["RS256", "PS256"]);
+		for (const algorithms of [[], ["HS256"], ["none"]]) {
+			expect(section.safeParse({ algorithms }).success, String(algorithms)).toBe(false);
+		}
 	});
 
 	it("also takes the token endpoint's location, and lists, from a client accepting a loose audience, logging each", async () => {
@@ -303,7 +305,13 @@ describe("private_key_jwt", () => {
 		expect(await by(ec.privateKey, { alg: "ES256" })).toBe("app");
 		expect(await by(ed.privateKey, { alg: "EdDSA" })).toBe("app");
 		expect(await by(rsa.privateKey, { alg: "RS256" })).toBe("app");
-		expect(await by(rsa.privateKey, { alg: "PS256", kid: "r" })).toBe("app");
+		// PS256 is not taken by default; named, a key naming it is read under it alone.
+		expect(await by(rsa.privateKey, { alg: "PS256", kid: "r" })).toBe("bad_credentials");
+		const withPss = await boot({
+			keys: [jwk(rsa.publicKey, { kid: "r", alg: "PS256" })],
+			settings: { algorithms: ["RS256", "PS256"] },
+		});
+		expect(await tried(withPss.c, {}, {}, rsa.privateKey, { alg: "PS256", kid: "r" })).toBe("app");
 		expect(await by(rsa.privateKey, { alg: "RS256", kid: "ec" })).toBe("bad_credentials");
 		const p384 = generateKeyPairSync("ec", { namedCurve: "P-384" });
 		expect(await by(p384.privateKey, { alg: "ES384" })).toBe("bad_credentials");
@@ -316,8 +324,39 @@ describe("private_key_jwt", () => {
 		const rs = (alg: string) => tried(pinned.c, {}, {}, rsa.privateKey, { alg });
 		expect(await rs("RS256")).toBe("app");
 		expect(await rs("PS256")).toBe("bad_credentials");
-		const curves = await boot({ keys: [jwk(ec.publicKey), jwk(p384.publicKey)] });
+		const p521 = generateKeyPairSync("ec", { namedCurve: "P-521" });
+		const curves = await boot({
+			keys: [jwk(ec.publicKey), jwk(p384.publicKey), jwk(p521.publicKey)],
+		});
 		expect(await tried(curves.c, {}, {}, ec.privateKey, { alg: "ES256" })).toBe("app");
+		// By default, keys of P-384 and P-521 naming no alg are read under their own curve's.
+		expect(await tried(curves.c, {}, {}, p384.privateKey, { alg: "ES384" })).toBe("app");
+		expect(await tried(curves.c, {}, {}, p521.privateKey, { alg: "ES512" })).toBe("app");
+	});
+
+	it("reads each client key under one algorithm, its own alg or the one the operator takes for its kind", async () => {
+		const both = { algorithms: ["RS256" as const, "PS256" as const] };
+		// RS256 and PS256 both taken: a key naming no alg is unused, for an RS256 assertion too.
+		const bare = await boot({ keys: [jwk(rsa.publicKey, { kid: "r" })], settings: both });
+		const bareBy = (alg: string) => tried(bare.c, {}, {}, rsa.privateKey, { alg, kid: "r" });
+		expect(await bareBy("RS256")).toBe("bad_credentials");
+		expect(await bareBy("PS256")).toBe("bad_credentials");
+		// A key naming its alg is read under that one alone.
+		const named = await boot({
+			keys: [jwk(rsa.publicKey, { kid: "r", alg: "RS256" })],
+			settings: both,
+		});
+		const namedBy = (alg: string) => tried(named.c, {}, {}, rsa.privateKey, { alg, kid: "r" });
+		expect(await namedBy("RS256")).toBe("app");
+		expect(await namedBy("PS256")).toBe("bad_credentials");
+		// A key whose alg the operator does not take is used under none.
+		const untaken = await boot({
+			keys: [jwk(rsa.publicKey, { kid: "r", alg: "PS256" })],
+			settings: { algorithms: ["RS256", "ES256"] },
+		});
+		expect(await tried(untaken.c, {}, {}, rsa.privateKey, { alg: "RS256", kid: "r" })).toBe(
+			"bad_credentials",
+		);
 	});
 
 	it("logs why it refused an assertion", async () => {
@@ -514,6 +553,7 @@ describe("private_key_jwt", () => {
 			},
 			issuer,
 			tokenEndpoint: tokenUrl,
+			algorithms: ["ES256"],
 			maxLifetimeMs: 3_600_000,
 			skewMs: 30_000,
 			clock: runtime.clock,
@@ -584,7 +624,11 @@ describe("private_key_jwt", () => {
 		}
 		for (const not of ["301s", "500ms", 30])
 			expect(takes({ "clock-skew": not }), String(not)).toBe(false);
-		expect(section.parse({})).toEqual({ "max-lifetime": 3600, "clock-skew": 30 });
+		expect(section.parse({})).toEqual({
+			"max-lifetime": 3600,
+			"clock-skew": 30,
+			algorithms: ["RS256", "ES256", "ES384", "ES512", "EdDSA"],
+		});
 		expect(takes({ other: 1 })).toBe(false);
 	});
 });
