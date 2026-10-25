@@ -45,7 +45,7 @@
 - Internal modules `authorization`, `verification` and `grant` each take their contracts from the build context; the package's module only declares.
 
 ## Depends on
-- `kernel`, `audit`, `http`, `url-setting`, `request-source`, `clients`, `issuer`, `grants`, `token-endpoint`, `tokens`, `session`, `subject-revocation`, `rate-limit`, `csrf`
+- `kernel`, `audit`, `http`, `url-setting`, `request-source`, `clients`, `client-allowance`, `issuer`, `grants`, `token-endpoint`, `tokens`, `session`, `subject-revocation`, `rate-limit`, `csrf`
 
 ## Vocabulary
 - device code: the code the device polls with. user code: the short code a user enters on another device.
