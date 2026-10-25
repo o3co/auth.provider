@@ -10,7 +10,22 @@ import { drain, serve } from "./serving/server.ts";
 import { section } from "./settings/section.ts";
 
 export default defineModule(
-	{ name: "http", section, takes: [marks, policies, requestEnds, routes] },
+	{
+		name: "http",
+		section,
+		// A plain-http origin sends the session's cookie in the clear: for trying it on one machine.
+		refusedInProduction: (s) =>
+			s["insecure-origin"]
+				? [
+						{
+							key: "insecure-origin",
+							reason:
+								"takes a plain-http public origin, which a production deployment does not; set kernel.environment = development to try one",
+						},
+					]
+				: [],
+		takes: [marks, policies, requestEnds, routes],
+	},
 	(m) => [
 		m.provide(site).by((c) => {
 			const origin = c.section["public-origin"];

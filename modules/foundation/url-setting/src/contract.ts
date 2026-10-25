@@ -76,6 +76,30 @@ export function isLoopbackName(host: string): boolean {
 	return labels.at(-1) === "localhost" && labels.every((label) => label !== "");
 }
 
+/**
+ * Whether a URL is plain `http` on a loopback host (`isLoopbackName`), as a module's own production
+ * check asks of a URL `loopbackHttp` took: such a page is the operator's machine, never a user's.
+ */
+export function isLoopbackHttp(url: string): boolean {
+	const parsed = URL.parse(url);
+	return parsed?.protocol === "http:" && isLoopbackName(parsed.hostname);
+}
+
+/**
+ * A module's production refusals of its pages that `loopbackHttp` took: each key whose URL, or one
+ * of whose URLs, is plain http on a loopback host, with one reason and never the value. A browser
+ * sent there would reach the user's own machine, never the deployment's page.
+ */
+export function loopbackPagesRefused(
+	pages: Readonly<Record<string, string | readonly string[] | undefined>>,
+): { key: string; reason: string }[] {
+	const reason =
+		"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to";
+	return Object.entries(pages)
+		.filter(([, value]) => [value ?? []].flat().some((url) => isLoopbackHttp(url)))
+		.map(([key]) => ({ key, reason }));
+}
+
 function form(kind: string): string {
 	return `a URL as the URL parser writes it; refused for ${kind}`;
 }

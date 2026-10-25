@@ -1,5 +1,6 @@
 import { urlSetting } from "@mod/url-setting";
 import { expect, it } from "vitest";
+import linkModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 
 /** The page setting federation-grants-connect's `step-up-page` is too, so both refuse a page in the same words. */
@@ -28,4 +29,11 @@ it("refuses a page as federation-grants-connect's step-up page does, in the same
 		expect(said, url).toEqual(as);
 		expect(said?.length, url).toBeGreaterThan(0);
 	}
+});
+
+it("refuses in production a step-up page on a loopback host", () => {
+	const ask = (url: string) =>
+		linkModule.refusedInProduction?.(section.parse({ "step-up-page": url }))?.map((r) => r.key);
+	expect(ask("http://localhost:3000/raise")).toEqual(["step-up-page"]);
+	expect(ask("https://as.example/raise")).toEqual([]);
 });

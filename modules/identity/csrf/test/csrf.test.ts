@@ -26,7 +26,8 @@ const boot = (origin = "https://as.example", modules: readonly Module[] = [csrfM
 	assemble({
 		modules: [http, cookiesModule, ...modules],
 		config: {
-			...kernelConfig(),
+			// A plain-http origin is one only a development deployment takes.
+			...kernelConfig({ environment: origin.startsWith("http:") ? "development" : "production" }),
 			...httpConfig({
 				"trusted-proxies": ["127.0.0.1"],
 				...(origin ? { "public-origin": origin } : {}),

@@ -40,6 +40,7 @@ const ran = (script: string, input?: string) =>
 
 /** The reader's `config/local.conf`, with the key and the hash their scripts printed. */
 const localConf = (pem: string, hash: string) => `kernel.deployment = single
+kernel.environment = development
 issuer.url = "${origin}"
 http {
   public-origin = "${origin}"

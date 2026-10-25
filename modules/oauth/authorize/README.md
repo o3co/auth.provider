@@ -14,7 +14,7 @@
 - Contribution of the return path `/oauth/authorize` to `login-gates`
 - Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`)
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`, and of its document copy to `client-documents`
-- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
+- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host, and never in production) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
 - Audit events (to `audit`, declared in `./audit-events`):
   - `authorize.granted` when a code is given, with the subject, `client` and `response_type` `code`.
   - `authorize.rejected` on a refusal decided for the client or its consent, with no subject, and `client` and `reason`.

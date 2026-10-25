@@ -170,7 +170,10 @@ async function serve(setup: Setup = {}) {
 			...(receiving.length > 0 ? [sealModule, handoffSealModule, ...receiving] : []),
 		],
 		config: {
-			...kernelConfig(),
+			// A plain-http origin is one only a development deployment takes.
+			...kernelConfig({
+				environment: setup.origin?.startsWith("http:") ? "development" : "production",
+			}),
 			...(receiving.length > 0 ? sealConfig() : {}),
 			...httpConfig({
 				"trusted-proxies": ["127.0.0.1"],

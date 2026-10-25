@@ -18,7 +18,7 @@
 
 ## Invariants
 - A challenge is 32 random bytes, answered within `challenge-lifetime` of its making on `kernel`'s clock.
-- Origins match the list exactly: https, or http on `localhost`; never an IP literal. An Android app origin is `android:apk-key-hash:` and the unpadded base64url SHA-256 of its signing certificate, never a top origin. A relying party ID that is a public suffix of several labels (`co.uk`) passes boot: no list of them is kept, and the browser refuses it at the first ceremony.
+- Origins match the list exactly: https, or http on `localhost` (refused at boot in production); never an IP literal. An Android app origin is `android:apk-key-hash:` and the unpadded base64url SHA-256 of its signing certificate, never a top origin. A relying party ID that is a public suffix of several labels (`co.uk`) passes boot: no list of them is kept, and the browser refuses it at the first ceremony.
 - An origin that is empty or no URL refuses boot at its place in the list. A reported top origin not listed is refused, and with none listed any frame is, for registration and assertion alike. The relying party ID must match; boot refuses one that is not each web origin's host or a domain it lies under. Algorithms are EdDSA, ES256 and RS256.
 - The count is compared after the signature verified, and must go up (0 after 0 passes).
 - An assertion whose request named no credential is refused without a user handle (`user-handle`, WebAuthn §7.2 step 6); one whose request named it may carry none. A handle carried must be the credential's.

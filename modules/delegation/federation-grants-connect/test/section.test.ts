@@ -1,6 +1,7 @@
 import { BootRefused } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import { connector, origin } from "../src/connect/test/harness.ts";
+import connectModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 
 describe("the browser half's section", () => {
@@ -16,6 +17,17 @@ describe("the browser half's section", () => {
 			{ connections: {} },
 		])
 			expect(section.safeParse(wrong).success, JSON.stringify(wrong)).toBe(false);
+	});
+
+	it("refuses in production each page on a loopback host, by its key", () => {
+		const refused = connectModule.refusedInProduction?.(
+			section.parse({
+				page: "http://localhost:8080/ask",
+				"login-page": `${origin}/login`,
+				"step-up-page": "http://127.0.0.1:8080/raise",
+			}),
+		);
+		expect(refused?.map((r) => r.key)).toEqual(["page", "step-up-page"]);
 	});
 
 	it("checks the upstream account unless its section says none", () => {

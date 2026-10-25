@@ -12,7 +12,7 @@
 ## Offers
 - Composition definition: a contribution at `federation-grants`' `grantsBrowsers`. It joins an app composing federation-grants, and no other.
 - Operator section:
-  - `page`, `login-page`, `step-up-page` (https; http only on a loopback host)
+  - `page`, `login-page`, `step-up-page` (https; http only on a loopback host, and never in production)
   - `identity-check` (`required`)
 
 ## Invariants

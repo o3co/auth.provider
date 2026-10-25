@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import webauthnModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 
 const accepts = (rpId: string, origins: string[]) =>
@@ -95,4 +96,16 @@ it("refuses the keys passkeys keeps now, naming each", () => {
 
 it("refuses the challenge lifetime by its name in seconds", () => {
 	expect(parsed({ "challenge-seconds": 120 }).success).toBe(false);
+});
+
+it("refuses in production an origin over plain http on localhost, in either list", () => {
+	const ask = (origins: string[], top: string[] = []) =>
+		webauthnModule
+			.refusedInProduction?.({ origins, "top-origins": top } as never)
+			?.map((r) => r.key);
+	expect(ask(["http://localhost:3000"], ["http://localhost:4000"])).toEqual([
+		"origins",
+		"top-origins",
+	]);
+	expect(ask(["https://as.example"], ["https://top.example"])).toEqual([]);
 });

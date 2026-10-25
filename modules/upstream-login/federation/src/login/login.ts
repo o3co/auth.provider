@@ -5,6 +5,7 @@ import { loginSource } from "@mod/login-attributes";
 import { type Logins, logins } from "@mod/login-gates";
 import { type Handoff, handoff } from "@mod/upstream-handoff";
 import type { UpstreamLogin } from "@mod/upstreams";
+import { loopbackPagesRefused } from "@mod/url-setting";
 import { type Users, userAttribute, users } from "@mod/users";
 import {
 	type Continuation,
@@ -33,6 +34,10 @@ export const loginCaller = "federation";
 
 /** What `loginIn` takes from the build context, and the landing's, whose `site` its held page is checked against. */
 export const loginTakes = [logins, users, audit, handoff, ...landingTakes] as const;
+
+/** A production check's refusal of a held page on a loopback host, which is the operator's own machine. */
+export const heldPageRefused = (settings: Pick<Settings, "held-page">) =>
+	loopbackPagesRefused({ "held-page": settings["held-page"] });
 
 export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> {
 	const heldPage = c.section["held-page"];
