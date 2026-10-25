@@ -7,14 +7,14 @@ import { csrfChecked, csrfRefused, originEvidence } from "./contract.ts";
 /** The public origin both checks compare with, refused once without one. */
 const ours = contract<Site>("csrf.public-origin");
 
+/** What `deciding` takes from other modules: the site, and cookies for the token it checks. */
+export const decidingTakes = [cookies, site] as const;
+
 /**
  * The policy's rule, its mark and the origin evidence, built alike by the module and its stand-in.
  * Without a public origin the module refuses boot. The stand-in refuses every unsafe request
  * instead, until no test boots it without one.
  */
-/** What `deciding` takes from other modules: the site, and cookies for the token it checks. */
-export const decidingTakes = [cookies, site] as const;
-
 export const deciding = (m: Parts<undefined>, withoutOrigin: "refuse boot" | "refuse requests") => [
 	m.provide(ours).by(async (c) => {
 		const publicSite = await c.get(site);

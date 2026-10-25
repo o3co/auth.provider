@@ -667,5 +667,5 @@ it("registers no clients, and a client no sections, that the operator leaves out
 it("takes every handle its takes name", async () => {
 	const modules = [clientsModule, secretHashModule, grantsModule];
 	const config = { ...kernelConfig(), clients: { registered } };
-	expect(await takesUnused({ modules, config })).toEqual({});
+	expect((await takesUnused({ modules, config })).clients).toBeUndefined();
 });

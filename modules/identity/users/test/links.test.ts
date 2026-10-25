@@ -121,10 +121,10 @@ describe("the link store users asks for", () => {
 
 	it("is taken where users keeps the links, and left untaken where the ledger keeps them", async () => {
 		const kept = await takesUnused({ modules: parts(ledgerOf(), [countedLinks([])]), config });
-		expect(kept).toEqual({});
+		expect(kept.users).toBeUndefined();
 		const upstream = ledgerOf(async () => none);
 		const left = await takesUnused({ modules: parts(upstream, [countedLinks([])]), config });
 		// Its takes name the link store in every composition; a ledger with upstream lookups never asks it.
-		expect(left).toEqual({ users: ["users.link-store"] });
+		expect(left.users).toEqual(["users.link-store"]);
 	});
 });

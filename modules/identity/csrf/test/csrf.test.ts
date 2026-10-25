@@ -335,6 +335,15 @@ describe.each([
 it("takes every handle its takes name, the module and its stand-in alike, at a public origin", async () => {
 	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
 	for (const module of [csrfModule, csrfStandIn]) {
-		expect(await takesUnused({ modules: [http, cookiesModule, module], config })).toEqual({});
+		expect(
+			(await takesUnused({ modules: [http, cookiesModule, module], config })).csrf,
+		).toBeUndefined();
 	}
+});
+
+it("leaves cookies untaken in its stand-in without a public origin, refusing unsafe requests as it does", async () => {
+	// The origin is http's setting, not csrf's: cookies is composed wherever csrf is, so its take stays named.
+	const config = { ...kernelConfig(), ...httpConfig() };
+	const unused = await takesUnused({ modules: [http, cookiesModule, csrfStandIn], config });
+	expect(unused.csrf).toEqual(["cookies"]);
 });

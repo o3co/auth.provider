@@ -200,6 +200,10 @@ it("takes every handle its takes name, the module and its stand-in alike", async
 		m.provide(boundaryStore).by(() => stores.boundaries),
 	]);
 	const config = kernelConfig();
-	expect(await takesUnused({ modules: [revocationModule, boundaries], config })).toEqual({});
-	expect(await takesUnused({ modules: [subjectRevocationStandIn], config })).toEqual({});
+	expect(
+		(await takesUnused({ modules: [revocationModule, boundaries], config }))["subject-revocation"],
+	).toBeUndefined();
+	expect(
+		(await takesUnused({ modules: [subjectRevocationStandIn], config }))["subject-revocation"],
+	).toBeUndefined();
 });

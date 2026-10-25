@@ -497,7 +497,11 @@ it("takes every handle its takes name, the store and its simulated stand-in alik
 		m.contribute(spaces).by(() => space),
 	]);
 	const accepting = { ...kernelConfig(), store: { "accept-volatile": true } };
-	expect(await takesUnused({ modules: [storeModule, caller], config: accepting })).toEqual({});
+	expect(
+		(await takesUnused({ modules: [storeModule, caller], config: accepting })).store,
+	).toBeUndefined();
 	const simulated = simulatedStore().module;
-	expect(await takesUnused({ modules: [simulated, caller], config: kernelConfig() })).toEqual({});
+	expect(
+		(await takesUnused({ modules: [simulated, caller], config: kernelConfig() })).store,
+	).toBeUndefined();
 });

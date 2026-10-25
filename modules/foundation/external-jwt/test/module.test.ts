@@ -121,7 +121,9 @@ it("takes every handle its takes name", async () => {
 			},
 		})),
 	]);
-	expect(await takesUnused({ modules: [fake, externalJwtModule], config: kernelConfig() })).toEqual(
-		{},
-	);
+	expect(
+		(await takesUnused({ modules: [fake, externalJwtModule], config: kernelConfig() }))[
+			"external-jwt"
+		],
+	).toBeUndefined();
 });

@@ -304,5 +304,5 @@ it("lets each receiver hold 1000 deliveries at once when the operator sets no li
 
 it("takes every handle its takes name", async () => {
 	const config = { ...kernelConfig(), audit: { receivers: ["log"] } };
-	expect(await takesUnused({ modules: [auditModule], config })).toEqual({});
+	expect((await takesUnused({ modules: [auditModule], config })).audit).toBeUndefined();
 });

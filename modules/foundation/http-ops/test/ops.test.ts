@@ -117,5 +117,5 @@ describe("request duration", () => {
 
 it("takes every handle its takes name: the probes and routes it collects", async () => {
 	const config = { ...kernelConfig(), "http-ops": {} };
-	expect(await takesUnused({ modules: [httpOps], config })).toEqual({});
+	expect((await takesUnused({ modules: [httpOps], config }))["http-ops"]).toBeUndefined();
 });

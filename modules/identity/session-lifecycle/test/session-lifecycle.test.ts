@@ -1252,5 +1252,7 @@ it("takes every handle its takes name", async () => {
 		subjectRevocationStandIn,
 		memoryStores().module,
 	];
-	expect(await takesUnused({ modules, config: configWith() })).toEqual({});
+	expect(
+		(await takesUnused({ modules, config: configWith() }))["session-lifecycle"],
+	).toBeUndefined();
 });

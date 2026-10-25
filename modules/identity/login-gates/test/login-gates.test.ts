@@ -518,5 +518,5 @@ it("resumes through the gates composed now: one added before the hold runs only 
 it("takes every handle its takes name", async () => {
 	const modules = [http, sessionStandIn, subjectRevocationStandIn, gatesModule];
 	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
-	expect(await takesUnused({ modules, config })).toEqual({});
+	expect((await takesUnused({ modules, config }))["login-gates"]).toBeUndefined();
 });

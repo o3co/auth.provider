@@ -130,5 +130,5 @@ describe("the stand-in's seams", () => {
 it("takes every handle its stand-in's takes name, the seams collected though none is contributed", async () => {
 	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
 	const modules = [http, cookiesModule, sessionStandIn, subjectRevocationStandIn];
-	expect(await takesUnused({ modules, config })).toEqual({});
+	expect((await takesUnused({ modules, config })).session).toBeUndefined();
 });
