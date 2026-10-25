@@ -386,7 +386,8 @@ describe("the JWT bearer grant over the whole token endpoint, for id_tokens", ()
 			clock.at += 2 * second;
 		});
 		expect(said(await s.bearer("app", token))).toBe("400 invalid_grant: expired");
-		expect(said(await s.bearer("app", token))).not.toMatch(/^200/);
+		// Used up still: its record holds it, so writing it again finds it.
+		expect(await s.app.get(usedIdTokens).save("apple", nameOf(token), minute)).toBe("exists");
 	});
 
 	it("never takes again an id_token this version kept once max-age widens to an hour, but takes one an earlier version kept", async () => {
