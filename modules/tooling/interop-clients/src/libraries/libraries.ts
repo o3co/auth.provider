@@ -12,6 +12,8 @@ export const flows = [
 	"dpop",
 	"device",
 	"logout",
+	"jwt-bearer",
+	"token-exchange",
 ] as const;
 export type Flow = (typeof flows)[number];
 
@@ -63,6 +65,8 @@ export const libraries: readonly Library[] = [
 			"dpop",
 			"device",
 			"logout",
+			"jwt-bearer",
+			"token-exchange",
 		],
 		// The runtime jars are checked against their pins before anything is compiled or shaded from them.
 		build: [
