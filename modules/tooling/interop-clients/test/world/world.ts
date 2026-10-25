@@ -28,7 +28,15 @@ export interface World {
 	readonly ca: string;
 	readonly clients: Readonly<
 		Record<
-			"basic" | "post" | "public" | "assertion" | "device" | "mtls" | "backchannel",
+			| "basic"
+			| "post"
+			| "public"
+			| "assertion"
+			| "device"
+			| "mtls"
+			| "backchannel"
+			| "service"
+			| "publicDevice",
 			WorldClient
 		>
 	>;
@@ -139,6 +147,12 @@ export async function startWorld(
 			secret: "device-secret-0123456789abcdef",
 		},
 		mtls: { id: "mtls", method: "client_secret_post", secret: "mtls-secret-0123456789abcdef" },
+		service: {
+			id: "service",
+			method: "client_secret_basic",
+			secret: "service-secret-0123456789abcdef",
+		},
+		publicDevice: { id: "public-device", method: "none" },
 		backchannel: {
 			id: "backchannel",
 			method: "client_secret_basic",
@@ -154,6 +168,12 @@ export async function startWorld(
 		scopes: ["read"],
 		defaultScopes: ["read"],
 		audiences: [resource],
+	};
+	const byService: ClientScene = {
+		...byMtls,
+		id: clients.service.id,
+		method: "client_secret_basic",
+		secret: clients.service.secret,
 	};
 	const byBackchannel: ClientScene = {
 		...client(clients.backchannel.id, clients.backchannel.method, clients.backchannel.secret),
@@ -186,13 +206,29 @@ export async function startWorld(
 		// The audience the harness's introspecting client may see too.
 		audiences: [resource],
 	};
+	// The device grant's own case (RFC 8628 §3.1): a public client, which names itself alone.
+	const { secret: _, ...deviceAllowance } = byDevice;
+	const byPublicDevice: ClientScene = {
+		...deviceAllowance,
+		id: clients.publicDevice.id,
+		kind: "public",
+		method: "none",
+	};
 	const app = await fronted(
 		(origin) => {
 			const scene = codeScene({
 				issuer: origin,
 				keys: { signing: signing() },
 				users: [{ identifier: user.username, password: user.password }],
-				clients: [...byCode, byAssertion, byDevice, byMtls, byBackchannel],
+				clients: [
+					...byCode,
+					byAssertion,
+					byDevice,
+					byMtls,
+					byService,
+					byPublicDevice,
+					byBackchannel,
+				],
 				discovery: true,
 				userinfo: true,
 				refresh: {},

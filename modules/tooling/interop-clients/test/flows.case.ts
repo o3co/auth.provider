@@ -203,6 +203,23 @@ describe(`${library.name}: a client's own token`, () => {
 	);
 });
 
+describe(`${library.name}: a client's own token, by its secret`, () => {
+	it.runIf(runs("client-credentials-secret"))(
+		"gets a token by the client credentials grant, the client authenticated by client_secret_basic",
+		(context) =>
+			excusable(context, "client-credentials-secret", async () => {
+				const result = await run("client-credentials-secret", world.clients.service, {
+					scope: "read",
+				});
+				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+				expect(await world.introspect(String(result.accessToken))).toMatchObject({
+					active: true,
+					client_id: world.clients.service.id,
+				});
+			}),
+	);
+});
+
 describe(`${library.name}: revoking`, () => {
 	it.runIf(runs("revocation"))(
 		"introspects an access token as active, revokes it, and introspects it as inactive",
@@ -234,6 +251,20 @@ describe(`${library.name}: a device`, () => {
 		(context) =>
 			excusable(context, "device", async () => {
 				const result = await run("device", world.clients.device, { scope: "openid read" });
+				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+				expect((await world.introspect(String(result.accessToken))).active).toBe(true);
+			}),
+	);
+});
+
+describe(`${library.name}: a public device`, () => {
+	it.runIf(runs("public-device"))(
+		"gets a token by the device authorization grant as a public client, once the user approves the code",
+		(context) =>
+			excusable(context, "public-device", async () => {
+				const result = await run("public-device", world.clients.publicDevice, {
+					scope: "openid read",
+				});
 				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
 				expect((await world.introspect(String(result.accessToken))).active).toBe(true);
 			}),

@@ -223,9 +223,11 @@ const flows: Record<string, (i: Instruction) => Promise<unknown>> = {
 	refresh,
 	resource,
 	"client-credentials": clientCredentials,
+	"client-credentials-secret": clientCredentials,
 	revocation,
 	dpop,
 	device,
+	"public-device": device,
 	logout,
 };
 
