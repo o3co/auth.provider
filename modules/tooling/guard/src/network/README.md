@@ -14,9 +14,9 @@ Internal module of `guard`: G26, how product code may reach the network, and G27
 - `networkRules` (G26, G27), `helpersOf` (the plain helpers the packages' `forks` name, which the run's shared analysis reads beside the sources), `reachesIn` (a file's facts → the places it reaches the network) and `reachesOf` (a file read on its own).
 
 ## Invariants
-- It reads each file's `facts` (`guard-imports`), a fork's helper's too from the same shared analysis: an import's and a re-export's bindings (a default taken by name is a value the import names), a module loaded (`import()`, a loader's call, `import = require`), and a name or a property read with what it is bound to.
+- It reads each file's `facts` (`guard-imports`), a fork's helper's too from the same shared analysis: an import's and a re-export's bindings, a module loaded (`import()`, a loader's call, `import = require`), and a name or a property read with what it is bound to.
 - A name, or the owner of a property read, counts only as a value (its role `value`: never in a type or an ambient context). So a shorthand property and a local export read the global they name, and `require` in parentheses, or a loader `createRequire` made, loads as `require` does.
-- An import and a re-export are read alike: a default, a namespace or `export *` binds a module whole, a name binds that name, and one binding types alone reaches nothing.
+- An import and a re-export are read alike: a default, taken by name or not, a namespace or `export *` binds a module whole, a name binds that name, and one binding types alone reaches nothing.
 - A place reaches the network where shipped code does one of these:
   - Imports or re-exports, not as a type alone, a name that opens a connection or a server from `node:http`, `node:https`, `node:net`, `node:tls`, `node:dgram` or `node:http2`, or one that asks a resolver from `node:dns` or `node:dns/promises`, or one of those modules whole. Functions that reach nothing, such as `isIP` and `BlockList`, are not counted.
   - Imports or re-exports anything from `node:child_process`: a process started can reach anything. One starter is let through, below.

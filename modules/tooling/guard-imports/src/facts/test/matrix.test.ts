@@ -60,6 +60,18 @@ const forms: EdgeRow[] = [
 		],
 	},
 	{
+		name: "a default taken by name, by an import and by a re-export alike: a named binding of default",
+		files: {
+			"a.ts":
+				'import { default as d } from "m";\nexport { default as e } from "m";\nexport { default } from "m";\n',
+		},
+		edges: [
+			"import m loads → package m {named:default>d}",
+			"export-from m loads → package m {named:default=>e}",
+			"export-from m loads → package m {named:default=>default}",
+		],
+	},
+	{
 		name: "a dynamic import by a literal, a template, with options, and named at run time",
 		files: {
 			"a.ts": [
