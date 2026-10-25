@@ -211,4 +211,28 @@ describe("the deployment's environment", () => {
 		const app = await assemble({ modules: [changer], config: production });
 		expect(app.get(outcome)).toEqual([false, false, "production"]);
 	});
+
+	it("reads an answer by index alone, never by its iterator", async () => {
+		const answer = Object.defineProperty([{ key: "k", reason: "r" }], Symbol.iterator, {
+			get: () => {
+				throw new Error(secret);
+			},
+		});
+		const indexed = defineModule({ name: "indexed", refusedInProduction: () => answer, takes: [] });
+		const refused = await refusalsOf(assemble({ modules: [indexed], config: production }));
+		expect(refused).toEqual([{ where: "indexed.k", reason: "r" }]);
+	});
+
+	it("holds a replica declaration answering anything but a boolean to its module", async () => {
+		const answers: unknown[] = [1, "yes", undefined, null, {}];
+		const modules = answers.map((answer, i) =>
+			defineModule({ name: `r${i}`, replicaSafe: () => answer as boolean, takes: [] }),
+		);
+		const refused = await refusalsOf(
+			assemble({ modules, config: kernelConfig({ deployment: "multi" }) }),
+		);
+		expect(refused).toEqual(
+			answers.map((_, i) => ({ where: `r${i}`, reason: "its multi-instance check failed" })),
+		);
+	});
 });
