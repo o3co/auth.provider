@@ -84,5 +84,5 @@
 - 7.1 #2 SHOULD: excluded deployment: TLS ends at the proxy in front, which the deployment provides
 - 7.1 #3 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
 - 7.1 #4 MUST: oidc-discovery-7.1-a
-- 7.2 #1 MUST: excluded client-only
+- 7.2 #1 MUST: oidc-discovery-7.1-a
 - 7.2 #2 MUST: excluded client-only

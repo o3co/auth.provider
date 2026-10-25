@@ -8,11 +8,11 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 |---|---|---|---|---|---|---|---|---|---|---|
 | [OpenID Connect Back-Channel Logout 1.0](oidc-bcl.md) | 24 | 14 | 0 | 14 | 0 | 9 | 0 | 9 | 0 | 1 |
 | [OpenID Connect Core 1.0](oidc-core.md) | 274 | 105 | 0 | 105 | 0 | 43 | 0 | 43 | 0 | 126 |
-| [OpenID Connect Discovery 1.0](oidc-discovery.md) | 51 | 24 | 0 | 24 | 0 | 8 | 0 | 8 | 0 | 19 |
+| [OpenID Connect Discovery 1.0](oidc-discovery.md) | 51 | 26 | 0 | 26 | 0 | 9 | 0 | 9 | 0 | 16 |
 | [OpenID Connect RP-Initiated Logout 1.0](oidc-rpinit.md) | 19 | 13 | 0 | 13 | 0 | 6 | 0 | 6 | 0 | 0 |
 | [RFC 6749: The OAuth 2.0 Authorization Framework](rfc6749.md) | 112 | 79 | 0 | 79 | 0 | 24 | 0 | 24 | 0 | 9 |
 | [RFC 7009: OAuth 2.0 Token Revocation](rfc7009.md) | 9 | 7 | 0 | 7 | 0 | 2 | 0 | 2 | 0 | 0 |
 | [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](rfc7636.md) | 12 | 8 | 0 | 8 | 0 | 3 | 0 | 3 | 0 | 1 |
 | [RFC 8414: OAuth 2.0 Authorization Server Metadata](rfc8414.md) | 26 | 18 | 0 | 18 | 0 | 2 | 0 | 2 | 0 | 6 |
 | [RFC 9207: OAuth 2.0 Authorization Server Issuer Identification](rfc9207.md) | 6 | 5 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
-| Total | 533 | 273 | 0 | 273 | 0 | 97 | 0 | 97 | 0 | 163 |
+| Total | 533 | 275 | 0 | 275 | 0 | 98 | 0 | 98 | 0 | 160 |
