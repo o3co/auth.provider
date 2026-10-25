@@ -242,6 +242,20 @@ describe("delegated issuers", () => {
 		expect(saidOf(await s.grant("app", a))).toBe("issued");
 	});
 
+	it("refuses an assertion with less than a second left before its delegate spends it, as the exchange does", async () => {
+		const d = delegating();
+		const s = await serve([d.module]);
+		// The delegate took it within its clock allowance, past or at its end.
+		for (const left of [-5_000, 0, 999]) {
+			expect(
+				saidOf(await s.grant("app", sent({ ...valid, expiresAt: now + left }))),
+				String(left),
+			).toBe("invalid_grant: expired");
+		}
+		expect(d.spent).toEqual([]);
+		expect(saidOf(await s.grant("app", sent({ ...valid, expiresAt: now + 1000 })))).toBe("issued");
+	});
+
 	it("gives no token for an assertion made before its subject's revocation", async () => {
 		const d = delegating();
 		const s = await serve([d.module]);
