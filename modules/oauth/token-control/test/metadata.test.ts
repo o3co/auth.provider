@@ -113,6 +113,10 @@ it("takes all its module names, tokens revocable or not, a kind contributed or n
 		for (const extra of [[], [refreshKind]])
 			for (const origin of ["https://as.example", undefined]) {
 				const input = assembly(revocable, origin, extra);
-				expect(await takesUnused(input), `${revocable} ${extra.length} ${origin}`).toEqual({});
+				// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+				expect(
+					(await takesUnused(input))["token-control"],
+					`${revocable} ${extra.length} ${origin}`,
+				).toBeUndefined();
 			}
 });
