@@ -10,7 +10,7 @@ Internal module of `conformance`: the new system's driver, composed from a scene
 
 ## Invariants
 - Does not rely on logs to tell that start-up is done.
-- A start's `trustedCertificates` reach the app as one bundle named by `NODE_EXTRA_CA_CERTS`, its only variable from the start's options; a file that cannot be read, holds no certificate, or holds a PEM block that is no X.509 certificate refuses the start before the app or its store and sinks run, and stops the parties started for it. Nothing else of the runner's environment reaches the app.
+- A start's `trustedCertificates` reach the app as one bundle named by `NODE_EXTRA_CA_CERTS`, its only variable from the start's options; a file that cannot be read, holds no certificate, holds anything but whole PEM certificate blocks and whitespace (a block cut short, a key, a note), or a block that is no X.509 certificate, refuses the start before the app or its store and sinks run, and stops the parties started for it. Nothing else of the runner's environment reaches the app.
 - The driver picks the port and waits until it is reachable over HTTP.
 - Composes `audit` with `audit-http` (through `outbound`) into every scene, sending each event to the `audit` sink, named in outbound's `allow` and as a plain-http loopback destination.
 - A pattern's app boots on `trial`'s layer for the keys each scene leaves unset, but none in a section a set-up marks `whole`.

@@ -93,7 +93,9 @@ export async function trustedEnv(
 				throw new Error(`a trusted certificate file cannot be read: ${file}`, { cause: error });
 			});
 			const blocks = text.match(certificateBlock) ?? [];
-			if (blocks.length === 0 || !blocks.every(isCertificate)) {
+			// Whole certificates alone: Node would boot on the good ones of a file with anything else.
+			const rest = text.replace(certificateBlock, "").trim();
+			if (blocks.length === 0 || rest !== "" || !blocks.every(isCertificate)) {
 				throw new Error(
 					`a trusted certificate file holds no X.509 certificate, or a broken one: ${file}`,
 				);

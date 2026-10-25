@@ -65,6 +65,29 @@ describe("the certificates a started app trusts besides the system's", () => {
 		}
 	});
 
+	it("refuses a file where anything but whole certificates stands, a block cut short among them", async () => {
+		const dir = await scratch();
+		const good = await readFile(fixture("suite"), "utf8");
+		const written = async (name: string, text: string) => {
+			const file = join(dir, name);
+			await writeFile(file, text);
+			return file;
+		};
+		const files = [
+			// Node would read the good one and boot, warning of the rest.
+			await written("cut.pem", `${good}-----BEGIN CERTIFICATE-----\nMIIB\n`),
+			await written("unopened.pem", `${good}MIIB\n-----END CERTIFICATE-----\n`),
+			await written("text.pem", `a note\n${good}`),
+			await written(
+				"key.pem",
+				`${good}-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n`,
+			),
+		];
+		for (const file of files) {
+			await expect(trustedEnv([file], dir)).rejects.toThrow(file);
+		}
+	});
+
 	it("stops the parties started for the app when its certificates are refused", async () => {
 		let stopped = 0;
 		const party = { base: "http://127.0.0.1:1", config: {}, stop: async () => void stopped++ };
