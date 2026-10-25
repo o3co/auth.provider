@@ -91,6 +91,19 @@ describe("raising the session", () => {
 		expect(await h.intents.steppedUp((await h.linked(link)).ref, "email", h.now())).toBe(true);
 	});
 
+	it("changes no intent past its time since it was read: no session is bound and no trip marked", async () => {
+		const h = await intents();
+		const { link } = await h.lodge({ endsAt: h.now() + 1000 });
+		const { ref } = await h.linked(link);
+		h.advance(1000);
+		expect((await h.intents.bound(ref, "s-1")).kind).toBe("stale");
+		expect(await h.intents.steppedUp(ref, "mfa", h.now())).toBe(false);
+		// Back within its time, the intent reads as it was: unbound, and no trip marked.
+		h.advance(-1000);
+		expect((await h.linked(link)).view.session).toBeUndefined();
+		expect(await h.intents.steppedUp(ref, "mfa", h.now())).toBe(true);
+	});
+
 	it("answers false where another request marked the trip first, or the intent was replaced", async () => {
 		for (const raced of [
 			{ stepped: { requirement: "mfa", at: 1_800_000_000_000 } },
