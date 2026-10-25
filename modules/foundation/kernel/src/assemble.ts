@@ -1,5 +1,5 @@
 import { readSections } from "./config/sections.ts";
-import type { KernelSettings } from "./config/settings.ts";
+import { checkProduction, checkReplicas } from "./deployment/deployment.ts";
 import type { Contract, ExtensionPoint, Handle } from "./handles.ts";
 import { periodic } from "./lifecycle/every.ts";
 import {
@@ -43,28 +43,6 @@ type Built = { readonly ok: true; readonly value: unknown } | { readonly ok: fal
 
 /** Failure of something this item needed; the original refusal is already recorded. */
 class DependencyFailed extends Error {}
-
-function checkReplicas(
-	modules: readonly Module[],
-	sections: Map<Module, unknown>,
-	deployment: KernelSettings["deployment"],
-	refusals: Refusal[],
-): void {
-	if (deployment !== "multi") return;
-	for (const module of modules) {
-		// A section that failed its schema is refused already; the declaration expects a checked one.
-		if (module.section !== undefined && !sections.has(module)) continue;
-		const safe =
-			typeof module.replicaSafe === "function"
-				? module.replicaSafe(sections.get(module))
-				: (module.replicaSafe ?? true);
-		if (!safe)
-			refusals.push({
-				where: module.name,
-				reason: "declares itself unsafe for multiple instances",
-			});
-	}
-}
 
 /** Who provides each contract and who contributes to each point; a contract provided twice is refused. */
 function indexParts(modules: readonly Module[], refusals: Refusal[]) {
@@ -143,6 +121,7 @@ export async function assembleWatching(
 				log: routedLog(kernel.logging.level, systemClock, () => sinkList),
 			};
 	checkReplicas(modules, sections, kernel.deployment, refusals);
+	checkProduction(modules, sections, kernel.environment, refusals);
 	// One preflight before any factory runs: every structural gap is named in one refusal, and a
 	// refused boot has built nothing, so no stop hook is left to run.
 	const parts = indexParts(modules, refusals);

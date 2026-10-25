@@ -57,6 +57,14 @@ export interface ModuleHead<S> {
 	/** A function is asked only with a section that passed its schema. */
 	readonly replicaSafe?: boolean | ((section: S) => boolean);
 	/**
+	 * What a production deployment must not hold in this section: each a key path below the section
+	 * and a reason, never a value, which boot is refused with. Asked only where `kernel.environment`
+	 * is production, and only with a section that passed its schema.
+	 */
+	readonly refusedInProduction?: (
+		section: S,
+	) => readonly { readonly key: string; readonly reason: string }[];
+	/**
 	 * What its factories take from other modules: each contract they `get` or hold `late`, and each
 	 * point they `collect`; a contract it provides itself is not named. A function is asked only
 	 * with a section that passed its schema. Required: a module taking nothing names none (`[]`).
