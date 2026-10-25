@@ -15,7 +15,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - `find` (request, identifier) → the transaction and the time left, or none.
 - `carried` (request) → the identifier the browser's cookie names, or none.
 - `spend` → the attempts left and the challenge it took, or none. `take` → whether this call took it.
-- `judged` (identifier, a judgement on the attempt spent) → its answer; an unavailable one gives the attempt back.
+- `judged` (identifier, a judgement on the attempt spent) → its answer; an unavailable one gives the attempt back, the last one included, so the transaction is found again.
 - `challenged` (a factor's challenge sealed by `mfa`, or none to clear it) → whether it was kept.
 - `keep` (a change of what the transaction holds for its work, from what it holds) → what it holds now, or none when it is no longer in use or the change gives nothing.
 - `askedFrom` (a transaction's purpose) → whom `mfa`'s kinds are asked for: a held login by the email its login gave, `vouched` when `subject-attributes`' `vouches` says `users` stands behind it, else the session by its handle.
@@ -33,7 +33,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - Taking marks the transaction; a marked one is kept until its lifetime and read as gone.
 - A start whose identifier is already held is unavailable.
 - A start lists the transaction under its holder (the session it is tied to, or the held login's subject) by a digest of its identifier, after keeping it; a listing that cannot answer makes the start unavailable.
-- `find` answers a transaction only while its holder's listing holds it; taking it, or spending its last attempt, takes it off, logging `mfa-flows.listing_failed` when that fails.
+- `find` answers a transaction only while its holder's listing holds it and an attempt is left; taking it takes it off the listing, logging `mfa-flows.listing_failed` when that fails. Every caller takes it once its last attempt is judged.
 
 ## Depends on
 - `kernel` (the build context, the clock, unavailable); `http` (the request type); `cookies`; `session` (the login facts type); `login-gates` (`LoginFrom`); `mfa-extensions` (`AskedFrom`, whom it asks for); `subject-attributes` (`vouches`); the package's store interface

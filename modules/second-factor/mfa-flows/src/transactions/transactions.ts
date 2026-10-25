@@ -148,19 +148,21 @@ export function transactionsOver(parts: TransactionParts) {
 			const found = transactionOf(await store.read(id));
 			const now = clock.now();
 			if (!found || !live(found, now) || found.browser !== hashOf(browser)) return undefined;
+			// Its last attempt spent, it is no longer in use, unless a proof that could not be judged gave it back.
+			if (found.attemptsLeft === 0) return undefined;
 			if (!(await listed(id, found))) return undefined;
 			return { transaction: found, leftMs: found.deadline - now };
 		},
 		/**
 		 * Spends one attempt and takes the challenge with it; the attempts left and the challenge
-		 * taken, or nothing when the transaction is gone or spent.
+		 * taken, or nothing when the transaction is gone or spent. It stays listed: the caller takes it
+		 * once its last attempt is judged, and one that cannot be judged gives the attempt back.
 		 */
 		spend: async (id: string) => {
 			const { before, after } = await changeLive(id, (t) =>
 				t.attemptsLeft > 0 ? { ...unchallenged(t), attemptsLeft: t.attemptsLeft - 1 } : undefined,
 			);
 			if (!before || !after || after.attemptsLeft >= before.attemptsLeft) return undefined;
-			if (after.attemptsLeft === 0) await unlist(id, after);
 			return { left: after.attemptsLeft, challenge: before.challenge };
 		},
 		/** Judges a proof on an attempt spent; one that cannot be judged (unavailable) gives the attempt back. */
