@@ -1,0 +1,56 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { converse } from "../src/dialog/dialog.ts";
+import type { Flow } from "../src/libraries/libraries.ts";
+import { excusable, library, runs, unmetOf } from "./library.ts";
+import { type ServicesWorld, startServicesWorld } from "./world/services.ts";
+
+/** The flows of this file: those of services, which need no user. */
+const here: Flow[] = ["jwt-bearer"];
+
+let world: ServicesWorld;
+beforeAll(async () => {
+	if (here.some(runs)) world = await startServicesWorld();
+});
+afterAll(async () => {
+	await world?.stop();
+});
+
+/** Runs one flow with the library; it asks nothing of a browser, and one that gives no result fails. */
+async function run(flow: Flow, extra: Record<string, unknown>) {
+	const dialog = await converse(
+		library.adapter(),
+		{ flow, issuer: world.issuer, ca: world.ca, ...extra },
+		async (ask) => {
+			throw new Error(`the driver has no answer to ${ask.ask}`);
+		},
+		90_000,
+	);
+	if (dialog.outcome.kind !== "result")
+		throw new Error(
+			`${library.name} ${flow}: ${dialog.outcome.type}: ${dialog.outcome.message}\n${dialog.stderr.slice(-2000)}`,
+		);
+	return dialog.outcome.result as Record<string, unknown>;
+}
+
+describe(`${library.name}: an assertion for a token`, () => {
+	it.runIf(runs("jwt-bearer"))(
+		"gets a token by the jwt-bearer grant, its assertion from an issuer the provider trusts, the client authenticated",
+		(context) =>
+			excusable(context, "jwt-bearer", async () => {
+				const result = await run("jwt-bearer", {
+					client: world.clients.bearer,
+					assertionIssuer: world.assertionIssuer,
+					subject: "service-a",
+					scope: "read",
+				});
+				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+				expect(String(result.accessToken)).not.toBe("");
+			}),
+	);
+});
+
+describe(`${library.name}: the known differences of services`, () => {
+	it("are each met by a check of this run, so a fixed one is taken out", () => {
+		expect(unmetOf(here)).toEqual([]);
+	});
+});
