@@ -2,7 +2,13 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Pkg } from "@mod/guard-imports";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { branchingImports, check, dependencyCards, heavyDependencyCards } from "../src/contract.ts";
+import {
+	branchingImports,
+	check,
+	dependencyCards,
+	heavyDependencyCards,
+	measures,
+} from "../src/contract.ts";
 import { budget, pkg, root } from "./workspace.ts";
 
 // A fixture with exports has its contract surface built by the type checker, which is slow when the machine is busy.
@@ -202,6 +208,39 @@ describe("guard", () => {
 			check([p], { ...budget, readRangeBytes: limit }).map((v) => `${v.where} ${v.detail}`);
 		expect(reading(own)).toEqual([]);
 		expect(reading(own - 1)).toEqual([`@t/mjs reading scope bytes ${own} > ${own - 1}`]);
+	});
+
+	it("gives every unit's measures, each with its limit, the ones under it too", () => {
+		const line = "export const n = 1;\n";
+		const p = pkg("@t/measured", {
+			"src/contract.ts": line.repeat(3),
+			"src/inner/README.md": "# inner\n- one item\n- a second, longer item\n",
+			"src/inner/a.ts": line.repeat(4),
+			"src/inner/test/a.test.ts": line.repeat(2),
+		});
+		const of = (where: string) =>
+			Object.fromEntries(
+				measures([p], budget)
+					.filter((m) => m.where === where)
+					.map((m) => [m.what, [m.value, m.limit]]),
+			);
+		expect(of("@t/measured")).toMatchObject({
+			"source lines": [3, budget.sourceLines],
+			"test lines": [0, budget.testLines],
+			"contract values": [1, budget.contractValues],
+			"contract members": [0, budget.contractMembers],
+			"card lines": [2, budget.cardLines],
+			"card items": [0, undefined],
+		});
+		expect(of("@t/measured/src/inner")).toMatchObject({
+			"source lines": [4, budget.sourceLines],
+			"test lines": [2, budget.testLines],
+			"comment lines": [0, budget.commentFloor],
+			"card items": [2, undefined],
+			"card item bytes": [Buffer.byteLength("- a second, longer item"), budget.cardItemBytes],
+			dependencies: [0, budget.dependencies],
+		});
+		expect(of("@t/measured/src/inner")).not.toHaveProperty("contract values");
 	});
 
 	it("measures each internal module, a directory with a card, apart from the rest of its package", () => {

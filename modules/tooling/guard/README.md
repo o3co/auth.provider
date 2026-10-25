@@ -26,6 +26,7 @@
 
 ## Offers
 - The check command.
+- `measures` (packages, budget → every unit's budget measures, each with its limit, whether past it or not), for a record that compares two states.
 
 ## Invariants
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
