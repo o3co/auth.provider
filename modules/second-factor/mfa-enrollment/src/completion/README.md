@@ -24,4 +24,4 @@ Internal module of `mfa-enrollment`: beginning a binding, and completing it with
 - A fence moved or the factor gone writes no codes (`401`); another factor taking their place answers `409 mfa_factor_limit`, the factor standing. A login's opened session is closed, so no login goes on without its codes; a raised session stays raised, its cookie answered.
 
 ## Depends on
-- `http`, `kernel` (unavailable), `mfa` (factor decisions, the label's shape), `mfa-flows` (the handler type); the package's parts, place, what a binding keeps, and `binding-proof`.
+- `http`, `kernel` (unavailable), `mfa-binding` (binding), `mfa-managing` (`reissue`), `labels` (the label's shape), `mfa-flows` (the handler type); the package's parts, place, what a binding keeps, and `binding-proof`.
