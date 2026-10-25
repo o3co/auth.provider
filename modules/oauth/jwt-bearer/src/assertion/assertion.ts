@@ -72,7 +72,10 @@ export async function check(
 	// Read unverified, so bounded before it reaches a key source.
 	if (kid !== undefined && !bounded.safeParse(kid).success) return untrusted;
 	if (signers.thumbprint && !isThumbprint(sub)) return untrusted;
-	const verifier = await signers.verifierFor(sub, kid as string | undefined);
+	// The signer as each use reads it: asked for, expected in the signature, and stood for.
+	const resolved = sub;
+	const asked = { lookup: sub, expectedSub: sub, kid: kid as string | undefined };
+	const verifier = await signers.verifierFor(asked);
 	if (!verifier) return untrusted;
 	const verified = await verifier.verify(assertion);
 	if (verified.kind === "unavailable") throw new Unavailable("jwt-bearer");
@@ -80,13 +83,13 @@ export async function check(
 		return verified.signed ? invalid(said[verified.reason]) : untrusted;
 	const parsed = claimsShape.safeParse(verified.claims);
 	if (!parsed.success) return invalid("missing or malformed claims");
-	if (parsed.data.sub !== sub) return invalid("wrong subject");
+	if (parsed.data.sub !== asked.expectedSub) return invalid("wrong subject");
 	// The verifier read `iat`, where given, as a number.
 	const iat = verified.claims.iat;
 	return {
 		kind: "valid",
 		issuer,
-		subject: parsed.data.sub,
+		subject: resolved,
 		jti: parsed.data.jti,
 		expiresAt: Number(verified.claims.exp) * 1000,
 		...(typeof iat === "number" ? { issuedAt: iat * 1000 } : {}),
