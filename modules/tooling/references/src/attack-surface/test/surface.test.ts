@@ -8,6 +8,8 @@ import {
 	attackSurfaceFile,
 	attackSurfaceIn,
 	attackSurfaceOf,
+	destinationByName,
+	destinationCandidate,
 	looseningByName,
 	looseningCandidate,
 	type SurfaceInput,
@@ -23,6 +25,8 @@ const empty = {
 	notSecrets: [],
 	loosening: [],
 	notLoosening: [],
+	destinations: [],
+	notDestinations: [],
 	manualTasks: [],
 };
 const route = { owner: "@mod/r", policies: [], cors: false };
@@ -99,6 +103,45 @@ it("finds secrets and weakening settings by their names, and leaves out what the
 	expect(reference).toContain("| `x.accept-any` | `@mod/x` | `false` |");
 });
 
+it("lists each route that takes cross-origin requests, so turning CORS on for one changes the reference", () => {
+	const input = (cors: boolean): SurfaceInput => ({
+		routes: [{ ...route, method: "POST", path: "/token", cors }],
+		settings: [],
+		packages: [],
+		composed: [],
+		internalBy: [],
+		coverage: empty,
+	});
+	expect(attackSurfaceOf(input(true))).toContain("- POST `/token` (`@mod/r`)");
+	expect(attackSurfaceOf(input(false))).not.toContain("- POST `/token` (`@mod/r`)");
+});
+
+it("lists destinations by their names and the coverage's, the coverage's with where they reach", () => {
+	expect(
+		["a.url", "a.keys-url", "a.redirect-uri", "a.token-endpoint", "a.hosts"].map(destinationByName),
+	).toEqual([true, true, true, true, true]);
+	expect(["mail-smtp.host", "a.api", "a.issuer"].map(destinationByName)).toEqual([
+		false,
+		false,
+		false,
+	]);
+	expect(["mail-smtp.host", "a.api", "a.issuer", "a.discovery"].map(destinationCandidate)).toEqual([
+		true,
+		true,
+		true,
+		true,
+	]);
+	const reference = attackSurfaceOf({
+		routes: [],
+		settings: [{ key: "x.host", owner: "@mod/x" }],
+		packages: [],
+		composed: [],
+		internalBy: [],
+		coverage: { ...empty, destinations: [{ key: "x.host", reaches: "the relay" }] },
+	});
+	expect(reference).toContain("| `x.host` | `@mod/x` |  | the relay |");
+});
+
 it("holds, committed, the reference generated from the workspace as it is now", async () => {
 	expect(readFileSync(attackSurfaceFile(root), "utf8")).toBe(
 		attackSurfaceOf(await attackSurfaceIn(root)),
@@ -108,6 +151,13 @@ it("holds, committed, the reference generated from the workspace as it is now", 
 it("classifies every setting whose name could weaken a guarantee, and every one the security model names as a choice", async () => {
 	const { settings } = await attackSurfaceIn(root);
 	const keys = new Set(settings.map((s) => s.key));
+	/** The nearest key a setting row holds: a key written below a map (`a.<name>.b`) is the map's row. */
+	const nearest = (key: string): string | undefined => {
+		for (let at = key; ; at = at.slice(0, at.lastIndexOf("."))) {
+			if (keys.has(at)) return at;
+			if (!at.includes(".")) return undefined;
+		}
+	};
 	const classified = new Set([
 		...settings.filter((s) => looseningByName(s.key) || secretByName(s.key)).map((s) => s.key),
 		...coverage.loosening.map((l) => l.key),
@@ -118,18 +168,31 @@ it("classifies every setting whose name could weaken a guarantee, and every one 
 	const candidates = settings.map((s) => s.key).filter(looseningCandidate);
 	// The security model's choices: a setting written with a value, and one under "Left to you".
 	const model = readFileSync(join(root, "docs", "security-model.md"), "utf8");
-	const chosen = [...model.matchAll(/`([a-z][a-z0-9-]*(?:\.[a-z0-9<>-]+)+) = [^`]+`/g)].map(
-		(m) => m[1] as string,
-	);
+	const chosen = [...model.matchAll(/`([a-z][a-z0-9-]*(?:\.[a-z0-9<>-]+)+) = [^`]+`/g)]
+		.map((m) => nearest(m[1] as string))
+		.filter((key) => key !== undefined);
 	const leftToYou = model
 		.split(/\n(?=- \*\*)/)
 		.filter((part) => part.startsWith("- **Left to you:**"))
 		.flatMap((part) => [...part.matchAll(/`([a-z][a-z0-9.<>-]+)`/g)].map((m) => m[1] as string))
-		.filter((key) => keys.has(key));
+		.filter((key) => key.includes("."))
+		.map(nearest)
+		.filter((key) => key !== undefined);
 	const unclassified = [...new Set([...candidates, ...chosen, ...leftToYou])].filter(
 		(key) => !classified.has(key),
 	);
 	expect(unclassified, "classify each in coverage.ts").toEqual([]);
+	// A key written below a map counts as the map's: `federation.idps`, for `upstream-amr`.
+	expect(leftToYou).toContain("federation.idps");
+	const destinations = new Set([
+		...settings.filter((s) => destinationByName(s.key)).map((s) => s.key),
+		...coverage.destinations.map((d) => d.key),
+		...coverage.notDestinations.map((d) => d.key),
+	]);
+	const unplaced = settings
+		.map((s) => s.key)
+		.filter((key) => destinationCandidate(key) && !destinations.has(key));
+	expect(unplaced, "classify each destination in coverage.ts").toEqual([]);
 });
 
 it("holds the coverage to the workspace: every setting, route and runbook section it names is there", async () => {
@@ -140,6 +203,8 @@ it("holds the coverage to the workspace: every setting, route and runbook sectio
 		...coverage.notSecrets,
 		...coverage.loosening,
 		...coverage.notLoosening,
+		...coverage.destinations,
+		...coverage.notDestinations,
 	];
 	expect(named.map((n) => n.key).filter((key) => !keys.has(key))).toEqual([]);
 	const served = new Set(routes.map((r) => `${r.method} ${r.path}`));

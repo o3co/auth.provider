@@ -57,6 +57,10 @@ export const looseningCandidate = (key: string) =>
 		last(key),
 	);
 
+/** A key whose name makes it a candidate to name a destination, to be classified one way or the other. */
+export const destinationCandidate = (key: string) =>
+	/(host|api|issuer|server|discovery)/.test(last(key));
+
 /** A key that names where the provider reaches out to. */
 export const destinationByName = (key: string) =>
 	/(url|uri|endpoint|^hosts|-hosts)$/.test(last(key));
@@ -102,7 +106,18 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 			weakens: l.weakens,
 		})),
 	].sort((a, b) => (a.key < b.key ? -1 : 1));
-	const destinations = settings.filter((s) => destinationByName(s.key));
+	const destinations = [
+		...settings
+			.filter((s) => destinationByName(s.key))
+			.map((s) => ({ ...s, reaches: "by its name" })),
+		...c.destinations.map((d) => ({
+			...owned.get(d.key),
+			key: d.key,
+			owner: ownerOf(d.key),
+			reaches: d.reaches,
+		})),
+	].sort((a, b) => (a.key < b.key ? -1 : 1));
+	const crossOrigin = routes.filter((r) => r.cors);
 	return `${[
 		"# Attack surface",
 		"",
@@ -142,6 +157,12 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 			(r) => `| ${r.method} | ${code(r.path)} | ${code(r.owner)} | ${reasonOf(r.perSource)} |`,
 		),
 		"",
+		"Routes that take cross-origin requests (CORS):",
+		"",
+		...(crossOrigin.length
+			? crossOrigin.map((r) => `- ${r.method} ${code(r.path)} (${code(r.owner)})`)
+			: ["- none"]),
+		"",
 		"Routes that send the browser elsewhere, which `outbound` never sees:",
 		"",
 		"| Method | Path | To |",
@@ -158,9 +179,12 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 		"",
 		"Settings that name where it reaches:",
 		"",
-		"| Setting | From | Default |",
-		"|---|---|---|",
-		...destinations.map((s) => `| ${code(s.key)} | ${code(s.owner)} | ${defaultOf(s.default)} |`),
+		"| Setting | From | Default | Reaches |",
+		"|---|---|---|---|",
+		...destinations.map(
+			(s) =>
+				`| ${code(s.key)} | ${s.owner ? code(s.owner) : ""} | ${defaultOf(s.default)} | ${s.reaches} |`,
+		),
 		"",
 		"## Secrets in settings",
 		"",

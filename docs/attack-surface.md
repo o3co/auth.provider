@@ -57,6 +57,18 @@ Routes that count no source, by their reason:
 | POST | `/oauth/userinfo` | `@mod/userinfo` | It is authenticated by a bearer access token and only reads. |
 | POST | `/session/logout` | `@mod/logout` | It closes only the requester's own session; there is nothing to guess or spend. |
 
+Routes that take cross-origin requests (CORS):
+
+- GET `/.well-known/jwks.json` (`@mod/keys`)
+- GET `/.well-known/oauth-authorization-server` (`@mod/discovery`)
+- GET `/.well-known/oauth-authorization-server/` (`@mod/discovery`)
+- GET `/.well-known/openid-configuration` (`@mod/discovery`)
+- GET `/.well-known/openid-configuration/` (`@mod/discovery`)
+- POST `/oauth/revoke` (`@mod/token-control`)
+- POST `/oauth/token` (`@mod/token-endpoint`)
+- GET `/oauth/userinfo` (`@mod/userinfo`)
+- POST `/oauth/userinfo` (`@mod/userinfo`)
+
 Routes that send the browser elsewhere, which `outbound` never sees:
 
 | Method | Path | To |
@@ -82,52 +94,57 @@ A package that depends on `outbound` can reach another server through it; this s
 
 Settings that name where it reaches:
 
-| Setting | From | Default |
-|---|---|---|
-| `audit-http.url` | `@mod/audit-http` |  |
-| `device-grant.complete-uri` | `@mod/device-grant` | `false` |
-| `device-grant.verification-uri` | `@mod/device-grant` |  |
-| `federation.idps.<name>.authorization-endpoint` | `@mod/idp-apple` | `"https://appleid.apple.com/auth/authorize"` |
-| `federation.idps.<name>.authorization-endpoint` | `@mod/idp-github` | `"https://github.com/login/oauth/authorize"` |
-| `federation.idps.<name>.authorization-endpoint` | `@mod/idp-google` | `"https://accounts.google.com/o/oauth2/v2/auth"` |
-| `federation.idps.<name>.authorization-endpoint` | `@mod/idp-oidc` |  |
-| `federation.idps.<name>.end-session-endpoint` | `@mod/idp-apple` |  |
-| `federation.idps.<name>.end-session-endpoint` | `@mod/idp-google` |  |
-| `federation.idps.<name>.end-session-endpoint` | `@mod/idp-oidc` |  |
-| `federation.idps.<name>.endpoint-hosts` | `@mod/idp-oidc` | `[]` |
-| `federation.idps.<name>.jwks-uri` | `@mod/idp-apple` | `"https://appleid.apple.com/auth/keys"` |
-| `federation.idps.<name>.jwks-uri` | `@mod/idp-google` | `"https://www.googleapis.com/oauth2/v3/certs"` |
-| `federation.idps.<name>.jwks-uri` | `@mod/idp-oidc` |  |
-| `federation.idps.<name>.token-endpoint` | `@mod/idp-apple` | `"https://appleid.apple.com/auth/token"` |
-| `federation.idps.<name>.token-endpoint` | `@mod/idp-github` | `"https://github.com/login/oauth/access_token"` |
-| `federation.idps.<name>.token-endpoint` | `@mod/idp-google` | `"https://oauth2.googleapis.com/token"` |
-| `federation.idps.<name>.token-endpoint` | `@mod/idp-oidc` |  |
-| `issuer.url` | `@mod/issuer` |  |
-| `jti-ledger-http.consume-url` | `@mod/jti-ledger-http` |  |
-| `mfa-witness-http.clear-url` | `@mod/mfa-witness-http` |  |
-| `mfa-witness-http.enroll-url` | `@mod/mfa-witness-http` |  |
-| `mfa-witness-http.read-url` | `@mod/mfa-witness-http` |  |
-| `mfa-witness-http.withdraw-url` | `@mod/mfa-witness-http` |  |
-| `mtls.revocation.hosts` | `@mod/mtls` |  |
-| `outbound.direct-hosts` | `@mod/outbound` | `[]` |
-| `outbound.internal-hosts` | `@mod/outbound` | `[]` |
-| `passkey-witness-http.enroll-url` | `@mod/passkey-witness-http` |  |
-| `passkey-witness-http.read-url` | `@mod/passkey-witness-http` |  |
-| `passkey-witness-http.withdraw-url` | `@mod/passkey-witness-http` |  |
-| `redis.url` | `@mod/redis` |  |
-| `sections.client-assertion.jwks-uri` | `@mod/client-assertion` |  |
-| `sections.consent.uri` | `@mod/consent` |  |
-| `sections.rp-logout.backchannel-logout-uri` | `@mod/rp-logout` |  |
-| `sections.rp-logout.frontchannel-logout-uri` | `@mod/rp-logout` |  |
-| `signer-keys-http.keys-url` | `@mod/signer-keys-http` |  |
-| `users-http.subject-url` | `@mod/users-http` |  |
-| `users-http.upstream-url` | `@mod/users-http` |  |
-| `users-http.verify-url` | `@mod/users-http` |  |
+| Setting | From | Default | Reaches |
+|---|---|---|---|
+| `audit-http.url` | `@mod/audit-http` |  | by its name |
+| `device-grant.complete-uri` | `@mod/device-grant` | `false` | by its name |
+| `device-grant.verification-uri` | `@mod/device-grant` |  | by its name |
+| `federation.idps.<name>.api` | `@mod/idp-github` | `"https://api.github.com"` | a GitHub's API, for the user's profile |
+| `federation.idps.<name>.authorization-endpoint` | `@mod/idp-apple` | `"https://appleid.apple.com/auth/authorize"` | by its name |
+| `federation.idps.<name>.authorization-endpoint` | `@mod/idp-github` | `"https://github.com/login/oauth/authorize"` | by its name |
+| `federation.idps.<name>.authorization-endpoint` | `@mod/idp-google` | `"https://accounts.google.com/o/oauth2/v2/auth"` | by its name |
+| `federation.idps.<name>.authorization-endpoint` | `@mod/idp-oidc` |  | by its name |
+| `federation.idps.<name>.end-session-endpoint` | `@mod/idp-apple` |  | by its name |
+| `federation.idps.<name>.end-session-endpoint` | `@mod/idp-google` |  | by its name |
+| `federation.idps.<name>.end-session-endpoint` | `@mod/idp-oidc` |  | by its name |
+| `federation.idps.<name>.endpoint-hosts` | `@mod/idp-oidc` | `[]` | by its name |
+| `federation.idps.<name>.issuer` | `@mod/idp-oidc` |  | an IdP's issuer, and for OpenID Connect its discovery document and the endpoints it names |
+| `federation.idps.<name>.jwks-uri` | `@mod/idp-apple` | `"https://appleid.apple.com/auth/keys"` | by its name |
+| `federation.idps.<name>.jwks-uri` | `@mod/idp-google` | `"https://www.googleapis.com/oauth2/v3/certs"` | by its name |
+| `federation.idps.<name>.jwks-uri` | `@mod/idp-oidc` |  | by its name |
+| `federation.idps.<name>.token-endpoint` | `@mod/idp-apple` | `"https://appleid.apple.com/auth/token"` | by its name |
+| `federation.idps.<name>.token-endpoint` | `@mod/idp-github` | `"https://github.com/login/oauth/access_token"` | by its name |
+| `federation.idps.<name>.token-endpoint` | `@mod/idp-google` | `"https://oauth2.googleapis.com/token"` | by its name |
+| `federation.idps.<name>.token-endpoint` | `@mod/idp-oidc` |  | by its name |
+| `issuer.url` | `@mod/issuer` |  | by its name |
+| `jti-ledger-http.consume-url` | `@mod/jti-ledger-http` |  | by its name |
+| `jwt-bearer.issuers` | `@mod/jwt-bearer` | `[]` | each trusted issuer's `jwks-uri`, where its key set is fetched |
+| `mail-smtp.host` | `@mod/mail-smtp` |  | the SMTP relay |
+| `mfa-witness-http.clear-url` | `@mod/mfa-witness-http` |  | by its name |
+| `mfa-witness-http.enroll-url` | `@mod/mfa-witness-http` |  | by its name |
+| `mfa-witness-http.read-url` | `@mod/mfa-witness-http` |  | by its name |
+| `mfa-witness-http.withdraw-url` | `@mod/mfa-witness-http` |  | by its name |
+| `mtls.revocation.hosts` | `@mod/mtls` |  | by its name |
+| `outbound.direct-hosts` | `@mod/outbound` | `[]` | by its name |
+| `outbound.internal-hosts` | `@mod/outbound` | `[]` | by its name |
+| `passkey-witness-http.enroll-url` | `@mod/passkey-witness-http` |  | by its name |
+| `passkey-witness-http.read-url` | `@mod/passkey-witness-http` |  | by its name |
+| `passkey-witness-http.withdraw-url` | `@mod/passkey-witness-http` |  | by its name |
+| `redis.url` | `@mod/redis` |  | by its name |
+| `sections.client-assertion.jwks-uri` | `@mod/client-assertion` |  | by its name |
+| `sections.consent.uri` | `@mod/consent` |  | by its name |
+| `sections.rp-logout.backchannel-logout-uri` | `@mod/rp-logout` |  | by its name |
+| `sections.rp-logout.frontchannel-logout-uri` | `@mod/rp-logout` |  | by its name |
+| `signer-keys-http.keys-url` | `@mod/signer-keys-http` |  | by its name |
+| `users-http.subject-url` | `@mod/users-http` |  | by its name |
+| `users-http.upstream-url` | `@mod/users-http` |  | by its name |
+| `users-http.verify-url` | `@mod/users-http` |  | by its name |
 
 ## Secrets in settings
 
 | Setting | From | Holds |
 |---|---|---|
+| `audit-http.authorization` | `@mod/audit-http` | the credential the audit collector asks for |
 | `dpop.nonce.secret` | `@mod/dpop` | by its name |
 | `federation.idps.<name>.client-secret` | `@mod/idp-apple` | by its name |
 | `federation.idps.<name>.client-secret` | `@mod/idp-github` | by its name |
@@ -135,6 +152,7 @@ Settings that name where it reaches:
 | `federation.idps.<name>.client-secret` | `@mod/idp-oidc` | by its name |
 | `federation.idps.<name>.private-key` | `@mod/idp-apple` | by its name |
 | `jti-ledger-http.credential` | `@mod/jti-ledger-http` | by its name |
+| `keys.next.public-key` | `@mod/keys` | the next signing key, which may be given as its private PEM |
 | `keys.previous` | `@mod/keys` | a previous signing key, which may be given as its private PEM |
 | `keys.signing.private-key` | `@mod/keys` | by its name |
 | `keys.signing.secret` | `@mod/keys` | by its name |
@@ -166,6 +184,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
 | `login-passkey.password-exempt-group` | `@mod/login-passkey` |  | its members keep password logins where passkey holders are refused them |
+| `mail-smtp.security` | `@mod/mail-smtp` | `"starttls"` | `none`: no TLS, so the relay's authentication and the mail go in the clear, to a loopback relay only |
 | `mail.accept-unsent` | `@mod/mail` | `false` | named so (`accept-*` and the like) |
 | `mfa.mode` | `@mod/mfa` | `"required"` | below `required`, using a session needs no second factor |
 | `mtls.mode` | `@mod/mtls` |  | `self-signed`: any certificate that parses binds, with no revocation |

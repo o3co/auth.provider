@@ -19,6 +19,10 @@ export interface Coverage {
 	readonly loosening: readonly { readonly key: string; readonly weakens: string }[];
 	/** Settings a candidate by name or by the security model, that weaken none. */
 	readonly notLoosening: readonly { readonly key: string; readonly why: string }[];
+	/** Settings that name where the provider reaches out to, beyond those the naming rule finds. */
+	readonly destinations: readonly { readonly key: string; readonly reaches: string }[];
+	/** Settings a candidate by name to name a destination, that name none. */
+	readonly notDestinations: readonly { readonly key: string; readonly why: string }[];
 	/** What the operator does by hand, by the runbook's section. */
 	readonly manualTasks: readonly { readonly anchor: string; readonly what: string }[];
 }
@@ -75,6 +79,11 @@ export const coverage: Coverage = {
 	secrets: [
 		{ key: "outbound.proxy-authorization", holds: "the credential the outbound proxy asks for" },
 		{ key: "redis.url", holds: "the Redis password, where the URL carries one" },
+		{ key: "audit-http.authorization", holds: "the credential the audit collector asks for" },
+		{
+			key: "keys.next.public-key",
+			holds: "the next signing key, which may be given as its private PEM",
+		},
 		{
 			key: "keys.previous",
 			holds: "a previous signing key, which may be given as its private PEM",
@@ -88,6 +97,11 @@ export const coverage: Coverage = {
 		},
 	],
 	loosening: [
+		{
+			key: "mail-smtp.security",
+			weakens:
+				"`none`: no TLS, so the relay's authentication and the mail go in the clear, to a loopback relay only",
+		},
 		{
 			key: "outbound.allow-any-public",
 			weakens: "any public host is reached by name, not only those `outbound.allow` lists",
@@ -151,6 +165,36 @@ export const coverage: Coverage = {
 		{
 			key: "clients-cimd.allow",
 			weakens: "clients name themselves by a metadata document fetched from these hosts",
+		},
+	],
+	destinations: [
+		{
+			key: "jwt-bearer.issuers",
+			reaches: "each trusted issuer's `jwks-uri`, where its key set is fetched",
+		},
+		{ key: "mail-smtp.host", reaches: "the SMTP relay" },
+		{ key: "federation.idps.<name>.api", reaches: "a GitHub's API, for the user's profile" },
+		{
+			key: "federation.idps.<name>.issuer",
+			reaches:
+				"an IdP's issuer, and for OpenID Connect its discovery document and the endpoints it names",
+		},
+	],
+	notDestinations: [
+		{
+			key: "federation.idps.<name>.hosted-domains",
+			why: "the Google Workspace domains a login must belong to",
+		},
+		{ key: "http.host", why: "the address the app listens on" },
+		{
+			key: "sections.consent.host",
+			why: "the host a client's source verified, shown on the consent page",
+		},
+		{ key: "jti-ledger-http.issuer", why: "the `iss` the ledger answers for, not where it is" },
+		{ key: "signer-keys-http.issuer", why: "the `iss` the ledger answers for, not where it is" },
+		{
+			key: "federation.idps.<name>.discovery",
+			why: "whether the issuer's discovery is read; the issuer is the destination",
 		},
 	],
 	notLoosening: [
