@@ -1,104 +1,27 @@
 import { createHash } from "node:crypto";
 import { clientAllowance } from "@mod/client-allowance";
-import { externalJwt } from "@mod/external-jwt";
 import { grants } from "@mod/grants";
 import { issuer } from "@mod/issuer";
-import { defineModule, type Refusal, setting } from "@mod/kernel";
-import { publicPem } from "@mod/keys";
-import { withinHosts } from "@mod/outbound-policy";
+import { defineModule, setting } from "@mod/kernel";
 import { revocations } from "@mod/subject-revocation";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { z } from "zod";
 import { check } from "./assertion/assertion.ts";
+import { algorithms, linkedIssuers, linkedSubjects, spentAssertions } from "./contract.ts";
 import {
-	algorithms,
-	jtiLedgers,
-	linkedIssuers,
-	linkedSubjects,
-	signerKeys,
-	spentAssertions,
-} from "./contract.ts";
+	type IssuerEntry,
+	issuersIn,
+	issuersSetting,
+	issuersTakes,
+	linkedOf,
+} from "./issuers/issuers.ts";
 import { spentIn } from "./ledgers.ts";
-import { contributedSigners, fetchedSigners, type Signers, writtenSigners } from "./signers.ts";
 
 /** The grant type it serves (RFC 7523). */
 export const jwtBearerGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 
-/** The issuer's host, the only one its key set is fetched from; none for an issuer that is no URL. */
-const hostsOf = (issuer: string) => (URL.canParse(issuer) ? [new URL(issuer).hostname] : []);
-
-/** A public key only: a private key written here refuses boot rather than being dropped later. */
-const readable = (pem: string) => publicPem(pem) !== undefined;
-
-/** How an issuer's assertion names the subject a token is for. */
-const subjectOf = {
-	subject: z
-		.enum(["as-is", "linked"])
-		// Required, but checked past the union of key sources, so a refusal names this key.
-		.optional()
-		.describe(
-			'Required. "as-is": the assertion\'s `sub` is the subject. "linked": the user `users` finds by the upstream identity (`upstream`, `sub`) is.',
-		),
-	upstream: z
-		.string()
-		.min(1)
-		.optional()
-		.describe('The IdP name `users` knows this issuer\'s signers by; written with "linked" only.'),
-	"subject-is-key-thumbprint": z
-		.boolean()
-		.prefault(false)
-		.describe(
-			"Whether `sub` must be the JWK thumbprint (RFC 7638, SHA-256) of the key that signed.",
-		),
-};
-
-const issuerEntry = z
-	.union([
-		z.strictObject({
-			issuer: z.string().min(1),
-			keys: z
-				.array(
-					z.strictObject({
-						kid: z.string().min(1).optional(),
-						alg: z.enum(algorithms),
-						"public-key": z
-							.string()
-							.refine(readable, "not readable as a public key PEM (a private key is refused)"),
-					}),
-				)
-				.min(1),
-			...subjectOf,
-		}),
-		z
-			.strictObject({ issuer: z.string().min(1), "jwks-uri": z.string(), ...subjectOf })
-			.refine(
-				(i) =>
-					withinHosts(i["jwks-uri"], hostsOf(i.issuer)) &&
-					new URL(i["jwks-uri"]).protocol === "https:",
-				"the key set is not at https on the issuer's host",
-			)
-			.refine(
-				(i) => !i["subject-is-key-thumbprint"],
-				"a key set fetched here cannot tell which key signed: subject-is-key-thumbprint needs keys written or contributed",
-			),
-		z.strictObject({ issuer: z.string().min(1), ...subjectOf }),
-	])
-	.refine((i) => i.subject !== undefined, {
-		message: 'required: "as-is" or "linked"',
-		path: ["subject"],
-	})
-	.refine((i) => (i.subject === "linked") === (i.upstream !== undefined), {
-		message: 'upstream is written with subject = "linked", and only then',
-		path: ["upstream"],
-	});
-
 const section = z.strictObject({
-	issuers: z
-		.array(issuerEntry)
-		.prefault([])
-		.describe(
-			"The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`.",
-		),
+	issuers: issuersSetting,
 	"max-assertion-lifetime": setting
 		.duration("s")
 		.pipe(z.number().int().min(1).max(86_400))
@@ -112,10 +35,6 @@ const section = z.strictObject({
 			"How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds.",
 		),
 });
-
-/** Each linked issuer, by the IdP name its signers are known by. */
-const linkedOf = (s: z.output<typeof section>): ReadonlyMap<string, string> =>
-	new Map(s.issuers.flatMap((i) => (i.upstream ? [[i.issuer, i.upstream] as const] : [])));
 
 /** Kept longer than any assertion is accepted by this much, so clock differences never let one back. */
 const usedAllowanceMs = 60_000;
@@ -132,16 +51,16 @@ const takes = [
 	tokenEndpointLocation,
 	spentAssertions,
 	revocations,
-	externalJwt,
-	signerKeys,
 	linkedSubjects,
-	jtiLedgers,
+	...issuersTakes,
 ];
 
 export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 	m
 		.provide(linkedIssuers)
-		.by((c) => [...linkedOf(c.section)].map(([issuer, upstream]) => ({ upstream, issuer }))),
+		.by((c) =>
+			[...linkedOf(c.section.issuers)].map(([issuer, upstream]) => ({ upstream, issuer })),
+		),
 
 	m.contribute(grants).by(async (c) => {
 		const named = (await c.get(issuer)).url;
@@ -151,62 +70,17 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 		}
 		const spent = await c.get(spentAssertions);
 		const boundaries = await c.get(revocations);
-		const jwt = await c.get(externalJwt);
 		const skewMs = c.section["clock-skew"] * 1000;
-		const contributed = new Map((await c.collect(signerKeys)).map((k) => [k.issuer, k]));
-		const policyOf = (i: (typeof c.section.issuers)[number]) => ({
+		const policyOf = (i: IssuerEntry) => ({
 			algorithms: "keys" in i ? [...new Set(i.keys.map((k) => k.alg))] : algorithms,
 			skewMs,
 			maxLifetimeMs: c.section["max-assertion-lifetime"] * 1000,
 			expect: { aud: [named, url] },
 		});
-		const trusted = new Map<string, Signers>();
-		// Named by its place in the settings, never by its value: a refusal tells no setting's value.
-		const refused: Refusal[] = [];
-		const firstAt = new Map<string, number>();
-		for (const [at, i] of c.section.issuers.entries()) {
-			const where = `jwt-bearer.issuers.${at}`;
-			const first = firstAt.get(i.issuer);
-			if (first === undefined) firstAt.set(i.issuer, at);
-			else refused.push({ where, reason: `names the same issuer as jwt-bearer.issuers.${first}` });
-			const keys = contributed.get(i.issuer);
-			const written = "keys" in i || "jwks-uri" in i;
-			if (written && keys) refused.push({ where, reason: "has its keys written and contributed" });
-			if (!written && !keys) refused.push({ where, reason: "has no keys written or contributed" });
-			const thumbprint = i["subject-is-key-thumbprint"];
-			trusted.set(
-				i.issuer,
-				"keys" in i
-					? await writtenSigners(
-							jwt,
-							i.keys.map(({ kid, alg, "public-key": pem }) => ({
-								alg,
-								pem,
-								...(kid ? { kid } : {}),
-							})),
-							policyOf(i),
-							thumbprint,
-						)
-					: "jwks-uri" in i
-						? fetchedSigners(jwt, { url: i["jwks-uri"], hosts: hostsOf(i.issuer) }, policyOf(i))
-						: contributedSigners(jwt, keys as NonNullable<typeof keys>, policyOf(i), thumbprint),
-			);
-		}
-		const ledgers = new Map((await c.collect(jtiLedgers)).map((l) => [l.issuer, l]));
-		for (const [what, named] of [
-			["keys are", [...contributed.keys()]],
-			["jti ledgers are", [...ledgers.keys()]],
-		] as const) {
-			const unnamed = named.filter((name) => !trusted.has(name)).length;
-			if (unnamed > 0) {
-				refused.push({
-					where: "jwt-bearer.issuers",
-					reason: `${what} contributed for ${unnamed} issuer${unnamed === 1 ? "" : "s"} none of these names: name ${unnamed === 1 ? "it" : "them"} here, or leave out the module that contributes them`,
-				});
-			}
-		}
-		if (refused.length > 0) return c.refuseAll(refused);
-		const linked = linkedOf(c.section);
+		const trust = await issuersIn(c, c.section.issuers, policyOf);
+		if (trust.kind === "refused") return c.refuseAll(trust.refusals);
+		const { trusted, ledgers } = trust;
+		const linked = linkedOf(c.section.issuers);
 		const resolvers = await c.collect(linkedSubjects);
 		if (linked.size > 0 && resolvers.length === 0) {
 			return c.refuse(
