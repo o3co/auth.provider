@@ -14,7 +14,7 @@
 - 1.1 #8 RECOMMENDED: excluded definition
 - 1.1 #9 NOT RECOMMENDED: excluded definition
 - 1.1 #10 MUST NOT: excluded definition
-- 1.2 #1 MUST: excluded definition
+- 1.2 #1 MUST: excluded client-only
 - 1.2 #2 MUST: oidc-core-1.2-a
 - 2 #1 REQUIRED: oidc-core-2-a
 - 2 #2 REQUIRED: oidc-core-2-b
@@ -387,7 +387,7 @@
 - 15.1 #8 MUST: oidc-core-15.1-e
 - 15.1 #9 MUST: oidc-core-15.1-f
 - 15.1 #10 MUST: oidc-core-15.1-g
-- 15.2 #1 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 15.2 #1 MUST: excluded other: the lead-in to the list below; each listed feature is its own item (15.2-a to 15.2-g)
 - 15.2 #2 MUST: oidc-core-15.2-a
 - 15.2 #3 MUST: oidc-core-15.2-b
 - 15.2 #4 MUST: oidc-core-15.2-c
@@ -411,8 +411,8 @@
 - 16.15 #1 MUST: oidc-core-16.15-a
 - 16.15 #2 RECOMMENDED: oidc-core-16.15-b
 - 16.17 #1 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
-- 16.17 #2 SHOULD: excluded deployment: TLS ends at the proxy in front, which the deployment provides
-- 16.17 #3 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
+- 16.17 #2 SHOULD: oidc-core-16.17-b
+- 16.17 #3 MUST: oidc-core-16.17-c
 - 16.17 #4 MUST: oidc-core-16.17-a
 - 16.18 #1 SHOULD: oidc-core-16.18-a
 - 16.18 #2 SHOULD: oidc-core-16.18-b
