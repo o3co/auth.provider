@@ -118,7 +118,7 @@ export function tokenEndpoint(
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
 		const authenticated = await clients.authenticate(request);
 		const named = readerOf(request).param("grant_type");
-		const identifier = identifierOf(clients, grants, request, named);
+		const identifier = identifierOf(clients, grants, authenticated, request, named);
 		// Any other refusal is answered and recorded as `authenticateClient` does; a request a grant
 		// identifies the client of has not tried to authenticate, so no failure is recorded.
 		if (authenticated.kind === "refused" && !identifier) {

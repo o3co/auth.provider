@@ -2,11 +2,12 @@ import { type AuditEvent, audit } from "@mod/audit";
 import { auditStandIn } from "@mod/audit/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
-import { authMethods, clientSources } from "@mod/clients";
+import { type Authentication, authMethods, clientSources } from "@mod/clients";
 import clientEvents from "@mod/clients/audit-events";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
-import { grants } from "@mod/grants";
+import { type Grant, grants, targetRules } from "@mod/grants";
 import { listening } from "@mod/http";
+import { testRequest } from "@mod/http/testing";
 import { assemble, defineModule, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
@@ -14,6 +15,7 @@ import { simulatedStore } from "@mod/store/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { basicOf, endpointConfig, endpointModules } from "../../../test/deployment.ts";
 import declared from "../../audit-events.ts";
+import { identifierOf } from "../identified.ts";
 
 const quiet = quietRuntime({
 	clock: { now: () => 1_800_000_000_000 },
@@ -54,7 +56,11 @@ afterEach(() => {
 });
 
 /** The endpoint with `extra` modules and these clients; posts a form as client `id` by Basic. */
-async function serve(extra: Module[], clients: ReturnType<typeof client>[]) {
+async function serve(
+	extra: Module[],
+	clients: ReturnType<typeof client>[],
+	peer: Record<string, unknown> = {},
+) {
 	const recorded = auditStandIn();
 	events = recorded.events;
 	const app = await assemble({
@@ -66,7 +72,7 @@ async function serve(extra: Module[], clients: ReturnType<typeof client>[]) {
 			...extra,
 		),
 		config: {
-			...endpointConfig({ issuer: "https://issuer.example" }),
+			...endpointConfig({ issuer: "https://issuer.example", peer }),
 			...clientsConfig(clients),
 		},
 		runtime: quiet,
@@ -134,10 +140,20 @@ describe("a request naming no client", () => {
 				id === "sourced" ? client("sourced", "none", asserted) : undefined,
 		})),
 	]);
-	const serving = async () => {
+	/** A rule that refuses a `resource` sent to a grant that takes no audience, as resource indicators may. */
+	const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		m.contribute(targetRules).by(() => ({
+			untargeted: ({ param }) =>
+				param("resource")
+					? { kind: "error", error: "invalid_target", description: "no resource here" }
+					: undefined,
+			target: ({ audience }) => ({ kind: "audience", audience }),
+		})),
+	]);
+	const serving = async (peer: Record<string, unknown> = {}) => {
 		const seen = { identify: 0, handled: [] as unknown[] };
 		const post = await serve(
-			[identifying(seen), keyed, sourced],
+			[identifying(seen), keyed, sourced, strict],
 			[
 				client("agents", "none", asserted),
 				client("ungranted", "none", []),
@@ -146,7 +162,10 @@ describe("a request naming no client", () => {
 				{ ...client("secretpub", "client_secret_basic", asserted), kind: "public" },
 				// A public client that holds a key, by a method that reads one.
 				{ ...client("keypub", "none", asserted), method: "test-key" },
+				// Registered as confidential with `none`: `none` authenticates no such client, nor may a grant name one.
+				{ ...client("confnone", "none", asserted), kind: "confidential" },
 			],
+			peer,
 		);
 		/** Posts the form with these headers and no client credentials but what they carry. */
 		const raw = async (
@@ -257,7 +276,7 @@ describe("a request naming no client", () => {
 
 	it("is unavailable when the identified client is not one registered with no credentials", async () => {
 		const { raw, seen } = await serving();
-		for (const id of ["ghost", "sourced", "conf", "secretpub", "keypub"]) {
+		for (const id of ["ghost", "sourced", "conf", "secretpub", "keypub", "confnone"]) {
 			const answered = await raw(assert(`as:${id}`));
 			expect([answered.status, answered.body.error], id).toEqual([503, "temporarily_unavailable"]);
 		}
@@ -363,4 +382,74 @@ describe("a request naming no client", () => {
 		).toEqual(["bad_credentials", "malformed_credentials", "multiple_methods"]);
 		expect(events.some((e) => "identified" in (e.attributes ?? {}))).toBe(false);
 	});
+
+	it("asks the rule's untargeted of a grant that takes no audience, for the client it identified, before the grant runs", async () => {
+		const { raw, seen } = await serving();
+		const asked = await raw({ ...assert("as:agents"), resource: "https://api" });
+		expect([asked.status, asked.body]).toEqual([
+			400,
+			{ error: "invalid_target", error_description: "no resource here" },
+		]);
+		expect(seen.handled).toEqual([]);
+		expect(events.map((e) => e.attributes)).toEqual([
+			{
+				client: "agents",
+				source: "127.0.0.1",
+				grant_type: "urn:test:assert",
+				identified: "grant",
+				reason: "untargeted",
+				error: "invalid_target",
+			},
+		]);
+	});
+
+	it("answers as today a request whose trusted proxy forwards a client's certificate, malformed or not", async () => {
+		const { raw, seen } = await serving({
+			"trusted-proxies": ["127.0.0.1/32"],
+			"client-certificate": { dialect: "pem", header: "x-client-cert" },
+		});
+		const forwarded = { "x-forwarded-for": "203.0.113.5" };
+		const plain = await raw(assert("as:agents"), forwarded);
+		expect(plain.status, "no certificate").toBe(200);
+		const certified = await raw(assert("as:agents"), {
+			...forwarded,
+			"x-client-cert": "not a pem",
+		});
+		expect([certified.status, certified.body.error]).toEqual([401, "invalid_client"]);
+		expect(seen.identify).toBe(1);
+		expect(events.map((e) => [e.kind, e.attributes?.reason])).toEqual([
+			["token.issued", undefined],
+			["client.authentication.failure", "no_credentials"],
+		]);
+	});
+});
+
+it("names a grant to identify only for a request refused as carrying no credentials, whatever `bare` says", () => {
+	const grant: Grant = {
+		grantType: "urn:test:assert",
+		readsAmbient: "none",
+		identify: async () => ({ kind: "error", error: "invalid_grant" }),
+		handle: async () => ({ kind: "error", error: "invalid_grant" }),
+	};
+	const table = new Map([[grant.grantType, grant]]);
+	// A `clients` whose `bare` says yes to every request: the refusal's reason still decides.
+	const lenient = { bare: () => true };
+	const refused = (reason: Extract<Authentication, { kind: "refused" }>["reason"]) =>
+		({ kind: "refused", reason, challenges: [] }) as const;
+	const request = testRequest({ method: "POST" });
+	expect(identifierOf(lenient, table, refused("no_credentials"), request, grant.grantType)).toBe(
+		grant,
+	);
+	for (const reason of ["unknown_client", "bad_credentials", "malformed_credentials"] as const) {
+		expect(
+			identifierOf(lenient, table, refused(reason), request, grant.grantType),
+			reason,
+		).toBeUndefined();
+	}
+	expect(
+		identifierOf({ bare: () => false }, table, refused("no_credentials"), request, grant.grantType),
+	).toBeUndefined();
+	expect(
+		identifierOf(lenient, table, refused("no_credentials"), request, "urn:test:other"),
+	).toBeUndefined();
 });
