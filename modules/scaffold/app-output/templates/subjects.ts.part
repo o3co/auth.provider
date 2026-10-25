@@ -1,4 +1,20 @@
 {{refused}}
+// A script reading subjects tells only fixed lines and counts: no subject, configured value or error's
+// words, which may hold either. The app's own start tells why, run with the same configuration.
+/** Writes a fixed line on standard error and exits with `code`, telling nothing else. */
+const ended = async (line: string, code: number): Promise<never> => {
+	await written(process.stderr, `${line}\n`).catch(() => undefined);
+	process.exit(code);
+};
+// Whatever is thrown outside a subject's own call ends the run alike.
+const unexpected = () => ended("failed: the run stopped on an unexpected error", 1);
+process.on("uncaughtException", unexpected);
+process.on("unhandledRejection", unexpected);
+/** A boot that could not be built: how many refusals (exit 78), or that it failed (exit 1). */
+const notBuilt = (error: unknown): Promise<never> =>
+	BootRefused.is(error)
+		? ended(`refused ${error.refusals.length}: start the app with this configuration to read why`, 78)
+		: ended("failed: the app could not be built: start it with this configuration to read why", 1);
 /** The longest subject, in bytes. */
 const longest = 255;
 
@@ -45,9 +61,14 @@ const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
 const source = { files, env: process.env };
 const app = await loadConfig(source)
 	.then(async (config) => {
-		// A variable 0.17 read, left in the environment, is named once, or refuses boot, as config-files says.
+		// A variable 0.17 read, left in the environment, is told once, named by none, or refuses boot, as config-files says.
 		const told = await legacyVariablesCheck(source);
-		if (told !== undefined) await written(process.stderr, `warn config-files: ${told}\n`);
+		if (told !== undefined) {
+			await written(
+				process.stderr,
+				"warn variables 0.17 read are set and never read: start the app to name them\n",
+			);
+		}
 		return assemble({ modules: [{{modules}}], config, runtime });
 	})
-	.catch(refused);
+	.catch(notBuilt);

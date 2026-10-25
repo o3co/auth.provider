@@ -30,6 +30,8 @@ export const legacyVariablesCheck = async (source) => {
 export async function assemble({ runtime }) {
 	// A refusal thrown by a second copy of the kernel: its own class, the same mark.
 	if (process.env.REFUSE) throw new (await import("fake-kernel-copy")).BootRefused([{ where: "a.b", reason: "why" }]);
+	// A boot that fails as no refusal, its message holding a subject and a secret.
+	if (process.env.BOOT_FAILS) throw new Error("secret of alice at boot");
 	// Many refusals, each long, so their lines fill a pipe read slowly.
 	if (process.env.REFUSE_MANY) throw new BootRefused(Array.from({ length: Number(process.env.REFUSE_MANY) }, (_, i) => ({ where: \`at.\${i}\`, reason: "r".repeat(100) })));
 	// Without the script's own runtime, the composed sink would write this line.
@@ -82,6 +84,7 @@ export const backfill = {
 		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
 		if (subject === "down") throw Object.assign(new Error("down for alice"), { name: "Unavailable" });
 		if (subject === "boom") throw new Error("secret of alice");
+		if (subject === "late") setImmediate(() => { throw new Error("late secret of alice"); });
 		if (subject === "claimless") return "unclaimed";
 		if (subject === "registering") return "pending";
 		if (subject === "odd") return "a word of a later release";
@@ -191,10 +194,12 @@ it("stops at an unexpected failure, telling only the counts and nothing of the f
 	expect(`${done.stdout}${done.stderr}`).not.toMatch(/secret|alice|boom/);
 });
 
-it("warns once of the 0.17 variables its configuration never reads, then goes on", async () => {
+it("warns once of the 0.17 variables its configuration never reads, naming none, then goes on", async () => {
 	const run = await script();
 	const done = await run("first\n", { LEGACY_ONE: "v1", LEGACY_TWO: "v2" });
-	expect(done.stderr).toBe("warn config-files: 2 named: LEGACY_ONE, LEGACY_TWO\n");
+	expect(done.stderr).toBe(
+		"warn variables 0.17 read are set and never read: start the app to name them\n",
+	);
 	expect(done.stdout).toBe(
 		"marked 1 held 0 none 0 unclaimed 0 inconsistent 0 unknown 0 failed 0\n",
 	);
@@ -214,20 +219,36 @@ it("counts a subject whose factor is written and not claimed, and an answer it d
 	expect(odd.status).toBe(1);
 });
 
-it("exits 78 on a boot another copy of the kernel refused, writing each refusal", async () => {
+it("exits 78 on a boot another copy of the kernel refused, telling only how many refusals", async () => {
 	const run = await script();
 	const done = await run("first\n", { REFUSE: "1" });
-	expect(done.stderr).toBe("refused a.b: why\n");
+	expect(done.stderr).toBe("refused 1: start the app with this configuration to read why\n");
 	expect(done.status).toBe(78);
 	expect(done.seen).toEqual([]);
 });
 
-it("refuses boot as config-files' check refuses, writing the refusal and exiting 78", async () => {
+it("refuses boot as config-files' check refuses, naming no variable, and exits 78", async () => {
 	const run = await script();
 	const done = await run("first\n", { LEGACY_ONE: "v1", APP_LEGACY_VARIABLES: "refuse" });
-	expect(done.stderr).toBe("refused config-files: LEGACY_ONE\n");
+	expect(done.stderr).toBe("refused 1: start the app with this configuration to read why\n");
 	expect(done.status).toBe(78);
 	expect(done.seen).toEqual([]);
+});
+
+it("tells nothing of a boot that fails as no refusal, nor of a failure after its subjects, and exits 1", async () => {
+	const run = await script();
+	const boot = await run("first\n", { BOOT_FAILS: "1" });
+	expect([boot.stdout, boot.stderr, boot.status]).toEqual([
+		"",
+		"failed: the app could not be built: start it with this configuration to read why\n",
+		1,
+	]);
+	expect(boot.seen).toEqual([]);
+	const late = await run("late\nfirst\n");
+	expect(late.stderr).toBe("failed: the run stopped on an unexpected error\n");
+	expect(late.status).toBe(1);
+	for (const done of [boot, late])
+		expect(`${done.stdout}${done.stderr}`).not.toMatch(/secret|alice/);
 });
 
 it("writes the passkey backfill alike: its own answers counted in its order, pending among them", async () => {
@@ -258,7 +279,11 @@ it("names, one a line on standard output, only the subjects given whose factor s
 	]);
 	// A refused boot exits 78, naming nothing.
 	const refused = await run("claimless-4\n", { REFUSE: "1" });
-	expect([refused.stdout, refused.status]).toEqual(["", 78]);
+	expect([refused.stdout, refused.stderr, refused.status]).toEqual([
+		"",
+		"refused 1: start the app with this configuration to read why\n",
+		78,
+	]);
 });
 
 it("hands on every subject it names before it exits, though the pipe it writes to is read slowly", async () => {
@@ -277,10 +302,15 @@ it("hands on every refusal of a refused boot before it exits 78, from the app's 
 			file,
 		);
 		const done = await run.slowly("", { REFUSE_MANY: "5000" }, "stderr");
+		// A script reading subjects tells how many alone; the app's entry and reseal tell each.
+		const told =
+			file === "src/witness-backfill.ts"
+				? ["refused 5000: start the app with this configuration to read why"]
+				: lines;
 		expect(
 			done.stderr.split("\n").filter((l) => l !== ""),
 			file,
-		).toEqual(lines);
+		).toEqual(told);
 		expect(done.status, file).toBe(78);
 	}
 }, 120_000);
