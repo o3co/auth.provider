@@ -184,6 +184,7 @@ export async function assembleWatching(
 	const contextFor = (item: Item, next: readonly Item[]): BuildContext<unknown> => ({
 		...runtime,
 		section: sections.get(item.module),
+		environment: kernel.environment,
 		get: async <T>(contract: Contract<T>) => {
 			mayName(contract as Contract<unknown>, item);
 			mayTake(contract as Contract<unknown>, item);

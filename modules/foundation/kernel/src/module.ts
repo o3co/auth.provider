@@ -6,6 +6,12 @@ import type { Runtime } from "./runtime/runtime.ts";
 
 export interface BuildContext<S> extends Runtime {
 	readonly section: S;
+	/**
+	 * The deployment's environment (`kernel.environment`), for a check only a build can make, such
+	 * as of settings an owner opens while it builds. What a section alone shows is a module's
+	 * `refusedInProduction`, refused with the preflight at once; a refusal here comes as it builds.
+	 */
+	readonly environment: "production" | "development";
 	get<T>(contract: Contract<T>): Promise<T>;
 	collect<T>(point: ExtensionPoint<T>): Promise<readonly T[]>;
 	/**

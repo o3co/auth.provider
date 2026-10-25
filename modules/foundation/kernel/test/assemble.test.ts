@@ -533,6 +533,17 @@ describe("assemble", () => {
 		expect([unsafe.map((r) => r.where), asked]).toEqual([["m"], [{ shared: false }]]);
 	});
 
+	it("tells each factory the deployment's environment, production unless set", async () => {
+		const told = contract<string>("told");
+		const telling = defineModule({ name: "telling", takes: [] }, (m) => [
+			m.provide(told).by((c) => c.environment),
+		]);
+		const asTold = async (config: object) =>
+			(await assemble({ modules: [telling], config })).get(told);
+		expect(await asTold(single)).toBe("production");
+		expect(await asTold(kernelConfig({ environment: "development" }))).toBe("development");
+	});
+
 	it("refuses a kernel section without a deployment, which has no default", async () => {
 		const refusals = await refusalsOf(assemble({ modules: [], config: { kernel: {} } }));
 		expect(refusals.map((r) => r.where)).toEqual(["kernel.deployment"]);
