@@ -12,7 +12,7 @@
   - Declares: the amr it can add; `addsSecondFactor` (whether its proofs add `mfa`); `guessable`; `counts`; optional `uniqueSecret` (a value no two factors of the kind may hold).
   - `enroll` (subject, its factors of the kind → secret and what to show once / limited / refused / duplicate).
   - Optional `challenge` (subject, factor, latest end → sent with what to show and what to keep / limited / refused).
-  - `verify` (secret, state, proof, what the challenge kept → valid with the next state, optional amr and optional remaining / invalid / replayed).
+  - `verify` (secret, state, proof, what the challenge kept → valid with the next state, a JSON value, optional amr and optional remaining / invalid / replayed).
 - `AskedFrom` (a login with its stated email and whether the ledger vouches for it, or a session's handle): passed to kinds, proofs and gates unread.
 - `firstBindingGates`: asked by `begin`, with what the caller gave, while no counting factor is held; a gate refusing answers `binding-proof-required`.
 - `secondFactorAmr` (`mfa`): the amr a proof adds when its kind adds a second factor (RFC 8176).
