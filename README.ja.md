@@ -1,7 +1,7 @@
 # auth-provider
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@o3co/create-auth-provider/next)](https://www.npmjs.com/package/@o3co/create-auth-provider)
+[![npm](https://img.shields.io/npm/v/@o3co/create-auth-provider)](https://www.npmjs.com/package/@o3co/create-auth-provider)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 [English](README.md) | 日本語
@@ -10,7 +10,7 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 
 選んだ機能が依存するモジュールは、ジェネレーターが追加します。アプリは起動時に設定を検証し、見つかった問題を、設定名またはモジュール名とともにすべて表示します。
 
-0.18 は、パッケージ名を変更して 0.17 を書き直したバージョンで、まだプレリリース段階です。0.18.0 の正式リリースまでは、npm の `next` タグを指定してインストールしてください。タグを省略すると 0.17 がインストールされます。既存の 0.17 環境を移行する場合は、まず[移行ガイド](docs/migration.md)を読んでください。既存環境をそのままアップグレードすることはできません。設定の書き直しが必要で、保存済みの状態も移行されません。
+0.18 は、パッケージ名を変更して 0.17 を書き直したバージョンで、タグを指定せずにインストールできます。リリース候補は npm の `next` タグで公開されます。既存の 0.17 環境を移行する場合は、まず[移行ガイド](docs/migration.md)を読んでください。既存環境をそのままアップグレードすることはできません。設定の書き直しが必要で、保存済みの状態も移行されません。
 
 ## 主な機能
 
