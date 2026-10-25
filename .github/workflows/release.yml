@@ -100,54 +100,39 @@ jobs:
         env:
           SPEC_EVIDENCE_DIR: ${{ runner.temp }}/release-run/reports
       # The tarballs of this tag, checked before a draft release is created or
-      # anything is published. Each attempt first restores the tarballs an
-      # earlier attempt of this run saved: a rerun publishes those, never a new
-      # pack, as a tarball packed again need not be the same bytes as one
-      # published. Where none was saved (the first attempt, or one before it
-      # failed before saving them, so before anything was published), every
-      # bundle and the entrance is packed, the index sealed with the other
-      # bundles' and zod's integrity in between, and saved. A restore that fails
-      # for another reason packs anew too: the check before publishing then
-      # stops it where what is on npm is other bytes.
-      - name: Restore the tarballs an earlier attempt saved
-        id: restore
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: release-tarballs
-          path: ${{ runner.temp }}/tarballs
-
+      # anything is published. Each attempt asks npm for each package at this
+      # version: one already there, published by an earlier attempt, is taken
+      # from the registry, of the integrity npm gave it; the rest are packed,
+      # the index sealed again over the bundles before it. No earlier attempt's
+      # artifact is restored. The release publishes the index's bundle after
+      # every bundle it seals over, so it can always be sealed again; where it
+      # cannot, the pack stops for a person to look.
       - name: Pack the bundles
-        if: steps.restore.outcome != 'success'
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/tarballs"
           pnpm bundles
-          .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
+          .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs" --from-registry
 
       # Built, not packed: the license check lists the packages the release
-      # publishes from what pnpm bundles builds. Checked before they are saved,
-      # so a pack that fails it is never restored.
+      # publishes from what pnpm bundles builds. Checked before they are saved.
       - name: Refuse a tarball without the root LICENSE
-        env:
-          RESTORED: ${{ steps.restore.outcome }}
-        run: |
-          set -euo pipefail
-          if [ "$RESTORED" = success ]; then pnpm bundles; fi
-          .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
+        run: .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
 
       # Each pattern made from these very tarballs, the ones the release publishes, type-checked and booted.
       - run: pnpm release:check "$RUNNER_TEMP/tarballs"
 
-      # Saved before anything is published, so a rerun has them to publish;
-      # saved by each attempt, restored ones too, so its jobs take them by this
-      # attempt's id. Kept 90 days: a rerun after that packs anew, as above.
+      # Saved before anything is published, with the order the release
+      # publishes them in, by each attempt, so its jobs take them by this
+      # attempt's id.
       - name: Save the tarballs
         id: tarballs
         uses: actions/upload-artifact@v4
         with:
           name: release-tarballs
-          path: ${{ runner.temp }}/tarballs/*.tgz
+          path: |
+            ${{ runner.temp }}/tarballs/*.tgz
+            ${{ runner.temp }}/tarballs/publish-order.json
           if-no-files-found: error
           retention-days: 90
           overwrite: true
@@ -160,6 +145,8 @@ jobs:
           set -euo pipefail
           at="$RUNNER_TEMP/release-run"
           mkdir -p "$at"
+          # Which tarballs this attempt took from the registry, as npm holds them.
+          cp "$RUNNER_TEMP/tarballs/fetched.json" "$at/fetched.json"
           # Kept as it is: a finding is reported, not a stop here; CI's audit job holds the gate.
           pnpm audit --json > "$at/audit.json" || true
           jq -n \
@@ -348,8 +335,9 @@ jobs:
             ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-sbom.tar.gz
           fail_on_unmatched_files: true
 
-      # The checked tarballs, one by one, the bundles first and the entrance
-      # (`@o3co/create-auth-provider`, which depends on them) last. A name at
+      # The checked tarballs, one by one, in the order the pack wrote: the
+      # bundles the index seals over, then the index's bundle, then the entrance
+      # (`@o3co/create-auth-provider`, which depends on them). A name at
       # this version already on npm is passed over, so a rerun after a partial
       # publish publishes only what is missing. npm authenticates through this
       # run's OIDC token (`id-token: write`), each name bound to this workflow
@@ -362,12 +350,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          entrance="$RUNNER_TEMP/tarballs/o3co-create-auth-provider-${VERSION}.tgz"
-          for tgz in "$RUNNER_TEMP"/tarballs/*.tgz; do
-            [ "$tgz" = "$entrance" ] || set -- "$@" "$tgz"
-          done
-          set -- "$@" "$entrance"
-          for tgz in "$@"; do
+          # In the order the pack wrote, which release:listed held to these tarballs.
+          mapfile -t order < <(node -e 'for (const f of JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))) console.log(f)' "$RUNNER_TEMP/tarballs/publish-order.json")
+          for file in "${order[@]}"; do
+            tgz="$RUNNER_TEMP/tarballs/${file}"
             name="$(tar -xzOf "$tgz" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).name')"
             if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
               echo "${name}@${VERSION} is on npm already; passed over"

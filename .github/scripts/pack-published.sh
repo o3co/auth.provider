@@ -11,7 +11,7 @@
 #
 # Fails closed: a pack that fails, or an index that cannot be sealed, stops it.
 #
-# Usage (from the workspace root, after pnpm bundles): pack-published.sh <destination>
+# Usage (from the workspace root, after pnpm bundles): pack-published.sh <destination> [--from-registry]
 set -euo pipefail
 
 destination="${1:?usage: pack-published.sh <destination>}"
@@ -21,4 +21,5 @@ if [ ! -d dist/bundles ]; then
 fi
 mkdir -p "$destination"
 destination="$(cd "$destination" && pwd)"
-pnpm release:pack "$destination" </dev/null
+# Anything after the destination (the release passes --from-registry) goes to release:pack as it is.
+pnpm release:pack "$destination" "${@:2}" </dev/null
