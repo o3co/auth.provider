@@ -35,7 +35,7 @@ import {
 	selfIssuedOf,
 } from "./issuers/issuers.ts";
 import { spentIn } from "./ledgers.ts";
-import { ceilingsOf, keepUntilOf, skewOf, verifierPolicy } from "./policy/policy.ts";
+import { ceilingsOf, keepUntilOf, verifierPolicy } from "./policy/policy.ts";
 
 /** The grant type it serves (RFC 7523). */
 export const jwtBearerGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -143,8 +143,6 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			{ client, param, admits, issue, target }: GrantInput,
 			checked: { readonly subject: string; readonly issuedAt?: number; readonly expiresAt: number },
 			spend: () => Promise<"spent" | "replayed">,
-			/** The clock allowance its issuer's clock may run ahead by, for the `sessions` boundary. */
-			boundarySkewMs: number,
 			/** The ceilings its issuer holds its tokens to, within the client's allowance. */
 			ceilings: readonly Ceiling[],
 		): Promise<GrantOutcome | Refused> => {
@@ -160,9 +158,10 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			);
 			if (asked.kind === "error") return asked;
 			// Made at its `iat`, never later than now; one that does not say is as old as can be. The
-			// boundary is widened by the skew allowed, as an issuer's clock may run that far ahead.
+			// boundary is widened by the section's skew, as an issuer's clock may run that far ahead: an
+			// issuer's own narrower skew narrows what is taken, never this, so narrowing it lets none back.
 			const madeAt = Math.min(checked.issuedAt ?? 0, c.clock.now());
-			const revoked = await boundaries.compare(checked.subject, madeAt, "sessions", boundarySkewMs);
+			const revoked = await boundaries.compare(checked.subject, madeAt, "sessions", skewMs);
 			if (revoked === "revoked") {
 				return { kind: "error", error: "invalid_grant", description: "assertion revoked" };
 			}
@@ -212,7 +211,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			if (client.kind !== "confidential" && !unbound && !holds(input.binding, told.holderDigest)) {
 				return refusedGrant("the request does not prove the key the assertion names");
 			}
-			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion), skewMs, []);
+			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion), []);
 			if (client.kind !== "confidential" && unbound && outcome.kind === "issued") {
 				c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
 			}
@@ -257,7 +256,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 							);
 					return told === "replayed" || told === "exists" ? "replayed" : "spent";
 				};
-				return issueFor(input, checked, spend, skewOf(entry, c.section), ceilingsOf(entry));
+				return issueFor(input, checked, spend, ceilingsOf(entry));
 			},
 		};
 	}),

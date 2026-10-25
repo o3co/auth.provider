@@ -81,7 +81,9 @@ const narrowing = {
 		.duration("s")
 		.pipe(z.number().int().min(0).max(300))
 		.optional()
-		.describe("This issuer's clock allowance, no wider than the section's."),
+		.describe(
+			"This issuer's clock allowance for what is taken, no wider than the section's; a revocation keeps the section's.",
+		),
 };
 
 /** The algorithms keys not written with theirs are taken under. */

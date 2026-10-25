@@ -460,6 +460,25 @@ describe("jwt-bearer", () => {
 		}
 	});
 
+	it("holds a revocation by the section's clock skew, however narrow its issuer's own", async () => {
+		const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
+			{ ...trustedUpstream[0], "clock-skew": "5s" },
+		]);
+		await s.revoke("alice");
+		try {
+			// Signed before the boundary on a clock 20s ahead, taken 25s on, within the issuer's 5s.
+			clock.at = now + 25_000;
+			const ahead = await assertion({ ...base, iat: now / 1000 + 20 });
+			expect(saidOf(await s.grant(ahead))).toBe("invalid_grant: assertion revoked");
+			// Made past the boundary by more than the section's 30s: issued.
+			clock.at = now + 33_000;
+			const past = await assertion({ ...base, iat: now / 1000 + 31 });
+			expect(errorOf(await s.grant(past))).toBe("issued");
+		} finally {
+			clock.at = now;
+		}
+	});
+
 	it("refuses an assertion an issuer whose clock runs ahead signed just before its subject's revocation", async () => {
 		const s = await serve();
 		await s.revoke("alice");
