@@ -7,6 +7,8 @@ const root = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
 
 interface Step {
 	readonly id?: string;
+	readonly name?: string;
+	readonly env?: Readonly<Record<string, string>>;
 	readonly uses?: string;
 	readonly run?: string;
 	readonly with?: Readonly<Record<string, unknown>>;
@@ -58,5 +60,29 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(checkout("compliance")?.with?.ref).toBe(
 			expr("needs.conformance-plan.outputs.sha || ''"),
 		);
+	});
+
+	it("has each job that reports mark its attempt first, keep its evidence by attempt, and a release's compliance fail on a needed job that did not succeed", () => {
+		const reporting = {
+			checks: "unit",
+			integration: "integration",
+			"conformance-area": "area",
+			"conformance-pattern": "pattern",
+			"release-check": "release",
+		};
+		for (const [name, kind] of Object.entries(reporting)) {
+			const [first] = job(name).steps;
+			expect(first?.name, name).toBe("Mark this attempt");
+			expect(first?.env?.KIND, name).toBe(kind);
+			const kept = job(name).steps.find(
+				(s) => s.name === "Keep the evidence of the tests that ran",
+			);
+			expect(String(kept?.with?.name), name).toContain(expr("github.run_attempt"));
+		}
+		const told = job("compliance").steps.find(
+			(s) => s.name === "Each item's status from this run's evidence",
+		);
+		expect(told?.env?.NEEDS).toBe(expr("toJSON(needs)"));
+		expect(told?.run).toContain('select(.value.result != "success")');
 	});
 });
