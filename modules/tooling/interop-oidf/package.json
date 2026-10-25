@@ -8,6 +8,7 @@
 		"@mod/conformance": "workspace:*",
 		"@mod/conformance-code": "workspace:*",
 		"@mod/conformance-front": "workspace:*",
+		"@mod/conformance-tunnel": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",
 		"vitest": "5.0.5"
 	},

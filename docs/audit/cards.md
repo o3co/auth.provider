@@ -350,7 +350,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `differences` (`src/differences`): the differences accepted between a library and the provider.
   - `libraries` (`src/libraries`): the client libraries the harness runs.
   - `pins` (`src/pins`): the SHA-256 of each jar an adapter is built from.
-- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config, on the `simple-web` pattern's app behind an https front.
+- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
   - `expected` (`src/expected`): whether the expected entries may go to the suite.
   - `harness` (`src/harness`): one plan run end to end, reported as tests.
   - `login` (`src/login`): the deployment's login page, as the suite's browser meets it.

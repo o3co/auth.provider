@@ -1,8 +1,7 @@
 import { execFile } from "node:child_process";
 import { X509Certificate } from "node:crypto";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { connect } from "node:tls";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -46,13 +45,27 @@ export async function hostForSuite(): Promise<SuiteHost> {
  * The compose file beside the suite's own: its store is in memory, never a directory of this
  * machine's (a run's store is thrown away, and Docker Desktop's shared directories can refuse its
  * writes); its server reaches this machine by name, mapped to an IPv4 address alone (`host-gateway`
- * adds an IPv6 one the suite's Java may pick and find no route to).
+ * adds an IPv6 one the suite's Java may pick and find no route to); its nginx answers with the
+ * harness's certificate, which names the suite's host, so a client checking names can reach it.
  */
-export const composeOverride = (host: SuiteHost) => `services:
+export const composeOverride = (
+	host: SuiteHost,
+	tls: { readonly cert: string; readonly key: string },
+) => `services:
   mongodb:
     volumes:
       - type: tmpfs
         target: /data/db
+  nginx:
+    volumes:
+      - type: bind
+        source: ${tls.cert}
+        target: /etc/ssl/certs/nginx-selfsigned.crt
+        read_only: true
+      - type: bind
+        source: ${tls.key}
+        target: /etc/ssl/private/nginx-selfsigned.key
+        read_only: true
 ${
 	host.mapped === undefined
 		? ""
@@ -74,20 +87,13 @@ export const suiteEnv = (pin: SuitePin): NodeJS.ProcessEnv => ({
 	BASE_MTLS_URL: "https://localhost.emobix.co.uk:8444",
 });
 
-/** A certificate as PEM, from its DER bytes. */
-export const pemOf = (der: Buffer) =>
-	`-----BEGIN CERTIFICATE-----\n${der
-		.toString("base64")
-		.match(/.{1,64}/g)
-		?.join("\n")}\n-----END CERTIFICATE-----\n`;
-
 /** The suite at its pinned version, started in `dir`: a directory of its own, removed when it stops. */
 export interface Suite {
 	/** The suite's scripts, as the pinned commit holds them. */
 	readonly scripts: string;
 	/** The Python that runs them, with their packages. */
 	readonly python: string;
-	/** The suite's own certificate, as PEM in a file: the one its nginx answers with. */
+	/** The certificate its nginx answers with, as PEM in a file: for the app to trust. */
 	readonly certificate: string;
 	/** The suite's API, as a JSON GET from this machine. */
 	api(path: string): Promise<unknown>;
@@ -100,27 +106,6 @@ const project = (dir: string) =>
 		.pop()
 		?.toLowerCase()
 		.replace(/[^a-z0-9]/g, "")}`;
-
-/** Asks the suite's nginx for its certificate, without trusting it yet: the one to trust from now on. */
-async function certificateAt(): Promise<string> {
-	const der = await new Promise<Buffer>((resolve, reject) => {
-		const socket = connect(
-			{
-				host: "127.0.0.1",
-				port: 8443,
-				servername: "localhost.emobix.co.uk",
-				rejectUnauthorized: false,
-			},
-			() => {
-				const raw = socket.getPeerCertificate().raw;
-				socket.end();
-				resolve(raw);
-			},
-		);
-		socket.once("error", reject);
-	});
-	return pemOf(der);
-}
 
 /**
  * The check of a server's identity that takes this certificate alone, by its fingerprint: the
@@ -173,6 +158,8 @@ export async function startSuite(
 	dir: string,
 	host: SuiteHost,
 	log: string,
+	/** The certificate its nginx answers with, as PEM: one naming `localhost.emobix.co.uk`. */
+	tls: { readonly cert: string; readonly key: string },
 ): Promise<Suite> {
 	const source = join(dir, "suite");
 	const name = project(dir);
@@ -219,25 +206,27 @@ export async function startSuite(
 				`the suite's tag ${pin.tag} names ${head.trim()}, not the pinned ${pin.commit}`,
 			);
 		}
-		await writeFile(join(dir, "override.yml"), composeOverride(host));
+		const files = { cert: join(dir, "nginx-cert.pem"), key: join(dir, "nginx-key.pem") };
+		await writeFile(files.cert, tls.cert);
+		await writeFile(files.key, tls.key, { mode: 0o600 });
+		await writeFile(join(dir, "override.yml"), composeOverride(host, files));
 		const venv = join(dir, "python");
 		await run("python3", ["-m", "venv", venv]);
 		await run(join(venv, "bin", "pip"), ["install", "--quiet", ...pin.python]);
 		await run("docker", [...compose, "up", "--detach", "--quiet-pull"], { env });
 		const deadline = Date.now() + readyWithinMs;
-		let ca: string | undefined;
+		// Only the harness's certificate is trusted, by its fingerprint: an nginx answering with its own fails.
+		const ca = tls.cert;
 		for (;;) {
 			try {
-				ca ??= await certificateAt();
 				if ((await getJson("api/plan?length=1", ca)).status === 200) break;
 			} catch {}
 			if (Date.now() > deadline)
 				throw new Error(`the suite did not answer within ${readyWithinMs / 1000}s`);
 			await new Promise((resolve) => setTimeout(resolve, 2_000));
 		}
-		const certificate = join(dir, "suite-cert.pem");
-		await writeFile(certificate, ca);
-		const trusted = await readFile(certificate, "utf8");
+		const certificate = files.cert;
+		const trusted = ca;
 		return {
 			scripts: join(source, "scripts"),
 			python: join(venv, "bin", "python"),

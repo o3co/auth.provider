@@ -22,6 +22,8 @@ export interface SuiteUser {
 /** What the harness asks of the app beyond the areas' scenes: one source's limits and the user's claims. */
 interface HarnessPart {
 	readonly user: SuiteUser;
+	/** The CONNECT proxy the app's outbound goes through to the suite, for its back-channel notices. */
+	readonly proxy?: string;
 }
 
 const harnessArea = area<HarnessPart>("interop-oidf");
@@ -34,6 +36,9 @@ onNew(harnessArea, (part) => ({
 		authorize: { requests: perSource },
 		"token-endpoint": { requests: perSource },
 		"token-control": { requests: perSource },
+		"rp-logout": { requests: perSource },
+		// The suite's host resolves to loopback, which outbound never reaches over https but by a proxy.
+		...(part.proxy === undefined ? {} : { outbound: { proxy: part.proxy } }),
 		"login-password": { attempts: 100, window: "1m" },
 		// The identity area's users, with the claims it has no field for.
 		users: {
@@ -74,7 +79,8 @@ function signing() {
 /**
  * The provider the suite's OP plans meet, behind the front at `origin`: the code flow with
  * discovery, userinfo and refresh, first-party clients whose redirect URIs are the suite's
- * callbacks under `alias`, and one user.
+ * callbacks under `alias`, and one user. With `logout`, the clients register the suite's logout
+ * endpoints too, and the app reaches the suite's back channel through the proxy named.
  */
 export function suiteScene(given: {
 	readonly origin: string;
@@ -82,8 +88,14 @@ export function suiteScene(given: {
 	readonly alias: string;
 	readonly clients: readonly SuiteClient[];
 	readonly user: SuiteUser;
+	readonly logout?: {
+		/** The channel a session's end is told on besides the redirect: the plan's own, none for RP-initiated logout alone. */
+		readonly channel?: "backchannel" | "frontchannel";
+		readonly proxy?: string;
+	};
 }): AreaScene {
-	const callback = `${given.suite}/test/a/${given.alias}/callback`;
+	const base = `${given.suite}/test/a/${given.alias}`;
+	const callback = `${base}/callback`;
 	const scene = codeScene({
 		issuer: given.origin,
 		keys: { signing: signing() },
@@ -97,10 +109,28 @@ export function suiteScene(given: {
 			scopes: ["openid", "profile", "email"],
 			redirectUris: [callback],
 			firstParty: true,
+			...(given.logout === undefined
+				? {}
+				: {
+						logout: {
+							postLogoutRedirectUris: [`${base}/post_logout_redirect`],
+							...(given.logout.channel === "frontchannel"
+								? { frontchannelLogoutUri: `${base}/frontchannel_logout` }
+								: {}),
+							...(given.logout.channel === "backchannel"
+								? { backchannelLogoutUri: `${base}/backchannel_logout` }
+								: {}),
+						},
+					}),
 		})),
 		discovery: true,
 		userinfo: true,
 		refresh: {},
+		...(given.logout === undefined ? {} : { logout: { allowed: [given.suite] } }),
 	});
-	return { ...scene, parts: { ...scene.parts, [harnessArea.name]: { user: given.user } } };
+	const part: HarnessPart = {
+		user: given.user,
+		...(given.logout ? { proxy: given.logout.proxy } : {}),
+	};
+	return { ...scene, parts: { ...scene.parts, [harnessArea.name]: part } };
 }

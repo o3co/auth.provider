@@ -1,7 +1,7 @@
 # interop-oidf
 
 ## Responsibilities
-- Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config, on the `simple-web` pattern's app behind an https front.
+- Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
 - Reports each suite test as a vitest test, its result excused only by an expected entry the checklist lets it take.
 - Its internal modules: `pkce` gives PKCE to requests that carry none, `login` is the login page, `expected` judges the expected entries, `results` reads each test's outcome, `scene` is the app's scene, `suite` starts and stops the suite, `harness` runs a plan.
 
@@ -11,6 +11,7 @@
 
 ## Offers
 - `pnpm --filter @mod/interop-oidf run plan [basic|config]`: runs the plans (Docker, `git`, `openssl` and Python 3.9 or later on the path).
+- `plans/logout.json`: the logout plans' configuration, with the browser's steps through the provider's logout and the suite's overrides for the logouts the provider answers itself.
 - `run evidence-runs`: the runs the package's evidence comes from, as JSON: `{ entry: "@mod/interop-oidf#<plan>", kind: "oidf-plan", matrix: "<plan>" }`, one per plan.
 - `suite-pin.json`: the suite's release tag, the commit the tag must name, and the Python packages its scripts run on, each at one version.
 - `plans/op.json`: the plans' configuration, which the harness fills at run time (origin, alias, secrets, user).
@@ -24,7 +25,8 @@
 - A suite test that never ran or did not finish fails; so does an entry no test used, and a plan the suite's runner fails.
 - The suite's tag must name the pinned commit. Everything a run starts is stopped and its directories removed, however it ends.
 - The plans run one at a time: the suite takes fixed ports.
+- A logout plan's clients register the suite's post-logout redirect and that plan's own channel alone (the RP-initiated plan serves neither channel). The back channel reaches the suite through `conformance-tunnel`, set as the app's `outbound.proxy`: the suite's host resolves to loopback, which outbound never reaches over https directly. The app trusts the suite's certificate, the harness's own, by `trustedCertificates`, its checks of names unchanged.
 - The app is told one sender, a documentation address, for every request the suite makes: on a desktop the suite reaches the front from loopback, the app's trusted proxy.
 
 ## Depends on
-- `conformance` (the pattern's app), `conformance-code` (the code flow's scene), `conformance-front` (the https front), `spec-checklist` (the checklist and the exception rule), `vitest`.
+- `conformance` (the pattern's app), `conformance-code` (the code flow's scene), `conformance-front` (the https front), `conformance-tunnel` (the app's way to the suite's back channel), `spec-checklist` (the checklist and the exception rule), `vitest`.
