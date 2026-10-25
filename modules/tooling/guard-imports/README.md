@@ -41,7 +41,7 @@
 - A package depends on what its manifest names in `dependencies` and `peerDependencies`, and in `devDependencies` where a rule counts tests (G1, G2, G10, G14, G16 do).
 - G29 reads a test file's imports: a `./module` (its own package's by path) is composed, a `./testing` value named `…StandIn` composes its package, and an adapter composes its owner; a stand-in named otherwise, or a composition built elsewhere or at run time, is missed, not reported. A package contributes to a bridge when its shipped code takes one of the bridge's `extensionPoint` values.
 - G29 counts feature bridges only: a foundation bridge's points collect operational counts that decide no answer a test reads. Were one to collect what decides answers, the scope is to be looked at again.
-- Internal modules `recorded` (G30), `taken` (G31), `internal-by` (G32) and `facts`.
+- Internal modules `recorded` (G30), `taken` (G31), `internal-by` (G32), `facts` and `surface`.
 
 ## Depends on
 - `typescript`, `pnpm` (asks it for the workspace's packages).
