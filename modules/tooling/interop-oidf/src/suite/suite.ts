@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { connect } from "node:tls";
@@ -94,20 +94,20 @@ export interface Suite {
 	stop(): Promise<void>;
 }
 
-const project = (dir: string) =>
-	`o3co-oidf-${dir
-		.split("/")
-		.pop()
-		?.toLowerCase()
-		.replace(/[^a-z0-9]/g, "")}`;
+/** A start's Compose project: one of its own, from its whole directory, as every start's ends alike. */
+export const projectOf = (dir: string) =>
+	`o3co-oidf-${createHash("sha256").update(dir).digest("hex").slice(0, 16)}`;
 
 /** Asks the suite's nginx for its certificate, without trusting it yet: the one to trust from now on. */
-async function certificateAt(): Promise<string> {
+export async function certificateAt(
+	at: { readonly host: string; readonly port: number } = { host: "127.0.0.1", port: 8443 },
+	withinMs = 5_000,
+): Promise<string> {
 	const der = await new Promise<Buffer>((resolve, reject) => {
 		const socket = connect(
 			{
-				host: "127.0.0.1",
-				port: 8443,
+				host: at.host,
+				port: at.port,
 				servername: "localhost.emobix.co.uk",
 				rejectUnauthorized: false,
 			},
@@ -118,6 +118,10 @@ async function certificateAt(): Promise<string> {
 			},
 		);
 		socket.once("error", reject);
+		// A port that takes the connection and never finishes the handshake is tried again, not waited on.
+		socket.setTimeout(withinMs, () =>
+			socket.destroy(new Error(`no TLS handshake within ${withinMs / 1000}s`)),
+		);
 	});
 	return pemOf(der);
 }
@@ -135,28 +139,27 @@ export function pinnedTo(pem: string) {
 }
 
 /** A JSON GET at the suite, trusting the certificate it was first read with alone. */
-async function getJson(path: string, ca: string): Promise<{ status: number; body: unknown }> {
+export async function getJson(url: string, ca: string): Promise<{ status: number; body: unknown }> {
 	const { request } = await import("node:https");
 	const checkServerIdentity = pinnedTo(ca);
 	return new Promise((resolve, reject) => {
-		const req = request(
-			`${suiteOrigin}/${path}`,
-			{ ca, checkServerIdentity, timeout: 30_000 },
-			(res) => {
-				let text = "";
-				res.on("data", (chunk) => {
-					text += chunk;
-				});
-				res.on("end", () => {
-					let body: unknown = text;
-					try {
-						body = JSON.parse(text);
-					} catch {}
-					resolve({ status: res.statusCode ?? 0, body });
-				});
-			},
-		);
-		req.on("timeout", () => req.destroy(new Error(`the suite did not answer ${path}`)));
+		const req = request(url, { ca, checkServerIdentity, timeout: 30_000 }, (res) => {
+			// An answer cut off midway is refused, never left pending.
+			res.on("error", reject);
+			res.on("aborted", () => reject(new Error(`the suite cut its answer to ${url} off`)));
+			let text = "";
+			res.on("data", (chunk) => {
+				text += chunk;
+			});
+			res.on("end", () => {
+				let body: unknown = text;
+				try {
+					body = JSON.parse(text);
+				} catch {}
+				resolve({ status: res.statusCode ?? 0, body });
+			});
+		});
+		req.on("timeout", () => req.destroy(new Error(`the suite did not answer ${url}`)));
 		req.on("error", reject);
 		req.end();
 	});
@@ -175,7 +178,7 @@ export async function startSuite(
 	log: string,
 ): Promise<Suite> {
 	const source = join(dir, "suite");
-	const name = project(dir);
+	const name = projectOf(dir);
 	const compose = [
 		"compose",
 		"-p",
@@ -229,7 +232,7 @@ export async function startSuite(
 		for (;;) {
 			try {
 				ca ??= await certificateAt();
-				if ((await getJson("api/plan?length=1", ca)).status === 200) break;
+				if ((await getJson(`${suiteOrigin}/api/plan?length=1`, ca)).status === 200) break;
 			} catch {}
 			if (Date.now() > deadline)
 				throw new Error(`the suite did not answer within ${readyWithinMs / 1000}s`);
@@ -243,7 +246,7 @@ export async function startSuite(
 			python: join(venv, "bin", "python"),
 			certificate,
 			api: async (path) => {
-				const answer = await getJson(path, trusted);
+				const answer = await getJson(`${suiteOrigin}/${path}`, trusted);
 				if (answer.status !== 200)
 					throw new Error(`the suite answered ${answer.status} to ${path}`);
 				return answer.body;
