@@ -18,7 +18,7 @@
 - A body goes on with its length as rewritten. A connection's own headers (`Connection`, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, the proxy ones) and those a `Connection` header names, in any case, are never passed, to the app or back.
 - An answer the app cuts off midway ends the client's answer too.
 - A certificate is carried, never judged.
-- While the app cannot be reached, the answer is `502`.
+- While the app cannot be reached, and where a hook throws, the answer is `502`; where the app's answer breaks after it began, the client's answer is ended instead.
 
 ## Depends on
 - `openssl` on the path, for `selfSigned`. No workspace package.

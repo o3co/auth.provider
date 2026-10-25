@@ -2,7 +2,7 @@ import { X509Certificate } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { request } from "node:https";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -305,5 +305,46 @@ describe("what an https front passes on of a connection", () => {
 			req.end();
 		});
 		expect(ended).toBe("ended");
+	});
+
+	it("answers 502 where the watcher of the app's answers throws, and goes on serving", async () => {
+		const a = await app(() => ({ status: 200 }));
+		const f = await front(a.base, {
+			answered: () => {
+				throw new Error("a harness's hook failed");
+			},
+		});
+		expect((await send(f.origin, "/x")).status).toBe(502);
+		expect((await send(f.origin, "/y")).status).toBe(502);
+	});
+
+	it("ends the client's answer where the app's breaks after its headers went", async () => {
+		// A good chunk, then a frame that is none: the request to the app fails after the answer began.
+		const broken = createNetServer((socket) => {
+			socket.once("data", () => {
+				socket.write("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\nZZ\r\n");
+			});
+		});
+		await new Promise<void>((resolve) => broken.listen(0, "127.0.0.1", resolve));
+		stops.push(() => new Promise((resolve) => broken.close(() => resolve())));
+		const f = await front(`http://127.0.0.1:${(broken.address() as AddressInfo).port}`);
+		const ended = await new Promise<string>((resolve) => {
+			const timer = setTimeout(() => resolve("still open"), 5_000);
+			const req = request(`${f.origin}/x`, { ca: server.cert }, (res) => {
+				res.on("data", () => {});
+				res.on("error", () => resolve("ended"));
+				res.on("close", () => {
+					clearTimeout(timer);
+					resolve("ended");
+				});
+			});
+			req.on("error", () => resolve("ended"));
+			req.end();
+		});
+		expect(ended).toBe("ended");
+		// The front still serves.
+		const a = await app(() => ({ status: 204 }));
+		const g = await front(a.base);
+		expect((await send(g.origin, "/z")).status).toBe(204);
 	});
 });

@@ -178,7 +178,13 @@ export async function startFront(options: FrontOptions): Promise<Front> {
 				headers,
 			},
 			(app) => {
-				options.answered?.(received, { status: app.statusCode ?? 502, headers: app.headers });
+				// The hook runs after the request's own promise settled: a throw here is caught here.
+				try {
+					options.answered?.(received, { status: app.statusCode ?? 502, headers: app.headers });
+				} catch {
+					app.destroy();
+					return answer(res, { status: 502 });
+				}
 				res.writeHead(app.statusCode ?? 502, passedOn(app.headers, new Set()));
 				// An answer cut off midway ends the client's too, never left open.
 				app.on("error", (error) => res.destroy(error));
@@ -186,7 +192,10 @@ export async function startFront(options: FrontOptions): Promise<Front> {
 				app.pipe(res);
 			},
 		);
-		sent.on("error", () => answer(res, { status: 502 }));
+		// Once the answer began, the client's is ended rather than answered twice.
+		sent.on("error", (error) =>
+			res.headersSent ? res.destroy(error) : answer(res, { status: 502 }),
+		);
 		sent.end(body);
 	};
 	const server = createServer(
