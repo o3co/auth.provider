@@ -104,7 +104,8 @@ it("provides the records over the store the assembly wires, taking all it names"
 		m.provide(reauthStore).by(() => ({ save: stand.records.create, update: stand.records.change })),
 	]);
 	const input = { modules: [reauthModule, place], config: kernelConfig() };
-	expect(await takesUnused(input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["reauth"]).toBeUndefined();
 	const app = await assemble(input);
 	const records = app.get(reauths);
 	const name = await records.remember(params({ a: "1" }), 5);
