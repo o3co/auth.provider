@@ -32,7 +32,12 @@ const app: ClientScene = {
 let ledger: Server;
 const consumed = new Map<string, number>();
 const seen: { jti: unknown; exp: unknown; token: unknown; authorization: unknown }[] = [];
-let mode: "up" | "down" | "lose-next" = "up";
+let mode: "up" | "down" | "lose-next" | "other-token" = "up";
+/**
+ * A meeting at the ledger's door: the grant's consume of `jti` waits there until `release`, so the
+ * other service's consume of it arrives while the grant's is at the ledger too.
+ */
+let meeting: { jti: string; arrived: () => void; release: Promise<void> } | undefined;
 /** Uses a jti up as the other service does: the ledger's own answer. */
 function consume(jti: unknown, exp: unknown): number {
 	if (typeof jti !== "string" || jti === "" || jti.length > 256) return 400;
@@ -57,7 +62,12 @@ function startLedger(): Promise<string> {
 				authorization: request.headers.authorization,
 			});
 			if (mode === "down") return void response.writeHead(503).end();
-			if (given !== token) return void response.writeHead(401).end();
+			if (given !== token || mode === "other-token") return void response.writeHead(401).end();
+			const met = meeting?.jti === sent.jti ? meeting : undefined;
+			if (met) {
+				met.arrived();
+				return void met.release.then(() => response.writeHead(consume(sent.jti, sent.exp)).end());
+			}
 			const status = consume(sent.jti, sent.exp);
 			if (mode === "lose-next") {
 				mode = "up";
@@ -158,13 +168,41 @@ describe.runIf(areaTarget().can("trusted-issuers"))(
 			);
 		});
 
-		it("lets one of the other service and the grant use one jti at once", async () => {
-			const jti = `j-${Math.random()}`;
-			const [granted, other] = await Promise.all([
-				grant(base, assertion(ledgered, devices.privateKey, jti)),
-				Promise.resolve().then(() => consume(jti, Math.floor(Date.now() / 1000) + 120)),
-			]);
-			expect([outcome(granted) === "issued", other === 204].filter(Boolean)).toHaveLength(1);
+		it("lets one of the other service and the grant use one jti both bring to the ledger at once", async () => {
+			// The grant's consume held at the ledger while the other service's arrives, then each taken first.
+			for (const otherFirst of [true, false]) {
+				const jti = `j-${Math.random()}`;
+				const arrived = Promise.withResolvers<void>();
+				const release = Promise.withResolvers<void>();
+				meeting = { jti, arrived: arrived.resolve, release: release.promise };
+				try {
+					const granting = grant(base, assertion(ledgered, devices.privateKey, jti));
+					await arrived.promise;
+					const exp = Math.floor(Date.now() / 1000) + 120;
+					let other = 0;
+					if (otherFirst) other = consume(jti, exp);
+					release.resolve();
+					const granted = await granting;
+					if (!otherFirst) other = consume(jti, exp);
+					expect(
+						[outcome(granted) === "issued", other === 204].filter(Boolean),
+						String(otherFirst),
+					).toHaveLength(1);
+				} finally {
+					meeting = undefined;
+				}
+			}
+		});
+
+		it("answers 503 where the ledger refuses its token, using nothing up", async () => {
+			const signed = assertion(ledgered, devices.privateKey);
+			mode = "other-token";
+			try {
+				expect(outcome(await grant(base, signed))).toBe("503 temporarily_unavailable");
+			} finally {
+				mode = "up";
+			}
+			expect(outcome(await grant(base, signed))).toBe("issued");
 		});
 
 		it("answers 503 while the ledger is out, uses nothing up elsewhere, and issues once it is back", async () => {
