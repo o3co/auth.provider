@@ -275,7 +275,7 @@ The generator picks the packages your app needs. Published packages are named `@
 
 Before 1.0, a minor release may break compatibility, and so may a new release candidate. Read the migration guide and the [changelog](CHANGELOG.md) before you upgrade.
 
-Security fixes are released for the latest 0.18.x only; a fix found in a release candidate lands in the next one. Report a vulnerability privately with **Report a vulnerability** on this repository's Security tab, as [SECURITY.md](SECURITY.md) describes. Please don't open a public issue.
+Security fixes are released for the versions [SECURITY.md](SECURITY.md) names as supported; a fix found in a release candidate lands in the next one. What each version keeps compatible, and how a change to it is announced, is in [the release policy](docs/releasing.md#what-a-version-promises). Report a vulnerability privately with **Report a vulnerability** on this repository's Security tab, as [SECURITY.md](SECURITY.md) describes. Please don't open a public issue.
 
 ## Contributing
 

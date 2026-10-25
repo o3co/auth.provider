@@ -4,6 +4,7 @@ How a maintainer cuts a release. The release workflow (`release.yml`) does the b
 
 ## Contents
 
+- [What a version promises](#what-a-version-promises)
 - [What a release publishes](#what-a-release-publishes)
 - [Before the tag](#before-the-tag)
 - [Tagging](#tagging)
@@ -13,6 +14,38 @@ How a maintainer cuts a release. The release workflow (`release.yml`) does the b
 - [The API site](#the-api-site)
 - [After the release](#after-the-release)
 
+## What a version promises
+
+This section is the compatibility policy: what semver covers, how a change to it is announced, and what an operator must act on. The repository's security policy (`SECURITY.md`) says which versions get security fixes.
+
+### The surfaces semver covers
+
+A change that breaks one of these is a major version after 1.0, and a minor version before 1.0 (where a release candidate may break one too):
+
+1. **HTTP**: the routes, their methods and parameters, and their answers (status, error code, body members), as [the route reference](routes.md) lists them.
+2. **Configuration**: each setting's key, type, bounds and default, as [the configuration reference](configuration.md) lists them. A value refused at boot that was accepted before is a break.
+3. **Module contracts**: what each package exports at `.` and `./module`, the names of the modules an app composes, and the contract tests a package offers (`*Contract`) for implementations of its contracts. The rest of `./testing` (fakes, configuration builders) is offered as is.
+4. **Audit events**: each kind and its attributes, as [the audit event reference](audit-events.md) lists them.
+5. **Metrics**: each metric's name, type and labels.
+6. **Data at rest**: a version reads what the version before it wrote to the store, so an upgrade needs no migration of stored records. How a record's format changes is decided in 0.20; until then, a minor version that changes a record's format says so with an upgrade notice.
+7. **Log events**: each event's name (such as `kernel.stop_failed`), as operators alert on it; not its fields or the wording of a message.
+
+Not covered: internal modules and anything a package does not export, the wording of error descriptions and log messages, `./testing` but for its contract tests, behaviour no card or reference states, the conformance and tooling packages, and a feature marked preview on its card.
+
+### Deprecation
+
+A covered surface is removed or changed incompatibly only after it was deprecated:
+
+- The release that deprecates it says so in the changelog's **Deprecated** section, on the owning module's card, and in the migration guide, with what to use instead.
+- It stays as it was for at least two minor versions or three months after that release, whichever is longer, and is removed no earlier than in the release that ends that notice.
+- A security fix may shorten the notice where keeping the surface would keep the hole; the changelog says why.
+
+### Upgrade notices
+
+Each change an operator must act on to upgrade carries a numbered notice, `U-<minor>-<n>` numbered within the minor version that brings the change (`U-0.19-3`), at its line in the changelog and at its entry in [the migration guide](migration.md). A notice states what to change, and how to tell whether a deployment is affected. An operator checks off the notices between the version they run and the one they move to; a release with none says so.
+
+In the migration guide, a notice is an item that starts with its anchor and bold id (`<a id="u-0.19-3"></a>**U-0.19-3. …**`), says what to change, and ends with an **Affected:** line; the minor's section opens with a table of its notices (notice, what to do, affected). The changelog line links to it (`docs/migration.md#u-0.19-3`). Once a release, a release candidate included, carries a notice, its number stays: a later notice takes the next number.
+
 ## What a release publishes
 
 One package per concern, `@o3co/auth-provider-<concern>`, and the entrance `@o3co/create-auth-provider`, all at the version the root `package.json` states. A version with a prerelease part (`0.18.0-rc.2`) is published under the npm `next` tag and marked a prerelease on GitHub; any other under `latest`.
@@ -20,7 +53,7 @@ One package per concern, `@o3co/auth-provider-<concern>`, and the entrance `@o3c
 ## Before the tag
 
 1. **The changelog.** The version's section in `CHANGELOG.md` is complete, and its `Unreleased` becomes the date.
-2. **The migration guide.** Every change an operator must act on has its line in [the migration guide](migration.md).
+2. **The migration guide.** Every change an operator must act on has its line in [the migration guide](migration.md), with its numbered upgrade notice ([What a version promises](#upgrade-notices)); a deprecation also has its line in the changelog's **Deprecated** section.
 3. **Pull request titles.** The release notes are generated from the titles of the pull requests merged since the last tag. Read them: a security fix's title names the kind of hole it closes and the module, never how to reach it. Retitle one on GitHub before tagging; the notes read the titles when the release is made.
 4. **The version.** One commit changes the root `package.json` version, by itself, and reaches `main` with the rest.
 5. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on `main` runs the conformance scenes and `pnpm release:check`; wait for both.
