@@ -22,8 +22,8 @@
 
 ## Invariants
 - A count that cannot be made is unavailable; only the requests policy set `open` then lets a request through. Any other failure is thrown.
-- Keys of any length are taken; a name keeps its windows apart.
-- A wait is a hint: at least a second, never longer than the window, which the store's clock judges.
+- Keys of any length are taken; a name keeps its windows apart, where names hold no line feed (a name and a key are joined by one).
+- A wait is a hint: at least a second, or the whole window where it is shorter, and never longer than the window, which the store's clock judges.
 - Lockout times are the store's: a hold ends at its time; a fixed hold ends only by release.
 - Handing back the attempt that fixed a hold lifts it; handing back any other keeps it.
 - Attempt times are unique within a key and never go back, so a reservation names one attempt.
