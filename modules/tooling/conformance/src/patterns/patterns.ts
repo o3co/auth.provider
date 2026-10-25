@@ -34,6 +34,12 @@ export function runsOf(summaries: readonly PatternSummary[], args: readonly stri
 export const patternNames = (summaries: readonly PatternSummary[]) =>
 	runsOf(summaries, []).map((run) => run.pattern);
 
+/** Each area's run on each pattern's app, as `<area's package>@<pattern>`: the runs a CI run reports. */
+export const evidenceRuns = (summaries: readonly PatternSummary[]) =>
+	runsOf(summaries, []).flatMap((run) =>
+		run.areas.map((area) => `@mod/conformance-${area}@${run.pattern}`),
+	);
+
 /** An ANSI escape sequence, as a terminal that colours output writes one (ESC, then CSI). */
 const ansiEscape = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 
@@ -122,5 +128,6 @@ export function runPatterns(
 if (import.meta.main) {
 	const args = process.argv.slice(2);
 	if (args[0] === "--list") console.log(JSON.stringify(patternNames(patterns())));
+	else if (args[0] === "--evidence-runs") console.log(JSON.stringify(evidenceRuns(patterns())));
 	else process.exitCode = runPatterns(args) ? 0 : 1;
 }
