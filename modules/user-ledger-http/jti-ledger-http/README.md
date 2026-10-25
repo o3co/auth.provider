@@ -31,7 +31,7 @@
 
 ## Deployment
 - The ledger answers `204` to one of two consumes of a `jti` at once, and `409` to the other.
-- It keeps each record, through a crash and a failover, at least until the `exp` it was sent.
+- It keeps each record, through a crash and a failover, as long as any service using it up may still accept that assertion: past the `exp` it was sent by the time the slowest of them accepts after `exp` (`jwt-bearer`'s `clock-skew`, another's raw `exp` with its own allowance) and the hosts' clock differences. Keeping each an hour past the `exp` it was sent covers `jwt-bearer`'s own allowance (`clock-skew`, at most 5 minutes) with room for the others'.
 - It keys its records by `jti` alone, across every service using it up: every signer whose assertions it holds is in one trust domain, and a `jti` is unique across all of them. A party that learns another's `jti` can use it up first, refusing that assertion, never letting one be used twice.
 - Every service accepting the issuer's assertions uses them up in this ledger; one that does not can accept an assertion the grant accepted.
 - Hosts' clocks differ by far less than the time the ledger keeps a record past the `exp` it was sent.

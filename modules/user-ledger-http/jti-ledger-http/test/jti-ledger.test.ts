@@ -26,7 +26,12 @@ interface Asked {
 	readonly body: string;
 }
 /** How the ledger answers a consume: a status, a body, or the connection dropped once it recorded. */
-type Answer = { readonly status: number; readonly text?: string; readonly drop?: boolean };
+type Answer = {
+	readonly status: number;
+	readonly text?: string;
+	readonly drop?: boolean;
+	readonly delayMs?: number;
+};
 
 /** The ledger as deployed: a jti once, kept until its exp by its own clock; 204, then 409. */
 function ledgerAnswer(used: Map<string, number>, now: () => number) {
@@ -52,9 +57,13 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
 		const asked = { method: req.method ?? "", path: req.url ?? "", headers: req.headers, body };
 		received.push(asked);
 		const answer = script(asked);
-		if (answer.drop) return void req.socket.destroy();
-		res.writeHead(answer.status);
-		res.end(answer.text ?? "");
+		const respond = () => {
+			if (answer.drop) return void req.socket.destroy();
+			res.writeHead(answer.status);
+			res.end(answer.text ?? "");
+		};
+		if (answer.delayMs) setTimeout(respond, answer.delayMs);
+		else respond();
 	});
 });
 let pair = "";
@@ -166,6 +175,20 @@ describe("jti-ledger-http", () => {
 		const told = JSON.stringify(logged.lines());
 		for (const hidden of ["j-secret", credential, "secret-said"])
 			expect(told).not.toContain(hidden);
+	});
+
+	it("answers unavailable to an answer past its time or its size, telling its kind alone", async () => {
+		const slow = await open(settings({ timeout: "50ms" }));
+		script = () => ({ status: 204, delayMs: 500 });
+		await expect(slow.ledger.spend(spending("j-slow"))).rejects.toSatisfy(isUnavailable);
+		const small = await open(settings({ "max-response-size": "8B" }));
+		script = () => ({ status: 409, text: "x".repeat(64) });
+		await expect(small.ledger.spend(spending("j-big"))).rejects.toSatisfy(isUnavailable);
+		const told = [...slow.logged.lines(), ...small.logged.lines()].map((l) => [l.event, l.fields]);
+		expect(told).toEqual([
+			["jti-ledger-http.ledger_failed", { reason: "timeout" }],
+			["jti-ledger-http.ledger_failed", { reason: "too-large" }],
+		]);
 	});
 
 	it("sends no jti over the ledger's 256 bytes, however few its characters, answering unavailable", async () => {
