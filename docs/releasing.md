@@ -16,7 +16,7 @@ How a maintainer cuts a release. The release workflow (`release.yml`) does the b
 
 ## What a version promises
 
-This section is the compatibility policy: what semver covers, how a change to it is announced, and what an operator must act on. [SECURITY.md](../SECURITY.md) says which versions get security fixes.
+This section is the compatibility policy: what semver covers, how a change to it is announced, and what an operator must act on. The repository's security policy (`SECURITY.md`) says which versions get security fixes.
 
 ### The surfaces semver covers
 
