@@ -8,7 +8,7 @@ A finding not yet fixed shows nowhere public: not its text, nor the pull request
 
 - The fix is made in the security advisory's temporary private fork, as a private pull request, its change record kept private too.
 - GitHub runs no Actions in a temporary private fork, so the checks that hold the guarantees are run again on the fix's branch on a private machine, and their evidence (the commands, the environment, the commit, the results) kept in its change record: the whole test suite, the conformance areas and patterns, the checklists' compliance, the guard and the release check.
-- The fix is published with the release that carries it, in one sequence (`docs/releasing.md`, "A security fix's release"), so the fix is visible only while that release's workflow runs.
+- The fix is made public with the release that carries it, and the advisory with that release.
 - Once released, the change record is reviewed, then published with the advisory or in a pull request after the release. CI's run on the published commits is added to it; where it differs from the private run, a fix follows at once.
 
 A pull request's description holds a change record in public only for a finding already fixed, or for a change that fixes no finding.
