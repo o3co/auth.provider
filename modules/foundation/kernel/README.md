@@ -27,7 +27,7 @@
 - `./testing`: a switch making an implementation's async calls unavailable (the next call, or named methods until restored), a module whose provision goes through one, a quiet runtime and a recording log, and `takesUnused` (each handle a module's takes name that no factory took in an assembly, which it stops before it answers, by module, for a test of each section).
 
 ## Invariants
-- Before any factory runs, one preflight refuses, together with the sections', replicas' and duplicate providers' refusals, each gap a module's takes show: a contract no other module provides or its `takenBy` refuses, a point whose registered contributions break its rule (by identity, once). A refused boot has built nothing.
+- Before any factory runs, the takes' preflight (internal module `takes`) refuses each gap a module's takes show, with the sections', replicas' and duplicate providers' refusals; a refused boot has built nothing.
 - A module with takes taking, by `get`, `late` or `collect`, a handle they do not name (its own contracts aside) refuses boot, even when it catches the throw.
 - Contracts and points resolve by value identity, never by name. Cycles, gaps, two providers, an empty point needing one, duplicate keys and a bad `every` interval refuse boot.
 - Refusals of one stage are reported together, by key path (a value configuration cannot hold too), never by value; a key the schema needs and the configuration does not set is `required, and not set`, unless the schema words it itself. Every key a keyed point holds twice is refused, and a point is checked once however many modules collect it. `multi` refuses a module unsafe on multiple instances.

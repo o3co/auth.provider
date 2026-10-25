@@ -20,6 +20,7 @@ import {
 } from "./refusal/refusal.ts";
 import { guardedLog, logSinks, routedLog } from "./runtime/log.ts";
 import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime/runtime.ts";
+import { checkTakes, countRefusal, takenByRefusal } from "./takes/takes.ts";
 
 export interface Assembly {
 	get<T>(contract: Contract<T>): T;
@@ -86,65 +87,6 @@ function indexParts(modules: readonly Module[], refusals: Refusal[]) {
 		}
 	}
 	return { providers, contributions };
-}
-
-/** Why a contract refuses a module taking it, by its takenBy; none where it may. */
-function takenByRefusal(contract: Contract<unknown>, module: Module): string | undefined {
-	const { takenBy } = contract;
-	if (takenBy === undefined || takenBy.includes(module.name)) return undefined;
-	return takenBy.length === 0
-		? `${contract.label} is taken by no module`
-		: `${contract.label} is taken by ${takenBy.join(", ")} alone`;
-}
-
-/** Why a point's rule refuses this many contributions; none where it holds. */
-function countRefusal(rule: { readonly multiplicity: string }, count: number): string | undefined {
-	if (rule.multiplicity === "one" && count !== 1) {
-		return `needs exactly one contribution (${count})`;
-	}
-	if (rule.multiplicity === "some" && count === 0) return "needs at least one contribution";
-	return undefined;
-}
-
-/**
- * Each module's takes, held against what the modules provide and contribute before anything is
- * built: a contract no other module provides, one its takenBy does not let it take, and a point
- * whose registered contributions (one that fails as it builds among them) break its rule, each
- * point once by identity. A function is asked only with a section that passed. Answers the takes
- * each declaring module is held to while it is built.
- */
-function checkTakes(
-	modules: readonly Module[],
-	sections: Map<Module, unknown>,
-	parts: ReturnType<typeof indexParts>,
-	refusals: Refusal[],
-): Map<Module, ReadonlySet<Handle>> {
-	const held = new Map<Module, ReadonlySet<Handle>>();
-	const pointsChecked = new Set<Handle>();
-	for (const module of modules) {
-		const { takes } = module;
-		if (takes === undefined) continue;
-		const passed = module.section === undefined || sections.has(module);
-		if (typeof takes === "function" && !passed) continue;
-		const handles = new Set(typeof takes === "function" ? takes(sections.get(module)) : takes);
-		held.set(module, handles);
-		const own = new Set((module.provides ?? []).map((provision) => provision.contract));
-		for (const handle of handles) {
-			if (handle.kind === "contract") {
-				const taken = takenByRefusal(handle, module);
-				if (taken) refusals.push({ where: module.name, reason: taken });
-				if (!own.has(handle) && !parts.providers.has(handle)) {
-					refusals.push({ where: module.name, reason: `no module provides ${handle.label}` });
-				}
-			} else if (!pointsChecked.has(handle)) {
-				pointsChecked.add(handle);
-				const count = parts.contributions.get(handle as ExtensionPoint<unknown>)?.length ?? 0;
-				const broken = countRefusal(handle.rule, count);
-				if (broken) refusals.push({ where: handle.label, reason: broken });
-			}
-		}
-	}
-	return held;
 }
 
 function refuseIfAny(refusals: readonly Refusal[]): void {
