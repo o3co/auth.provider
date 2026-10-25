@@ -86,17 +86,25 @@ export async function promote<N extends Member>(m: Membership<N>, o: PromoteOpti
 			const lapse = new Promise<void>((resolve) => {
 				timer = setTimeout(resolve, Math.max(0, deadline - performance.now()));
 			});
-			await Promise.race([o.between(), lapse]);
-			clearTimeout(timer);
+			try {
+				await Promise.race([o.between(), lapse]);
+			} finally {
+				clearTimeout(timer);
+			}
 		}
-		if (performance.now() >= deadline)
-			throw new Error(`the barrier ran out before ${old.name} could go`);
+		const inTime = (what: string) => {
+			if (performance.now() >= deadline) throw new Error(`the barrier ran out ${what}`);
+		};
+		inTime(`before ${old.name} could go`);
 		if (!o.keepOld) {
 			m.kill(old);
 			m.killed.add(old.name);
 		}
 		await o.replica.ask("REPLICAOF", "NO", "ONE");
 		m.follows.set(o.replica.name, undefined);
+		// Kept on, the old primary may take writes once the hold lapses: a candidate that detached
+		// only after it is a promotion that failed, the topology needing recovery.
+		if (o.keepOld) inTime(`before ${o.replica.name} detached; the topology needs recovery`);
 		for (const r of reattach) {
 			await r.ask("REPLICAOF", o.replica.name, "6379");
 			m.follows.set(r.name, o.replica.name);

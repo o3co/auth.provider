@@ -326,6 +326,44 @@ describe("what a topology keeps true across its faults", () => {
 		});
 	});
 
+	it("fails a promotion keeping the old primary on whose candidate detaches only after the hold lapsed", async () => {
+		const t = await topology({ replicas: 3 });
+		const [, next, moved] = t.replicas();
+		if (!next || !moved) throw new Error("no replicas");
+		let unpause: NodeJS.Timeout | undefined;
+		await expect(
+			t.promote({
+				replica: next,
+				reattach: [moved],
+				keepOld: true,
+				catchUpMs: 1_000,
+				holdMs: 1_500,
+				// The candidate stops before it is told to detach, and wakes past the hold.
+				between: async () => {
+					t.pause(next, true);
+					unpause = setTimeout(() => t.pause(next, false), 3_000);
+				},
+			}),
+		).rejects.toThrow(/barrier/);
+		clearTimeout(unpause);
+	});
+
+	it("leaves no timer running where the scene's step fails", async () => {
+		const t = await topology({ replicas: 2 });
+		const [next, other] = t.replicas();
+		if (!next || !other) throw new Error("no replicas");
+		const timers = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+		const before = timers();
+		await expect(
+			t.promote({
+				replica: next,
+				reattach: [other],
+				between: () => Promise.reject(new Error("the scene's check failed")),
+			}),
+		).rejects.toThrow(/scene's check failed/);
+		expect(timers()).toBeLessThanOrEqual(before);
+	});
+
 	it("takes no write on the old primary from its barrier until the promotion ends", async () => {
 		const t = await topology({ replicas: 2 });
 		const [next, other] = t.replicas();

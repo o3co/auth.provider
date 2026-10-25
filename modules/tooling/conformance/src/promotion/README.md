@@ -12,7 +12,8 @@ Internal module of `conformance`: promoting a replica of a Redis topology's prim
 - A replica that has not caught up, or follows another replication history than the primary, is never promoted; its refusal says it is not eligible.
 - Writes to the primary are held from the barrier at which the target is taken until the old primary is killed or, kept on, released. The hold lapses on its own (`holdMs` past the catch-up), so a promotion still holding writes a second before it lapses, `between` included, fails rather than lose what the old primary took after the target.
 - Keeping the old primary on needs a replica reattached to the new one and one of its own to stay with it; a choice that leaves either without is refused before anything changes.
-- A promotion that fails after the barrier leaves an old primary it did not kill taking writes again.
+- Keeping the old primary on, a candidate that detaches only after the hold lapsed is a failed promotion, the topology needing recovery, never a success.
+- A promotion that fails after the barrier leaves an old primary it did not kill taking writes again. Its deadline's timer ends with it, however it ends.
 - With the old primary kept on, each primary keeps a replica online.
 
 ## Depends on
