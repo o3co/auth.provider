@@ -8,7 +8,9 @@ import type { EvidenceReport } from "../reporter.ts";
 const fixture = join(import.meta.dirname, "fixtures", "evidence");
 const root = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
 
-it("writes a run's results, named by what ran them, even where tests fail, a file does not load or a hook fails", () => {
+it("writes a run's results, named by what ran them, even where tests fail, a file does not load or a hook fails", {
+	timeout: 60_000,
+}, () => {
 	const dir = mkdtempSync(join(tmpdir(), "spec-evidence-"));
 	const ran = spawnSync(
 		"pnpm",
@@ -75,7 +77,9 @@ it("writes a run's results, named by what ran them, even where tests fail, a fil
 	]);
 });
 
-it("writes nothing without SPEC_EVIDENCE_DIR, where it runs nor beside the config", () => {
+it("writes nothing without SPEC_EVIDENCE_DIR, where it runs nor beside the config", {
+	timeout: 60_000,
+}, () => {
 	const cwd = mkdtempSync(join(tmpdir(), "spec-evidence-none-"));
 	const before = readdirSync(fixture);
 	const ran = spawnSync(

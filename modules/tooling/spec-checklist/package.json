@@ -10,6 +10,7 @@
 		"check": "node src/main.ts check",
 		"ledger": "node src/main.ts ledger",
 		"expected": "node src/main.ts expected",
+		"plan": "node src/main.ts plan",
 		"compliance": "node src/main.ts compliance"
 	},
 	"exports": {

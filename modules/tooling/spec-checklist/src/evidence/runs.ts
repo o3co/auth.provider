@@ -4,6 +4,40 @@ import { classOf, itemId } from "../ids.ts";
 import type { TestRef } from "../report.ts";
 import type { EvidenceReport } from "./reporter.ts";
 
+/**
+ * A run a CI run makes: the entry its report names, the kind of job that makes it and the value the
+ * job's matrix takes for it, and whether only a release's run makes it.
+ */
+export interface Run {
+	readonly entry: string;
+	readonly kind: string;
+	readonly matrix?: string;
+	readonly releaseOnly?: true;
+}
+
+/** A package's printed runs, each checked to be a run; a value that is not refused naming the package. */
+export function runsPrinted(pkg: string, printed: unknown): Run[] {
+	const isRun = (r: unknown): r is Run => {
+		const o = r as Partial<Run> | null;
+		return (
+			typeof o?.entry === "string" &&
+			typeof o.kind === "string" &&
+			(o.matrix === undefined || typeof o.matrix === "string") &&
+			(o.releaseOnly === undefined || o.releaseOnly === true)
+		);
+	};
+	if (!Array.isArray(printed) || !printed.every(isRun))
+		throw new Error(`${pkg}: its evidence-runs printed what is not a list of runs`);
+	return printed;
+}
+
+/** The values a kind of job's matrix takes, each once, in the order the runs give them. */
+export const planOf = (runs: readonly Run[], kind: string): string[] => [
+	...new Set(
+		runs.filter((r) => r.kind === kind && r.matrix !== undefined).map((r) => r.matrix ?? ""),
+	),
+];
+
 /** The runs a CI run must report, and which of them run a package's tests. */
 export interface Expected {
 	readonly entries: readonly string[];

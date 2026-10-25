@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expectedOf, packageDirs, readChecklist, workspaceTests } from "../repo.ts";
+import { expectedOf, packageDirs, readChecklist, runsOf, workspaceTests } from "../repo.ts";
 import type { EvidenceReport } from "./reporter.ts";
 import { checkpoint, complianceTable, itemStatuses, selectReports } from "./runs.ts";
 
@@ -18,14 +18,15 @@ const isReport = (r: unknown): r is EvidenceReport => {
 };
 
 /**
- * Reads every report under `dir`, keeps this run's (`of`), and writes `compliance.json` and
+ * Reads every report under `dir`, keeps this run's (`of`), expects the runs a run makes (a release's
+ * too where it is one), and writes `compliance.json` and
  * `compliance.md` beside them: each item's status and the counts the checkpoint takes. Answers the
  * table and whether a release may go on: none failed, incomplete or unverified.
  */
 export function complianceOf(
 	root: string,
 	dir: string,
-	of: { readonly commit: string; readonly run: string },
+	of: { readonly commit: string; readonly run: string; readonly release: boolean },
 ) {
 	const reports = selectReports(
 		walk(dir)
@@ -33,7 +34,7 @@ export function complianceOf(
 			.filter(isReport),
 		of,
 	);
-	const expected = expectedOf(root);
+	const expected = expectedOf(runsOf(root), of.release);
 	const present = new Set(reports.map((r) => r.identity.entry));
 	const missingRuns = expected.entries.filter((e) => !present.has(e));
 	const items = readChecklist().specs.flatMap((s) => s.items);

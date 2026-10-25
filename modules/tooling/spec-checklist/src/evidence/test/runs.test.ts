@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseItems } from "../../checklist.ts";
 import { type EvidenceReport, entryOf } from "../reporter.ts";
-import { type Expected, itemStatuses, selectReports } from "../runs.ts";
+import { type Expected, itemStatuses, planOf, runsPrinted, selectReports } from "../runs.ts";
 
 const identity = (entry: string, extra: Partial<EvidenceReport["identity"]> = {}) => ({
 	commit: "c1",
@@ -165,5 +165,27 @@ describe("itemStatuses", () => {
 			status: "unverified",
 			excused: { adaptation: 1 },
 		});
+	});
+});
+
+describe("the runs a package prints", () => {
+	it("are taken as a list of runs, and anything else refused naming the package", () => {
+		const printed = [{ entry: "@mod/x@p", kind: "pattern", matrix: "p" }];
+		expect(runsPrinted("@mod/x", printed)).toEqual(printed);
+		expect(() => runsPrinted("@mod/x", ["@mod/x@p"])).toThrow(
+			"@mod/x: its evidence-runs printed what is not a list of runs",
+		);
+		expect(() => runsPrinted("@mod/x", [{ entry: "e", kind: "k", releaseOnly: false }])).toThrow();
+	});
+
+	it("give each kind of job the values its matrix takes, each once", () => {
+		const runs = [
+			{ entry: "@mod/a@p1", kind: "pattern", matrix: "p1" },
+			{ entry: "@mod/b@p1", kind: "pattern", matrix: "p1" },
+			{ entry: "@mod/a@p2", kind: "pattern", matrix: "p2" },
+			{ entry: "@mod/a", kind: "area", matrix: "@mod/a" },
+		];
+		expect(planOf(runs, "pattern")).toEqual(["p1", "p2"]);
+		expect(planOf(runs, "none")).toEqual([]);
 	});
 });

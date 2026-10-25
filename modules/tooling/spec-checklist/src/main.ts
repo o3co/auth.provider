@@ -3,12 +3,14 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checklistFindings } from "./checklist.ts";
 import { complianceOf } from "./evidence/compliance.ts";
+import { planOf } from "./evidence/runs.ts";
 import {
 	expectedOf,
 	readChecklist,
 	repoFindings,
 	reportDir,
 	repoRoot as root,
+	runsOf,
 	updatedByOf,
 	workspaceTests,
 } from "./repo.ts";
@@ -60,11 +62,14 @@ if (command === "report") {
 		process.exitCode = found.length === 0 ? 0 : 1;
 	}
 } else if (command === "expected") {
-	say(JSON.stringify(expectedOf(root).entries));
+	say(JSON.stringify(expectedOf(runsOf(root), args.includes("--release")).entries));
+} else if (command === "plan" && args[0]) {
+	say(JSON.stringify(planOf(runsOf(root), args[0])));
 } else if (command === "compliance" && args[0]) {
 	const of = {
 		commit: process.env.GITHUB_SHA ?? "local",
 		run: process.env.GITHUB_RUN_ID ?? "local",
+		release: args.includes("--release"),
 	};
 	const { table, releasable } = complianceOf(root, args[0], of);
 	say(table);
@@ -72,7 +77,7 @@ if (command === "report") {
 	process.exitCode = args.includes("--release") && !releasable ? 1 : 0;
 } else {
 	say(
-		"usage: report | summary | check | ledger <spec> <the spec's plain text file> | expected | compliance <reports dir> [--release]",
+		"usage: report | summary | check | ledger <spec> <the spec's plain text file> | expected [--release] | plan <kind> | compliance <reports dir> [--release]",
 	);
 	process.exitCode = 2;
 }

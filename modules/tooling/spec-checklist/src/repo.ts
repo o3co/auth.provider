@@ -11,7 +11,7 @@ import {
 	parseLedger,
 	type Spec,
 } from "./checklist.ts";
-import type { Expected } from "./evidence/runs.ts";
+import { type Expected, type Run, runsPrinted } from "./evidence/runs.ts";
 import type { TestRef } from "./report.ts";
 import { titlesIn } from "./titles.ts";
 
@@ -94,30 +94,46 @@ const scriptsOf = (p: ReturnType<typeof readWorkspace>[number]) =>
 	(p.manifest as { readonly scripts?: Readonly<Record<string, string>> }).scripts ?? {};
 
 /**
- * The runs a CI run must report: the root's unit and integration runs, each package with a
- * `conformance` script on the new system, and every run a package's `evidence-runs` script prints
- * (JSON: a pattern's runs as `<package>@<pattern>`, a harness's as `<package>#<run>`).
+ * Every run a CI run makes: the root's unit and integration runs, each package with a `conformance`
+ * script on the new system (an area), and every run a package's `evidence-runs` script prints as a
+ * JSON list of runs (a pattern's as `<package>@<pattern>`, a harness's as `<package>#<run>`).
  */
-export function expectedOf(root: string): Expected {
+export function runsOf(root: string): Run[] {
 	const packages = readWorkspace(root);
-	const areas = packages.filter((p) => scriptsOf(p).conformance).map((p) => p.name);
+	const areas = packages
+		.filter((p) => scriptsOf(p).conformance)
+		.map((p): Run => ({ entry: p.name, kind: "area", matrix: p.name }));
 	const printed = packages
 		.filter((p) => scriptsOf(p)["evidence-runs"])
-		.flatMap(
-			(p) =>
+		.flatMap((p) =>
+			runsPrinted(
+				p.name,
 				JSON.parse(
 					execFileSync("pnpm", ["--silent", "--filter", p.name, "run", "evidence-runs"], {
 						cwd: root,
 						encoding: "utf8",
 					}),
-				) as string[],
+				),
+			),
 		);
-	const runsOf = new Map<string, string[]>();
-	for (const run of printed.filter((e) => e.includes("#"))) {
+	return [
+		{ entry: "unit", kind: "unit" },
+		{ entry: "integration", kind: "integration" },
+		...areas,
+		...printed,
+	];
+}
+
+/** The runs a CI run must report: every run, but those only a release makes unless it is one. */
+export function expectedOf(runs: readonly Run[], release: boolean): Expected {
+	const entries = runs.filter((r) => release || !r.releaseOnly).map((r) => r.entry);
+	const areas = new Set(runs.filter((r) => r.kind === "area").map((r) => r.entry));
+	const harness = new Map<string, string[]>();
+	for (const run of entries.filter((e) => e.includes("#"))) {
 		const pkg = run.slice(0, run.indexOf("#"));
-		runsOf.set(pkg, [...(runsOf.get(pkg) ?? []), run]);
+		harness.set(pkg, [...(harness.get(pkg) ?? []), run]);
 	}
-	return { entries: ["unit", "integration", ...areas, ...printed], areas: new Set(areas), runsOf };
+	return { entries, areas, runsOf: harness };
 }
 
 /** Each workspace package's directory, relative to the root. */

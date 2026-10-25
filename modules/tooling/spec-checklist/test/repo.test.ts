@@ -28,10 +28,23 @@ describe("the checklist and the workspace's tests", () => {
 });
 
 describe("the runs a CI run must report", () => {
-	it("are the root's unit and integration runs and each conformance area's, beside what packages print", () => {
-		const { entries, areas } = expectedOf(repoRoot);
-		expect(entries.slice(0, 2)).toEqual(["unit", "integration"]);
-		expect(areas.has("@mod/conformance-code")).toBe(true);
-		expect(entries).toContain("@mod/conformance-code");
+	const runs = [
+		{ entry: "unit", kind: "unit" },
+		{ entry: "integration", kind: "integration" },
+		{ entry: "@mod/conformance-code", kind: "area", matrix: "@mod/conformance-code" },
+		{ entry: "@mod/conformance-code@simple-web", kind: "pattern", matrix: "simple-web" },
+		{ entry: "@mod/interop-oidf#basic", kind: "plan", matrix: "basic" },
+		{ entry: "@mod/conformance-recipes", kind: "release", releaseOnly: true as const },
+	];
+
+	it("are every run, a release's own only where the run is a release's", () => {
+		expect(expectedOf(runs, false).entries).toEqual(runs.slice(0, 5).map((r) => r.entry));
+		expect(expectedOf(runs, true).entries).toEqual(runs.map((r) => r.entry));
+	});
+
+	it("tell an area's package and a harness's runs apart", () => {
+		const expected = expectedOf(runs, false);
+		expect([...expected.areas]).toEqual(["@mod/conformance-code"]);
+		expect(expected.runsOf.get("@mod/interop-oidf")).toEqual(["@mod/interop-oidf#basic"]);
 	});
 });
