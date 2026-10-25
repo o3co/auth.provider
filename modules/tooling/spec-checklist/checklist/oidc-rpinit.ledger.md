@@ -1,0 +1,42 @@
+# OpenID Connect RP-Initiated Logout 1.0 ledger
+
+- source: https://openid.net/specs/openid-connect-rpinitiated-1_0.txt
+- version: OpenID Connect RP-Initiated Logout 1.0, Final (September 2022)
+- sha256: 5413a40b3e665f9e04df02547a3c134f91a51814ec5953a4f8829d1bd09fe283
+
+- 1.1 #1 MUST: excluded definition
+- 1.1 #2 MUST NOT: excluded definition
+- 1.1 #3 REQUIRED: excluded definition
+- 1.1 #4 SHALL: excluded definition
+- 1.1 #5 SHALL NOT: excluded definition
+- 1.1 #6 SHOULD: excluded definition
+- 1.1 #7 SHOULD NOT: excluded definition
+- 1.1 #8 RECOMMENDED: excluded definition
+- 1.1 #9 NOT RECOMMENDED: excluded definition
+- 1.1 #10 MUST NOT: excluded definition
+- 2 #1 RECOMMENDED: excluded client-only
+- 2 #2 MUST: oidc-rpinit-2-a
+- 2 #3 SHOULD: oidc-rpinit-2-k
+- 2 #4 MUST: oidc-rpinit-2-b
+- 2 #5 RECOMMENDED: excluded client-only
+- 2 #6 SHOULD NOT: oidc-rpinit-2-c
+- 2 #7 MUST: oidc-rpinit-2-d
+- 2 #8 MUST: oidc-rpinit-2-e
+- 2 #9 SHOULD: oidc-rpinit-2-f
+- 2 #10 SHOULD: oidc-rpinit-2-g
+- 2 #11 SHOULD: oidc-rpinit-2-h
+- 2 #12 MUST: oidc-rpinit-2-i
+- 2 #13 MUST: oidc-rpinit-2-j
+- 2.1 #1 MUST: oidc-rpinit-2.1-a
+- 2.1 #2 REQUIRED: oidc-rpinit-2.1-a
+- 2.1 #3 MUST: oidc-rpinit-2.1-b
+- 3 #1 RECOMMENDED: excluded client-only
+- 3 #2 MUST NOT: oidc-rpinit-3-a
+- 3 #3 MUST NOT: oidc-rpinit-3-b
+- 3.1 #1 SHOULD: oidc-rpinit-3.1-a
+- 4 #1 MUST: oidc-rpinit-4-a
+- 4 #2 MUST NOT: oidc-rpinit-4-b
+- 4 #3 MUST: oidc-rpinit-4-c
+- 5 #1 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 5 #2 REQUIRED: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 5 #3 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
