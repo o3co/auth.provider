@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { refusalsOf, unreadable } from "../../../test/refusals.ts";
-import { assemble, contract, defineModule, kernelConfig } from "../../contract.ts";
+import { assemble, contract, defineModule, kernelConfig, type Module } from "../../contract.ts";
 import { recordingLog } from "../../testing.ts";
 
 const production = kernelConfig();
@@ -52,7 +52,8 @@ describe("the deployment's environment", () => {
 				},
 			}),
 		);
-		expect(refused.map((r) => r.where).sort()).toEqual(["origin.url", "taker", "unsafe"]);
+		// In the order the preflight asks: replicas, production, then takes.
+		expect(refused.map((r) => r.where)).toEqual(["unsafe", "origin.url", "taker"]);
 		expect(built).toEqual([]);
 	});
 
@@ -109,5 +110,105 @@ describe("the deployment's environment", () => {
 		}
 		expect(refused).toContainEqual({ where: "origin.url", reason: "is plain http" });
 		expect(JSON.stringify([refused, recorded.lines()])).not.toContain(secret);
+	});
+
+	it("holds an answer that is no list of key and reason strings, or that throws as it is read, to its module", async () => {
+		const throwing = () => {
+			throw new Error(secret);
+		};
+		const answers: unknown[] = [
+			"",
+			new Set([{ key: "k", reason: "r" }]),
+			[{}],
+			[{ key: 1, reason: "r" }],
+			[{ key: "k", reason: "" }],
+			[null],
+			{ length: 1, 0: { key: "k", reason: "r" } },
+			new Proxy([{ key: "k", reason: "r" }], { get: throwing }),
+			[
+				{
+					get key() {
+						return throwing();
+					},
+					reason: "r",
+				},
+			],
+			{ [Symbol.iterator]: throwing },
+		];
+		const modules = answers.map((answer, i) =>
+			defineModule({ name: `a${i}`, refusedInProduction: () => answer as never, takes: [] }),
+		);
+		const refused = await refusalsOf(assemble({ modules, config: production }));
+		expect(refused).toEqual(
+			answers.map((_, i) => ({ where: `a${i}`, reason: "its production check failed" })),
+		);
+		expect(JSON.stringify(refused)).not.toContain(secret);
+	});
+
+	it("holds a declaration whose very reading throws to its module, keeping nothing of it", async () => {
+		const getter = (key: string) =>
+			({
+				name: `get-${key}`,
+				takes: [],
+				get [key]() {
+					throw new Error(secret);
+				},
+			}) as unknown as Module;
+		const refused = await refusalsOf(
+			assemble({
+				modules: [getter("refusedInProduction"), getter("replicaSafe"), origin],
+				config: { ...kernelConfig({ deployment: "multi" }), origin: { url: "http://x" } },
+			}),
+		);
+		expect(refused).toEqual([
+			{ where: "get-replicaSafe", reason: "its multi-instance check failed" },
+			{ where: "get-refusedInProduction", reason: "its production check failed" },
+			{ where: "origin.url", reason: "is plain http" },
+		]);
+		expect(JSON.stringify(refused)).not.toContain(secret);
+	});
+
+	it("asks a declaration as its module's method, and with no section, or the section its defaults fill", async () => {
+		const asked: unknown[] = [];
+		const methods = {
+			name: "methods",
+			takes: [],
+			replicaSafe(this: { name: string }) {
+				return this.name === "methods";
+			},
+			refusedInProduction(this: { name: string }, section: unknown) {
+				asked.push(section);
+				return this.name === "methods" ? [] : [{ key: "this", reason: "lost" }];
+			},
+		} as unknown as Module;
+		const filled = defineModule({
+			name: "filled",
+			section: z.strictObject({ n: z.number().prefault(7) }),
+			refusedInProduction: (section) => {
+				asked.push(section);
+				return [];
+			},
+			takes: [],
+		});
+		await assemble({
+			modules: [methods, filled],
+			config: kernelConfig({ deployment: "multi" }),
+		});
+		expect(asked).toEqual([undefined, { n: 7 }]);
+	});
+
+	it("gives a factory an environment it cannot change", async () => {
+		const outcome = contract<readonly unknown[]>("outcome");
+		const changer = defineModule({ name: "changer", takes: [] }, (m) => [
+			m
+				.provide(outcome)
+				.by((c) => [
+					Reflect.set(c, "environment", "development"),
+					Reflect.defineProperty(c, "environment", { value: "development" }),
+					c.environment,
+				]),
+		]);
+		const app = await assemble({ modules: [changer], config: production });
+		expect(app.get(outcome)).toEqual([false, false, "production"]);
 	});
 });

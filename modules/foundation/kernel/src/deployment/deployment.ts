@@ -2,6 +2,48 @@ import type { KernelSettings } from "../config/settings.ts";
 import type { Module } from "../module.ts";
 import { type Refusal, readThrown } from "../refusal/refusal.ts";
 
+/**
+ * A module's declaration, read and asked as its method once, inside the hold: its getter, its call
+ * and every part of its answer `read` touches may throw, and none of what they throw is kept.
+ */
+function asked<T>(
+	module: Module,
+	name: "replicaSafe" | "refusedInProduction",
+	section: unknown,
+	read: {
+		readonly value: (declared: unknown) => T | undefined;
+		readonly answer: (answer: unknown) => T | undefined;
+	},
+	absent: T,
+): T | undefined {
+	return readThrown<T | undefined>(() => {
+		const declared: unknown = module[name];
+		if (declared === undefined) return absent;
+		if (typeof declared !== "function") return read.value(declared);
+		return read.answer(Reflect.apply(declared, module, [section]));
+	}, undefined);
+}
+
+/** A boolean as it is, or none for any other answer. */
+const readSafe = (answer: unknown) => (typeof answer === "boolean" ? answer : undefined);
+
+/**
+ * A list of key and reason strings, copied out of the answer by index (never by its iterator), or
+ * none for anything else: a list's own items only, each a record of two non-empty strings.
+ */
+function readRefusals(answer: unknown): { key: string; reason: string }[] | undefined {
+	if (!Array.isArray(answer)) return undefined;
+	const read: { key: string; reason: string }[] = [];
+	for (let i = 0; i < answer.length; i++) {
+		const item: unknown = answer[i];
+		if (item === null || typeof item !== "object") return undefined;
+		const { key, reason } = item as { key?: unknown; reason?: unknown };
+		if (typeof key !== "string" || typeof reason !== "string" || !key || !reason) return undefined;
+		read.push({ key, reason });
+	}
+	return read;
+}
+
 /** On multiple instances, each module that declares itself unsafe there. */
 export function checkReplicas(
 	modules: readonly Module[],
@@ -13,12 +55,13 @@ export function checkReplicas(
 	for (const module of modules) {
 		// A section that failed its schema is refused already; the declaration expects a checked one.
 		if (module.section !== undefined && !sections.has(module)) continue;
-		const { replicaSafe } = module;
-		// A function's throw is its module's refusal, its text never kept; the others are still asked.
-		const safe =
-			typeof replicaSafe === "function"
-				? readThrown<boolean | undefined>(() => replicaSafe(sections.get(module)), undefined)
-				: (replicaSafe ?? true);
+		const safe = asked(
+			module,
+			"replicaSafe",
+			sections.get(module),
+			{ value: readSafe, answer: readSafe },
+			true,
+		);
 		if (safe === undefined) {
 			refusals.push({ where: module.name, reason: "its multi-instance check failed" });
 		} else if (!safe) {
@@ -39,18 +82,14 @@ export function checkProduction(
 ): void {
 	if (environment !== "production") return;
 	for (const module of modules) {
-		const { refusedInProduction } = module;
-		if (refusedInProduction === undefined) continue;
 		if (module.section !== undefined && !sections.has(module)) continue;
-		// Read once, into plain strings: a throw, or an answer whose reading throws, is the module's
-		// refusal with a fixed reason, never the thrown value, which may hold a secret.
-		const read = readThrown<{ key: string; reason: string }[] | undefined>(
-			() =>
-				[...refusedInProduction(sections.get(module))].map(({ key, reason }) => ({
-					key: String(key),
-					reason: String(reason),
-				})),
-			undefined,
+		// A function only: anything written in its place is no check.
+		const read = asked(
+			module,
+			"refusedInProduction",
+			sections.get(module),
+			{ value: () => undefined, answer: readRefusals },
+			[],
 		);
 		if (read === undefined) {
 			refusals.push({ where: module.name, reason: "its production check failed" });

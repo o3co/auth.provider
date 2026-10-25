@@ -181,81 +181,89 @@ export async function assembleWatching(
 		throw new DependencyFailed();
 	};
 	/** What a factory sees while `item` is built; `next` is the stack its requests extend. */
-	const contextFor = (item: Item, next: readonly Item[]): BuildContext<unknown> => ({
-		...runtime,
-		section: sections.get(item.module),
-		environment: kernel.environment,
-		get: async <T>(contract: Contract<T>) => {
-			mayName(contract as Contract<unknown>, item);
-			mayTake(contract as Contract<unknown>, item);
-			const provider = providers.get(contract as Contract<unknown>);
-			if (!provider) {
-				refusals.push({
-					where: item.module.name,
-					reason: `no module provides ${contract.label}`,
-				});
-				throw new DependencyFailed();
-			}
-			return (await build(provider, next)) as T;
-		},
-		collect: async <T>(point: ExtensionPoint<T>) => {
-			mayName(point, item);
-			const list = contributions.get(point as ExtensionPoint<unknown>) ?? [];
-			const values: T[] = [];
-			// Each collector builds the contributions itself, so a cycle through it is still seen.
-			for (const contributor of list) values.push((await build(contributor, next)) as T);
-			const key = point as ExtensionPoint<unknown>;
-			if (collected.has(key)) {
-				const checked = collected.get(key);
-				if (checked === undefined) throw new DependencyFailed();
-				return checked as readonly T[];
-			}
-			try {
-				const checked = checkPoint(point, values, refusals);
-				collected.set(key, checked);
-				return checked;
-			} catch (error) {
-				collected.set(key, undefined);
-				throw error;
-			}
-		},
-		late: <T>(contract: Contract<T>) => {
-			mayName(contract as Contract<unknown>, item);
-			mayTake(contract as Contract<unknown>, item);
-			lateNamed.push({ contract: contract as Contract<unknown>, by: item.module.name });
-			return () => {
-				if (!assembled) throw new Error(`${contract.label} is used before assembly is done`);
-				return builtContracts.get(contract as Contract<unknown>) as T;
-			};
-		},
-		readinessReport: (deadlineMs) => {
-			if (!assembled) {
-				return Promise.reject(new Error("readiness is asked before assembly is done"));
-			}
-			return assembled.readiness(deadlineMs);
-		},
-		onStart: (hook) => startHooks.push(hook),
-		onStop: (hook) => stopHooks.push({ module: item.module.name, run: hook }),
-		every: (intervalMs, task) => {
-			if (!isTimerMs(intervalMs)) {
-				throw new RefusalSignal([
-					{
+	const contextFor = (item: Item, next: readonly Item[]): BuildContext<unknown> =>
+		withEnvironment({
+			...runtime,
+			section: sections.get(item.module),
+			get: async <T>(contract: Contract<T>) => {
+				mayName(contract as Contract<unknown>, item);
+				mayTake(contract as Contract<unknown>, item);
+				const provider = providers.get(contract as Contract<unknown>);
+				if (!provider) {
+					refusals.push({
 						where: item.module.name,
-						reason: "the every interval must be a whole number of ms, 1 to 2^31-1",
-					},
-				]);
-			}
-			periodics.push(periodic(intervalMs, task, runtime.log, item.module.name));
-		},
-		refuse: (where, reason) => {
-			throw new RefusalSignal([{ where, reason }]);
-		},
-		refuseAll: (list) => {
-			throw new RefusalSignal(
-				list.length > 0 ? list : [{ where: item.module.name, reason: "refused" }],
-			);
-		},
-	});
+						reason: `no module provides ${contract.label}`,
+					});
+					throw new DependencyFailed();
+				}
+				return (await build(provider, next)) as T;
+			},
+			collect: async <T>(point: ExtensionPoint<T>) => {
+				mayName(point, item);
+				const list = contributions.get(point as ExtensionPoint<unknown>) ?? [];
+				const values: T[] = [];
+				// Each collector builds the contributions itself, so a cycle through it is still seen.
+				for (const contributor of list) values.push((await build(contributor, next)) as T);
+				const key = point as ExtensionPoint<unknown>;
+				if (collected.has(key)) {
+					const checked = collected.get(key);
+					if (checked === undefined) throw new DependencyFailed();
+					return checked as readonly T[];
+				}
+				try {
+					const checked = checkPoint(point, values, refusals);
+					collected.set(key, checked);
+					return checked;
+				} catch (error) {
+					collected.set(key, undefined);
+					throw error;
+				}
+			},
+			late: <T>(contract: Contract<T>) => {
+				mayName(contract as Contract<unknown>, item);
+				mayTake(contract as Contract<unknown>, item);
+				lateNamed.push({ contract: contract as Contract<unknown>, by: item.module.name });
+				return () => {
+					if (!assembled) throw new Error(`${contract.label} is used before assembly is done`);
+					return builtContracts.get(contract as Contract<unknown>) as T;
+				};
+			},
+			readinessReport: (deadlineMs) => {
+				if (!assembled) {
+					return Promise.reject(new Error("readiness is asked before assembly is done"));
+				}
+				return assembled.readiness(deadlineMs);
+			},
+			onStart: (hook) => startHooks.push(hook),
+			onStop: (hook) => stopHooks.push({ module: item.module.name, run: hook }),
+			every: (intervalMs, task) => {
+				if (!isTimerMs(intervalMs)) {
+					throw new RefusalSignal([
+						{
+							where: item.module.name,
+							reason: "the every interval must be a whole number of ms, 1 to 2^31-1",
+						},
+					]);
+				}
+				periodics.push(periodic(intervalMs, task, runtime.log, item.module.name));
+			},
+			refuse: (where, reason) => {
+				throw new RefusalSignal([{ where, reason }]);
+			},
+			refuseAll: (list) => {
+				throw new RefusalSignal(
+					list.length > 0 ? list : [{ where: item.module.name, reason: "refused" }],
+				);
+			},
+		});
+	/** The context with the deployment's environment, which no factory can write or redefine. */
+	const withEnvironment = (context: Omit<BuildContext<unknown>, "environment">) =>
+		Object.defineProperty(context, "environment", {
+			value: kernel.environment,
+			enumerable: true,
+			writable: false,
+			configurable: false,
+		}) as BuildContext<unknown>;
 	const build = (item: Item, stack: readonly Item[]): Promise<unknown> => {
 		const requester = stack.at(-1);
 		// Before the cache: joining an unfinished build that waits on the requester would never settle.

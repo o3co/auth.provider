@@ -10,6 +10,7 @@ export interface BuildContext<S> extends Runtime {
 	 * The deployment's environment (`kernel.environment`), for a check only a build can make, such
 	 * as of settings an owner opens while it builds. What a section alone shows is a module's
 	 * `refusedInProduction`, refused with the preflight at once; a refusal here comes as it builds.
+	 * No factory can write or redefine it.
 	 */
 	readonly environment: "production" | "development";
 	get<T>(contract: Contract<T>): Promise<T>;

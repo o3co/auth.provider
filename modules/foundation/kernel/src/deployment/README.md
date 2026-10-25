@@ -13,8 +13,9 @@ Internal module of `kernel`: the preflight of what the deployment's settings ask
 - `checkReplicas` and `checkProduction` (modules, their checked sections, the setting, the refusals so far): each adds its refusals.
 
 ## Invariants
-- A declaration that is a function is asked only with a section that passed its schema.
-- One that throws, or whose answer throws as it is read, refuses its module by name with a fixed reason (`its multi-instance check failed`, `its production check failed`), keeping none of what it threw; the other modules are still asked.
+- A declaration is read once, and a function asked as its module's method, only with a section that passed its schema (none for a module without one, the defaults filled in).
+- `replicaSafe` answers a boolean. `refusedInProduction` is a function answering a list (read by index, never by its iterator) of records of two non-empty strings, `key` and `reason`.
+- Reading the declaration, asking it, or reading its answer: a throw, or an answer of another shape, refuses its module by name with a fixed reason (`its multi-instance check failed`, `its production check failed`), keeping none of what it threw; the other modules are still asked, in order.
 - A production refusal is at `<module>.<key>`, with the reason the module gave; the module gives no value.
 - In development, no production check is asked.
 
