@@ -6,7 +6,7 @@
 
 ## Not here
 - A recipe's text, which is written by hand around its generated blocks; the module cards hold the facts it points to.
-- Generating and starting apps (`create-app`, `conformance`). The fake ledger's answers (`users-http`'s `./testing`).
+- Generating and starting apps (`create-app`, `conformance`). The fake ledger's answers (`ledger-fakes`).
 
 ## Offers
 - Area `recipes`: its part names the modules a recipe's command composes, set up on Redis where the command composes it and with a second factor required where it composes `mfa`, and `localConf`, the `config/local.conf` its reader writes, which the app boots as written, below the set-up's sections. It has no legacy set-up: recipes run on the new system only.
@@ -26,7 +26,7 @@
 - Touches only the HTTP interface and boot refusals.
 
 ## Depends on
-- `conformance`, `create-app`; in tests, the areas whose parts a recipe's scene composes, `users-http`'s fake ledger, and `trial`'s layer.
+- `conformance`, `create-app`; in tests, the areas whose parts a recipe's scene composes, `ledger-fakes`' fake ledger, and `trial`'s layer.
 
 ## Vocabulary
 - recipe: a document a user follows to build something with the provider, written by hand around generated blocks.

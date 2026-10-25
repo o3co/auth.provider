@@ -17,6 +17,8 @@
 ## Invariants
 - The legacy set-up, and the needs the legacy system cannot provide and the differences it answers differently, live only in `src/legacy.ts`.
 - The new system always composes subject revocation and its check on tokens, which `tokens` requires.
+- The new set-up composes `client-credentials` only where a scene's client is allowed the grant, as boot refuses a grant a client is allowed that nothing composed serves.
+- A scene registers only the clients of its own grants; a client there only to be refused or to authenticate is allowed no grant.
 - A scene about DPoP, the jwt-bearer grant or resource indicators being absent says so (`false`).
 - The new set-up of a scene about DPoP, the jwt-bearer grant or resource indicators being absent names that module as one the scene is without.
 - A pattern's app with a user ledger and verified-email leaves out a jwt-bearer scene: no source can vouch for the subject's email.
