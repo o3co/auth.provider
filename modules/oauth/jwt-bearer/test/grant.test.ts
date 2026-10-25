@@ -681,6 +681,10 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 				.sign(ec.privateKey),
 			header: rawSigned({ alg: "EdDSA", crit: ["x"], x: 1 }, { ...claims, jti: "j-crit" }),
 			signature: rawSigned({ alg: "EdDSA" }, { ...claims, jti: "j-other" }, other.privateKey),
+			// Not read as a JWT at all: two parts, a header or payload that is no JSON object.
+			compact: "a.b",
+			unreadHeader: `${Buffer.from("not json").toString("base64url")}.e30.AA`,
+			unreadPayload: `${Buffer.from(JSON.stringify({ alg: "EdDSA" })).toString("base64url")}.${Buffer.from("[1]").toString("base64url")}.AA`,
 		};
 		for (const answer of [held, { kind: "none" } as const]) {
 			keys = answer;
