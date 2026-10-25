@@ -89,6 +89,8 @@ interface Link {
 	inMulti: boolean;
 	holding: boolean;
 	readonly waiting: Record<Direction, Buffer[]>;
+	/** Frames whose delay ran out while kept: ahead of every one waiting. */
+	readonly parked: Record<Direction, Buffer[]>;
 	chain: Record<Direction, Promise<void>>;
 	/** Frames on the chain not yet written, so a frame sent with no delay keeps behind them. */
 	readonly inFlight: Record<Direction, number>;
@@ -99,7 +101,21 @@ interface Rule<T> {
 	readonly done: ReturnType<typeof settleable<T>>;
 }
 
-const subscriptions = new Set(["SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "MONITOR"]);
+// Each answers more than once, or not at once, to one request.
+const subscriptions = new Set([
+	"SUBSCRIBE",
+	"PSUBSCRIBE",
+	"SSUBSCRIBE",
+	"UNSUBSCRIBE",
+	"PUNSUBSCRIBE",
+	"SUNSUBSCRIBE",
+	"MONITOR",
+]);
+/** `CLIENT REPLY OFF` or `SKIP`: requests with no answer, which would part each answer from its request. */
+const turnsAnswersOff = (command: Command) =>
+	command.name === "CLIENT" &&
+	command.args[0]?.toString().toUpperCase() === "REPLY" &&
+	["OFF", "SKIP"].includes(command.args[1]?.toString().toUpperCase() ?? "");
 
 /**
  * A relay between an app and Redis that reads RESP2 both ways and pairs each answer with its
@@ -129,11 +145,15 @@ export async function startRelay(options: RelayOptions) {
 		link.server.destroy();
 		link.waiting.up = [];
 		link.waiting.down = [];
+		link.parked.up = [];
+		link.parked.down = [];
 	};
 	const fail = (link: Link | undefined, why: string) => {
 		failures.push(why);
 		if (link) cut(link);
 	};
+	const kept = (link: Link, direction: Direction) =>
+		stalled[direction] || (direction === "up" && link.holding);
 	const deliver = (link: Link, direction: Direction, bytes: Buffer) => {
 		const to = direction === "up" ? link.server : link.client;
 		const ms = delays[direction];
@@ -146,19 +166,26 @@ export async function startRelay(options: RelayOptions) {
 			.then(() => (ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : undefined))
 			.then(() => {
 				link.inFlight[direction]--;
-				if (link.open) to.write(bytes);
+				if (!link.open) return;
+				// A stall or a hold begun while it was delayed keeps it, in order.
+				if (kept(link, direction)) link.parked[direction].push(bytes);
+				else to.write(bytes);
 			});
 	};
 	const send = (link: Link, direction: Direction, bytes: Buffer) => {
 		if (!link.open) return;
-		const kept = stalled[direction] || (direction === "up" && link.holding);
-		if (kept || link.waiting[direction].length > 0) link.waiting[direction].push(bytes);
+		if (kept(link, direction) || link.waiting[direction].length > 0)
+			link.waiting[direction].push(bytes);
 		else deliver(link, direction, bytes);
 	};
 	const flush = (link: Link) => {
 		for (const direction of ["up", "down"] as const) {
-			if (stalled[direction] || (direction === "up" && link.holding)) continue;
+			if (kept(link, direction)) continue;
+			// Parked frames have had their delay and are older than any still on the chain.
+			const to = direction === "up" ? link.server : link.client;
+			for (const bytes of link.parked[direction]) to.write(bytes);
 			const waiting = link.waiting[direction];
+			link.parked[direction] = [];
 			link.waiting[direction] = [];
 			for (const bytes of waiting) deliver(link, direction, bytes);
 		}
@@ -195,6 +222,7 @@ export async function startRelay(options: RelayOptions) {
 			}
 			if (subscriptions.has(command.name))
 				return fail(link, `a subscription is not read (${command.name})`);
+			if (turnsAnswersOff(command)) return fail(link, "CLIENT REPLY OFF or SKIP is not read");
 			if (command.name === "HELLO" && command.args[0]?.toString() === "3")
 				return fail(link, "RESP3 is not read");
 			link.role = options.roleOf?.(command) ?? link.role;
@@ -306,6 +334,7 @@ export async function startRelay(options: RelayOptions) {
 			inMulti: false,
 			holding: false,
 			waiting: { up: [], down: [] },
+			parked: { up: [], down: [] },
 			chain: { up: Promise.resolve(), down: Promise.resolve() },
 			inFlight: { up: 0, down: 0 },
 		};

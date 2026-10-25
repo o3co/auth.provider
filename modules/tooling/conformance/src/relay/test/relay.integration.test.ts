@@ -12,6 +12,14 @@ const bulk = (data: string | null) => ({
 	data: data === null ? null : Buffer.from(data),
 });
 const ok = { kind: "simple", text: "OK" };
+/** Until `seen` holds, checked every few ms, within five seconds. */
+const until = async (seen: () => boolean) => {
+	for (let i = 0; i < 500 && !seen(); i++) await pause(10);
+	if (!seen()) throw new Error("not seen in time");
+};
+/** A relay that names every connection by what it sends, so a request's arrival shows. */
+const signalling = () =>
+	startRelay({ upstream: upstreamOf(redis.url), roleOf: () => "operations" });
 
 /** A `SET` of the key, which wrote where Redis answered OK. */
 const setOf = (key: string): Match => ({
@@ -282,35 +290,91 @@ describe("what the relay cannot read", () => {
 		["RESP3", encode("HELLO", "3")],
 		["a subscription", encode("SUBSCRIBE", "ch")],
 		["an inline command", Buffer.from("PING\r\n")],
+		["an unsubscription", encode("UNSUBSCRIBE", "a", "b")],
+		["a pattern unsubscription", encode("PUNSUBSCRIBE", "a")],
+		["a shard unsubscription", encode("SUNSUBSCRIBE", "a")],
+		["answers turned off", encode("CLIENT", "REPLY", "OFF")],
+		["an answer skipped", encode("client", "reply", "skip")],
 	];
 	for (const [what, request] of cases) {
 		it(`is refused: ${what}, its connection cut`, async () => {
 			const relay = await startRelay({ upstream: upstreamOf(redis.url) });
 			const c = await rawClient(relay.url);
 			c.write(request);
-			await c.closed;
-			await expect(relay.close()).rejects.toThrow(/RESP3|subscription|inline/);
+			await Promise.race([c.closed, pause(2_000)]);
+			expect(c.isClosed()).toBe(true);
+			await expect(relay.close()).rejects.toThrow(/RESP3|subscription|inline|CLIENT REPLY/);
 		});
 	}
 });
 
 describe("what the relay keeps in order and on record", () => {
 	it("keeps a frame behind one still delayed, though the delay is lifted meanwhile, both ways", async () => {
-		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		const relay = await signalling();
 		const c = await rawClient(relay.url);
 		const k = fresh();
 		relay.delay(300, "up");
 		c.write(encode("SET", k, "1"));
+		// The relay has the first SET, delayed, before the delay is lifted.
+		await until(() => relay.connections()[0]?.role !== undefined);
 		relay.delay(0, "up");
 		c.write(encode("SET", k, "2"));
 		expect(await c.replies(2)).toEqual([ok, ok]);
 		expect(await ask(redis.url, "GET", k)).toEqual(bulk("2"));
+		const ping: Match = { request: (x) => x.name === "PING", succeeded: () => true };
 		relay.delay(300, "down");
 		c.write(encode("PING"));
-		await pause(50);
+		await until(() => relay.executions(ping).length === 1);
 		relay.delay(0, "down");
 		c.write(encode("ECHO", "after"));
 		expect(await c.replies(4)).toEqual([ok, ok, { kind: "simple", text: "PONG" }, bulk("after")]);
+		c.end();
+		await relay.close();
+	});
+
+	it("keeps a delayed frame from passing a stall begun meanwhile, both ways, until resumed", async () => {
+		const relay = await signalling();
+		const c = await rawClient(relay.url);
+		const k = fresh();
+		relay.delay(200, "up");
+		c.write(encode("SET", k, "1"));
+		await until(() => relay.connections()[0]?.role !== undefined);
+		relay.stall("up");
+		await pause(400);
+		expect(await ask(redis.url, "GET", k)).toEqual(bulk(null));
+		relay.resume();
+		expect(await c.replies(1)).toEqual([ok]);
+		expect(await ask(redis.url, "GET", k)).toEqual(bulk("1"));
+		relay.delay(0, "up");
+		const ping: Match = { request: (x) => x.name === "PING", succeeded: () => true };
+		relay.delay(200, "down");
+		c.write(encode("PING"));
+		await until(() => relay.executions(ping).length === 1);
+		relay.stall("down");
+		await pause(400);
+		expect(c.got()).toEqual([ok]);
+		relay.resume();
+		expect(await c.replies(2)).toEqual([ok, { kind: "simple", text: "PONG" }]);
+		c.end();
+		await relay.close();
+	});
+
+	it("lets a frame kept by a stall out ahead of a later one still delayed, once resumed", async () => {
+		const relay = await signalling();
+		const c = await rawClient(relay.url);
+		const k = fresh();
+		relay.delay(300, "up");
+		c.write(encode("SET", k, "1"));
+		await until(() => relay.connections()[0]?.role !== undefined);
+		await pause(100);
+		c.write(encode("SET", k, "2"));
+		await pause(50);
+		relay.stall("up");
+		// The first's delay runs out under the stall; the second's has not when it is lifted.
+		await pause(200);
+		relay.resume();
+		expect(await c.replies(2)).toEqual([ok, ok]);
+		expect(await ask(redis.url, "GET", k)).toEqual(bulk("2"));
 		c.end();
 		await relay.close();
 	});

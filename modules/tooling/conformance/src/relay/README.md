@@ -16,9 +16,9 @@ Internal module of `conformance`: a relay between an app and Redis that causes a
 - An answer is dropped only where the match says it shows a write; a matched answer showing none is passed on, and the drop fails as no fault having happened.
 - A dropped answer cuts its connection both ways, so no later answer is paired with the wrong request; the requests behind it are reported, each with whether Redis had answered it. Answers read with it are recorded and observed, never passed on, and cause no further drop.
 - A held request, and every request after it on its connection, reaches Redis only once released; cut, they never do. A connection takes one hold at a time; a second matched while it is held is refused.
-- Frames keep their order each way: one sent with no delay waits behind those still delayed.
+- Frames keep their order each way: one sent with no delay waits behind those still delayed, and a stall or a hold begun while a frame is delayed keeps it, ahead of later ones, until lifted.
 - A match on a request inside a transaction (after `MULTI`, until `EXEC` or `DISCARD`) is refused, as `QUEUED` shows nothing ran.
-- RESP3, subscriptions, `MONITOR`, inline commands and frames it cannot read cut their connection.
+- RESP3, subscriptions and unsubscriptions, `MONITOR`, `CLIENT REPLY OFF` and `SKIP`, inline commands and frames it cannot read cut their connection: each would part an answer from its request.
 - What it refused, or a fault that did not happen (a drop or a hold that never matched, a drop whose answer showed no write), fails the relay's `close`.
 - A connection's role comes from the caller's `roleOf`, read from what the connection sends; the relay holds no store or feature vocabulary.
 - Times are on the relay's monotonic clock.
