@@ -10,7 +10,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 
 ## Offers
 - `transactionsIn` (the build context) → the operations below. It takes the package's store interface and `cookies`' contract from the assembly, and randomness, the clock and the package's `transaction-lifetime` and `attempts-per-transaction` from the context.
-- `transactionsOver` (those parts, given directly) → the same operations.
+- `transactionsOver` (those parts, given directly) → the same operations. `transactionsTakes`: what `transactionsIn` takes, for the takes of each module calling it.
 - `start`: a new transaction with every attempt, holding what it is given for its work → its identifier, deadline and cookie. `nextDeadline`: the deadline of one started now.
 - `find` (request, identifier) → the transaction and the time left, or none.
 - `carried` (request) → the identifier the browser's cookie names, or none.
@@ -36,4 +36,4 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - `find` answers a transaction only while its holder's listing holds it; taking it, or spending its last attempt, takes it off, logging `mfa-flows.listing_failed` when that fails.
 
 ## Depends on
-- `kernel` (the build context, the clock, unavailable); `http` (the request type); `cookies`; `session` (the login facts type); `mfa` (the type of whom it asks for); `subject-attributes` (`vouches`); the package's store interface
+- `kernel` (the build context, the clock, unavailable); `http` (the request type); `cookies`; `session` (the login facts type); `login-gates` (`LoginFrom`); `mfa-extensions` (`AskedFrom`, whom it asks for); `subject-attributes` (`vouches`); the package's store interface

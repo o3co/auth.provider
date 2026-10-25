@@ -20,4 +20,4 @@ Internal module of `mfa-flows`: the shapes of what the module binding factors gi
 - Its types are what the package's contract takes, by type alone.
 
 ## Depends on
-- `audit`, `http`, `rate-limit` (types); the package's `proof` (the resume), `recording`, `transactions`, `requests` and section (the lockout's name).
+- `audit`, `http`, `rate-limit`, `mfa-extensions` (`AskedFrom`), `session`, `subject-revocation` (types); the package's `proof` (the resume), `recording`, `transactions`, `requests` and section (the lockout's name).

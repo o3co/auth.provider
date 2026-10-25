@@ -6,15 +6,15 @@ Internal module of `mfa-flows`: a session's permit to release its subject's lock
 - Keeps one permit per session, granted when a factor guessing cannot beat is proved locally in it (at the login gate or a step-up), and marks it used, with what its release answered.
 
 ## Not here
-- Which factors guessing cannot beat, and how long a proof stays recent (`mfa`). The release itself (`release`). When to grant (`proof`).
+- Which factors guessing cannot beat, and how long a proof stays recent (`session`). The release itself (`release`). When to grant (`proof`).
 
 ## Offers
-- `permitsOver` (the transaction store, the clock, `mfa`'s recent window, the longest one (`session`'s)) → grant, the session's permit (none / ready with its id / used with its answer), and use.
+- `permitsOver` (the transaction store, the clock, `session`'s recent window and its longest one) → grant, the session's permit (none / ready with its id / used with its answer), and use.
 
 ## Invariants
 - A permit is named by a hash of the session's handle in the transaction store; the handle is never kept in clear.
 - A later proof's permit replaces the session's, used or not, under a new id; a use names its proof, so it leaves a later one alone.
-- A permit counts while its proof is recent (`mfa`), and lasts at most an hour from the session's first: the record is kept that long and not renewed, which fails closed.
+- A permit counts while its proof is recent (`session`), and lasts at most an hour from the session's first: the record is kept that long and not renewed, which fails closed.
 - Used is a mark in the record, not a time: a used permit answers what it answered, however clocks drift.
 
 ## Data

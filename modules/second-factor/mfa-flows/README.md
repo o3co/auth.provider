@@ -11,7 +11,7 @@
 ## Offers
 - Contributions: the `login-gates` gate `mfa`, and the step `mfa-flows` that proves a factor to `mfa`.
 - Routes under `/session/mfa/`, whose URLs outside users rely on: `GET transaction`, `POST challenge`, `POST verify`, `POST step-up`, `POST enrollment`, `POST enrollment/complete`, `POST lock/release`.
-- Audit events carry the subject, the transaction's `purpose` and the `source` where determined; never a proof, a challenge or a transaction id.
+- Audit events carry the subject, a transaction's `purpose` where one is in play (`mfa.lock.recovered` has none), and the `source` where determined; never a proof, a challenge or a transaction id.
 - `mfa.challenge.sent` (`kind`): a factor's or a binding proof's challenge sent; a login held or a step-up begun records nothing.
 - With the judged `factor` (a binding proof's name as `kind`): `mfa.verified` once the transaction is taken, `mfa.verify.failure` (`reason`), `mfa.locked` (`hold`), and `mfa.locked.first` (`hold`) with the wrong guess that starts a hold.
 - `mfa.email_address_mismatch` (`kind`) when a kind refuses a factor whose contact changed. `mfa.lock.recovered` when a release clears something (fields in `release`'s card).
@@ -39,7 +39,7 @@
 - Transactions: one per identifier (256 random bits), kept for `transaction-lifetime`. Its needs say what the place must keep it through (a taken one coming back could finish a login twice); the wiring side meets them.
 
 ## Depends on
-- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (composed with it; `proofSteps`, `fenceFollower`), `mfa-reading` (the reading and proving of factors), `mfa-extensions` (`secondFactorAmr`)
+- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (composed with it; `proofSteps`, `fenceFollower`), `mfa-reading` (the reading and proving of factors), `mfa-extensions` (`secondFactorAmr`), `subject-attributes` (`vouches`)
 
 ## Vocabulary
 - Transaction: a short-lived record waiting for second-factor confirmation. Its purpose is login, login with a first enrollment, step-up, or enrollment.
