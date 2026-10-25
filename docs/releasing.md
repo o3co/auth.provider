@@ -121,11 +121,12 @@ The check stops for one of two reasons, and its output names which for each pack
 
 ## When the release finds no evidence
 
-The first job looks for CI's successful run of the release pull request (the pull request to `main` the tag's commit merged) whose tested commit has the tag's tree, the newest first. It runs before anything is built, so where it stops nothing is published; its output names the run and the reason:
+The first job looks for CI's successful runs of the release pull request (the pull request to `main` the tag's commit merged) and examines them in turn, the newest first, taking the first that will do: its tested commit has the tag's tree, its `conformance`, `release-check` and `compliance` jobs passed (a pull request to `main` alone runs them), and the evidence it kept, each job's from its newest attempt, still makes the release's compliance when read again. It runs before anything is built, so where it stops nothing is published; its output names each run it examined and the reason:
 
 - **The tag's commit merged no pull request to `main`.** Delete the tag (`git push --delete origin v<version>`) and tag the merge commit of the release pull request.
 - **No successful CI run of the release pull request.** Re-run the pull request's CI (on its run, **Re-run all jobs**), wait for it to pass, then re-run the failed jobs of the release's run.
-- **Its compliance job did not pass, or an artifact is missing or expired.** Re-run all jobs of the run it names, then re-run the failed jobs of the release's run. GitHub re-runs a run within 30 days of it; past that, do as for another tree, below.
+- **A release job did not pass, an artifact is missing or expired, or the evidence kept no longer makes the release's compliance** (the runs that did not report are named). Re-run all jobs of the run it names: the new attempt keeps its artifacts anew, and each job's newest attempt is the one taken, so an older attempt's expired one stops nothing. Then re-run the failed jobs of the release's run. GitHub re-runs a run within 30 days of it; past that, do as for another tree, below.
+- **A run could not be examined** (a download, an archive or an answer that failed). The next older run was examined in its place; where none would do, re-run the failed jobs of the release's run once GitHub answers.
 - **The run tested another tree** (main moved after it ran, so what it tested is not what the tag publishes). Delete the tag, merge `main` into `develop`, open a new release pull request from `develop` to `main`, wait for its CI, merge it, and tag the new merge commit.
 
 ## The API site
