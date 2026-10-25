@@ -86,16 +86,19 @@ Tag the merge commit on `main` as `v<version>` and push the tag. The workflow re
 
 ## What the workflow does
 
+It runs in four jobs before the API site's. `evidence` reads the CI runs, and nothing else. `pack` runs the checks and packs, and `sbom` makes the lists; both run what the release packed, and read alone. `publish` alone holds what publishing takes (its OIDC token and writing the release), and runs nothing the release packed.
+
 1. Finds the CI run of the release pull request that tested the tag's tree, and keeps its evidence: each test's result and the compliance table (`pnpm release:evidence`). It stops the release where none will do; see [When the release finds no evidence](#when-the-release-finds-no-evidence).
-2. Checks that npm can publish through trusted publishing (11.5.1 or later).
-3. Runs `pnpm check` and `pnpm release:check`: every pattern generated from the packed tarballs alone, type-checked and booted, and a package outside the release composed beside them, its app held to the integrity the release sealed.
-4. Restores the tarballs an earlier attempt of the run saved, or, where none was saved, packs every package (`pnpm release:pack`): every bundle but the scaffold, then the scaffold's index sealed with their integrity and zod's, then the scaffold and the entrance. Refuses any tarball without the root `LICENSE` word for word, and saves the tarballs it packed to the run.
-5. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
-6. Makes the release's lists of what it ships (`pnpm release:sbom`), CycloneDX 1.6, from those very tarballs: the operator's app (the full template with every feature that opts in) and the entrance, each installed from them with its lock; the packages bundles hold inside, as the manifests declare them; the tools that build the release; and the reference image built from the app's Dockerfile, listed by syft. Each list names the release's own packages as npm publishes them, with their tarballs' SHA-512; a tarball no list holds, or a bundled file undeclared, stops the release.
-7. Creates a draft GitHub release with generated notes, and attaches the lists as `auth-provider-<version>-sbom.tar.gz` (its `README.md` says what each file is) and the evidence as `auth-provider-<version>-evidence.tar.gz`: the CI run's artifacts with a manifest naming the run and the commit it tested (of the tag's tree), this run's own `pnpm check` results, `pnpm audit --json`, and the commands and environment they ran in.
-8. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
-9. Publishes the draft release.
-10. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
+2. Runs `pnpm check` and `pnpm release:check`: every pattern generated from the packed tarballs alone, type-checked and booted, and a package outside the release composed beside them, its app held to the integrity the release sealed.
+3. Restores the tarballs an earlier attempt of the run saved, or, where none was saved, packs every package (`pnpm release:pack`): every bundle but the scaffold, then the scaffold's index sealed with their integrity and zod's, then the scaffold and the entrance. Refuses any tarball without the root `LICENSE` word for word, and saves the tarballs it packed to the run.
+4. Makes the release's lists of what it ships (`pnpm release:sbom`), CycloneDX 1.6, from those very tarballs: the operator's app (the full template with every feature that opts in) and the entrance, each installed from them with its lock; the packages bundles hold inside, as the manifests declare them; the tools that build the release; and the reference image built from the app's Dockerfile, listed by syft. Each list names the release's own packages as npm publishes them, with their tarballs' SHA-512; a tarball no list holds, or a bundled file undeclared, stops the release.
+5. Checks that npm can publish through trusted publishing (11.5.1 or later).
+6. Holds the tarballs it is about to publish to those the lists were made of, by name, version and integrity (`pnpm release:listed`).
+7. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
+8. Creates a draft GitHub release with generated notes, and attaches the lists as `auth-provider-<version>-sbom.tar.gz` (its `README.md` says what each file is) and the evidence as `auth-provider-<version>-evidence.tar.gz`: the CI run's artifacts with a manifest naming the run and the commit it tested (of the tag's tree), this run's own `pnpm check` results, `pnpm audit --json`, and the commands and environment they ran in.
+9. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
+10. Publishes the draft release.
+11. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
 
 ## A package name never published before
 
@@ -108,7 +111,7 @@ A release whose new name is missing either stops at that package; see the next s
 
 ## When a publish stops partway
 
-Fix the cause and re-run the failed job of the same run (not a new run, and not a new tag). Each attempt first restores the tarballs an earlier attempt saved, and packs only where none was saved:
+Fix the cause and re-run the failed jobs of the same run (not a new run, and not a new tag). Each attempt first restores the tarballs an earlier attempt saved, and packs only where none was saved:
 
 - A failure before the tarballs were saved (installing, the checks, packing, saving them) published nothing: the rerun packs, checks and saves them anew.
 - A failure after they were saved, publishing included: the rerun restores them, never packing again, and checks that every package of this version already on npm is that very tarball before publishing anything; one that is passed over, so the rerun publishes only what is missing, and the release is published once every package is.
