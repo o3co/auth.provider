@@ -51,7 +51,7 @@ export interface JtiLedgerScene {
 export type TrustedIssuerScene = (
 	| {
 			readonly issuer: string;
-			readonly alg: "EdDSA" | "ES256" | "RS256";
+			readonly alg: "EdDSA" | "ES256" | "RS256" | "PS256";
 			readonly publicPem: string;
 	  }
 	/**
