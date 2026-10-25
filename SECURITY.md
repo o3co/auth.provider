@@ -41,7 +41,7 @@ Which versions get fixes is [Supported versions](#supported-versions), as it sta
 
 ## How a fix is made and published
 
-A fix stays as private as the report until the version that carries it is released:
+A fix is made and checked in private, and made public with the version that carries it:
 
 1. The fix is made in the advisory's temporary private fork, as a private pull request, with its change record ([findings and fixes](docs/audit/findings.md)).
 2. GitHub runs no Actions there, so the checks that hold the guarantees are run on the fix's branch on a private machine, and their evidence is kept with the change record: the tests, the conformance scenes, the checklists' compliance, the guard and the release check.
