@@ -71,9 +71,9 @@ export interface Suite {
  * Starts the suite at `pin` in `dir`: its source at the pinned commit (the compose file and the
  * scripts), a Python of its own for the scripts, and its containers under a project of their own,
  * after any suite whose owner is gone was taken down. Each setup step is held to its own time and to
- * `signal`, the plan's deadline. Stopping keeps every container's state and log in `log` first, then
- * takes the containers and their volumes down by budgets of its own, past the deadline too, and
- * removes `dir`; however the start went. A stop that fails, a start's own too, is a `SuiteStopFailed`
+ * `signal`, the plan's deadline. Stopping keeps every container's state and log, stdout and stderr,
+ * in `log` first, then takes the containers and their volumes down by budgets of its own, past the
+ * deadline too, and removes `dir`; however the start went. A stop that fails, a start's own too, is a `SuiteStopFailed`
  * telling every step that failed; where the containers were not taken down it keeps `dir`, which holds
  * what stops the suite.
  */
@@ -103,9 +103,11 @@ export async function startSuite(
 		command(cmd, args, { timeoutMs, env, ...(signal ? { signal } : {}), ...(cwd ? { cwd } : {}) });
 	const stop = async () => {
 		const problems: unknown[] = [];
+		/** What a command wrote, its stderr after its stdout. */
 		const kept = async (args: readonly string[]) =>
 			command("docker", [...compose, ...args], { timeoutMs: budgetMs.logs, env }).then(
-				(r) => r.stdout,
+				({ stdout, stderr = "" }) =>
+					stderr === "" ? stdout : `${stdout}\n--- stderr ---\n${stderr}`,
 				(error: unknown) => {
 					problems.push(error);
 					return "";
