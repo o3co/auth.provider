@@ -4262,6 +4262,9 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/guard-imports':
+        specifier: workspace:*
+        version: link:../guard-imports
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
