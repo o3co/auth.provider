@@ -6,7 +6,8 @@ import type { ExchangeVerifier } from "@mod/token-exchange";
 import { isWellFormedSubject, type Users } from "@mod/users";
 import { decodeJwt } from "jose";
 import { z } from "zod";
-import type { ClientEntry, Kind } from "./section.ts";
+import type { IdTokenChecks, IdTokenTaken } from "./contract.ts";
+import { type ClientEntry, type Kind, longestClockSkew, longestMaxAge } from "./section.ts";
 import type { UsedIdTokens } from "./store.ts";
 
 export const idTokenType = "urn:ietf:params:oauth:token-type:id_token";
@@ -32,6 +33,9 @@ export interface VerifierParts {
 
 /** Kept past the last moment a token is taken by this much, so clock differences never let one back. */
 const usedAllowanceMs = 60_000;
+/** The latest any section takes an id_token after its `iat`, and after its `exp`: the longest max-age and clock skew. */
+const longestAgeMs = longestMaxAge * 1000;
+const longestSkewMs = longestClockSkew * 1000;
 
 const claimsShape = z.object({
 	iss: z.string(),
@@ -52,8 +56,8 @@ const takes = (entry: ClientEntry, aud: string, azp: string | undefined) =>
 		? azp === undefined || azp === aud
 		: azp !== undefined && entry["authorized-parties"].includes(azp));
 
-/** The id_token verifier for token-exchange: one per token type, choosing the kind by `iss`. */
-export function idTokens(parts: VerifierParts): ExchangeVerifier {
+/** The checks over the kinds taken, choosing the kind by `iss`. */
+export function idTokenChecksOver(parts: VerifierParts): IdTokenChecks {
 	const invalid = { kind: "invalid" } as const;
 	const kindOf = (token: string) => {
 		try {
@@ -64,8 +68,8 @@ export function idTokens(parts: VerifierParts): ExchangeVerifier {
 		}
 	};
 	return {
-		tokenType: idTokenType,
-		async verify(token) {
+		issuers: parts.taken.flatMap((taken) => taken.iss),
+		async check(token) {
 			const taken = kindOf(token);
 			if (!taken) return invalid;
 			const verified = await taken.jwt.verify(token);
@@ -92,15 +96,16 @@ export function idTokens(parts: VerifierParts): ExchangeVerifier {
 				parts.skewMs,
 			);
 			if (revoked === "revoked") return invalid;
-			// Another issuer's token for one app: what it may give is that client's allowance alone.
-			return {
-				kind: "foreign",
+			const answer: IdTokenTaken = {
+				kind: "taken",
 				subject,
 				issuer: taken.iss[0] as string,
+				issuedAt: iat * 1000,
 				expiresAt: exp * 1000,
-				clients: [clients[0] as string],
+				client: clients[0] as string,
 				...(nonce !== undefined && digestShape.test(nonce) ? { holderDigest: nonce } : {}),
 			};
+			return answer;
 		},
 		async consume(token) {
 			const taken = kindOf(token);
@@ -111,11 +116,35 @@ export function idTokens(parts: VerifierParts): ExchangeVerifier {
 			// The signed part alone, so the same token under another signature is the same token.
 			const signed = token.split(".").slice(0, 2).join(".");
 			const name = createHash("sha256").update(signed).digest("base64url");
-			const lastTaken = Math.min(exp * 1000, iat * 1000 + parts.maxAgeMs) + parts.skewMs;
+			// By the longest a section may take it, never this one's: a record outlives any section's taking, so
+			// instances on other settings, or this one's widened, never take it again.
+			const lastTaken = Math.min(exp * 1000, iat * 1000 + longestAgeMs) + longestSkewMs;
 			// Relative, since the place judges a lifetime by its own clock.
 			const lifetimeMs = lastTaken - parts.now() + usedAllowanceMs;
 			const saved = await parts.used.save(taken.kind, name, lifetimeMs);
 			return saved === "created" ? "consumed" : "replayed";
 		},
+	};
+}
+
+/** The id_token verifier for token-exchange, over the checks: one per token type. */
+export function idTokens(checks: IdTokenChecks): ExchangeVerifier {
+	return {
+		tokenType: idTokenType,
+		async verify(token) {
+			const taken = await checks.check(token);
+			if (taken.kind !== "taken") return { kind: "invalid" };
+			const { subject, issuer, expiresAt, client, holderDigest } = taken;
+			// Another issuer's token for one app: what it may give is that client's allowance alone.
+			return {
+				kind: "foreign",
+				subject,
+				issuer,
+				expiresAt,
+				clients: [client],
+				...(holderDigest === undefined ? {} : { holderDigest }),
+			};
+		},
+		consume: (token) => checks.consume(token),
 	};
 }

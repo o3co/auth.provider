@@ -190,6 +190,10 @@ export const coverage: Coverage = {
 			key: "sections.consent.host",
 			why: "the host a client's source verified, shown on the consent page",
 		},
+		{
+			key: "jwt-bearer.delegated-issuers",
+			why: "the `iss` values another module checks; their keys are where that module fixes them (`exchange-id-tokens`, by the kind)",
+		},
 		{ key: "jti-ledger-http.issuer", why: "the `iss` the ledger answers for, not where it is" },
 		{ key: "signer-keys-http.issuer", why: "the `iss` the ledger answers for, not where it is" },
 		{

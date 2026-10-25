@@ -5,6 +5,7 @@ Internal module of `jwt-bearer`: the trusted issuers, each entry of the section'
 ## Responsibilities
 - Reads each entry: its keys written, its key set's URL, or neither (its keys then contributed at `signerKeys`), and how its signers name a subject.
 - Builds each issuer's signers, and refuses boot on an entry, or a contribution, that cannot be read as one.
+- Reads the delegated issuers (`delegated-issuers`), each with the one module that checks its assertions.
 
 ## Not here
 - Checking an assertion (`assertion`). The grant's policy (audience, lifetime, clock skew), resolving linked subjects, and spending the `jti` (the package).
@@ -14,12 +15,14 @@ Internal module of `jwt-bearer`: the trusted issuers, each entry of the section'
 - An entry's `self-issued-prefix` (1 to 64 printable ASCII characters; with thumbprints and keys contributed only): it takes self-issued signers too, whose `iss` and `sub` are the prefix and their key's thumbprint.
 - `linkedOf` (the entries) → each linked issuer's IdP name. `selfIssuedOf` (the entries) → each issuer taking self-issued signers: its prefix and its place.
 - `issuersIn` (the build context, the entries, the policy for each) → each issuer's signers and ledger, or the refusals; `trustedWith`, the same from what it takes as arguments; `issuersTakes`, what `issuersIn` takes.
+- `delegatedSetting`, the section's `delegated-issuers`: a list of issuers, each as sent. `delegatedIn` (the build context, the entries, that list) → each delegated issuer's delegate (`delegatedAssertions`), or the refusals; `delegatedWith`, the same from its arguments; `delegatedTakes`.
 
 ## Invariants
-- A key set is fetched only at https from its issuer's host; a `jwks-uri` not at https or on another host, or with an issuer that is no URL, refuses the boot.
+- A key set is fetched only at https from its issuer's host; a `jwks-uri` not at https or on another host, or with an issuer that is no URL, refuses the boot. While no key set can be had, the issuer's signers are unavailable, and so is the grant for its assertions.
 - Boot is refused on an issuer with keys both written and contributed, or neither; on `upstream` without `linked`, or `linked` without it; on `subject-is-key-thumbprint` with a key set, which cannot tell which key signed; and on an issuer without `subject`.
 - Boot is refused on an issuer named twice, and on keys or a jti ledger contributed for an issuer the entries do not name.
 - Boot is refused on a `self-issued-prefix` beside keys written or a key set, or on an issuer without `subject-is-key-thumbprint`; on one that starts any issuer, its own included; and on two that overlap, one starting the other, at both whatever the order, so no assertion can be read as two issuers'. Each refusal of an entry is at its place (`jwt-bearer.issuers.<i>`), never by its value.
+- Boot is refused on a delegated issuer named twice, that no module checks or two do (naming them), that is an entry's issuer, or that a self-issued prefix starts, so no assertion is read by two rules; each at its place (`jwt-bearer.delegated-issuers.<i>`). And on assertions delegated for an issuer the list does not name.
 
 ## Depends on
 - `external-jwt` (key sources), `keys` (reading a PEM), `outbound-policy` (the key set's host), the package's contract and `signers`, `kernel` (the build context)

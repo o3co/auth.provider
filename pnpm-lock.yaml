@@ -1428,6 +1428,9 @@ importers:
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
       '@mod/external-jwt':
         specifier: workspace:*
         version: link:../../foundation/external-jwt
@@ -1465,9 +1468,6 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/clients':
-        specifier: workspace:*
-        version: link:../../identity/clients
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -1483,6 +1483,97 @@ importers:
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/oauth/jwt-bearer-id-tokens:
+    dependencies:
+      '@mod/exchange-id-tokens':
+        specifier: workspace:*
+        version: link:../exchange-id-tokens
+      '@mod/jwt-bearer':
+        specifier: workspace:*
+        version: link:../jwt-bearer
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/client-allowance':
+        specifier: workspace:*
+        version: link:../client-allowance
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      '@mod/dpop':
+        specifier: workspace:*
+        version: link:../dpop
+      '@mod/dpop-store':
+        specifier: workspace:*
+        version: link:../../templates/dpop-store
+      '@mod/exchange-id-tokens-store':
+        specifier: workspace:*
+        version: link:../../templates/exchange-id-tokens-store
+      '@mod/external-jwt':
+        specifier: workspace:*
+        version: link:../../foundation/external-jwt
+      '@mod/grants':
+        specifier: workspace:*
+        version: link:../grants
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/issuer':
+        specifier: workspace:*
+        version: link:../issuer
+      '@mod/jwt-bearer-store':
+        specifier: workspace:*
+        version: link:../../templates/jwt-bearer-store
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
+      '@mod/sender-binding':
+        specifier: workspace:*
+        version: link:../sender-binding
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      '@mod/subject-revocation-store':
+        specifier: workspace:*
+        version: link:../../templates/subject-revocation-store
+      '@mod/token-endpoint':
+        specifier: workspace:*
+        version: link:../token-endpoint
+      '@mod/token-exchange':
+        specifier: workspace:*
+        version: link:../token-exchange
+      '@mod/tokens':
+        specifier: workspace:*
+        version: link:../tokens
+      '@mod/tokens-store':
+        specifier: workspace:*
+        version: link:../../templates/tokens-store
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))

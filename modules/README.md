@@ -173,13 +173,14 @@ What each module contains is described by that module's contract card (each modu
 | Sending a client's logout on to the session's upstream | contribution | rp-logout-federation |
 | Refresh tokens and families (rotation, reuse detection, revocation), the link between a family and its session, the family an access token belongs to | contract | refresh |
 | The refresh grant | grant contribution | refresh |
-| The JWT bearer grant (RFC 7523) and its trusted issuers, their keys or key sets | grant contribution / setting | jwt-bearer |
+| The JWT bearer grant (RFC 7523) and its trusted issuers, their keys or key sets, and the issuers whose assertions it leaves to another module's rules | grant contribution / setting | jwt-bearer |
 | Resolving a linked JWT bearer signer's subject through users, and declaring the linked issuers' IdP names | contribution | jwt-bearer-users |
+| Taking Apple's and Google's id_tokens as JWT bearer assertions, by exchange-id-tokens' checks | contribution | jwt-bearer-id-tokens |
 | One issuer's JWT bearer signer keys, asked of the operator's HTTP ledger on every assertion, its request shape and credential | contribution / setting | signer-keys-http |
 | One issuer's JWT bearer assertions used up in the operator's HTTP ledger, shared with other services accepting them, its request shape and credential | contribution / setting | jti-ledger-http |
 | The token exchange grant (RFC 8693), the verifiers of the token types it exchanges, the actor chain | grant contribution / extension point kind / setting | token-exchange |
 | Verifying one token type for exchange | contribution | the module that verifies that type |
-| Verifying Apple's and Google's id_tokens for exchange, which client of this provider may exchange each app's id_token, and taking each once | contribution / setting / data | exchange-id-tokens |
+| Verifying Apple's and Google's id_tokens for exchange and for any grant that takes them, which client of this provider each app's id_token is for, and taking each once | contribution / setting / data | exchange-id-tokens |
 | The session grant: an access token for the user of the browser's session, recorded to that session | grant contribution | session-grant |
 | The client credentials grant | grant contribution | client-credentials |
 | Sender binding (binding kinds, reading a request's binding, the shape of a binding), admitting a request presenting a token at a resource | extension point kind / contract | sender-binding |

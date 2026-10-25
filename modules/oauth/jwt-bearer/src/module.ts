@@ -1,14 +1,32 @@
 import { createHash } from "node:crypto";
 import { clientAllowance } from "@mod/client-allowance";
-import { grants } from "@mod/grants";
+import { clients, metadataSections } from "@mod/clients";
+import { type GrantInput, type GrantOutcome, grants, type Refused } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
 import { revocations } from "@mod/subject-revocation";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { z } from "zod";
 import { check } from "./assertion/assertion.ts";
-import { algorithms, linkedIssuers, linkedSubjects, spentAssertions } from "./contract.ts";
 import {
+	algorithms,
+	type DelegatedAssertions,
+	linkedIssuers,
+	linkedSubjects,
+	spentAssertions,
+} from "./contract.ts";
+import {
+	acceptsUnbound,
+	checkedBy,
+	delegatedClient,
+	holds,
+	sentIssuerOf,
+	spentBy,
+} from "./delegated/delegated.ts";
+import {
+	delegatedIn,
+	delegatedSetting,
+	delegatedTakes,
 	type IssuerEntry,
 	issuersIn,
 	issuersSetting,
@@ -23,6 +41,7 @@ export const jwtBearerGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 
 const section = z.strictObject({
 	issuers: issuersSetting,
+	"delegated-issuers": delegatedSetting,
 	"max-assertion-lifetime": setting
 		.duration("s")
 		.pipe(z.number().int().min(1).max(86_400))
@@ -53,7 +72,9 @@ const takes = [
 	spentAssertions,
 	revocations,
 	linkedSubjects,
+	clients,
 	...issuersTakes,
+	...delegatedTakes,
 ];
 
 export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
@@ -62,6 +83,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 		.by((c) =>
 			[...linkedOf(c.section.issuers)].map(([issuer, upstream]) => ({ upstream, issuer })),
 		),
+	m.contribute(metadataSections).by(() => delegatedClient),
 
 	m.contribute(grants).by(async (c) => {
 		const named = (await c.get(issuer)).url;
@@ -79,8 +101,14 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			expect: { aud: [named, url] },
 		});
 		const trust = await issuersIn(c, c.section.issuers, policyOf);
-		if (trust.kind === "refused") return c.refuseAll(trust.refusals);
+		const delegation = await delegatedIn(c, c.section.issuers, c.section["delegated-issuers"]);
+		const refused = [trust, delegation].flatMap((t) => (t.kind === "refused" ? t.refusals : []));
+		if (trust.kind === "refused" || delegation.kind === "refused") return c.refuseAll(refused);
 		const { trusted, ledgers } = trust;
+		// Told at boot by client: each lets a leaked delegated assertion be used once, before its owner.
+		for (const client of (await c.get(clients)).registered()) {
+			if (acceptsUnbound(client)) c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
+		}
 		const selfIssued = selfIssuedOf(c.section.issuers);
 		// Told once, by place: the prefixes are the operator's, never written out.
 		if (selfIssued.length > 0) {
@@ -108,66 +136,119 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			const found = await resolver.subjectOf(name, sub);
 			return found.kind === "subject" ? found.subject : undefined;
 		};
+		const refusedGrant = (description: string) =>
+			({ kind: "error", error: "invalid_grant", description }) as const;
+		/**
+		 * What any assertion verified becomes: a token for its subject, once the client may have it and
+		 * its single use is spent. One `lasting` must have a second left when it is spent and give a
+		 * token that lives, however long the steps before take.
+		 */
+		const issueFor = async (
+			{ client, param, admits, issue, target }: GrantInput,
+			checked: { readonly subject: string; readonly issuedAt?: number; readonly expiresAt: number },
+			spend: () => Promise<"spent" | "replayed">,
+			lasting = false,
+		): Promise<GrantOutcome | Refused> => {
+			const allowed = clientAllowance.allowedIssuance(client, param("scope"), named);
+			if (allowed.kind === "error") return allowed;
+			const asked = target(allowed.audience, (a) =>
+				clientAllowance.allowsAudience(client, a, named),
+			);
+			if (asked.kind === "error") return asked;
+			// Made at its `iat`, never later than now; one that does not say is as old as can be. The
+			// boundary is widened by the skew allowed, as an issuer's clock may run that far ahead.
+			const madeAt = Math.min(checked.issuedAt ?? 0, c.clock.now());
+			if ((await boundaries.compare(checked.subject, madeAt, "sessions", skewMs)) === "revoked") {
+				return { kind: "error", error: "invalid_grant", description: "assertion revoked" };
+			}
+			const { scope } = allowed;
+			const { audience } = asked;
+			const access = { subject: checked.subject, issuedTo: client.id, audience, scope };
+			// Asked before the assertion is used up, so a refusal leaves it usable.
+			const admitted = await admits(access);
+			if (admitted.kind === "refused") return admitted;
+			if (lasting && checked.expiresAt - c.clock.now() < 1000) return refusedGrant("expired");
+			if ((await spend()) === "replayed")
+				return { kind: "error", error: "invalid_grant", description: "assertion replayed" };
+			const issued = await issue(access, { notAfter: checked.expiresAt });
+			if (issued.kind === "refused") return issued;
+			const token = issued.access;
+			// Cut to the assertion's end, and signed after its end was fixed, it may have less than a second
+			// left by now, whatever its expires_in says: handed to no one.
+			if (lasting && token.expiresAt - c.clock.now() < 1000) return refusedGrant("expired");
+			return {
+				kind: "issued",
+				body: {
+					access_token: token.token,
+					token_type: token.tokenType,
+					expires_in: token.expiresIn,
+					scope: scope.join(" "),
+				},
+			};
+		};
+		/**
+		 * A delegated issuer's assertion: checked and used up by its delegate alone, never another way. A
+		 * public client proves the key it names; one with accept-unbound need not where it names none.
+		 */
+		const delegated = async (
+			input: GrantInput,
+			delegate: DelegatedAssertions,
+			assertion: string,
+		): Promise<GrantOutcome | Refused> => {
+			const told = await checkedBy(delegate, assertion);
+			// As an unknown signer is: the answer tells nothing of which issuers are delegated.
+			if (told.kind === "invalid") return refusedGrant("untrusted signer");
+			// A delegate may take one within its clock allowance past its end: a token needs a second left.
+			if (told.expiresAt - c.clock.now() < 1000) return refusedGrant("expired");
+			const { client } = input;
+			if (!told.clients.includes(client.id)) return refusedGrant("assertion is for another client");
+			// A key it names is proved always: leaving out the proof never skips it.
+			const unbound = told.holderDigest === undefined && acceptsUnbound(client);
+			if (client.kind !== "confidential" && !unbound && !holds(input.binding, told.holderDigest)) {
+				return refusedGrant("the request does not prove the key the assertion names");
+			}
+			const outcome = await issueFor(input, told, () => spentBy(delegate, assertion), true);
+			if (client.kind !== "confidential" && unbound && outcome.kind === "issued") {
+				c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
+			}
+			return outcome;
+		};
 		return {
 			grantType: jwtBearerGrantType,
 			readsAmbient: "none",
 			targets: true,
-			handle: async ({ client, param, admits, issue, target }) => {
-				const assertion = param("assertion");
+			handle: async (input) => {
+				const assertion = input.param("assertion");
 				if (!assertion)
 					return { kind: "error", error: "invalid_request", description: "assertion is required" };
+				// A delegated issuer's assertion goes its delegate's way alone, whatever it answers.
+				const delegate = delegation.by.get(sentIssuerOf(assertion) ?? "");
+				if (delegate) return delegated(input, delegate, assertion);
 				const verified = await check(assertion, trusted, selfIssued);
-				if (verified.kind === "invalid")
-					return { kind: "error", error: "invalid_grant", description: verified.reason };
+				if (verified.kind === "invalid") return refusedGrant(verified.reason);
 				const subject = await subjectOf(verified.entry, verified.subject);
-				if (subject === undefined)
-					return { kind: "error", error: "invalid_grant", description: "unknown subject" };
+				if (subject === undefined) return refusedGrant("unknown subject");
 				const checked = { ...verified, subject };
-				const allowed = clientAllowance.allowedIssuance(client, param("scope"), named);
-				if (allowed.kind === "error") return allowed;
-				const asked = target(allowed.audience, (a) =>
-					clientAllowance.allowsAudience(client, a, named),
-				);
-				if (asked.kind === "error") return asked;
-				// Made at its `iat`, never later than now; one that does not say is as old as can be. The
-				// boundary is widened by the skew allowed, as an issuer's clock may run that far ahead.
-				const madeAt = Math.min(checked.issuedAt ?? 0, c.clock.now());
-				if ((await boundaries.compare(checked.subject, madeAt, "sessions", skewMs)) === "revoked") {
-					return { kind: "error", error: "invalid_grant", description: "assertion revoked" };
-				}
-				const { scope } = allowed;
-				const { audience } = asked;
-				const access = { subject: checked.subject, issuedTo: client.id, audience, scope };
-				// Asked before the jti is used up, so a refusal leaves the assertion usable.
-				const admitted = await admits(access);
-				if (admitted.kind === "refused") return admitted;
 				const keepUntil = checked.expiresAt + skewMs + usedAllowanceMs;
 				// An issuer with a ledger uses its jti up there alone, never the store, whatever it answers;
 				// the store keeps it by the `iss` as sent, so a self-issued signer's assertions are apart from its issuer's own.
 				const ledger = ledgers.get(checked.entry);
-				const told = ledger
-					? await spentIn(ledger, {
-							sentIssuer: checked.sentIssuer,
-							jti: checked.jti,
-							expiresAt: checked.expiresAt,
-							keepUntil,
-						})
-					: // Relative, since the store judges a lifetime by its own clock.
-						await spent.save(spentName(checked.sentIssuer, checked.jti), keepUntil - c.clock.now());
-				if (told === "replayed" || told === "exists")
-					return { kind: "error", error: "invalid_grant", description: "assertion replayed" };
-				const issued = await issue(access, { notAfter: checked.expiresAt });
-				if (issued.kind === "refused") return issued;
-				const token = issued.access;
-				return {
-					kind: "issued",
-					body: {
-						access_token: token.token,
-						token_type: token.tokenType,
-						expires_in: token.expiresIn,
-						scope: scope.join(" "),
-					},
+				const spend = async () => {
+					const told = ledger
+						? await spentIn(ledger, {
+								sentIssuer: checked.sentIssuer,
+								jti: checked.jti,
+								expiresAt: checked.expiresAt,
+								keepUntil,
+							})
+						: // Relative, since the store judges a lifetime by its own clock.
+							await spent.save(
+								spentName(checked.sentIssuer, checked.jti),
+								keepUntil - c.clock.now(),
+							);
+					return told === "replayed" || told === "exists" ? "replayed" : "spent";
 				};
+				return issueFor(input, checked, spend);
 			},
 		};
 	}),
