@@ -11,6 +11,7 @@ export const conditionsSetting = z
 		"subject-prefix": z
 			.string()
 			.regex(/^[\x21-\x7e]{1,255}$/, "1 to 255 printable ASCII characters")
+			.refine((prefix) => !prefix.startsWith("REPLACE-"), "a sample left in place")
 			.optional()
 			.describe("A prefix the verified `sub` starts with, compared as written."),
 		claims: z

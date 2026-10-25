@@ -10,7 +10,7 @@ Internal module of `jwt-bearer`: the conditions an issuer holds an assertion's v
 - Which issuer's conditions apply, and when they are asked (`issuers`, the package). Verifying the assertion (`assertion`).
 
 ## Offers
-- `conditionsSetting`: `subject-prefix` (1 to 255 printable ASCII characters) and `claims` (a claim's name to a string, a number or a boolean, or a list of them one of which it holds).
+- `conditionsSetting`: `subject-prefix` (1 to 255 printable ASCII characters, not a `REPLACE-` sample) and `claims` (a claim's name to a string, a number or a boolean, or a list of them one of which it holds).
 - `meets` (conditions, verified claims) → whether every condition holds.
 
 ## Invariants

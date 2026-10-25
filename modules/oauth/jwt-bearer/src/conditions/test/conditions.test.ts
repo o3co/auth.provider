@@ -25,6 +25,11 @@ describe("conditions as written", () => {
 		}
 	});
 
+	it("refuses a prefix that is a fragment's sample left in place", () => {
+		expect(read({ "subject-prefix": "REPLACE-SUBJECT-PREFIX" }).success).toBe(false);
+		expect(read({ "subject-prefix": "REPLACED:" }).success).toBe(true);
+	});
+
 	it("refuses a field it does not know, a value of another kind, and a claim the grant's policy decides", () => {
 		expect(read({ subjects: "x" }).success).toBe(false);
 		expect(read({ claims: { a: { b: 1 } } }).success).toBe(false);
