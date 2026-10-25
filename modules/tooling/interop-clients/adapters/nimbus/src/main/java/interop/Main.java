@@ -21,6 +21,20 @@ import com.nimbusds.oauth2.sdk.assertions.jwt.JWTAssertionFactory;
 import com.nimbusds.oauth2.sdk.id.Subject;
 import com.nimbusds.oauth2.sdk.token.TokenTypeURI;
 import com.nimbusds.oauth2.sdk.tokenexchange.TokenExchangeGrant;
+import com.nimbusds.openid.connect.sdk.claims.LogoutTokenClaimsSet;
+import com.nimbusds.openid.connect.sdk.validators.LogoutTokenValidator;
+import com.nimbusds.jwt.JWTParser;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+import java.net.URLDecoder;
+import java.security.KeyFactory;
+import java.security.PrivateKey;
+import java.security.cert.Certificate;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.Base64;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import javax.net.ssl.KeyManagerFactory;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.oauth2.sdk.device.DeviceAuthorizationRequest;
@@ -120,13 +134,40 @@ public final class Main {
   }
 
   private final Map<String, Object> instruction;
-  private final SSLSocketFactory tls;
+  private SSLSocketFactory tls;
   /** The DPoP proofs, in the DPoP flow alone. */
   private DefaultDPoPProofFactory dpop;
 
   private Main(Map<String, Object> instruction) throws Exception {
     this.instruction = instruction;
     this.tls = trusting(JSONObjectUtils.getString(instruction, "ca"));
+  }
+
+  /** A connection that trusts the front's certificate alone and presents the client's certificate. */
+  private static SSLSocketFactory presenting(String trusted, String cert, String keyPem) throws Exception {
+    Certificate certificate =
+        CertificateFactory.getInstance("X.509")
+            .generateCertificate(new ByteArrayInputStream(cert.getBytes(StandardCharsets.US_ASCII)));
+    byte[] der =
+        Base64.getMimeDecoder()
+            .decode(keyPem.replaceAll("-----(BEGIN|END) PRIVATE KEY-----", "").trim());
+    PrivateKey key = KeyFactory.getInstance("EC").generatePrivate(new PKCS8EncodedKeySpec(der));
+    KeyStore own = KeyStore.getInstance("PKCS12");
+    own.load(null, null);
+    own.setKeyEntry("client", key, new char[0], new Certificate[] {certificate});
+    KeyManagerFactory keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+    keys.init(own, new char[0]);
+    KeyStore store = KeyStore.getInstance(KeyStore.getDefaultType());
+    store.load(null, null);
+    store.setCertificateEntry(
+        "front",
+        CertificateFactory.getInstance("X.509")
+            .generateCertificate(new ByteArrayInputStream(trusted.getBytes(StandardCharsets.US_ASCII))));
+    TrustManagerFactory trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+    trust.init(store);
+    SSLContext context = SSLContext.getInstance("TLS");
+    context.init(keys.getKeyManagers(), trust.getTrustManagers(), null);
+    return context.getSocketFactory();
   }
 
   private static SSLSocketFactory trusting(String pem) throws Exception {
@@ -283,6 +324,63 @@ public final class Main {
             new Issuer(JSONObjectUtils.getString(instruction, "issuer")), this::sending);
     refuseInsecure(as.toJSONObject());
     return as;
+  }
+
+  /** The client credentials grant over a TLS connection that presents the client's certificate (RFC 8705). */
+  private Map<String, Object> mtls() throws Exception {
+    Map<String, Object> own = JSONObjectUtils.getJSONObject(instruction, "clientCertificate");
+    tls =
+        presenting(
+            JSONObjectUtils.getString(instruction, "ca"),
+            JSONObjectUtils.getString(own, "cert"),
+            JSONObjectUtils.getString(own, "key"));
+    return clientCredentials();
+  }
+
+  /**
+   * Signs in, then ends the session by the end-session endpoint, and takes the logout token the
+   * provider posts to the receiver the client registered, validated by Nimbus's LogoutTokenValidator.
+   */
+  private Map<String, Object> backchannelLogout() throws Exception {
+    Map<String, Object> at = JSONObjectUtils.getJSONObject(instruction, "backchannel");
+    CompletableFuture<String> told = new CompletableFuture<>();
+    HttpServer receiver =
+        HttpServer.create(new InetSocketAddress("127.0.0.1", JSONObjectUtils.getInt(at, "port")), 0);
+    receiver.createContext(
+        JSONObjectUtils.getString(at, "path"),
+        exchange -> {
+          String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+          for (String pair : body.split("&"))
+            if (pair.startsWith("logout_token="))
+              told.complete(URLDecoder.decode(pair.substring("logout_token=".length()), StandardCharsets.UTF_8));
+          exchange.sendResponseHeaders(200, -1);
+          exchange.close();
+        });
+    receiver.start();
+    try {
+      SignedIn in = signIn();
+      Map<String, Object> ended = logout(in);
+      String token = told.get(20, TimeUnit.SECONDS);
+      var keys = new DefaultResourceRetriever(5000, 5000, 512 * 1024, true, tls);
+      LogoutTokenClaimsSet claims =
+          new LogoutTokenValidator(
+                  in.op().getIssuer(),
+                  new ClientID(JSONObjectUtils.getString(client(), "id")),
+                  JWSAlgorithm.RS256,
+                  in.op().getJWKSetURI().toURL(),
+                  keys)
+              .validate(JWTParser.parse(token));
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("sub", claims.getSubject() == null ? null : claims.getSubject().getValue());
+      result.put("sid", claims.getSessionID() == null ? null : claims.getSessionID().getValue());
+      result.put("signedInSub", in.claims().getSubject().getValue());
+      result.put(
+          "signedInSid", in.claims().getSessionID() == null ? null : in.claims().getSessionID().getValue());
+      result.put("location", ended.get("location"));
+      return result;
+    } finally {
+      receiver.stop(0);
+    }
   }
 
   /** Signs in, then exchanges the access token for another (RFC 8693), the client authenticated. */
@@ -509,7 +607,10 @@ public final class Main {
 
   /** Signs in, then ends the session by the provider's end-session endpoint, as the relying party starts it. */
   private Map<String, Object> logout() throws Exception {
-    SignedIn in = signIn();
+    return logout(signIn());
+  }
+
+  private Map<String, Object> logout(SignedIn in) throws Exception {
     State state = new State();
     URI url =
         new LogoutRequest(
@@ -546,6 +647,8 @@ public final class Main {
             case "logout" -> main.logout();
             case "jwt-bearer" -> main.jwtBearer();
             case "token-exchange" -> main.tokenExchange();
+            case "mtls" -> main.mtls();
+            case "backchannel-logout" -> main.backchannelLogout();
             default -> throw new Refused("unsupported", "no flow " + flow);
           });
     } catch (Refused refused) {

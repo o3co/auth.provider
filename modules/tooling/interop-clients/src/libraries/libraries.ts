@@ -14,6 +14,8 @@ export const flows = [
 	"logout",
 	"jwt-bearer",
 	"token-exchange",
+	"mtls",
+	"backchannel-logout",
 ] as const;
 export type Flow = (typeof flows)[number];
 
@@ -67,6 +69,8 @@ export const libraries: readonly Library[] = [
 			"logout",
 			"jwt-bearer",
 			"token-exchange",
+			"mtls",
+			"backchannel-logout",
 		],
 		// The runtime jars are checked against their pins before anything is compiled or shaded from them.
 		build: [
