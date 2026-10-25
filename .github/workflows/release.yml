@@ -180,6 +180,19 @@ jobs:
       - name: Refuse what is published already as another tarball
         run: pnpm release:published "$RUNNER_TEMP/tarballs"
 
+      # The release's lists of what it ships (CycloneDX), made from these very tarballs before anything
+      # is published (distribution's `release:sbom`): the operator's app and the entrance, what bundles
+      # hold inside, the tools that build it, and the reference image. A tarball no list holds, or a
+      # bundled file undeclared, stops it here.
+      - name: The lists of what the release ships
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm release:sbom "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/sbom"
+          tar -czf "$RUNNER_TEMP/auth-provider-${VERSION}-sbom.tar.gz" -C "$RUNNER_TEMP" sbom
+
       # The evidence the release keeps as an asset, past any artifact's days: the CI run's that tested
       # the tag's tree, with its manifest, this run's own checks, the dependency audit, and the commands
       # and environment they ran in.
@@ -216,7 +229,9 @@ jobs:
           draft: true
           prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true
-          files: ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-evidence.tar.gz
+          files: |
+            ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-evidence.tar.gz
+            ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-sbom.tar.gz
           fail_on_unmatched_files: true
 
       # The checked tarballs, one by one, the bundles first and the entrance
