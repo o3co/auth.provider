@@ -53,59 +53,67 @@ const section = z
 const unanswerable = deepFreeze({ kind: "unanswerable" } as const);
 const none = deepFreeze({ kind: "none" } as const);
 
-export default defineModule({ name: "users-http", section, replicaSafe: true }, (m) => [
-	m.contribute(ledgers).by(async (c): Promise<Ledger> => {
-		const { "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
-		// The operator's own URL: reached at a private address at its origin, for a host in
-		// `internal-hosts` or, over plain http, a host:port `plain-internal` names.
-		const narrowerOf = (url: ConfiguredUrl) => ({
-			hosts: [new URL(url).hostname],
-			internal: url,
-			...(maxBytes === undefined ? {} : { maxBytes }),
-			...(timeoutMs === undefined ? {} : { timeoutMs }),
-		});
-		const urls = urlKeys.flatMap((key) => c.section[key] ?? []);
-		const refused =
-			c.section.credential === undefined
-				? undefined
-				: (await c.get(credentialPolicy)).refusalOf(urls);
-		// More than one origin first, as the section reads; a URL's own refusal is more precise than its scheme.
-		if (refused === "origins")
-			return c.refuse("users-http.credential", credentialRefusalText(refused));
-		const refusals = await c.get(outboundRefusals);
-		for (const key of urlKeys) {
-			const url = c.section[key];
+export default defineModule(
+	{
+		name: "users-http",
+		section,
+		replicaSafe: true,
+		takes: [outbound, credentialPolicy, outboundRefusals],
+	},
+	(m) => [
+		m.contribute(ledgers).by(async (c): Promise<Ledger> => {
+			const { "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
+			// The operator's own URL: reached at a private address at its origin, for a host in
+			// `internal-hosts` or, over plain http, a host:port `plain-internal` names.
+			const narrowerOf = (url: ConfiguredUrl) => ({
+				hosts: [new URL(url).hostname],
+				internal: url,
+				...(maxBytes === undefined ? {} : { maxBytes }),
+				...(timeoutMs === undefined ? {} : { timeoutMs }),
+			});
+			const urls = urlKeys.flatMap((key) => c.section[key] ?? []);
 			const refused =
-				url === undefined ? undefined : destinationRefusal(refusals, url, narrowerOf(url));
-			if (refused !== undefined) return c.refuse(`users-http.${key}`, refused);
-		}
-		if (refused === "scheme")
-			return c.refuse("users-http.credential", credentialRefusalText(refused));
-		const ask = calls({
-			out: await c.get(outbound),
-			credential: c.section.credential,
-			narrowerOf,
-			warn: (event, fields) => c.log.warn(event, fields),
-		});
-		const {
-			"verify-url": verifyUrl,
-			"subject-url": subjectUrl,
-			"upstream-url": upstreamUrl,
-		} = c.section;
-		return {
-			verify: async (identifier, password) =>
-				verifyUrl === undefined ? none : ask.verify(verifyUrl, identifier, password),
-			bySubject: async (subject) =>
-				subjectUrl === undefined
-					? unanswerable
-					: ask.lookup(subjectUrl, usersWire.bySubject(subject)),
-			// Only a ledger asked by upstream identity answers it; users then reads no link of its own.
-			...(upstreamUrl === undefined
-				? {}
-				: {
-						byUpstream: async (idp: string, subject: string) =>
-							ask.lookup(upstreamUrl, usersWire.byUpstream(idp, subject)),
-					}),
-		};
-	}),
-]);
+				c.section.credential === undefined
+					? undefined
+					: (await c.get(credentialPolicy)).refusalOf(urls);
+			// More than one origin first, as the section reads; a URL's own refusal is more precise than its scheme.
+			if (refused === "origins")
+				return c.refuse("users-http.credential", credentialRefusalText(refused));
+			const refusals = await c.get(outboundRefusals);
+			for (const key of urlKeys) {
+				const url = c.section[key];
+				const refused =
+					url === undefined ? undefined : destinationRefusal(refusals, url, narrowerOf(url));
+				if (refused !== undefined) return c.refuse(`users-http.${key}`, refused);
+			}
+			if (refused === "scheme")
+				return c.refuse("users-http.credential", credentialRefusalText(refused));
+			const ask = calls({
+				out: await c.get(outbound),
+				credential: c.section.credential,
+				narrowerOf,
+				warn: (event, fields) => c.log.warn(event, fields),
+			});
+			const {
+				"verify-url": verifyUrl,
+				"subject-url": subjectUrl,
+				"upstream-url": upstreamUrl,
+			} = c.section;
+			return {
+				verify: async (identifier, password) =>
+					verifyUrl === undefined ? none : ask.verify(verifyUrl, identifier, password),
+				bySubject: async (subject) =>
+					subjectUrl === undefined
+						? unanswerable
+						: ask.lookup(subjectUrl, usersWire.bySubject(subject)),
+				// Only a ledger asked by upstream identity answers it; users then reads no link of its own.
+				...(upstreamUrl === undefined
+					? {}
+					: {
+							byUpstream: async (idp: string, subject: string) =>
+								ask.lookup(upstreamUrl, usersWire.byUpstream(idp, subject)),
+						}),
+			};
+		}),
+	],
+);

@@ -175,7 +175,7 @@ afterAll(() => {
 	if (network) docker("network", "rm", network);
 });
 
-const durable = defineModule({ name: "durable-owner" }, (m) => [
+const durable = defineModule({ name: "durable-owner", takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
 	...contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 ]);
@@ -326,7 +326,7 @@ describe("redis", () => {
 		cli(container, "acl", "setuser", user, "on", ">pw", ...every, "-evalsha", "-script");
 		try {
 			let context: BuildContext<unknown> | undefined;
-			const asker = defineModule({ name: "asker" }, (m) => [
+			const asker = defineModule({ name: "asker", takes: [] }, (m) => [
 				m.provide(contract<object>("asker")).by((c) => {
 					context = c;
 					return {};
@@ -420,7 +420,7 @@ describe("redis", () => {
 		let follower = "";
 		try {
 			await waitFor(() => pings(lone));
-			const replicatedOnly = defineModule({ name: "replicated-owner" }, (m) =>
+			const replicatedOnly = defineModule({ name: "replicated-owner", takes: [] }, (m) =>
 				contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 			);
 			const app = await open(
@@ -639,7 +639,7 @@ describe("one server alone, as configured with replication none", () => {
 	afterAll(() => {
 		for (const id of lone) docker("rm", "-f", id);
 	});
-	const replicatedOnly = defineModule({ name: "replicated-owner" }, (m) => [
+	const replicatedOnly = defineModule({ name: "replicated-owner", takes: [] }, (m) => [
 		m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
 	]);
 
@@ -700,7 +700,7 @@ describe("settings the server will not show", () => {
 	afterAll(() => {
 		if (blocked) docker("rm", "-f", blocked);
 	});
-	const kept = defineModule({ name: "kept-owner" }, (m) => [
+	const kept = defineModule({ name: "kept-owner", takes: [] }, (m) => [
 		m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
 	]);
 	const boot = (redis: object, through = blockedUrl, recorded = recordingLog()) =>

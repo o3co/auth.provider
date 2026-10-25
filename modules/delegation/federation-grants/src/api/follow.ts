@@ -78,6 +78,8 @@ export function followerWith(p: FollowParts): RevocationFollower {
 	};
 }
 
+export const followerTakes = [grantStore, subjectGrants, audit] as const;
+
 /** The follower over the contracts the assembly gives. */
 export async function followerOver(c: BuildContext<Settings>) {
 	// The shared parts read the revocations this follower is collected into: taken once built.

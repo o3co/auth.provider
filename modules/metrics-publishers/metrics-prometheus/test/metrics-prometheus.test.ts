@@ -44,7 +44,9 @@ async function refusals(modules: Module[], settings?: Record<string, unknown>) {
 }
 
 const emitting = (...made: (() => Instrument)[]) =>
-	defineModule({ name: "emitter" }, (m) => made.map((make) => m.contribute(instruments).by(make)));
+	defineModule({ name: "emitter", takes: [] }, (m) =>
+		made.map((make) => m.contribute(instruments).by(make)),
+	);
 
 describe("scrape", () => {
 	it("answers metrics' series and the process's counts as text, never to be cached", async () => {

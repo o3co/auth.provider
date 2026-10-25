@@ -239,7 +239,7 @@ const connections = contract<{
 	readonly declared: readonly Space[];
 }>("redis.connections");
 
-export default defineModule({ name: "redis", section }, (m) => [
+export default defineModule({ name: "redis", section, takes: [spaces] }, (m) => [
 	m.provide(connections).by(async (c) => {
 		const client = new Redis(c.section.url, {
 			lazyConnect: true,

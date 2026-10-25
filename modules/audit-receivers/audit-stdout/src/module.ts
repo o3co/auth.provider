@@ -1,7 +1,7 @@
 import { auditReceivers } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 
-export default defineModule({ name: "audit-stdout", replicaSafe: true }, (m) => [
+export default defineModule({ name: "audit-stdout", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(auditReceivers).by(() => ({
 		name: "stdout",
 		receive: (event) =>

@@ -12,7 +12,7 @@ async function written(
 		lines.push(chunk);
 		return true;
 	}) as typeof process.stdout.write);
-	const speaker = defineModule({ name: "speaker" }, (m) => [
+	const speaker = defineModule({ name: "speaker", takes: [] }, (m) => [
 		m.provide(contract<object>("speaker")).by((c) => {
 			call(c.log);
 			return {};

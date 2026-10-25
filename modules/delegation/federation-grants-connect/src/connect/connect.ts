@@ -22,6 +22,7 @@ import { name, type Settings } from "../section.ts";
 import {
 	type UpstreamAccounts,
 	upstreamAccountOver,
+	upstreamAccountTakes,
 } from "../upstream-account/upstream-account.ts";
 
 export interface ConnectParts {
@@ -365,6 +366,14 @@ export function connectWith(p: ConnectParts): GrantsBrowser {
 		}),
 	};
 }
+
+export const connectTakes = [
+	grantIntents,
+	sessions,
+	upstreams,
+	roundTrips,
+	...upstreamAccountTakes,
+] as const;
 
 /** The browser half over the contracts the assembly gives; connections refuse boot without the page that asks the user. */
 export const connectOver = async (c: BuildContext<Settings>) => {

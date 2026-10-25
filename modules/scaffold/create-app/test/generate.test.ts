@@ -294,7 +294,7 @@ it("starts on the configuration files APP_CONFIG lists, and exits 78 telling eac
 /** A module whose start takes a second, saying when it begins, ends and stops. */
 const slowModule = `import { contract, defineModule } from "@mod/kernel";
 const slow = contract("test.slow");
-export default defineModule({ name: "slow" }, (m) => [
+export default defineModule({ name: "slow", takes: [] }, (m) => [
 	m.provide(slow).by((c) => {
 		c.onStart(async () => {
 			process.stdout.write("starting\\n");

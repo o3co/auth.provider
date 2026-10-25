@@ -322,6 +322,8 @@ export function refreshWith(parts: Parts) {
 
 export type Refresh = ReturnType<typeof refreshWith>;
 
+export const refreshTakes = [grantStore, refreshLockStore] as const;
+
 /** The refresher over the grants and locks the assembly gives, on `records`. */
 export const refreshOver = async (
 	c: BuildContext<Settings>,

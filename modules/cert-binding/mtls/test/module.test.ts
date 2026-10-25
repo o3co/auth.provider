@@ -34,14 +34,14 @@ function serving(table: Record<string, Uint8Array>, missing: number, sent: Sent[
 			return { status: body ? 200 : missing, headers: new Map(), body: body ?? new Uint8Array() };
 		},
 	};
-	return defineModule({ name: "signed-material" }, (m) => [
+	return defineModule({ name: "signed-material", takes: [] }, (m) => [
 		m.provide(signedOutbound).by(() => outbound),
 	]);
 }
 
 const published = contract<readonly MetadataItem[]>("published");
 const kindNames = contract<readonly (string | undefined)[]>("kind-names");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [metadata, senderBindings] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 	m.provide(kindNames).by(async (c) => (await c.collect(senderBindings)).map((kind) => kind.name)),
 ]);

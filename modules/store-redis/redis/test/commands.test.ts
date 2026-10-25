@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 /** A space whose writes are confirmed on every replica, so a write takes a confirmation round. */
-const replicated = defineModule({ name: "replicated-owner" }, (m) => [
+const replicated = defineModule({ name: "replicated-owner", takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
 ]);
 
@@ -36,7 +36,7 @@ function primary() {
 async function boot(port: number, replication?: "replicas" | "none") {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
-	const asker = defineModule({ name: "asker" }, (m) => [
+	const asker = defineModule({ name: "asker", takes: [] }, (m) => [
 		m.provide(contract<object>("asker")).by((c) => {
 			context = c;
 			return {};
