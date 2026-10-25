@@ -52,3 +52,11 @@ The [guard](modules/tooling/guard/README.md) holds the workspace to its rules: n
 - Open pull requests against `develop`. `main` takes releases.
 - The required check is `build-and-test`, which passes when both `checks` and `integration` pass.
 - Describe the change, how you tested it, and any setting, route or behavior an operator would notice; a change an operator must act on also adds its line to [the migration guide](docs/migration.md).
+
+## Change records
+
+A change that fixes a finding, or a design fix an audit would ask about, carries a change record: what the two commits differ in, and what was run again ([findings and fixes](docs/audit/findings.md)).
+
+- `pnpm --filter @mod/guard run change-record <base> <head>` writes its machine rows as Markdown: the modules touched, the contract's changes by structure, the dependency edges and the budget measures that moved. It reads each commit in a worktree of its own and keeps nothing.
+- Add by hand the owner's confirmation of each contract change, the checks run again with their runs, and whether a design review was needed.
+- A finding not yet fixed is never described in public: its fix and its record are made privately, as `SECURITY.md` says. A pull request's description holds a change record only for a finding already fixed, or a fix of no finding.
