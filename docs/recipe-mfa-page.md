@@ -19,7 +19,7 @@ Set what the generated README asks for, among them:
 - Your ledger's `users-http.verify-url` and `users-http.credential` (the `users-http` card).
 - The Redis URL (the `redis` card).
 
-Every key is in the [configuration reference](configuration.md). The second factor's routes are in the [route reference](routes.md), and the `mfa-flows` card says what each answers.
+Every key is in the [configuration reference](configuration.md). The second factor's routes are in the [route reference](routes.md), and the cards of `mfa-flows` and its internal modules say what each answers (the two enrollment routes, the `mfa-enrollment` card).
 
 ## 1. A first login asks the user to bind a factor
 
