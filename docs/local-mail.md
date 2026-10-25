@@ -74,4 +74,4 @@ x-csrf-token: <csrf_token>
 
 The answer sends the browser on (`redirect_to`), as with any other factor.
 
-Binding an email factor mails codes too, and each arrives in Mailpit the same way: first the proof of the account's address (`mfa-email-proof`), then a 16-character code the binding completes with (`mfa-email`). The `mfa-enrollment` and `mfa-email-proof` cards give the requests. A code by email counts toward a required second factor only where `mfa-email.adds-second-factor` is set (the `mfa-email` card).
+Binding an email factor mails codes too, and each arrives in Mailpit the same way: a 16-character code the binding completes with (`mfa-email`), and, before it, the proof of the account's address (`mfa-email-proof`) only where the subject holds no factor that counts yet, as a first binding does. A subject binding email beside a TOTP gets the code alone. The `mfa-enrollment` and `mfa-email-proof` cards give the requests. A code by email counts toward a required second factor only where `mfa-email.adds-second-factor` is set (the `mfa-email` card).
