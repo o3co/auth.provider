@@ -291,11 +291,17 @@ describe(`${library.name}: exchanging a token`, () => {
 		"exchanges a signed-in user's access token for another of the same subject, by token exchange",
 		(context) =>
 			excusable(context, "token-exchange", async () => {
-				const result = await run("token-exchange", world.clients.post);
+				// The subject token the harness signs in for itself, as an app holding one would.
+				const subject = await world.issue(world.clients.post);
+				const result = await run("token-exchange", world.clients.post, {
+					subjectToken: subject.accessToken,
+					// The subject token's own scope, for a library that asks one.
+					scope: "openid",
+				});
 				expect(result.issuedTokenType).toBe("urn:ietf:params:oauth:token-type:access_token");
 				expect(await world.introspect(String(result.accessToken))).toMatchObject({
 					active: true,
-					sub: result.sub,
+					sub: subject.sub,
 				});
 			}),
 	);

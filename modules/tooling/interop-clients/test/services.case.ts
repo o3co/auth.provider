@@ -42,6 +42,8 @@ describe(`${library.name}: an assertion for a token`, () => {
 					assertionIssuer: world.assertionIssuer,
 					subject: "service-a",
 					scope: "read",
+					// No OpenID discovery here: the OAuth metadata (RFC 8414), for an adapter that reads one.
+					metadata: "oauth-authorization-server",
 				});
 				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
 				expect(String(result.accessToken)).not.toBe("");
