@@ -36,6 +36,8 @@ jobs:
     # The push takes the site by this id, never by a name another job could make again.
     outputs:
       site: ${{ steps.site.outputs.artifact-id }}
+      # The pages commit the site is built on: the push goes onto it, or not at all.
+      pages: ${{ steps.pages.outputs.commit }}
     env:
       TAG: ${{ inputs.tag }}
     steps:
@@ -87,6 +89,9 @@ jobs:
           ref: gh-pages
           path: pages
           persist-credentials: false
+      - name: The pages commit the site is built on
+        id: pages
+        run: echo "commit=$(git -C pages rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Only this minor's dir, the root and the list of releases change.
       - name: Build this release's API into the pages
@@ -119,9 +124,11 @@ jobs:
     env:
       TAG: ${{ inputs.tag }}
     steps:
+      # The very pages commit the build built on: where another release has moved the pages since,
+      # the push below is no fast-forward and is refused, and the site is to be built again.
       - uses: actions/checkout@v4
         with:
-          ref: gh-pages
+          ref: ${{ needs.build.outputs.pages }}
           path: pages
           persist-credentials: false
       - name: Take the site the build kept
