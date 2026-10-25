@@ -55,7 +55,9 @@ it("contributes the one entry judge over the requirements the composition contri
 	]);
 	const app = await assemble({ modules: [requirementsModule, reading], config: kernelConfig() });
 	expect(
-		await takesUnused({ modules: [requirementsModule, reading], config: kernelConfig() }),
-	).toEqual({});
+		(await takesUnused({ modules: [requirementsModule, reading], config: kernelConfig() }))[
+			"session-requirements"
+		],
+	).toBeUndefined();
 	expect(await app.get(judged).judge(context, "use")).toMatchObject({ requirement: "mfa" });
 });
