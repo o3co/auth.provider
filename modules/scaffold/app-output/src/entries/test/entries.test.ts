@@ -37,7 +37,22 @@ export async function assemble({ runtime }) {
 	const { backfill, candidates } = await import("fake-witnessing");
 	const resealer = { reseal: async () => Array.from({ length: Number(process.env.HOLDERS ?? 1) }, (_, i) => ({ name: \`holder-\${i}-\${"h".repeat(100)}\`, resealed: 0, left: 0 })) };
 	const asked = { resetCandidates: candidates, resealing: resealer };
-	return { get: (what) => asked[what] ?? backfill, start: async () => {}, stop: async () => {} };
+	// Where a test signals the app: kept alive once started, each stop told and slow.
+	const signalled = process.env.SIGNALLED !== undefined;
+	let alive;
+	const start = async () => {
+		if (!signalled) return;
+		alive = setInterval(() => {}, 60000);
+		process.stdout.write("started\\n");
+	};
+	const stop = async () => {
+		if (!signalled) return;
+		process.stdout.write("stopping\\n");
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		clearInterval(alive);
+		process.stdout.write("stopped\\n");
+	};
+	return { get: (what) => asked[what] ?? backfill, start, stop };
 }`,
 	},
 	"fake-kernel-copy": {
@@ -139,7 +154,7 @@ async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill
 				.map((line) => JSON.parse(line)),
 		}));
 	};
-	return Object.assign(run, { slowly });
+	return Object.assign(run, { slowly, target });
 }
 
 it("settles each line as it was sent, skipping only empty lines, and counts a line longer than a subject as failed", async () => {
@@ -278,3 +293,29 @@ it("hands on every holder reseal tells before it exits, though standard output i
 	expect(told.at(-1)).toBe("previous keys may be retired");
 	expect(done.status).toBe(0);
 }, 60_000);
+
+it("stops the app once on a second signal that comes while it stops, waiting for the first stop", async () => {
+	const { target } = await script("@mod/seal", "src/main.ts");
+	const child = spawn(process.execPath, ["src/main.ts"], {
+		cwd: target,
+		env: { ...process.env, SIGNALLED: "1" },
+	});
+	const exited = new Promise<[number | null, string | null]>((resolve) =>
+		child.once("exit", (code, signal) => resolve([code, signal])),
+	);
+	let output = "";
+	child.stdout.on("data", (chunk) => {
+		output += chunk;
+		if (output.endsWith("started\n")) child.kill("SIGTERM");
+		if (output.endsWith("stopping\n")) child.kill("SIGINT");
+	});
+	child.stderr.on("data", (chunk) => {
+		output += chunk;
+	});
+	expect(await exited, output).toEqual([0, null]);
+	expect(output.split("\n").filter((l) => l !== "" && !l.startsWith("LOG "))).toEqual([
+		"started",
+		"stopping",
+		"stopped",
+	]);
+});
