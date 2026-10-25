@@ -139,6 +139,7 @@ function claimsFault(claims: Claims, policy: Policy, now: number): Reason | unde
 
 function verifierWith(choose: Choose, policy: Policy, clock: Clock): Verifier {
 	const invalid = (reason: Reason): Verified => ({ kind: "invalid", reason });
+	const signedInvalid = (reason: Reason): Verified => ({ kind: "invalid", reason, signed: true });
 	return {
 		verify: async (jwt) => {
 			const header = isCanonicalJws(jwt) ? headerOf(jwt) : undefined;
@@ -156,10 +157,11 @@ function verifierWith(choose: Choose, policy: Policy, clock: Clock): Verifier {
 			if (typeof key === "string") return invalid(key);
 			const payload = await signedPayload(jwt, key);
 			if (!payload) return invalid("signature");
+			// Past here the signature held: a refusal says so, for a caller to tell it from one before.
 			const claims = claimsOf(payload);
-			if (!claims) return invalid("malformed");
+			if (!claims) return signedInvalid("malformed");
 			const fault = claimsFault(claims, policy, clock.now());
-			if (fault) return invalid(fault);
+			if (fault) return signedInvalid(fault);
 			return { kind: "valid", header: deepFreeze({ ...header }), claims: deepFreeze(claims) };
 		},
 	};
