@@ -23,4 +23,4 @@ Internal module of `passkeys`: the challenges that registrations and assertions 
 - A challenge's record (`v` 1, its kind, the subject or the requester's digest, and when it was made), then the taken mark in its place, through the challenge store.
 
 ## Depends on
-- `webauthn` (the canonical form); the package's store interface
+- `kernel` (`Unavailable`), `webauthn` (the canonical form); the package's store interface

@@ -15,7 +15,7 @@
 - Audit event (declared in `./audit-events`): `mfa.reset` once a run gets past its input, finished or not: `by` `operator`, `kinds` and `count` once the factors went, `parts` (each part done, as `name=count`) and `partsStopped` (each part stopped or failed, by name) where there are any, `sessions`, `sessionsAgain` once it ran, `complete`, and `requestedBy` when given.
 
 ## Invariants
-- A subject that is not a non-empty string, or a requester that is not 1 to 256 well-formed characters, is refused with a RangeError before anything is done.
+- A subject that is not a non-empty string, or a requester that is not 1 to 256 UTF-16 code units, well-formed, is refused with a RangeError before anything is done.
 - Only the sessions boundary moves (`keepDelegations`); which delegated grants outlive it is for `federation-grants` to judge.
 - Pending transactions are not touched: the boundary refuses them.
 - A run that cannot move the first boundary, or whose revocation leaves a session open, stops there; a second revocation that leaves one open fails the run too.

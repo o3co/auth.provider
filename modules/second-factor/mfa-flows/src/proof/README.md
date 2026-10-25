@@ -9,9 +9,9 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 - Keeping transactions (`transactions`). Judging a proof (`mfa`). Raising a session (`session`). Going on with a login (`login-gates`).
 
 ## Offers
-- `gateOver` (`mfa`'s factor decisions, `transactions`) → the gate's hold.
+- `gateOver` (`mfa-reading`'s factor reading, `transactions`) → the gate's hold.
 - `resumeOver` (`session`'s close, `login-gates`, `subject-revocation`, `transactions`, `kernel`'s log) → going on with a login held at the gate, adding what was proved to its amr, and what it carries to `done` once it opens.
-- `proofOver` (`mfa`'s factor decisions, `session`, `login-gates`, `rate-limit`'s lockouts and the package's policy, `subject-revocation`, `transactions`, `audit`, `kernel`'s log, the enrollment flow's answer to a challenge) → the handlers of challenge, verify, the transaction's view, and step-up.
+- `proofOver` (`mfa-reading`'s factor reading, `session`, `login-gates`, `rate-limit`'s lockouts and the package's policy, `subject-revocation`, `transactions`, `audit`, `kernel`'s log, the enrollment flow's answer to a challenge) → the handlers of challenge, verify, the transaction's view, and step-up.
 
 ## Invariants
 - A login whose amr holds `secondFactorAmr` (`mfa`) passes the gate, nothing asked of its subject's factors and no transaction started: the amr is the login's own word, so a first factor's module, or an operator mapping an upstream's amr to `mfa`, decides it.
@@ -39,4 +39,4 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 - What a resume carries is made only once the login opened past that check. A response it makes instead closes the session and is answered, the session's cookie never going out; a throw closes it as best it can and goes on, with no cookie either. A part unavailable there, the close included, is answered `503`, clearing the transaction's cookie.
 
 ## Depends on
-- `audit`; `http` (the request and response types); `kernel` (the log); `login-gates` (the gate type, going on with a login); `mfa` (factor decisions); `mfa-extensions` (`secondFactorAmr`); `rate-limit` (lockouts); `session` (entering, raising); `subject-revocation`; `transactions`; `requests`; `recording`
+- `audit`; `http` (the request and response types); `kernel` (the log); `login-gates` (the gate type, going on with a login); `mfa-reading` (factor reading and proving); `mfa-extensions` (`secondFactorAmr`); `rate-limit` (lockouts); `session` (entering, raising); `subject-revocation`; `transactions`; `permits` (types); `requests`; `recording`; the package's section (the lockout's name)

@@ -9,7 +9,7 @@
 ## Offers
 - Extension point `bindingProofs`, keyed by name: `available` (subject, where it was asked from), `send` (subject, latest end, where from → as a kind's challenge), `check` (subject, what was kept, proof).
 - `bindingProof`: `asks` (proof / nothing, sending nothing); `challenge` (sent with the proof's name, what to show and the challenge sealed / none / limited / refused with the name); `prove` (proof, sealed challenge, the transaction and kind it is for → a pass sealed to the subject / none).
-- Contribution to `mfa`'s `firstBindingGates`: a first counting factor begins only with the subject's pass, when a proof is asked.
+- Contribution to `mfa-extensions`' `firstBindingGates`, asked by `mfa`: a first counting factor begins only with the subject's pass, when a proof is asked.
 - Operator section `mfa-binding-proof`: `mode` (`never`, `when-available` by default, or `always`); its keys are in the configuration reference.
 
 ## Invariants
@@ -21,7 +21,7 @@
 - Where it was asked from goes to the proofs unread.
 
 ## Depends on
-- `kernel`, `mfa` (composed with it), `mfa-reading` (`countingHeld`), `seal`
+- `kernel`, `mfa` (composed with it), `mfa-extensions` (the gate point, `AskedFrom`, `Sending`), `mfa-reading` (`countingHeld`), `seal`
 
 ## Vocabulary
 - binding proof: a proof asked before a subject's first counting factor; pass: what a proved challenge gives, for `mfa`'s `begin`.

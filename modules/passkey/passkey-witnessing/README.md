@@ -20,7 +20,7 @@
 ## Invariants
 - A mark follows a written passkey: between a registration's write and its mark the passkey stands unwitnessed, and a write that fails leaves no mark.
 - This package never removes a mark it did not set, but the token it read after an emptying write, and only on `none`: a mark beside none may be a store that lost its passkeys.
-- A mark beside none, read once more, and `after` answering `unsure`, are recorded as inconsistent and logged, the mark kept, and unavailable. The record names the subject and where it was asked, never a token.
+- A mark beside none, read once more, and `after` answering `unsure` before the withdraw, are recorded as inconsistent and logged, the mark kept, and unavailable; `unsure` after the withdraw is recorded and unavailable alike, the mark gone. The record names the subject and where it was asked, never a token.
 - A withdraw unavailable past its retries, or a read again that stops, may leave a passkey unmarked until a later settle; the call is unavailable.
 - Boot is refused without exactly one witness composed.
 - Comes once `passkeys` and `passkey-witness-http` are both composed, through `combinations`; an app composed by hand, or with another witness, composes it too, or `passkeys` refuses to boot.

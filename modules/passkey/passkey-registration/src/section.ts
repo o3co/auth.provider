@@ -8,7 +8,7 @@ export const section = z.strictObject({
 		.min(1)
 		.max(100_000)
 		.prefault(60)
-		.describe("Requests allowed per source in each window, over both registration routes."),
+		.describe("Requests allowed per source in each window, over its POST routes."),
 	window: setting
 		.duration("s")
 		.pipe(z.number().int().min(1).max(86_400))
