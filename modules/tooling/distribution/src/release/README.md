@@ -10,7 +10,8 @@
 - Checking the release as an operator meets it: `release-check`.
 
 ## Offers
-- `pnpm release:pack <dir>` (after `pnpm bundles`): packs every bundle but the one holding the index, seals the index with their integrity and zod's, then packs the index's bundle and the entrances, into `dir`. Prints each problem and exits 1.
+- `pnpm release:pack <dir> [--from-registry]` (after `pnpm bundles`): packs every bundle but the one holding the index, seals the index with their integrity and zod's, then packs the index's bundle and the entrances, into `dir`, with `publish-order.json` (the files in the order the release publishes them, the internal module `order`'s). Prints each problem and exits 1.
+  - With `--from-registry`, a package npm already holds at this version is taken from the registry instead (`fetched`), and named in `fetched.json`.
 - `pnpm release:published <dir>`: before anything is published, asks the registry for each tarball's name at its version; exits 1, naming each, where one is there with another integrity or its answer cannot be read.
 
 ## Invariants
