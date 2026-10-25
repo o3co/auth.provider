@@ -18,6 +18,7 @@
   - `allowsAudience`: any allowed audience, or the issuer when none is allowed.
   - `maySee`: the audience includes an allowed audience or the client's own id.
   - `parseScope`: RFC 6749 scope tokens joined by single spaces; an empty value names none, as when left out.
+  - `allowedIssuanceWithin` and `allowsAudienceWithin`: the same within ceilings (`Ceiling`, a `scopes` and an `audiences` list, each optional). Each list a ceiling holds narrows the client's, its defaults and the issuer's audience among them, and an empty one allows nothing; a default narrowed to none is refused, and no audience left is `invalid_target`.
   - `allowancesWithin`: the section entry for a client asking within a ceiling. Each list keeps what both hold, and a list not asked is the ceiling's. Refused when the asked audiences leave none of a ceiling that names some, since none means the issuer.
 - `AllowanceLists`: the grants, scopes and audiences lists a ceiling and a request name.
 - Client metadata section `client-allowance`: `grants`, `scopes`, `audiences` (default empty, allowing nothing), `default-scopes` (unwritten means "not set", which differs from an explicit empty value). Readers do not interpret the values themselves; they use `clientAllowance`.

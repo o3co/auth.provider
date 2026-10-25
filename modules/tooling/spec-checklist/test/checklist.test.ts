@@ -35,8 +35,54 @@ describe("items", () => {
 				text: "never this.",
 				mark: { kind: "out-of-scope", reason: "not offered." },
 				updates: [],
+				role: "as",
 			},
 		]);
+	});
+
+	it("takes an item's role from its spec, from the file's head, or from its own role line", () => {
+		const oidc = parseItems(
+			"oidc-core",
+			"# Core\n\n## 2 X\n\n- **oidc-core-2-a** MUST: a\n- **oidc-core-2-b** MUST: b\n  role: rp\n",
+		);
+		expect(oidc.items.map((i) => i.role)).toEqual(["op", "rp"]);
+		const headed = parseItems(
+			"rfc9999",
+			items("- role: client\n\n## 4 X\n\n- **rfc9999-4-a** MUST: a\n"),
+		);
+		expect(headed.items.map((i) => i.role)).toEqual(["client"]);
+		const wrong = parseItems(
+			"rfc9999",
+			items(
+				"- role: user\n\n## 4 X\n\n- **rfc9999-4-a** MUST: a\n  role: rs\n  role: rp\n- **rfc9999-4-b** MUST: b\n  role: browser\n",
+			),
+		);
+		expect(wrong.findings.map((f) => f.detail)).toEqual([
+			"the file's role user is none of as, op, rs, rp, client",
+			"rfc9999-4-a: has more than one role line",
+			"rfc9999-4-b: its role browser is none of as, op, rs, rp, client",
+		]);
+	});
+
+	it("refuses an item's second role line even after a first one it refused, keeping the role it took", () => {
+		const twice = parseItems(
+			"rfc9999",
+			items("## 4 X\n\n- **rfc9999-4-a** MUST: a\n  role: browser\n  role: rp\n"),
+		);
+		expect(twice.findings.map((f) => f.detail)).toEqual([
+			"rfc9999-4-a: its role browser is none of as, op, rs, rp, client",
+			"rfc9999-4-a: has more than one role line",
+		]);
+		expect(twice.items.map((i) => i.role)).toEqual(["as"]);
+	});
+
+	it("refuses a second role line at the file's head, keeping the first for the items", () => {
+		const twice = parseItems(
+			"rfc9999",
+			items("- role: as\n- role: rp\n\n## 4 X\n\n- **rfc9999-4-a** MUST: a\n"),
+		);
+		expect(twice.findings.map((f) => f.detail)).toEqual(["the file has more than one role line"]);
+		expect(twice.items.map((i) => i.role)).toEqual(["as"]);
 	});
 
 	it("refuses a line that is no item, heading, mark or blank", () => {
@@ -184,12 +230,13 @@ describe("ledger", () => {
 	it("refuses a head without its source, version or digest, and an unknown exclusion", () => {
 		const read = parseLedger(
 			"rfc9999",
-			"# RFC 9999 ledger\n\n- source: https://example.org/x.txt\n\n- 4 #1 MUST: excluded because\n- 4 #2 MUST: excluded other\n- 4 #3 MUST: excluded restates\n",
+			"# RFC 9999 ledger\n\n- source: https://example.org/x.txt\n\n- 4 #1 MUST: excluded because\n- 4 #2 MUST: excluded other\n- 4 #3 MUST: excluded restates\n- 4 #4 MUST: excluded other-role\n",
 		);
 		expect(read.findings.map((f) => f.detail)).toEqual([
 			"4 #1: excluded as because, which is no exclusion",
 			"4 #2: other needs its reason",
 			"4 #3: restates needs its reason",
+			"4 #4: other-role needs its reason",
 			"has no version",
 			"has no sha256 of 64 hex digits",
 		]);

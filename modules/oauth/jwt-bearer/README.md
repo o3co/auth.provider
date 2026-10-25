@@ -8,8 +8,8 @@
 - Client authentication (`token-endpoint`).
 
 ## Offers
-- Composition definition (grant, taking its audience from the request), and its contract (`.`).
-- Extension point `signerKeys`, one per issuer: the keys of the signer an assertion names (its subject and `kid`) with the algorithms they take, or none; it throws Unavailable when it cannot tell, and is asked anew for each assertion.
+- Composition definition (grant, taking its audience from the request), and its contract (`.`), naming the signing algorithms taken by default (`algorithms`, one for each kind of key) and every one there is to take (`takenAlgorithms`).
+- Extension point `signerKeys`, one per issuer: the keys of the signer an assertion names (its subject and `kid`) with the algorithms they take, or none; it throws Unavailable when it cannot tell, and is asked anew for each assertion. One answering each signer's own keys alone declares `perSigner`.
 - Extension point `linkedSubjects`: the subject a linked issuer's verified signer stands for, by the IdP name and the signer's subject, or none; it throws Unavailable when it cannot tell. Contract `linkedIssuers`: each linked issuer with its IdP name (`upstream`), for the module declaring the names.
 - Store interface for spent assertions: save a name for a lifetime, answering `created` or `exists`. Needs: never evicted, survives a crash and a failover. Its contract test (`./testing`).
 - Extension point `jtiLedgers`, one per issuer: a ledger shared with whatever else accepts that issuer's assertions, using one up by its `jti` as sent (`first` or `replayed`), in place of the store; it throws Unavailable when it cannot tell. Its contract test and a ledger in memory (`./testing`).

@@ -6,17 +6,23 @@
 	"type": "module",
 	"scripts": {
 		"report": "node src/main.ts report",
+		"summary": "node src/main.ts summary",
 		"check": "node src/main.ts check",
-		"ledger": "node src/main.ts ledger"
+		"ledger": "node src/main.ts ledger",
+		"expected": "node src/main.ts expected",
+		"plan": "node src/main.ts plan",
+		"compliance": "node src/main.ts compliance"
 	},
 	"exports": {
-		".": "./src/contract.ts"
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts"
 	},
 	"dependencies": {
 		"@mod/guard-imports": "workspace:*",
 		"typescript": "6.0.3"
 	},
 	"devDependencies": {
-		"vitest": "5.0.5"
+		"vitest": "5.0.5",
+		"yaml": "2.9.1"
 	}
 }

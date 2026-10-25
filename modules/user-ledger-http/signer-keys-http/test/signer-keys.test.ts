@@ -169,6 +169,13 @@ describe("signer-keys-http", () => {
 			algorithms: ["EdDSA"],
 		});
 		expect(received).toHaveLength(2);
+		// Any algorithm there is to take is handed on as named; the grant takes those its issuer does.
+		script = () => ({ status: 200, json: { keys: [deviceJwk], algorithms: ["PS256", "RS384"] } });
+		expect(await keys.keysOf({ subject: "dev-1" })).toMatchObject({
+			algorithms: ["PS256", "RS384"],
+		});
+		// The ledger answers each signer's own keys alone, as its card says it does.
+		expect(keys.perSigner).toBe(true);
 		// The keys left out are counted in one warning, telling nothing they held.
 		const lines = logged.lines().map((line) => [line.event, line.fields]);
 		expect(lines).toEqual([["signer-keys-http.keys_dropped", { count: 3 }]]);

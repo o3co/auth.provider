@@ -12,7 +12,7 @@ import {
 	wiringRules,
 } from "./rules.ts";
 import { type Rules, type Scope, scopeOf } from "./scope.ts";
-import { type Surface, surfaceOf } from "./surface.ts";
+import { type Surface, surfaceOf } from "./surface/surface.ts";
 import { takenByRules } from "./taken/taken.ts";
 import type { Pkg } from "./workspace.ts";
 
@@ -32,7 +32,7 @@ export type {
 export { type LexicalAnalysis, lexicalAnalysis } from "./facts/facts.ts";
 export { budgetsAsTest, type Kinds, type Rules, type Scope, scopeOf } from "./scope.ts";
 export { type ImportUse, importedNames, importsOf, packageOf, parse } from "./source.ts";
-export type { Surface } from "./surface.ts";
+export type { Surface } from "./surface/surface.ts";
 export { type Pkg, readWorkspace } from "./workspace.ts";
 
 /** A rule's finding: the rule by its id, the place, and what went over. */

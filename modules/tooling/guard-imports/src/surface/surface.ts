@@ -14,6 +14,13 @@ export interface Surface {
 	readonly points: ReadonlySet<string>;
 	/** The doc comments on the exported declarations and their members, by file of the package: where each starts. */
 	readonly docs: ReadonlyMap<string, ReadonlySet<number>>;
+	/**
+	 * Each export's structure, as text, by its name: a type's members (name, `readonly`, optional,
+	 * type) sorted by name, with its calls, constructions and index signatures; a value's type; an
+	 * enum's members and their values. Two surfaces' signatures differ wherever their contract does,
+	 * whatever file a declaration lies in; a type a signature names by name has its own signature.
+	 */
+	readonly signatures: ReadonlyMap<string, string>;
 }
 
 const options: ts.CompilerOptions = {
@@ -26,6 +33,9 @@ const options: ts.CompilerOptions = {
 	skipLibCheck: true,
 	types: [],
 };
+
+/** How a signature writes a type: whole, and a function as an arrow. */
+const written = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.WriteArrowStyleSignature;
 
 const named = (node: ts.Node) =>
 	ts.isInterfaceDeclaration(node) ||
@@ -71,7 +81,10 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 	const points = new Set<string>();
 	const hidden = new Set<string>();
 	const docs = new Map<string, Set<number>>();
-	if (!moduleSymbol) return { values, types, hidden: [], members: 0, tokens, points, docs };
+	const signatures = new Map<string, string>();
+	if (!moduleSymbol) {
+		return { values, types, hidden: [], members: 0, tokens, points, docs, signatures };
+	}
 	let members = 0;
 	// A primitive, or a union of them, has no members of its own: the platform's own are not the contract's.
 	const primitives =
@@ -101,6 +114,81 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 			docs.set(file, starts);
 		}
 	};
+	const text = (type: ts.Type, flags = ts.TypeFormatFlags.None) =>
+		checker.typeToString(type, undefined, flags | written);
+	/** A type's members, calls, constructions and index signatures, one line each, sorted. */
+	const structure = (type: ts.Type): string[] => {
+		const members = type.getProperties().map((member) => {
+			const readonly =
+				ts.getCombinedModifierFlags(
+					member.valueDeclaration ?? member.declarations?.[0] ?? source!,
+				) & ts.ModifierFlags.Readonly;
+			const optional = member.flags & ts.SymbolFlags.Optional ? "?" : "";
+			return `  ${readonly ? "readonly " : ""}${member.name}${optional}: ${text(checker.getTypeOfSymbol(member))}`;
+		});
+		const calls = type
+			.getCallSignatures()
+			.map((c) => `  call ${checker.signatureToString(c, undefined, written)}`);
+		const builds = type
+			.getConstructSignatures()
+			.map((c) => `  new ${checker.signatureToString(c, undefined, written)}`);
+		const indexes = checker
+			.getIndexInfosOfType(type)
+			.map((i) => `  [${text(i.keyType)}]: ${text(i.type)}`);
+		return [...members, ...calls, ...builds, ...indexes].sort();
+	};
+	const parametersOf = (declaration: ts.Declaration | undefined) => {
+		const listed =
+			declaration &&
+			(ts.isInterfaceDeclaration(declaration) ||
+				ts.isTypeAliasDeclaration(declaration) ||
+				ts.isClassDeclaration(declaration))
+				? declaration.typeParameters
+				: undefined;
+		return listed ? `<${listed.map((p) => p.getText()).join(", ")}>` : "";
+	};
+	const signatureOf = (name: string, target: ts.Symbol): string => {
+		const lines: string[] = [];
+		const declaration = target.declarations?.[0];
+		if (target.flags & ts.SymbolFlags.Enum) {
+			const members = checker.getExportsOfModule(target).map((member) => {
+				const value =
+					member.valueDeclaration && ts.isEnumMember(member.valueDeclaration)
+						? checker.getConstantValue(member.valueDeclaration)
+						: undefined;
+				return `  ${member.name} = ${JSON.stringify(value)}`;
+			});
+			return [`enum ${name}`, ...members.sort()].join("\n");
+		}
+		if (
+			target.flags &
+			(ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias | ts.SymbolFlags.Class)
+		) {
+			const type = checker.getDeclaredTypeOfSymbol(target);
+			const head = `${target.flags & ts.SymbolFlags.Class ? "class" : "type"} ${name}${parametersOf(declaration)}`;
+			const object =
+				(type.flags & ts.TypeFlags.Object) !== 0 &&
+				!(
+					target.flags & ts.SymbolFlags.TypeAlias &&
+					type.getCallSignatures().length > 0 &&
+					type.getProperties().length === 0
+				);
+			lines.push(
+				object
+					? [head, ...structure(type)].join("\n")
+					: `${head} = ${text(type, ts.TypeFormatFlags.InTypeAlias)}`,
+			);
+		}
+		if (target.flags & ts.SymbolFlags.Value && !(target.flags & ts.SymbolFlags.Enum)) {
+			const type = checker.getTypeOfSymbol(target);
+			lines.push(
+				target.flags & ts.SymbolFlags.Class
+					? `value ${name}\n${structure(type).join("\n")}`
+					: `value ${name}: ${text(type)}`,
+			);
+		}
+		return lines.join("\n");
+	};
 	const exported = checker.getExportsOfModule(moduleSymbol);
 	const exportedDeclarations = new Set<ts.Node>();
 	for (const symbol of exported) {
@@ -108,6 +196,7 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		for (const declaration of target.declarations ?? []) exportedDeclarations.add(declaration);
 		documented(target);
 		(target.flags & ts.SymbolFlags.Value ? values : types).add(symbol.name);
+		signatures.set(symbol.name, signatureOf(symbol.name, target));
 		if ((target.declarations ?? []).some(madeAsToken)) tokens.add(symbol.name);
 		if ((target.declarations ?? []).some(madeAsPoint)) points.add(symbol.name);
 		if (target.flags & (ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias)) {
@@ -135,5 +224,5 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 			for (const part of signatureParts(declaration)) visit(part);
 		}
 	}
-	return { values, types, hidden: [...hidden].sort(), members, tokens, points, docs };
+	return { values, types, hidden: [...hidden].sort(), members, tokens, points, docs, signatures };
 }

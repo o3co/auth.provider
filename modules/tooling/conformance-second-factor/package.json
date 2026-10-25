@@ -18,6 +18,7 @@
 	},
 	"devDependencies": {
 		"@mod/conformance-identity": "workspace:*",
-		"@mod/conformance-keys": "workspace:*"
+		"@mod/conformance-keys": "workspace:*",
+		"@mod/spec-checklist": "workspace:*"
 	}
 }

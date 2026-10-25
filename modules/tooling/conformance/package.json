@@ -9,7 +9,8 @@
 		"./testing": "./src/testing.ts"
 	},
 	"scripts": {
-		"patterns": "node src/patterns/patterns.ts"
+		"patterns": "node src/patterns/patterns.ts",
+		"evidence-runs": "node src/patterns/patterns.ts --evidence-runs"
 	},
 	"dependencies": {
 		"@mod/combinations": "workspace:*",

@@ -34,6 +34,19 @@ export function runsOf(summaries: readonly PatternSummary[], args: readonly stri
 export const patternNames = (summaries: readonly PatternSummary[]) =>
 	runsOf(summaries, []).map((run) => run.pattern);
 
+/**
+ * Each area's run on each pattern's app, `<area's package>@<pattern>`, as `spec-checklist` lists a
+ * CI run's runs: a pattern job's, its matrix the pattern. A pattern with no areas is one run of this
+ * package, which no area reports, so the run lacking it fails as its job does.
+ */
+export const evidenceRuns = (summaries: readonly PatternSummary[]) =>
+	runsOf(summaries, []).flatMap((run) =>
+		(run.areas.length > 0
+			? run.areas.map((area) => `@mod/conformance-${area}`)
+			: ["@mod/conformance"]
+		).map((pkg) => ({ entry: `${pkg}@${run.pattern}`, kind: "pattern", matrix: run.pattern })),
+	);
+
 /** An ANSI escape sequence, as a terminal that colours output writes one (ESC, then CSI). */
 const ansiEscape = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 
@@ -122,5 +135,6 @@ export function runPatterns(
 if (import.meta.main) {
 	const args = process.argv.slice(2);
 	if (args[0] === "--list") console.log(JSON.stringify(patternNames(patterns())));
+	else if (args[0] === "--evidence-runs") console.log(JSON.stringify(evidenceRuns(patterns())));
 	else process.exitCode = runPatterns(args) ? 0 : 1;
 }

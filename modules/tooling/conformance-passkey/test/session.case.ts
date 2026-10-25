@@ -217,27 +217,27 @@ describe.runIf(areaTarget().can("passkey-session-login"))(
 		});
 
 		it("refuses it before the second factor holds the login, and again when a held login resumes", async () => {
-			const { secret, codes } = await s.enrol("frank");
-			// Held by TOTP while frank holds no passkey yet.
+			const { codes } = await s.enrol("frank");
+			// Held by the second factor while frank holds no passkey yet.
 			const waiting = fresh();
 			const held = await waiting.login("frank");
 			expectStatus(held, 403);
 			const transaction = String(held.body.transaction);
-			// Another login let in by a recovery code, its TOTP step left for the held one, registers a passkey.
+			// Another login let in by a recovery code registers a passkey.
 			const kept = fresh();
 			const other = await kept.login("frank");
 			const letIn = await letInByRecovery(kept, String(other.body.transaction), codes[0] ?? "");
 			expectStatus(letIn, 200);
 			await registerFrom(kept);
-			// The held login resumes past TOTP: refused, as frank now holds a passkey.
-			const factor = (await waiting.factors(transaction)).find((f) => f.kind === "totp");
+			// The held login resumes by another recovery code, a proof no clock judges: refused, as frank now holds a passkey.
+			const way = (await waiting.factors(transaction)).find((f) => f.kind === "recovery_code");
 			const resumed = await waiting.send("POST", "/session/mfa/verify", {
 				transaction_id: transaction,
-				factor_id: factor?.id ?? "",
-				proof: totp(secret, 1),
+				factor_id: way?.id ?? "",
+				proof: codes[1] ?? "",
 			});
 			expectStatus(resumed, 403);
-			// A new password login is refused before TOTP holds it.
+			// A new password login is refused before the second factor holds it.
 			expect(await fresh().login("frank")).toEqual({
 				status: 401,
 				body: { error: "invalid_credentials" },

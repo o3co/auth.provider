@@ -14,7 +14,19 @@ export interface Item {
 	readonly mark?: Mark;
 	/** The items of an earlier spec this one updates. */
 	readonly updates: readonly string[];
+	/** The role of the server's the requirement binds. */
+	readonly role: Role;
 }
+
+/**
+ * The roles the server takes: authorization server, OpenID Provider, resource server at its own
+ * protected routes, relying party to an upstream IdP, and client sending tokens or assertions out.
+ */
+export const roles = ["as", "op", "rs", "rp", "client"] as const;
+export type Role = (typeof roles)[number];
+
+/** A spec's default role: an OpenID spec's is the OpenID Provider's, an RFC's the authorization server's. */
+export const defaultRoleOf = (spec: string): Role => (spec.startsWith("oidc-") ? "op" : "as");
 
 export const exclusions = [
 	"client-only",
@@ -25,10 +37,11 @@ export const exclusions = [
 	"deployment",
 	"not-a-bearer-route",
 	"restates",
+	"other-role",
 	"other",
 ] as const;
 export type Exclusion = (typeof exclusions)[number];
-const withReason: readonly Exclusion[] = ["not-a-bearer-route", "restates", "other"];
+const withReason: readonly Exclusion[] = ["not-a-bearer-route", "other-role", "restates", "other"];
 
 export interface LedgerRow {
 	readonly section: string;
@@ -74,7 +87,7 @@ export interface Checklist {
 
 const section = "(?:\\d+|[A-Z])(?:\\.\\d+)*";
 const itemLine = /^- \*\*(\S+?)\*\* (MUST NOT|MUST|SHOULD NOT|SHOULD): (\S.*)$/;
-const markLine = /^ {2}(out-of-scope|deviates|noncompliant|updates): (\S.*)$/;
+const markLine = /^ {2}(out-of-scope|deviates|noncompliant|updates|role): (\S.*)$/;
 const heading = new RegExp(`^## (${section}) \\S`);
 
 export function parseItems(spec: string, text: string) {
@@ -87,13 +100,23 @@ export function parseItems(spec: string, text: string) {
 	// The item a mark belongs to: the last one written in the section, none after a heading or a refused item.
 	let last: (typeof items)[number] | undefined;
 	let updated = false;
+	let roled = false;
+	let role = defaultRoleOf(spec);
+	let headRoled = false;
 	for (const line of text.split("\n")) {
 		const item = itemLine.exec(line);
 		const mark = markLine.exec(line);
 		const sectionHead = heading.exec(line);
 		if (line.trim() === "") continue;
+		const head = /^- role: (\S+)$/.exec(line);
 		if (line.startsWith("# ") && title === "") title = line.slice(2);
-		else if (sectionHead) {
+		else if (head && current === undefined) {
+			const given = head[1] as Role;
+			if (headRoled) found("the file has more than one role line");
+			else if (roles.includes(given)) role = given;
+			else found(`the file's role ${given} is none of ${roles.join(", ")}`);
+			headRoled = true;
+		} else if (sectionHead) {
 			current = sectionHead[1] ?? "";
 			last = undefined;
 		} else if (item) {
@@ -101,6 +124,7 @@ export function parseItems(spec: string, text: string) {
 			const parts = itemId.exec(id);
 			last = undefined;
 			updated = false;
+			roled = false;
 			if (!parts) found(`${id}: not an item ID`);
 			else if (parts[1] !== spec) found(`${id}: names another spec than its file`);
 			else if (current === undefined) found(`${id}: is written under no section heading`);
@@ -108,13 +132,27 @@ export function parseItems(spec: string, text: string) {
 				found(`${id}: is not of section ${current}, under which it is written`);
 			else if (items.some((i) => i.id === id)) found(`${id}: is written twice`);
 			else {
-				last = { id, spec, section: current, strength: strength as Strength, text, updates: [] };
+				last = {
+					id,
+					spec,
+					section: current,
+					strength: strength as Strength,
+					text,
+					updates: [],
+					role,
+				};
 				items.push(last);
 			}
 		} else if (mark) {
 			const [, kind, value = ""] = mark;
 			if (!last) found(`a mark with no item before it: ${line.trim()}`);
-			else if (kind === "updates" && updated) found(`${last.id}: has more than one updates line`);
+			else if (kind === "role" && roled) found(`${last.id}: has more than one role line`);
+			else if (kind === "role") {
+				// A role line seen, taken or not, so a second one is refused either way.
+				roled = true;
+				if (roles.includes(value as Role)) last.role = value as Role;
+				else found(`${last.id}: its role ${value} is none of ${roles.join(", ")}`);
+			} else if (kind === "updates" && updated) found(`${last.id}: has more than one updates line`);
 			else if (kind === "updates") {
 				last.updates = value.split(",").map((s) => s.trim());
 				updated = true;

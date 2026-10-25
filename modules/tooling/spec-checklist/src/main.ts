@@ -2,15 +2,20 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checklistFindings } from "./checklist.ts";
+import { complianceOf } from "./evidence/compliance.ts";
+import { commitOf } from "./evidence/reporter.ts";
+import { planOf } from "./evidence/runs.ts";
 import {
+	expectedOf,
 	readChecklist,
 	repoFindings,
 	reportDir,
 	repoRoot as root,
+	runsOf,
 	updatedByOf,
 	workspaceTests,
 } from "./repo.ts";
-import { reportFiles } from "./report.ts";
+import { reportFiles, summaryTable } from "./report.ts";
 import { ledgerAgainstText } from "./text.ts";
 
 const [command, ...args] = process.argv.slice(2);
@@ -22,6 +27,8 @@ if (command === "report") {
 	mkdirSync(reportDir, { recursive: true });
 	for (const [name, text] of files) writeFileSync(join(reportDir, name), text);
 	say(`spec-checklist: wrote ${files.size} files to docs/compliance`);
+} else if (command === "summary") {
+	process.stdout.write(summaryTable(readChecklist().specs, workspaceTests(root).tests));
 } else if (command === "check") {
 	const found = repoFindings(readChecklist(), workspaceTests(root));
 	for (const f of found) say(`${f.where}  ${f.detail}`);
@@ -55,7 +62,23 @@ if (command === "report") {
 		);
 		process.exitCode = found.length === 0 ? 0 : 1;
 	}
+} else if (command === "expected") {
+	say(JSON.stringify(expectedOf(runsOf(root), args.includes("--release")).entries));
+} else if (command === "plan" && args[0]) {
+	say(JSON.stringify(planOf(runsOf(root), args[0])));
+} else if (command === "compliance" && args[0]) {
+	const of = {
+		commit: commitOf(process.env),
+		run: process.env.GITHUB_RUN_ID ?? "local",
+		release: args.includes("--release"),
+	};
+	const { table, releasable } = complianceOf(root, args[0], of);
+	say(table);
+	// A release needs every expected run reported and every mapped item passed.
+	process.exitCode = args.includes("--release") && !releasable ? 1 : 0;
 } else {
-	say("usage: report | check | ledger <spec> <the spec's plain text file>");
+	say(
+		"usage: report | summary | check | ledger <spec> <the spec's plain text file> | expected [--release] | plan <kind> | compliance <reports dir> [--release]",
+	);
 	process.exitCode = 2;
 }

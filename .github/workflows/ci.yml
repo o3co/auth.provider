@@ -39,6 +39,18 @@ jobs:
         # The lowest version engines admits, and the newest.
         node: ['24', '26']
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        if: matrix.node == '24'
+        env:
+          KIND: unit
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
         with:
           # The commit-message scan and the per-commit install check walk the
@@ -59,7 +71,19 @@ jobs:
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
+      # The lowest version's run keeps the evidence of the unit tests (spec-checklist's reporter);
+      # build-and-test holds both versions to passing.
       - run: pnpm check
+        env:
+          SPEC_EVIDENCE_DIR: ${{ matrix.node == '24' && format('{0}/evidence', runner.temp) || '' }}
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-checks-${{ matrix.node }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
       # The API site builds from the bundles as they stand, before a release
       # does it from what it published; nothing is written to the pages.
       - name: The API site builds from the bundles
@@ -164,6 +188,18 @@ jobs:
         # The lowest version engines admits, and the newest.
         node: ['24', '26']
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        if: matrix.node == '24'
+        env:
+          KIND: integration
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -181,6 +217,16 @@ jobs:
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:integration
+        env:
+          SPEC_EVIDENCE_DIR: ${{ matrix.node == '24' && format('{0}/evidence', runner.temp) || '' }}
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-integration-${{ matrix.node }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The required check on every branch it guards: both jobs above passed, on
   # every Node version of their matrix.
@@ -248,8 +294,11 @@ jobs:
   # and each pattern runs in a job of its own; `conformance` passes only once
   # all of them have.
   #
-  # What the jobs run, read from the repository: an area is a package with a
-  # `conformance` script, and a pattern is a run `patterns --list` names.
+  # What the jobs run is read from the runs spec-checklist lists (`run plan`), the
+  # same runs whose evidence compliance expects: an area is a package with a
+  # `conformance` script, a pattern a pattern run `conformance` prints. The plan
+  # also fixes the one commit every conformance job and compliance check out, so a
+  # daily run's jobs test the same develop commit.
   conformance-plan:
     needs: conformance-due
     if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
@@ -257,6 +306,7 @@ jobs:
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
       patterns: ${{ steps.plan.outputs.patterns }}
+      sha: ${{ steps.plan.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -271,10 +321,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          areas=$(jq -c -s 'map(select(.scripts.conformance) | .name)' modules/*/*/package.json)
-          patterns=$(pnpm --silent --filter @mod/conformance run patterns --list)
-          echo "areas=$areas" >> "$GITHUB_OUTPUT"
-          echo "patterns=$patterns" >> "$GITHUB_OUTPUT"
+          areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
+          patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
+          {
+            echo "areas=$areas"
+            echo "patterns=$patterns"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
   # One area: its scenes on the new system, then on the legacy one. A scene the
   # legacy system cannot be set up for, or answers by a decided difference, is
@@ -293,13 +346,24 @@ jobs:
       LEGACY_SOURCE: ${{ github.workspace }}
       LEGACY_BRANCH: v0.17.0
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: area
+          MATRIX: ${{ matrix.area }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       # The runner context is not available in a job's env, so the legacy
       # build's directory is set here.
       - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
-          # The daily run tests develop, where merged work waits for the next release.
-          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
           # The legacy build clones the v0.17.0 tag from this checkout.
           fetch-depth: 0
           fetch-tags: true
@@ -329,11 +393,25 @@ jobs:
             pnpm --filter @mod/conformance-legacy run prepare-legacy
           fi
       - name: Conformance on the new system
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter "${{ matrix.area }}" run conformance
+      # Runs where the new system failed too, so each target reports; the legacy one's evidence is
+      # kept but not counted.
       - name: Conformance on the legacy system
+        if: ${{ !cancelled() }}
         env:
           CONFORMANCE_TARGET: legacy
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter "${{ matrix.area }}" run conformance
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-area-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
   # One pattern's app, on each area it composes.
   conformance-pattern:
@@ -347,10 +425,21 @@ jobs:
       matrix:
         pattern: ${{ fromJSON(needs.conformance-plan.outputs.patterns) }}
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: pattern
+          MATRIX: ${{ matrix.pattern }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
         with:
-          # The daily run tests develop, where merged work waits for the next release.
-          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -370,6 +459,8 @@ jobs:
         env:
           # Where the runner keeps a failed area's whole output (output.log), so the step below finds it.
           TMPDIR: ${{ runner.temp }}
+          # Each area's run on the pattern's app inherits it and reports as `<area>@<pattern>`.
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
       - name: Keep the output of each area that failed
         if: failure()
         uses: actions/upload-artifact@v4
@@ -378,6 +469,14 @@ jobs:
           path: ${{ runner.temp }}/conformance-*/output.log
           if-no-files-found: ignore
           retention-days: 14
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-pattern-${{ matrix.pattern }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The check required of a release: every area and every pattern passed.
   conformance:
@@ -402,6 +501,17 @@ jobs:
     if: (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: release
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -429,7 +539,77 @@ jobs:
       - name: The recipes against the packed release
         env:
           RECIPES_TARBALLS: ${{ runner.temp }}/tarballs
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter @mod/conformance-recipes run external
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-release-check-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # What this run's tests proved of the checklist's items (spec-checklist's `compliance`): it reads
+  # every job's evidence, keeps this commit and run's, and tells each item's status and the expected
+  # runs that did not report. It runs after every job, whatever they ended; on a pull request to main
+  # and on the release branches it fails where an expected run did not report or an item is
+  # failed, incomplete or unverified, and elsewhere it only tells.
+  compliance:
+    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, release-check]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit the conformance jobs tested, where they ran; else the event's.
+          ref: ${{ needs.conformance-plan.outputs.sha || '' }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      # Each job's evidence in a directory of its own, so no two reports share a path.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: evidence-*
+          path: ${{ runner.temp }}/evidence
+      - name: Each item's status from this run's evidence
+        env:
+          # A release's run fails where a job it needs did not succeed, even one that ended before it marked its attempt.
+          NEEDS: ${{ toJSON(needs) }}
+          RELEASE: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          release=""
+          if [ "$RELEASE" = true ]; then release=--release; fi
+          status=0
+          if [ "$RELEASE" = true ]; then
+            unsucceeded=$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<<"$NEEDS")
+            if [ -n "$unsucceeded" ]; then
+              echo "jobs this release needs did not succeed:"
+              echo "$unsucceeded"
+              status=1
+            fi
+          fi
+          pnpm --silent --filter @mod/spec-checklist run compliance "$RUNNER_TEMP/evidence" $release > "$RUNNER_TEMP/compliance.out" || status=$?
+          cat "$RUNNER_TEMP/compliance.out" >> "$GITHUB_STEP_SUMMARY"
+          # The summary over every specification, from the checklist alone, which the repository does not keep.
+          pnpm --silent --filter @mod/spec-checklist run summary > "$RUNNER_TEMP/evidence/summary.md"
+          { echo; echo "## The checklist by specification and by role"; echo; cat "$RUNNER_TEMP/evidence/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Keep the table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance
+          path: |
+            ${{ runner.temp }}/evidence/compliance.json
+            ${{ runner.temp }}/evidence/compliance.md
+            ${{ runner.temp }}/evidence/summary.md
+          if-no-files-found: ignore
+          retention-days: 90
 
   # Daily on the default branch, and on every push: known vulnerabilities in
   # what an app installs.

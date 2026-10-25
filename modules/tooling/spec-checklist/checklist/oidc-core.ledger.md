@@ -1,0 +1,427 @@
+# OpenID Connect Core 1.0 ledger
+
+- source: https://openid.net/specs/openid-connect-core-1_0.txt
+- version: OpenID Connect Core 1.0 incorporating errata set 2, Final
+- sha256: aa28dd92cb104bd5928123fd51a2e0ab1070cc4b7846b82520004b2c1bfbf25e
+
+- 1.1 #1 MUST: excluded definition
+- 1.1 #2 MUST NOT: excluded definition
+- 1.1 #3 REQUIRED: excluded definition
+- 1.1 #4 SHALL: excluded definition
+- 1.1 #5 SHALL NOT: excluded definition
+- 1.1 #6 SHOULD: excluded definition
+- 1.1 #7 SHOULD NOT: excluded definition
+- 1.1 #8 RECOMMENDED: excluded definition
+- 1.1 #9 NOT RECOMMENDED: excluded definition
+- 1.1 #10 MUST NOT: excluded definition
+- 1.2 #1 MUST: oidc-core-1.2-b
+- 1.2 #2 MUST: oidc-core-1.2-a
+- 2 #1 REQUIRED: oidc-core-2-a
+- 2 #2 REQUIRED: oidc-core-2-b
+- 2 #3 MUST NOT: oidc-core-2-c
+- 2 #4 REQUIRED: oidc-core-2-d
+- 2 #5 MUST: oidc-core-2-e
+- 2 #6 REQUIRED: oidc-core-2-f
+- 2 #7 MUST NOT: oidc-core-2-t
+- 2 #8 MUST: oidc-core-2-u
+- 2 #9 REQUIRED: oidc-core-2-g
+- 2 #10 REQUIRED: oidc-core-2-h, oidc-core-3.1.2.1-s
+- 2 #11 MUST: oidc-core-2-v
+- 2 #12 MUST: oidc-core-2-i
+- 2 #13 SHOULD: oidc-core-2-j
+- 2 #14 SHOULD NOT: oidc-core-2-w
+- 2 #15 SHOULD: oidc-core-2-k
+- 2 #16 MUST NOT: oidc-core-2-l
+- 2 #17 SHOULD: oidc-core-2-m
+- 2 #18 MUST: oidc-core-2-n
+- 2 #19 MUST: oidc-core-2-s
+- 2 #20 MUST: oidc-core-2-o
+- 2 #21 MUST: oidc-core-2-p
+- 2 #22 MUST NOT: oidc-core-2-q
+- 2 #23 SHOULD NOT: oidc-core-2-r
+- 3.1.2 #1 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
+- 3.1.2.1 #1 MUST: oidc-core-3.1.2.1-a
+- 3.1.2.1 #2 REQUIRED: oidc-core-3.1.2.2-a
+- 3.1.2.1 #3 MUST: oidc-core-3.1.2.2-a
+- 3.1.2.1 #4 SHOULD: oidc-core-3.1.2.1-b
+- 3.1.2.1 #5 REQUIRED: oidc-core-3.1.2.1-c
+- 3.1.2.1 #6 REQUIRED: oidc-core-3.1.2.1-d
+- 3.1.2.1 #7 REQUIRED: oidc-core-3.1.2.1-e
+- 3.1.2.1 #8 MUST: oidc-core-3.1.2.1-f
+- 3.1.2.1 #9 SHOULD: oidc-core-3.1.2.1-w
+- 3.1.2.1 #10 RECOMMENDED: oidc-core-3.1.2.1-x
+- 3.1.2.1 #11 NOT RECOMMENDED: oidc-core-3.1.2.1-y
+- 3.1.2.1 #12 MUST: oidc-core-3.1.2.1-z
+- 3.1.2.1 #13 SHOULD: oidc-core-3.1.2.1-g
+- 3.1.2.1 #14 SHOULD: oidc-core-3.1.2.1-h
+- 3.1.2.1 #15 SHOULD: oidc-core-3.1.2.1-i
+- 3.1.2.1 #16 SHOULD: oidc-core-3.1.2.1-j
+- 3.1.2.1 #17 MUST NOT: oidc-core-3.1.2.1-k
+- 3.1.2.1 #18 SHOULD: oidc-core-3.1.2.1-l
+- 3.1.2.1 #19 MUST: oidc-core-3.1.2.1-m
+- 3.1.2.1 #20 SHOULD: oidc-core-3.1.2.1-n
+- 3.1.2.1 #21 MUST: oidc-core-3.1.2.1-o
+- 3.1.2.1 #22 SHOULD: oidc-core-3.1.2.1-p
+- 3.1.2.1 #23 MUST: oidc-core-3.1.2.1-q
+- 3.1.2.1 #24 MUST: oidc-core-3.1.2.1-r
+- 3.1.2.1 #25 MUST: oidc-core-3.1.2.1-s
+- 3.1.2.1 #26 SHOULD NOT: oidc-core-3.1.2.1-t
+- 3.1.2.1 #27 MUST: oidc-core-3.1.2.1-u
+- 3.1.2.1 #28 SHOULD: oidc-core-3.1.2.1-aa
+- 3.1.2.1 #29 SHOULD: oidc-core-3.1.2.1-v
+- 3.1.2.1 #30 MUST: oidc-core-3.1.2.1-ab
+- 3.1.2.1 #31 RECOMMENDED: oidc-core-3.1.2.1-ac
+- 3.1.2.2 #1 MUST: oidc-core-3.1.2.2-a
+- 3.1.2.2 #2 MUST: oidc-core-3.1.2.2-b
+- 3.1.2.2 #3 MUST: oidc-core-3.1.2.2-c
+- 3.1.2.2 #4 REQUIRED: oidc-core-3.1.2.2-c
+- 3.1.2.2 #5 MUST: oidc-core-3.1.2.2-d
+- 3.1.2.2 #6 MUST NOT: oidc-core-3.1.2.2-e
+- 3.1.2.2 #7 MUST: oidc-core-3.1.2.2-f
+- 3.1.2.2 #8 SHOULD: oidc-core-3.1.2.2-g
+- 3.1.2.2 #9 SHOULD: oidc-core-3.1.2.2-h
+- 3.1.2.2 #10 MUST: oidc-core-3.1.2.2-i
+- 3.1.2.3 #1 MUST: oidc-core-3.1.2.3-a
+- 3.1.2.3 #2 MUST: oidc-core-3.1.2.3-b
+- 3.1.2.3 #3 MUST NOT: oidc-core-3.1.2.3-c
+- 3.1.2.3 #4 MUST: oidc-core-3.1.2.3-d
+- 3.1.2.3 #5 MUST: oidc-core-3.1.2.3-e
+- 3.1.2.4 #1 MUST: oidc-core-3.1.2.4-a
+- 3.1.2.5 #1 MUST: oidc-core-3.1.2.5-a
+- 3.1.2.6 #1 SHOULD NOT: oidc-core-3.1.2.6-a
+- 3.1.2.6 #2 MUST NOT: oidc-core-3.1.2.6-b
+- 3.1.2.6 #3 REQUIRED: excluded definition
+- 3.1.2.6 #4 REQUIRED: oidc-core-3.1.2.6-c
+- 3.1.2.6 #5 REQUIRED: oidc-core-3.1.2.6-d
+- 3.1.2.7 #1 MUST: oidc-core-3.1.2.7-a
+- 3.1.3 #1 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
+- 3.1.3.1 #1 MUST: oidc-core-3.1.3.1-a
+- 3.1.3.2 #1 MUST: oidc-core-3.1.3.2-a, oidc-core-3.1.3.2-b, oidc-core-3.1.3.2-c, oidc-core-3.1.3.2-d, oidc-core-3.1.3.2-e, oidc-core-3.1.3.2-f
+- 3.1.3.3 #1 MUST: oidc-core-3.1.3.3-a
+- 3.1.3.3 #2 SHOULD: oidc-core-3.1.3.3-b
+- 3.1.3.3 #3 MUST: oidc-core-3.1.3.3-c
+- 3.1.3.3 #4 MUST: oidc-core-3.1.3.3-d
+- 3.1.3.3 #5 SHOULD: oidc-core-3.1.3.3-e
+- 3.1.3.5 #1 MUST: oidc-core-3.1.3.5-a
+- 3.1.3.7 #1 MUST: oidc-core-3.1.3.7-b
+- 3.1.3.7 #2 SHOULD: oidc-core-3.1.3.7-c
+- 3.1.3.7 #3 MUST: oidc-core-3.1.3.7-d
+- 3.1.3.7 #4 MUST: oidc-core-3.1.3.7-e
+- 3.1.3.7 #5 MUST: oidc-core-3.1.3.7-f
+- 3.1.3.7 #6 SHOULD: oidc-core-3.1.3.7-g
+- 3.1.3.7 #7 SHOULD: oidc-core-3.1.3.7-h
+- 3.1.3.7 #8 MUST: oidc-core-3.1.3.7-i
+- 3.1.3.7 #9 MUST: oidc-core-3.1.3.7-j
+- 3.1.3.7 #10 SHOULD: oidc-core-3.1.3.7-a
+- 3.1.3.7 #11 MUST: oidc-core-2-u
+- 3.1.3.7 #12 MUST: oidc-core-3.1.3.7-k
+- 3.1.3.7 #13 SHOULD: oidc-core-3.1.3.7-l
+- 3.1.3.7 #14 SHOULD: oidc-core-3.1.3.7-m
+- 3.1.3.7 #15 SHOULD: oidc-core-3.1.3.7-n
+- 3.2.2.1 #1 REQUIRED: oidc-core-3.2.2.1-e
+- 3.2.2.1 #2 REQUIRED: oidc-core-3.2.2.1-a
+- 3.2.2.1 #3 MUST: oidc-core-3.2.2.1-b
+- 3.2.2.1 #4 MUST NOT: oidc-core-3.2.2.1-c
+- 3.2.2.1 #5 REQUIRED: oidc-core-3.2.2.1-d
+- 3.2.2.1 #6 MUST: oidc-core-3.2.2.1-f
+- 3.2.2.5 #1 MUST: oidc-core-3.2.2.5-a
+- 3.2.2.5 #2 MUST: oidc-core-3.2.2.5-d
+- 3.2.2.5 #3 REQUIRED: oidc-core-3.2.2.5-b
+- 3.2.2.5 #4 REQUIRED: oidc-core-3.2.2.5-c
+- 3.2.2.5 #5 MUST: oidc-core-3.2.2.5-e
+- 3.2.2.6 #1 MUST: oidc-core-3.2.2.6-a
+- 3.2.2.8 #1 MUST: oidc-core-3.2.2.8-a
+- 3.2.2.9 #1 SHOULD: oidc-core-3.2.2.9-a
+- 3.2.2.9 #2 MUST: oidc-core-3.2.2.9-b
+- 3.2.2.10 #1 REQUIRED: oidc-core-3.2.2.10-a
+- 3.2.2.10 #2 REQUIRED: oidc-core-3.2.2.10-b
+- 3.2.2.11 #1 MUST: oidc-core-3.2.2.11-a
+- 3.2.2.11 #2 MUST: oidc-core-3.2.2.11-b
+- 3.2.2.11 #3 MUST: oidc-core-3.2.2.11-c
+- 3.2.2.11 #4 SHOULD: oidc-core-3.2.2.11-d
+- 3.3.2.1 #1 REQUIRED: oidc-core-3.3.2.1-b
+- 3.3.2.1 #2 REQUIRED: oidc-core-3.3.2.1-a
+- 3.3.2.1 #3 MUST: oidc-core-3.3.2.1-c
+- 3.3.2.6 #1 MUST: oidc-core-3.3.2.6-a
+- 3.3.2.8 #1 MUST: oidc-core-3.3.2.8-a
+- 3.3.2.10 #1 SHOULD: oidc-core-3.3.2.10-a
+- 3.3.2.10 #2 MUST: oidc-core-3.3.2.10-b
+- 3.3.2.11 #1 MUST: oidc-core-3.3.2.11-a
+- 3.3.2.11 #2 REQUIRED: oidc-core-3.3.2.11-b
+- 3.3.2.11 #3 REQUIRED: oidc-core-3.3.2.11-c
+- 3.3.2.12 #1 MUST: oidc-core-3.3.2.12-a
+- 3.3.3.6 #1 MUST: oidc-core-3.3.3.6-a
+- 3.3.3.6 #2 SHOULD: oidc-core-3.3.3.6-b
+- 3.3.3.6 #3 SHOULD: oidc-core-3.3.3.6-c
+- 3.3.3.7 #1 MUST: oidc-core-3.3.3.7-a
+- 4 #1 REQUIRED: excluded other: on a party starting a login at an RP, which the OP does not do
+- 4 #2 MUST: excluded other: on a party starting a login at an RP, which the OP does not do
+- 4 #3 RECOMMENDED: excluded other-role: the third party that starts a login at an RP
+- 4 #4 MUST: oidc-core-4-a
+- 4 #5 MUST: oidc-core-4-b
+- 4 #6 SHOULD: oidc-core-4-c
+- 5.1 #1 MUST: oidc-core-5.7-b
+- 5.1 #2 SHOULD: oidc-core-5.1-a
+- 5.1 #3 MUST: oidc-core-5.1-b
+- 5.1 #4 SHOULD: oidc-core-5.1-c
+- 5.1 #5 SHOULD: oidc-core-5.1-d
+- 5.1 #6 MUST: oidc-core-5.1-e
+- 5.1 #7 MUST: oidc-core-5.7-b
+- 5.1 #8 RECOMMENDED: oidc-core-5.1-f
+- 5.1 #9 RECOMMENDED: oidc-core-5.1-g
+- 5.1 #10 MUST: oidc-core-5.1-h
+- 5.1 #11 MUST: oidc-core-5.1-i
+- 5.1.1 #1 SHOULD: oidc-core-5.1.1-a
+- 5.1.2 #1 RECOMMENDED: oidc-core-5.1.2-a
+- 5.2 #1 RECOMMENDED: oidc-core-5.2-a
+- 5.2 #2 SHOULD: oidc-core-5.2-b
+- 5.2 #3 SHOULD: oidc-core-5.2-c
+- 5.2 #4 SHOULD: oidc-core-5.2-d
+- 5.2 #5 SHOULD NOT: oidc-core-5.2-e
+- 5.2 #6 RECOMMENDED: oidc-core-5.2-f
+- 5.2 #7 RECOMMENDED: oidc-core-5.2-g
+- 5.3 #1 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
+- 5.3 #2 MUST: oidc-core-5.3-a
+- 5.3 #3 MUST: oidc-core-5.3-b
+- 5.3 #4 SHOULD: oidc-core-5.3-c
+- 5.3.1 #1 MUST: oidc-core-5.3-b
+- 5.3.1 #2 RECOMMENDED: oidc-core-5.3.1-a
+- 5.3.2 #1 MUST: oidc-core-5.3.2-a
+- 5.3.2 #2 SHOULD: oidc-core-5.3.2-b
+- 5.3.2 #3 SHOULD NOT: oidc-core-5.3.2-c
+- 5.3.2 #4 MUST: oidc-core-5.3.2-d
+- 5.3.2 #5 MUST: oidc-core-5.3.2-n
+- 5.3.2 #6 MUST NOT: oidc-core-5.3.2-n
+- 5.3.2 #7 MUST: oidc-core-5.3.2-e
+- 5.3.2 #8 MUST: oidc-core-5.3.2-f
+- 5.3.2 #9 MUST: oidc-core-5.3.2-g
+- 5.3.2 #10 SHOULD: oidc-core-5.3.2-h
+- 5.3.2 #11 MUST: oidc-core-5.3.2-i
+- 5.3.2 #12 MUST: oidc-core-5.3.2-j
+- 5.3.2 #13 MUST: oidc-core-5.3.2-k
+- 5.3.2 #14 MUST: oidc-core-5.3.2-l
+- 5.3.2 #15 MUST: oidc-core-5.3.2-m
+- 5.3.4 #1 MUST: oidc-core-5.3.4-a
+- 5.3.4 #2 SHOULD: oidc-core-5.3.4-b
+- 5.5 #1 SHOULD: oidc-core-5.5-a
+- 5.5 #2 MUST: oidc-core-5.5-c
+- 5.5 #3 MUST: oidc-core-5.5-b
+- 5.5.1 #1 MUST: oidc-core-5.5.1-d
+- 5.5.1 #2 MUST NOT: oidc-core-5.5.1-a
+- 5.5.1 #3 MUST: oidc-core-5.5.1-e
+- 5.5.1 #4 MUST: oidc-core-5.5.1-b
+- 5.5.1 #5 MUST: oidc-core-5.5.1-e
+- 5.5.1 #6 MUST: oidc-core-5.5.1-c
+- 5.5.1.1 #1 MUST: oidc-core-5.5.1.1-a
+- 5.5.1.1 #2 MUST: oidc-core-5.5.1.1-b
+- 5.5.1.1 #3 SHOULD: oidc-core-5.5.1.1-c
+- 5.5.2 #1 SHOULD: oidc-core-5.5.2-a
+- 5.6 #1 MUST: oidc-core-5.6-a
+- 5.6.2 #1 MUST: oidc-core-5.6.2-a
+- 5.6.2 #2 MUST: oidc-core-5.6.2-b
+- 5.6.2 #3 MUST: oidc-core-5.6.2-i
+- 5.6.2 #4 REQUIRED: oidc-core-5.6.2-a
+- 5.6.2 #5 SHOULD NOT: oidc-core-5.6.2-c
+- 5.6.2 #6 SHOULD NOT: oidc-core-5.6.2-c
+- 5.6.2 #7 REQUIRED: oidc-core-5.6.2-d
+- 5.6.2 #8 MUST: oidc-core-5.6.2-e
+- 5.6.2 #9 SHOULD: oidc-core-5.6.2-j
+- 5.6.2 #10 MUST: oidc-core-5.6.2-f
+- 5.6.2 #11 MUST: oidc-core-5.6.2-k
+- 5.6.2 #12 SHOULD: oidc-core-5.6.2-l
+- 5.6.2 #13 SHOULD NOT: oidc-core-5.6.2-g
+- 5.6.2 #14 SHOULD NOT: oidc-core-5.6.2-g
+- 5.6.2 #15 SHOULD: oidc-core-5.6.2-h
+- 5.7 #1 MUST: oidc-core-5.7-a
+- 5.7 #2 MUST NOT: oidc-core-5.7-b
+- 6 #1 MUST: oidc-core-6-a
+- 6 #2 MUST NOT: oidc-core-6-b
+- 6.1 #1 MUST: oidc-core-6.1-a
+- 6.1 #2 MUST: oidc-core-6.1-b
+- 6.1 #3 REQUIRED: oidc-core-6.1-b
+- 6.1 #4 MUST: oidc-core-6.1-c
+- 6.1 #5 MUST: oidc-core-6.1-d
+- 6.1 #6 SHOULD: oidc-core-6.1-g
+- 6.1 #7 SHOULD: oidc-core-6.1-g
+- 6.1 #8 SHOULD: oidc-core-6.1-g
+- 6.1 #9 MUST: oidc-core-6.1-f
+- 6.1 #10 MUST NOT: oidc-core-6.1-e
+- 6.2 #1 MUST: oidc-core-6.2-a
+- 6.2 #2 MUST: oidc-core-6.2-b
+- 6.2 #3 REQUIRED: oidc-core-6.2-b
+- 6.2 #4 MUST: oidc-core-6.2-c
+- 6.2 #5 MUST: oidc-core-6.2-d
+- 6.2 #6 SHOULD: oidc-core-6.2-f
+- 6.2 #7 SHOULD NOT: oidc-core-6.2-g
+- 6.2 #8 MUST: oidc-core-6.2-e
+- 6.2 #9 MUST: oidc-core-6-a
+- 6.2 #10 MUST: oidc-core-6.2-h
+- 6.2 #11 SHOULD: oidc-core-6.2-i
+- 6.2.1 #1 MUST NOT: oidc-core-6.2.1-a
+- 6.2.1 #2 MUST: oidc-core-6.2.1-b
+- 6.2.1 #3 RECOMMENDED: oidc-core-6.2.1-c
+- 6.2.3 #1 MUST: oidc-core-6.2.3-a
+- 6.2.3 #2 SHOULD: oidc-core-6.2.3-b
+- 6.3.1 #1 MUST: oidc-core-6.3.1-a
+- 6.3.1 #2 MUST: oidc-core-6.3.1-b
+- 6.3.1 #3 MUST: oidc-core-6.3.1-c
+- 6.3.2 #1 MUST: oidc-core-6.3.2-a
+- 6.3.2 #2 MUST: oidc-core-6.3.2-b
+- 6.3.2 #3 MUST: oidc-core-6.3.2-c
+- 6.3.3 #1 MUST: oidc-core-6.3.3-a
+- 7.2.1 #1 SHOULD NOT: oidc-core-7.2.1-a
+- 7.2.1 #2 REQUIRED: excluded definition
+- 7.3 #1 REQUIRED: oidc-core-7.3-a
+- 7.3 #2 REQUIRED: oidc-core-7.3-a
+- 7.3 #3 REQUIRED: oidc-core-7.3-a
+- 7.3 #4 REQUIRED: excluded other: says `redirect_uri` is not required beside a `client_id` that holds it
+- 7.3 #5 MUST NOT: excluded other-role: a Self-Issued OP's relying party
+- 7.4 #1 REQUIRED: oidc-core-7.4-a
+- 7.4 #2 NOT RECOMMENDED: oidc-core-7.4-b
+- 7.4 #3 REQUIRED: excluded definition
+- 7.4 #4 MUST: oidc-core-7.4-c
+- 7.5 #1 MUST: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #2 MUST: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #3 MUST: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #4 MUST: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #5 MUST: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #6 SHOULD: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #7 MUST: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #8 MUST: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #9 MUST: excluded other-role: a Self-Issued OP's relying party
+- 7.5 #10 SHOULD: excluded other-role: a Self-Issued OP's relying party
+- 8 #1 MUST: oidc-core-8-a
+- 8.1 #1 MUST: oidc-core-8.1-a
+- 8.1 #2 MUST NOT: oidc-core-8.1-b
+- 8.1 #3 SHOULD: oidc-core-8.1-e
+- 8.1 #4 MUST: oidc-core-8.1-f
+- 8.1 #5 MUST: oidc-core-8.1-g
+- 8.1 #6 MUST: oidc-core-8.1-h
+- 8.1 #7 MUST NOT: oidc-core-8.1-b
+- 8.1 #8 MUST: oidc-core-8.1-c
+- 8.1 #9 MUST: oidc-core-8.1-d
+- 9 #1 MUST: oidc-core-9-g
+- 9 #2 REQUIRED: oidc-core-9-g
+- 9 #3 REQUIRED: oidc-core-9-a
+- 9 #4 MUST: oidc-core-9-a
+- 9 #5 REQUIRED: oidc-core-9-b
+- 9 #6 MUST: oidc-core-9-b
+- 9 #7 REQUIRED: oidc-core-9-c
+- 9 #8 MUST: oidc-core-9-c
+- 9 #9 SHOULD: oidc-core-9-d
+- 9 #10 REQUIRED: oidc-core-9-e
+- 9 #11 MUST: oidc-core-9-e
+- 9 #12 REQUIRED: oidc-core-9-f
+- 9 #13 MUST NOT: oidc-core-9-f
+- 9 #14 MUST: oidc-core-9-o
+- 9 #15 MUST: oidc-core-9-p
+- 9 #16 MUST: oidc-core-9-q
+- 9 #17 MUST: oidc-core-9-n
+- 9 #18 REQUIRED: oidc-core-9-n
+- 9 #19 REQUIRED: oidc-core-9-h
+- 9 #20 MUST: oidc-core-9-h
+- 9 #21 REQUIRED: oidc-core-9-i
+- 9 #22 MUST: oidc-core-9-i
+- 9 #23 REQUIRED: oidc-core-9-j
+- 9 #24 MUST: oidc-core-9-j
+- 9 #25 SHOULD: oidc-core-9-k
+- 9 #26 REQUIRED: oidc-core-9-l
+- 9 #27 MUST: oidc-core-9-l
+- 9 #28 REQUIRED: oidc-core-9-m
+- 9 #29 MUST NOT: oidc-core-9-m
+- 9 #30 MUST: oidc-core-9-o
+- 9 #31 MUST: oidc-core-9-p
+- 9 #32 MUST: oidc-core-9-q
+- 10 #1 MUST: oidc-core-10-a
+- 10.1 #1 MUST: oidc-core-10.1-a
+- 10.1 #2 MUST: oidc-core-10.1-b
+- 10.1 #3 MUST: oidc-core-10.1-c
+- 10.1 #4 MUST: oidc-core-10.1-d
+- 10.1 #5 MUST: oidc-core-10.1-e
+- 10.1 #6 MUST: oidc-core-10.1-f
+- 10.1 #7 MUST NOT: oidc-core-10.1-g
+- 10.1.1 #1 SHOULD: oidc-core-10.1.1-a
+- 10.2 #1 MUST: oidc-core-10.2-a
+- 10.2 #2 MUST: oidc-core-10.2-b
+- 10.2 #3 MUST: oidc-core-10.2-c
+- 10.2 #4 MUST: oidc-core-10.2-d
+- 10.2 #5 MUST: oidc-core-10.2-e
+- 10.2 #6 MUST: oidc-core-10.2-c
+- 10.2 #7 MUST: oidc-core-10.2-d
+- 10.2 #8 MUST: oidc-core-10.2-f
+- 10.2 #9 MUST NOT: oidc-core-10.2-g
+- 10.2.1 #1 SHOULD: oidc-core-10.2.1-a
+- 10.2.1 #2 SHOULD: oidc-core-10.2.1-b
+- 10.2.1 #3 SHOULD: oidc-core-10.2.1-c
+- 11 #1 MUST: oidc-core-11-g
+- 11 #2 MUST: oidc-core-11-a
+- 11 #3 MUST: oidc-core-11-b
+- 11 #4 MUST: oidc-core-11-c
+- 11 #5 MUST: oidc-core-11-d
+- 11 #6 MUST: oidc-core-11-e
+- 11 #7 SHOULD: oidc-core-11-f
+- 12.1 #1 MUST: oidc-core-12.1-a
+- 12.1 #2 MUST: oidc-core-12.1-b
+- 12.1 #3 MUST: oidc-core-12.1-c
+- 12.2 #1 MUST: oidc-core-12.2-a
+- 12.2 #2 MUST: oidc-core-12.2-b
+- 12.2 #3 MUST: oidc-core-12.2-c
+- 12.2 #4 MUST: oidc-core-12.2-d
+- 12.2 #5 MUST: oidc-core-12.2-e
+- 12.2 #6 MUST: oidc-core-12.2-f
+- 12.2 #7 MUST NOT: oidc-core-12.2-g
+- 12.2 #8 SHOULD NOT: oidc-core-12.2-h
+- 12.2 #9 MUST: oidc-core-12.2-i
+- 13.3 #1 SHOULD: oidc-core-13.3-a
+- 14 #1 MUST: oidc-core-14-a
+- 14 #2 MUST NOT: oidc-core-14-b
+- 14 #3 MUST: oidc-core-14-c
+- 14 #4 MUST: oidc-core-14-d
+- 15.1 #1 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 15.1 #2 REQUIRED: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 15.1 #3 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 15.1 #4 MUST: oidc-core-15.1-a
+- 15.1 #5 MUST: oidc-core-15.1-b
+- 15.1 #6 MUST: oidc-core-15.1-c
+- 15.1 #7 MUST: oidc-core-15.1-d
+- 15.1 #8 MUST: oidc-core-15.1-e
+- 15.1 #9 MUST: oidc-core-15.1-f
+- 15.1 #10 MUST: oidc-core-15.1-g
+- 15.2 #1 MUST: excluded other: the lead-in to the list below; each listed feature is its own item (15.2-a to 15.2-g)
+- 15.2 #2 MUST: oidc-core-15.2-a
+- 15.2 #3 MUST: oidc-core-15.2-b
+- 15.2 #4 MUST: oidc-core-15.2-c
+- 15.2 #5 MUST: oidc-core-15.2-d
+- 15.2 #6 MUST: oidc-core-15.2-e
+- 15.2 #7 MUST: oidc-core-15.2-f
+- 15.2 #8 MUST: oidc-core-15.2-g
+- 15.3 #1 SHOULD: oidc-core-15.3-a
+- 15.4 #1 REQUIRED: excluded other: the lead-in saying an RP's use of a feature brings its MUSTs; each rp item states its own
+- 15.4 #2 MUST: excluded other: the lead-in saying an RP's use of a feature brings its MUSTs; each rp item states its own
+- 16.3 #1 SHOULD: oidc-core-16.3-a
+- 16.4 #1 MUST NOT: oidc-core-16.4-a
+- 16.6 #1 SHOULD: oidc-core-16.3-a
+- 16.7 #1 SHOULD: oidc-core-16.7-a
+- 16.8 #1 SHOULD: oidc-core-16.8-a
+- 16.9 #1 SHOULD: oidc-core-16.9-a
+- 16.11 #1 MUST NOT: oidc-core-16.11-a
+- 16.11 #2 MUST: excluded other: on designing another binding of the specification than HTTP
+- 16.12 #1 SHOULD NOT: oidc-core-16.12-a
+- 16.12 #2 SHOULD: oidc-core-16.12-b
+- 16.15 #1 MUST: oidc-core-16.15-a
+- 16.15 #2 RECOMMENDED: oidc-core-16.15-b
+- 16.17 #1 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
+- 16.17 #2 SHOULD: oidc-core-16.17-b
+- 16.17 #3 MUST: oidc-core-16.17-c
+- 16.17 #4 MUST: oidc-core-16.17-a
+- 16.18 #1 SHOULD: oidc-core-16.18-a
+- 16.18 #2 SHOULD: oidc-core-16.18-b
+- 16.18 #3 SHOULD: oidc-core-16.18-c
+- 16.19 #1 MUST: oidc-core-16.19-a
+- 16.19 #2 MUST: oidc-core-16.19-b
+- 16.19 #3 MUST: oidc-core-16.19-c
+- 16.19 #4 SHOULD: oidc-core-16.19-d
+- 16.22 #1 MUST NOT: oidc-core-16.22-a
+- 17.1 #1 SHOULD: oidc-core-17.1-a
+- 17.2 #1 SHOULD: oidc-core-17.2-a
+- 17.3 #1 SHOULD: oidc-core-17.3-a

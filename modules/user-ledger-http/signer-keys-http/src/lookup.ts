@@ -1,4 +1,9 @@
-import { algorithms, type SignerKeys } from "@mod/jwt-bearer";
+import {
+	algorithms,
+	type SignerAlgorithm,
+	type SignerKeys,
+	takenAlgorithms,
+} from "@mod/jwt-bearer";
 import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
 import { publicMembers } from "@mod/keys";
 import {
@@ -21,7 +26,10 @@ export interface LookupParts {
 
 const answerShape = z.object({
 	keys: z.array(z.record(z.string(), z.unknown())),
-	algorithms: z.array(z.enum(algorithms)).min(1).optional(),
+	algorithms: z
+		.array(z.enum(takenAlgorithms as [SignerAlgorithm, ...SignerAlgorithm[]]))
+		.min(1)
+		.optional(),
 });
 
 /** The kind outbound gives a failure to send, or no-answer for anything else. */
@@ -43,6 +51,8 @@ export function keysAt(parts: LookupParts): SignerKeys {
 	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
 	return {
 		issuer,
+		// The ledger answers a signer's own keys alone, as the Deployment section asks of it.
+		perSigner: true,
 		async keysOf({ subject, kid }) {
 			// A kid the assertion does not name is left out, as JSON writes no undefined member.
 			const body = JSON.stringify({ issuer, subject, kid });
