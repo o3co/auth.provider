@@ -18,7 +18,7 @@
 ## Offers
 - Area `code` and the shape of its parts
 - Scene builder (builds the key, identity, OAuth, second-factor and code parts from the form written in a scene)
-- Test tools (`./testing`): a logged-in browser, and requests to the authorization endpoint
+- Test tools (`./testing`): a logged-in browser, requests to the authorization endpoint, and `succeeded` (a set-up's answer read only when it succeeded, else the scene fails naming what answered, its status and its body's start)
 
 ## Invariants
 - The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of refusing an unverified email `verified-email`, and those of a subject the ledger revokes `revocation`; the rest are the package's.
