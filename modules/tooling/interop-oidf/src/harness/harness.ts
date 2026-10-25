@@ -11,7 +11,13 @@ import { loginPage } from "../login/login.ts";
 import { pkceShim } from "../pkce/pkce.ts";
 import { type ModuleRun, type Outcome, outcomesOf } from "../results/results.ts";
 import { suiteScene } from "../scene/scene.ts";
-import { hostForSuite, type SuitePin, startSuite, suiteOrigin } from "../suite/suite.ts";
+import {
+	hostForSuite,
+	type SuitePin,
+	SuiteStopFailed,
+	startSuite,
+	suiteOrigin,
+} from "../suite/suite.ts";
 
 const packageDir = join(import.meta.dirname, "..", "..");
 
@@ -68,6 +74,16 @@ export async function stopAll(stops: readonly (() => Promise<unknown>)[]): Promi
 		await stop().catch((error: unknown) => problems.push(error));
 	}
 	return problems;
+}
+
+/**
+ * Removes a plan's work directory where everything it started was stopped; keeps it where a stop
+ * failed, the suite's start's own too, for it holds what stops that part. A failed removal joins
+ * `problems`.
+ */
+export async function cleared(work: string, failure: unknown, problems: unknown[]): Promise<void> {
+	if (problems.length > 0 || failure instanceof SuiteStopFailed) return;
+	await rm(work, { recursive: true, force: true }).catch((e: unknown) => problems.push(e));
 }
 
 const readJson = async <T>(file: string): Promise<T> =>
@@ -346,8 +362,7 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 	}
 	const problems = await stopAll(stops);
 	// A stop that failed keeps what stops its part in `work`; it is left for the next run to take down.
-	if (problems.length === 0)
-		await rm(work, { recursive: true, force: true }).catch((e: unknown) => problems.push(e));
+	await cleared(work, failure, problems);
 	if (failure !== undefined) {
 		if (problems.length > 0)
 			throw new AggregateError(
