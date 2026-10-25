@@ -1,5 +1,5 @@
 import { inspect } from "node:util";
-import { BootRefused, defineModule, type Module, Unavailable } from "@mod/kernel";
+import { BootRefused, defineModule, isUnavailable, type Module } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { type Mail, type Message, mailPurposes, mailTemplates, plainText } from "./contract.ts";
@@ -70,7 +70,7 @@ export function mailContract(name: string, harness: MailHarness): void {
 
 		it("is unavailable once the message has expired", async () => {
 			const sender = await open();
-			await expect(sender.send(notice({ expiresAt: 1 }))).rejects.toBeInstanceOf(Unavailable);
+			await expect(sender.send(notice({ expiresAt: 1 }))).rejects.toSatisfy(isUnavailable);
 		});
 
 		it("refuses anything but one address", async () => {
@@ -157,7 +157,7 @@ export function mailContract(name: string, harness: MailHarness): void {
 				};
 				await expect((await refusing("limit")).send(notice())).resolves.toBe("limited");
 				const failure = await (await refusing("down")).send(notice()).catch((e: unknown) => e);
-				expect(failure).toBeInstanceOf(Unavailable);
+				expect(isUnavailable(failure)).toBe(true);
 				expect(inspect(failure)).not.toContain(remoteWords);
 			},
 		);
@@ -166,7 +166,7 @@ export function mailContract(name: string, harness: MailHarness): void {
 			const bare = defineModule({ name: "mail-contract-bare", takes: [] }, (m) => [
 				m.contribute(mailPurposes).by(() => ({ purpose: "contract.bare" })),
 			]);
-			await expect(harness.boot([bare])).rejects.toBeInstanceOf(BootRefused);
+			await expect(harness.boot([bare])).rejects.toSatisfy(BootRefused.is);
 		});
 	});
 }

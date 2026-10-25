@@ -16,12 +16,15 @@ const app = await loadConfig(source)
 	.catch(refused);
 // Taken before starting, so a signal while starting stops once started instead of killing.
 let started: Promise<void> = Promise.resolve();
-const stop = async () => {
-	await started.catch(() => undefined);
-	// Within the kernel's `stop-deadline`.
-	await app.stop();
-	process.exit(0);
-};
+// Run once: a second signal waits for the first stop instead of stopping again.
+let stopping: Promise<void> | undefined;
+const stop = () =>
+	(stopping ??= (async () => {
+		await started.catch(() => undefined);
+		// Within the kernel's `stop-deadline`.
+		await app.stop();
+		process.exit(0);
+	})());
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 started = app.start();

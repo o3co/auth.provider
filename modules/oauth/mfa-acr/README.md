@@ -18,4 +18,4 @@
 - None.
 
 ## Depends on
-- `kernel`, `acr`, `mfa` (composed with it), `mfa-reading` (the contract it asks for, so boot is refused without second factors)
+- `kernel`, `acr`, `mfa` (composed with it), `mfa-extensions` (`secondFactorAmr`), `mfa-reading` (the contract it asks for, so boot is refused without second factors)

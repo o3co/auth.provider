@@ -1,11 +1,12 @@
 # ledger-wire
 
 ## Responsibilities
-- Holds the words of the wire the provider speaks with the operator's HTTP ledgers: the user ledger's calls (`users-http`'s) and a witness ledger's (`mfa-witness-http`'s, `passkey-witness-http`'s). The modules that speak it and the fakes that answer it read them here, from one place.
+- Holds the words of two of the wires the provider speaks with the operator's HTTP ledgers: the user ledger's calls (`users-http`'s) and a witness ledger's (`mfa-witness-http`'s, `passkey-witness-http`'s). The modules that speak it and the fakes that answer it read them here, from one place.
 
 ## Not here
 - Making the calls, reading an answer into users or factors, logging and outages: the module that speaks each wire.
 - Where a deployment's ledger serves each call: its settings' URLs, sent to as given.
+- The words of the subject-revocation route and of the signer-keys call: `subject-revocation-http`'s and `signer-keys-http`'s, each in its own module.
 - A fake ledger: the verification packages'.
 
 ## Offers

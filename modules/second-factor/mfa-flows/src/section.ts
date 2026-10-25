@@ -51,7 +51,9 @@ export const section = z.strictObject({
 				.describe("The first hold after `threshold` failures, in whole seconds, such as `15m`."),
 			"max-backoff": seconds()
 				.prefault("1d")
-				.describe("The longest hold, the first doubling up to it, in whole seconds, such as `1d`."),
+				.describe(
+					"The longest hold, the first doubling up to it, no shorter than `backoff`, in whole seconds, such as `1d`.",
+				),
 			budget: z
 				.number()
 				.int()
@@ -72,7 +74,7 @@ export const section = z.strictObject({
 			memory: seconds()
 				.prefault("1d")
 				.describe(
-					"How long a run of failures is remembered without one, in whole seconds, such as `1d`.",
+					"How long a run of failures is remembered without one, no shorter than `max-backoff`, in whole seconds, such as `1d`.",
 				),
 		})
 		.prefault({}),

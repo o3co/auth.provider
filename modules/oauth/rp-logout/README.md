@@ -44,7 +44,7 @@
 - A client gone or without a back-channel URL settles it.
 
 ## Depends on
-- `audit`, `clients`, `code-grant`, `http`, `issuer`, `keys`, `oidc`, `outbound`, `outbound-policy`, `redirect-uris`, `request-source` (the source), `session`, `session-participants`
+- `audit`, `clients`, `code-grant`, `http`, `issuer`, `kernel`, `keys`, `oidc`, `outbound`, `outbound-policy`, `rate-limit`, `redirect-uris`, `request-source` (the source), `session`, `session-participants`
 
 ## Vocabulary
 - notice: one client to tell that a session closed, until it is given up.

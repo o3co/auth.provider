@@ -31,7 +31,7 @@
 - An unavailable dependency answers `503` `temporarily_unavailable` (each route's declared answer), never `active:false` or `200`; `http` then warns `http.unavailable` with what and the route, and introspection records `introspection.unavailable`.
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `clients`, `issuer`, `tokens`, `token-endpoint`, `rate-limit`, `audit`
+- `kernel`, `http`, `request-source`, `clients`, `client-allowance`, `issuer`, `tokens`, `token-endpoint`, `rate-limit`, `audit`
 
 ## Vocabulary
 - written: this request wrote the token's revocation.
