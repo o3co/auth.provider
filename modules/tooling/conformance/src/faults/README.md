@@ -9,7 +9,10 @@ Internal module of `conformance`: a Redis topology a fault scene runs on, and th
 ## Offers
 - `startTopology` (a number of replicas, settings every node starts with, a clock offset), giving the nodes, the current `primary`, its `replicas`, and `stop`; `ask` a node one command.
 - A node: its name, `upstream` (where it answers on this host now), `ask`, `runId`, `state` (running, exit code).
-- `promote` a replica (only once it has caught up with the primary, within a wait given), killing the old primary or keeping it on, and reattaching the replicas named to the new one; `crash` a node (SIGKILL, then started again, answering how it ended); `sleep` a node (`DEBUG SLEEP`: `awake` with when it began and ended on Redis's clock, from a `TIME` on either side in the same write; `asleep` only a hint, a PING unanswered); `askAll` several commands in one write; `microsOf` a `TIME`; `pause` a node's container.
+- `promote` a replica (only once it has caught up with the primary, within a wait given), killing the old primary or keeping it on, and reattaching the replicas named to the new one.
+- `crash` a node (SIGKILL, then started again, answering how it ended), and `pause` a node's container.
+- `sleep` a node (`DEBUG SLEEP`): `awake` with when it began and ended on Redis's clock, from a `TIME` on either side in the same write; `asleep` only a hint, a PING unanswered.
+- `askAll` several commands in one write, and `microsOf` a `TIME` reply.
 - `redisImage` and `libfaketime`: the Redis image by version and digest, and the libfaketime package by version.
 
 ## Invariants
