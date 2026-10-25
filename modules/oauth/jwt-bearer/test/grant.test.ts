@@ -926,6 +926,146 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		]);
 	});
 
+	describe("self-issued signers", () => {
+		const prefix = "device:";
+		const own = { "subject-is-key-thumbprint": true, "self-issued-prefix": prefix };
+		/** The signer's key as a ledger answers it, under the `kid` its assertions name: its thumbprint. */
+		const held = async (k = device): Promise<Answer> => ({
+			kind: "keys",
+			keys: [{ ...(await deviceKey(k)), kid: await thumbOf(k) }],
+			algorithms: ["EdDSA"],
+		});
+		/** An assertion as a self-issued signer makes it: `iss` and `sub` its own name, `kid` its thumbprint. */
+		const selfIssued = async (
+			name: string,
+			more: Record<string, unknown> = {},
+			key = device.privateKey,
+			kid?: string,
+		) =>
+			assertion(
+				{ ...base, iss: name, sub: name, iat: now / 1000, exp: now / 1000 + 120, ...more },
+				key,
+				{ kid: kid ?? name.slice(prefix.length) },
+			);
+		const subjectOfIssued = async (s: Awaited<ReturnType<typeof serve>>, outcome: GrantOutcome) => {
+			const token = outcome.kind === "issued" ? String(outcome.body.access_token) : "";
+			const verified = await s.verify(token);
+			return verified.kind === "valid" ? verified.grant.subject : verified.reason;
+		};
+
+		it("takes a self-issued signer as its issuer's, asking its keys by its thumbprint, the subject that thumbprint", async () => {
+			const thumb = await thumbOf();
+			const asked: unknown[] = [];
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [
+				signing(() => held(), asked),
+			]);
+			const issued = await s.grant(await selfIssued(prefix + thumb));
+			expect(errorOf(issued)).toBe("issued");
+			expect(asked).toEqual([{ subject: thumb, kid: thumb }]);
+			expect(await subjectOfIssued(s, issued)).toBe(thumb);
+			// The same key under the issuer's own `iss` stands for the same subject.
+			expect(await subjectOfIssued(s, await s.grant(await deviceAssertion(thumb)))).toBe(thumb);
+		});
+
+		it("reads only the prefix as written and a thumbprint's 43 characters, asking no key for any other", async () => {
+			const thumb = await thumbOf();
+			const asked: unknown[] = [];
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [
+				signing(() => held(), asked),
+			]);
+			const last = thumb.at(-1) ?? "A";
+			const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+			const unused = alphabet[(alphabet.indexOf(last) + 1) % 64] ?? "A";
+			const unread = [
+				`Device:${thumb}`,
+				`device\uff1a${thumb}`,
+				`${prefix}${thumb}=`,
+				`${prefix}${thumb.slice(0, 42)}`,
+				`${prefix}${thumb}A`,
+				`${prefix}${thumb.slice(0, 42)}+`,
+			];
+			for (const name of unread) {
+				expect(saidOf(await s.grant(await selfIssued(name))), name).toBe(
+					"invalid_grant: untrusted signer",
+				);
+			}
+			expect(asked).toEqual([]);
+			// One differing only in its last character's unused bits is asked for, and no key's own.
+			const near = `${prefix}${thumb.slice(0, 42)}${unused}`;
+			expect(saidOf(await s.grant(await selfIssued(near)))).toBe("invalid_grant: untrusted signer");
+		});
+
+		it("takes a self-issued signer only where its sub is its iss, and its own key only", async () => {
+			const thumb = await thumbOf();
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [signing(() => held())]);
+			const name = prefix + thumb;
+			for (const sub of [thumb, prefix + (await thumbOf(other))]) {
+				expect(saidOf(await s.grant(await selfIssued(name, { sub }))), sub).toBe(
+					"invalid_grant: untrusted signer",
+				);
+			}
+			// Another signer's name, signed with this key.
+			const otherName = prefix + (await thumbOf(other));
+			expect(saidOf(await s.grant(await selfIssued(otherName)))).toBe(
+				"invalid_grant: untrusted signer",
+			);
+		});
+
+		it("stands a linked self-issued signer for the account its thumbprint links, revoked at that account's boundary", async () => {
+			const thumb = await thumbOf();
+			const asked: unknown[] = [];
+			let found: Linked = { kind: "none" };
+			const s = await serveWith(entry({ subject: "linked", upstream: "device", ...own }), [
+				signing(() => held()),
+				resolving(async () => found, asked),
+			]);
+			expect(saidOf(await s.grant(await selfIssued(prefix + thumb)))).toBe(
+				"invalid_grant: unknown subject",
+			);
+			found = { kind: "subject", subject: "account-7" };
+			expect(await subjectOfIssued(s, await s.grant(await selfIssued(prefix + thumb)))).toBe(
+				"account-7",
+			);
+			expect(asked).toEqual([
+				["device", thumb],
+				["device", thumb],
+			]);
+			await s.revoke("account-7");
+			expect(saidOf(await s.grant(await selfIssued(prefix + thumb)))).toBe(
+				"invalid_grant: assertion revoked",
+			);
+		});
+
+		it("uses a self-issued assertion up once, apart from the issuer's own iss with the same jti", async () => {
+			const thumb = await thumbOf();
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [signing(() => held())]);
+			const once = await selfIssued(prefix + thumb, { jti: "j-1" });
+			const [a, b] = await Promise.all([s.grant(once), s.grant(once)]);
+			expect([errorOf(a), errorOf(b)].sort()).toEqual(["invalid_grant", "issued"]);
+			expect(saidOf(await s.grant(once))).toBe("invalid_grant: assertion replayed");
+			const fixed = await assertion(
+				{ ...base, iss: fixedIss, sub: thumb, jti: "j-1" },
+				device.privateKey,
+			);
+			expect(errorOf(await s.grant(fixed))).toBe("issued");
+		});
+
+		it("holds a self-issued assertion to the audience, times and lifetime as any other", async () => {
+			const thumb = await thumbOf();
+			const s = await serveWith(entry({ subject: "as-is", ...own }), [signing(() => held())]);
+			const name = prefix + thumb;
+			expect(saidOf(await s.grant(await selfIssued(name, { aud: "https://elsewhere" })))).toBe(
+				"invalid_grant: wrong audience",
+			);
+			expect(saidOf(await s.grant(await selfIssued(name, { exp: now / 1000 - 600 })))).toBe(
+				"invalid_grant: expired",
+			);
+			expect(saidOf(await s.grant(await selfIssued(name, { exp: now / 1000 + 86_400 })))).toBe(
+				"invalid_grant: lives too long",
+			);
+		});
+	});
+
 	it("refuses to boot on an issuer that does not say how its subject is read, naming the key", async () => {
 		const unsaid = await serveWith(entry(), [signing(async () => ({ kind: "none" }))]).catch(
 			(error) => error,

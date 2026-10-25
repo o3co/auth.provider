@@ -32,11 +32,12 @@
 - Usable only when the client explicitly allows it.
 - The audience asked (`grants`' `target`, after the scope) narrows the token within what the client may be issued; it is asked before the `sessions` boundary and the `jti` is written, so a refusal leaves the assertion usable.
 - An assertion made at or before its subject's `sessions` boundary, widened by `clock-skew` as its issuer's clock may run that far ahead, gets no token: it is made at its `iat`, never later than now, and one without `iat` counts as made before any boundary. Checked before its `jti` is spent.
-- An assertion's `jti` is once only: spent through the store interface, by a hash of the issuer and the `jti`, unless spent already.
+- An assertion's `jti` is once only: spent through the store interface, by a hash of the `iss` as sent and the `jti`, unless spent already; a self-issued signer's assertions are spent apart from its issuer's own.
+- A self-issued signer's assertion is read as its issuer's, as the internal module `assertion` says; it stands for its thumbprint (linked: the subject `users` finds by it).
 - The token is issued through `tokens`' issuance policies, without a session. They are asked before the `jti` is written, so a refusal leaves the assertion usable, and again when issuing.
 
 ## Data
-- Spent assertions, through the store interface (a wiring keeps them), each by a hash of its issuer and `jti`. The lifetime is a relative value: the assertion's remaining lifetime plus the clock skew allowance and a margin (since the store judges it by its own clock). Only well-formed `jti` strings (without lone surrogates) are accepted.
+- Spent assertions, through the store interface (a wiring keeps them), each by a hash of its `iss` as sent and `jti`. The lifetime is a relative value: the assertion's remaining lifetime plus the clock skew allowance and a margin (since the store judges it by its own clock). Only well-formed `jti` strings (without lone surrogates) are accepted.
 - Needs: never evicted, survives a crash and a failover (losing one lets an assertion be reused).
 
 ## Depends on
