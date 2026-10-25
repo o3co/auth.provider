@@ -122,6 +122,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 - **Left to you:**
   - Keeping other subdomains of your origin from being taken over: double submit relies on them being unable to set the cookie.
   - Ending sessions with revocation, not by waiting out their lifetime, when they must end now.
+  - The pages you serve (`authorize.login-page`, `consent.page`, the step-up pages and federation grants' pages): the provider draws none of them. Escaping what they show, from its answers (a client's name, the scopes asked) and from their URL, and the headers they are served with (a content security policy, framing), are yours.
 
 ## Tokens
 
