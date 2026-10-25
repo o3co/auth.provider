@@ -11,6 +11,7 @@
 - `find` (id → client or none) and `authenticate` (request → client or a typed refusal, never null); both throw unavailable when a source is unavailable. A caller records a refusal through `recordRefusedAuthentication` (its audit, the request, the refusal) as `client.authentication.failure`, with `reason` and `source`, never the client id claimed; declared in `./audit-events`.
 - `checkRecord` (record → where it fails, or nothing): the checks `find` holds a source's record to (the registered rule, a known method, each section's schema), each failure a path from the record's root (`sections.consent.uri`), never a value or message; it rejects when a schema throws.
 - An authenticated answer carries the challenges for a later 401 to that client: its method's, or every method's when its method has none.
+- `bare` (request → whether it carries nothing a client authenticates with, whichever methods are composed). `authenticate`'s `no_credentials` says only that no composed method claimed the request.
 - `registered` (→ the clients the operator registered, in the settings' order, the `i`th at `clients.registered.<i>`), for a boot check that names one by its place, never its id.
 - `methods` names the usable authentication methods, built in and contributed; `signingAlgorithms` names the algorithms they take signed credentials in.
 - A client gives its metadata by section, and says whether the operator registered it or another source named it.
@@ -23,6 +24,7 @@
 ## Invariants
 - A request uses one authentication method: two or more are refused first, then credentials a method finds malformed, both before any lookup.
 - `none` is the method only when no other method claims the request; an Authorization header no method reads claims nothing.
+- `bare` is false for an `authorization` header, a client certificate (a malformed one included), any of `client_id`, `client_secret`, `client_assertion` and `client_assertion_type` sent at all (empty, repeated or not a string included), and anything a composed method claims or finds malformed; a field only a method not composed reads cannot be told.
 - A Basic header is malformed unless it is canonical base64 of UTF-8 that decodes to a non-empty id and secret; a `client_id` in the body beside it must name the same client, or the credentials are bad.
 - A `client_secret` is malformed unless one non-empty `client_id` is sent once beside it; a `client_id` alone is malformed when sent twice or not as a string, and no credentials when empty.
 - `client_secret_post` and `none` read `client_id` and `client_secret` from a form or JSON body, where a value that is not a string still counts as sent.

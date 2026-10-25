@@ -378,6 +378,67 @@ describe("clients", () => {
 		});
 	});
 
+	it("tells a request that carries nothing a client authenticates with from one that carries anything, whichever methods are composed", async () => {
+		const c = await boot();
+		const grant = { grant_type: ["urn:test:grant"], assertion: ["a.b.c"] };
+		expect(c.bare(request({}, grant))).toBe(true);
+		expect(c.bare(testRequest({ method: "POST", json: { grant_type: "urn:test:grant" } }))).toBe(
+			true,
+		);
+		// Each of these is answered as today by `authenticate`; `bare` is false for all of them.
+		const carrying: [Record<string, string>, Record<string, string[]>][] = [
+			[{ authorization: "Bearer abc" }, grant],
+			[basic("conf", "s3cret"), grant],
+			[{}, { ...grant, client_id: ["pub"] }],
+			[{}, { ...grant, client_id: [""] }],
+			[{}, { ...grant, client_id: ["pub", "pub"] }],
+			[{}, { ...grant, client_secret: ["p0st"] }],
+			// The assertion method is not composed here: its fields still count.
+			[{}, { ...grant, client_assertion: ["x.y.z"] }],
+			[
+				{},
+				{
+					...grant,
+					client_assertion_type: ["urn:ietf:params:oauth:client-assertion-type:jwt-bearer"],
+				},
+			],
+		];
+		for (const [headers, form] of carrying) {
+			expect(c.bare(request(headers, form)), JSON.stringify([headers, form])).toBe(false);
+		}
+		await expect(
+			c.authenticate(request({}, { ...grant, client_assertion: ["x.y.z"] })),
+		).resolves.toMatchObject({
+			reason: "no_credentials",
+		});
+		for (const sent of [1, ["pub"], { id: "pub" }]) {
+			const json = testRequest({ method: "POST", json: { client_id: sent } });
+			expect(c.bare(json), JSON.stringify(sent)).toBe(false);
+		}
+		for (const clientCertificate of [
+			{ kind: "certificate" as const, leaf: new Uint8Array([1]), chain: [] },
+			{ kind: "malformed" as const },
+		]) {
+			const certified = testRequest({
+				method: "POST",
+				form: new Map(Object.entries(grant)),
+				source: { clientCertificate },
+			});
+			expect(c.bare(certified), clientCertificate.kind).toBe(false);
+		}
+	});
+
+	it("takes what a composed method claims, or finds malformed, as carrying credentials", async () => {
+		const claims = method("header-key", {
+			claimed: (r) => r.headers.get("x-client-key") ?? undefined,
+		});
+		const malformed = method("odd-key", { malformed: (r) => r.headers.has("x-odd-key") });
+		const c = await boot([claims, malformed]);
+		expect(c.bare(request({}, {}))).toBe(true);
+		expect(c.bare(request({ "x-client-key": "k" }, {}))).toBe(false);
+		expect(c.bare(request({ "x-odd-key": "k" }, {}))).toBe(false);
+	});
+
 	it("reads a Basic header only in canonical base64 of UTF-8", async () => {
 		const c = await boot();
 		const header = (value: string) => ({ authorization: `Basic ${value}` });

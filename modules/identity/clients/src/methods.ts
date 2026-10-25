@@ -59,7 +59,7 @@ function utf8(bytes: Uint8Array): string | undefined {
 }
 
 /** Whether the body sends this name, as a string or of another type. */
-const sends = ({ fields, mistyped }: HttpRequest, name: string) =>
+export const sends = ({ fields, mistyped }: HttpRequest, name: string) =>
 	fields.has(name) || mistyped?.has(name) === true;
 
 const usesBasic = (request: HttpRequest) =>
