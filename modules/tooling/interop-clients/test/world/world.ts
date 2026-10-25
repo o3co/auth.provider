@@ -1,8 +1,8 @@
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { area, areaTarget, onNew, type Started } from "@mod/conformance";
+import { type AreaScene, area, areaTarget, onNew, type Started } from "@mod/conformance";
 import { codeScene } from "@mod/conformance-code";
 import { browserAt } from "@mod/conformance-code/testing";
 import { type Front, selfSigned, startFront } from "@mod/conformance-front";
@@ -19,9 +19,8 @@ export interface WorldClient {
 export interface World {
 	/** The provider's issuer: the front's origin. */
 	readonly issuer: string;
-	/** The front's certificate, which every adapter trusts and nothing else; as PEM, and in a file. */
+	/** The front's certificate, as PEM, which every adapter trusts and nothing else. */
 	readonly ca: string;
-	readonly caFile: string;
 	readonly clients: Readonly<Record<"basic" | "post" | "public", WorldClient>>;
 	readonly redirectUri: string;
 	/** A browser with its own session: it logs in and follows an authorization URL to the redirect. */
@@ -71,12 +70,28 @@ function signing() {
 	};
 }
 
-/** Starts the front, then the app at the front's origin; a refused start fails with what the app told. */
-export async function startWorld(): Promise<World> {
-	const dir = await mkdtemp(join(tmpdir(), "interop-clients-"));
+/** The query of an authorization URL a library built, where it is the provider's authorization endpoint at its issuer. */
+export function authorizationQuery(url: string, issuer: string): string {
+	const at = new URL(url);
+	// Followed as given, not mended: a discovery that told another endpoint fails here.
+	if (at.origin !== new URL(issuer).origin || at.pathname !== "/oauth/authorize")
+		throw new Error(
+			`the library sent the browser to ${at.origin}${at.pathname}, not the provider's authorization endpoint`,
+		);
+	return at.search.slice(1);
+}
+
+/**
+ * Starts the front, then the app at the front's origin (by `start`, the conformance target's unless
+ * given), its files under `under`; where the app does not start, the front is closed and the files
+ * removed before the failure, with what the app told, is thrown.
+ */
+export async function startWorld(
+	given: { readonly start?: (scene: AreaScene) => Promise<Started>; readonly under?: string } = {},
+): Promise<World> {
+	const start = given.start ?? ((scene: AreaScene) => areaTarget().start(scene));
+	const dir = await mkdtemp(join(given.under ?? tmpdir(), "interop-clients-"));
 	const tls = await selfSigned("127.0.0.1", dir);
-	const caFile = join(dir, "ca.pem");
-	await writeFile(caFile, tls.cert);
 	let base = "";
 	const front: Front = await startFront({
 		upstream: () => base,
@@ -101,26 +116,32 @@ export async function startWorld(): Promise<World> {
 		userinfo: true,
 		refresh: {},
 	});
-	const running: Started = await areaTarget().start({
+	const cleared = async () => {
+		await front.stop();
+		await rm(dir, { recursive: true, force: true });
+	};
+	const running = await start({
 		...scene,
 		parts: { ...scene.parts, [harnessArea.name]: {} },
+	}).catch(async (failure: unknown) => {
+		await cleared();
+		throw failure;
 	});
 	if (running.kind !== "running") {
-		await front.stop();
+		await cleared();
 		throw new Error(`the app refused to start:\n${running.output}`);
 	}
 	base = running.baseUrl;
 	return {
 		issuer: front.origin,
 		ca: tls.cert,
-		caFile,
 		clients,
 		redirectUri,
 		browser() {
 			const at = browserAt(() => base, front.origin, user);
 			return {
 				async authorize(url: string) {
-					const answer = await at.authorize(new URL(url).search.slice(1));
+					const answer = await at.authorize(authorizationQuery(url, front.origin));
 					if (!answer.at)
 						throw new Error(
 							`the authorization endpoint answered ${answer.status}: ${answer.text.slice(0, 300)}`,
@@ -131,8 +152,7 @@ export async function startWorld(): Promise<World> {
 		},
 		async stop() {
 			await running.stop();
-			await front.stop();
-			await rm(dir, { recursive: true, force: true });
+			await cleared();
 		},
 	};
 }
