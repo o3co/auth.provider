@@ -454,4 +454,32 @@ describe("a caller's code that throws", () => {
 		}
 		await expect(relay.close()).rejects.toThrow(/cannot be told[\s\S]*cannot be read/);
 	});
+
+	it("releases a scene waiting on the rule whose match threw, the relay still open", async () => {
+		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		const throws = (where: "request" | "succeeded", name: string): Match => ({
+			request: (c) => {
+				if (where === "request" && c.name === name) throw new Error(`${name}'s request threw`);
+				return c.name === name;
+			},
+			succeeded: () => {
+				if (where === "succeeded") throw new Error(`${name}'s success threw`);
+				return true;
+			},
+		});
+		const seen = relay.observe(throws("request", "INCR"));
+		const held = relay.hold(throws("request", "DECR"));
+		const dropped = relay.dropReplyTo(throws("succeeded", "PING")).first;
+		for (const command of [encode("INCR", fresh()), encode("DECR", fresh()), encode("PING")]) {
+			const c = await rawClient(relay.url);
+			c.write(command);
+			await Promise.race([c.closed, pause(2_000)]);
+		}
+		const within = <T>(p: Promise<T>) =>
+			Promise.race([p, pause(2_000).then(() => Promise.reject(new Error("still waiting")))]);
+		await expect(within(seen)).rejects.toThrow(/INCR's request threw/);
+		await expect(within(held)).rejects.toThrow(/DECR's request threw/);
+		await expect(within(dropped)).rejects.toThrow(/PING's success threw/);
+		await expect(relay.close()).rejects.toThrow(/threw/);
+	});
 });

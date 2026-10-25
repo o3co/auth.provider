@@ -118,6 +118,24 @@ const turnsAnswersOff = (command: Command) =>
 	["OFF", "SKIP"].includes(command.args[1]?.toString().toUpperCase() ?? "");
 
 /**
+ * A caller's match, its predicates guarded: one that throws first gives its error to `failed`,
+ * which releases whoever waits on the rule, then throws on to cut the connection.
+ */
+function guardedMatch(match: Match, failed: (error: Error) => void): Match {
+	const guard =
+		<A>(read: (a: A) => boolean) =>
+		(a: A) => {
+			try {
+				return read(a);
+			} catch (error) {
+				failed(error instanceof Error ? error : new Error(String(error)));
+				throw error;
+			}
+		};
+	return { request: guard(match.request), succeeded: guard(match.succeeded) };
+}
+
+/**
  * A relay between an app and Redis that reads RESP2 both ways and pairs each answer with its
  * request, to cause a fault at a known point and to show that it happened.
  */
@@ -389,8 +407,15 @@ export async function startRelay(options: RelayOptions) {
 			match: Match,
 			opts: { resends?: (first: Command, later: Command) => boolean } = {},
 		): Drop {
+			const done = settleable<Dropped>();
 			const entry = {
-				rule: { match, done: settleable<Dropped>() },
+				rule: {
+					match: guardedMatch(match, (error) => {
+						entry.ended = true;
+						done.reject(error);
+					}),
+					done,
+				},
 				...(opts.resends ? { resends: opts.resends } : {}),
 				resent: [] as Dropped[],
 				ended: false,
@@ -406,13 +431,28 @@ export async function startRelay(options: RelayOptions) {
 		},
 		/** Keeps the next matched request, and what follows on its connection, from Redis. */
 		hold(match: Match): Promise<Held> {
-			const rule = { match, done: settleable<Held>() };
+			const done = settleable<Held>();
+			const rule: Rule<Held> = {
+				match: guardedMatch(match, (error) => {
+					holds = holds.filter((h) => h !== rule);
+					done.reject(error);
+				}),
+				done,
+			};
 			holds.push(rule);
 			return rule.done.promise;
 		},
 		/** The next matched request whose answer comes out as asked. */
 		observe(match: Match, opts: { outcome?: "succeeded" | "failed" } = {}): Promise<Execution> {
-			const rule = { match, done: settleable<Execution>(), outcome: opts.outcome ?? "succeeded" };
+			const done = settleable<Execution>();
+			const rule = {
+				match: guardedMatch(match, (error) => {
+					observers = observers.filter((o) => o !== rule);
+					done.reject(error);
+				}),
+				done,
+				outcome: opts.outcome ?? "succeeded",
+			};
 			observers.push(rule);
 			return rule.done.promise;
 		},
