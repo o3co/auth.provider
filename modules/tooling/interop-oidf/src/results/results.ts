@@ -88,8 +88,9 @@ export function outcomesOf(
 			used.add(skip);
 			return { kind: "excused", class: skip.class };
 		}
-		if (excusedBy.length > 0) return { kind: "excused", class: excusedBy[0]?.class ?? "" };
+		// A person's review the suite asks for stands, whatever the expected warnings excuse.
 		if (run.info.result === "REVIEW") return { kind: "review" };
+		if (excusedBy.length > 0) return { kind: "excused", class: excusedBy[0]?.class ?? "" };
 		if (run.info.result === "PASSED" || run.info.result === "WARNING") return { kind: "passed" };
 		return { kind: "failed", why: [`its result is ${run.info.result}`] };
 	};

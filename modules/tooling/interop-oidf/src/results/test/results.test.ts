@@ -111,4 +111,12 @@ describe("each suite test's outcome, as the harness reports it", () => {
 		const { unused: found } = judged([run("oidcc-server", "PASSED", [block])], [unused]);
 		expect(found).toEqual([unused]);
 	});
+
+	it("is waiting for review where the suite asks for one, though every warning was expected", () => {
+		const runs = [run("oidcc-server", "REVIEW", [block, failing("CheckX", "WARNING")])];
+		const warning = entry({ "expected-result": "warning" });
+		const judgedRun = judged(runs, [warning]);
+		expect(judgedRun.modules[0]?.outcome).toEqual({ kind: "review" });
+		expect(judgedRun.unused).toEqual([]);
+	});
 });

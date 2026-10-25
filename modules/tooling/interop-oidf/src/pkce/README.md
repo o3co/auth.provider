@@ -7,5 +7,6 @@ Internal module of `interop-oidf`: the PKCE the suite's OIDC tests do not send, 
 
 ## Invariants
 - A request carrying `code_challenge` or `code_challenge_method`, right or wrong, and a token request carrying `code_verifier`, pass as they are; so does a token request for a code the shim did not see, or of another grant.
+- A request with PKCE of its own waits as any does, so its code is tied to it and gets no verifier; the login bringing back a request the shim challenged, its challenge the shim's, is no new request.
 - A code is tied to the latest request with its state at its redirect URI; another URI or an error answer ties none.
 - Every token request for a tied code gets the same verifier: a code used twice is refused by the provider as ever.
