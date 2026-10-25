@@ -50,6 +50,13 @@ const subjectOf = {
 		.describe(
 			"Whether `sub` must be the JWK thumbprint (RFC 7638, SHA-256) of the key that signed.",
 		),
+	"self-issued-prefix": z
+		.string()
+		.regex(/^[\x21-\x7e]{1,64}$/, "1 to 64 printable ASCII characters")
+		.optional()
+		.describe(
+			"Takes self-issued signers too: an assertion whose `iss` and `sub` are both this prefix and its key's JWK thumbprint, read as this issuer's. Needs `subject-is-key-thumbprint` and keys contributed.",
+		),
 };
 
 const issuerEntry = z
@@ -90,7 +97,43 @@ const issuerEntry = z
 	.refine((i) => (i.subject === "linked") === (i.upstream !== undefined), {
 		message: 'upstream is written with subject = "linked", and only then',
 		path: ["upstream"],
-	});
+	})
+	.refine(
+		(i) =>
+			i["self-issued-prefix"] === undefined ||
+			(i["subject-is-key-thumbprint"] && !("keys" in i) && !("jwks-uri" in i)),
+		{
+			message: "a self-issued prefix needs subject-is-key-thumbprint and keys contributed",
+			path: ["self-issued-prefix"],
+		},
+	);
+
+/** Refusals of prefixes that could read one assertion as two issuers', each at its place, whatever the order. */
+function prefixRefusals(
+	issuers: readonly { issuer: string; "self-issued-prefix"?: string | undefined }[],
+) {
+	const at = (i: number) => `jwt-bearer.issuers.${i}`;
+	const refused: Refusal[] = [];
+	for (const [a, own] of issuers.entries()) {
+		const prefix = own["self-issued-prefix"];
+		if (prefix === undefined) continue;
+		const where = `${at(a)}.self-issued-prefix`;
+		for (const [b, other] of issuers.entries()) {
+			if (other.issuer.startsWith(prefix)) {
+				refused.push({ where, reason: `starts the issuer of ${at(b)}` });
+			}
+			const theirs = other["self-issued-prefix"];
+			if (
+				b !== a &&
+				theirs !== undefined &&
+				(theirs.startsWith(prefix) || prefix.startsWith(theirs))
+			) {
+				refused.push({ where, reason: `overlaps the self-issued prefix of ${at(b)}` });
+			}
+		}
+	}
+	return refused;
+}
 
 const section = z.strictObject({
 	issuers: z
@@ -192,6 +235,7 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 						: contributedSigners(jwt, keys as NonNullable<typeof keys>, policyOf(i), thumbprint),
 			);
 		}
+		refused.push(...prefixRefusals(c.section.issuers));
 		const ledgers = new Map((await c.collect(jtiLedgers)).map((l) => [l.issuer, l]));
 		for (const [what, named] of [
 			["keys are", [...contributed.keys()]],
@@ -206,6 +250,12 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			}
 		}
 		if (refused.length > 0) return c.refuseAll(refused);
+		const selfIssued = c.section.issuers.flatMap((i, at) =>
+			i["self-issued-prefix"] === undefined ? [] : [`jwt-bearer.issuers.${at}`],
+		);
+		// Told once, by place: the prefixes are the operator's, never written out.
+		if (selfIssued.length > 0)
+			c.log.info("jwt-bearer.self_issued_signers", { at: selfIssued.join(",") });
 		const linked = linkedOf(c.section);
 		const resolvers = await c.collect(linkedSubjects);
 		if (linked.size > 0 && resolvers.length === 0) {
