@@ -3926,6 +3926,9 @@ importers:
         specifier: workspace:*
         version: link:../conformance-oauth
     devDependencies:
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
