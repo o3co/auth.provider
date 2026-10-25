@@ -150,9 +150,10 @@ export const helpersOf = (packages: readonly Pkg[]) =>
 			.filter(isPlainHelper),
 	);
 
-/** Whether a declared word lets a package reach this; a module imported whole needs a word that names it. */
+/** Whether the declared words let a package reach this; a module imported whole reaches each of its names, so they must name every one. */
 const covers = (allowed: readonly string[], reach: string) =>
-	allowed.includes(reach) || allowed.some((a) => a.split(" ")[0] === reach);
+	allowed.includes(reach) ||
+	(reaching[reach]?.every((name) => allowed.includes(`${reach} ${name}`)) ?? false);
 
 /** G26: product code reaches the network only as the words its manifest declares let it, each stated on its card. G27: a word reaching a server the deployment provides asks a Deployment section. */
 export function networkRules(s: Scope, p: Pkg) {

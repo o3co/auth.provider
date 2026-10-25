@@ -139,6 +139,20 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
+	it("refuses a module imported whole past what its words name, as the whole reaches each of its names", () => {
+		const files = {
+			"src/a.ts":
+				'import * as http from "node:http";\nexport const a = (url: string) => http.request(url);\n',
+			"src/b.ts": 'import http from "node:http";\nexport const b = http;\n',
+			"src/c.ts": 'export * from "node:http";\n',
+			"src/d.ts": 'import { createServer } from "node:http";\nexport const d = createServer;\n',
+		};
+		const manifest = { exports: { ".": "./src/contract.ts" }, network: "serves-http" };
+		expect(
+			said(declaring(pkg("@t/whole", files, manifest), "- (`network`: `serves-http`)")),
+		).toEqual(["src/a.ts node:http", "src/b.ts node:http", "src/c.ts node:http"]);
+	});
+
 	it("refuses a word it does not know, and takes several words in a list", () => {
 		const files = {
 			"src/a.ts":

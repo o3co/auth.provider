@@ -28,6 +28,7 @@ Internal module of `guard`: G26, how product code may reach the network, and G27
   - `outbound`: `node:http`'s and `node:https`'s `request` and `Agent`, `node:net`'s and `node:tls`'s `connect`, and `lookup` from `node:dns` and `node:dns/promises`.
   - `redis`: the `ioredis` client.
   - `smtp`: `node:net`'s and `node:tls`'s `connect`, and `nodemailer`.
+- A module imported or loaded whole reaches each of its names, so the words cover it only where they name every one. None names all of a module above: a package imports the names a word lets through.
 - A starter and its helper are read through their facts (`fork`, `join` and `lookup` by the bindings they import and the reads of them, `process` unbound); a call named `require`, or `import()`, counts as a load whatever binds it, as the launch form's own strictness asks, beside every loader the facts read.
 - A package declaring `outbound` may name in `forks` one shipped source this rule reads (the starter, a plain file, never a link) and its helper, a plain `.mjs` file beside it; `forks` naming more is refused. The starter's `node:child_process` is let through only where all of these hold; else it is refused with the condition it misses:
   - It imports `fork` alone by name and reaches `node:child_process` (under either name) no other way: no other import, no re-export, no `import()` or `require` of it, nor of a module named at run time alone.
