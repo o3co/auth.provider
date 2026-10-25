@@ -41,5 +41,6 @@ it("refuses boot for a field the section does not name", async () => {
 });
 
 it("takes nothing: its one contribution is a value", async () => {
-	expect(await takesUnused(assembly({}))).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(assembly({})))["client-allowance"]).toBeUndefined();
 });
