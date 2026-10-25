@@ -47,4 +47,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `users`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule), `ledger-wire` (the wire's words)
+- `kernel`, `users`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule), `ledger-wire` (the wire's words); its takes name `credentialPolicy` (`outbound.credentials`) with or without a `credential`, as `outbound` provides it beside `outbound`, so a module of your own providing `outbound` provides it too

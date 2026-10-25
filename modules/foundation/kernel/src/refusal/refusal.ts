@@ -23,7 +23,10 @@ export class BootRefused extends Error {
 	constructor(refusals: readonly Refusal[]) {
 		super(`boot refused (${refusals.length})`);
 		this.name = "BootRefused";
-		this.refusals = Object.freeze([...refusals]);
+		// Each refusal's words copied as they are now: whoever gave one may change it later.
+		this.refusals = Object.freeze(
+			refusals.map(({ where, reason }) => Object.freeze({ where, reason })),
+		);
 	}
 	/** Whether `error` is a refused boot, by its mark rather than its class, so two copies of the kernel agree; it never throws. */
 	static is(error: unknown): error is BootRefused {

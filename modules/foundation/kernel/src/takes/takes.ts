@@ -1,6 +1,6 @@
 import type { Contract, ExtensionPoint, Handle } from "../handles.ts";
 import type { Module } from "../module.ts";
-import type { Refusal } from "../refusal/refusal.ts";
+import { type Refusal, readThrown } from "../refusal/refusal.ts";
 
 /** Why a contract refuses a module taking it, by its takenBy; none where it may. */
 export function takenByRefusal(contract: Contract<unknown>, module: Module): string | undefined {
@@ -50,7 +50,16 @@ export function checkTakes(
 		}
 		const passed = module.section === undefined || sections.has(module);
 		if (typeof takes === "function" && !passed) continue;
-		const handles = new Set(typeof takes === "function" ? takes(sections.get(module)) : takes);
+		// A function's throw is its module's refusal, its text never kept; the other modules are still asked.
+		const asked = readThrown<readonly Handle[] | undefined>(
+			() => [...(typeof takes === "function" ? takes(sections.get(module)) : takes)],
+			undefined,
+		);
+		if (asked === undefined) {
+			refusals.push({ where: module.name, reason: "its takes failed as they were asked" });
+			continue;
+		}
+		const handles = new Set(asked);
 		held.set(module, handles);
 		const own = new Set((module.provides ?? []).map((provision) => provision.contract));
 		for (const handle of handles) {

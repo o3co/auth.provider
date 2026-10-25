@@ -13,7 +13,7 @@ Internal module of `kernel`: the preflight of what modules take, before any fact
 
 ## Invariants
 - A module without takes (one written past the types: plain JavaScript, or cast) is refused; `[]` names none.
-- A function's takes are asked only with a section that passed its schema.
+- A function's takes are asked only with a section that passed its schema; one that throws refuses its module by name (`its takes failed as they were asked`), the thrown value's text never kept, and the other modules are still checked.
 - Refused: a contract no other module provides (one the module provides itself is never named), one whose `takenBy` does not name the module, and a point whose registered contributions break its rule (a contribution that will fail as it builds counts), each point once by its identity, never its label.
 - A point's handle carries its rule, whatever its contributions are.
 

@@ -27,4 +27,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `jwt-bearer`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)
+- `kernel`, `jwt-bearer`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule); its takes name `credentialPolicy` (`outbound.credentials`) with or without a `credential`, as `outbound` provides it beside `outbound`, so a module of your own providing `outbound` provides it too

@@ -280,6 +280,26 @@ describe("readiness", () => {
 		expect(await none.report(10)).toEqual({ answer: "ready", probes: [] });
 	});
 
+	it("answers unready, every probe down, where stop began while the probes ran, though they pass", async () => {
+		let pass: (() => void) | undefined;
+		const s = setUp([
+			{ name: "slow", check: () => new Promise<void>((resolve) => (pass = resolve)) },
+			passing("quick"),
+		]);
+		const app = await s.app;
+		const asked = s.report(1000);
+		await vi.waitFor(() => expect(pass).toBeDefined());
+		await app.stop(1000);
+		pass?.();
+		expect(await asked).toEqual({
+			answer: "unready",
+			probes: [
+				{ name: "slow", up: false },
+				{ name: "quick", up: false },
+			],
+		});
+	});
+
 	it("reports every probe down without checking once stop begins", async () => {
 		let runs = 0;
 		const s = setUp([

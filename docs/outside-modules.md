@@ -31,7 +31,7 @@ The generator reads what your package is from one key of its `package.json`, `au
 
 - `format` is `1`. A key the generator does not read is refused, and so is a value of the wrong shape.
 - `kind` is what your module is: a feature, an adapter of an axis, or a wiring of a feature of your own. Every kind takes `needs`; beside it, a feature takes `optIn` and `joins`, an adapter `replaces` or `adapts` one axis owner (never both), `default` and `joins`, and a wiring `wires`, the name of one of your features composed with it. The `combinations` card says what each field means, and what `combinationsWith` refuses.
-- `needs` names the modules your module needs to run, each a module of the release or another package outside it composed with yours. It may point only the way the kinds allow: a feature never needs a capability, an adapter or a wiring, nor a package declared for wirings alone. Your npm dependencies do not go here.
+- `needs` names the modules your module needs to run, each a module of the release or another package outside it composed with yours. It may point only the way the kinds allow: a feature never needs a capability, an adapter or a wiring, nor a package declared for wirings alone. A need brings a foundation, a feature, or an axis owner and then its axis's adapter; one on any other module (an adapter of an axis your module does not own, a wiring) is refused, so need the owner it adapts or the feature it wires. Your npm dependencies do not go here.
 - An adapter declares no default for an axis the release owns: whoever generates the app chooses it, with `--axis`.
 
 ### Export the module
