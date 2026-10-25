@@ -14,20 +14,31 @@
 		"@mod/kernel": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/audit": "workspace:*",
 		"@mod/client-allowance": "workspace:*",
 		"@mod/clients": "workspace:*",
+		"@mod/dpop": "workspace:*",
+		"@mod/dpop-store": "workspace:*",
+		"@mod/exchange-id-tokens-store": "workspace:*",
 		"@mod/external-jwt": "workspace:*",
 		"@mod/grants": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
+		"@mod/jwt-bearer-store": "workspace:*",
+		"@mod/keys": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
+		"@mod/sender-binding": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
+		"@mod/subject-revocation-store": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/token-exchange": "workspace:*",
 		"@mod/tokens": "workspace:*",
+		"@mod/tokens-store": "workspace:*",
 		"@mod/users": "workspace:*",
+		"jose": "6.2.12",
 		"vitest": "5.0.5"
 	}
 }
