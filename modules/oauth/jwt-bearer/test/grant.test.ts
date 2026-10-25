@@ -18,7 +18,13 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import {
+	quietRuntime,
+	recordingLog,
+	switchedModule,
+	takesUnused,
+	unavailableSwitch,
+} from "@mod/kernel/testing";
 import { type Narrower, type Outbound, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
@@ -615,6 +621,13 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		]);
 
 	const entry = (more: Record<string, unknown> = {}) => [{ issuer: fixedIss, ...more }];
+	const otherIss = "app.phones";
+	/** Keys contributed for the second issuer, answering none. */
+	const otherSigning = defineModule({ name: "phone-keys", takes: [] }, (m) => [
+		m
+			.contribute(signerKeys)
+			.by(() => ({ issuer: otherIss, keysOf: async () => ({ kind: "none" }) })),
+	]);
 	const located = `${issuer}/oauth/token`;
 	const serveWith = (issuers: Record<string, unknown>[], extra: Module[]) =>
 		serve(undefined, issuer, located, issuers, outboundModule, extra);
@@ -732,6 +745,92 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		expect(asked).toEqual([]);
 		await s.grant(await signedWith("k1"));
 		expect(asked).toEqual([{ subject: thumb, kid: "k1" }]);
+	});
+
+	it("takes a self-issued prefix of 1 to 64 printable ASCII characters, only beside contributed thumbprint keys", () => {
+		const takes = (more: Record<string, unknown>) =>
+			jwtBearer.section?.safeParse({
+				issuers: entry({ subject: "as-is", "subject-is-key-thumbprint": true, ...more }),
+			}).success;
+		expect(takes({ "self-issued-prefix": "device:" })).toBe(true);
+		expect(takes({ "self-issued-prefix": "~".repeat(64) })).toBe(true);
+		for (const prefix of [
+			"",
+			"~".repeat(65),
+			"d\u00e9vice:",
+			"dev ice:",
+			"dev\tice:",
+			"dev\u0000",
+		]) {
+			expect(takes({ "self-issued-prefix": prefix }), JSON.stringify(prefix)).toBe(false);
+		}
+		expect(takes({ "self-issued-prefix": "device:", "subject-is-key-thumbprint": false })).toBe(
+			false,
+		);
+		const key = [{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") }];
+		expect(takes({ "self-issued-prefix": "device:", keys: key })).toBe(false);
+	});
+
+	it("refuses to boot on a self-issued prefix that starts an issuer or another prefix, whichever is written first, by place", async () => {
+		const refusalsOf = (issuers: Record<string, unknown>[]) =>
+			serveWith(issuers, [
+				signing(async () => ({ kind: "none" })),
+				...(issuers.length > 1 ? [otherSigning] : []),
+			]).then(
+				() => [],
+				(error: BootRefused) => error.refusals,
+			);
+		const own = { subject: "as-is", "subject-is-key-thumbprint": true };
+		const at = (i: number) => `jwt-bearer.issuers.${i}.self-issued-prefix`;
+		// A prefix that starts an issuer: its own, or another's.
+		expect(await refusalsOf(entry({ ...own, "self-issued-prefix": "app." }))).toEqual([
+			{ where: at(0), reason: "starts the issuer of jwt-bearer.issuers.0" },
+		]);
+		const two = (a: string, b: string) => [
+			{ issuer: fixedIss, ...own, "self-issued-prefix": a },
+			{ issuer: otherIss, ...own, "self-issued-prefix": b },
+		];
+		for (const [a, b] of [
+			["device:", "device:x"],
+			["device:x", "device:"],
+			["device:", "device:"],
+		] as const) {
+			expect(await refusalsOf(two(a, b)), `${a} ${b}`).toEqual([
+				{ where: at(0), reason: "overlaps the self-issued prefix of jwt-bearer.issuers.1" },
+				{ where: at(1), reason: "overlaps the self-issued prefix of jwt-bearer.issuers.0" },
+			]);
+		}
+		expect(await refusalsOf(two("device:", "phone:"))).toEqual([]);
+	});
+
+	it("tells at boot which issuers take self-issued signers, by place and never by prefix", async () => {
+		const logged = recordingLog();
+		const issuers = [
+			{ issuer: fixedIss, subject: "as-is", "subject-is-key-thumbprint": true },
+			{
+				issuer: otherIss,
+				subject: "as-is",
+				"subject-is-key-thumbprint": true,
+				"self-issued-prefix": "device:",
+			},
+		];
+		const given = assembly(undefined, issuer, located, issuers, outboundModule, [
+			signing(async () => ({ kind: "none" })),
+			otherSigning,
+		]);
+		await assemble({
+			...given,
+			runtime: quietRuntime({ clock: { now: () => clock.at }, log: logged.log }),
+		});
+		const told = logged.lines().filter((l) => l.event === "jwt-bearer.self_issued_signers");
+		expect(told).toEqual([
+			{
+				level: "info",
+				event: "jwt-bearer.self_issued_signers",
+				fields: { at: "jwt-bearer.issuers.1" },
+			},
+		]);
+		expect(JSON.stringify(logged.lines())).not.toContain("device:");
 	});
 
 	it("refuses to boot on an issuer named twice, and on keys contributed for an issuer it does not name, by path and never by value", async () => {
