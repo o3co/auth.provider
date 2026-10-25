@@ -1,7 +1,7 @@
 # kernel
 
 ## Responsibilities
-- Assembles modules in two stages: builds every provision and contribution, resolving contracts at once, then checks late references. Owns the generic rules of extension points, collecting contributions in module order.
+- Assembles modules: checks what they take, builds every provision and contribution, resolving contracts at once, then checks late references. Owns the generic rules of extension points, collecting contributions in module order.
 - Loads configuration and gives each module only its own section, checked and frozen. With even one boot refusal, nothing is served.
 - Runs the lifecycle (start, periodic tasks, stop within a drain deadline) and answers readiness (internal module `lifecycle`, whose card holds their invariants). Provides the clock, randomness and log.
 - Additions to this module go through a human gate.
@@ -11,7 +11,7 @@
 
 ## Offers
 - `defineModule`: name, section schema (zod, the library that reads sections), multi-instance declaration (a boolean, or a function asked only with a section that passed), `takes` (the `Handle`s its factories take from other modules, `[]` for none: a list, or such a function), provisions and contributions. `contract` (optionally `takenBy`, the names of the modules that may take it) and `extensionPoint` (exactly one / at least one / any number / keyed) make the handles.
-- `assemble`: answers `get`, `start` and `stop(deadlineMs?)` (without one, `stop-deadline`), or rejects with `BootRefused` (one module may raise several refusals), refused after its builds once their stop hooks ran (`lifecycle`'s rollback).
+- `assemble`: answers `get`, `start` and `stop(deadlineMs?)` (without one, `stop-deadline`), or rejects with `BootRefused` (one module may raise several refusals): before any build where the takes show a gap, else after its builds once their stop hooks ran (`lifecycle`'s rollback).
 - `stop`: after the periodic tasks, runs the stop hooks in reverse order, each given a signal that aborts at the deadline; the hooks left are then called without waiting. A hook may also run without `start()`, on a refused assembly: it ends what its build started.
 - Build context: the runtime, `section`, `get`, `collect`, `late` (a function giving a contract's interface once assembly succeeds), `readinessReport`, `onStart`, `onStop`, `every`, `refuse` and `refuseAll`.
 - `readinessReport(deadlineMs)`: runs every probe (a contributed check of one resource, keyed by name at `probes`) at once, joining a check still running, and gives each probe's name and whether it passed. `ready` only if all pass within the caller's deadline; once stop begins, `unready` with all down. A check is aborted once no caller waits.

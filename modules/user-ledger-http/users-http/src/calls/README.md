@@ -16,4 +16,4 @@
 - A user is a new frozen value. Attributes keep the ledger's values as given.
 
 ## Depends on
-- `kernel`, `outbound`, `users`
+- `kernel`, `outbound`, `users`, `ledger-wire` (the wire's words), `url-setting` (a configured URL's type)

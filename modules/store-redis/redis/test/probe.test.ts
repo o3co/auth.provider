@@ -84,6 +84,18 @@ describe("the redis probe", () => {
 		redis.down();
 	});
 
+	it("answers unready once the server splits keys across nodes, as boot would refuse", async () => {
+		const redis = fakeRedis();
+		const { warned, ready } = await boot(await redis.listen());
+		expect(await ready()).toBe("ready");
+		redis.storeScripts.splitsKeys = true;
+		expect(await ready()).toBe("unready");
+		expect(warned()).toContain("redis.settings_unmet");
+		redis.storeScripts.splitsKeys = false;
+		expect(await ready()).toBe("ready");
+		redis.down();
+	});
+
 	it("fails once the server is gone", async () => {
 		const redis = fakeRedis();
 		const { ready } = await boot(await redis.listen());

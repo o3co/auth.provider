@@ -59,6 +59,8 @@ export function fakeRedis() {
 		transient: undefined as string | undefined,
 		/** Fails only the store scripts whose text holds this, as a server that runs some and not others. */
 		failWhere: undefined as string | undefined,
+		/** Refuses a script over keys of two hash tags, as a proxy that splits keys across nodes does. */
+		splitsKeys: false,
 	};
 	const writing = new Set(["SET", "INCR", "HSET", "HINCRBY", "PEXPIRE", "PEXPIREAT", "DEL"]);
 	const refusal = (name: string) =>
@@ -88,6 +90,11 @@ export function fakeRedis() {
 		if (name === "EVAL" && scripts.keysRefused) return "-NOPERM No permissions to access a key\r\n";
 		if (name === "EVAL" && (args[1] ?? "").includes("local failed = {}")) return report();
 		if (name === "EVAL" && storeScripts.transient) return `-${storeScripts.transient}\r\n`;
+		if (name === "EVAL" && storeScripts.splitsKeys) {
+			const keys = args.slice(3, 3 + Number(args[2] ?? 0));
+			const tags = new Set(keys.map((key) => /\{([^}]*)\}/.exec(key)?.[1] ?? key));
+			if (tags.size > 1) return "-CROSSSLOT Keys in request don't hash to the same slot\r\n";
+		}
 		const failing =
 			storeScripts.fail ||
 			(storeScripts.failWhere !== undefined && (args[1] ?? "").includes(storeScripts.failWhere));

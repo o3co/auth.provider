@@ -133,6 +133,13 @@ describe("a store script, run once", () => {
 		redis.down();
 	});
 
+	it("refuses boot, naming it, where the server splits keys across nodes and refuses a script over two partitions", async () => {
+		const redis = primary();
+		redis.storeScripts.splitsKeys = true;
+		expect(await refusal(await redis.listen())).toMatch(/splits keys across nodes/);
+		redis.down();
+	});
+
 	it("never names a store script for a passing state of the server: busy with a script, or loading its data", async () => {
 		for (const state of [
 			"BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.",

@@ -39,7 +39,7 @@
 - A scan walks Redis's SCAN over the space's value keys alone, which one server holds (clusters are refused); a value at its very expiry may still be listed, and a read then finds none. A failover or restart during a walk loses its cursor's place, so a key may not come; a later walk lists it.
 
 ## Deployment
-- Redis 7.0 or later, answering as a primary: no cluster, and no proxy splitting keys across nodes.
+- Redis 7.0 or later, answering as a primary: no cluster, and no proxy splitting keys across nodes (boot runs `batchAcross` over two partitions, and refuses, named, a server that answers it `CROSSSLOT`).
 - `maxmemory-policy noeviction`, where a composed module keeps a space that must not be evicted.
 - `appendonly yes` and `appendfsync always`, where a composed module keeps a durable space, unless `durability` is `none`.
 - With `replication` `replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of 1 or more. With `none`: no replica connected.

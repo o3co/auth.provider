@@ -36,7 +36,7 @@
 - Writes the target only, through `app-output`; reads the workspace's package list or the bundle's index, and the cards and fragments of the modules it composes.
 
 ## Depends on
-- `app-output` (it writes the project, from the packages create-app gives it), `combinations` (the modules it assembles become dependencies of the project).
+- `app-output` (it writes the project, from the packages create-app gives it), `combinations` (the modules it assembles become dependencies of the project); `semver`, through `outside`.
 
 ## Vocabulary
 - fragment: a module's example of its section, placeholders only; a secret's is `REPLACE-…` text its section refuses.

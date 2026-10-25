@@ -9,7 +9,7 @@
 
 ## Offers
 - Composition definition only (a contribution to `mfa-witness.enrollment-witnesses`). Opt-in: no axis's default, so composing `mfa` alone never brings it.
-- `./testing`: `mfaWitnessHttpConfig`, the section of a test's configuration.
+- `./testing`: `mfaWitnessHttpConfig`, the section of a test's configuration, and `testCredential`, the credential it names.
 - Operator section: `read-url`, `enroll-url` and `clear-url` (required: each URL whole, https or a plain-http pair outbound names, no fragment, all at one origin); `credential` (required: `keys`' `bearerToken` of at least 32 bytes of key material, never a `REPLACE-` sample), sent on every call; `timeout` (default 5s) and `max-response-size`, each narrowing outbound's cap, written with its unit.
   - `withdraw-url` (optional): at that origin too, never reaching `clear-url`'s target however spelled (an empty query, or what RFC 3986 holds equivalent).
 - The calls: `POST` to the URL as written, nothing added; `Content-Type` and `Accept: application/json`; `Authorization: Bearer {credential}`. A write's `deadline` is the `kernel` clock's epoch milliseconds when it is sent, plus the time outbound holds the call to (`outbound-policy`'s `outbound.limits` for the call: `timeout`, or outbound's own where shorter).

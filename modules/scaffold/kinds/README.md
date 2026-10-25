@@ -1,7 +1,7 @@
 # kinds
 
 ## Responsibilities
-- Names the kinds a package's manifest may be, and which way a dependency between kinds may point: the one place either is written.
+- Names the kinds a package's manifest may be, and which way a dependency between kinds may point: the one place either is written. That the bottom level (common, protocol) depends on nothing at all is `guard`'s G2, beside `mayNeed`, which answers by level alone.
 
 ## Not here
 - Composing modules by their kinds: `combinations`.

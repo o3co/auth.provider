@@ -3,7 +3,7 @@ import { getValidated } from "@o3co/ts.hocon/zod";
 import { type ZodType, z } from "zod";
 import { deepFreeze } from "../freeze.ts";
 import type { Module } from "../module.ts";
-import type { Refusal } from "../refusal/refusal.ts";
+import { type Refusal, readThrown } from "../refusal/refusal.ts";
 import { type KernelSettings, kernelSection } from "./settings.ts";
 
 export const KERNEL_SECTION = "kernel";
@@ -54,13 +54,23 @@ function readSection<T>(
 		const tree = fromMap({ raw: plainTree(raw, "raw") });
 		return { value: getValidated(tree, "raw", schema) };
 	} catch (error) {
-		if (error instanceof ConfigError) {
-			return {
-				issues: [{ message: "holds a value configuration cannot hold", path: keysOf(error.path) }],
-			};
+		// Read through readThrown: a schema of a module's may throw any value, one whose reading throws too.
+		const kind = readThrown(
+			() =>
+				error instanceof ConfigError
+					? "configuration"
+					: error instanceof z.core.$ZodError
+						? "schema"
+						: "other",
+			"other",
+		);
+		if (kind === "configuration") {
+			const path = readThrown(() => keysOf((error as ConfigError).path), []);
+			return { issues: [{ message: "holds a value configuration cannot hold", path }] };
 		}
-		if (error instanceof z.core.$ZodError) return { issues: error.issues };
-		throw error;
+		if (kind === "schema") return { issues: (error as z.core.$ZodError).issues };
+		// Anything else the schema threw: refused by the module's name, its text never kept.
+		return { issues: [{ message: "its schema failed as it read the section" }] };
 	}
 }
 
