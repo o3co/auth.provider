@@ -84,5 +84,9 @@ describe("whether verified claims meet them", () => {
 		// One named `__proto__` is read as naming no claim, and refused.
 		expect(read({ claims: { ["__proto__"]: "x" } }).success).toBe(false);
 		expect(meets(held({ claims: { toString: "x" } }), { toString: "x" })).toBe(true);
+		// Nor one the claims inherit, even equal to the value or the prefix asked.
+		const inherited = Object.create({ environment: "prod", sub: "repo:acme/app" });
+		expect(meets(held({ claims: { environment: "prod" } }), inherited)).toBe(false);
+		expect(meets(held({ "subject-prefix": "repo:acme/" }), inherited)).toBe(false);
 	});
 });
