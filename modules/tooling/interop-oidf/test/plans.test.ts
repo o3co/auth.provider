@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planCommands, plans } from "../src/plans.ts";
+import { evidenceRuns, planCommands, plans } from "../src/plans.ts";
 
 describe("the plans the package runs, one evidence run each", () => {
 	it("starts one vitest for each plan named, on that plan's file, naming its run", () => {
@@ -22,5 +22,16 @@ describe("the plans the package runs, one evidence run each", () => {
 
 	it("refuses a plan it does not hold, naming the ones it does", () => {
 		expect(() => planCommands(["basic", "nope"])).toThrow(/nope.*basic/);
+	});
+
+	it("declares each plan a gate run, whose failed tests stop a release whatever items they name", () => {
+		expect(evidenceRuns).toEqual(
+			Object.keys(plans).map((name) => ({
+				entry: `@mod/interop-oidf#${name}`,
+				kind: "oidf-plan",
+				matrix: name,
+				gate: true,
+			})),
+		);
 	});
 });

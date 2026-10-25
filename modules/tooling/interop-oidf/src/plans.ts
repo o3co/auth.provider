@@ -17,11 +17,13 @@ export const plans = {
 	},
 } as const satisfies Record<string, PlanDefinition>;
 
-/** The runs the package's evidence comes from, as `spec-checklist` lists the runs a CI run must report: one job of the kind `oidf-plan` per plan. */
+/** The runs the package's evidence comes from, as `spec-checklist` lists the runs a CI run must report: one job of the kind `oidf-plan` per plan, a gate run. */
 export const evidenceRuns = Object.keys(plans).map((name) => ({
 	entry: `@mod/interop-oidf#${name}`,
 	kind: "oidf-plan",
 	matrix: name,
+	// Its tests name no item yet, so a release stops on each that failed, whatever it names.
+	gate: true,
 }));
 
 /** The vitest each named plan runs in (every plan where none is named), on its own file, naming its evidence run. */
