@@ -20,6 +20,7 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
+		"@mod/redirect-uris": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",

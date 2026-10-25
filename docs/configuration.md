@@ -831,7 +831,7 @@ From `@mod/federation-grants`.
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `sections.federation-grants.connections` | list of string | `[]` |  | The operator's connections, by name, that the client may ask for; only a registered confidential client asks for any. |
-| `sections.federation-grants.return-uris` | list of string | `[]` |  | Where the browser may be sent back after the user connects or declines, each matched exactly; none may hold `grant_id`, `state` or `error`. |
+| `sections.federation-grants.return-uris` | list of string | `[]` |  | Where the browser may be sent back after the user connects or declines, each matched exactly: https, http to localhost or a loopback address, or a private-use scheme, as redirect-uris takes one; none may hold `grant_id`, `state` or `error`. |
 
 ### sections.federation-tokens
 
