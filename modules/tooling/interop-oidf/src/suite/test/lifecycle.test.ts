@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Command } from "../../commands/commands.ts";
 import { composeOverride } from "../../compose/compose.ts";
-import { startSuite } from "../suite.ts";
+import { SuiteStopFailed, startSuite } from "../suite.ts";
 
 const pin = { tag: "release-v1", commit: "c0ffee", python: ["httpx==1"] };
 const host = { name: "host.docker.internal", listen: "127.0.0.1" };
@@ -83,8 +83,11 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 			() => undefined,
 			(e: unknown) => e,
 		);
+		// Told as the suite's stop failing, for the caller to keep what stops it.
+		expect(error).toBeInstanceOf(SuiteStopFailed);
 		const told =
 			error instanceof AggregateError ? error.errors.map(String).join("\n") : String(error);
+		expect(String(error)).toContain(`its compose files stay in ${suiteDir}`);
 		expect(told).toContain("the daemon did not answer");
 		expect(existsSync(join(suiteDir, "override.yml"))).toBe(true);
 	});
