@@ -3,12 +3,13 @@
 ## Responsibilities
 - Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
 - Starts the provider the libraries meet, behind an https front whose origin is the issuer: the full template with every feature that opts in, and the services' (`a2a`) for the grants that need no user, such as jwt-bearer, which the full template's ledger of users cannot hold.
-- Plays the browser in each flow: the driver logs in and follows the authorization URL a library built, only where it is the provider's authorization endpoint at the issuer, and hands the library the redirect.
+- Plays the browser in each flow: the driver logs in and follows the authorization URL a library built, only where it is the provider's authorization endpoint at the issuer, and hands the library the redirect, accepting the consent page on the way for a client that is not first-party.
+- Serves a client's metadata document over https by its host's name, on a certificate the app is told to trust, and reaches it for the app through a tunnel set as its outbound proxy.
 - Holds the differences accepted between a library and the provider, each written narrowly and held to the checklist's exception rules.
 
 ## Not here
 - What a library does on its own: its adapter calls the library's first-class interface and reports what the library said.
-- Starting the app (`conformance`'s drivers) and the https front (`conformance-front`).
+- Starting the app (`conformance`'s drivers), the https front (`conformance-front`), and the tunnel (`conformance-tunnel`).
 - Whether an item is met: the flow tests name the items they check, and `spec-checklist` reads their results.
 
 ## Offers
@@ -25,7 +26,7 @@
 - Where the app does not start, the front is closed and the run's files removed before the failure is told.
 
 ## Depends on
-- `conformance`, `conformance-code`, `conformance-oauth`, `conformance-front`, `spec-checklist`, `openid-client`, `undici`; a JDK and Maven for the Nimbus adapter, Go for the Go adapter, Python for the Authlib adapter.
+- `conformance`, `conformance-code`, `conformance-oauth`, `conformance-front`, `conformance-tunnel`, `spec-checklist`, `openid-client`, `undici`; a JDK and Maven for the Nimbus adapter, Go for the Go adapter, Python for the Authlib adapter.
 
 ## Vocabulary
 - adapter: a library's small program that runs one flow per start, told by its first input line.

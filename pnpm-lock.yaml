@@ -4388,6 +4388,9 @@ importers:
       '@mod/conformance-oauth':
         specifier: workspace:*
         version: link:../conformance-oauth
+      '@mod/conformance-tunnel':
+        specifier: workspace:*
+        version: link:../conformance-tunnel
       '@mod/spec-checklist':
         specifier: workspace:*
         version: link:../spec-checklist

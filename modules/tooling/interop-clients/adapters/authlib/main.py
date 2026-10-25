@@ -167,6 +167,7 @@ def main():
         flows = {
             "login": run.login,
             "public-login": run.login,
+            "cimd": run.login,
             "refresh": run.refresh,
             "resource": run.resource_flow,
             "client-credentials": run.client_credentials,

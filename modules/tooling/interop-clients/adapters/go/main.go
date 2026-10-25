@@ -33,14 +33,14 @@ type client struct {
 }
 
 type instruction struct {
-	Flow                  string  `json:"flow"`
-	Issuer                string  `json:"issuer"`
-	CA                    string  `json:"ca"`
-	Client                client  `json:"client"`
-	RedirectURI           string  `json:"redirectUri"`
-	Scope                 string  `json:"scope"`
-	Resource              string  `json:"resource"`
-	PostLogoutRedirectURI string  `json:"postLogoutRedirectUri"`
+	Flow                  string `json:"flow"`
+	Issuer                string `json:"issuer"`
+	CA                    string `json:"ca"`
+	Client                client `json:"client"`
+	RedirectURI           string `json:"redirectUri"`
+	Scope                 string `json:"scope"`
+	Resource              string `json:"resource"`
+	PostLogoutRedirectURI string `json:"postLogoutRedirectUri"`
 	Backchannel           *struct {
 		Port int    `json:"port"`
 		Path string `json:"path"`
@@ -353,6 +353,7 @@ func main() {
 	flows := map[string]func() (any, error){
 		"login":                     r.login,
 		"public-login":              r.login,
+		"cimd":                      r.login,
 		"refresh":                   r.refresh,
 		"resource":                  r.resource,
 		"client-credentials-secret": r.clientCredentials,

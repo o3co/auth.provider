@@ -646,7 +646,7 @@ public final class Main {
       out.put(
           "result",
           switch (flow) {
-            case "login", "public-login" -> main.login();
+            case "login", "public-login", "cimd" -> main.login();
             case "refresh" -> main.refresh();
             case "resource" -> main.resourceFlow();
             case "client-credentials", "client-credentials-secret" -> main.clientCredentials();

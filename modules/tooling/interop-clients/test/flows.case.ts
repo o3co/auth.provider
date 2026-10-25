@@ -77,6 +77,18 @@ describe(`${library.name}: signing in`, () => {
 			expect(claims(result.userinfo).sub).toBe(id.sub);
 		}),
 	);
+
+	it.runIf(runs("cimd"))(
+		"signs in a client whose id is its metadata document's URL, the document fetched over https",
+		(context) =>
+			excusable(context, "cimd", async () => {
+				const result = await run("cimd", world.clients.cimd);
+				const id = claims(result.idToken);
+				expect([id.aud].flat()).toContain(world.clients.cimd.id);
+				expect(claims(result.userinfo).sub).toBe(id.sub);
+				expect(world.tunnelOpened()).toContain(`${new URL(world.clients.cimd.id).host}:443`);
+			}),
+	);
 });
 
 describe(`${library.name}: refreshing`, () => {
