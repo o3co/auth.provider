@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { type Difference, differencesIn, differencesOf } from "../differences.ts";
 
 const known = { items: new Map(), decisions: new Map() };
-const registry = ["authlib", "nimbus"];
+const registry = {
+	libraries: ["authlib", "nimbus"],
+	flows: ["login", "refresh", "client-credentials"],
+};
 const third: Difference = {
 	library: "authlib",
 	flow: "login",
@@ -42,6 +45,14 @@ describe("the known differences", () => {
 			),
 		).toThrow(
 			'difference 0 (authllib login "signs in with client_secret_basic"): names authllib, which the harness does not run',
+		);
+	});
+
+	it("name only flows the harness has, so a misspelt or removed one is not passed over unseen", () => {
+		expect(() =>
+			differencesIn(JSON.stringify({ differences: [{ ...third, flow: "logn" }] }), known, registry),
+		).toThrow(
+			'difference 0 (authlib logn "signs in with client_secret_basic"): names the flow logn, which the harness does not have',
 		);
 	});
 
