@@ -6,6 +6,13 @@ import type { Runtime } from "./runtime/runtime.ts";
 
 export interface BuildContext<S> extends Runtime {
 	readonly section: S;
+	/**
+	 * The deployment's environment (`kernel.environment`), for a check only a build can make, such
+	 * as of settings an owner opens while it builds. What a section alone shows is a module's
+	 * `refusedInProduction`, refused with the preflight at once; a refusal here comes as it builds.
+	 * No factory can write or redefine it.
+	 */
+	readonly environment: "production" | "development";
 	get<T>(contract: Contract<T>): Promise<T>;
 	collect<T>(point: ExtensionPoint<T>): Promise<readonly T[]>;
 	/**
@@ -56,6 +63,14 @@ export interface ModuleHead<S> {
 	readonly section?: ZodType<S>;
 	/** A function is asked only with a section that passed its schema. */
 	readonly replicaSafe?: boolean | ((section: S) => boolean);
+	/**
+	 * What a production deployment must not hold in this section: each a key path below the section
+	 * and a reason, never a value, which boot is refused with. Asked only where `kernel.environment`
+	 * is production, and only with a section that passed its schema.
+	 */
+	readonly refusedInProduction?: (
+		section: S,
+	) => readonly { readonly key: string; readonly reason: string }[];
 	/**
 	 * What its factories take from other modules: each contract they `get` or hold `late`, and each
 	 * point they `collect`; a contract it provides itself is not named. A function is asked only

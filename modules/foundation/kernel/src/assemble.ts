@@ -1,5 +1,5 @@
 import { readSections } from "./config/sections.ts";
-import type { KernelSettings } from "./config/settings.ts";
+import { checkProduction, checkReplicas } from "./deployment/deployment.ts";
 import type { Contract, ExtensionPoint, Handle } from "./handles.ts";
 import { periodic } from "./lifecycle/every.ts";
 import {
@@ -43,28 +43,6 @@ type Built = { readonly ok: true; readonly value: unknown } | { readonly ok: fal
 
 /** Failure of something this item needed; the original refusal is already recorded. */
 class DependencyFailed extends Error {}
-
-function checkReplicas(
-	modules: readonly Module[],
-	sections: Map<Module, unknown>,
-	deployment: KernelSettings["deployment"],
-	refusals: Refusal[],
-): void {
-	if (deployment !== "multi") return;
-	for (const module of modules) {
-		// A section that failed its schema is refused already; the declaration expects a checked one.
-		if (module.section !== undefined && !sections.has(module)) continue;
-		const safe =
-			typeof module.replicaSafe === "function"
-				? module.replicaSafe(sections.get(module))
-				: (module.replicaSafe ?? true);
-		if (!safe)
-			refusals.push({
-				where: module.name,
-				reason: "declares itself unsafe for multiple instances",
-			});
-	}
-}
 
 /** Who provides each contract and who contributes to each point; a contract provided twice is refused. */
 function indexParts(modules: readonly Module[], refusals: Refusal[]) {
@@ -143,6 +121,7 @@ export async function assembleWatching(
 				log: routedLog(kernel.logging.level, systemClock, () => sinkList),
 			};
 	checkReplicas(modules, sections, kernel.deployment, refusals);
+	checkProduction(modules, sections, kernel.environment, refusals);
 	// One preflight before any factory runs: every structural gap is named in one refusal, and a
 	// refused boot has built nothing, so no stop hook is left to run.
 	const parts = indexParts(modules, refusals);
@@ -202,80 +181,89 @@ export async function assembleWatching(
 		throw new DependencyFailed();
 	};
 	/** What a factory sees while `item` is built; `next` is the stack its requests extend. */
-	const contextFor = (item: Item, next: readonly Item[]): BuildContext<unknown> => ({
-		...runtime,
-		section: sections.get(item.module),
-		get: async <T>(contract: Contract<T>) => {
-			mayName(contract as Contract<unknown>, item);
-			mayTake(contract as Contract<unknown>, item);
-			const provider = providers.get(contract as Contract<unknown>);
-			if (!provider) {
-				refusals.push({
-					where: item.module.name,
-					reason: `no module provides ${contract.label}`,
-				});
-				throw new DependencyFailed();
-			}
-			return (await build(provider, next)) as T;
-		},
-		collect: async <T>(point: ExtensionPoint<T>) => {
-			mayName(point, item);
-			const list = contributions.get(point as ExtensionPoint<unknown>) ?? [];
-			const values: T[] = [];
-			// Each collector builds the contributions itself, so a cycle through it is still seen.
-			for (const contributor of list) values.push((await build(contributor, next)) as T);
-			const key = point as ExtensionPoint<unknown>;
-			if (collected.has(key)) {
-				const checked = collected.get(key);
-				if (checked === undefined) throw new DependencyFailed();
-				return checked as readonly T[];
-			}
-			try {
-				const checked = checkPoint(point, values, refusals);
-				collected.set(key, checked);
-				return checked;
-			} catch (error) {
-				collected.set(key, undefined);
-				throw error;
-			}
-		},
-		late: <T>(contract: Contract<T>) => {
-			mayName(contract as Contract<unknown>, item);
-			mayTake(contract as Contract<unknown>, item);
-			lateNamed.push({ contract: contract as Contract<unknown>, by: item.module.name });
-			return () => {
-				if (!assembled) throw new Error(`${contract.label} is used before assembly is done`);
-				return builtContracts.get(contract as Contract<unknown>) as T;
-			};
-		},
-		readinessReport: (deadlineMs) => {
-			if (!assembled) {
-				return Promise.reject(new Error("readiness is asked before assembly is done"));
-			}
-			return assembled.readiness(deadlineMs);
-		},
-		onStart: (hook) => startHooks.push(hook),
-		onStop: (hook) => stopHooks.push({ module: item.module.name, run: hook }),
-		every: (intervalMs, task) => {
-			if (!isTimerMs(intervalMs)) {
-				throw new RefusalSignal([
-					{
+	const contextFor = (item: Item, next: readonly Item[]): BuildContext<unknown> =>
+		withEnvironment({
+			...runtime,
+			section: sections.get(item.module),
+			get: async <T>(contract: Contract<T>) => {
+				mayName(contract as Contract<unknown>, item);
+				mayTake(contract as Contract<unknown>, item);
+				const provider = providers.get(contract as Contract<unknown>);
+				if (!provider) {
+					refusals.push({
 						where: item.module.name,
-						reason: "the every interval must be a whole number of ms, 1 to 2^31-1",
-					},
-				]);
-			}
-			periodics.push(periodic(intervalMs, task, runtime.log, item.module.name));
-		},
-		refuse: (where, reason) => {
-			throw new RefusalSignal([{ where, reason }]);
-		},
-		refuseAll: (list) => {
-			throw new RefusalSignal(
-				list.length > 0 ? list : [{ where: item.module.name, reason: "refused" }],
-			);
-		},
-	});
+						reason: `no module provides ${contract.label}`,
+					});
+					throw new DependencyFailed();
+				}
+				return (await build(provider, next)) as T;
+			},
+			collect: async <T>(point: ExtensionPoint<T>) => {
+				mayName(point, item);
+				const list = contributions.get(point as ExtensionPoint<unknown>) ?? [];
+				const values: T[] = [];
+				// Each collector builds the contributions itself, so a cycle through it is still seen.
+				for (const contributor of list) values.push((await build(contributor, next)) as T);
+				const key = point as ExtensionPoint<unknown>;
+				if (collected.has(key)) {
+					const checked = collected.get(key);
+					if (checked === undefined) throw new DependencyFailed();
+					return checked as readonly T[];
+				}
+				try {
+					const checked = checkPoint(point, values, refusals);
+					collected.set(key, checked);
+					return checked;
+				} catch (error) {
+					collected.set(key, undefined);
+					throw error;
+				}
+			},
+			late: <T>(contract: Contract<T>) => {
+				mayName(contract as Contract<unknown>, item);
+				mayTake(contract as Contract<unknown>, item);
+				lateNamed.push({ contract: contract as Contract<unknown>, by: item.module.name });
+				return () => {
+					if (!assembled) throw new Error(`${contract.label} is used before assembly is done`);
+					return builtContracts.get(contract as Contract<unknown>) as T;
+				};
+			},
+			readinessReport: (deadlineMs) => {
+				if (!assembled) {
+					return Promise.reject(new Error("readiness is asked before assembly is done"));
+				}
+				return assembled.readiness(deadlineMs);
+			},
+			onStart: (hook) => startHooks.push(hook),
+			onStop: (hook) => stopHooks.push({ module: item.module.name, run: hook }),
+			every: (intervalMs, task) => {
+				if (!isTimerMs(intervalMs)) {
+					throw new RefusalSignal([
+						{
+							where: item.module.name,
+							reason: "the every interval must be a whole number of ms, 1 to 2^31-1",
+						},
+					]);
+				}
+				periodics.push(periodic(intervalMs, task, runtime.log, item.module.name));
+			},
+			refuse: (where, reason) => {
+				throw new RefusalSignal([{ where, reason }]);
+			},
+			refuseAll: (list) => {
+				throw new RefusalSignal(
+					list.length > 0 ? list : [{ where: item.module.name, reason: "refused" }],
+				);
+			},
+		});
+	/** The context with the deployment's environment, which no factory can write or redefine. */
+	const withEnvironment = (context: Omit<BuildContext<unknown>, "environment">) =>
+		Object.defineProperty(context, "environment", {
+			value: kernel.environment,
+			enumerable: true,
+			writable: false,
+			configurable: false,
+		}) as BuildContext<unknown>;
 	const build = (item: Item, stack: readonly Item[]): Promise<unknown> => {
 		const requester = stack.at(-1);
 		// Before the cache: joining an unfinished build that waits on the requester would never settle.

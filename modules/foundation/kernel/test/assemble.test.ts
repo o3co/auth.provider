@@ -64,11 +64,18 @@ describe("assemble", () => {
 	it("exports its section's schema, with the defaults and a description on each key", () => {
 		expect(kernelSection.parse({ deployment: "multi" })).toEqual({
 			deployment: "multi",
+			environment: "production",
 			logging: { level: "info" },
 			"stop-deadline": 30,
 		});
-		const { deployment, logging, "stop-deadline": stopDeadline } = kernelSection.shape;
-		for (const key of [deployment, logging, logging.unwrap().shape.level, stopDeadline]) {
+		const { deployment, environment, logging, "stop-deadline": stopDeadline } = kernelSection.shape;
+		for (const key of [
+			deployment,
+			environment,
+			logging,
+			logging.unwrap().shape.level,
+			stopDeadline,
+		]) {
 			expect(key.description).toMatch(/\w/);
 		}
 	});
@@ -524,6 +531,17 @@ describe("assemble", () => {
 			assemble({ modules: [m], config: { ...multi, m: { shared: false } } }),
 		);
 		expect([unsafe.map((r) => r.where), asked]).toEqual([["m"], [{ shared: false }]]);
+	});
+
+	it("tells each factory the deployment's environment, production unless set", async () => {
+		const told = contract<string>("told");
+		const telling = defineModule({ name: "telling", takes: [] }, (m) => [
+			m.provide(told).by((c) => c.environment),
+		]);
+		const asTold = async (config: object) =>
+			(await assemble({ modules: [telling], config })).get(told);
+		expect(await asTold(single)).toBe("production");
+		expect(await asTold(kernelConfig({ environment: "development" }))).toBe("development");
 	});
 
 	it("refuses a kernel section without a deployment, which has no default", async () => {
