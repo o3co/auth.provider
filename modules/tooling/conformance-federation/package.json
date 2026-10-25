@@ -20,6 +20,7 @@
 	},
 	"devDependencies": {
 		"@mod/conformance-second-factor": "workspace:*",
+		"@mod/spec-checklist": "workspace:*",
 		"jose": "6.2.12",
 		"vitest": "5.0.5"
 	}
