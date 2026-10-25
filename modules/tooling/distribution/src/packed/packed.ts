@@ -29,3 +29,7 @@ export function packedOf(tarball: string): Packed {
 		integrity: integrityOf(readFileSync(tarball)),
 	};
 }
+
+/** The file npm packs a name and version as: the scope's `@` dropped, its `/` a `-`, the version after. */
+export const tarballFileOf = (name: string, version: string) =>
+	`${name.replace(/^@/, "").replace("/", "-")}-${version}.tgz`;

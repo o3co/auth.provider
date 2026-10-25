@@ -9,7 +9,7 @@ Internal module of `distribution`: a packed tarball read for what it is, its nam
 - Packing, sealing and checking the release: `release`. What is done with what is read: its callers.
 
 ## Offers
-- `packedOf` (a tarball's path → `Packed`: name, version, integrity), `integrityOf` (bytes → `sha512-` and the SHA-512 in base64).
+- `packedOf` (a tarball's path → `Packed`: name, version, integrity), `integrityOf` (bytes → `sha512-` and the SHA-512 in base64), `tarballFileOf` (a name and version → the file npm packs them as).
 
 ## Invariants
 - It loads Node's own modules alone, as the release's publish job reads tarballs with it and loads nothing from outside.

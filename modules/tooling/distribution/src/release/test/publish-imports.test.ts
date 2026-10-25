@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { expect, it } from "vitest";
 
 /** The scripts the publish job runs, which hold its token: what they load must be Node's alone. */
-const entries = ["src/release/check-published.ts", "src/release-sbom/listed.ts"].map((f) =>
+const entries = ["src/release/check-published.ts", "src/release-listed/listed.ts"].map((f) =>
 	join(import.meta.dirname, "..", "..", "..", f),
 );
 const specifier =

@@ -12,7 +12,7 @@
 		"release-published": "node src/release/check-published.ts",
 		"release-evidence": "node src/release-evidence/collect.ts",
 		"release-sbom": "node src/release-sbom/make.ts",
-		"release-listed": "node src/release-sbom/listed.ts"
+		"release-listed": "node src/release-listed/listed.ts"
 	},
 	"exports": {
 		".": "./src/contract.ts"

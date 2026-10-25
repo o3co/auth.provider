@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { packedOf } from "../packed/packed.ts";
-import { listedProblems } from "./boms.ts";
+import { listedProblems } from "./problems.ts";
 
 const [directory, listing] = process.argv.slice(2);
 if (!directory || !listing) {
