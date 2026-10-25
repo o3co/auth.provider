@@ -162,3 +162,14 @@ it("composes packages declared outside the workspace beside its own", () => {
 		/@x\/did-grant: needs @mod\/nope, which is not declared/,
 	);
 });
+
+it("brings a feature that opts in only where named, though it ties modules composed together: the id_token assertions", () => {
+	const bridge = "@mod/jwt-bearer-id-tokens";
+	const both = ["@mod/jwt-bearer", "@mod/exchange-id-tokens"];
+	// Generated again or completed, an app with both never takes it unasked.
+	expect(completed(both)).not.toContain(bridge);
+	expect(needed(both)).not.toContain(bridge);
+	expect(full(both)).not.toContain(bridge);
+	expect(optIns()).toContain(bridge);
+	expect(needed([bridge])).toEqual(expect.arrayContaining([bridge, ...both]));
+});
