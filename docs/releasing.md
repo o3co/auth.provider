@@ -11,6 +11,7 @@ How a maintainer cuts a release. The release workflow (`release.yml`) does the b
 - [What the workflow does](#what-the-workflow-does)
 - [A package name never published before](#a-package-name-never-published-before)
 - [When a publish stops partway](#when-a-publish-stops-partway)
+- [When the release finds no evidence](#when-the-release-finds-no-evidence)
 - [The API site](#the-api-site)
 - [After the release](#after-the-release)
 
@@ -77,22 +78,23 @@ One package per concern, `@o3co/auth-provider-<concern>`, and the entrance `@o3c
 4. **Pull request titles.** The release notes are generated from the titles of the pull requests merged since the last tag. Read them: a security fix's title names the kind of hole it closes and the module, never how to reach it. Retitle one on GitHub before tagging; the notes read the titles when the release is made.
 5. **The attack surface.** Read the diff of [the attack surface reference](attack-surface.md) since the last tag: each route, outbound reach, secret or weakening setting it adds was meant to open, and is declared as [What a version promises](#what-a-version-promises) asks.
 6. **The version.** One commit changes the root `package.json` version, by itself, and reaches `main` with the rest.
-7. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on the pull request to `main` runs the conformance scenes and `pnpm release:check`; wait for both.
+7. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on the pull request to `main` runs the conformance scenes and `pnpm release:check`; wait for both, and for its compliance job. Merge it with nothing else merged to `main` since its CI ran, and tag within 30 days of that run: the release keeps that run's evidence, and its artifacts are kept 30 days.
 
 ## Tagging
 
-Tag the merge commit on `main` as `v<version>` and push the tag. The workflow refuses a tag that does not name the root `package.json` version, before it builds anything.
+Tag the merge commit on `main` as `v<version>` and push the tag. The workflow refuses a tag that does not name the root `package.json` version, or whose tree no successful CI run of the release pull request tested, before it builds anything.
 
 ## What the workflow does
 
-1. Checks that npm can publish through trusted publishing (11.5.1 or later).
-2. Runs `pnpm check` and `pnpm release:check`: every pattern generated from the packed tarballs alone, type-checked and booted, and a package outside the release composed beside them, its app held to the integrity the release sealed.
-3. Restores the tarballs an earlier attempt of the run saved, or, where none was saved, packs every package (`pnpm release:pack`): every bundle but the scaffold, then the scaffold's index sealed with their integrity and zod's, then the scaffold and the entrance. Refuses any tarball without the root `LICENSE` word for word, and saves the tarballs it packed to the run.
-4. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
-5. Creates a draft GitHub release with generated notes.
-6. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
-7. Publishes the draft release.
-8. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
+1. Finds the CI run of the release pull request that tested the tag's tree, and keeps its evidence: each test's result and the compliance table (`pnpm release:evidence`). It stops the release where none will do; see [When the release finds no evidence](#when-the-release-finds-no-evidence).
+2. Checks that npm can publish through trusted publishing (11.5.1 or later).
+3. Runs `pnpm check` and `pnpm release:check`: every pattern generated from the packed tarballs alone, type-checked and booted, and a package outside the release composed beside them, its app held to the integrity the release sealed.
+4. Restores the tarballs an earlier attempt of the run saved, or, where none was saved, packs every package (`pnpm release:pack`): every bundle but the scaffold, then the scaffold's index sealed with their integrity and zod's, then the scaffold and the entrance. Refuses any tarball without the root `LICENSE` word for word, and saves the tarballs it packed to the run.
+5. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
+6. Creates a draft GitHub release with generated notes, and attaches the evidence as `auth-provider-<version>-evidence.tar.gz`: the CI run's artifacts with a manifest naming the run and the commit it tested (of the tag's tree), this run's own `pnpm check` results, `pnpm audit --json`, and the commands and environment they ran in.
+7. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
+8. Publishes the draft release.
+9. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
 
 ## A package name never published before
 
@@ -116,6 +118,15 @@ The check stops for one of two reasons, and its output names which for each pack
 
 - npm's answer could not be read ("the registry's answer is unread": a network or authentication error, an answer that is no JSON or holds no sha512 integrity). Nothing is known to differ: re-run the job once the registry answers.
 - A package of this version is on npm with another integrity than this run's tarball ("published with another integrity"). What is on npm is not what the index of this version names, and no rerun changes that: publish the next version instead.
+
+## When the release finds no evidence
+
+The first job looks for CI's successful run of the release pull request (the pull request to `main` the tag's commit merged) whose tested commit has the tag's tree, the newest first. It runs before anything is built, so where it stops nothing is published; its output names the run and the reason:
+
+- **The tag's commit merged no pull request to `main`.** Delete the tag (`git push --delete origin v<version>`) and tag the merge commit of the release pull request.
+- **No successful CI run of the release pull request.** Re-run the pull request's CI (on its run, **Re-run all jobs**), wait for it to pass, then re-run the failed jobs of the release's run.
+- **Its compliance job did not pass, or an artifact is missing or expired.** Re-run all jobs of the run it names, then re-run the failed jobs of the release's run. GitHub re-runs a run within 30 days of it; past that, do as for another tree, below.
+- **The run tested another tree** (main moved after it ran, so what it tested is not what the tag publishes). Delete the tag, merge `main` into `develop`, open a new release pull request from `develop` to `main`, wait for its CI, merge it, and tag the new merge commit.
 
 ## The API site
 
