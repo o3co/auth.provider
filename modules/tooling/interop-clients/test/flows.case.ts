@@ -40,7 +40,7 @@ afterAll(async () => {
 async function run(flow: Flow, client: WorldClient, extra: Record<string, unknown> = {}) {
 	const browser = world.browser();
 	const dialog = await converse(
-		library.adapter({ caFile: world.caFile }),
+		library.adapter(),
 		{ flow, issuer: world.issuer, ca: world.ca, client, redirectUri: world.redirectUri, ...extra },
 		async (ask) => {
 			if (ask.ask === "browse") return { location: await browser.authorize(String(ask.url)) };

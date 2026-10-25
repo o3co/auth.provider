@@ -1,8 +1,9 @@
 // The openid-client adapter: one flow per run, told on its first input line, done with the library's
 // own calls; each browser step is asked of the driver, and the result is what the library gave back.
-// It trusts the front's certificate through NODE_EXTRA_CA_CERTS, which Node's fetch reads at start.
+// It trusts the front's certificate its instruction gives, and nothing else: no public root either.
 import { createInterface } from "node:readline";
 import * as client from "openid-client";
+import { Agent, fetch } from "undici";
 
 const lines = createInterface({ input: process.stdin })[Symbol.asyncIterator]();
 const read = async (): Promise<Record<string, unknown>> =>
@@ -23,6 +24,8 @@ interface Client {
 interface Instruction {
 	readonly flow: string;
 	readonly issuer: string;
+	/** The front's certificate, as PEM: the one certificate the adapter trusts. */
+	readonly ca: string;
 	readonly client: Client;
 	readonly redirectUri?: string;
 	readonly scope?: string;
@@ -43,14 +46,25 @@ async function authOf(c: Client): Promise<client.ClientAuth> {
 	return client.PrivateKeyJwt({ key, kid: jwk.kid });
 }
 
+/** The library's fetch, over a connection that trusts the instruction's certificate alone. */
+function trusting(ca: string): client.CustomFetch {
+	const dispatcher = new Agent({ connect: { ca: [ca] } });
+	return (url, options) => fetch(url, { ...options, dispatcher }) as unknown as Promise<Response>;
+}
+
 async function configOf(i: Instruction) {
 	const metadata = i.client.method === "none" ? {} : { client_secret: i.client.secret };
+	const fetching = trusting(i.ca);
 	const config = await client.discovery(
 		new URL(i.issuer),
 		i.client.id,
 		metadata,
 		await authOf(i.client),
+		{
+			[client.customFetch]: fetching,
+		},
 	);
+	config[client.customFetch] = fetching;
 	// The id token's signature is checked against the provider's keys, not taken on TLS's word.
 	client.enableNonRepudiationChecks(config);
 	return config;
@@ -122,11 +136,17 @@ try {
 	write({ result: await flow(instruction) });
 } catch (error) {
 	const e = error as Error & { code?: string; error?: string; cause?: unknown };
-	// The answer the library refused, where it kept it: its status and the start of its body.
-	const answered =
-		e.cause instanceof Response
-			? ` (${e.cause.status}: ${(await e.cause.text()).slice(0, 300)})`
-			: "";
-	write({ error: { type: e.error ?? e.code ?? e.name, message: `${e.message}${answered}` } });
+	const cause = e.cause as
+		| { status?: unknown; text?: () => Promise<string>; message?: unknown }
+		| undefined;
+	// What lies under the library's error: the answer it refused (its status and body's start), or the
+	// failure beneath, such as a certificate the connection refused.
+	const beneath =
+		typeof cause?.status === "number" && typeof cause.text === "function"
+			? ` (${cause.status}: ${(await cause.text()).slice(0, 300)})`
+			: typeof cause?.message === "string"
+				? ` (${cause.message})`
+				: "";
+	write({ error: { type: e.error ?? e.code ?? e.name, message: `${e.message}${beneath}` } });
 }
 process.exit(0);

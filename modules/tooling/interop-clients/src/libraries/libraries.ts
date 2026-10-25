@@ -5,18 +5,14 @@ import type { AdapterCommand } from "../dialog/dialog.ts";
 export const flows = ["login", "public-login", "refresh"] as const;
 export type Flow = (typeof flows)[number];
 
-/** What the adapter is started with, beside the instruction: where the front's certificate is. */
-export interface Trust {
-	readonly caFile: string;
-}
-
 /** A client library the harness runs: its adapter, how it is built, and the flows it runs first-class. */
 export interface Library {
 	readonly name: string;
 	readonly flows: readonly Flow[];
 	/** Commands that build the adapter, run in order in the package's directory; none where it needs no build. */
 	readonly build: readonly (readonly string[])[];
-	adapter(trust: Trust): AdapterCommand;
+	/** How the adapter starts; it takes the front's certificate from its instruction. */
+	adapter(): AdapterCommand;
 }
 
 const packageDir = join(import.meta.dirname, "..", "..");
@@ -28,12 +24,11 @@ export const libraries: readonly Library[] = [
 		name: "openid-client",
 		flows: ["login", "public-login", "refresh"],
 		build: [],
-		// Node's fetch reads the certificates it trusts as it starts, so the front's goes in the environment.
-		adapter: (trust) => ({
+		adapter: () => ({
 			command: process.execPath,
 			args: [join(packageDir, "adapters", "openid-client", "main.ts")],
 			cwd: packageDir,
-			env: { ...path(), NODE_EXTRA_CA_CERTS: trust.caFile },
+			env: path(),
 		}),
 	},
 	{
