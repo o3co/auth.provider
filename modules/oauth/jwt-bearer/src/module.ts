@@ -116,10 +116,10 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 				const assertion = param("assertion");
 				if (!assertion)
 					return { kind: "error", error: "invalid_request", description: "assertion is required" };
-				const verified = await check(assertion, trusted);
+				const verified = await check(assertion, trusted, selfIssued);
 				if (verified.kind === "invalid")
 					return { kind: "error", error: "invalid_grant", description: verified.reason };
-				const subject = await subjectOf(verified.issuer, verified.subject);
+				const subject = await subjectOf(verified.entry, verified.subject);
 				if (subject === undefined)
 					return { kind: "error", error: "invalid_grant", description: "unknown subject" };
 				const checked = { ...verified, subject };
@@ -142,17 +142,18 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 				const admitted = await admits(access);
 				if (admitted.kind === "refused") return admitted;
 				const keepUntil = checked.expiresAt + skewMs + usedAllowanceMs;
-				// An issuer with a ledger uses its jti up there alone, never the store, whatever it answers.
-				const ledger = ledgers.get(checked.issuer);
+				// An issuer with a ledger uses its jti up there alone, never the store, whatever it answers;
+				// the store keeps it by the `iss` as sent, so a self-issued signer's assertions are apart from its issuer's own.
+				const ledger = ledgers.get(checked.entry);
 				const told = ledger
 					? await spentIn(ledger, {
-							sentIssuer: checked.issuer,
+							sentIssuer: checked.sentIssuer,
 							jti: checked.jti,
 							expiresAt: checked.expiresAt,
 							keepUntil,
 						})
 					: // Relative, since the store judges a lifetime by its own clock.
-						await spent.save(spentName(checked.issuer, checked.jti), keepUntil - c.clock.now());
+						await spent.save(spentName(checked.sentIssuer, checked.jti), keepUntil - c.clock.now());
 				if (told === "replayed" || told === "exists")
 					return { kind: "error", error: "invalid_grant", description: "assertion replayed" };
 				const issued = await issue(access, { notAfter: checked.expiresAt });

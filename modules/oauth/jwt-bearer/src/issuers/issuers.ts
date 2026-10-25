@@ -108,14 +108,14 @@ export const issuersSetting = z
 	);
 
 /** A trusted issuer that takes self-issued signers: the prefix of their names, and its place. */
-export interface SelfIssued {
+export interface SelfIssuedEntry {
 	readonly prefix: string;
 	readonly issuer: string;
 	readonly where: string;
 }
 
 /** The entries that take self-issued signers, in the settings' order. */
-export const selfIssuedOf = (issuers: readonly IssuerEntry[]): readonly SelfIssued[] =>
+export const selfIssuedOf = (issuers: readonly IssuerEntry[]): readonly SelfIssuedEntry[] =>
 	issuers.flatMap((i, at) => {
 		const prefix = i["self-issued-prefix"];
 		return prefix === undefined
