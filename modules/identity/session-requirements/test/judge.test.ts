@@ -1,4 +1,5 @@
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { type AuthContext, type EntryJudge, type EntryLevel, entryJudge } from "@mod/session";
 import { expect, it } from "vitest";
 import { type EntryRequirement, entryRequirements } from "../src/contract.ts";
@@ -44,7 +45,7 @@ it("admits where none falls short, saying whether one judged the level", async (
 
 it("contributes the one entry judge over the requirements the composition contributes", async () => {
 	const judged = contract<EntryJudge>("test.judged");
-	const reading = defineModule({ name: "reading" }, (m) => [
+	const reading = defineModule({ name: "reading", takes: [entryJudge] }, (m) => [
 		m.provide(judged).by(async (c) => {
 			const [judge] = await c.collect(entryJudge);
 			if (!judge) throw new Error("no judge");
@@ -53,5 +54,8 @@ it("contributes the one entry judge over the requirements the composition contri
 		m.contribute(entryRequirements).by(() => requirement("mfa", ["use"])),
 	]);
 	const app = await assemble({ modules: [requirementsModule, reading], config: kernelConfig() });
+	expect(
+		await takesUnused({ modules: [requirementsModule, reading], config: kernelConfig() }),
+	).toEqual({});
 	expect(await app.get(judged).judge(context, "use")).toMatchObject({ requirement: "mfa" });
 });

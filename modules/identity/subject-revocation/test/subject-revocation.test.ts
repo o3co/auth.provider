@@ -1,5 +1,5 @@
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { revocations, subjectRevocation } from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
@@ -34,7 +34,7 @@ async function boot(front: (boundaries: BoundaryStore) => BoundaryStore = (b) =>
 	const app = await assemble({
 		modules: [
 			revocationModule,
-			defineModule({ name: "boundaries" }, (m) => [
+			defineModule({ name: "boundaries", takes: [] }, (m) => [
 				m.provide(boundaryStore).by(() => front(stores.boundaries)),
 			]),
 		],
@@ -192,4 +192,14 @@ subjectRevocationContract("the stand-in", async () => {
 		runtime,
 	});
 	return { revocation: app.get(subjectRevocation), revocations: app.get(revocations), ...adapter };
+});
+
+it("takes every handle its takes name, the module and its stand-in alike", async () => {
+	const stores = memoryBoundaries();
+	const boundaries = defineModule({ name: "boundaries", takes: [] }, (m) => [
+		m.provide(boundaryStore).by(() => stores.boundaries),
+	]);
+	const config = kernelConfig();
+	expect(await takesUnused({ modules: [revocationModule, boundaries], config })).toEqual({});
+	expect(await takesUnused({ modules: [subjectRevocationStandIn], config })).toEqual({});
 });

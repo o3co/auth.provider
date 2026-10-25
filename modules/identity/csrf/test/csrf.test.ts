@@ -11,7 +11,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { carried, checking } from "../src/check.ts";
 import { csrfChecked, originEvidence } from "../src/contract.ts";
@@ -171,7 +171,7 @@ describe("the route", () => {
 	});
 });
 
-const guarded = defineModule({ name: "guarded" }, (m) =>
+const guarded = defineModule({ name: "guarded", takes: [] }, (m) =>
 	(["GET", "POST", "DELETE"] as const).map((method) =>
 		m.contribute(routes).by(() => ({
 			method,
@@ -264,7 +264,7 @@ describe.each([
 
 	it("marks the policy own-site for every method but GET", async () => {
 		const declared = (method: "GET" | "POST" | "PUT" | "DELETE") =>
-			defineModule({ name: "declared" }, (m) => [
+			defineModule({ name: "declared", takes: [] }, (m) => [
 				m.contribute(routes).by(() => ({
 					method,
 					path: "/declared",
@@ -330,4 +330,11 @@ describe.each([
 		});
 		expect(plain.sameOrigin(overHttp)).toBe(true);
 	});
+});
+
+it("takes every handle its takes name, the module and its stand-in alike, at a public origin", async () => {
+	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
+	for (const module of [csrfModule, csrfStandIn]) {
+		expect(await takesUnused({ modules: [http, cookiesModule, module], config })).toEqual({});
+	}
 });

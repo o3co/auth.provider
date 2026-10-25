@@ -23,114 +23,127 @@ const section = z.strictObject({
 		),
 });
 
-export default defineModule({ name: "login-gates", section, replicaSafe: true }, (m) => [
-	m.provide(logins).by(async (c) => {
-		const opening = await c.get(sessions);
-		// By name in code units, not locale, so every host runs them alike. Names are keyed, never equal.
-		const gates = (await c.collect(loginGates)).toSorted((a, b) => (a.name < b.name ? -1 : 1));
-		const provable = new Set((await c.collect(amrSources)).flatMap((source) => source.amr));
-		const targets = new Set<string>(c.section["return-targets"]);
-		const origin = (await c.get(site)).origin;
-		const contributed = await c.collect(returnPaths);
-		const paths = new Set(contributed.filter((p) => !p.segment).map((p) => p.path));
-		const parents = new Set(contributed.filter((p) => p.segment).map((p) => p.path));
-		// Below the root, or a path ending in a slash, a segment would be told apart by doubled slashes.
-		for (const parent of parents) {
-			if (parent === "/" || parent.endsWith("/")) {
-				c.refuse(
-					"login-gates",
-					`a return path taking a segment below it is a path below the root, not ending in a slash: ${parent}`,
+export default defineModule(
+	{
+		name: "login-gates",
+		section,
+		replicaSafe: true,
+		takes: [site, amrSources, loginGates, openedAfterHold, returnPaths, sessions],
+	},
+	(m) => [
+		m.provide(logins).by(async (c) => {
+			const opening = await c.get(sessions);
+			// By name in code units, not locale, so every host runs them alike. Names are keyed, never equal.
+			const gates = (await c.collect(loginGates)).toSorted((a, b) => (a.name < b.name ? -1 : 1));
+			const provable = new Set((await c.collect(amrSources)).flatMap((source) => source.amr));
+			const targets = new Set<string>(c.section["return-targets"]);
+			const origin = (await c.get(site)).origin;
+			const contributed = await c.collect(returnPaths);
+			const paths = new Set(contributed.filter((p) => !p.segment).map((p) => p.path));
+			const parents = new Set(contributed.filter((p) => p.segment).map((p) => p.path));
+			// Below the root, or a path ending in a slash, a segment would be told apart by doubled slashes.
+			for (const parent of parents) {
+				if (parent === "/" || parent.endsWith("/")) {
+					c.refuse(
+						"login-gates",
+						`a return path taking a segment below it is a path below the root, not ending in a slash: ${parent}`,
+					);
+				}
+			}
+			/** A path one name segment below a parent contributed so: never empty, a dot, or encoded. */
+			const belowParent = (pathname: string) => {
+				const cut = pathname.lastIndexOf("/");
+				return (
+					parents.has(pathname.slice(0, cut)) &&
+					/^[A-Za-z0-9_-]{1,64}$/.test(pathname.slice(cut + 1))
 				);
-			}
-		}
-		/** A path one name segment below a parent contributed so: never empty, a dot, or encoded. */
-		const belowParent = (pathname: string) => {
-			const cut = pathname.lastIndexOf("/");
-			return (
-				parents.has(pathname.slice(0, cut)) && /^[A-Za-z0-9_-]{1,64}$/.test(pathname.slice(cut + 1))
-			);
-		};
-		const returnAllowed = (target: string) => {
-			// The URL parser drops some of these silently; a target is judged as written.
-			if (/[\s\p{Cc}]/u.test(target)) return false;
-			if (targets.has(target)) return true;
-			const url = URL.parse(target);
-			if (!url || origin === undefined || target.includes("#")) return false;
-			const known = paths.has(url.pathname) || belowParent(url.pathname);
-			// Written as the public origin and the path itself, to the query: no userinfo, port or other
-			// origin, and nothing the URL parser rewrites (dot segments, backslashes) on the way.
-			const written = target.slice(0, target.includes("?") ? target.indexOf("?") : undefined);
-			return known && written === `${origin}${url.pathname}`;
-		};
-		const callers = new Map((await c.collect(openedAfterHold)).map((told) => [told.caller, told]));
-		// Known only per call: a caller that contributed nothing is the caller's own mistake.
-		const tellerOf = (from: LoginFrom | undefined) => {
-			if (from === undefined) return undefined;
-			const told = callers.get(from.caller);
-			if (told === undefined) throw new TypeError("login-gates: no caller contributed this name");
-			// The login stays open whatever the caller does with the news.
-			return async (session: Session) => {
-				try {
-					await told.opened(session, from.carry);
-				} catch (error) {
-					const kind = error instanceof Error ? error.name : typeof error;
-					c.log.error("login-gates.opened_failed", { caller: from.caller, kind });
-				}
 			};
-		};
-		const through = async (
-			request: HttpRequest,
-			facts: LoginFacts,
-			pending: readonly LoginGate[],
-			done: unknown = null,
-			from?: LoginFrom,
-		): Promise<LoginOutcome> => {
-			for (const gate of pending) {
-				const decision = await gate.hold(request, facts, done, from);
-				if (decision.kind === "refused") return { kind: "refused", gate: gate.name, cookies: [] };
-				if (decision.kind === "held") {
-					const cookies = decision.cookies ?? [];
-					return { kind: "held", gate: gate.name, answer: decision.answer, cookies };
+			const returnAllowed = (target: string) => {
+				// The URL parser drops some of these silently; a target is judged as written.
+				if (/[\s\p{Cc}]/u.test(target)) return false;
+				if (targets.has(target)) return true;
+				const url = URL.parse(target);
+				if (!url || origin === undefined || target.includes("#")) return false;
+				const known = paths.has(url.pathname) || belowParent(url.pathname);
+				// Written as the public origin and the path itself, to the query: no userinfo, port or other
+				// origin, and nothing the URL parser rewrites (dot segments, backslashes) on the way.
+				const written = target.slice(0, target.includes("?") ? target.indexOf("?") : undefined);
+				return known && written === `${origin}${url.pathname}`;
+			};
+			const callers = new Map(
+				(await c.collect(openedAfterHold)).map((told) => [told.caller, told]),
+			);
+			// Known only per call: a caller that contributed nothing is the caller's own mistake.
+			const tellerOf = (from: LoginFrom | undefined) => {
+				if (from === undefined) return undefined;
+				const told = callers.get(from.caller);
+				if (told === undefined) throw new TypeError("login-gates: no caller contributed this name");
+				// The login stays open whatever the caller does with the news.
+				return async (session: Session) => {
+					try {
+						await told.opened(session, from.carry);
+					} catch (error) {
+						const kind = error instanceof Error ? error.name : typeof error;
+						c.log.error("login-gates.opened_failed", { caller: from.caller, kind });
+					}
+				};
+			};
+			const through = async (
+				request: HttpRequest,
+				facts: LoginFacts,
+				pending: readonly LoginGate[],
+				done: unknown = null,
+				from?: LoginFrom,
+			): Promise<LoginOutcome> => {
+				for (const gate of pending) {
+					const decision = await gate.hold(request, facts, done, from);
+					if (decision.kind === "refused") return { kind: "refused", gate: gate.name, cookies: [] };
+					if (decision.kind === "held") {
+						const cookies = decision.cookies ?? [];
+						return { kind: "held", gate: gate.name, answer: decision.answer, cookies };
+					}
 				}
-			}
-			return { kind: "opened", ...(await opening.complete(request, facts)) };
-		};
-		/** The gates before `heldAt` that are asked again on resume; one holding there is the gate's error. */
-		const rechecked = async (
-			request: HttpRequest,
-			facts: LoginFacts,
-			heldAt: number,
-			done: unknown = null,
-			from?: LoginFrom,
-		): Promise<LoginOutcome | undefined> => {
-			for (const gate of gates.slice(0, heldAt).filter((g) => g.rechecked)) {
-				const decision = await gate.hold(request, facts, done, from);
-				if (decision.kind === "refused") return { kind: "refused", gate: gate.name, cookies: [] };
-				if (decision.kind === "held") {
-					throw new TypeError("login-gates: a gate asked again on resume may only pass or refuse");
+				return { kind: "opened", ...(await opening.complete(request, facts)) };
+			};
+			/** The gates before `heldAt` that are asked again on resume; one holding there is the gate's error. */
+			const rechecked = async (
+				request: HttpRequest,
+				facts: LoginFacts,
+				heldAt: number,
+				done: unknown = null,
+				from?: LoginFrom,
+			): Promise<LoginOutcome | undefined> => {
+				for (const gate of gates.slice(0, heldAt).filter((g) => g.rechecked)) {
+					const decision = await gate.hold(request, facts, done, from);
+					if (decision.kind === "refused") return { kind: "refused", gate: gate.name, cookies: [] };
+					if (decision.kind === "held") {
+						throw new TypeError(
+							"login-gates: a gate asked again on resume may only pass or refuse",
+						);
+					}
 				}
-			}
-			return undefined;
-		};
-		return {
-			achievable: (amr) => amr.every((name) => provable.has(name)),
-			returnAllowed,
-			login: async (request, facts, done, from) => {
-				tellerOf(from);
-				return through(request, facts, gates, done, from);
-			},
-			resume: async (request, facts, after, done, from) => {
-				const heldAt = gates.findIndex((gate) => gate.name === after);
-				if (heldAt === -1) throw new TypeError("login-gates: no gate has this name");
-				const tell = tellerOf(from);
-				if (from?.deadline !== undefined && c.clock.now() >= from.deadline)
-					return { kind: "expired" };
-				const outcome =
-					(await rechecked(request, facts, heldAt, done, from)) ??
-					(await through(request, facts, gates.slice(heldAt + 1), done, from));
-				if (outcome.kind === "opened") await tell?.(outcome.session);
-				return outcome;
-			},
-		};
-	}),
-]);
+				return undefined;
+			};
+			return {
+				achievable: (amr) => amr.every((name) => provable.has(name)),
+				returnAllowed,
+				login: async (request, facts, done, from) => {
+					tellerOf(from);
+					return through(request, facts, gates, done, from);
+				},
+				resume: async (request, facts, after, done, from) => {
+					const heldAt = gates.findIndex((gate) => gate.name === after);
+					if (heldAt === -1) throw new TypeError("login-gates: no gate has this name");
+					const tell = tellerOf(from);
+					if (from?.deadline !== undefined && c.clock.now() >= from.deadline)
+						return { kind: "expired" };
+					const outcome =
+						(await rechecked(request, facts, heldAt, done, from)) ??
+						(await through(request, facts, gates.slice(heldAt + 1), done, from));
+					if (outcome.kind === "opened") await tell?.(outcome.session);
+					return outcome;
+				},
+			};
+		}),
+	],
+);

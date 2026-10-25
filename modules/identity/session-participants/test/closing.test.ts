@@ -1,4 +1,5 @@
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { type ClosingParticipants, closingParticipants, type Session } from "@mod/session";
 import { expect, it } from "vitest";
 import { closingOf } from "../src/closing.ts";
@@ -41,7 +42,7 @@ it("calls the participants one at a time in the order given, past a failing one,
 it("contributes the one closing participants over those the composition contributes", async () => {
 	const closed: string[] = [];
 	const read = contract<ClosingParticipants>("test.closing");
-	const reading = defineModule({ name: "reading" }, (m) => [
+	const reading = defineModule({ name: "reading", takes: [closingParticipants] }, (m) => [
 		m.provide(read).by(async (c) => {
 			const [closing] = await c.collect(closingParticipants);
 			if (!closing) throw new Error("none");
@@ -55,6 +56,9 @@ it("contributes the one closing participants over those the composition contribu
 		})),
 	]);
 	const app = await assemble({ modules: [participantsModule, reading], config: kernelConfig() });
+	expect(
+		await takesUnused({ modules: [participantsModule, reading], config: kernelConfig() }),
+	).toEqual({});
 	expect(await app.get(read).closing(session)).toEqual([]);
 	expect(closed).toEqual(["h"]);
 });

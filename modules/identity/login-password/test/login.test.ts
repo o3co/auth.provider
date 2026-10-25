@@ -12,7 +12,13 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import {
+	quietRuntime,
+	recordingLog,
+	switchedModule,
+	takesUnused,
+	unavailableSwitch,
+} from "@mod/kernel/testing";
 import { loginGates, logins, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
@@ -212,7 +218,7 @@ describe("login-password answers", () => {
 	it("gives no cookie when the session cannot be opened after a match", async () => {
 		const down = unavailableSwitch<Sessions>("session");
 		down.unavailable("complete");
-		const failing = defineModule({ name: "session" }, (m) => [
+		const failing = defineModule({ name: "session", takes: [] }, (m) => [
 			m.provide(sessions).by(() => down.wrap(stubSessions())),
 		]);
 		const { login, events } = await serve({ sessions: failing });
@@ -366,10 +372,10 @@ describe("login-password attempts", () => {
 });
 
 it("sends the user back to a contributed path on the public origin, with any query, and nowhere near it", async () => {
-	const authorize = defineModule({ name: "return-path" }, (m) => [
+	const authorize = defineModule({ name: "return-path", takes: [] }, (m) => [
 		m.contribute(returnPaths).by(() => ({ path: "/oauth/authorize" })),
 	]);
-	const device = defineModule({ name: "another-return-path" }, (m) => [
+	const device = defineModule({ name: "another-return-path", takes: [] }, (m) => [
 		m.contribute(returnPaths).by(() => ({ path: "/device" })),
 	]);
 	const { login } = await serve({ extra: [authorize, device] });
@@ -394,7 +400,7 @@ it("sends the user back to a contributed path on the public origin, with any que
 
 it("answers a login a gate holds with 403, the gate's answer and its cookies, and opens no session", async () => {
 	const carried: unknown[] = [];
-	const gate = defineModule({ name: "gate" }, (m) => [
+	const gate = defineModule({ name: "gate", takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "second",
 			hold: async (_request, _facts, done) => {
@@ -481,7 +487,7 @@ it("passes the user's attributes from users' answer to the session, under the so
 
 it("reports the time it verified the password as the login's authentication time", async () => {
 	const seen: unknown[] = [];
-	const gate = defineModule({ name: "gate" }, (m) => [
+	const gate = defineModule({ name: "gate", takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "watching",
 			hold: async (_request, facts) => {
@@ -599,7 +605,7 @@ describe("login-password attempts per account", () => {
 describe("login-password under a gate that refuses", () => {
 	/** A `logins` whose login answers `outcome`, or throws it. */
 	const answering = (outcome: () => Promise<unknown>) =>
-		defineModule({ name: "logins-stand-in" }, (m) => [
+		defineModule({ name: "logins-stand-in", takes: [] }, (m) => [
 			m.provide(logins).by(() => ({
 				login: outcome as never,
 				resume: outcome as never,
@@ -693,4 +699,30 @@ describe("login-password under a gate that refuses", () => {
 		const held = await login({ username: "alice", password: "correct horse" }, elsewhere());
 		expect([held.status, held.body]).toEqual([429, { error: "too_many_attempts" }]);
 	});
+});
+
+it("takes every handle its takes name, every module beside it as it boots", async () => {
+	const modules = [
+		http,
+		gatesModule,
+		csrfStandIn,
+		cookiesModule,
+		usersModule,
+		secretHashModule,
+		memoryUsersStores().module,
+		sessionStandIn,
+		subjectRevocationStandIn,
+		rateLimitModule,
+		simulatedStore().module,
+		loginModule,
+		auditStandIn().module,
+	];
+	const config = {
+		...kernelConfig(),
+		...httpConfig({ "public-origin": "https://as.example" }),
+		...usersConfig([testUser("alice", "correct horse")]),
+		"login-password": {},
+		"login-gates": {},
+	};
+	expect(await takesUnused({ modules, config })).toEqual({});
 });

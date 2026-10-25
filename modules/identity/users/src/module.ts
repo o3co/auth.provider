@@ -73,30 +73,37 @@ function undeclaredLinks(
 	);
 }
 
-export default defineModule({ name: "users", section }, (m) => [
-	m.provide(users).by(async (c) => {
-		const declarations = await c.collect(upstreamNames);
-		const refused = namesRefused(declarations);
-		if (refused.length > 0) return c.refuse("users", refused.join("; "));
-		const undeclared = undeclaredLinks(c.section.registered, declarations);
-		if (undeclared.length > 0) return c.refuseAll(undeclared);
-		const [ledger, ...more] = await c.collect(ledgers);
-		if (more.length > 0) return c.refuse("users", "more than one user ledger is contributed");
-		if (ledger && c.section.registered.length > 0) {
-			return c.refuse(
-				"users.registered",
-				"users are registered while a user ledger is contributed",
-			);
-		}
-		// This assembly's checkers, which share its limit on checks under way.
-		const checkers = await c.get(secretCheckers);
-		const source = ledger
-			? contributedSource(ledger, c.log)
-			: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
-		// A ledger that looks users up by upstream identity has the last word there, so no link store is asked for.
-		const linking = ledger?.byUpstream
-			? ledgerLinks(source)
-			: keptLinks(source, await c.get(linkStore));
-		return ledgerUsers(source, linking, await c.get(contactStore));
-	}),
-]);
+export default defineModule(
+	{
+		name: "users",
+		section,
+		takes: [secretCheckers, contactStore, ledgers, linkStore, upstreamNames],
+	},
+	(m) => [
+		m.provide(users).by(async (c) => {
+			const declarations = await c.collect(upstreamNames);
+			const refused = namesRefused(declarations);
+			if (refused.length > 0) return c.refuse("users", refused.join("; "));
+			const undeclared = undeclaredLinks(c.section.registered, declarations);
+			if (undeclared.length > 0) return c.refuseAll(undeclared);
+			const [ledger, ...more] = await c.collect(ledgers);
+			if (more.length > 0) return c.refuse("users", "more than one user ledger is contributed");
+			if (ledger && c.section.registered.length > 0) {
+				return c.refuse(
+					"users.registered",
+					"users are registered while a user ledger is contributed",
+				);
+			}
+			// This assembly's checkers, which share its limit on checks under way.
+			const checkers = await c.get(secretCheckers);
+			const source = ledger
+				? contributedSource(ledger, c.log)
+				: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
+			// A ledger that looks users up by upstream identity has the last word there, so no link store is asked for.
+			const linking = ledger?.byUpstream
+				? ledgerLinks(source)
+				: keptLinks(source, await c.get(linkStore));
+			return ledgerUsers(source, linking, await c.get(contactStore));
+		}),
+	],
+);

@@ -72,51 +72,58 @@ const byName = (sections: readonly Section<unknown>[]) => new Map(sections.map((
 const registered = contract<ReadonlyMap<string, Client>>("clients.registered");
 const secrets = contract<SecretChecker>("clients.secrets");
 
-export default defineModule({ name: "clients", section }, (m) => [
-	// This assembly's checkers, which share its limit on checks under way.
-	m
-		.provide(secrets)
-		.by(async (c) => (await c.get(secretCheckers)).checkerOf(hashesOf(c.section.registered))),
-	m.contribute(authMethods).by(async (c) => secretBasic(await c.get(secrets))),
-	m.contribute(authMethods).by(async (c) => secretPost(await c.get(secrets))),
-	m.contribute(authMethods).by(() => none),
-	m.contribute(metadataSections).by(() => secretSection),
-	m.provide(registered).by(async (c) => {
-		const known = byName(await c.collect(metadataSections));
-		const methods = new Set((await c.collect(authMethods)).map((a) => a.name));
-		const found = new Map<string, Client>();
-		const issues: { where: string; reason: string }[] = [];
-		for (const [i, entry] of c.section.registered.entries()) {
-			if (!methods.has(entry.method)) {
-				issues.push({
-					where: `clients.registered.${i}.method`,
-					reason: "unknown authentication method",
-				});
+export default defineModule(
+	{
+		name: "clients",
+		section,
+		takes: [authMethods, metadataSections, clientSources, secretCheckers],
+	},
+	(m) => [
+		// This assembly's checkers, which share its limit on checks under way.
+		m
+			.provide(secrets)
+			.by(async (c) => (await c.get(secretCheckers)).checkerOf(hashesOf(c.section.registered))),
+		m.contribute(authMethods).by(async (c) => secretBasic(await c.get(secrets))),
+		m.contribute(authMethods).by(async (c) => secretPost(await c.get(secrets))),
+		m.contribute(authMethods).by(() => none),
+		m.contribute(metadataSections).by(() => secretSection),
+		m.provide(registered).by(async (c) => {
+			const known = byName(await c.collect(metadataSections));
+			const methods = new Set((await c.collect(authMethods)).map((a) => a.name));
+			const found = new Map<string, Client>();
+			const issues: { where: string; reason: string }[] = [];
+			for (const [i, entry] of c.section.registered.entries()) {
+				if (!methods.has(entry.method)) {
+					issues.push({
+						where: `clients.registered.${i}.method`,
+						reason: "unknown authentication method",
+					});
+				}
+				const read = await readRecord(entry, known, "registered");
+				if ("client" in read) {
+					found.set(entry.id, read.client);
+					issues.push(...refusedAtBoot(entry, read.client, known, `clients.registered.${i}`));
+				} else {
+					issues.push(
+						...read.issues.map((issue) => ({
+							where: `clients.registered.${i}.sections.${issue.path}`,
+							reason: issue.message,
+						})),
+					);
+				}
 			}
-			const read = await readRecord(entry, known, "registered");
-			if ("client" in read) {
-				found.set(entry.id, read.client);
-				issues.push(...refusedAtBoot(entry, read.client, known, `clients.registered.${i}`));
-			} else {
-				issues.push(
-					...read.issues.map((issue) => ({
-						where: `clients.registered.${i}.sections.${issue.path}`,
-						reason: issue.message,
-					})),
-				);
-			}
-		}
-		if (issues.length > 0) return c.refuseAll(issues);
-		return found;
-	}),
-	m
-		.provide(clients)
-		.by(async (c) =>
-			registry(
-				await c.get(registered),
-				await c.collect(clientSources),
-				await c.collect(authMethods),
-				byName(await c.collect(metadataSections)),
+			if (issues.length > 0) return c.refuseAll(issues);
+			return found;
+		}),
+		m
+			.provide(clients)
+			.by(async (c) =>
+				registry(
+					await c.get(registered),
+					await c.collect(clientSources),
+					await c.collect(authMethods),
+					byName(await c.collect(metadataSections)),
+				),
 			),
-		),
-]);
+	],
+);

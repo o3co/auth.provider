@@ -1,5 +1,5 @@
 import { assemble, defineModule, isUnavailable, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
 import secretHashModule from "@mod/secret-hash/module";
 import { type AuthContext, type Entry, type Sessions, sessions } from "@mod/session";
@@ -25,7 +25,7 @@ const short: Entry = { kind: "short", requirement: "mfa", answer: { error: "mfa_
 
 /** Sessions by handle, entered with their context or as the entry given; `asked` lists each read. */
 const sessionsOf = (byHandle: Record<string, AuthContext | Entry>, asked: string[] = []) =>
-	defineModule({ name: "sessions" }, (m) => [
+	defineModule({ name: "sessions", takes: [] }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
 				entryOf: async (handle, level) => {
@@ -40,7 +40,7 @@ const sessionsOf = (byHandle: Record<string, AuthContext | Entry>, asked: string
 	]);
 
 /** A ledger that cannot look users up by subject. */
-const unanswering = defineModule({ name: "ledger" }, (m) => [
+const unanswering = defineModule({ name: "ledger", takes: [] }, (m) => [
 	m.contribute(ledgers).by(() => ({
 		verify: async () => ({ kind: "none" }),
 		bySubject: async () => ({ kind: "unanswerable" }),
@@ -186,4 +186,16 @@ describe("whether users vouches for a login's attributes", () => {
 			expect(vouches({ source }), source).toBe(false);
 		}
 	});
+});
+
+it("takes every handle its takes name", async () => {
+	const modules = [
+		memoryUsersStores().module,
+		usersModule,
+		secretHashModule,
+		sessionsOf({}),
+		reader,
+	];
+	const config = { ...kernelConfig(), ...usersConfig([]) };
+	expect(await takesUnused({ modules, config })).toEqual({});
 });

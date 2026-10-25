@@ -125,20 +125,23 @@ export function subjectRevocationContract(
  * the composition's clock, recorded and compared by subject-revocation's own rules, and followed
  * by the contributed followers as there.
  */
-export const subjectRevocationStandIn = defineModule({ name: "subject-revocation" }, (m) => [
-	m.provide(revocations).by(async (c) => {
-		const boundaries = new Map<string, Boundaries>();
-		const write: Write = async (subject, keep) => {
-			boundaries.set(subject, recorded(boundaries.get(subject), c.clock.now(), keep));
-		};
-		return {
-			record: followedBy(write, await c.collect(revocationFollowers), c.log),
-			compare: async (subject, time, kind, allowanceMs) =>
-				compared(time, boundaries.get(subject)?.[kind], allowanceMs),
-		};
-	}),
-	m.provide(subjectRevocation).by(async (c) => subjectRevocationOf(await c.get(revocations))),
-]);
+export const subjectRevocationStandIn = defineModule(
+	{ name: "subject-revocation", takes: [revocationFollowers] },
+	(m) => [
+		m.provide(revocations).by(async (c) => {
+			const boundaries = new Map<string, Boundaries>();
+			const write: Write = async (subject, keep) => {
+				boundaries.set(subject, recorded(boundaries.get(subject), c.clock.now(), keep));
+			};
+			return {
+				record: followedBy(write, await c.collect(revocationFollowers), c.log),
+				compare: async (subject, time, kind, allowanceMs) =>
+					compared(time, boundaries.get(subject)?.[kind], allowanceMs),
+			};
+		}),
+		m.provide(subjectRevocation).by(async (c) => subjectRevocationOf(await c.get(revocations))),
+	],
+);
 
 /** A place that keeps subject-revocation's boundaries, as one implementation of its store interface offers it. */
 export interface BoundaryPlace {

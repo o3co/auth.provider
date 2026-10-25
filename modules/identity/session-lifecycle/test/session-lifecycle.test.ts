@@ -11,7 +11,7 @@ import {
 	type Module,
 	type Runtime,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { type Session, sessions } from "@mod/session";
 import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
@@ -62,7 +62,7 @@ async function boot(
 ) {
 	const stores = memoryStores();
 	const closer: Closer = { failing: false, calls: 0, done: [] };
-	const participant = defineModule({ name: "closer" }, (m) => [
+	const participant = defineModule({ name: "closer", takes: [] }, (m) => [
 		m.contribute(participants).by(() => ({
 			name: "closer",
 			closing: async (s) => {
@@ -329,7 +329,7 @@ describe("session entry", () => {
 
 	it("lets nobody in whose subject is revoked while the entry requirements are asked", async () => {
 		const asked: { gate?: Promise<void>; reached?: () => void } = {};
-		const waiting = defineModule({ name: "waiting" }, (m) => [
+		const waiting = defineModule({ name: "waiting", takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "waiting",
 				judges: ["use"],
@@ -444,7 +444,7 @@ describe("session entry", () => {
 	it("fails an entry closed when subject revocation cannot tell", async () => {
 		const withCookie = (cookie: string) =>
 			testRequest({ headers: new Map([["cookie", cookie]]), source: { scheme: "https" } });
-		const failing = defineModule({ name: "subject-revocation" }, (m) => [
+		const failing = defineModule({ name: "subject-revocation", takes: [] }, (m) => [
 			m.provide(subjectRevocation).by(() => ({
 				revoke: async () => {},
 				check: async () => {
@@ -495,7 +495,7 @@ describe("session entry", () => {
 
 	it("lets a session in only where every entry requirement admits it at the level asked, and says which fell short", async () => {
 		const asked: string[] = [];
-		const requirement = defineModule({ name: "requirement" }, (m) => [
+		const requirement = defineModule({ name: "requirement", takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "recent",
 				judges: ["use", "credentials"],
@@ -978,7 +978,7 @@ describe("session raise", () => {
 
 	it("indexes a raised cookie for at least a millisecond, even when the session ends during the raise", async () => {
 		let ending = false;
-		const moving = defineModule({ name: "subject-revocation" }, (m) => [
+		const moving = defineModule({ name: "subject-revocation", takes: [] }, (m) => [
 			m.provide(subjectRevocation).by(() => ({
 				revoke: async () => {},
 				// The clock reaches the session's end between the entry check and the new cookie.
@@ -1240,4 +1240,17 @@ describe("revoking a subject", () => {
 		expect(closer.calls).toBe(0);
 		expect(await s.enter(withCookie(cookie))).toBeUndefined();
 	});
+});
+
+it("takes every handle its takes name", async () => {
+	const modules = [
+		http,
+		cookiesModule,
+		sessionLifecycle,
+		sessionRequirements,
+		sessionParticipants,
+		subjectRevocationStandIn,
+		memoryStores().module,
+	];
+	expect(await takesUnused({ modules, config: configWith() })).toEqual({});
 });

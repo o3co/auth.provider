@@ -645,180 +645,185 @@ export function failStandInListing(stand: Sessions): void {
  * sessions as the contract has it, up to `standInListingCap`, and closes them through `close`
  * when the listing pushes one out or the subject is revoked.
  */
-export const sessionStandIn = defineModule({ name: "session" }, (m) => [
-	m.provide(sessions).by(async (c) => {
-		const jar = cookiesFor((await c.get(site)).secureCookies);
-		const revocation = await c.get(subjectRevocation);
-		// `session`'s seams, where a module keeps them; none is taken as no requirement and no participant.
-		const [judge] = await c.collect(entryJudge);
-		const [closing] = await c.collect(closingParticipants);
-		const recentMs = sessionRules.credentialsSecondsDefault * 1000;
-		const recent = (at: number) => c.clock.now() - at <= recentMs;
-		const shortOf = sessionRules.judgedShortOf(judge, recent);
-		const lifetimeMs = standInLifetimeSeconds * 1000;
-		type Kept = {
-			context: AuthContext;
-			state: "open" | "closing" | "closed";
-			openedAt: number;
-			until: number;
-		};
-		const kept = new Map<string, Kept>();
-		/** The handle each cookie's secret opens, until the cookie ends. */
-		const handles = new Map<string, { handle: string; until: number }>();
-		/** Each subject's listing: when each listed handle ends. */
-		const listing = new Map<string, Map<string, number>>();
-		let failListing = false;
-		const listedUnder = (subject: string) =>
-			[...(listing.get(subject) ?? [])].filter(([, until]) => until > c.clock.now());
-		/**
-		 * Lists the session being opened until it ends, answering those pushed out over the cap: the
-		 * others that end first. The session being opened is never pushed out.
-		 */
-		const list = (subject: string, handle: string, until: number) => {
-			if (failListing) {
-				failListing = false;
-				throw new Unavailable("session");
-			}
-			const byEnd = listedUnder(subject).sort(
-				([a, aEnds], [b, bEnds]) => aEnds - bEnds || (a < b ? -1 : a > b ? 1 : 0),
-			);
-			const over = Math.max(0, byEnd.length + 1 - standInListingCap);
-			listing.set(subject, new Map([...byEnd.slice(over), [handle, until]]));
-			return byEnd.slice(0, over).map(([pushed]) => pushed);
-		};
-		const random = () => Buffer.from(c.random.bytes(32)).toString("base64url");
-		const handleOf = (secret: string | undefined) => {
-			const found = secret === undefined ? undefined : handles.get(secret);
-			return found && found.until > c.clock.now() ? found.handle : undefined;
-		};
-		/** The session cookie's value, when the request carries it once where it may be read. */
-		const secretIn = (request: HttpRequest) => {
-			const carried = jar.lookup(request, "session");
-			return carried.kind === "found" ? carried.value : undefined;
-		};
-		const handleIn = (request: HttpRequest) => handleOf(secretIn(request));
-		const sessionOf = (handle: string, found: Kept): Session =>
-			Object.freeze({ id: handle, context: found.context });
-		const liveAt = async (handle: string | undefined) => {
-			const found = handle === undefined ? undefined : kept.get(handle);
-			if (found?.state !== "open" || found.until <= c.clock.now()) return undefined;
-			if ((await revocation.check(found.context.subject, found.openedAt)) === "revoked") {
-				return undefined;
-			}
-			return found;
-		};
-		const enterAt = async (handle: string | undefined, level: EntryLevel): Promise<Entry> => {
-			const found = await liveAt(handle);
-			if (!found || handle === undefined) return { kind: "absent" };
-			const short = await shortOf(found.context, level);
-			if (!(await liveAt(handle))) return { kind: "absent" };
-			if (short) return { kind: "short", ...short };
-			const endsAt = found.openedAt + lifetimeMs;
-			return { kind: "entered", session: sessionOf(handle, found), endsAt };
-		};
-		const enteredAt = async (handle: string | undefined) => {
-			const entry = await enterAt(handle, "use");
-			return entry.kind === "entered" ? entry : undefined;
-		};
-		const close = async (handle: string, request?: HttpRequest) => {
-			const removed = request && handleIn(request) === handle ? [jar.write("session", "", 0)] : [];
-			const found = kept.get(handle);
-			// A record past its lifetime is gone; a closing one is kept until it is closed.
-			if (!found || (found.state !== "closing" && found.until <= c.clock.now())) {
-				return { kind: "closed" as const, cookies: removed };
-			}
-			const session = { id: handle, subject: found.context.subject };
-			const from = found.state;
-			if (found.state !== "closed") {
-				found.state = "closing";
-				const failed = closing ? await closing.closing(sessionOf(handle, found)) : [];
-				for (const failure of failed) c.log.warn("session.participant_failed", failure);
-				if (failed.length > 0) return { kind: "pending" as const, cookies: removed, session, from };
-			}
-			// A closed record is kept for the lifetime from its last close, and no longer listed.
-			found.state = "closed";
-			found.until = c.clock.now() + lifetimeMs;
-			listing.get(found.context.subject)?.delete(handle);
-			return { kind: "closed" as const, cookies: removed, session, from };
-		};
-		const stand: Sessions = {
-			recent,
-			enter: async (request) => (await enteredAt(handleIn(request)))?.session,
-			enterFor: (request, level) => enterAt(handleIn(request), level),
-			entryOf: (handle, level = "use") => enterAt(handle, level),
-			complete: async (request, facts) => {
-				const at = facts.authenticatedAt;
-				if (at !== "unknown" && !(Number.isFinite(at) && at >= 0 && at <= 8.64e15))
-					throw new TypeError('authenticatedAt must be epoch milliseconds or "unknown"');
-				const carried = handleIn(request);
-				if (carried !== undefined) await close(carried);
-				const handle = random();
-				const secret = random();
-				const openedAt = c.clock.now();
-				const attributes = keptAtLogin(facts.attributes, c.log);
-				const context = Object.freeze({
-					subject: facts.subject,
-					amr: Object.freeze([...facts.amr]),
-					...authenticatedAtOf(facts, openedAt, c.log),
-					...(attributes === undefined ? {} : { attributes }),
-				});
-				const until = openedAt + lifetimeMs;
-				kept.set(handle, { context, state: "open", openedAt, until });
-				// Listed before its cookie is made; a session pushed out is closed through `close`.
-				for (const pushed of list(facts.subject, handle, until)) await close(pushed);
-				handles.set(secret, { handle, until });
-				return {
-					session: Object.freeze({ id: handle, context }),
-					cookies: [jar.write("session", secret, lifetimeMs / 1000)],
-				};
-			},
-			raise: async (request, amr) => {
-				const secret = secretIn(request);
-				const handle = handleOf(secret);
+export const sessionStandIn = defineModule(
+	{ name: "session", takes: [site, closingParticipants, entryJudge, subjectRevocation] },
+	(m) => [
+		m.provide(sessions).by(async (c) => {
+			const jar = cookiesFor((await c.get(site)).secureCookies);
+			const revocation = await c.get(subjectRevocation);
+			// `session`'s seams, where a module keeps them; none is taken as no requirement and no participant.
+			const [judge] = await c.collect(entryJudge);
+			const [closing] = await c.collect(closingParticipants);
+			const recentMs = sessionRules.credentialsSecondsDefault * 1000;
+			const recent = (at: number) => c.clock.now() - at <= recentMs;
+			const shortOf = sessionRules.judgedShortOf(judge, recent);
+			const lifetimeMs = standInLifetimeSeconds * 1000;
+			type Kept = {
+				context: AuthContext;
+				state: "open" | "closing" | "closed";
+				openedAt: number;
+				until: number;
+			};
+			const kept = new Map<string, Kept>();
+			/** The handle each cookie's secret opens, until the cookie ends. */
+			const handles = new Map<string, { handle: string; until: number }>();
+			/** Each subject's listing: when each listed handle ends. */
+			const listing = new Map<string, Map<string, number>>();
+			let failListing = false;
+			const listedUnder = (subject: string) =>
+				[...(listing.get(subject) ?? [])].filter(([, until]) => until > c.clock.now());
+			/**
+			 * Lists the session being opened until it ends, answering those pushed out over the cap: the
+			 * others that end first. The session being opened is never pushed out.
+			 */
+			const list = (subject: string, handle: string, until: number) => {
+				if (failListing) {
+					failListing = false;
+					throw new Unavailable("session");
+				}
+				const byEnd = listedUnder(subject).sort(
+					([a, aEnds], [b, bEnds]) => aEnds - bEnds || (a < b ? -1 : a > b ? 1 : 0),
+				);
+				const over = Math.max(0, byEnd.length + 1 - standInListingCap);
+				listing.set(subject, new Map([...byEnd.slice(over), [handle, until]]));
+				return byEnd.slice(0, over).map(([pushed]) => pushed);
+			};
+			const random = () => Buffer.from(c.random.bytes(32)).toString("base64url");
+			const handleOf = (secret: string | undefined) => {
+				const found = secret === undefined ? undefined : handles.get(secret);
+				return found && found.until > c.clock.now() ? found.handle : undefined;
+			};
+			/** The session cookie's value, when the request carries it once where it may be read. */
+			const secretIn = (request: HttpRequest) => {
+				const carried = jar.lookup(request, "session");
+				return carried.kind === "found" ? carried.value : undefined;
+			};
+			const handleIn = (request: HttpRequest) => handleOf(secretIn(request));
+			const sessionOf = (handle: string, found: Kept): Session =>
+				Object.freeze({ id: handle, context: found.context });
+			const liveAt = async (handle: string | undefined) => {
+				const found = handle === undefined ? undefined : kept.get(handle);
+				if (found?.state !== "open" || found.until <= c.clock.now()) return undefined;
+				if ((await revocation.check(found.context.subject, found.openedAt)) === "revoked") {
+					return undefined;
+				}
+				return found;
+			};
+			const enterAt = async (handle: string | undefined, level: EntryLevel): Promise<Entry> => {
 				const found = await liveAt(handle);
-				if (!found || secret === undefined || handle === undefined) return undefined;
-				handles.delete(secret);
-				const next = random();
-				handles.set(next, { handle, until: found.until });
-				const raised = raisedBy(found.context.amr, amr);
-				found.context = Object.freeze({
-					...found.context,
-					amr: Object.freeze(raised.amr),
-					raisedAt: c.clock.now(),
-					raisedAmr: Object.freeze(raised.raisedAmr),
-				});
-				const left = Math.max(1, Math.floor((found.until - c.clock.now()) / 1000));
-				return {
-					session: sessionOf(handle, found),
-					cookies: [jar.write("session", next, left)],
-					raised: true,
-				};
-			},
-			closeRequest: async (request) => {
-				const handle = handleIn(request);
-				const carried = jar.lookup(request, "session").kind !== "absent";
-				const removed = carried ? [jar.write("session", "", 0)] : [];
-				if (handle === undefined) return { kind: "closed", cookies: removed };
-				return { ...(await close(handle)), cookies: removed };
-			},
-			close,
-		};
-		listingOf.set(stand, {
-			members: (subject) => listedUnder(subject).map(([handle]) => handle),
-			failNext: () => {
-				failListing = true;
-			},
-		});
-		return stand;
-	}),
-	m.contribute(revocationFollowers).by((c) => {
-		const lateSessions = c.late(sessions);
-		const members = async (subject: string) =>
-			(listingOf.get(lateSessions())?.members(subject) ?? []).map((member) => ({ member }));
-		return {
-			name: "session",
-			follow: (subject) =>
-				sessionRules.closeListed(subject, { members }, (handle) => lateSessions().close(handle)),
-		};
-	}),
-]);
+				if (!found || handle === undefined) return { kind: "absent" };
+				const short = await shortOf(found.context, level);
+				if (!(await liveAt(handle))) return { kind: "absent" };
+				if (short) return { kind: "short", ...short };
+				const endsAt = found.openedAt + lifetimeMs;
+				return { kind: "entered", session: sessionOf(handle, found), endsAt };
+			};
+			const enteredAt = async (handle: string | undefined) => {
+				const entry = await enterAt(handle, "use");
+				return entry.kind === "entered" ? entry : undefined;
+			};
+			const close = async (handle: string, request?: HttpRequest) => {
+				const removed =
+					request && handleIn(request) === handle ? [jar.write("session", "", 0)] : [];
+				const found = kept.get(handle);
+				// A record past its lifetime is gone; a closing one is kept until it is closed.
+				if (!found || (found.state !== "closing" && found.until <= c.clock.now())) {
+					return { kind: "closed" as const, cookies: removed };
+				}
+				const session = { id: handle, subject: found.context.subject };
+				const from = found.state;
+				if (found.state !== "closed") {
+					found.state = "closing";
+					const failed = closing ? await closing.closing(sessionOf(handle, found)) : [];
+					for (const failure of failed) c.log.warn("session.participant_failed", failure);
+					if (failed.length > 0)
+						return { kind: "pending" as const, cookies: removed, session, from };
+				}
+				// A closed record is kept for the lifetime from its last close, and no longer listed.
+				found.state = "closed";
+				found.until = c.clock.now() + lifetimeMs;
+				listing.get(found.context.subject)?.delete(handle);
+				return { kind: "closed" as const, cookies: removed, session, from };
+			};
+			const stand: Sessions = {
+				recent,
+				enter: async (request) => (await enteredAt(handleIn(request)))?.session,
+				enterFor: (request, level) => enterAt(handleIn(request), level),
+				entryOf: (handle, level = "use") => enterAt(handle, level),
+				complete: async (request, facts) => {
+					const at = facts.authenticatedAt;
+					if (at !== "unknown" && !(Number.isFinite(at) && at >= 0 && at <= 8.64e15))
+						throw new TypeError('authenticatedAt must be epoch milliseconds or "unknown"');
+					const carried = handleIn(request);
+					if (carried !== undefined) await close(carried);
+					const handle = random();
+					const secret = random();
+					const openedAt = c.clock.now();
+					const attributes = keptAtLogin(facts.attributes, c.log);
+					const context = Object.freeze({
+						subject: facts.subject,
+						amr: Object.freeze([...facts.amr]),
+						...authenticatedAtOf(facts, openedAt, c.log),
+						...(attributes === undefined ? {} : { attributes }),
+					});
+					const until = openedAt + lifetimeMs;
+					kept.set(handle, { context, state: "open", openedAt, until });
+					// Listed before its cookie is made; a session pushed out is closed through `close`.
+					for (const pushed of list(facts.subject, handle, until)) await close(pushed);
+					handles.set(secret, { handle, until });
+					return {
+						session: Object.freeze({ id: handle, context }),
+						cookies: [jar.write("session", secret, lifetimeMs / 1000)],
+					};
+				},
+				raise: async (request, amr) => {
+					const secret = secretIn(request);
+					const handle = handleOf(secret);
+					const found = await liveAt(handle);
+					if (!found || secret === undefined || handle === undefined) return undefined;
+					handles.delete(secret);
+					const next = random();
+					handles.set(next, { handle, until: found.until });
+					const raised = raisedBy(found.context.amr, amr);
+					found.context = Object.freeze({
+						...found.context,
+						amr: Object.freeze(raised.amr),
+						raisedAt: c.clock.now(),
+						raisedAmr: Object.freeze(raised.raisedAmr),
+					});
+					const left = Math.max(1, Math.floor((found.until - c.clock.now()) / 1000));
+					return {
+						session: sessionOf(handle, found),
+						cookies: [jar.write("session", next, left)],
+						raised: true,
+					};
+				},
+				closeRequest: async (request) => {
+					const handle = handleIn(request);
+					const carried = jar.lookup(request, "session").kind !== "absent";
+					const removed = carried ? [jar.write("session", "", 0)] : [];
+					if (handle === undefined) return { kind: "closed", cookies: removed };
+					return { ...(await close(handle)), cookies: removed };
+				},
+				close,
+			};
+			listingOf.set(stand, {
+				members: (subject) => listedUnder(subject).map(([handle]) => handle),
+				failNext: () => {
+					failListing = true;
+				},
+			});
+			return stand;
+		}),
+		m.contribute(revocationFollowers).by((c) => {
+			const lateSessions = c.late(sessions);
+			const members = async (subject: string) =>
+				(listingOf.get(lateSessions())?.members(subject) ?? []).map((member) => ({ member }));
+			return {
+				name: "session",
+				follow: (subject) =>
+					sessionRules.closeListed(subject, { members }, (handle) => lateSessions().close(handle)),
+			};
+		}),
+	],
+);
