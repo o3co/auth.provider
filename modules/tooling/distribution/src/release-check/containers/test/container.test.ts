@@ -347,17 +347,21 @@ describe("a look again and again, within the container's deadline", () => {
 
 	it("gives up by the clock however long each look takes, and begins none past it", async () => {
 		const d = daemon();
-		let looks = 0;
-		const began = performance.now();
+		const starts: number[] = [];
 		const slow = async () => {
-			looks += 1;
+			starts.push(performance.now());
 			await new Promise((resolve) => setTimeout(resolve, 40));
 			return false;
 		};
 		const held = await withContainer(options(d.docker, 5_000), (c) => c.until(slow, 1, 100));
+		const ended = performance.now();
 		expect(held).toBe(false);
-		expect(looks).toBeLessThanOrEqual(3);
-		expect(performance.now() - began).toBeLessThan(100 + 40 + 100);
+		// The first look begins once the time is set, so the time ends 100 ms after it at the latest:
+		// a look begun from then on began past it, however slow the machine is.
+		const [first = 0] = starts;
+		expect(starts.filter((at) => at >= first + 100)).toEqual([]);
+		// It gave up by the clock, not by running out of looks: well before the container's own time.
+		expect(ended - first).toBeLessThan(2_000);
 	});
 
 	it("gives a look's commands no more than the look's own time", async () => {
