@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 export interface Pkg {
@@ -50,13 +50,13 @@ function walk(dir: string, base = dir): string[] {
 	});
 }
 
-/** Workspace packages as pnpm sees them, minus the root. */
+/** Workspace packages as pnpm sees them, minus the root, however the root is named (pnpm gives real paths). */
 export function readWorkspace(root: string): Pkg[] {
 	const listed = JSON.parse(
 		execFileSync("pnpm", ["ls", "-r", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
 	) as { name: string; path: string }[];
 	return listed
-		.filter((entry) => entry.path !== root)
+		.filter((entry) => realpathSync(entry.path) !== realpathSync(root))
 		.map((entry) => {
 			const files = walk(entry.path);
 			return {
