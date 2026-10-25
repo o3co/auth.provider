@@ -12,5 +12,6 @@ it("takes the issuer, and nothing it names goes untaken", async () => {
 		m.provide(collected).by((c) => c.collect(grants)),
 	]);
 	const input = { modules: [beside, clientCredentials], config: kernelConfig() };
-	expect(await takesUnused(input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["client-credentials"]).toBeUndefined();
 });
