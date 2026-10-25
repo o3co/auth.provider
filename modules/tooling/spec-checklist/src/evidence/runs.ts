@@ -10,6 +10,10 @@ export interface Run {
 	readonly kind: string;
 	readonly matrix?: string;
 	readonly releaseOnly?: true;
+	/** The test files it runs, by the suffix of their names; unset, the default rules say which. */
+	readonly files?: string;
+	/** A test of it that is skipped, excused or not, or left todo, fails its items. */
+	readonly noSkip?: true;
 }
 
 /** A package's printed runs, each checked to be a run; a value that is not refused naming the package. */
@@ -20,7 +24,9 @@ export function runsPrinted(pkg: string, printed: unknown): Run[] {
 			typeof o?.entry === "string" &&
 			typeof o.kind === "string" &&
 			(o.matrix === undefined || typeof o.matrix === "string") &&
-			(o.releaseOnly === undefined || o.releaseOnly === true)
+			(o.releaseOnly === undefined || o.releaseOnly === true) &&
+			(o.files === undefined || (typeof o.files === "string" && o.files !== "")) &&
+			(o.noSkip === undefined || o.noSkip === true)
 		);
 	};
 	if (!Array.isArray(printed) || !printed.every(isRun))
@@ -40,8 +46,16 @@ export interface Expected {
 	readonly entries: readonly string[];
 	/** The packages whose `.case.ts` tests run as their own entry and once per pattern (`<package>@<pattern>`). */
 	readonly areas: ReadonlySet<string>;
-	/** A harness's runs (`<package>#<run>`), by its package. */
+	/** A harness's runs (`<package>#<run>`) that name no files, by its package. */
 	readonly runsOf: ReadonlyMap<string, readonly string[]>;
+	/** The runs that name their files by a suffix, with their package. */
+	readonly suffixed: readonly {
+		readonly entry: string;
+		readonly pkg: string;
+		readonly files: string;
+	}[];
+	/** The runs that take no skip. */
+	readonly noSkip: ReadonlySet<string>;
 }
 
 export type RunStatus =
@@ -85,6 +99,8 @@ export interface ItemStatus {
 	readonly failed: number;
 	/** The expected runs of its tests that did not report. */
 	readonly missing: readonly string[];
+	/** Its tests absent from a run of their file that reported, as `<entry>: <file> > <title>`. */
+	readonly unrun: readonly string[];
 	/** Results a harness excused, by their class. */
 	readonly excused: Readonly<Record<string, number>>;
 	/** The reports its tests ran in, the status's provenance. */
@@ -142,6 +158,8 @@ export function selectReports(
 /** The expected runs a test file's tests run in. */
 export function entriesOfFile(pkg: string, file: string, expected: Expected): readonly string[] {
 	if (file.endsWith(".integration.test.ts")) return ["integration"];
+	const named = expected.suffixed.filter((r) => r.pkg === pkg && file.endsWith(r.files));
+	if (named.length > 0) return named.map((r) => r.entry);
 	const runs = expected.runsOf.get(pkg);
 	if (runs) return runs;
 	if (file.endsWith(".case.ts") && expected.areas.has(pkg))
@@ -217,6 +235,24 @@ export function itemStatuses(
 		const entries = [...new Set(refs.flatMap((r) => entriesOfFile(r.pkg, r.file, expected)))];
 		const missing = entries.filter((e) => expected.entries.includes(e) && !present.has(e));
 		const broken = files.some((f) => brokenFiles.has(f)) || entries.some((e) => errored.has(e));
+		// Each test naming the item, in each run of its file that reported: a suite's title is met by a test in it.
+		const unrun = refs.flatMap((ref) =>
+			entriesOfFile(ref.pkg, ref.file, expected)
+				.filter((e) => present.has(e))
+				.filter(
+					(e) =>
+						!reports.some(
+							(r) =>
+								r.identity.entry === e &&
+								r.tests.some(
+									(t) =>
+										t.file === join(pkgDirs.get(ref.pkg) ?? ref.pkg, ref.file) &&
+										t.names.includes(ref.title),
+								),
+						),
+				)
+				.map((e) => `${e}: ${ref.file} > ${ref.title}`),
+		);
 		const failures = reports.flatMap((r) => {
 			const { commit, run, attempt, job, entry } = r.identity;
 			const at = { commit, run, attempt, job, entry };
@@ -231,15 +267,29 @@ export function itemStatuses(
 				r.errors > 0 && entries.includes(entry)
 					? [{ ...at, reason: `${r.errors} error(s) no test owns` }]
 					: [];
-			return [...outside, ...errors];
+			const skipped = expected.noSkip.has(entry)
+				? r.tests
+						.filter(
+							(t) =>
+								(t.state === "skipped" || t.state === "pending") && idsIn(t.names).includes(i.id),
+						)
+						.map((t) => ({
+							...at,
+							reason: `${t.file} > ${t.names.join(" > ")}: skipped in a run that takes no skip`,
+						}))
+				: [];
+			return [...outside, ...errors, ...skipped];
 		});
+		const refusedSkip = failures.some((f) =>
+			f.reason.endsWith("skipped in a run that takes no skip"),
+		);
 		const status: RunStatus =
 			i.mark?.kind ??
 			(refs.length === 0
 				? "hole"
-				: s.failed > 0 || broken
+				: s.failed > 0 || broken || refusedSkip
 					? "failed"
-					: missing.length > 0
+					: missing.length > 0 || unrun.length > 0
 						? "incomplete"
 						: s.passed > 0
 							? "passed"
@@ -252,6 +302,7 @@ export function itemStatuses(
 			status,
 			...s,
 			missing,
+			unrun,
 			evidence: provenance,
 			failures,
 		};
