@@ -49,6 +49,7 @@ From `@mod/client-assertion`.
 |---|---|---|---|---|---|---|
 | `client-assertion.max-lifetime` | string | `1h` |  |  |  | The longest lifetime a client assertion may have, from `1s` to `1d` in whole seconds. |
 | `client-assertion.clock-skew` | string | `30s` |  |  |  | How far a client's clock may be off when an assertion's times are checked, from `0s` to `5m` in whole seconds. |
+| `client-assertion.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","ES256","ES384","ES512","EdDSA"]` |  |  |  | The algorithms a client's assertion may be signed with: asymmetric ones only, by default one for each kind of key. |
 
 ## clients
 

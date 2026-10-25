@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthMethod } from "@mod/clients";
-import type { ExternalJwt } from "@mod/external-jwt";
+import type { Algorithm, ExternalJwt } from "@mod/external-jwt";
 import type { HttpRequest } from "@mod/http";
 import { type Clock, type Log, Unavailable } from "@mod/kernel";
 import { decodeJwt } from "jose";
@@ -19,6 +19,8 @@ export interface Parts {
 	readonly tokenEndpoint: string;
 	readonly maxLifetimeMs: number;
 	readonly skewMs: number;
+	/** The algorithms the operator takes. */
+	readonly algorithms: readonly Algorithm[];
 	readonly clock: Clock;
 	readonly log: Log;
 }
@@ -48,7 +50,7 @@ const storeClockMarginMs = 60_000;
 export function assertionMethod(p: Parts): AuthMethod {
 	return {
 		name: "private_key_jwt",
-		signingAlgorithms: p.jwt.algorithms,
+		signingAlgorithms: p.algorithms,
 		// Any assertion is this method's to judge (RFC 7521 §4.2.1), so one of a type not taken here
 		// is refused rather than left to another method.
 		claimed: (request) => {
@@ -80,9 +82,9 @@ export function assertionMethod(p: Parts): AuthMethod {
 			}
 			const section = client.section(clientKeys);
 			const loose = section["accept-loose-audience"];
-			// A verifier over this client's written keys; every asymmetric algorithm external-jwt knows is taken.
+			// A verifier over this client's written keys, under the algorithms the operator takes.
 			const verifier = p.jwt.verifierOf(keysOf(section), {
-				algorithms: p.jwt.algorithms,
+				algorithms: p.algorithms,
 				skewMs: p.skewMs,
 				maxLifetimeMs: p.maxLifetimeMs,
 				expect: {

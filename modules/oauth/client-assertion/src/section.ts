@@ -1,4 +1,5 @@
 import { setting } from "@mod/kernel";
+import { type VerifyAlgorithm, verifyAlgorithms } from "@mod/keys";
 import { z } from "zod";
 
 export const section = z.strictObject({
@@ -15,5 +16,13 @@ export const section = z.strictObject({
 		.prefault("30s")
 		.describe(
 			"How far a client's clock may be off when an assertion's times are checked, from `0s` to `5m` in whole seconds.",
+		),
+	algorithms: z
+		.array(z.enum(verifyAlgorithms as [VerifyAlgorithm, ...VerifyAlgorithm[]]))
+		.min(1)
+		.prefault(["RS256", "ES256", "ES384", "ES512", "EdDSA"])
+		.transform((named) => [...new Set(named)])
+		.describe(
+			"The algorithms a client's assertion may be signed with: asymmetric ones only, by default one for each kind of key.",
 		),
 });
