@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BootRefused } from "../src/contract.ts";
-import { unreadable } from "./refusals.ts";
+import { unreadable } from "../../../test/refusals.ts";
+import { BootRefused } from "../../contract.ts";
 
 describe("BootRefused.is", () => {
 	it("tells a refused boot by the mark every copy of the kernel puts on it, never by its class", () => {

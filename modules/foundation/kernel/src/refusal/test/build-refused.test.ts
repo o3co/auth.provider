@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BuildRefused } from "../src/contract.ts";
-import { unreadable } from "./refusals.ts";
+import { unreadable } from "../../../test/refusals.ts";
+import { BuildRefused } from "../../contract.ts";
 
 describe("BuildRefused.is", () => {
 	it("tells a library's refusal by the mark every copy of the kernel puts on it, with where and why", () => {

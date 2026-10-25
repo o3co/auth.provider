@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readThrown, thrownKind } from "../src/refusal/refusal.ts";
-import { unreadable } from "./refusals.ts";
+import { unreadable } from "../../../test/refusals.ts";
+import { readThrown, thrownKind } from "../refusal.ts";
 
 describe("reading a thrown value", () => {
 	it("answers what the read makes of it", () => {

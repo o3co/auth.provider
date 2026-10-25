@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isUnavailable, Unavailable } from "../src/contract.ts";
-import { unreadable } from "./refusals.ts";
+import { unreadable } from "../../../test/refusals.ts";
+import { isUnavailable, Unavailable } from "../../contract.ts";
 
 describe("isUnavailable", () => {
 	it("tells an outage by the mark every copy of the kernel puts on it, never by its class", () => {
