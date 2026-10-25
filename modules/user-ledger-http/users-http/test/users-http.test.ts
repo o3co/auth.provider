@@ -10,6 +10,7 @@ import {
 	kernelConfig,
 	type Runtime,
 } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import {
@@ -864,6 +865,34 @@ describe("users-http looking a user up by subject", () => {
 				refusals: [{ where: "users-http.credential", reason: credentialRefusalText(refusal) }],
 			});
 		}
+	});
+
+	it("takes outbound's credential policy only with a credential, its takes naming it either way", async () => {
+		const unused = async (section: unknown) =>
+			(
+				await takesUnused({
+					modules: [
+						outboundModule,
+						usersModule,
+						secretHashModule,
+						memoryUsersStores().module,
+						usersHttp,
+						collector,
+					],
+					config: {
+						...kernelConfig(),
+						outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
+						"users-http": section,
+					},
+					runtime,
+				})
+			)["users-http"];
+		expect(await unused(settings())).toBeUndefined();
+		// The take is conditional, the takes static: outbound provides the policy beside the refusals
+		// the module always takes, so wherever it boots the policy is there; without a credential it
+		// is left untaken.
+		const { credential: _, ...bare } = settings();
+		expect(await unused(bare)).toEqual(["outbound.credentials"]);
 	});
 
 	it("refuses to start on a subject-url outbound's policy refuses, saying why", async () => {
