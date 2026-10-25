@@ -337,8 +337,10 @@ it("lets a login return one name segment below a path contributed so, and nowher
 	);
 });
 
-it("refuses to start with a return path taking a segment below the root, or below a path ending in a slash", async () => {
-	for (const at of ["/", "/session/"]) {
+it("refuses to start with a return path taking a segment that is no path below the root, or ends in a slash", async () => {
+	// The root, a path ending in a slash, an empty path (below which every segment at the root would
+	// match), and one not beginning with a slash.
+	for (const at of ["/", "/session/", "", "session"]) {
 		const below = defineModule({ name: "below", takes: [] }, (m) => [
 			m.contribute(returnPaths).by(() => ({ path: at, segment: true })),
 		]);
@@ -347,7 +349,7 @@ it("refuses to start with a return path taking a segment below the root, or belo
 		expect((refused as BootRefused).refusals, at).toEqual([
 			{
 				where: "login-gates",
-				reason: `a return path taking a segment below it is a path below the root, not ending in a slash: ${at}`,
+				reason: `a return path taking a segment below it is a path below the root, beginning with a slash and not ending in one: ${at}`,
 			},
 		]);
 	}
