@@ -34,5 +34,6 @@ it("offers the acr met by a second factor, only where second factors are compose
 
 it("takes all it names", async () => {
 	const input = { modules: [secondFactors, bridge, reader], config: kernelConfig(), runtime };
-	expect(await takesUnused(input)).toEqual({});
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["mfa-acr"]).toBeUndefined();
 });
