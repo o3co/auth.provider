@@ -7,12 +7,23 @@ import { issuer, type MetadataItem, metadata } from "../src/contract.ts";
 import issuerModule from "../src/module.ts";
 import { issuerConfig } from "../src/testing.ts";
 
-const boot = (url: unknown, origin?: string) =>
+const boot = (
+	url: unknown,
+	origin?: string,
+	environment: "production" | "development" = "production",
+) =>
 	assemble({
 		modules: [http, issuerModule],
 		config: {
-			...kernelConfig(),
-			...httpConfig(origin ? { "public-origin": origin } : {}),
+			...kernelConfig({ environment }),
+			...httpConfig(
+				origin
+					? {
+							"public-origin": origin,
+							...(origin.startsWith("http:") ? { "insecure-origin": true } : {}),
+						}
+					: {},
+			),
 			issuer: { url },
 		},
 	});
@@ -101,4 +112,12 @@ it("takes all it names, with a public origin and without one", async () => {
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 		expect((await takesUnused(input))["issuer"], JSON.stringify(origin)).toBeUndefined();
 	}
+});
+
+it("takes a plain-http issuer only beside the same plain-http public origin, which http takes only when told", async () => {
+	expect(await refusedAt(boot("http://issuer.example", undefined, "development"))).toEqual([
+		"issuer.url",
+	]);
+	const plain = await boot("http://as.example", "http://as.example", "development");
+	expect(plain.get(issuer).url).toBe("http://as.example");
 });

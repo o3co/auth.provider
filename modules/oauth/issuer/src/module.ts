@@ -14,6 +14,14 @@ export default defineModule({ name: "issuer", section, takes: [site, metadata] }
 	m.provide(issuer).by(async (c) => {
 		const url = c.section.url;
 		const publicOrigin = (await c.get(site)).origin;
+		// Plain http only as the public origin's own, which http takes only with insecure-origin: no
+		// public origin leaves nothing to say the deployment accepted it.
+		if (publicOrigin === undefined && url.startsWith("http:")) {
+			return c.refuse(
+				"issuer.url",
+				"a plain-http issuer needs the same plain-http public origin, accepted by http.insecure-origin",
+			);
+		}
 		if (publicOrigin !== undefined && new URL(url).origin !== publicOrigin) {
 			return c.refuse(
 				"issuer.url",

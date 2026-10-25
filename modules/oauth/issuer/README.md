@@ -17,7 +17,7 @@
 - Test configuration builders (`./testing`); the URL defaults to `https://issuer.example`.
 
 ## Invariants
-- Boot is refused when the issuer's origin differs from `http`'s public origin, where one is written.
+- Boot is refused when the issuer's origin differs from `http`'s public origin, where one is written, and for a plain-http issuer where none is (plain http comes only with the public origin http takes by `insecure-origin`).
 - Frozen once at boot.
 - Two contributions of one metadata item, or a contribution of the `issuer` item (it is the URL above), refuse boot, whether or not any module reads the items.
 
