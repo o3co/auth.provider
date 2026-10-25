@@ -14,11 +14,11 @@
 - 1.1 #8 RECOMMENDED: excluded definition
 - 1.1 #9 NOT RECOMMENDED: excluded definition
 - 1.1 #10 MUST NOT: excluded definition
-- 2 #1 RECOMMENDED: excluded client-only
+- 2 #1 RECOMMENDED: oidc-rpinit-2-l
 - 2 #2 MUST: oidc-rpinit-2-a
 - 2 #3 SHOULD: oidc-rpinit-2-k
 - 2 #4 MUST: oidc-rpinit-2-b
-- 2 #5 RECOMMENDED: excluded client-only
+- 2 #5 RECOMMENDED: oidc-rpinit-2-m
 - 2 #6 SHOULD NOT: oidc-rpinit-2-c
 - 2 #7 MUST: oidc-rpinit-2-d
 - 2 #8 MUST: oidc-rpinit-2-e
@@ -30,7 +30,7 @@
 - 2.1 #1 MUST: oidc-rpinit-2.1-a
 - 2.1 #2 REQUIRED: oidc-rpinit-2.1-a
 - 2.1 #3 MUST: oidc-rpinit-2.1-b
-- 3 #1 RECOMMENDED: excluded client-only
+- 3 #1 RECOMMENDED: oidc-rpinit-2-m
 - 3 #2 MUST NOT: oidc-rpinit-3-a
 - 3 #3 MUST NOT: oidc-rpinit-3-b
 - 3.1 #1 SHOULD: oidc-rpinit-3.1-a
