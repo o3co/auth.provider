@@ -296,10 +296,11 @@ flowchart LR
 | `@mod/conformance-passkey` | verification | `@mod/conformance`, `@mod/conformance-legacy`, `@mod/conformance-oauth`, `@mod/ledger-fakes` |
 | `@mod/conformance-recipes` | verification | `@mod/conformance`, `@mod/create-app` |
 | `@mod/conformance-second-factor` | verification | `@mod/conformance`, `@mod/conformance-legacy` |
+| `@mod/conformance-tunnel` | verification | none |
 | `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/trial` |
 | `@mod/guard` | verification | `@mod/guard-imports`, `@mod/kinds` |
 | `@mod/guard-imports` | verification | none |
-| `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/spec-checklist` |
+| `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-exchange`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/spec-checklist` |
 | `@mod/ledger-fakes` | verification | `@mod/ledger-wire` |
 | `@mod/references` | assembly | `@mod/app-output`, `@mod/combinations`, `@mod/config-files`, `@mod/create-app`, `@mod/guard-imports`, `@mod/kernel`, `@mod/trial` |
 | `@mod/spec-checklist` | verification | `@mod/guard-imports` |

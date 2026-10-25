@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
-- Starts the provider the libraries meet: the full template with every feature that opts in, behind an https front whose origin is the issuer.
+- Starts the provider the libraries meet, behind an https front whose origin is the issuer: the full template with every feature that opts in, and the services' (`a2a`) for the grants that need no user, such as jwt-bearer, which the full template's ledger of users cannot hold.
 - Plays the browser in each flow: the driver logs in and follows the authorization URL a library built, only where it is the provider's authorization endpoint at the issuer, and hands the library the redirect.
 - Holds the differences accepted between a library and the provider, each written narrowly and held to the checklist's exception rules.
 

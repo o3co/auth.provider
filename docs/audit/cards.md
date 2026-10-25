@@ -138,8 +138,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/issuer` (feature, `modules/oauth/issuer`): Owns this provider's canonical name, the issuer: the configured URL, never derived from a request, the same for every module that names it.
 - `@mod/jwt-bearer` (feature, `modules/oauth/jwt-bearer`): Contributes the grant by JWT assertion.
   - `assertion` (`src/assertion`): checking a JWT assertion, all but its single use.
+  - `conditions` (`src/conditions`): the conditions an issuer holds an assertion's verified claims to, and whether claims meet them.
   - `delegated` (`src/delegated`): an assertion of a delegated issuer, which another module checks by its own rules (`delegatedAssertions`).
   - `issuers` (`src/issuers`): the trusted issuers, each entry of the section's `issuers`, and the signers and ledgers each is read with.
+  - `policy` (`src/policy`): what a trusted issuer's own policy makes of the section's, for verifying its assertions, keeping them used and issuing their tokens.
 - `@mod/jwt-bearer-id-tokens` (feature, `modules/oauth/jwt-bearer-id-tokens`): Ties `jwt-bearer` and `exchange-id-tokens` together: Apple's and Google's id_tokens, sent as JWT bearer assertions, are checked and taken once by `exchange-id-tokens`' rules, for the apps already sent out that send them so.
 - `@mod/jwt-bearer-users` (feature, `modules/oauth/jwt-bearer-users`): Joins `jwt-bearer` and `users`: resolves the subject a linked issuer's signer stands for through `users`, and declares the linked issuers' IdP names to `users`.
 - `@mod/logout` (feature, `modules/oauth/logout`): Provides the session logout endpoint.
@@ -327,6 +329,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-passkey` (verification, `modules/tooling/conformance-passkey`): Owns the conformance scenes of the passkey area: registering a passkey from a session, and its refusals (no session, a second factor not recent, an origin or a frame not listed, a frame whose page is not reported, a challenge answered twice or past its lifetime, a credential id another account holds, a user not verified when required, the limit of passkeys per user, the store failing).
 - `@mod/conformance-recipes` (verification, `modules/tooling/conformance-recipes`): Keeps each recipe in the documents from going stale: a recipe's scene generates the app with the recipe's own command, starts it, and makes the recipe's requests over HTTP, as a user of the provider would.
 - `@mod/conformance-second-factor` (verification, `modules/tooling/conformance-second-factor`): Owns the conformance scenes of the second-factor area: second factor at login (by a form or a JSON body), enrollment, naming factors, step-up, lockout, a recovery code that lets in one login only when two use it at once, store failure, the audit events they record.
+- `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
   - `fetched` (`src/fetched`): the packages of this version npm already holds, taken from the registry for a release run again.
   - `outside-scene` (`src/outside-scene`): Composes a package outside the release as an operator does, beside the packed release, and checks that the app is held to what the release sealed.

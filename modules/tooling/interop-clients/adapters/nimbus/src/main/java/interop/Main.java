@@ -13,6 +13,23 @@ import com.nimbusds.oauth2.sdk.TokenIntrospectionRequest;
 import com.nimbusds.oauth2.sdk.TokenIntrospectionResponse;
 import com.nimbusds.oauth2.sdk.TokenRevocationRequest;
 import com.nimbusds.oauth2.sdk.auth.PrivateKeyJWT;
+import com.nimbusds.jwt.SignedJWT;
+import com.nimbusds.oauth2.sdk.JWTBearerGrant;
+import com.nimbusds.oauth2.sdk.as.AuthorizationServerMetadata;
+import com.nimbusds.oauth2.sdk.assertions.jwt.JWTAssertionDetails;
+import com.nimbusds.oauth2.sdk.assertions.jwt.JWTAssertionFactory;
+import com.nimbusds.oauth2.sdk.id.Subject;
+import com.nimbusds.oauth2.sdk.token.TokenTypeURI;
+import com.nimbusds.oauth2.sdk.tokenexchange.TokenExchangeGrant;
+import com.nimbusds.jose.jwk.Curve;
+import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
+import com.nimbusds.oauth2.sdk.device.DeviceAuthorizationRequest;
+import com.nimbusds.oauth2.sdk.device.DeviceAuthorizationResponse;
+import com.nimbusds.oauth2.sdk.device.DeviceCodeGrant;
+import com.nimbusds.oauth2.sdk.dpop.DefaultDPoPProofFactory;
+import com.nimbusds.oauth2.sdk.http.HTTPResponse;
+import com.nimbusds.oauth2.sdk.token.DPoPAccessToken;
+import com.nimbusds.openid.connect.sdk.LogoutRequest;
 import com.nimbusds.oauth2.sdk.auth.JWTAuthenticationClaimsSet;
 import com.nimbusds.oauth2.sdk.id.Audience;
 import com.nimbusds.jose.jwk.ECKey;
@@ -104,6 +121,8 @@ public final class Main {
 
   private final Map<String, Object> instruction;
   private final SSLSocketFactory tls;
+  /** The DPoP proofs, in the DPoP flow alone. */
+  private DefaultDPoPProofFactory dpop;
 
   private Main(Map<String, Object> instruction) throws Exception {
     this.instruction = instruction;
@@ -133,8 +152,8 @@ public final class Main {
   }
 
   /** An endpoint or key set the discovery names over anything but https fails the flow before any request. */
-  private static void refuseInsecure(OIDCProviderMetadata op) throws Refused {
-    for (Map.Entry<String, Object> e : op.toJSONObject().entrySet()) {
+  private static void refuseInsecure(Map<String, Object> metadata) throws Refused {
+    for (Map.Entry<String, Object> e : metadata.entrySet()) {
       String key = e.getKey();
       if (!(key.endsWith("_endpoint") || key.equals("jwks_uri")) || !(e.getValue() instanceof String value)) continue;
       if (!value.startsWith("https://"))
@@ -253,8 +272,68 @@ public final class Main {
     OIDCProviderMetadata op =
         OIDCProviderMetadata.resolve(
             new Issuer(JSONObjectUtils.getString(instruction, "issuer")), this::sending);
-    refuseInsecure(op);
+    refuseInsecure(op.toJSONObject());
     return op;
+  }
+
+  /** The provider's OAuth metadata (RFC 8414), for a provider that is no OpenID one, held to https alike. */
+  private AuthorizationServerMetadata server() throws Exception {
+    AuthorizationServerMetadata as =
+        AuthorizationServerMetadata.resolve(
+            new Issuer(JSONObjectUtils.getString(instruction, "issuer")), this::sending);
+    refuseInsecure(as.toJSONObject());
+    return as;
+  }
+
+  /** Signs in, then exchanges the access token for another (RFC 8693), the client authenticated. */
+  private Map<String, Object> tokenExchange() throws Exception {
+    SignedIn in = signIn();
+    AccessToken subject = in.tokens().getOIDCTokens().getAccessToken();
+    TokenRequest request =
+        new TokenRequest(
+            in.op().getTokenEndpointURI(),
+            authentication(in.op().getTokenEndpointURI()),
+            new TokenExchangeGrant(subject, TokenTypeURI.ACCESS_TOKEN));
+    TokenResponse answer = TokenResponse.parse(sending(request.toHTTPRequest()).send());
+    if (!answer.indicatesSuccess()) throw Refused.of(answer.toErrorResponse().getErrorObject());
+    var success = answer.toSuccessResponse();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("accessToken", success.getTokens().getAccessToken().getValue());
+    TokenTypeURI issued = success.getTokens().getAccessToken().getIssuedTokenType();
+    result.put("issuedTokenType", issued == null ? null : issued.getURI().toString());
+    result.put("sub", in.claims().getSubject().getValue());
+    return result;
+  }
+
+  /** The jwt-bearer grant: an assertion an issuer the provider trusts signs, built by Nimbus, the client authenticated. */
+  private Map<String, Object> jwtBearer() throws Exception {
+    AuthorizationServerMetadata as = server();
+    Map<String, Object> signer = JSONObjectUtils.getJSONObject(instruction, "assertionIssuer");
+    ECKey key = ECKey.parse(JSONObjectUtils.getJSONObject(signer, "privateJwk"));
+    SignedJWT assertion =
+        JWTAssertionFactory.create(
+            new JWTAssertionDetails(
+                new Issuer(JSONObjectUtils.getString(signer, "issuer")),
+                new Subject(JSONObjectUtils.getString(instruction, "subject")),
+                new Audience(as.getIssuer().getValue())),
+            JWSAlgorithm.ES256,
+            key.toECPrivateKey(),
+            key.getKeyID(),
+            null);
+    TokenRequest request =
+        new TokenRequest.Builder(
+                as.getTokenEndpointURI(),
+                authentication(as.getTokenEndpointURI()),
+                new JWTBearerGrant(assertion))
+            .scope(Scope.parse(orElse(instruction, "scope", "read")))
+            .build();
+    TokenResponse answer = TokenResponse.parse(sending(request.toHTTPRequest()).send());
+    if (!answer.indicatesSuccess()) throw Refused.of(answer.toErrorResponse().getErrorObject());
+    AccessToken token = answer.toSuccessResponse().getTokens().getAccessToken();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("accessToken", token.getValue());
+    result.put("tokenType", token.getType().getValue());
+    return result;
   }
 
   /** What a sign-in gave: the provider, the tokens and the ID token's claims as the validator took them. */
@@ -333,7 +412,7 @@ public final class Main {
     AuthorizationCode code = answer.toSuccessResponse().getAuthorizationCode();
     TokenRequest token =
         tokenRequest(op.getTokenEndpointURI(), new AuthorizationCodeGrant(code, redirect, verifier));
-    var tokenAnswer = OIDCTokenResponse.parse(sending(token.toHTTPRequest()).send());
+    var tokenAnswer = OIDCTokenResponse.parse(proven(sending(token.toHTTPRequest()), null));
     if (!tokenAnswer.indicatesSuccess()) throw Refused.of(tokenAnswer.toErrorResponse().getErrorObject());
     OIDCTokenResponse tokens = (OIDCTokenResponse) tokenAnswer.toSuccessResponse();
     JWT idToken = tokens.getOIDCTokens().getIDToken();
@@ -341,6 +420,111 @@ public final class Main {
     IDTokenValidator validator =
         new IDTokenValidator(op.getIssuer(), id, JWSAlgorithm.RS256, op.getJWKSetURI().toURL(), keys);
     return new SignedIn(op, tokens, validator.validate(idToken, nonce));
+  }
+
+  /**
+   * Sends the request, with a DPoP proof in the DPoP flow (bound to the access token at a resource),
+   * and once more with the nonce the server asked for, as the client must by hand in Nimbus.
+   */
+  private HTTPResponse proven(HTTPRequest request, AccessToken token) throws Exception {
+    if (dpop == null) return request.send();
+    Nonce nonce = null;
+    for (int attempt = 0; ; attempt++) {
+      String htm = request.getMethod().name();
+      request.setDPoP(
+          token == null
+              ? dpop.createDPoPJWT(htm, request.getURI(), nonce)
+              : dpop.createDPoPJWT(htm, request.getURI(), token, nonce));
+      HTTPResponse response = request.send();
+      boolean asked = (response.getStatusCode() == 400 || response.getStatusCode() == 401) && response.getDPoPNonce() != null;
+      if (!asked || attempt > 0) return response;
+      nonce = response.getDPoPNonce();
+    }
+  }
+
+  /** Signs in with the access token bound to a DPoP key, and reads userinfo with it, answering each nonce asked. */
+  private Map<String, Object> dpopFlow() throws Exception {
+    dpop =
+        new DefaultDPoPProofFactory(
+            new ECKeyGenerator(Curve.P_256).keyID("dpop").generate(), JWSAlgorithm.ES256);
+    SignedIn in = signIn();
+    AccessToken token = in.tokens().getOIDCTokens().getAccessToken();
+    if (!(token instanceof DPoPAccessToken bound))
+      throw new Refused("not_dpop", "the access token is of type " + token.getType());
+    var info =
+        UserInfoResponse.parse(
+            proven(sending(new UserInfoRequest(in.op().getUserInfoEndpointURI(), bound).toHTTPRequest()), bound));
+    if (!info.indicatesSuccess()) throw Refused.of(info.toErrorResponse().getErrorObject());
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("tokenType", token.getType().getValue());
+    result.put("accessToken", token.getValue());
+    result.put("sub", in.claims().getSubject().getValue());
+    result.put("userinfo", info.toSuccessResponse().getUserInfo().toJSONObject());
+    return result;
+  }
+
+  /** The device authorization grant: the user code is approved by the driver as the user, then polled for. */
+  private Map<String, Object> device() throws Exception {
+    OIDCProviderMetadata op = provider();
+    ClientAuthentication auth = authentication(op.getTokenEndpointURI());
+    var started =
+        DeviceAuthorizationResponse.parse(
+            sending(
+                    new DeviceAuthorizationRequest.Builder(auth)
+                        .endpointURI(op.getDeviceAuthorizationEndpointURI())
+                        .scope(Scope.parse(orElse(instruction, "scope", "openid")))
+                        .build()
+                        .toHTTPRequest())
+                .send());
+    if (!started.indicatesSuccess()) throw Refused.of(started.toErrorResponse().getErrorObject());
+    var codes = started.toSuccessResponse();
+    Map<String, Object> question = new LinkedHashMap<>();
+    question.put("ask", "device");
+    question.put("userCode", codes.getUserCode().getValue());
+    question.put("verificationUri", codes.getVerificationURI().toString());
+    ask(question);
+    long interval = Math.max(codes.getInterval(), 1);
+    for (int attempt = 0; attempt < 30; attempt++) {
+      TokenResponse answer =
+          TokenResponse.parse(
+              sending(
+                      new TokenRequest(
+                              op.getTokenEndpointURI(), auth, new DeviceCodeGrant(codes.getDeviceCode()))
+                          .toHTTPRequest())
+                  .send());
+      if (answer.indicatesSuccess()) {
+        AccessToken token = answer.toSuccessResponse().getTokens().getAccessToken();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("accessToken", token.getValue());
+        result.put("tokenType", token.getType().getValue());
+        return result;
+      }
+      String code = answer.toErrorResponse().getErrorObject().getCode();
+      if ("slow_down".equals(code)) interval += 5;
+      else if (!"authorization_pending".equals(code)) throw Refused.of(answer.toErrorResponse().getErrorObject());
+      Thread.sleep(interval * 1000);
+    }
+    throw new Refused("timeout", "the device was not approved in time");
+  }
+
+  /** Signs in, then ends the session by the provider's end-session endpoint, as the relying party starts it. */
+  private Map<String, Object> logout() throws Exception {
+    SignedIn in = signIn();
+    State state = new State();
+    URI url =
+        new LogoutRequest(
+                in.op().getEndSessionEndpointURI(),
+                in.tokens().getOIDCTokens().getIDToken(),
+                URI.create(JSONObjectUtils.getString(instruction, "postLogoutRedirectUri")),
+                state)
+            .toURI();
+    Map<String, Object> question = new LinkedHashMap<>();
+    question.put("ask", "logout");
+    question.put("url", url.toString());
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("location", JSONObjectUtils.getString(ask(question), "location"));
+    result.put("state", state.getValue());
+    return result;
   }
 
   public static void main(String[] args) throws Exception {
@@ -357,6 +541,11 @@ public final class Main {
             case "resource" -> main.resourceFlow();
             case "client-credentials" -> main.clientCredentials();
             case "revocation" -> main.revocation();
+            case "dpop" -> main.dpopFlow();
+            case "device" -> main.device();
+            case "logout" -> main.logout();
+            case "jwt-bearer" -> main.jwtBearer();
+            case "token-exchange" -> main.tokenExchange();
             default -> throw new Refused("unsupported", "no flow " + flow);
           });
     } catch (Refused refused) {

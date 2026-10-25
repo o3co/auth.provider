@@ -7,6 +7,7 @@ import {
 	attemptsOf,
 	checkpoint,
 	complianceTable,
+	gateFailures,
 	itemStatuses,
 	selectReports,
 } from "./runs.ts";
@@ -53,14 +54,27 @@ export function complianceOf(
 		expected,
 		packageDirs(root),
 	);
-	const table = complianceTable(statuses, missingRuns);
+	const stopped = gateFailures(reports, expected.gate);
+	const table = [
+		complianceTable(statuses, missingRuns),
+		...(stopped.length > 0
+			? ["## Gate runs' failed tests", "", ...stopped.map((s) => `- ${s}`), ""]
+			: []),
+	].join("\n");
 	writeFileSync(
 		join(dir, "compliance.json"),
-		JSON.stringify({ missingRuns, checkpoint: checkpoint(statuses), items: statuses }, null, 2),
+		JSON.stringify(
+			{ missingRuns, gateFailures: stopped, checkpoint: checkpoint(statuses), items: statuses },
+			null,
+			2,
+		),
 	);
 	writeFileSync(join(dir, "compliance.md"), table);
 	const blocking = statuses.filter((s) =>
 		["failed", "incomplete", "unverified"].includes(s.status),
 	);
-	return { table, releasable: blocking.length === 0 && missingRuns.length === 0 };
+	return {
+		table,
+		releasable: blocking.length === 0 && missingRuns.length === 0 && stopped.length === 0,
+	};
 }
