@@ -22,7 +22,7 @@
 - The assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under this section's policy: the algorithms of that issuer's keys (any the grant takes, for a key set), `clock-skew` as the allowance, `max-assertion-lifetime` as the longest lifetime. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
 - A key set is fetched only at https from its issuer's host (`issuers`). While no key set can be had, the grant is unavailable.
 - Boot is refused on an entry `issuers` cannot read as a trusted issuer, as its card says, each at its place (`jwt-bearer.issuers.<i>`), never by its value; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them.
-- The signer is read, its shape checked and its keys asked for as the internal module `assertion` says, before anything is verified.
+- The signer is read, its shape checked and its keys asked for as the internal module `assertion` says, before anything is verified; every refusal before the signature holds answers `untrusted signer`, so the answer tells nothing of which signers have keys.
 - `as-is`: the token is for the `sub`. `linked`: for the subject `linkedSubjects` resolves (`upstream`, `sub`) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.
 - A refusal's reason is told in this grant's own words. Keys or subjects that cannot be told make the grant unavailable, using up no `jti`.
 - Usable only when the client explicitly allows it.
