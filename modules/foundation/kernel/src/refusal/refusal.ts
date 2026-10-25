@@ -113,8 +113,12 @@ export function buildRefusalOf(error: unknown): Refusal | undefined {
 export class RefusalSignal extends Error {
 	readonly refusals: readonly Refusal[];
 	constructor(refusals: readonly Refusal[]) {
-		super(`${refusals.length} refusal(s)`);
-		this.refusals = refusals;
+		// Copied as given, each refusal's words too: the factory may change its list once it threw.
+		const copied = Object.freeze(
+			refusals.map(({ where, reason }) => Object.freeze({ where, reason })),
+		);
+		super(`${copied.length} refusal(s)`);
+		this.refusals = copied;
 	}
 }
 

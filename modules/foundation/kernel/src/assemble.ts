@@ -86,7 +86,14 @@ function recordFailure(error: unknown, where: string, refusals: Refusal[]): void
 					: "other",
 		"unreadable",
 	);
-	if (seen === "signal") refusals.push(...(error as RefusalSignal).refusals);
+	if (seen === "signal") {
+		// Read as a thrown value is: a signal rethrown altered may hold none, or none readable.
+		const told = readThrown(
+			() => (error as RefusalSignal).refusals.map(({ where, reason }) => ({ where, reason })),
+			[],
+		);
+		refusals.push(...(told.length > 0 ? told : [failed]));
+	}
 	// A library's refusal names its own where and reason; any other error's text is never kept.
 	else if (seen !== "dependency") refusals.push(buildRefusalOf(error) ?? failed);
 }
