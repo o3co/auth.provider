@@ -333,6 +333,7 @@ describe("authorize: trust in the redirect URI", () => {
 			[request({ code_challenge: "" }), "invalid_request"],
 			[request({ code_challenge_method: "plain" }), "invalid_request"],
 			[request({ request: "eyJ" }), "request_not_supported"],
+			[request({ request_uri: "urn:x" }), "request_uri_not_supported"],
 			[request({ response_mode: "fragment" }), "invalid_request"],
 			[request({ scope: "admin" }), "invalid_scope"],
 			[request({ acr_values: "gold" }), "unmet_authentication_requirements"],
@@ -779,7 +780,10 @@ describe("authorize: what the reviews asked to pin down", () => {
 		const cookie = await login();
 		const error = async (extra: Record<string, string>) =>
 			(await authorize(request(extra), cookie)).at?.searchParams.get("error");
-		expect(await error({ request_uri: "urn:x" })).toBe("request_not_supported");
+		// OpenID Connect Core §6.1 and §6.2: each parameter its own code; `request` is checked first.
+		expect(await error({ request_uri: "urn:x" })).toBe("request_uri_not_supported");
+		expect(await error({ request: "eyJ" })).toBe("request_not_supported");
+		expect(await error({ request: "eyJ", request_uri: "urn:x" })).toBe("request_not_supported");
 		expect(await error({ response_mode: "query" })).toBeNull();
 		expect(await error({ nonce: "n".repeat(257) })).toBe("invalid_request");
 		expect(await error({ prompt: "maybe" })).toBe("invalid_request");
