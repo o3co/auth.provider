@@ -1,8 +1,14 @@
 import { contract, extensionPoint } from "@mod/kernel";
+import { type VerifyAlgorithm, verifyAlgorithms } from "@mod/keys";
 
-/** The signing algorithms the grant takes. */
-export const algorithms = ["EdDSA", "ES256", "RS256"] as const;
-export type SignerAlgorithm = (typeof algorithms)[number];
+/** A signing algorithm: an asymmetric one `keys` verifies. */
+export type SignerAlgorithm = VerifyAlgorithm;
+
+/** The signing algorithms the grant takes by default, one for each kind of key. */
+export const algorithms = ["EdDSA", "ES256", "RS256"] as const satisfies readonly SignerAlgorithm[];
+
+/** Every signing algorithm there is to take: the asymmetric ones `keys` verifies. */
+export const takenAlgorithms: readonly SignerAlgorithm[] = verifyAlgorithms;
 
 /** A public key as a JWK. */
 export type SignerKey = Readonly<Record<string, unknown>>;
@@ -15,6 +21,11 @@ export type SignerKey = Readonly<Record<string, unknown>>;
 export interface SignerKeys {
 	/** The `iss` it answers for. */
 	readonly issuer: string;
+	/**
+	 * Declared where it answers each signer's own keys alone: a key it answers for one subject is
+	 * never answered for another. A promise of what it reads the keys from.
+	 */
+	readonly perSigner?: true;
 	/**
 	 * The signer's keys and the algorithms they take; none for a signer with no keys, unknown or
 	 * revoked. Throws Unavailable when it cannot tell. Asked with a subject already well formed, and
