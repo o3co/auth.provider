@@ -9,7 +9,7 @@ import {
 	surfacesOf,
 	type Violation,
 } from "@mod/guard-imports";
-import { budgetRules, dependencyCards } from "./budget/budget.ts";
+import { budgetRules } from "./budget/budget.ts";
 import { laidOut } from "./documents.ts";
 import { helpersOf, networkRules } from "./network/network.ts";
 import { protocolRules } from "./protocol/protocol.ts";
@@ -18,7 +18,7 @@ import { branchesOf, clockReads, commentsOf, randomReads } from "./source.ts";
 import { budgetsAsTest, type Scope } from "./units.ts";
 import type { Doc } from "./workspace.ts";
 
-export { branchingImports, dependencyCards } from "./budget/budget.ts";
+export { branchingImports, dependencyCards, heavyDependencyCards } from "./budget/budget.ts";
 export type { Doc, Pkg, Violation };
 
 /** The configuration: the budget numbers, beside the rules guard-imports reads. */
@@ -44,7 +44,7 @@ export interface Budget extends Rules {
 	readonly cardItemBytes: number;
 	/** The test tables that count as test lines all the same: fixtures. */
 	readonly countedFixtureFile: string;
-	/** The bytes of the cards of the packages a unit's shipped code imports, together. */
+	/** The bytes of the cards of the packages a unit's shipped code imports, together, past which it is reported. */
 	readonly dependencyCardBytes: number;
 	/**
 	 * Comment lines, but for the doc comments of the package's public surface, may reach this share
@@ -153,14 +153,13 @@ export function check(
 		helpersOf(packages),
 	);
 	const surfaces = surfacesOf(packages);
-	const importedCards = new Map(dependencyCards(packages, budget).map((u) => [u.where, u.bytes]));
 	importRules(s, surfaces);
 	for (const p of packages) {
 		sourceRules(s, p);
 		networkRules(s, p);
 		protocolRules(s, p);
 		commonVocabulary(s, p, surfaces);
-		budgetRules(s, p, surfaces, importedCards);
+		budgetRules(s, p, surfaces);
 	}
 	documentRules(s, documents);
 	return violations;

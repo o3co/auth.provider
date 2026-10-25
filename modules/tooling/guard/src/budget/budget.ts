@@ -39,6 +39,17 @@ export function dependencyCards(
 }
 
 /**
+ * Each unit whose dependency cards pass `dependencyCardBytes`, with their bytes: a measure, not a
+ * refusal, as they grow with cards the unit does not own.
+ */
+export function heavyDependencyCards(
+	packages: readonly Pkg[],
+	budget: Budget,
+): { readonly where: string; readonly bytes: number }[] {
+	return dependencyCards(packages, budget).filter((u) => u.bytes > budget.dependencyCardBytes);
+}
+
+/**
  * Each internal module none of whose imports any other unit of its package shares, with what it
  * imports: a sign that it pulls in what its host does not need, and may be its own module.
  */
@@ -61,12 +72,7 @@ export function branchingImports(
 }
 
 /** G7, with G9 and G17 on what it measures: the package and each internal module on its own. */
-export function budgetRules(
-	s: Scope,
-	p: Pkg,
-	surfaces: ReadonlyMap<string, Surface>,
-	importedCards: ReadonlyMap<string, number>,
-) {
+export function budgetRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surface>) {
 	const { budget, byName, report, workspaceDeps } = s;
 	const fixture = new RegExp(budget.fixtureFile);
 	const counted = new RegExp(budget.countedFixtureFile);
@@ -162,7 +168,6 @@ export function budgetRules(
 			0,
 		);
 		over("reading scope bytes", bytes + cards, budget.readRangeBytes);
-		over("dependency cards", importedCards.get(where) ?? 0, budget.dependencyCardBytes);
 		const imported = [...importedBy(p, unit, budget)].filter((name) => {
 			const dep = byName.get(name);
 			return dep !== undefined && !s.isCommon(dep);

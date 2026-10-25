@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Pkg } from "@mod/guard-imports";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { branchingImports, check, dependencyCards } from "../src/contract.ts";
+import { branchingImports, check, dependencyCards, heavyDependencyCards } from "../src/contract.ts";
 import { budget, pkg, root } from "./workspace.ts";
 
 // A fixture with exports has its contract surface built by the type checker, which is slow when the machine is busy.
@@ -306,7 +306,7 @@ describe("guard", () => {
 		]);
 	});
 
-	it("limits the cards each unit imports, and the card of a package many depend on", () => {
+	it("reports, not refuses, a unit whose imported cards pass their measure, and limits the card of a package many depend on", () => {
 		const big = pkg("@t/big", { "src/contract.ts": "export const b = 1;\n" });
 		const user = pkg(
 			"@t/user",
@@ -314,11 +314,12 @@ describe("guard", () => {
 			{ exports: { ".": "./src/contract.ts" }, dependencies: { "@t/big": "workspace:*" } },
 		);
 		const card = "# @t/big\n".length;
-		expect(
-			check([big, user], { ...budget, dependencyCardBytes: card - 1 }).map(
-				(v) => `${v.where} ${v.detail}`,
-			),
-		).toEqual([`@t/user dependency cards ${card} > ${card - 1}`]);
+		const measured = { ...budget, dependencyCardBytes: card - 1 };
+		expect(check([big, user], measured)).toEqual([]);
+		expect(heavyDependencyCards([big, user], measured)).toEqual([
+			{ where: "@t/user", bytes: card },
+		]);
+		expect(heavyDependencyCards([big, user], { ...budget, dependencyCardBytes: card })).toEqual([]);
 		const lines = (n: number) => `# p\n${"- x\n".repeat(n)}`;
 		const dependedOn = {
 			...pkg("@t/core", { "src/contract.ts": "export const c = 1;\n" }),
