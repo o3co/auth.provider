@@ -62,6 +62,7 @@ import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { type IssuanceRequest, issuancePolicies, type Tokens, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
+import { loopbackPagesRefused } from "@mod/url-setting";
 import { afterEach, describe, expect, it } from "vitest";
 import declared from "../src/audit-events.ts";
 import authorizeModule from "../src/module.ts";
@@ -1436,8 +1437,8 @@ it("boots with its pages at http on a loopback host, and refuses http on any oth
 		serve({ authorize: { "step-up-page": "http://[::1]:3000/raise" }, environment: development }),
 	).resolves.toBeDefined();
 	const refused = await serve({ authorize: local }).catch((error: BootRefused) => error.refusals);
-	const reason =
-		"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to";
+	// The reason is url-setting's, which words it.
+	const reason = loopbackPagesRefused({ page: "http://localhost/" })[0]?.reason;
 	expect(refused).toEqual([
 		{ where: "authorize.login-page", reason },
 		{ where: "authorize.step-up-page", reason },

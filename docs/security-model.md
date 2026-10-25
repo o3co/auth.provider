@@ -105,7 +105,7 @@ Each promise below holds across every module composed. Each names what keeps it 
   - A forwarded client certificate is read only from a trusted peer.
   - Security headers (CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy: no-referrer`) are set on every answer the app writes. Node's own `400`, `408` and `431`, to a request it cannot read or that comes too slowly, carry none.
 - **Left to you:**
-  - Terminating TLS. The app speaks plain HTTP behind your proxy; an http public origin needs `http.insecure-origin = true`.
+  - Terminating TLS. The app speaks plain HTTP behind your proxy; an http public origin needs `http.insecure-origin = true`, which a production deployment refuses, so only with `kernel.environment = development` ([Boot](#boot)).
   - Setting `http.trusted-proxies` whenever a proxy is in front.
   - Making the proxy strip or overwrite `X-Forwarded-For`, the forwarded scheme and the client-certificate header that clients send.
   - Bounding upload rates and connections per client in front. The app bounds a request's headers and the whole request (`http.headers-timeout`, `http.request-timeout`) and the connections it holds (`http.max-connections`), all clients together.

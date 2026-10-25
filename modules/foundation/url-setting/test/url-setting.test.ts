@@ -512,7 +512,7 @@ describe("loopbackPagesRefused", () => {
 			"return-targets": ["https://as.example/a", "http://127.0.0.1/b"],
 		});
 		const reason =
-			"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to";
+			"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to; set kernel.environment = development to try one";
 		expect(refused).toEqual([
 			{ key: "login-page", reason },
 			{ key: "return-targets", reason },
