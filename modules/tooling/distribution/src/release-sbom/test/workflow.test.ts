@@ -239,7 +239,11 @@ it("builds the API site where nothing can write, and pushes it where none of its
 	expect(needsOf(push)).toEqual(["build"]);
 	expect(build?.outputs?.site).toMatch(/steps\.\w+\.outputs\.artifact-id/);
 	const kept = only(build, uses("actions/upload-artifact"));
-	expect(build?.steps?.[kept]?.with).toMatchObject({ "include-hidden-files": true });
+	// A run of all jobs again writes over the site an earlier attempt kept; the push takes it by its id.
+	expect(build?.steps?.[kept]?.with).toMatchObject({
+		"include-hidden-files": true,
+		overwrite: true,
+	});
 	expect(String(build?.steps?.[kept]?.with?.path)).toContain("!");
 	for (const install of (build?.steps ?? []).filter(runs("pnpm install")))
 		expect(install.run).toContain("--ignore-scripts");
