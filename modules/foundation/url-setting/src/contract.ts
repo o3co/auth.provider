@@ -94,7 +94,7 @@ export function loopbackPagesRefused(
 	pages: Readonly<Record<string, string | readonly string[] | undefined>>,
 ): { key: string; reason: string }[] {
 	const reason =
-		"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to";
+		"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to; set kernel.environment = development to try one";
 	return Object.entries(pages)
 		.filter(([, value]) => [value ?? []].flat().some((url) => isLoopbackHttp(url)))
 		.map(([key]) => ({ key, reason }));
