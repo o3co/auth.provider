@@ -19,7 +19,7 @@ if (!directory || !listing) {
 const at = resolve(directory);
 const tarballs = readdirSync(at)
 	.filter((file) => file.endsWith(".tgz"))
-	.map((file) => packedOf(join(at, file)));
+	.map((file) => ({ ...packedOf(join(at, file)), file }));
 const problems = listedProblems(tarballs, JSON.parse(readFileSync(resolve(listing), "utf8")));
 for (const problem of problems) console.error(`release-listed: ${problem}`);
 console.log(

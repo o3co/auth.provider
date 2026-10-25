@@ -12,7 +12,7 @@ Internal module of `distribution`: the release's lists of what it ships (SBOMs),
 
 ## Offers
 - `pnpm release:sbom <tarballs> <dir>` (Docker running): writes into `dir` `app.cdx.json` and `entrance.cdx.json` with their locks, `inside.cdx.json`, `build-tools.cdx.json`, `image.cdx.json` with `image.json` (its id and syft's), `tarballs.json` and a `README.md` saying what each is. Prints each problem and exits 1.
-- `pnpm release:listed <tarballs> <tarballs.json>`: where the release publishes, the tarballs about to be published must be those the lists were made of, by name, version and integrity; it reads them and runs nothing they hold. Prints each problem and exits 1.
+- `pnpm release:listed <tarballs> <tarballs.json>`: where the release publishes, the tarballs about to be published must be those the lists were made of, one each, by name, version, integrity and file, each in the file npm packs it as (where the publish step finds the entrance); it reads them and runs nothing they hold. Prints each problem and exits 1.
 - `npmNamed`, `coverageProblems`, `insideBom` and `listedProblems`: the naming and the checks, apart from the tools.
 
 ## Invariants
