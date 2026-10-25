@@ -1,7 +1,7 @@
 import { type AuditReceiver, audit, auditReceivers } from "@mod/audit";
 import auditModule from "@mod/audit/module";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import {
 	DestinationRefused,
 	type Narrower,
@@ -158,6 +158,21 @@ it("refuses a secret Authorization value with a URL outbound will not send a cre
 	await expect(boot(status(204), { url: plain.url })).resolves.toBeDefined();
 	const local = { url: "http://127.0.0.1:9000/events", authorization: "Bearer s3cr3t" };
 	await expect(boot(status(204), local)).resolves.toBeDefined();
+});
+
+it("takes outbound's credential policy only with an Authorization value, its takes naming it either way", async () => {
+	const unused = async (section: unknown) =>
+		(
+			await takesUnused({
+				modules: [auditModule, outboundAnswering(status(204)), auditHttp],
+				config: { ...kernelConfig(), audit: { receivers: ["http"] }, "audit-http": section },
+				runtime,
+			})
+		)["audit-http"];
+	expect(await unused({ url, authorization: "Bearer s3cr3t-token" })).toBeUndefined();
+	// The takes are static: outbound provides the policy beside the refusals the module always
+	// takes, so wherever it boots the policy is there, and without a value it is left untaken.
+	expect(await unused({ url })).toEqual(["outbound.credentials"]);
 });
 
 it("refuses boot on a URL outbound's policy refuses, saying why", async () => {

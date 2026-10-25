@@ -27,4 +27,4 @@
 - None, so it is safe on many instances.
 
 ## Depends on
-- `kernel`, `audit`, `url-setting`, `outbound`, `outbound-policy`
+- `kernel`, `audit`, `url-setting`, `outbound`, `outbound-policy`; its takes name `credentialPolicy` (`outbound.credentials`) with or without an `authorization`, as `outbound` provides it beside `outbound`, so a module of your own providing `outbound` provides it too
