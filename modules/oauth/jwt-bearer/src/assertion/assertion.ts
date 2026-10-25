@@ -8,7 +8,11 @@ import { isThumbprint, type Signers } from "../signers.ts";
 export type Checked =
 	| {
 			readonly kind: "valid";
-			readonly issuer: string;
+			/** The trusted issuer whose assertion it is read as. */
+			readonly entry: string;
+			/** The `iss` as sent: the entry's, or a self-issued signer's own name. */
+			readonly sentIssuer: string;
+			/** The signer it stands for: its `sub`, or a self-issued signer's thumbprint. */
 			readonly subject: string;
 			readonly jti: string;
 			readonly expiresAt: number;
@@ -42,6 +46,22 @@ const bounded = z
 
 const claimsShape = z.object({ sub: z.string().min(1), jti: bounded });
 
+/** A trusted issuer that takes self-issued signers, by the prefix of their names. */
+export interface SelfIssued {
+	readonly prefix: string;
+	readonly issuer: string;
+}
+
+/** The issuer whose self-issued signer an `iss` names, and that signer's thumbprint; none for any other. */
+const selfIssuedBy = (iss: string, prefixes: readonly SelfIssued[]) => {
+	for (const { prefix, issuer } of prefixes) {
+		// Compared as written: no case folding, decoding or normalization.
+		const rest = iss.startsWith(prefix) ? iss.slice(prefix.length) : undefined;
+		if (rest !== undefined && isThumbprint(rest)) return { issuer, thumbprint: rest };
+	}
+	return undefined;
+};
+
 /**
  * Checks everything but single use: the signer is read unverified, its subject's shape checked,
  * and only then are its keys looked up, among the signers of the issuer the assertion names.
@@ -51,6 +71,7 @@ const claimsShape = z.object({ sub: z.string().min(1), jti: bounded });
 export async function check(
 	assertion: string,
 	trusted: ReadonlyMap<string, Signers>,
+	prefixes: readonly SelfIssued[] = [],
 ): Promise<Checked> {
 	const invalid = (reason: string) => ({ kind: "invalid", reason }) as const;
 	const untrusted = invalid("untrusted signer");
@@ -65,16 +86,21 @@ export async function check(
 	}
 	// An issuer is a string, never coerced to one.
 	if (typeof issuer !== "string") return untrusted;
-	const signers = trusted.get(issuer);
+	const sentIssuer = issuer;
+	// The issuer it names, or the one whose prefix names it a self-issued signer.
+	const own = trusted.has(sentIssuer) ? undefined : selfIssuedBy(sentIssuer, prefixes);
+	const entry = own?.issuer ?? sentIssuer;
+	const signers = trusted.get(entry);
 	if (!signers) return untrusted;
 	const { sub, kid } = signer;
 	if (!isWellFormedSubject(sub)) return untrusted;
 	// Read unverified, so bounded before it reaches a key source.
 	if (kid !== undefined && !bounded.safeParse(kid).success) return untrusted;
-	if (signers.thumbprint && !isThumbprint(sub)) return untrusted;
+	// A self-issued signer names itself as both; any other's subject is a thumbprint where its issuer says so.
+	if (own ? sub !== sentIssuer : signers.thumbprint && !isThumbprint(sub)) return untrusted;
 	// The signer as each use reads it: asked for, expected in the signature, and stood for.
-	const resolved = sub;
-	const asked = { lookup: sub, expectedSub: sub, kid: kid as string | undefined };
+	const resolved = own ? own.thumbprint : sub;
+	const asked = { lookup: resolved, expectedSub: sub, kid: kid as string | undefined };
 	const verifier = await signers.verifierFor(asked);
 	if (!verifier) return untrusted;
 	const verified = await verifier.verify(assertion);
@@ -88,7 +114,8 @@ export async function check(
 	const iat = verified.claims.iat;
 	return {
 		kind: "valid",
-		issuer,
+		entry,
+		sentIssuer,
 		subject: resolved,
 		jti: parsed.data.jti,
 		expiresAt: Number(verified.claims.exp) * 1000,
