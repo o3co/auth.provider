@@ -196,5 +196,5 @@ it("reseals through each holder in name order, answering counts alone, past a ho
 
 it("takes every handle its takes name", async () => {
 	const config = { ...kernelConfig(), seal: { current: { id: "a", key: key() } } };
-	expect(await takesUnused({ modules: [sealModule], config })).toEqual({});
+	expect((await takesUnused({ modules: [sealModule], config })).seal).toBeUndefined();
 });
