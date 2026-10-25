@@ -298,6 +298,7 @@ flowchart LR
 | `@mod/distribution` | assembly | `@mod/create-app`, `@mod/trial` |
 | `@mod/guard` | verification | `@mod/guard-imports`, `@mod/kinds` |
 | `@mod/guard-imports` | verification | none |
+| `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/spec-checklist` |
 | `@mod/ledger-fakes` | verification | `@mod/ledger-wire` |
 | `@mod/references` | assembly | `@mod/app-output`, `@mod/combinations`, `@mod/config-files`, `@mod/create-app`, `@mod/guard-imports`, `@mod/kernel`, `@mod/trial` |
 | `@mod/spec-checklist` | verification | `@mod/guard-imports` |
