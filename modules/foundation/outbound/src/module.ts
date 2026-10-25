@@ -81,7 +81,7 @@ export const section = policySettings
 			.enum(["helper", "in-process"])
 			.prefault("helper")
 			.describe(
-				"Where names are resolved, as the system resolves them: `helper`, in helper processes a request's deadline ends; `in-process`, here, where no deadline stops a lookup.",
+				"Where names are resolved, as the system resolves them: `helper`, in helper processes, one ended once no request waits on its lookups; `in-process`, here, where no deadline stops a lookup.",
 			),
 		"max-lookups": z
 			.number()

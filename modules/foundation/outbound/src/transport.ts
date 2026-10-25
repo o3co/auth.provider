@@ -117,7 +117,9 @@ async function bodyOf(answer: IncomingMessage, maxBytes: number, signal: AbortSi
 
 /** A tunnel to the destination through the proxy, by CONNECT; the proxy resolves the name and checks its addresses. */
 async function tunnel(route: Route, admitted: Admitted, signal: AbortSignal) {
-	const named = writtenAddress(admitted) ?? admitted.host;
+	// The name as the URL writes it, a trailing dot kept, as `addressesOf` resolves one: without its
+	// dot, the proxy's resolver would apply its search domains.
+	const named = writtenAddress(admitted) ?? unbracketed(admitted.url.hostname);
 	const target = `${isIP(named) === 6 ? `[${named}]` : named}:${admitted.port}`;
 	// The proxy's name is resolved as the deployment's own, never by this process's own lookup; every
 	// address it answers is offered, so each family is tried in turn within the deadline, as before.

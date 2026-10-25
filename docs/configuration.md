@@ -486,7 +486,7 @@ From `@mod/outbound`.
 | `outbound.proxy-authorization` | string |  |  |  |  | The Proxy-Authorization value the proxy asks for, such as `Basic …`: printable ASCII on one line. |
 | `outbound.direct-hosts` | list of string | `[]` |  |  |  | The hosts reached directly while a proxy is set; `.name` covers the name and the names under it. |
 | `outbound.plain-ipv4` | list of string | `[]` |  |  |  | The `host:port` pairs of `plain-loopback` or `plain-internal` whose name is resolved to IPv4 addresses alone, for plain http to that host and port: only those answers are checked and reached, and IPv6 ones are neither. For a network answering a name with an IPv4 address and an IPv6 one that does not reach, as ECS Service Connect writes both in the hosts file. Each names its host by name. |
-| `outbound.resolution` | helper \| in-process | `helper` |  |  |  | Where names are resolved, as the system resolves them: `helper`, in helper processes a request's deadline ends; `in-process`, here, where no deadline stops a lookup. |
+| `outbound.resolution` | helper \| in-process | `helper` |  |  |  | Where names are resolved, as the system resolves them: `helper`, in helper processes, one ended once no request waits on its lookups; `in-process`, here, where no deadline stops a lookup. |
 | `outbound.max-lookups` | integer (1–1024) |  |  |  |  | Names resolving at once, the outside party's half among them; one more is unavailable at once. Four by default, never more than max-concurrent. |
 
 ## passkey-registration
