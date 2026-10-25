@@ -1428,6 +1428,9 @@ importers:
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
       '@mod/external-jwt':
         specifier: workspace:*
         version: link:../../foundation/external-jwt
@@ -1465,9 +1468,6 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/clients':
-        specifier: workspace:*
-        version: link:../../identity/clients
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
