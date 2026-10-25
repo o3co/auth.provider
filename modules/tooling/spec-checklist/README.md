@@ -35,6 +35,7 @@
 - The report is held to the committed `docs/compliance`; a report that differs fails, naming the command.
 - `run ledger` holds the checklist to its rules first, and matches each place once: a place the ledger writes twice never matches. It reads plain text as RFCs print it: page heads and feet dropped, whitespace joined (a phrase split across lines or pages is one), a section from a numbered heading at a line's start (`Appendix A` as `A`), text before the first as `front`, the longer phrase first (`MUST NOT`, `NOT RECOMMENDED`).
 - An exception for an item's mark names that item, marked so, a deviation's a SHOULD with a decision the decisions hold; an adaptation's or a third party's names no item, and carries its name or an https issue URL.
+- An optional exception (a behaviour a spec leaves optional that the provider does not give, or gives otherwise) names a spec whose ledger the checklist holds and its section, no item, a decision only one the decisions hold, and its test names no item a MUST or SHOULD row of that section names; its results count neither as passed nor as failed.
 
 ## Data
 - The checklist files above, and the report it writes; nothing else is kept.

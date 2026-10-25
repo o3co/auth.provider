@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDecisions, parseItems } from "../src/checklist.ts";
+import { parseDecisions, parseItems, parseLedger } from "../src/checklist.ts";
 import { exceptionProblems } from "../src/exceptions.ts";
 
 const read = parseItems(
@@ -70,5 +70,57 @@ describe("exceptionProblems", () => {
 		expect(exceptionProblems({ class: "deviates", item: "rfc9999-4-f" }, known)).toEqual([
 			"rfc9999-4-f names the decision D-99, which the decisions do not hold",
 		]);
+	});
+
+	describe("an optional behaviour the provider does not give, or gives otherwise", () => {
+		const ledger = parseLedger(
+			"rfc9999",
+			[
+				"- source: https://example.org/rfc9999.txt",
+				"- version: 1",
+				`- sha256: ${"0".repeat(64)}`,
+				"- 4 #1 MUST: rfc9999-4-d",
+				"- 4 #2 SHOULD: rfc9999-4-a",
+			].join("\n"),
+		).ledger;
+		const withLedgers = { ...known, ledgers: new Map([["rfc9999", ledger]]) };
+		const optional = (more: Record<string, string> = {}) => ({
+			class: "optional" as const,
+			spec: "rfc9999",
+			section: "4",
+			...more,
+		});
+
+		it("is taken naming a spec whose ledger the checklist holds and a section of it, with or without a decision the decisions hold", () => {
+			expect(exceptionProblems(optional(), withLedgers)).toEqual([]);
+			expect(exceptionProblems(optional({ decision: "D-1" }), withLedgers)).toEqual([]);
+			// A section of MAYs alone holds no ledger row, and is what this class is for.
+			expect(exceptionProblems(optional({ section: "5" }), withLedgers)).toEqual([]);
+		});
+
+		it("is refused naming an item, no spec, a spec the ledgers do not hold, or a decision the decisions do not", () => {
+			expect(exceptionProblems(optional({ item: "rfc9999-4-d" }), withLedgers)).toEqual([
+				"names an item, which an optional exception reaches through its test",
+			]);
+			expect(exceptionProblems({ class: "optional", section: "4" }, withLedgers)).toEqual([
+				"names no spec and section",
+			]);
+			expect(exceptionProblems(optional({ spec: "rfc0000" }), withLedgers)).toEqual([
+				"names rfc0000, of which the checklist holds no ledger",
+			]);
+			expect(exceptionProblems(optional({ decision: "D-9" }), withLedgers)).toEqual([
+				"names the decision D-9, which the decisions do not hold",
+			]);
+			expect(exceptionProblems(optional(), known)).toEqual([
+				"cannot be checked without the ledgers",
+			]);
+		});
+
+		it("is refused where its test names an item a MUST or SHOULD row of that section names", () => {
+			expect(exceptionProblems(optional(), withLedgers, ["rfc9999-4-d"])).toEqual([
+				"its test names rfc9999-4-d, which section 4's MUST names",
+			]);
+			expect(exceptionProblems(optional(), withLedgers, ["rfc9999-4-c"])).toEqual([]);
+		});
 	});
 });
