@@ -2,6 +2,7 @@ import { createHmac, generateKeyPairSync } from "node:crypto";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { DestinationRefused, type Outbound, type OutboundResponse } from "@mod/outbound";
 import { configuredUrl } from "@mod/url-setting/testing";
+import { SignJWT } from "jose";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Algorithm, KeySource, Policy, Reason } from "../src/contract.ts";
 import { testSigner } from "../src/testing.ts";
@@ -145,6 +146,44 @@ describe("headers and keys", () => {
 		const unnamed = await signer.sign(fresh(), { kid: undefined });
 		const both = verifierOf({ inline: [signer.jwk, other.jwk] }, policy);
 		expect(await both.verify(unnamed)).toEqual(invalid("ambiguous-key"));
+	});
+
+	it("reads each key under one algorithm: its own `alg`, or the one the caller allows for its kind", async () => {
+		const rsa = await testSigner("RS256", "k1");
+		const token = await rsa.sign(fresh());
+		const judged = async (keys: Record<string, unknown>[], algorithms: Algorithm[]) =>
+			verifierOf({ inline: keys }, { ...policy, algorithms }).verify(token);
+		// One RSA algorithm allowed, so a key naming no alg is read under it; named twice, still one.
+		expect((await judged([rsa.jwk], ["RS256"])).kind).toBe("valid");
+		expect((await judged([rsa.jwk], ["RS256", "RS256", "ES256"])).kind).toBe("valid");
+		// Two allowed for its kind: a key naming no alg is used under neither, whatever the header says.
+		expect(await judged([rsa.jwk], ["RS256", "PS256"])).toEqual(invalid("no-key"));
+		expect(await judged([rsa.jwk], ["PS256", "RS256", "ES256"])).toEqual(invalid("no-key"));
+		// A key naming its alg is read under that one alone.
+		expect((await judged([{ ...rsa.jwk, alg: "RS256" }], ["RS256", "PS256"])).kind).toBe("valid");
+		expect(await judged([{ ...rsa.jwk, alg: "PS256" }], ["RS256", "PS256"])).toEqual(
+			invalid("no-key"),
+		);
+		// An EC key's curve gives its one algorithm, so the three may be allowed together.
+		const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-384" });
+		const p384 = { ...publicKey.export({ format: "jwk" }), kid: "e1" };
+		const signed = await new SignJWT(fresh())
+			.setProtectedHeader({ alg: "ES384", kid: "e1" })
+			.sign(privateKey);
+		const ec = verifierOf(
+			{ inline: [p384] },
+			{ ...policy, algorithms: ["ES256", "ES384", "ES512"] },
+		);
+		expect((await ec.verify(signed)).kind).toBe("valid");
+		// A PEM key is read under the algorithm it is given for.
+		const pem = verifierOf(
+			{ pem: [{ pem: rsa.pem, alg: "RS256", kid: "k1" }] },
+			{
+				...policy,
+				algorithms: ["RS256", "PS256"],
+			},
+		);
+		expect((await pem.verify(token)).kind).toBe("valid");
 	});
 
 	it("takes a key id only as a string, in the header and in a key", async () => {
@@ -577,6 +616,22 @@ describe("a key set at a URL", () => {
 			// Each fetched its own set, and only the configured one asks to reach as the operator's.
 			expect(s.asked.map((a) => a.internal)).toEqual(order.map((own) => (own ? url : undefined)));
 		}
+	});
+
+	it("binds a key of a shared set to an algorithm by each verifier's policy, fetching nothing more for it", async () => {
+		const rsa = await testSigner("RS256", "k1");
+		const s = served();
+		s.serve([rsa.jwk]);
+		const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+		const source = { jwks: { url: "https://issuer.example/jwks", hosts: ["issuer.example"] } };
+		const token = await rsa.sign(fresh());
+		const one = jwt.verifierOf(source, { ...policy, algorithms: ["RS256"] });
+		const two = jwt.verifierOf(source, { ...policy, algorithms: ["RS256", "PS256"] });
+		expect((await one.verify(token)).kind).toBe("valid");
+		// The set holds the key; it is unused here, so the answer is no key, not a fetch or an outage.
+		expect(await two.verify(token)).toEqual(invalid("no-key"));
+		expect(s.asked).toHaveLength(1);
+		expect((await one.verify(token)).kind).toBe("valid");
 	});
 
 	it("keeps one set for a URL and its hosts, whichever verifier asks", async () => {
