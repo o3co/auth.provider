@@ -21,7 +21,7 @@
 ## Invariants
 - A login whose authentication time is neither epoch milliseconds (0 to 8.64e15) nor unknown is a `TypeError`, naming no value, before an earlier session is closed or a new one opened.
 - A login's attributes are kept as `login-attributes` keeps them, a frozen copy taken at login, kept unchanged (a raise included) until the session closes.
-- It asks the entry requirements through `session`'s `entryJudge` and calls the participants through its `closingParticipants`; boot is refused, naming each, where either has no contribution, never taken as no rule.
+- It asks the entry requirements through `session`'s `entryJudge` and calls the participants through its `closingParticipants`; boot is refused, naming each, where either has no contribution, never taken as no rule. The seams take at most one, so `kernel`'s preflight leaves them be: this refusal comes as the sessions are built, in a boot no other gap refused first.
 - Where nothing judges `credentials`, `sessionRules` holds entry there to a sign-in within `recent-authentication`.
 - `recent(at)` answers whether a time on `kernel`'s clock is within `recent-authentication`, the one window every recent-authentication check counts in.
 - A host that cannot read a record (one a newer host wrote, during a rolling upgrade) lets nobody in on it and answers a login or close over its cookie Unavailable; the cookie stays.
