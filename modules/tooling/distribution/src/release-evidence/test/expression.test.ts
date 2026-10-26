@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conditionOf, evaluate, inputOf, type RunContext } from "../expression.ts";
+import { conditionOf, evaluate, inputOf, type RunContext } from "./expression.ts";
 
 const release: RunContext = { event_name: "push", ref: "refs/heads/release/0.19.1", base_ref: "" };
 const develop: RunContext = { event_name: "push", ref: "refs/heads/develop", base_ref: "" };
@@ -96,5 +96,6 @@ describe("inputOf and conditionOf", () => {
 	it("reads an if written with or without ${{ }}", () => {
 		expect(conditionOf("github.event_name == 'push'", release)).toBe(true);
 		expect(conditionOf("${{ github.event_name == 'schedule' }}", release)).toBe(false);
+		expect(conditionOf("'${{ github.event_name }}' == 'push'", release)).toHaveProperty("unknown");
 	});
 });

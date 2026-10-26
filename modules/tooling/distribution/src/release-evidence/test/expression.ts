@@ -279,7 +279,8 @@ export function inputOf(written: unknown, context: RunContext): Value | Unknown 
 
 /** An `if:` as GitHub reads it: written with or without `${{ }}`. */
 export function conditionOf(written: unknown, context: RunContext): Value | Unknown {
-	if (typeof written === "string" && !/^\s*\$\{\{/.test(written)) return evaluate(written, context);
+	// Text holding `${{` but no expression alone is a template, as `inputOf` reads it.
+	if (typeof written === "string" && !written.includes("${{")) return evaluate(written, context);
 	return inputOf(written, context);
 }
 
