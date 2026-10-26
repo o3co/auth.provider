@@ -372,10 +372,12 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `differences` (`src/differences`): the differences accepted between a library and the provider.
   - `libraries` (`src/libraries`): the client libraries the harness runs.
   - `pins` (`src/pins`): the SHA-256 of each jar an adapter is built from.
-- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
+- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front; and its relying party plan, the provider's federation login as the suite's OP's client, on the `sso-federated` pattern's app.
   - `api` (`src/api`): the suite's API, reached trusting its certificate alone.
+  - `client-plan` (`src/client-plan`): one relying party plan run end to end, the provider as the suite's OP's relying party.
   - `commands` (`src/commands`): a command a plan runs, held to its time.
   - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
+  - `drive` (`src/drive`): a relying party plan's tests driven one at a time over the suite's API, where the suite's own runner cannot reach the app.
   - `expected` (`src/expected`): whether the expected entries may go to the suite.
   - `harness` (`src/harness`): one plan run end to end, reported as tests.
   - `lifecycle` (`src/lifecycle`): what every plan run has, whichever side of the suite it plays.
@@ -385,6 +387,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `report` (`src/report`): a plan's run, reported as vitest tests.
   - `results` (`src/results`): what each suite test of a plan proved.
   - `review` (`src/review`): the pages the suite's browser kept for a person to review.
+  - `rp` (`src/rp`): the provider as a relying party, logging a browser in through the suite's OP.
   - `scene` (`src/scene`): the app the OP plans meet.
   - `suite` (`src/suite`): the suite at its pinned version, started and stopped.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.
