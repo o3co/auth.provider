@@ -11,16 +11,18 @@ export const promisesSource = "docs/security-model.md#promises-across-modules";
 
 const sectionHead = /^## Promises across modules\s*$/;
 // A top-level list entry of any kind: each must be a promise written as `N. **<title>**`.
-const listEntry = /^(?:\d+[.)]|[-*+])\s/;
-const indentedNumbered = /^\s+\d+[.)]\s/;
-const promiseEntry = /^(\d+)\. \*\*(.+?)\*\*/;
+const listEntry = /^(?:\d+[.)]|[-*+])(?:\s|$)/;
+const indentedNumbered = /^\s+\d+[.)](?:\s|$)/;
+// The title runs to the line's last `**`, so a code span holding `**` stays whole; only blanks may follow.
+const promiseEntry = /^(\d+)\. \*\*(.+)\*\*\s*$/;
 
 /**
  * The promises of the security model's `## Promises across modules` section, read so that none is
  * lost unseen: a section not there once, a list entry not written as `N. **<title>**` (another
- * marker, no bold, a title running past its line), an indented numbered entry, numbers that do not
- * run 1, 2, … and an empty section are findings. CRLF reads as LF; a title keeps its punctuation and
- * code spans. A promise's indented bullets and lines are its own, and not read.
+ * marker, an empty entry, no bold, a title running past its line, words after its title), an
+ * indented numbered entry, numbers that do not run 1, 2, … and an empty section are findings. CRLF
+ * reads as LF; a title keeps its punctuation and code spans. A promise's indented bullets and lines
+ * are its own, and not read.
  */
 export function promisesIn(text: string): { promises: Promised[]; findings: string[] } {
 	const lines = text.replaceAll("\r\n", "\n").split("\n");
