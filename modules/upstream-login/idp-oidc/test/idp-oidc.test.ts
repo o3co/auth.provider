@@ -1374,7 +1374,7 @@ describe("idp-oidc", () => {
 			expect(asked()).toEqual([]);
 		});
 
-		it("asks UserInfo by GET with the access token as a Bearer credential, completing the id_token's profile", async () => {
+		it("asks UserInfo by GET with the access token as a Bearer credential, completing the id_token's profile [oidc-core-5.3.1-a]", async () => {
 			const { upstream, asked } = await withUserinfo(
 				() =>
 					json({
@@ -1420,7 +1420,7 @@ describe("idp-oidc", () => {
 			]);
 		});
 
-		it("refuses the login on any answer but its subject's JSON, and is unavailable while UserInfo is down", async () => {
+		it("refuses the login on any answer but its subject's JSON, and is unavailable while UserInfo is down [oidc-core-5.3.2-n]", async () => {
 			const refusing: Handler[] = [
 				() => json({ sub: "u-bob", name: "Info" }),
 				() => json({ name: "Info" }),
