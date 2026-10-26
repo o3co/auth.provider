@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { userinfoProfileOf, withUserinfo } from "../src/id-token/userinfo.ts";
 
 describe("upstream-client's UserInfo reading", () => {
-	it("reads a UserInfo answer for the id_token's subject alone, as JSON, refusing any other", () => {
+	it("reads a UserInfo answer for the id_token's subject alone, as JSON, refusing any other [oidc-core-5.3.2-n]", () => {
 		const answer = (
 			status: number,
 			body: unknown,
