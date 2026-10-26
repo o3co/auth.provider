@@ -47,7 +47,7 @@ describe("client credentials", () => {
 		]);
 	});
 
-	it("issues a confidential client a token for itself, its default scope and the issuer as audience", async () => {
+	it("issues a confidential client a token for itself, its default scope and the issuer as audience [rfc6749-4.4.3-a] [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-3.3-a]", async () => {
 		const { answer, issued } = await ask(
 			client("confidential", { scopes: ["read"], "default-scopes": ["read"] }),
 		);
@@ -60,7 +60,7 @@ describe("client credentials", () => {
 		]);
 	});
 
-	it("refuses a public client, and a scope outside the allowance, before issuing", async () => {
+	it("refuses a public client, and a scope outside the allowance, before issuing [rfc6749-4.4-a]", async () => {
 		expect((await ask(client("public"))).answer).toEqual({
 			kind: "error",
 			error: "unauthorized_client",
