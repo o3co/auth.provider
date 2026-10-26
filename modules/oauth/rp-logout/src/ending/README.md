@@ -13,6 +13,7 @@ Internal module of `rp-logout`: the logout a client starts (OpenID Connect RP-In
 
 ## Invariants
 - Reads `id_token_hint`, `client_id`, `post_logout_redirect_uri` and `state`, from the query on a `GET` and the form on a `POST` (no other body is taken); nothing else.
+- A parameter sent more than once, whichever it is, is `400 invalid_request` (`repeated parameter`) before any is read, nothing closed: a value sent twice would read as none and pass the checks above.
 - A `client_id` beside the hint that is not the client the hint was issued to, or beside a hint naming no one client, is `400 invalid_request`, nothing closed (RP-Initiated Logout 1.0 §2).
 - No hint, or one naming no session, is `400 invalid_request`; one `oidc` refuses, or one issued more than 24 hours ago, is `400 invalid_token`; a hint that cannot be judged, or any other check that cannot tell, is `503`, logged as `rp-logout.unavailable` (warn) with what failed.
 - `sid` is taken from outside only in a hint the provider signed, and only to close that session.

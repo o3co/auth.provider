@@ -194,11 +194,14 @@ export async function harness(
 	};
 	const call = async (
 		method: "GET" | "POST",
-		params: Record<string, string>,
+		/** Each parameter's value, or its values where it is sent more than once. */
+		params: Record<string, string | readonly string[]>,
 		headers: Record<string, string> = {},
 	) => {
 		const route = seen.routes.find((r) => r.path === "/oauth/logout" && r.method === method);
-		const values = new Map(Object.entries(params).map(([k, v]) => [k, [v]]));
+		const values = new Map(
+			Object.entries(params).map(([k, v]) => [k, typeof v === "string" ? [v] : [...v]]),
+		);
 		const response: HttpResponse | undefined = await route?.handle(
 			testRequest({
 				method,

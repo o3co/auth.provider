@@ -34,6 +34,7 @@ const refused = (error: string, description: string) =>
 	jsonAnswer(400, { error, error_description: description });
 const unverified = refused("invalid_token", "id_token_hint verification failed");
 const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
+const repeated = refused("invalid_request", "repeated parameter");
 const mismatched = refused(
 	"invalid_request",
 	"client_id is not the client the id_token_hint was issued to",
@@ -152,6 +153,8 @@ export function endingOver(p: EndingParts) {
 
 	const end = async (request: HttpRequest): Promise<HttpResponse> => {
 		const values = request.method === "GET" ? request.query : request.fields;
+		// A value sent twice reads as none: refused first, so no check is passed by sending it twice.
+		if (values.repeated().length > 0) return repeated;
 		const hint = values.single("id_token_hint");
 		if (!hint) return refused("invalid_request", "id_token_hint is required");
 		const checked = await p.hints.check(hint);

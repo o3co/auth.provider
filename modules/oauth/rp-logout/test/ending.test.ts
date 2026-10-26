@@ -162,6 +162,42 @@ describe("the logout a client starts", () => {
 		expect(sent.headers).toMatchObject(noCache);
 	});
 
+	it("refuses a parameter sent twice, whichever it is, by GET or POST, and closes nothing", async () => {
+		const h = await serve();
+		const twice = (name: string, value: string) => [name, [value, value]] as const;
+		for (const [name, value] of [
+			["client_id", "other"],
+			["post_logout_redirect_uri", `${back}/`],
+			["state", "s"],
+			["ui_locales", "en"],
+		] as const) {
+			const { session } = await h.login();
+			const hint = await h.hintFor(session.id);
+			for (const method of ["GET", "POST"] as const) {
+				const out = await h.call(method, {
+					id_token_hint: hint,
+					...Object.fromEntries([twice(name, value)]),
+				});
+				expect([name, method, out.status, out.json]).toEqual([
+					name,
+					method,
+					400,
+					{ error: "invalid_request", error_description: "repeated parameter" },
+				]);
+			}
+			expect([name, await h.stillOpen(session.id)]).toEqual([name, true]);
+		}
+		const { session } = await h.login();
+		const hint = await h.hintFor(session.id);
+		const out = await h.call("GET", { id_token_hint: [hint, hint] });
+		expect([out.status, out.json]).toEqual([
+			400,
+			{ error: "invalid_request", error_description: "repeated parameter" },
+		]);
+		expect(await h.stillOpen(session.id)).toBe(true);
+		expect(h.events).toEqual([]);
+	});
+
 	it("refuses a client_id that is not the one the hint was issued to, and closes nothing", async () => {
 		const h = await serve();
 		const refused = [
