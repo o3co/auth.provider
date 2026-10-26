@@ -49,7 +49,7 @@ const post = (id: string, secret: string): HttpRequest =>
 const as = (id: string) => ({ kind: "authenticated", client: { id } });
 const refused = (reason: string) => ({ kind: "refused", reason });
 
-it("authenticates basic and post clients holding a bcrypt or a scrypt hash of their secret", async () => {
+it("authenticates basic and post clients holding a bcrypt or a scrypt hash of their secret [rfc6749-2.3.1-a]", async () => {
 	const c = await boot([
 		confidential("b-basic", "client_secret_basic", testBcryptHash("b-secret")),
 		confidential("b-post", "client_secret_post", testBcryptHash("b-secret")),
