@@ -52,6 +52,9 @@ onLegacy(codeArea, {
 		// Ours passes over an acr asked by acr_values and not met, and reads the acr a claims parameter asks for.
 		"voluntary-acr",
 		"claims-acr",
+		// Ours releases the claims a claims request names beyond its scope, held to the values it asks,
+		// checks a sub value it asks, and says so in its metadata; the legacy build reads only its acr.
+		"claims-names",
 		// Ours issues a session grant only to a request with same-origin evidence for its own origin.
 		"session-grant-same-origin-only",
 		"session-grant-needs-origin-evidence",

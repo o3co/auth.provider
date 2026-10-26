@@ -317,6 +317,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
   - `acr` (`src/acr`): the scenes of the acr a client asks for.
+  - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
