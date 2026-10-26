@@ -98,13 +98,19 @@ export function outcomesOf(
 	return { modules, unused: [...expected.failures, ...expected.skips].filter((e) => !used.has(e)) };
 }
 
-/** Each test of the plan the suite ran, read back from its API: its latest instance's result and log, none for one that never ran. */
+/**
+ * Each test of the plan the suite ran, read back from its API: its latest instance's result and log,
+ * none for one that never ran. The plan is the one `id` names, which must bear `planName`; without
+ * an id, the one plan of that name, two of it refused.
+ */
 export async function testsOf(
 	api: (path: string) => Promise<unknown>,
 	planName: string,
+	id?: string,
 ): Promise<ModuleRun[]> {
 	const listed = (await api("api/plan?length=100")) as {
 		readonly data: readonly {
+			readonly _id?: string;
 			readonly planName: string;
 			readonly modules: readonly {
 				readonly testModule: string;
@@ -113,8 +119,18 @@ export async function testsOf(
 			}[];
 		}[];
 	};
-	const plan = listed.data.find((p) => p.planName === planName);
-	if (plan === undefined) throw new Error(`the suite holds no plan ${planName}`);
+	const named =
+		id === undefined
+			? listed.data.filter((p) => p.planName === planName)
+			: listed.data.filter((p) => p._id === id);
+	if (named.length > 1)
+		throw new Error(
+			`the suite holds ${named.length} plans named ${planName}: name the one to read by its id`,
+		);
+	const [plan] = named;
+	if (plan === undefined) throw new Error(`the suite holds no plan ${id ?? planName}`);
+	if (plan.planName !== planName)
+		throw new Error(`the suite's plan ${id} is ${plan.planName}, not ${planName}`);
 	return Promise.all(
 		plan.modules.map(async (m) => {
 			const instance = m.instances.at(-1);

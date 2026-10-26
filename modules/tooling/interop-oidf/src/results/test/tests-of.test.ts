@@ -44,4 +44,42 @@ describe("each test of a plan the suite ran, read back from its API", () => {
 			"the suite holds no plan missing",
 		);
 	});
+
+	const twoOfOneName = {
+		"api/plan?length=100": {
+			data: [
+				{
+					_id: "counted",
+					planName: "oidcc-client-test-plan",
+					modules: [{ testModule: "a", instances: ["c1"] }],
+				},
+				{
+					_id: "uncounted",
+					planName: "oidcc-client-test-plan",
+					modules: [{ testModule: "a", instances: ["u1"] }],
+				},
+			],
+		},
+		"api/info/c1": { status: "FINISHED", result: "PASSED" },
+		"api/log/c1": [],
+		"api/info/u1": { status: "FINISHED", result: "FAILED" },
+		"api/log/u1": [],
+	};
+
+	it("reads the plan its id names, never another of the same name", async () => {
+		const tests = await testsOf(api(twoOfOneName), "oidcc-client-test-plan", "counted");
+		expect(tests.map((t) => t.instance)).toEqual(["c1"]);
+		await expect(testsOf(api(twoOfOneName), "another-plan", "counted")).rejects.toThrow(
+			"the suite's plan counted is oidcc-client-test-plan, not another-plan",
+		);
+		await expect(testsOf(api(twoOfOneName), "oidcc-client-test-plan", "gone")).rejects.toThrow(
+			"the suite holds no plan gone",
+		);
+	});
+
+	it("refuses to choose by name between two plans of that name", async () => {
+		await expect(testsOf(api(twoOfOneName), "oidcc-client-test-plan")).rejects.toThrow(
+			"the suite holds 2 plans named oidcc-client-test-plan: name the one to read by its id",
+		);
+	});
 });
