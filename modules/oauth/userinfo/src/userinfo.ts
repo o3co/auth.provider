@@ -7,6 +7,8 @@ import type { SessionTokens } from "@mod/session-tokens";
 import type { Tokens } from "@mod/tokens";
 
 export interface UserinfoParts {
+	/** Epoch ms, `kernel`'s clock. */
+	readonly now: () => number;
 	readonly senderBinding: Pick<SenderBindings, "admitted">;
 	readonly tokens: Pick<Tokens, "verifyAccess">;
 	readonly sessionTokens: Pick<SessionTokens, "sessionOf">;
@@ -32,7 +34,7 @@ export function userinfoOver(p: UserinfoParts) {
 			const { status, error, headers } = admission;
 			return answer(status, error === undefined ? {} : { error }, headers);
 		}
-		const { id, grant, tokenType } = admission.access;
+		const { id, grant, tokenType, expiresAt } = admission.access;
 		// OIDC Core §5.3 serves a token issued for openid; any other is short of scope (RFC 6750 §3.1).
 		if (!grant.scope.includes("openid")) {
 			return answer(
@@ -52,6 +54,11 @@ export function userinfoOver(p: UserinfoParts) {
 		}
 		// What the token's request asked beyond its scope, and the constraints on all it releases.
 		const selection = await p.selections.forToken(id);
+		// Checked again once read: a token still in time had its selection, which outlives it, to read;
+		// one that ended meanwhile is refused rather than answered without it.
+		if (p.now() >= expiresAt) {
+			return answer(401, { error: "invalid_token" }, challengeOf(tokenType, "invalid_token"));
+		}
 		const claims = await p.claims.of(grant.subject, grant.scope, bound.handle, selection);
 		return answer(200, { ...claims, sub: grant.subject });
 	};

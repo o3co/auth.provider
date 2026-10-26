@@ -20,6 +20,7 @@ const cors = {
 /** The handler, answering a check or claims that cannot tell as `503`, never as a refusal. */
 async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 	const userinfo = userinfoOver({
+		now: c.clock.now,
 		senderBinding: await c.get(senderBinding),
 		tokens: await c.get(tokens),
 		sessionTokens: await c.get(sessionTokens),
