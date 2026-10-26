@@ -1,15 +1,14 @@
-import { type Audit, audit, declaredAudit } from "@mod/audit";
+import { type Audit, audit } from "@mod/audit";
 import { type Client, clients } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import { issuer } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { type IdTokenHints, idTokenHints } from "@mod/oidc";
-import { determinedSource } from "@mod/request-source";
 import { type CloseOutcome, type Entry, sessions } from "@mod/session";
-import events from "../audit-events.ts";
-import type { LogoutReturn, UpstreamEnd } from "../contract.ts";
-import { type Frame, frontChannelPage } from "../page/page.ts";
-import { framable, registration } from "../registration/registration.ts";
+import { type Closed, closingOver } from "../closing/closing.ts";
+import type { UpstreamEnd } from "../contract.ts";
+import { frontChannelPage } from "../page/page.ts";
+import { registration } from "../registration/registration.ts";
 import type { Settings } from "../section.ts";
 import { type SessionClients, sessionClients } from "../store.ts";
 
@@ -73,16 +72,7 @@ const withState = (uri: string, state: string | undefined) => {
 };
 
 export function endingOver(p: EndingParts) {
-	/** The client's record, or none when it is gone or cannot be read; a logout goes on without it. */
-	const clientOf = async (id: string) => {
-		try {
-			return await p.clients.find(id);
-		} catch (error) {
-			if (!isUnavailable(error)) throw error;
-			p.log.warn("rp-logout.client_unavailable", { client: id });
-			return undefined;
-		}
-	};
+	const closing = closingOver(p);
 	/**
 	 * The return asked, where the hint's one client registered it exactly; `false` where it did not,
 	 * a request refused whole. A record that cannot be read is passed on: whether the return may be
@@ -95,49 +85,16 @@ export function endingOver(p: EndingParts) {
 		const listed = client?.section(registration)["post-logout-redirect-uris"] ?? [];
 		return listed.includes(asked) ? asked : false;
 	};
-	const framesOf = async (ids: readonly string[]) => {
-		const frames: Frame[] = [];
-		for (const id of ids) {
-			const client = await clientOf(id);
-			const registered = client?.section(registration);
-			const uri = registered?.["frontchannel-logout-uri"];
-			if (!client || !registered || uri === undefined) continue;
-			// A client a source names was never checked at boot.
-			if (!framable(registered, client)) {
-				p.log.warn("rp-logout.frontchannel_off_redirects", { client: id });
-				continue;
-			}
-			frames.push({ uri, withSession: registered["frontchannel-logout-session-required"] });
-		}
-		return frames;
-	};
-	/** The upstream's end of session, or none: the session still closes here, and the contributor logs its own failure. */
-	const endUpstream = (session: string, back: LogoutReturn) =>
-		Promise.resolve()
-			.then(() => p.upstream?.at(session, back))
-			.catch(() => undefined);
-	/** The close's outcome, or none when it was unavailable; any other error is passed on, a mistake and no outage. */
-	const closeOf = async (sid: string, request: HttpRequest) => {
-		try {
-			return await p.sessions.close(sid, request);
-		} catch (error) {
-			if (!isUnavailable(error)) throw error;
-			return undefined;
-		}
-	};
 	/** Where the browser goes after a logout, in order: the front-channel page, the upstream or the return, then JSON. */
 	const answer = async (
 		request: HttpRequest,
-		closed: {
-			readonly sid: string;
-			readonly held: readonly string[];
-			readonly cookies: readonly string[];
-		},
+		closed: Extract<Closed, { kind: "logged-out" }>,
+		sid: string,
 		next: string | undefined,
 	): Promise<HttpResponse> => {
-		const { sid, held, cookies } = closed;
+		const { cookies } = closed;
 		const page = wantsPage(request)
-			? frontChannelPage(await framesOf(held), { issuer: p.issuer, session: sid, next })
+			? frontChannelPage(await closed.frames(), { issuer: p.issuer, session: sid, next })
 			: undefined;
 		if (page) {
 			if (page.skipped > 0) p.log.warn("rp-logout.frames_skipped", { count: page.skipped });
@@ -170,50 +127,19 @@ export function endingOver(p: EndingParts) {
 		const back = await returnOf(checked.client, values.single("post_logout_redirect_uri"));
 		if (back === false) return unregistered;
 		const sid = checked.session;
-		// Both read before the close: a store that cannot answer ends nothing, and the close forgets the upstream tokens.
-		const held = (await p.sessionClients.members(sid)).map(({ member }) => member);
-		const upstream = await endUpstream(sid, {
-			...(back ? { postLogoutRedirectUri: back } : {}),
-			...(state === undefined ? {} : { state }),
+		const closed = await closing(request, {
+			sid,
+			subject: checked.subject,
+			back: {
+				...(back ? { postLogoutRedirectUri: back } : {}),
+				...(state === undefined ? {} : { state }),
+			},
 		});
-		const source = determinedSource(request);
-		const userAgent = request.headers.get("user-agent");
-		const record = (
-			kind: "logout.success" | "logout.cascade_failed",
-			subject: string,
-			more: Record<string, string> = {},
-		) =>
-			declaredAudit(p.audit, events).record(kind, {
-				subject,
-				attributes: {
-					sid,
-					...(source ? { source } : {}),
-					...(userAgent ? { userAgent } : {}),
-					...more,
-				},
-			});
-		// Nothing reads the session before its close: a read can end one past its lifetime, and the close
-		// would then call no participants. What the close found tells whether this is the logout.
-		const closed = await closeOf(sid, request);
-		if (!closed) {
-			record("logout.cascade_failed", checked.subject, { store: "session" });
-			return unavailable;
-		}
-		const { cookies, session } = closed;
-		// Closing, but the tokens it holds live until the close is swept: not logged out yet, as logout
-		// answers it. Asked before any answer of done, so a close sent again while pending is never one.
-		if (closed.kind === "pending") {
-			declaredAudit(p.audit, events).record("logout.close_pending", {
-				subject: session?.subject ?? checked.subject,
-				attributes: { sid, ...(source ? { source } : {}) },
-			});
-			return jsonAnswer(503, { error: "temporarily_unavailable" }, { cookies });
-		}
-		// One closed before, or gone, still has its close asked, for the cookie, but is no logout of its own.
-		if (!session || (closed.from !== "open" && closed.from !== "closing"))
-			return loggedOut(cookies);
-		record("logout.success", session.subject);
-		return answer(request, { sid, held, cookies }, upstream ?? (back && withState(back, state)));
+		if (closed.kind === "unavailable") return unavailable;
+		if (closed.kind === "pending")
+			return jsonAnswer(503, { error: "temporarily_unavailable" }, { cookies: closed.cookies });
+		if (closed.kind === "not-this-logout") return loggedOut(closed.cookies);
+		return answer(request, closed, sid, closed.upstream ?? (back && withState(back, state)));
 	};
 	return async (request: HttpRequest): Promise<HttpResponse> => {
 		try {
