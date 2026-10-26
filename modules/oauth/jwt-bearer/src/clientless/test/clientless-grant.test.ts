@@ -1,7 +1,7 @@
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
-import { clients } from "@mod/clients";
+import { authMethods, clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import externalJwtModule from "@mod/external-jwt/module";
@@ -167,6 +167,8 @@ const exposing = defineModule({ name: "test-grant", takes: [grants] }, (m) => [
 async function serve(
 	issuers: readonly Record<string, unknown>[] = [sharedEntry, ownEntry, devicesEntry],
 	options: {
+		/** The registered clients, in place of the three every test takes. */
+		registered?: readonly ReturnType<typeof publicClient>[];
 		linkedTo?: string | undefined;
 		extra?: readonly Module[];
 		log?: ReturnType<typeof recordingLog>;
@@ -199,7 +201,7 @@ async function serve(
 			...kernelConfig(),
 			...httpConfig(),
 			...issuerConfig({ url: issuer }),
-			...clientsConfig(registered),
+			...clientsConfig(options.registered ?? registered),
 			"jwt-bearer": { issuers, "delegated-issuers": [delegatedIss] },
 		},
 		runtime: options.log ? { ...runtime, log: options.log.log } : runtime,
@@ -413,6 +415,49 @@ describe("a grant naming no client, by an issuer's client", () => {
 		// The issuer's own assertion with the same jti is named by its own iss, apart.
 		const fixed = await sign({ iss: "app.phones", sub: id, jti }, device.privateKey, id);
 		expect(said(await s.clientless(fixed))).toBe("issued");
+	});
+
+	it("refuses to boot, at the entry's client, on a client with credentials, a confidential one, one not registered, and one allowed another grant", async () => {
+		// A key method and another grant, composed, so nothing but jwt-bearer refuses the clients.
+		const composed = defineModule({ name: "composed", takes: [] }, (m) => [
+			m.contribute(authMethods).by(() => ({
+				name: "test-key",
+				claimed: () => undefined,
+				verify: async () => true,
+			})),
+			m.contribute(grants).by(() => ({
+				grantType: "urn:test:other",
+				readsAmbient: "none",
+				handle: async () => ({ kind: "error", error: "invalid_grant" }),
+			})),
+		]);
+		const others = registered.filter((k) => k.id !== "agents");
+		const credentials = "names a client with credentials: it needs to be public with method none";
+		const cases = [
+			[{ ...confidentialClient({ id: "agents", sections: jwtOnly }), kind: "public" }, credentials],
+			[publicClient({ id: "agents", method: "test-key", sections: jwtOnly }), credentials],
+			[confidentialClient({ id: "agents", sections: jwtOnly }), credentials],
+			// Confidential with method none: registered, though never authenticated.
+			[confidentialClient({ id: "agents", method: "none", sections: jwtOnly }), credentials],
+			[undefined, "names no registered client"],
+			[
+				publicClient({
+					id: "agents",
+					sections: allowancesFor({ grants: [grantType, "urn:test:other"], scopes: ["read"] }),
+				}),
+				"names a client allowed another grant than this one",
+			],
+		] as const;
+		for (const [agents, reason] of cases) {
+			const refusals = await serve(undefined, {
+				registered: [...others, ...(agents ? [agents] : [])],
+				extra: [composed],
+			}).then(
+				() => [],
+				(error: { refusals?: readonly { where: string; reason: string }[] }) => error.refusals,
+			);
+			expect(refusals, reason).toEqual([{ where: "jwt-bearer.issuers.0.client", reason }]);
+		}
 	});
 
 	it("refuses to boot on accept-any-subject beside a client", async () => {
