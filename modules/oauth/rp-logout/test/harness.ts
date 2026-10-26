@@ -1,5 +1,5 @@
 import { auditStandIn } from "@mod/audit/testing";
-import { metadataSections } from "@mod/clients";
+import { type Clients, clients, metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
 import { sessionRedemptions } from "@mod/code-grant";
@@ -68,6 +68,8 @@ export async function harness(
 		readonly sessionsModule?: Module;
 		/** Makes rp-logout's session clients store fail as it says. */
 		readonly clientsDown?: UnavailableSwitch<SessionClients>;
+		/** Makes the client records fail as it says. */
+		readonly clientRecordsDown?: UnavailableSwitch<Clients>;
 		/** Why outbound's destination policy refuses a URL, as its refusals explain it; none by default. */
 		readonly refused?: (url: string) => string | undefined;
 	} = {},
@@ -135,7 +137,9 @@ export async function harness(
 			secretHashModule,
 			oidc,
 			subjectAttributes,
-			clientsModule,
+			options.clientRecordsDown
+				? switchedModule(clientsModule, clients, options.clientRecordsDown)
+				: clientsModule,
 			redirectsSection,
 			options.sessionsModule ?? sessionStandIn,
 			sessionRequirements,

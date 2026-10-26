@@ -34,6 +34,10 @@ const refused = (error: string, description: string) =>
 	jsonAnswer(400, { error, error_description: description });
 const unverified = refused("invalid_token", "id_token_hint verification failed");
 const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
+const unregistered = refused(
+	"invalid_request",
+	"post_logout_redirect_uri is not registered for the client",
+);
 /** A hint issued longer ago than this is refused, by GET or POST, as a logout another site may have started. */
 const confirmAfterMs = 86_400_000;
 
@@ -74,12 +78,17 @@ export function endingOver(p: EndingParts) {
 			return undefined;
 		}
 	};
-	/** The return the client registered, by exact match; none otherwise. */
+	/**
+	 * The return asked, where the hint's one client registered it exactly; `false` where it did not,
+	 * a request refused whole. A record that cannot be read is passed on: whether the return may be
+	 * taken cannot be told, so nothing is closed.
+	 */
 	const returnOf = async (id: string | undefined, asked: string | undefined) => {
-		if (id === undefined || !asked) return undefined;
-		const client = await clientOf(id);
+		if (!asked) return undefined;
+		if (id === undefined) return false;
+		const client = await p.clients.find(id);
 		const listed = client?.section(registration)["post-logout-redirect-uris"] ?? [];
-		return listed.includes(asked) ? asked : undefined;
+		return listed.includes(asked) ? asked : false;
 	};
 	const framesOf = async (ids: readonly string[]) => {
 		const frames: Frame[] = [];
@@ -149,6 +158,7 @@ export function endingOver(p: EndingParts) {
 		if (p.now() - checked.issuedAt > confirmAfterMs) return unverified;
 		const state = values.single("state") || undefined;
 		const back = await returnOf(checked.client, values.single("post_logout_redirect_uri"));
+		if (back === false) return unregistered;
 		const sid = checked.session;
 		// Both read before the close: a store that cannot answer ends nothing, and the close forgets the upstream tokens.
 		const held = (await p.sessionClients.members(sid)).map(({ member }) => member);

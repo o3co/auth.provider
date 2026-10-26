@@ -1,4 +1,4 @@
-import { clientSources } from "@mod/clients";
+import { type Clients, clientSources } from "@mod/clients";
 import { use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
@@ -160,14 +160,54 @@ describe("the logout a client starts", () => {
 		const sent = await go(back);
 		expect([sent.status, sent.headers.location]).toEqual([303, `${back}?state=s+1`]);
 		expect(sent.headers).toMatchObject(noCache);
-		const dropped = [
+	});
+
+	it("refuses a return the hint's client did not register, and closes nothing", async () => {
+		const h = await serve();
+		const refused = [
 			["a return it did not register", `${back}/`, {}],
 			["a hint naming no one client", back, { aud: ["app", "api"], azp: undefined }],
 			["another client's hint", back, { aud: "other", azp: undefined }],
 		] as const;
-		for (const [name, asked, over] of dropped) {
-			expect([name, (await go(asked, over)).json]).toEqual([name, { logged_out: true }]);
+		for (const [name, asked, over] of refused) {
+			const { session } = await h.login();
+			const hint = await h.hintFor(session.id, over);
+			for (const method of ["GET", "POST"] as const) {
+				const out = await h.call(method, {
+					id_token_hint: hint,
+					post_logout_redirect_uri: asked,
+					state: "s",
+				});
+				expect([name, method, out.status, out.json]).toEqual([
+					name,
+					method,
+					400,
+					{
+						error: "invalid_request",
+						error_description: "post_logout_redirect_uri is not registered for the client",
+					},
+				]);
+				expect(out.headers).toMatchObject(noCache);
+			}
+			expect([name, await h.stillOpen(session.id)]).toEqual([name, true]);
 		}
+		expect(h.events).toEqual([]);
+	});
+
+	it("answers 503 where the client a return is judged by cannot be read, and closes nothing", async () => {
+		const down = unavailableSwitch<Clients>("clients");
+		const h = await serve({ clientRecordsDown: down });
+		const { session } = await h.login();
+		down.failNext("find");
+		const out = await h.call("GET", {
+			id_token_hint: await h.hintFor(session.id),
+			post_logout_redirect_uri: back,
+		});
+		expect([out.status, out.json]).toEqual([503, { error: "temporarily_unavailable" }]);
+		expect(h.logs().filter((l) => l.event === "rp-logout.unavailable")).toEqual([
+			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "clients" } },
+		]);
+		expect(await h.stillOpen(session.id)).toBe(true);
 	});
 
 	it("answers a close left pending 503, clearing the cookie and recording it by its sid and source alone, never as a logout", async () => {
