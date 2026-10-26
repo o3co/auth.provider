@@ -136,4 +136,29 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 		expect(calls.some((c) => c.cmd === "docker" && c.args[0] === "compose")).toBe(false);
 		expect(existsSync(suiteDir)).toBe(false);
 	});
+
+	it("holds every request to its API, while it starts and after, to the plan's deadline", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "suite-api-"));
+		const { command } = commands((cmd, args) =>
+			cmd === "git" && args[0] === "-C" ? `${pin.commit}\n` : "",
+		);
+		const asked: { url: string; signal?: AbortSignal }[] = [];
+		const get = async (url: string, _ca: string, options: { signal?: AbortSignal } = {}) => {
+			asked.push({ url, ...(options.signal ? { signal: options.signal } : {}) });
+			return { status: 200, body: {} };
+		};
+		const deadline = new AbortController().signal;
+		const suite = await startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), tls, {
+			command,
+			get,
+			signal: deadline,
+		});
+		await suite.api("api/info/abc");
+		await suite.stop();
+		expect(asked.map((a) => a.url)).toEqual([
+			expect.stringContaining("/api/plan?length=1"),
+			expect.stringContaining("/api/info/abc"),
+		]);
+		for (const a of asked) expect(a.signal).toBe(deadline);
+	});
 });
