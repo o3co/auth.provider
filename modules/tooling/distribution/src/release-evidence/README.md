@@ -4,7 +4,6 @@ Internal module of `distribution`: the evidence a release keeps, from the CI run
 
 ## Responsibilities
 - Before anything is published, finds the run of CI that tested the tag's tree, keeps its evidence and compliance artifacts with a manifest, and stops the release where no run will do.
-- Holds CI's and the release's workflows to restoring no cache in a run whose evidence a release may take, or in the release's own run: whoever saved a cache is not known.
 
 ## Not here
 - Making the evidence: CI's jobs, through `spec-checklist`'s reporter and its `compliance`.
@@ -13,7 +12,6 @@ Internal module of `distribution`: the evidence a release keeps, from the CI run
 ## Offers
 - `pnpm release:evidence <dir>`, in the tag's checkout with `gh` able to read the repository's runs and `GITHUB_REPOSITORY` set: writes the run's artifacts under `dir/ci`, each in a directory named as it is, and `dir/manifest.json` (the tag's commit and tree, the run's id, attempt and URL, the commit it tested and that commit's tree, the artifacts' names). Prints each problem and exits 1.
 - `releasePullOf`, `candidatesOf`, `artifactsOf`, `testedCommitOf` and `firstTaken`: the choice, apart from the calls.
-- `cacheProblems(path, read, runs)`, `runs` `ci` or `release`: each place in a workflow, and in the workflows of this tree it calls, that uses an action not known, could restore a cache written otherwise than set out, or calls a workflow outside this tree; `offInEvidence` (the one `if:` a cache step may carry, and the one `cache:` of an action caching by default) and `mavenOffInEvidence` (setup-java's one maven `cache:`), both false in a push to a release branch and in a pull request to main.
 
 ## Invariants
 - The release pull request is the pull request to main that the tag's commit merged; a tag on no such commit stops the release.
@@ -24,12 +22,6 @@ Internal module of `distribution`: the evidence a release keeps, from the CI run
 - Over the tag's tree, the evidence taken is read again by the release's compliance (`spec-checklist`'s `compliance --release`, as that run and the commit it tested), which must let the release go on: an artifact gone since CI passed leaves an expected run unreported, and stops it.
 - The release workflow's evidence job is held, by a test reading it, to read permissions alone (contents, actions, pull requests), the only job reading runs, with no credential kept in its checkout, no install script run, an upload a re-run may write over, and publish needing it.
 - Every stop names the run, what is missing (no run, another tree, compliance not passed, an artifact missing or expired) and what to do.
-- A workflow uses only the actions its internal list names, each at a ref the list takes; a local action, an image or another repository's workflow is refused, and a workflow of this tree a job calls is read in the caller's run, a loop refused.
-- Nothing is evaluated: a step of `actions/cache` carries `if:` written exactly as `offInEvidence`; setup-go's `cache`, on by default, is written `false` or exactly as `offInEvidence`; setup-java's is left out, empty or exactly `mavenOffInEvidence`; setup-node's and setup-python's are left out or empty; pnpm's `cache` and `run_install` are left out or `false`. Any other writing is refused, however it would evaluate.
-- In the release's own workflows, and those they call, these forms, which turn a cache off in CI's evidence runs alone, are refused too: no cache step at all, setup-go's `cache` `false`, setup-java's left out or empty.
-- An input's name is read without regard to case, as GitHub reads it; one written twice is refused.
-- CI's workflow, in either run a release may take evidence from, and the release's own workflow restore no cache, held by a test; CI hands the legacy build to each area as the run's own artifact, by the id the job that built it gave, and lets a re-run write over the compliance table.
 
 ## Depends on
 - `spec-checklist`'s `compliance`, and `gh`, `git` and `unzip`, run.
-- `yaml` (reading a workflow as GitHub reads it).
