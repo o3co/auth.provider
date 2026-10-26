@@ -12,8 +12,8 @@ import {
 	stepUp,
 } from "@mod/conformance-second-factor/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type CodeScene, codeScene } from "../src/main.ts";
-import { backChannel, browserAt, succeeded } from "../src/testing.ts";
+import { type CodeScene, codeScene } from "../../main.ts";
+import { backChannel, browserAt, succeeded } from "../../testing.ts";
 
 const callback = "https://app.example/cb";
 const pair = generateKeyPairSync("ed25519");
