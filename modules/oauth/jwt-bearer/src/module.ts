@@ -136,8 +136,8 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			({ kind: "error", error: "invalid_grant", description }) as const;
 		/**
 		 * What any assertion verified becomes: a token for its subject, once the client may have it and
-		 * its single use is spent. It must have a second left when it is spent and give a token that
-		 * lives, however long the steps before take.
+		 * its single use is spent. It must have a second left when it is spent; a token with less than a
+		 * second left once signed, however long the steps before take, `tokens` refuses.
 		 */
 		const issueFor = async (
 			{ client, param, admits, issue, target }: GrantInput,
@@ -174,12 +174,10 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			if (checked.expiresAt - c.clock.now() < 1000) return refusedGrant("expired");
 			if ((await spend()) === "replayed")
 				return { kind: "error", error: "invalid_grant", description: "assertion replayed" };
+			// Cut to the assertion's end: one with less than a second left once signed, `tokens` refuses.
 			const issued = await issue(access, { notAfter: checked.expiresAt });
 			if (issued.kind === "refused") return issued;
 			const token = issued.access;
-			// Cut to the assertion's end, and signed after its end was fixed, it may have less than a second
-			// left by now, whatever its expires_in says: handed to no one.
-			if (token.expiresAt - c.clock.now() < 1000) return refusedGrant("expired");
 			return {
 				kind: "issued",
 				body: {

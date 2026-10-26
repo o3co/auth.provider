@@ -19,7 +19,7 @@
   - `max-assertion-lifetime` (`1s` to `1d`, default `1h`): how far ahead its `exp`, and back its `iat`, an assertion may be when taken, not `exp - iat`. `clock-skew` (`0s` to `5m`, default `30s`). Each in whole seconds with its unit, narrowed by an entry alone.
 
 ## Invariants
-- Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once issued is handed to no one, also `expired`.
+- Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once signed is refused by `tokens`, also `expired`.
 - How a signer is read and its keys asked for, a trusted issuer's key set, and a delegated issuer's assertion, which goes its delegate's way alone (its audience an app, not RFC 7523 §3): as the internal modules `assertion`, `issuers` and `delegated` say.
 - A trusted issuer's assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under that issuer's own policy, as `policy` makes it. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
 - Boot logs `jwt-bearer.self_issued_signers` (info) with the places of the issuers taking self-issued signers, never a prefix.
