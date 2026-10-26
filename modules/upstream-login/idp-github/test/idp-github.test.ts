@@ -107,7 +107,7 @@ describe("idp-github", () => {
 		expect(enterprise.upstream.authorizationUrl(start)).toMatch(/^https:\/\/ghe\.example\//);
 	});
 
-	it("exchanges the code with its verifier and the client's secret, and answers the user's numeric id [rfc6750-2.1-b] [rfc6750-2.3-d] [rfc9700-4.3.2-a]", async () => {
+	it("exchanges the code with its verifier and the client's secret, and answers the user's numeric id [rfc6750-2.3-d] [rfc9700-4.3.2-a]", async () => {
 		const { upstream, asked } = open({});
 		expect(await upstream.exchange(exchange())).toEqual({ subject: "583231", amr: [] });
 		const [token, user] = asked;
