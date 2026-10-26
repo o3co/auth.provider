@@ -92,6 +92,35 @@ export interface ClientPlanRun {
 	readonly subject: string;
 }
 
+/**
+ * The apps a run starts, each held among the run's `stops` while it is used and until one stop of
+ * it succeeds. A stop that fails leaves it there, tried again at the run's end, its failure kept in
+ * `failed`; it fails the use too, unless the use failed first.
+ */
+export function heldApps(stops: (() => Promise<unknown>)[]) {
+	const failed: unknown[] = [];
+	return {
+		failed,
+		async run<T>(app: { stop(): Promise<void> }, use: () => Promise<T>): Promise<T> {
+			const stop = () => app.stop();
+			stops.push(stop);
+			const used = await use().then(
+				(value) => ({ value }),
+				(error: unknown) => ({ error }),
+			);
+			const stopped = await app.stop().then(
+				() => undefined,
+				(error: unknown) => ({ error }),
+			);
+			if (stopped === undefined) stops.splice(stops.indexOf(stop), 1);
+			else failed.push(stopped.error);
+			if ("error" in used) throw used.error;
+			if (stopped !== undefined) throw stopped.error;
+			return used.value;
+		},
+	};
+}
+
 const errorOf = (body: string) => {
 	try {
 		const parsed = JSON.parse(body) as { error?: unknown };
@@ -119,6 +148,7 @@ export async function runClientPlan(plan: ClientPlanDefinition): Promise<ClientP
 	const said: string[] = [];
 	const tell = (line: string) => said.push(`${new Date().toISOString()} ${line}`);
 	let result: ClientPlanRun | undefined;
+	const apps = heldApps(stops);
 	let failure: unknown;
 	try {
 		const expected = await expectedOf(join(packageDir, "expected"), plan.name);
@@ -206,12 +236,11 @@ export async function runClientPlan(plan: ClientPlanDefinition): Promise<ClientP
 				return { booted: false, status: 0, returned: false };
 			}
 			app = started.baseUrl;
-			if (plan.bootOnly.includes(test)) {
-				tell(`${test}: started, and asked nothing`);
-				await started.stop();
-				return { booted: true, status: 0, returned: false };
-			}
-			try {
+			return apps.run(started, async (): Promise<AppSide> => {
+				if (plan.bootOnly.includes(test)) {
+					tell(`${test}: started, and asked nothing`);
+					return { booted: true, status: 0, returned: false };
+				}
 				const b = browser(trusted);
 				const signed = await signIn(b, { origin: front.origin, returnTarget, signal: deadline });
 				const error = errorOf(signed.callback.body);
@@ -232,9 +261,7 @@ export async function runClientPlan(plan: ClientPlanDefinition): Promise<ClientP
 					returned: signed.returned,
 					...(subject ? { subject } : {}),
 				};
-			} finally {
-				await started.stop();
-			}
+			});
 		};
 		const sides: Record<string, AppSide> = {};
 		const waits = { withinMs: 120_000, signal: deadline };
@@ -278,7 +305,8 @@ export async function runClientPlan(plan: ClientPlanDefinition): Promise<ClientP
 	} catch (error) {
 		failure = error;
 	}
-	const problems = await stopAll(stops);
+	// An app whose stop failed is told even where trying it again at the end stopped it.
+	const problems = [...apps.failed, ...(await stopAll(stops))];
 	await cleared(work, failure, problems);
 	if (failure !== undefined) {
 		if (problems.length > 0) {
