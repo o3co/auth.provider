@@ -128,7 +128,7 @@ describe.skipIf(areaTarget().differs("claims-names"))(
 			expect(same.userinfo).toMatchObject({ email: "alice@example.com" });
 		});
 
-		it("issues a code only for the subject a sub value names [oidc-core-5.5.1-b] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]", async () => {
+		it("issues a code only for the subject a sub value names [oidc-core-5.5.1-b]", async () => {
 			const other = await asked("openid", { id_token: { sub: { value: "s-bob" } } });
 			expect(other.at?.searchParams.get("error")).toBe("login_required");
 			const same = await asked("openid", { id_token: { sub: { value: "s-alice" } } });
