@@ -58,6 +58,10 @@ class Run:
         metadata = requests.get(
             url, verify=self.ca, timeout=30, hooks={"response": https_redirects_only}
         ).json()
+        # The provider named is the one discovered, as written (OpenID Connect Discovery 1.0 §4.3):
+        # otherwise its endpoints are another's, and would be sent the client's credentials.
+        if metadata.get("issuer") != self.given["issuer"]:
+            raise Refused("issuer_mismatch", "the discovery names another issuer, or none")
         for key, value in metadata.items():
             if (key.endswith("_endpoint") or key == "jwks_uri") and isinstance(value, str) and not value.startswith("https://"):
                 raise Refused("insecure", f"the discovery names {key} {value}, not https")
@@ -121,6 +125,9 @@ class Run:
         session = self.session()
         token, claims = self.sign_in(session)
         userinfo = session.get(self.metadata["userinfo_endpoint"]).json()
+        # Userinfo is the signed-in user's only where it names the ID token's subject (OpenID Connect Core §5.3.2).
+        if userinfo.get("sub") != claims["sub"]:
+            raise Refused("userinfo_subject", "the userinfo names another subject, or none")
         return {
             "idToken": claims,
             "userinfo": userinfo,
