@@ -3,7 +3,7 @@ import { httpConfig } from "@mod/http/testing";
 import { assemble, type BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { issuer, type MetadataItem, metadata } from "../src/contract.ts";
+import { endpointOrigin, issuer, type MetadataItem, metadata } from "../src/contract.ts";
 import issuerModule from "../src/module.ts";
 import { issuerConfig } from "../src/testing.ts";
 
@@ -67,6 +67,14 @@ it("refuses an origin other than the public origin, and takes a path under it", 
 	expect((await boot("https://as.example/t", "https://as.example")).get(issuer).url).toBe(
 		"https://as.example/t",
 	);
+});
+
+it("names its endpoints on the issuer's origin: the public origin where one is written, the issuer's own where none is", async () => {
+	expect(endpointOrigin({ url: "https://as.example/tenant" })).toBe("https://as.example");
+	const withOrigin = (await boot("https://as.example/t", "https://as.example")).get(issuer);
+	expect(endpointOrigin(withOrigin)).toBe("https://as.example");
+	const without = (await boot("https://login.example")).get(issuer);
+	expect(endpointOrigin(without)).toBe("https://login.example");
 });
 
 it("collects the items this server names itself by, refusing two contributions of one item or one of the issuer item", async () => {
