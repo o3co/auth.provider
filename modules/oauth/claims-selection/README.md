@@ -8,14 +8,15 @@
 
 ## Offers
 - Contract `claimsSelections`:
+  - `scopeOf`: a claim's scope, as the contributed table of claim scopes tells it; none without one.
   - `select`: the names whose scope the client is allowed (`client-allowance`) and the subject agreed to; every constraint kept, since constraints only hold back.
   - `keepForCode`, by the redemption's name, for the code's lifetime and a minute more.
   - `forCode`: the selection pinned to a redemption; none for a code without one.
   - `forToken`: the userinfo target kept for an access token; none for a token without one.
   - `follow`: the pinned userinfo target kept for the family founded from a redemption.
   - `forRefreshed`: a refreshed token kept its family's target, its names cut to what is allowed and agreed to now.
-- `selectionLimits` and the types `Selection`, `Target`, `Named`, `Constraint` and `Scalar`.
-- Extension point: the judge of consent, `consented(client, subject, scope)`; two refuse boot.
+- `selectionLimits`, `withinLimits` (whether a selection keeps within them) and the types `Selection`, `Target`, `Named`, `Constraint` and `Scalar`.
+- Extension points, two of either refusing boot: the judge of consent, `consented(client, subject, scope)`; the table of claim scopes, `scopeOf(claim)`, from the module releasing claims.
 - Contribution to `code-grant`'s redemption hooks: the pin, and a redeemed code's token kept the pinned userinfo target.
 - Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
 - Store interface, wired by the assembly: records by name, each kept once for its lifetime.

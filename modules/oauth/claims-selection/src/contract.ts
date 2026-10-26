@@ -28,9 +28,6 @@ export interface Selection {
 	readonly userinfo: Target;
 }
 
-/** The bounds a selection keeps within: longer strings, more values or a larger whole are refused. */
-export const selectionLimits = { valueLength: 256, values: 16, bytes: 4096 } as const;
-
 /** An access token as a selection is kept for it. */
 export interface Issued {
 	readonly id: string;
@@ -46,6 +43,8 @@ export type SelectionMode = "off" | "draining" | "on";
 
 export interface ClaimsSelections {
 	readonly mode: SelectionMode;
+	/** The scope a claim belongs to, as the module releasing claims tells it; none where none does. */
+	scopeOf(claim: string): string | undefined;
 	/** The names the client is allowed and the subject agreed to, by their scopes; the constraints as they are. */
 	select(client: Client, subject: string, asked: Selection): Promise<Selection>;
 	/** Keeps a code's selection by its redemption's name, for the code's lifetime and a minute more; only while `on`. */
@@ -71,4 +70,15 @@ export const selectionConsents = extensionPoint<SelectionConsent>("claims-select
 	multiplicity: "many",
 });
 
+/** Which scope each claim belongs to, from the module that releases claims. */
+export interface ClaimScopes {
+	scopeOf(claim: string): string | undefined;
+}
+
+export const claimScopes = extensionPoint<ClaimScopes>("claims-selection.claim-scopes", {
+	multiplicity: "many",
+});
+
+export { selectionLimits } from "./limits.ts";
 export * from "./store.ts";
+export { withinLimits } from "./stored.ts";

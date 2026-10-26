@@ -4,6 +4,7 @@ import type { RedemptionHook } from "@mod/code-grant";
 import type { TokenTie } from "@mod/grants";
 import { Unavailable } from "@mod/kernel";
 import type {
+	ClaimScopes,
 	ClaimsSelections,
 	Issued,
 	Selection,
@@ -32,10 +33,12 @@ export function selectionsWith(parts: {
 	readonly records: SelectionRecords;
 	/** Whoever judges consent; with none, no name is agreed to. */
 	readonly consent: SelectionConsent | undefined;
+	/** The table of claim scopes; with none, no claim has a scope. */
+	readonly scopes: ClaimScopes | undefined;
 	readonly mode: SelectionMode;
 	readonly now: () => number;
 }) {
-	const { records, consent, mode, now } = parts;
+	const { records, consent, scopes, mode, now } = parts;
 	/** Off, no store is touched: nothing was kept, so nothing is read, pinned or held back. */
 	const off = mode === "off";
 	/** Keeps a record once; a name already holding one keeps the first. */
@@ -78,6 +81,7 @@ export function selectionsWith(parts: {
 	};
 	const selections: ClaimsSelections = {
 		mode,
+		scopeOf: (claim) => scopes?.scopeOf(claim),
 		select: async (client, subject, asked) => {
 			bounded(asked);
 			return {

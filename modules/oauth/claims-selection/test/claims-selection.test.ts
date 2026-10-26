@@ -12,6 +12,7 @@ import {
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { afterEach, expect, it } from "vitest";
 import {
+	claimScopes,
 	claimsSelections,
 	type Selection,
 	type SelectionConsent,
@@ -19,6 +20,7 @@ import {
 	selectionLimits,
 	selectionRecords,
 	type Target,
+	withinLimits,
 } from "../src/contract.ts";
 import claimsSelectionModule from "../src/module.ts";
 import { claimsSelectionConfig, claimsSelectionInMemory } from "../src/testing.ts";
@@ -361,6 +363,36 @@ it("reads its mode as an operator writes it, off by default, and refuses another
 	});
 	expect(app.get(claimsSelections).mode).toBe("off");
 	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
+});
+
+/** A table of claim scopes, as the module releasing claims contributes it. */
+const scoping = (table: Record<string, string>, name = "scoping") =>
+	defineModule({ name, takes: [] }, (m) => [
+		m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => table[claim] })),
+	]);
+
+it("names a claim's scope as the contributed table does, none without one, and refuses to start with two", async () => {
+	const s = await serve([scoping({ name: "profile" })]);
+	expect(s.selections.scopeOf("name")).toBe("profile");
+	expect(s.selections.scopeOf("email")).toBeUndefined();
+	await stop();
+	expect((await serve([])).selections.scopeOf("name")).toBeUndefined();
+	await stop();
+	const twice = serve([scoping({}), scoping({}, "second-scoping")]);
+	await expect(twice).rejects.toMatchObject({
+		refusals: [expect.objectContaining({ reason: "more than one table of claim scopes" })],
+	});
+});
+
+it("offers the bounds check a selection is held to", () => {
+	const fits: Selection = {
+		idToken: none,
+		userinfo: { names: [name], constraints: [{ name: "name", value: "A" }] },
+	};
+	expect(withinLimits(fits)).toBe(true);
+	expect(
+		withinLimits({ ...fits, userinfo: { names: [], constraints: [{ name: "name", values: [] }] } }),
+	).toBe(false);
 });
 
 it("takes all its module names", async () => {
