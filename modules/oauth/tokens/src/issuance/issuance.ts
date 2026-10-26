@@ -7,8 +7,8 @@ import type {
 	IssuedAccess,
 	IssueLimits,
 	Tokens,
-} from "./contract.ts";
-import { actorSnapshot } from "./limits.ts";
+} from "../contract.ts";
+import { actorSnapshot } from "../limits.ts";
 
 /** How far ahead of the clock an authentication time may be, as 0.17 allowed. */
 export const authenticatedAheadMs = 300_000;

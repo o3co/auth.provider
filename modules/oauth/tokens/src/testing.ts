@@ -17,7 +17,7 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issuance.ts";
+import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issuance/issuance.ts";
 import { defaultLifetimeSeconds, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import type { section } from "./section.ts";

@@ -16,7 +16,7 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { type IssueAccess, issuing, judging } from "./issuance.ts";
+import { type IssueAccess, issuing, judging } from "./issuance/issuance.ts";
 import { chainWithin, expiryOf, issuedWithin, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import { section } from "./section.ts";
