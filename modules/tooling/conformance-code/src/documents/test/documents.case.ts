@@ -1,8 +1,8 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Fake, fakeHttp, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { codeScene } from "../src/main.ts";
-import { browserAt } from "../src/testing.ts";
+import { codeScene } from "../../main.ts";
+import { browserAt } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
 const registeredId = "https://app.example/client.json";

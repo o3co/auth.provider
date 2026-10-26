@@ -1,10 +1,11 @@
+import { claimsSelections } from "@mod/claims-selection";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
-import { releasedClaims } from "@mod/oidc";
+import { type ReleasedClaims, releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
@@ -50,7 +51,10 @@ const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
 			},
 		}),
 	),
-	m.provide(releasedClaims).by(() => ({ of: async () => ({}) })),
+	m
+		.provide(releasedClaims)
+		.by(() => ({ of: async () => ({}), scopeOf: () => undefined }) as ReleasedClaims),
+	m.provide(claimsSelections).by(() => ({ forToken: async () => undefined }) as never),
 	m.provide(items).by((c) => c.collect(metadata)),
 ]);
 

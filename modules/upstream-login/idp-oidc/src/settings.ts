@@ -28,10 +28,11 @@ export const sentFor = (s: {
 	readonly issuer: ConfiguredUrl;
 	readonly "token-endpoint"?: ConfiguredUrl | undefined;
 	readonly "jwks-uri"?: ConfiguredUrl | undefined;
+	readonly "userinfo-endpoint"?: ConfiguredUrl | undefined;
 }) =>
 	s.discovery
-		? { token: s.issuer, jwks: s.issuer }
-		: { token: s["token-endpoint"], jwks: s["jwks-uri"] };
+		? { token: s.issuer, jwks: s.issuer, userinfo: s.issuer }
+		: { token: s["token-endpoint"], jwks: s["jwks-uri"], userinfo: s["userinfo-endpoint"] };
 
 /** How a request to the upstream is narrowed: its hosts, and the operator's URL it is sent for. */
 export const narrowerOf = (hosts: readonly string[], internal: ConfiguredUrl | undefined) => ({
@@ -46,8 +47,14 @@ export function hostsOf(s: {
 	readonly "authorization-endpoint"?: string | undefined;
 	readonly "token-endpoint"?: string | undefined;
 	readonly "jwks-uri"?: string | undefined;
+	readonly "userinfo-endpoint"?: string | undefined;
 }): readonly string[] {
-	const named = [s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]];
+	const named = [
+		s["authorization-endpoint"],
+		s["token-endpoint"],
+		s["jwks-uri"],
+		s["userinfo-endpoint"],
+	];
 	const hostOf = (url: string) => new URL(url).hostname;
 	const given = named.filter((url) => url !== undefined).map(hostOf);
 	return [...new Set([hostOf(s.issuer), ...s["endpoint-hosts"], ...given])];
@@ -103,6 +110,15 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 				.describe(
 					"Hosts besides the issuer's its endpoints may be on, as outbound reads a host list.",
 				),
+			"read-userinfo": z
+				.boolean()
+				.prefault(false)
+				.describe(
+					"Reads the IdP's UserInfo after each login, with its access token, for profile claims its id_token leaves out; the answer must name the id_token's subject. UserInfo and the description it is read from must then be https.",
+				),
+			"userinfo-endpoint": endpoint
+				.optional()
+				.describe("Where UserInfo is read, without discovery; only with read-userinfo."),
 			"require-iss": z
 				.boolean()
 				.prefault(false)
@@ -133,7 +149,13 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 			urlsChecked(
 				(url, hosts, internal) => destinationRefusal(refusals, url, narrowerOf(hosts, internal)),
 				{
-					urls: (s) => [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]],
+					urls: (s) => [
+						s.issuer,
+						s["authorization-endpoint"],
+						s["token-endpoint"],
+						s["jwks-uri"],
+						s["userinfo-endpoint"],
+					],
 					sent: (s) => {
 						const hosts = hostsOf(s);
 						const from = sentFor(s);
@@ -142,11 +164,38 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 							: {
 									"token-endpoint": { url: s["token-endpoint"], hosts, internal: from.token },
 									"jwks-uri": { url: s["jwks-uri"], hosts, internal: from.jwks },
+									...(s["userinfo-endpoint"] === undefined
+										? {}
+										: {
+												"userinfo-endpoint": {
+													url: s["userinfo-endpoint"],
+													hosts,
+													internal: from.userinfo,
+												},
+											}),
 								};
 					},
 				},
 			),
 		)
+		.superRefine((s, context) => {
+			const at = (path: string, message: string) =>
+				context.addIssue({ code: "custom", path: [path], message });
+			const given = s["userinfo-endpoint"];
+			if (given !== undefined && s.discovery) at("userinfo-endpoint", "only without discovery");
+			else if (given !== undefined && !s["read-userinfo"])
+				at("userinfo-endpoint", "only with read-userinfo");
+			else if (given === undefined && s["read-userinfo"] && !s.discovery) {
+				at("userinfo-endpoint", "read-userinfo without discovery needs it");
+			}
+			// The access token and unsigned profile claims never go over plain http, whatever outbound takes.
+			const plain = (url: string | undefined) =>
+				URL.canParse(url ?? "") && new URL(url ?? "").protocol !== "https:";
+			if (s["read-userinfo"] && s.discovery && plain(s.issuer)) {
+				at("issuer", "read-userinfo needs the description on https");
+			}
+			if (s["read-userinfo"] && plain(given)) at("userinfo-endpoint", "read-userinfo needs https");
+		})
 		.superRefine((s, context) => {
 			// The browser goes to these, each given endpoint the operator's URL for itself alone.
 			if (s.discovery) return;

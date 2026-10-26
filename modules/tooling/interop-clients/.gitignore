@@ -1,2 +1,3 @@
 adapters/*/target/
 bin/
+adapters/*/__pycache__/

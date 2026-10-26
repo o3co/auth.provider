@@ -10,13 +10,15 @@ Review the pages once for each release, on a run of the release's commit. Twelve
 
 ## Get the pages
 
-1. Check out the release's commit, then run the two plans with a records directory of your own:
+1. Take the records of a run of the release's commit, in one of two ways:
+   - From CI: the run of the release's commit keeps each plan's records as an artifact, `oidf-records-<plan>-<attempt>`, for 30 days. Download the artifacts of `basic` and `rp-initiated-logout` into one directory, `oidf-records`, each unpacking to its plan's directory. Note the run's link for the record.
+   - On your machine: check out the release's commit, then run the two plans with a records directory of your own:
 
-   ```sh
-   OIDF_ARTIFACTS_DIR="$PWD/oidf-records" pnpm --filter @mod/interop-oidf run plan basic rp-initiated-logout
-   ```
+     ```sh
+     OIDF_ARTIFACTS_DIR="$PWD/oidf-records" pnpm --filter @mod/interop-oidf run plan basic rp-initiated-logout
+     ```
 
-   The run needs Docker, `git`, `openssl` and Python 3.9 or later. It takes the suite's fixed ports, so run nothing else that starts the suite at the same time.
+     The run needs Docker, `git`, `openssl` and Python 3.9 or later. It takes the suite's fixed ports, so run nothing else that starts the suite at the same time.
 
 2. Open `oidf-records/<plan>/review/index.json`, where `<plan>` is `basic` or `rp-initiated-logout`. It lists every review entry in order, with these fields:
    - `test`: the suite's test.

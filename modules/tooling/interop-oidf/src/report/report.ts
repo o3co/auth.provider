@@ -8,6 +8,11 @@ import type { ModuleRun, Outcome } from "../results/results.ts";
 export interface PlanRun {
 	readonly modules: readonly (ModuleRun & { readonly outcome: Outcome })[];
 	readonly unused: readonly Expected[];
+	/** The tests declared not run that no test of the plan answers. */
+	readonly strayNotRun: readonly {
+		readonly testModule: string;
+		readonly variant: Readonly<Record<string, string>>;
+	}[];
 	/** What drove the plan (the suite's own runner, or the harness), how it ended, and the record of what it said. */
 	readonly driver: {
 		readonly name: string;

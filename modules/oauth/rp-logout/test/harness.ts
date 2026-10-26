@@ -1,4 +1,6 @@
 import { auditStandIn } from "@mod/audit/testing";
+import claimsSelection from "@mod/claims-selection/module";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import { type Clients, clients, metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
@@ -135,6 +137,9 @@ export async function harness(
 			memoryUsersStores().module,
 			usersModule,
 			secretHashModule,
+			// oidc reads the selection a code's redemption pinned; these ID tokens name none.
+			claimsSelection,
+			claimsSelectionInMemory().module,
 			oidc,
 			subjectAttributes,
 			options.clientRecordsDown

@@ -153,6 +153,7 @@ flowchart LR
 |---|---|---|
 | `@mod/acr` | feature | `@mod/issuer`, `@mod/kernel`, `@mod/login-gates` |
 | `@mod/authorize` | feature | `@mod/acr`, `@mod/audit`, `@mod/client-allowance`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/consent`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/reauth`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/token-endpoint`, `@mod/tokens`, `@mod/url-setting` |
+| `@mod/claims-selection` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/kernel` |
 | `@mod/client-allowance` | feature | `@mod/clients`, `@mod/kernel` |
 | `@mod/client-assertion` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/token-endpoint`, `@mod/url-setting` |
 | `@mod/client-credentials` | feature | `@mod/client-allowance`, `@mod/grants`, `@mod/issuer`, `@mod/kernel` |
@@ -170,10 +171,10 @@ flowchart LR
 | `@mod/jwt-bearer-users` | feature | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/users` |
 | `@mod/logout` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session` |
 | `@mod/mfa-acr` | feature | `@mod/acr`, `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading` |
-| `@mod/oidc` | feature | `@mod/code-grant`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/subject-attributes`, `@mod/users` |
+| `@mod/oidc` | feature | `@mod/claims-selection`, `@mod/code-grant`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/reauth` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/redirect-uris` | feature | `@mod/client-documents`, `@mod/clients` |
-| `@mod/refresh` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |
+| `@mod/refresh` | feature | `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |
 | `@mod/resource-indicators` | feature | `@mod/grants`, `@mod/kernel` |
 | `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants` |
 | `@mod/sender-binding` | feature | `@mod/clients`, `@mod/http`, `@mod/issuer`, `@mod/kernel` |
@@ -185,7 +186,7 @@ flowchart LR
 | `@mod/token-endpoint` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/rate-limit`, `@mod/request-source`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/token-exchange` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/tokens` | feature | `@mod/added-claims`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/sender-binding`, `@mod/token-denylist` |
-| `@mod/userinfo` | feature | `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/oidc`, `@mod/sender-binding`, `@mod/session`, `@mod/session-tokens`, `@mod/tokens` |
+| `@mod/userinfo` | feature | `@mod/claims-selection`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/oidc`, `@mod/sender-binding`, `@mod/session`, `@mod/session-tokens`, `@mod/tokens` |
 | `@mod/verified-email` | feature | `@mod/client-credentials`, `@mod/kernel`, `@mod/subject-attributes`, `@mod/tokens`, `@mod/users` |
 
 ### passkey
@@ -254,6 +255,7 @@ flowchart LR
 | Package | Kind | Depends on |
 |---|---|---|
 | `@mod/authorize-store` | wiring | `@mod/kernel`, `@mod/reauth`, `@mod/records`, `@mod/store` |
+| `@mod/claims-selection-store` | wiring | `@mod/claims-selection`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/client-assertion-store` | wiring | `@mod/client-assertion`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/code-grant-store` | wiring | `@mod/code-grant`, `@mod/kernel`, `@mod/records`, `@mod/store` |
 | `@mod/consent-store` | wiring | `@mod/consent`, `@mod/kernel`, `@mod/records`, `@mod/store` |
@@ -300,7 +302,7 @@ flowchart LR
 | `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/trial` |
 | `@mod/guard` | verification | `@mod/guard-imports`, `@mod/kinds` |
 | `@mod/guard-imports` | verification | none |
-| `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-exchange`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/spec-checklist` |
+| `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-exchange`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/interop-oidf` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-front`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/ledger-fakes` | verification | `@mod/ledger-wire` |
 | `@mod/references` | assembly | `@mod/app-output`, `@mod/combinations`, `@mod/config-files`, `@mod/create-app`, `@mod/guard-imports`, `@mod/kernel`, `@mod/trial` |

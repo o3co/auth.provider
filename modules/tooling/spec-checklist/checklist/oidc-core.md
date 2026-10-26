@@ -375,7 +375,6 @@
 
 - **oidc-core-5.3.1-a** SHOULD: a UserInfo request o3co's RP sends to an upstream uses `GET` and sends the access token in the `Authorization` header.
   role: rp
-  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
 
 ## 5.3.2 Successful UserInfo Response
 
@@ -399,20 +398,19 @@
   out-of-scope: signed and encrypted userinfo answers are not offered: `userinfo` publishes `userinfo_endpoint` alone and answers JSON (`userinfo`'s card), with no `userinfo_signing_alg_values_supported` or `userinfo_encryption_alg_values_supported`.
 - **oidc-core-5.3.2-n** MUST: o3co's RP checks that a UserInfo answer's `sub` exactly matches the id_token's `sub`, and uses none of the answer's values where they differ.
   role: rp
-  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
 
 ## 5.3.4 UserInfo Response Validation
 
-- **oidc-core-5.3.4-a** MUST: o3co's RP validates an upstream's UserInfo answer: a TLS server certificate check that the intended OP answered, and decryption with the registered keys where `userinfo_encrypted_response_alg` was registered.
+- **oidc-core-5.3.4-a** MUST: o3co's RP validates an upstream's UserInfo answer: a TLS server certificate check that the intended OP answered; decryption with the registered keys is owed only where `userinfo_encrypted_response_alg` was registered, which o3co never registers.
   role: rp
-  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
 - **oidc-core-5.3.4-b** SHOULD: o3co's RP validates a signed UserInfo answer's signature by JWS.
   role: rp
-  out-of-scope: o3co's RP fetches no UserInfo: idp-oidc, idp-google and idp-apple take the profile from the checked id_token alone (their cards).
+  out-of-scope: o3co's RP registers neither `userinfo_signed_response_alg` nor `userinfo_encrypted_response_alg`, and takes a JSON UserInfo answer alone (idp-oidc's `src/userinfo/` and upstream-client's id_token reader).
 
 ## 5.5 Requesting Claims using the "claims" Request Parameter
 
 - **oidc-core-5.5-a** SHOULD: an OP that does not support the `claims` parameter returns the claims it believes useful where a client uses it.
+  deviates: D-2
 - **oidc-core-5.5-b** MUST: the OP ignores members of a `claims` request it does not understand.
 - **oidc-core-5.5-c** MUST: an authorization request of o3co's RP whose `claims` uses the `userinfo` member also uses a `response_type` that issues an access token for the UserInfo endpoint.
   role: rp

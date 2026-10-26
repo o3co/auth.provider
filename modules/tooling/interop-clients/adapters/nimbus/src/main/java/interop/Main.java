@@ -85,6 +85,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
@@ -141,7 +142,12 @@ public final class Main {
 
   private Main(Map<String, Object> instruction) throws Exception {
     this.instruction = instruction;
-    this.tls = trusting(JSONObjectUtils.getString(instruction, "ca"));
+    // The front's certificate, and an IdP's where the instruction names one: nothing else.
+    Object idp = instruction.get("idp");
+    this.tls =
+        idp instanceof Map<?, ?> named
+            ? trusting(JSONObjectUtils.getString(instruction, "ca"), String.valueOf(named.get("ca")))
+            : trusting(JSONObjectUtils.getString(instruction, "ca"));
   }
 
   /** A connection that trusts the front's certificate alone and presents the client's certificate. */
@@ -171,13 +177,14 @@ public final class Main {
     return context.getSocketFactory();
   }
 
-  private static SSLSocketFactory trusting(String pem) throws Exception {
+  private static SSLSocketFactory trusting(String... pems) throws Exception {
     KeyStore store = KeyStore.getInstance(KeyStore.getDefaultType());
     store.load(null, null);
-    store.setCertificateEntry(
-        "front",
-        CertificateFactory.getInstance("X.509")
-            .generateCertificate(new ByteArrayInputStream(pem.getBytes(StandardCharsets.US_ASCII))));
+    for (int i = 0; i < pems.length; i++)
+      store.setCertificateEntry(
+          "trusted-" + i,
+          CertificateFactory.getInstance("X.509")
+              .generateCertificate(new ByteArrayInputStream(pems[i].getBytes(StandardCharsets.US_ASCII))));
     TrustManagerFactory trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
     trust.init(store);
     SSLContext context = SSLContext.getInstance("TLS");
@@ -437,6 +444,64 @@ public final class Main {
     return result;
   }
 
+  /** The ID-JAG's token type (draft-ietf-oauth-identity-assertion-authz-grant-04 §4.3). */
+  private static final String ID_JAG = "urn:ietf:params:oauth:token-type:id-jag";
+
+  /**
+   * An ID-JAG, as Nimbus's grants make it: one from the IdP by token exchange (§4.3), the user's ID
+   * token its subject, this provider its audience; then a token for it here by jwt-bearer (§4.4), the
+   * client authenticated at both, and proving a DPoP key at both where the instruction says so.
+   */
+  private Map<String, Object> idJag() throws Exception {
+    if (Boolean.TRUE.equals(instruction.get("dpop")))
+      dpop =
+          new DefaultDPoPProofFactory(
+              new ECKeyGenerator(Curve.P_256).keyID("dpop").generate(), JWSAlgorithm.ES256);
+    AuthorizationServerMetadata here = server();
+    Map<String, Object> idp = JSONObjectUtils.getJSONObject(instruction, "idp");
+    AuthorizationServerMetadata at =
+        AuthorizationServerMetadata.resolve(
+            new Issuer(JSONObjectUtils.getString(idp, "issuer")), this::sending);
+    refuseInsecure(at.toJSONObject());
+    Scope scope = Scope.parse(orElse(instruction, "scope", "read"));
+    TokenRequest exchange =
+        new TokenRequest.Builder(
+                at.getTokenEndpointURI(),
+                authentication(at.getTokenEndpointURI()),
+                new TokenExchangeGrant(
+                    new BearerAccessToken(JSONObjectUtils.getString(instruction, "subjectToken")),
+                    TokenTypeURI.ID_TOKEN,
+                    null,
+                    null,
+                    TokenTypeURI.parse(ID_JAG),
+                    List.of(new Audience(here.getIssuer().getValue()))))
+            .scope(scope)
+            .build();
+    TokenResponse given = TokenResponse.parse(proven(sending(exchange.toHTTPRequest()), null));
+    if (!given.indicatesSuccess()) throw Refused.of(given.toErrorResponse().getErrorObject());
+    AccessToken jag = given.toSuccessResponse().getTokens().getAccessToken();
+    TokenTypeURI issued = jag.getIssuedTokenType();
+    if (issued == null || !ID_JAG.equals(issued.getURI().toString()))
+      throw new Refused("not_id_jag", "the IdP issued a token of type " + issued);
+    TokenRequest grant =
+        new TokenRequest.Builder(
+                here.getTokenEndpointURI(),
+                authentication(here.getTokenEndpointURI()),
+                new JWTBearerGrant(SignedJWT.parse(jag.getValue())))
+            .scope(scope)
+            .build();
+    TokenResponse answer = TokenResponse.parse(proven(sending(grant.toHTTPRequest()), null));
+    if (!answer.indicatesSuccess()) throw Refused.of(answer.toErrorResponse().getErrorObject());
+    var success = answer.toSuccessResponse();
+    AccessToken token = success.getTokens().getAccessToken();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("accessToken", token.getValue());
+    result.put("tokenType", token.getType().getValue());
+    result.put("scope", token.getScope() == null ? null : token.getScope().toString());
+    result.put("resource", success.getCustomParameters().get("resource"));
+    return result;
+  }
+
   /** What a sign-in gave: the provider, the tokens and the ID token's claims as the validator took them. */
   record SignedIn(OIDCProviderMetadata op, OIDCTokenResponse tokens, IDTokenClaimsSet claims) {}
 
@@ -654,7 +719,7 @@ public final class Main {
       out.put(
           "result",
           switch (flow) {
-            case "login", "public-login" -> main.login();
+            case "login", "public-login", "cimd" -> main.login();
             case "refresh" -> main.refresh();
             case "resource" -> main.resourceFlow();
             case "client-credentials", "client-credentials-secret" -> main.clientCredentials();
@@ -663,6 +728,7 @@ public final class Main {
             case "device", "public-device" -> main.device();
             case "logout" -> main.logout();
             case "jwt-bearer" -> main.jwtBearer();
+            case "id-jag" -> main.idJag();
             case "token-exchange" -> main.tokenExchange();
             case "mtls" -> main.mtls();
             case "backchannel-logout" -> main.backchannelLogout();

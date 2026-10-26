@@ -1,6 +1,11 @@
 import { type AreaScene, area, sceneOf } from "@mod/conformance";
 import { codeArea } from "@mod/conformance-code";
-import { identityArea, type RevocationScene, type UserScene } from "@mod/conformance-identity";
+import {
+	identityArea,
+	type LedgerScene,
+	type RevocationScene,
+	type UserScene,
+} from "@mod/conformance-identity";
 import { type KeysPart, keysArea } from "@mod/conformance-keys";
 import { type ClientScene, oauthArea } from "@mod/conformance-oauth";
 
@@ -14,6 +19,10 @@ export interface IdpScene {
 	readonly clientId: string;
 	/** Required by every type but Apple, which takes it or `signing`. */
 	readonly clientSecret?: string;
+	/** OpenID Connect only: reads UserInfo after each login (`readsUserinfo`). */
+	readonly readUserinfo?: boolean;
+	/** OpenID Connect only: hosts besides the issuer's its described endpoints may be on. */
+	readonly endpointHosts?: readonly string[];
 	/** Apple only: what signs the client's secret (all three, unless a scene means to leave some out). */
 	readonly signing?: {
 		readonly teamId?: string;
@@ -39,6 +48,9 @@ export const grantsLoginPage = "federation:grants-login-page";
 
 /** The need for a step-up page that a link's start short of a requirement names, and back. */
 export const linkStepUpPage = "federation:link-step-up-page";
+
+/** The need for an OpenID Connect IdP that reads its upstream's UserInfo after each login. */
+export const readsUserinfo = "federation:reads-userinfo";
 
 /** Federation grants: the consent page and the connections offered. */
 export interface GrantsPart {
@@ -68,6 +80,10 @@ export interface FederationPart {
 	readonly links?: boolean;
 	/** The page a link's start short of a session requirement names, on the origin (`linkStepUpPage`). */
 	readonly linkStepUpPage?: string;
+	/** A CONNECT proxy outbound reaches its upstreams through, for an upstream on https at loopback. */
+	readonly proxy?: string;
+	/** The user ledger's URLs, which outbound also reaches: this part's outbound section is the one kept. */
+	readonly ledgerUrls?: readonly string[];
 }
 
 export const federationArea = area<FederationPart>("federation");
@@ -76,6 +92,8 @@ export const federationArea = area<FederationPart>("federation");
 export interface FederationScene extends FederationPart {
 	readonly keys?: KeysPart;
 	readonly users: readonly UserScene[];
+	/** Users answered from a ledger over HTTP, beside or instead of `users`. */
+	readonly ledger?: LedgerScene;
 	/** Clients that run the code flow, so a scene can ask whether a browser is logged in. */
 	readonly clients?: readonly ClientScene[];
 	readonly userinfo?: boolean;
@@ -91,6 +109,7 @@ export function federationScene(scene: FederationScene): AreaScene {
 			origin: scene.origin,
 			users: scene.users,
 			login: { returnTargets: scene.returnTargets },
+			...(scene.ledger ? { ledger: scene.ledger } : {}),
 			...(scene.revocations ? { revocations: scene.revocations } : {}),
 			...(scene.recentAuthenticationSeconds
 				? { recentAuthenticationSeconds: scene.recentAuthenticationSeconds }
@@ -116,6 +135,15 @@ export function federationScene(scene: FederationScene): AreaScene {
 			...(scene.grants ? { grants: scene.grants } : {}),
 			...(scene.links ? { links: true } : {}),
 			...(scene.linkStepUpPage ? { linkStepUpPage: scene.linkStepUpPage } : {}),
+			...(scene.proxy ? { proxy: scene.proxy } : {}),
+			...(scene.ledger
+				? {
+						ledgerUrls: [
+							scene.ledger.verifyUrl,
+							...(scene.ledger.upstreamUrl ? [scene.ledger.upstreamUrl] : []),
+						],
+					}
+				: {}),
 		}),
 	);
 }

@@ -11,4 +11,5 @@ export {
 	grantsLoginPage,
 	type IdpScene,
 	linkStepUpPage,
+	readsUserinfo,
 } from "./area.ts";

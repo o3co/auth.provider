@@ -1,9 +1,11 @@
 import { auditStandIn } from "@mod/audit/testing";
+import claimsSelectionModule from "@mod/claims-selection/module";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient } from "@mod/clients/testing";
-import { type Addition, additions } from "@mod/code-grant";
+import { type Addition, additions, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
@@ -28,8 +30,10 @@ import wiring from "../src/module.ts";
 
 const runtime = quietRuntime();
 const seen = contract<readonly Addition[]>("additions-seen");
-const reader = defineModule({ name: "reader", takes: [additions] }, (m) => [
+const pins = contract<readonly RedemptionHook[]>("pins-seen");
+const reader = defineModule({ name: "reader", takes: [additions, redemptionHooks] }, (m) => [
 	m.provide(seen).by((c) => c.collect(additions)),
+	m.provide(pins).by((c) => c.collect(redemptionHooks)),
 ]);
 
 /** The real refresh over this wiring, starting families as a code's redemption would. */
@@ -58,6 +62,9 @@ async function boot() {
 			simulated.module,
 			refreshModule,
 			wiring,
+			// A family keeps what its code's request asked beyond its scope; these codes asked nothing.
+			claimsSelectionModule,
+			claimsSelectionInMemory().module,
 			reader,
 		],
 		config: {
@@ -80,8 +87,11 @@ async function boot() {
 		if (issued.kind !== "issued") throw new Error(issued.reason);
 		const { token: _, ...access } = issued.access;
 		const refresh = app.get(seen).find((a) => a.field === "refresh_token");
+		const redemption = `r-${Math.random()}`;
+		// Pinned first, as code-grant pins every redemption before the additions run.
+		for (const hook of app.get(pins)) await hook.pin(redemption);
 		return (await refresh?.issue({
-			redemption: `r-${Math.random()}`,
+			redemption,
 			client: {
 				id: "app",
 				kind: "confidential",

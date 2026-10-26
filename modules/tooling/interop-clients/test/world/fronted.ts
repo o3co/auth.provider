@@ -2,18 +2,25 @@ import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AreaScene, area, areaTarget, onNew, type Started } from "@mod/conformance";
+import {
+	type AreaScene,
+	area,
+	areaTarget,
+	onNew,
+	type Started,
+	type StartOptions,
+} from "@mod/conformance";
 import { selfSigned, startFront } from "@mod/conformance-front";
 
 /** The address the front tells the app the libraries send from: not loopback, which is its trusted proxy. */
 export const sender = "198.51.100.30";
 
 /** What the harness asks of the app beyond the areas' scenes, for the modules it composes. */
-export const harnessArea = area<Record<string, never>>("interop-clients");
+export const harnessArea = area<{ readonly outboundProxy?: string }>("interop-clients");
 const perSource = 1000;
 // A nonce asked at the token endpoint and at the resources alike, so each library's retry is met (RFC 9449 §8, §9).
 const dpopNonce = { required: "as+rs", secret: randomBytes(32).toString("base64") };
-onNew(harnessArea, (_, __, modules) => {
+onNew(harnessArea, (part, __, modules) => {
 	const where = (module: string, section: Record<string, Record<string, unknown>>) =>
 		modules.includes(module) ? section : {};
 	return {
@@ -24,6 +31,10 @@ onNew(harnessArea, (_, __, modules) => {
 			...where("@mod/token-control", { "token-control": { requests: perSource } }),
 			...where("@mod/login-password", { "login-password": { attempts: 100, window: "1m" } }),
 			...where("@mod/dpop", { dpop: { nonce: dpopNonce } }),
+			// The https parties the app reaches by name, through a tunnel to this machine.
+			...(part.outboundProxy
+				? where("@mod/outbound", { outbound: { proxy: part.outboundProxy } })
+				: {}),
 		},
 	};
 });
@@ -59,13 +70,19 @@ export interface Fronted {
 export async function fronted(
 	sceneAt: (origin: string) => AreaScene,
 	given: {
-		readonly start?: (scene: AreaScene) => Promise<Started>;
+		readonly start?: (scene: AreaScene, options?: StartOptions) => Promise<Started>;
 		readonly under?: string;
 		/** The header the front forwards a client's certificate in, as a deployment's proxy does. */
 		readonly clientCertificateHeader?: string;
+		/** Certificates (PEM files) the app trusts, for the https parties it reaches. */
+		readonly trustedCertificates?: readonly string[];
+		/** The proxy the app reaches its https parties through. */
+		readonly outboundProxy?: string;
 	} = {},
 ): Promise<Fronted> {
-	const start = given.start ?? ((scene: AreaScene) => areaTarget().start(scene));
+	const start =
+		given.start ??
+		((scene: AreaScene, options?: StartOptions) => areaTarget().start(scene, options));
 	const dir = await mkdtemp(join(given.under ?? tmpdir(), "interop-clients-"));
 	const tls = await selfSigned("127.0.0.1", dir);
 	let base = "";
@@ -89,10 +106,14 @@ export async function fronted(
 		await rm(dir, { recursive: true, force: true });
 	};
 	const scene = sceneAt(front.origin);
-	const running = await start({
-		...scene,
-		parts: { ...scene.parts, [harnessArea.name]: {} },
-	}).catch(async (failure: unknown) => {
+	const harness = given.outboundProxy ? { outboundProxy: given.outboundProxy } : {};
+	const options = given.trustedCertificates
+		? { trustedCertificates: given.trustedCertificates }
+		: {};
+	const running = await start(
+		{ ...scene, parts: { ...scene.parts, [harnessArea.name]: harness } },
+		options,
+	).catch(async (failure: unknown) => {
 		await cleared();
 		throw failure;
 	});
