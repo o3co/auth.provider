@@ -13,7 +13,7 @@
 - `basicAuthorization` (client ID, secret) → the HTTP Basic header value, each part form-urlencoded (RFC 6749 §2.3.1).
 - `answerOf` (an answer as `outbound` reads JSON, a schema) → what the schema reads. `tokenAnswerOf` (an answer, the scope asked) → the upstream tokens, and the id_token apart.
 - `refreshAnswerOf` (a refresh's answer, the scope asked, what is unavailable) → the refresh's outcome.
-- `idTokenReaderOf` (`external-jwt`, the type's rules, a clock) → a reader: (id_token, the login's nonce) → the login (subject, login time, profile) and the checked claims.
+- `idTokenReaderOf` (`external-jwt`, the type's rules, a clock) → a reader: (id_token, the login's nonce) → the login (subject, login time, profile) and the checked claims, and `withUserinfo` (the upstream's UserInfo answer) → the login, its profile completed by it.
 - `endSessionUrl` (the endpoint, the hint, return URI, state and client ID, the type's own parameters) → the URL.
 - `guarded` (a type's call) → what it gives, or what it throws.
 
@@ -28,6 +28,7 @@
 - The id_token is never put among the tokens: the type checks it first.
 - A refresh's answer is a limit for a 429, with `retry-after` only where it is digits; unavailable for a 5xx; `invalid_grant` for a 400 saying so; `interaction_required` for a 400 saying `interaction_required`, `login_required`, `consent_required` or `account_selection_required` (the user must act at the upstream first); else its tokens, never its id_token.
 - An id_token holds only as `src/id-token/`'s card says.
+- A UserInfo answer, and the profile it completes, hold only as `src/id-token/`'s card says.
 - An end-session URL keeps the endpoint's query, then sets the parameters RP-Initiated Logout fixes (`id_token_hint`, `post_logout_redirect_uri`, `state`, `client_id`), each where given and non-empty, then the type's own.
 - A type's own parameter with the name of a fixed one is dropped, given or not; it never replaces or places it.
 - `guarded` lets `UpstreamRefused` and `Unavailable` out as they are; any other error becomes `UpstreamRefused`, without its text.

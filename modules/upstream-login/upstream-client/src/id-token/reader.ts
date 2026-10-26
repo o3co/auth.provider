@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Algorithm, ExternalJwt, JwksSource } from "@mod/external-jwt";
 import { type Clock, Unavailable } from "@mod/kernel";
+import type { OutboundResponse } from "@mod/outbound";
 import { type UpstreamLogin, type UpstreamProfile, UpstreamRefused } from "@mod/upstreams";
 import { z } from "zod";
+import { userinfoProfileOf, withUserinfo } from "./userinfo.ts";
 
 /** What a type expects of its upstream's id_tokens. */
 export interface IdTokenRules {
@@ -23,6 +25,12 @@ export interface IdTokenRules {
 export interface IdTokenLogin {
 	readonly login: Pick<UpstreamLogin, "subject" | "authenticatedAt" | "profile">;
 	readonly claims: Readonly<Record<string, unknown>>;
+	/**
+	 * The login, its profile completed by the upstream's UserInfo answer (OpenID Connect Core
+	 * §5.3.2) where the id_token leaves a claim out; an answer that is not for the id_token's
+	 * subject, or not JSON, refuses. A 5xx is the type's to tell first.
+	 */
+	withUserinfo(answer: OutboundResponse): IdTokenLogin["login"];
 }
 
 const idTokenClaims = z.looseObject({
@@ -123,6 +131,15 @@ export function idTokenReaderOf(
 			...(authenticatedAt === undefined ? {} : { authenticatedAt }),
 			...(profile === undefined ? {} : { profile }),
 		};
-		return { login, claims: checked.claims };
+		const claims = checked.claims;
+		return {
+			login,
+			claims,
+			withUserinfo(answer) {
+				const completed = withUserinfo({ claims, profile }, userinfoProfileOf(answer, sub));
+				const { profile: _, ...rest } = login;
+				return completed === undefined ? rest : { ...rest, profile: completed };
+			},
+		};
 	};
 }
