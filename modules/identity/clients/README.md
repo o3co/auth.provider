@@ -22,7 +22,7 @@
 - `./testing`: test clients and configuration builders.
 
 ## Invariants
-- A request uses one authentication method: two or more are refused first, then credentials a method finds malformed, both before any lookup. Where an assertion method claims the request or finds it malformed, the refusal is marked `assertion` and carries the challenges of the methods tried, as RFC 7521 §4.2.1 answers it `invalid_client`; else it carries none.
+- A request uses one authentication method: two or more are refused first, then credentials a method finds malformed, both before any lookup. Where an assertion method is among the methods claiming the request or finding it malformed, either refusal is marked `assertion` and carries the challenges of all those methods, as RFC 7521 §4.2.1 answers it `invalid_client`; else it carries none.
 - `none` is the method only when no other method claims the request; an Authorization header no method reads claims nothing.
 - `bare` is false for an `authorization` header, a client certificate (a malformed one included), any of `client_id`, `client_secret`, `client_assertion` and `client_assertion_type` sent at all (empty, repeated or not a string included), and anything a composed method claims or finds malformed; a field only a method not composed reads cannot be told.
 - A Basic header is malformed unless it is canonical base64 of UTF-8 that decodes to a non-empty id and secret; a `client_id` in the body beside it must name the same client, or the credentials are bad.

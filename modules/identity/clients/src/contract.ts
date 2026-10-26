@@ -80,13 +80,15 @@ export type Authentication =
 				| "invalid_record";
 			/**
 			 * Challenges for the response: the tried method's, or every method's when none was tried; for
-			 * `multiple_methods` and `malformed_credentials`, those of the methods tried where an assertion
-			 * method is among them, else none, answered as malformed requests.
+			 * `multiple_methods` and `malformed_credentials`, those of the methods claiming the request or
+			 * finding it malformed where an assertion method is among them, else none, answered as
+			 * malformed requests.
 			 */
 			readonly challenges: readonly string[];
 			/**
-			 * Set on `multiple_methods` and `malformed_credentials` where an assertion method claims the
-			 * request or finds it malformed: RFC 7521 §4.2.1 answers it `invalid_client`.
+			 * Set on `multiple_methods` and `malformed_credentials` where an assertion method is among the
+			 * methods claiming the request or finding it malformed: RFC 7521 §4.2.1 answers it
+			 * `invalid_client`.
 			 */
 			readonly assertion?: true;
 	  };

@@ -315,9 +315,16 @@ describe("clients", () => {
 		const assertion = method("test_assertion", {
 			assertion: true,
 			claimed: (r) => r.form.get("test_assertion")?.[0],
-			malformed: (r) => r.form.get("test_assertion")?.[0] === "",
+			// Empty, or its type alone: malformed, and the second claims nothing.
+			malformed: (r) =>
+				r.form.get("test_assertion")?.[0] === "" ||
+				(r.form.has("test_assertion_type") && !r.form.has("test_assertion")),
 		});
-		const c = await boot([assertion]);
+		const half = method("half", {
+			claimed: (r) => r.form.get("half_id")?.[0],
+			malformed: (r) => r.form.has("half_id") !== r.form.has("half_proof"),
+		});
+		const c = await boot([assertion, half]);
 		expect(await outcome(c, basic("conf", "s3cret"), { test_assertion: ["conf"] })).toEqual({
 			kind: "refused",
 			reason: "multiple_methods",
@@ -325,6 +332,23 @@ describe("clients", () => {
 			challenges: ['Basic realm="client"'],
 		});
 		expect(await outcome(c, {}, { test_assertion: [""] })).toEqual({
+			kind: "refused",
+			reason: "malformed_credentials",
+			assertion: true,
+			challenges: [],
+		});
+		// Two other methods beside an assertion only malformed, which claims nothing: still the assertion's.
+		const secret = { client_id: ["conf"], client_secret: ["s3cret"] };
+		expect(
+			await outcome(c, basic("conf", "s3cret"), { ...secret, test_assertion_type: ["t"] }),
+		).toEqual({
+			kind: "refused",
+			reason: "multiple_methods",
+			assertion: true,
+			challenges: ['Basic realm="client"'],
+		});
+		// A whole assertion beside credentials another method finds malformed but does not claim.
+		expect(await outcome(c, {}, { test_assertion: ["conf"], half_proof: ["p"] })).toEqual({
 			kind: "refused",
 			reason: "malformed_credentials",
 			assertion: true,
