@@ -207,6 +207,7 @@ What each module contains is described by that module's contract card (each modu
 | ID token producers | extension point kind | code-grant |
 | Additions issued with the redemption response | extension point kind | code-grant |
 | Clients told of each code redeemed in a session | extension point kind | code-grant |
+| Hooks pinned with each code redemption and told what it gave | extension point kind | code-grant |
 | Consent records | contract | consent |
 | ID token contents (a contribution to code-grant's extension point), claim scope | vocabulary | oidc |
 | The claim table (the claims each scope releases), and the claims released for a subject and scope | contract | oidc |
