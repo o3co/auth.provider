@@ -78,6 +78,8 @@ export type TrustedIssuerScene = (
 			Record<string, string | number | boolean | readonly (string | number | boolean)[]>
 		>;
 	};
+	/** The registered client its assertions identify where a request names none: public, method none. */
+	readonly client?: string;
 	/** A ceiling over what its assertions are issued, within the client's allowance. */
 	readonly ceiling?: {
 		readonly scopes?: readonly string[];
