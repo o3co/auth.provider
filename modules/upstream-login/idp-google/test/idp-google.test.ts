@@ -158,7 +158,7 @@ describe("idp-google", () => {
 		expect((await open()).upstream.issuer).toBe("https://accounts.google.com");
 	});
 
-	it("asks Google for offline access, the login's nonce and the freshness the browser asked", async () => {
+	it("asks Google for offline access, the login's nonce and the freshness the browser asked [oidc-core-3.1.2.1-y] [oidc-core-7.2.1-a] [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", async () => {
 		const { upstream } = await open();
 		const url = new URL(upstream.authorizationUrl({ ...start, prompt: "login", maxAgeSeconds: 0 }));
 		expect(`${url.origin}${url.pathname}`).toBe(endpoints["authorization-endpoint"]);
@@ -360,7 +360,7 @@ describe("idp-google", () => {
 		expect(settings.safeParse({ ...both, "hosted-domains": ["corp.example"] }).success).toBe(true);
 	});
 
-	it("takes an id_token's at_hash only as the access token's", async () => {
+	it("takes an id_token's at_hash only as the access token's [oidc-core-3.1.3.5-a]", async () => {
 		const full = createHash("sha256").update("at").digest();
 		const half = full.subarray(0, 16).toString("base64url");
 		const exchanged = async (claims: Record<string, unknown>) => {
@@ -401,7 +401,7 @@ describe("idp-google", () => {
 		expect(await profileOf({})).toBeUndefined();
 	});
 
-	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless iss is not asked", async () => {
+	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless iss is not asked [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
 		const { upstream, asked } = await open({ token: async () => granted() });
 		for (const iss of [
 			undefined,
@@ -426,7 +426,7 @@ describe("idp-google", () => {
 		expect(lenient.asked.filter((a) => a.url === endpoints["token-endpoint"])).toHaveLength(1);
 	});
 
-	it("refuses an id_token that does not hold for this client and login", async () => {
+	it("refuses an id_token that does not hold for this client and login [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
 		const cases = {
 			"an unpublished key": await idToken({}, stranger),
 			"a key under a kid not in the set": await idToken({}, await testSigner("RS256", "g9")),
@@ -470,7 +470,7 @@ describe("idp-google", () => {
 		expect(await exchangedWith(crossClient)).toMatchObject({ subject: "g-alice" });
 	});
 
-	it("refuses an answer without an id_token and a 400 invalid_grant, and is unavailable when Google cannot be reached", async () => {
+	it("refuses an answer without an id_token and a 400 invalid_grant, and is unavailable when Google cannot be reached [oidc-core-3.1.3.5-a]", async () => {
 		const bare = await open({ token: async () => granted({ id_token: undefined }) });
 		expect(await outcome(bare.upstream.exchange(exchange()))).toBe("refused");
 		const denied = await open({ token: async () => answer({ error: "invalid_grant" }, 400) });
