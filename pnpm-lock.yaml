@@ -956,6 +956,34 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/oauth/claims-selection:
+    dependencies:
+      '@mod/client-allowance':
+        specifier: workspace:*
+        version: link:../client-allowance
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      '@mod/code-grant':
+        specifier: workspace:*
+        version: link:../code-grant
+      '@mod/grants':
+        specifier: workspace:*
+        version: link:../grants
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/oauth/client-allowance:
     dependencies:
       '@mod/clients':
@@ -3432,6 +3460,21 @@ importers:
       '@mod/reauth':
         specifier: workspace:*
         version: link:../../oauth/reauth
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+
+  modules/templates/claims-selection-store:
+    dependencies:
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../../oauth/claims-selection
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
