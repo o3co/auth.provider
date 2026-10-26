@@ -166,12 +166,13 @@ export function registry(
 				of.flatMap((m) => (m.challenge ? [m.challenge] : []));
 			const every = challengesOf(methods);
 			const malformed = read.filter((method) => method.malformed?.(request));
-			// Every method part of the request, those claiming it and those finding it malformed: where an
-			// assertion method is among them, two methods or malformed credentials are the assertion's,
-			// marked and challenged by them all, as RFC 7521 §4.2.1 answers it `invalid_client`.
+			// Where an assertion method claims the request, it uses an assertion: two methods or malformed
+			// credentials are then the assertion's, marked and challenged by every method part of the
+			// request, those claiming it and those finding it malformed, as RFC 7521 §4.2.1 answers it
+			// `invalid_client`. A method that only finds the request malformed marks nothing.
 			const involved = [...new Set([...tried.map((t) => t.method), ...malformed])];
 			const malformedRefusal = (reason: "multiple_methods" | "malformed_credentials"): Refused =>
-				involved.some((m) => m.assertion === true)
+				tried.some((t) => t.method.assertion === true)
 					? { kind: "refused", reason, challenges: challengesOf(involved), assertion: true }
 					: { kind: "refused", reason, challenges: [] };
 			if (more.length > 0) return malformedRefusal("multiple_methods");

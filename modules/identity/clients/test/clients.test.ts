@@ -314,8 +314,10 @@ describe("clients", () => {
 	it("marks a refusal an assertion method is part of, with the challenges of the methods tried", async () => {
 		const assertion = method("test_assertion", {
 			assertion: true,
-			claimed: (r) => r.form.get("test_assertion")?.[0],
-			// Empty, or its type alone: malformed, and the second claims nothing.
+			// Any part of it sent: the request uses the assertion.
+			claimed: (r) =>
+				r.form.get("test_assertion")?.[0] ?? (r.form.has("test_assertion_type") ? "" : undefined),
+			// Empty, or its type alone: malformed.
 			malformed: (r) =>
 				r.form.get("test_assertion")?.[0] === "" ||
 				(r.form.has("test_assertion_type") && !r.form.has("test_assertion")),
