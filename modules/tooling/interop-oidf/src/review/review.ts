@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ModuleRun } from "../results/results.ts";
 
 /** A page the suite's browser kept for a person to review, with what the suite asks of it. */
@@ -54,4 +56,21 @@ export function reviewPages(runs: readonly ModuleRun[]): ReviewPage[] {
 					};
 				}),
 		);
+}
+
+/**
+ * Keeps in `dir` each review page as a file of its own, and `index.json`: every review entry in
+ * order, what the suite asks of it and the page's file (none where the suite kept no page). Makes
+ * nothing where no test was left for review.
+ */
+export async function keepReviewPages(dir: string, runs: readonly ModuleRun[]): Promise<void> {
+	const pages = reviewPages(runs);
+	if (pages.length === 0) return;
+	await mkdir(dir, { recursive: true });
+	for (const p of pages) if (p.page !== undefined) await writeFile(join(dir, p.file), p.page);
+	const index = pages.map(({ page, ...rest }) => ({
+		...rest,
+		file: page === undefined ? null : rest.file,
+	}));
+	await writeFile(join(dir, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
 }

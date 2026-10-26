@@ -1,6 +1,9 @@
+import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ModuleRun } from "../../results/results.ts";
-import { reviewPages } from "../review.ts";
+import { keepReviewPages, reviewPages } from "../review.ts";
 
 const variant = { client_auth_type: "client_secret_basic" };
 const page = (source: string, regexp: string) =>
@@ -78,5 +81,52 @@ describe("the pages the suite's browser kept for a person to review", () => {
 			expect.objectContaining({ file: "oidcc-max-age-1.html", condition: "ExpectSecondLoginPage" }),
 		]);
 		expect(pages[0]?.page).toBeUndefined();
+	});
+
+	it("keeps each page in a file of its own, and an index of what the suite asks of each", async () => {
+		const dir = join(await mkdtemp(join(tmpdir(), "records-")), "review");
+		const runs: ModuleRun[] = [
+			{
+				testModule: "oidcc-rp-initiated-logout-no-params",
+				variant,
+				instance: "a1",
+				info: { status: "FINISHED", result: "REVIEW" },
+				log: [page("<html>logged out</html>", "logged_out")],
+			},
+			{
+				testModule: "oidcc-max-age-1",
+				variant,
+				instance: "e5",
+				info: { status: "FINISHED", result: "REVIEW" },
+				log: [{ src: "ExpectSecondLoginPage", msg: "upload a screenshot", result: "REVIEW" }],
+			},
+		];
+		await keepReviewPages(dir, runs);
+		expect((await readdir(dir)).sort()).toEqual([
+			"index.json",
+			"oidcc-rp-initiated-logout-no-params.html",
+		]);
+		expect(await readFile(join(dir, "oidcc-rp-initiated-logout-no-params.html"), "utf8")).toBe(
+			"<html>logged out</html>",
+		);
+		const index = JSON.parse(await readFile(join(dir, "index.json"), "utf8"));
+		expect(index).toEqual([
+			expect.objectContaining({
+				file: "oidcc-rp-initiated-logout-no-params.html",
+				matched: "logged_out",
+			}),
+			expect.objectContaining({
+				file: null,
+				test: "oidcc-max-age-1",
+				condition: "ExpectSecondLoginPage",
+			}),
+		]);
+		for (const entry of index) expect(entry).not.toHaveProperty("page");
+	});
+
+	it("keeps nothing where no test was left for review", async () => {
+		const dir = join(await mkdtemp(join(tmpdir(), "records-")), "review");
+		await keepReviewPages(dir, []);
+		await expect(readdir(dir)).rejects.toThrow();
 	});
 });
