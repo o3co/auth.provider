@@ -126,6 +126,11 @@ export async function started(
 	},
 	layers: readonly string[] = [],
 	options: StartOptions = {},
+	/** Runs on the caller's Redis (its section) and environment, such as a moved clock's, as a group. */
+	on?: {
+		readonly redis: Readonly<Record<string, unknown>>;
+		readonly env?: Readonly<Record<string, string>>;
+	},
 ): Promise<Started> {
 	const parties = trial?.parties ?? [];
 	const stopParties = () => Promise.all(parties.map((p) => p.stop()));
@@ -140,7 +145,7 @@ export async function started(
 	const smtp = trial?.smtp ? await fakeSmtp() : undefined;
 	// The settings the Redis store requires of a server before it starts.
 	const redis =
-		store === "pausable"
+		store === "pausable" && !on
 			? await startRedis([
 					"--maxmemory-policy",
 					"noeviction",
@@ -183,6 +188,7 @@ export async function started(
 				? { store: { "accept-volatile": scene.acceptVolatileStore ?? true } }
 				: {}),
 			...(redis ? { redis: sceneRedis(redis.url, scene.storeFaults === true) } : {}),
+			...(on ? { redis: on.redis } : {}),
 			...(smtp ? { "mail-smtp": { host: smtp.host, port: smtp.port, security: "none" } } : {}),
 		};
 		const scratch = await mkdtemp(join(tmpdir(), "conformance-scene-"));
@@ -201,7 +207,7 @@ export async function started(
 				values.map((value) => `${key} += ${JSON.stringify(value)}`);
 			// No Redis in the scene leaves the trial's URL unread: the app composes no Redis store.
 			const given = await trialLayer(dir, {
-				redisUrl: redis?.url ?? "redis://127.0.0.1:1",
+				redisUrl: (on?.redis.url as string | undefined) ?? redis?.url ?? "redis://127.0.0.1:1",
 				leave: trial.leave,
 				layer: [
 					...(trialLists
@@ -222,8 +228,14 @@ export async function started(
 			command: process.execPath,
 			args: ["src/main.ts"],
 			cwd: dir,
-			env: { ...baseEnv(), ...trusted, APP_CONFIG: appConfig(file, written, local) },
+			env: {
+				...baseEnv(),
+				...trusted,
+				...on?.env,
+				APP_CONFIG: appConfig(file, written, local),
+			},
 			port,
+			...(on ? { group: true } : {}),
 		});
 	};
 	const running = await untilPortHeld(startAt, portAttempts);

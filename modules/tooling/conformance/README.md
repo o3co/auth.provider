@@ -3,7 +3,7 @@
 ## Responsibilities
 - Owns the conformance test base: the area contract, scene composition, the driver contract and selection, assembly of the new system, the pattern mode (every scene on one pattern's app), shared tools.
 - Its internal modules for running a target: `drivers` runs the new system, on a scene's parts or a pattern's app; `audit` keeps the events a target sends; `patterns` runs every pattern's areas.
-- Its internal modules for fault scenes: `relay` sits between an app and Redis to cause a fault at a known point and show that it happened; `store-wire` reads the Redis adapter's wire for the relay; `faults` runs a Redis topology and the faults of its nodes; `promotion` promotes a replica without losing what the primary took; `ask` sends a node commands; `clock` runs a process on a moved clock.
+- Its internal modules for fault scenes: `relay` sits between an app and Redis to cause a fault at a known point and show that it happened; `store-wire` reads the Redis adapter's wire for the relay; `faults` runs a Redis topology and the faults of its nodes; `promotion` promotes a replica without losing what the primary took; `ask` sends a node commands; `clock` runs a process on a moved clock; `deployment` runs a scene's app as instances on a topology.
 
 ## Not here
 - Scenes and scene vocabulary, and the set-ups for legacy and new (each area's conformance module). Starting the legacy system (`conformance-legacy`). The internals of the system under test.
@@ -18,9 +18,11 @@
   - With `full+opt-ins`, a scene whose modules the app lacks fails
 - The pattern runs (the script `patterns`, internal module `patterns`)
 - Audit events (`auditEvents`, internal module `audit`): the need a scene states to read them, and a running target's trail
-- Shared tools: starting a process and waiting for it to respond, a free port, a throwaway Redis (on the settings its caller gives, as `drivers` does; paused as a hung store is and, resumed, back once it answers again, within ten seconds), a second start that can cause a storage failure, a fake HTTP server for a scene's outside parties (keeps every request, its body as text and as bytes, and answers as the area's script says, in JSON, text or bytes; plain http at loopback)
+- Starting a process and waiting for it to respond, in a process group of its own where asked (then killed with what it started); a free port.
+- Shared tools: a throwaway Redis (on the settings its caller gives, as `drivers` does; paused as a hung store is and, resumed, back once it answers again, within ten seconds), a second start that can cause a storage failure, a fake HTTP server for a scene's outside parties (keeps every request, its body as text and as bytes, and answers as the area's script says, in JSON, text or bytes; plain http at loopback)
   - A fake's script that fails fails the scene when the fake stops
 - Test tools (`./testing`): a fake SMTP relay for a scene's mail (plain SMTP at loopback, on a free port each run; keeps every message, decoded, and finds the latest to an address)
+- A fault run (`CONFORMANCE_FAULTS=1`, `./testing`): `faultRun` tells a scene it is in one, and `faultRunReporter` fails the run where a fault scene (`*.faults.case.ts`) did not run
 
 ## Invariants
 - Holds neither feature vocabulary nor legacy-system names.

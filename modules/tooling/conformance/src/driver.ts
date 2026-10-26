@@ -9,6 +9,13 @@ export type Started =
 			readonly kind: "running";
 			readonly baseUrl: string;
 			stop(): Promise<void>;
+			/**
+			 * Ends it at once with SIGKILL, its process group with it, answering how it ended and when, on
+			 * this process's monotonic clock (`performance.now()`); only where launched as a group.
+			 */
+			kill?(): Promise<{ readonly signal: string | null; readonly endedAt: number }>;
+			/** Its process group's id, where launched as a group. */
+			readonly pid?: number;
 			/** Makes the store unreachable, or reachable again; only where the scene asked for store faults. */
 			fault?(down: boolean): Promise<void>;
 			/** The audit events it sends, on a target that can meet the need. */
@@ -29,6 +36,8 @@ export interface Launch {
 	readonly stopGraceMs?: number;
 	/** How long a stop waits after SIGKILL before it fails. */
 	readonly killWithinMs?: number;
+	/** In a process group of its own, so a stop or a kill ends what it started too. */
+	readonly group?: boolean;
 }
 
 /** A target draining within the kernel's stop deadline (30 s) is never cut short. */
@@ -61,7 +70,11 @@ export async function untilPortHeld(
 }
 
 export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started> {
-	const child = spawn(spec.command, [...spec.args], { cwd: spec.cwd, env: { ...spec.env } });
+	const child = spawn(spec.command, [...spec.args], {
+		cwd: spec.cwd,
+		env: { ...spec.env },
+		...(spec.group ? { detached: true } : {}),
+	});
 	let output = "";
 	child.stdout.on("data", (chunk: Buffer) => {
 		output += chunk;
@@ -70,6 +83,13 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 		output += chunk;
 	});
 	const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+	/** Signals the target, its whole process group where launched as one. */
+	const signal = (name: NodeJS.Signals) => {
+		if (!spec.group || child.pid === undefined) return child.kill(name);
+		try {
+			process.kill(-child.pid, name);
+		} catch {}
+	};
 	/** Whether the target ended within `ms`; the timer is cleared either way. */
 	const endedWithin = async (ms: number) => {
 		let timer: NodeJS.Timeout | undefined;
@@ -83,11 +103,16 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 	// SIGTERM, then SIGKILL past its grace; one still there after that fails the stop.
 	const stop = async () => {
 		if (child.exitCode !== null || child.signalCode !== null) return;
-		child.kill("SIGTERM");
+		signal("SIGTERM");
 		if (await endedWithin(spec.stopGraceMs ?? stopGraceMs)) return;
-		child.kill("SIGKILL");
+		signal("SIGKILL");
 		if (await endedWithin(spec.killWithinMs ?? killWithinMs)) return;
 		throw new Error(`target ${child.pid} did not end after SIGTERM and SIGKILL:\n${output}`);
+	};
+	const kill = async () => {
+		if (child.exitCode === null && child.signalCode === null) signal("SIGKILL");
+		await exited;
+		return { signal: child.signalCode, endedAt: performance.now() };
 	};
 	const baseUrl = `http://127.0.0.1:${spec.port}`;
 	const deadline = Date.now() + timeoutMs;
@@ -95,12 +120,17 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 		if (child.exitCode !== null || child.signalCode !== null) return { kind: "refused", output };
 		try {
 			await fetch(baseUrl, { signal: AbortSignal.timeout(500) });
-			return { kind: "running", baseUrl, stop };
+			return {
+				kind: "running",
+				baseUrl,
+				stop,
+				...(spec.group ? { kill, ...(child.pid ? { pid: child.pid } : {}) } : {}),
+			};
 		} catch {
 			await Promise.race([pause(100), exited]);
 		}
 	}
-	child.kill("SIGKILL");
+	signal("SIGKILL");
 	throw new Error(`target did not answer in ${timeoutMs}ms:\n${output}`);
 }
 
