@@ -107,7 +107,7 @@ describe.runIf(!unstartable)("H. verified email: passkey login", () => {
 		expect((await loginWithPasskey("alice")).status).toBe(200);
 	});
 
-	it("refuses a user whose email is not, saying why", async () => {
+	it("refuses a user whose email is not, saying why [rfc6749-5.2-a]", async () => {
 		const res = await loginWithPasskey("bob");
 		expect([res.status, res.body.error, res.body.error_description]).toEqual([
 			400,

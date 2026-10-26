@@ -212,7 +212,7 @@ describe("G. second factor at password login", () => {
 		expect(own.status).toBe(200);
 	});
 
-	it("holds a user after repeated wrong codes even for the right one, and a recovery code still works", async () => {
+	it("holds a user after repeated wrong codes even for the right one, and a recovery code still works [rfc6749-10.10-d]", async () => {
 		const { secret, codes } = await s.enrol("carol");
 		const first = await s.held("carol");
 		const factor = (await first.b.factors(first.transaction)).find((f) => f.kind === "totp");

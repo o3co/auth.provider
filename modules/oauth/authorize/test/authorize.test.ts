@@ -305,7 +305,7 @@ const request = (extra: Record<string, string> = {}) => ({
 });
 
 describe("authorize: trust in the redirect URI", () => {
-	it("answers locally until the client and an exactly registered redirect URI are known", async () => {
+	it("answers locally until the client and an exactly registered redirect URI are known [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		for (const params of [
@@ -325,7 +325,7 @@ describe("authorize: trust in the redirect URI", () => {
 		expect(loopback.at?.origin).toBe("http://127.0.0.1:9555");
 	});
 
-	it("sends every other refusal back with state and iss", async () => {
+	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const cases: [Record<string, string> | string, string][] = [
@@ -336,7 +336,12 @@ describe("authorize: trust in the redirect URI", () => {
 			[request({ request_uri: "urn:x" }), "request_uri_not_supported"],
 			[request({ response_mode: "fragment" }), "invalid_request"],
 			[request({ scope: "admin" }), "invalid_scope"],
-			[request({ acr_values: "gold" }), "unmet_authentication_requirements"],
+			[
+				request({
+					claims: JSON.stringify({ id_token: { acr: { essential: true, values: ["gold"] } } }),
+				}),
+				"unmet_authentication_requirements",
+			],
 			[request({ client_id: "nocode" }), "unauthorized_client"],
 			[request({ prompt: "none login" }), "invalid_request"],
 			[`${new URLSearchParams(request())}&code_challenge_method=S256`, "invalid_request"],
@@ -374,7 +379,7 @@ it("refuses a client not allowed the code grant with the token endpoint's words 
 });
 
 describe("authorize: session and consent", () => {
-	it("sends a request without a session to the login page, with the way back from the public origin", async () => {
+	it("sends a request without a session to the login page, with the way back from the public origin [rfc6749-3.1-a]", async () => {
 		const { authorize } = await serve();
 		const res = await authorize(request());
 		expect(res.status).toBe(302);
@@ -611,7 +616,7 @@ describe("authorize: the audience a request asks for", () => {
 		expect(await audienceFor(s, "https://two")).toEqual(["https://api"]);
 	});
 
-	it("sends a parameter the rule reads, sent twice, back as the rule says, and any other as invalid_request", async () => {
+	it("sends a parameter the rule reads, sent twice, back as the rule says, and any other as invalid_request [rfc6749-3.1-f]", async () => {
 		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
@@ -666,7 +671,7 @@ describe("authorize: the code grant", () => {
 	const codeOf = async (s: Awaited<ReturnType<typeof serve>>, cookie: string) =>
 		(await s.authorize(request(), cookie)).at?.searchParams.get("code") ?? "";
 
-	it("exchanges a code once, and revokes what it gave when the code comes again", async () => {
+	it("exchanges a code once, and revokes what it gave when the code comes again [rfc6749-4.1.2-d] [rfc6749-4.1.2-e] [rfc6749-3.3-b] [rfc6749-5.1-a] [rfc7636-4.6-a]", async () => {
 		const s = await serve();
 		const code = await codeOf(s, await s.login());
 		const first = await s.token({ code, redirect_uri: callback, code_verifier: verifier });
@@ -682,7 +687,7 @@ describe("authorize: the code grant", () => {
 		});
 	});
 
-	it("uses up a code on a wrong verifier, client or redirect URI, but not on a malformed request", async () => {
+	it("uses up a code on a wrong verifier, client or redirect URI, but not on a malformed request [rfc7636-4.6-b] [rfc7636-4.5-a] [rfc7636-4.4-a] [rfc9700-2.1.1-a] [rfc6749-4.1.3-c] [rfc6749-4.1.3-e]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const malformed = await codeOf(s, cookie);
@@ -706,7 +711,7 @@ describe("authorize: the code grant", () => {
 		}
 	});
 
-	it("refuses a code after its time, or after its session ended", async () => {
+	it("refuses a code after its time, or after its session ended [rfc6749-4.1.2-b] [rfc6749-4.1.3-d]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const late = await codeOf(s, cookie);
@@ -749,7 +754,7 @@ describe("authorize: the code grant", () => {
 describe("authorize: what the reviews asked to pin down", () => {
 	const codeFrom = (res: { at?: URL | undefined }) => res.at?.searchParams.get("code") ?? "";
 
-	it("answers locally with OAuth codes, and treats only loopback IP literals as loopback", async () => {
+	it("answers locally with OAuth codes, and treats only loopback IP literals as loopback [rfc6749-4.1.2.1-a] [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-a] [rfc6749-3.1-f] [rfc9700-4.1.3-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const local = async (params: Record<string, string> | string) => {
@@ -775,7 +780,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect(v6.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("refuses or accepts each parameter as the rules say", async () => {
+	it("refuses or accepts each parameter as the rules say [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const error = async (extra: Record<string, string>) =>
@@ -903,7 +908,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		await expect(serve({ revocable: false })).rejects.toThrow();
 	});
 
-	it("lets a public client redeem, and a loopback redirect redeem with its own port only", async () => {
+	it("lets a public client redeem, and a loopback redirect redeem with its own port only [rfc6749-4.1.3-e]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const code = codeFrom(
@@ -936,7 +941,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		).toBe(200);
 	});
 
-	it("does not use up a code when the request lacks it parts, and answers every refusal alike", async () => {
+	it("does not use up a code when the request lacks it parts, and answers every refusal alike [rfc6749-4.1.3-e]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const code = codeFrom(await s.authorize(request(), cookie));
@@ -947,7 +952,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect(replay.body).toEqual({ error: "invalid_grant", error_description: "invalid code" });
 	});
 
-	it("leaves no usable token when two redeem at once, or another client presents a used code", async () => {
+	it("leaves no usable token when two redeem at once, or another client presents a used code [rfc6749-4.1.2-e]", async () => {
 		const s = await serve();
 		const t = s.app.get(tokens);
 		const cookie = await s.login();
@@ -968,7 +973,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect((await t.verifyAccess(String(first.body.access_token))).kind).toBe("invalid");
 	});
 
-	it("retries a revocation that failed, until the reused code's token is revoked", async () => {
+	it("retries a revocation that failed, until the reused code's token is revoked [rfc6749-4.1.2-e]", async () => {
 		const s = await serve({ codeGrant: { "sweep-interval": "1s" } });
 		const t = s.app.get(tokens);
 		const cookie = await s.login();
@@ -1017,7 +1022,7 @@ it("revokes a code's token when its session logs out later", async () => {
 	});
 });
 
-it("adds an ID token through code-grant when the scope holds the maker's, with the code's facts", async () => {
+it("adds an ID token through code-grant when the scope holds the maker's, with the code's facts [oidc-core-3.1.3.3-c] [oidc-core-3.1.3.2-f]", async () => {
 	const asked: IdTokenRequest[] = [];
 	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
@@ -1239,16 +1244,32 @@ it("meets an acr by the amr sets its table names, and sends a session that falls
 	expect(`${back.origin}${back.pathname}`).toBe("https://as.example/oauth/authorize");
 	const met = await s.authorize(asked, await s.login("alice", ["pwd", "otp", "mfa"]));
 	expect(met.at?.searchParams.get("code")).toBeTruthy();
+	// Asked by acr_values, an acr is voluntary: one not met under prompt=none, or not known, is passed over.
 	const quiet = await s.authorize(
 		request({ acr_values: "urn:test:mfa", prompt: "none" }),
 		await s.login(),
 	);
-	expect(quiet.at?.searchParams.get("error")).toBe("interaction_required");
+	expect(quiet.at?.searchParams.has("code")).toBe(true);
 	const unknown = await s.authorize(request({ acr_values: "gold" }), await s.login());
-	expect(unknown.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+	expect(unknown.at?.searchParams.has("code")).toBe(true);
+	// Asked as essential in claims, it is not: unmet under prompt=none, or not known, is refused.
+	const essential = (values: string[]) =>
+		JSON.stringify({ id_token: { acr: { essential: true, values } } });
+	const held = await s.authorize(
+		request({ claims: essential(["urn:test:mfa"]), prompt: "none" }),
+		await s.login(),
+	);
+	expect(held.at?.searchParams.get("error")).toBe("interaction_required");
+	const unknowable = await s.authorize(request({ claims: essential(["gold"]) }), await s.login());
+	expect(unknowable.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+	const raising = await s.authorize(
+		request({ claims: essential(["urn:test:mfa"]) }),
+		await s.login(),
+	);
+	expect(`${raising.at?.origin}${raising.at?.pathname}`).toBe("https://as.example/mfa");
 });
 
-it("binds to the code the first acr met in the order asked, past any not met", async () => {
+it("binds to the code the first acr met in the order asked, past any not met, or else the session's current acr", async () => {
 	const asked: IdTokenRequest[] = [];
 	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
@@ -1271,6 +1292,7 @@ it("binds to the code the first acr met in the order asked, past any not met", a
 		"urn:test:either urn:test:one",
 		"urn:test:one urn:test:either",
 		"urn:test:two urn:test:one",
+		"urn:test:two",
 	]) {
 		const res = await s.authorize(request({ scope: "openid", acr_values: order }), await s.login());
 		const code = res.at?.searchParams.get("code") ?? "";
@@ -1288,6 +1310,9 @@ it("binds to the code the first acr met in the order asked, past any not met", a
 		"urn:test:either",
 		"urn:test:one",
 		"urn:test:one",
+		// Voluntary and not met: the code carries the session's current acr, the first in the table it meets.
+		"urn:test:one",
+		// None asked: none carried.
 		undefined,
 	]);
 });
@@ -1305,13 +1330,20 @@ describe("authorize: one trip to raise the authentication", () => {
 		authorize: { "step-up-page": "https://as.example/mfa" },
 	};
 
-	it("answers unmet when the browser comes back without raising, and issues once it raised", async () => {
+	it("goes on without a voluntary acr when the browser comes back without raising, answers unmet for an essential one, and issues once it raised", async () => {
 		const s = await serve(table);
 		const cookie = await s.login();
 		const sent = await s.authorize(request({ acr_values: "urn:test:mfa" }), cookie);
 		const back = new URL(sent.at?.searchParams.get("redirect_to") ?? "");
 		const unraised = await s.authorize(back.search.slice(1), cookie);
-		expect(unraised.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+		expect(unraised.at?.searchParams.has("code")).toBe(true);
+		const essential = JSON.stringify({
+			id_token: { acr: { essential: true, value: "urn:test:mfa" } },
+		});
+		const held = await s.authorize(request({ claims: essential }), cookie);
+		const heldBack = new URL(held.at?.searchParams.get("redirect_to") ?? "");
+		const refused = await s.authorize(heldBack.search.slice(1), cookie);
+		expect(refused.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
 		const again = await s.authorize(request({ acr_values: "urn:test:mfa" }), cookie);
 		const resume = new URL(again.at?.searchParams.get("redirect_to") ?? "");
 		const done = await s.authorize(resume.search.slice(1), await raised(s, cookie));
@@ -1336,16 +1368,92 @@ describe("authorize: one trip to raise the authentication", () => {
 	});
 });
 
-it("refuses a claims parameter that is no object or asks for acr, and ignores the other claims it names", async () => {
-	const s = await serve({ acr: { "urn:test:pwd": [["pwd"]] } });
+it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a]", async () => {
+	const asked: IdTokenRequest[] = [];
+	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
+		m.contribute(idTokens).by(() => ({
+			scope: "openid",
+			make: async (r: IdTokenRequest) => {
+				asked.push(r);
+				return "id.token.here";
+			},
+		})),
+	]);
+	const s = await serve({
+		extra: [maker],
+		acr: { "urn:test:pwd": [["pwd"]], "urn:test:mfa": [["mfa"]] },
+	});
 	const cookie = await s.login();
 	const answer = async (claims: string, extra: Record<string, string> = {}) =>
-		(await s.authorize(request({ claims, ...extra }), cookie)).at?.searchParams;
-	const acr = JSON.stringify({ id_token: { acr: { essential: true, values: ["urn:test:pwd"] } } });
-	for (const asked of [acr, JSON.stringify({ userinfo: { acr: null } }), "[]", "not json"]) {
-		expect((await answer(asked))?.get("error")).toBe("invalid_request");
+		(await s.authorize(request({ scope: "openid", claims, ...extra }), cookie)).at?.searchParams;
+	/** The acr the ID token of this code carries: the code redeemed, and an ID token made for it. */
+	const acrOf = async (code: string | null | undefined) => {
+		const before = asked.length;
+		const redeemed = await s.token({
+			code: code ?? "",
+			redirect_uri: callback,
+			code_verifier: verifier,
+		});
+		expect(redeemed.status, JSON.stringify(redeemed.body)).toBe(200);
+		expect(asked.length).toBe(before + 1);
+		return asked.at(-1)?.acr;
+	};
+	for (const malformed of [
+		"[]",
+		"not json",
+		JSON.stringify({ id_token: { acr: { values: "urn:test:pwd" } } }),
+		// An empty list names no acr, so it can neither be met nor stand for no constraint.
+		JSON.stringify({ id_token: { acr: { essential: true, values: [] } } }),
+		JSON.stringify({ userinfo: { acr: { values: [] } } }),
+		// value and values together leave which is asked unclear.
+		JSON.stringify({
+			id_token: { acr: { essential: true, value: "urn:test:mfa", values: ["urn:test:pwd"] } },
+		}),
+	]) {
+		expect((await answer(malformed))?.get("error"), malformed).toBe("invalid_request");
 	}
-	expect((await answer(acr, { acr_values: "urn:test:pwd" }))?.get("error")).toBe("invalid_request");
+	const of = (acr: unknown, at = "id_token") => JSON.stringify({ [at]: { acr } });
+	// Essential and met, by value or values, from id_token or userinfo: the code carries it.
+	expect(
+		await acrOf((await answer(of({ essential: true, values: ["urn:test:pwd"] })))?.get("code")),
+	).toBe("urn:test:pwd");
+	expect(
+		await acrOf(
+			(await answer(of({ essential: true, value: "urn:test:pwd" }, "userinfo")))?.get("code"),
+		),
+	).toBe("urn:test:pwd");
+	// Its values over acr_values, which they stand in for.
+	const both = await answer(of({ essential: true, values: ["urn:test:pwd"] }), {
+		acr_values: "urn:test:mfa",
+	});
+	expect(await acrOf(both?.get("code"))).toBe("urn:test:pwd");
+	// Essential and unmet, with no step-up page: refused.
+	expect((await answer(of({ essential: true, values: ["urn:test:mfa"] })))?.get("error")).toBe(
+		"unmet_authentication_requirements",
+	);
+	// Not essential, or with no values: voluntary, so unmet goes on with the session's current acr.
+	expect(await acrOf((await answer(of({ values: ["urn:test:mfa"] })))?.get("code"))).toBe(
+		"urn:test:pwd",
+	);
+	expect(await acrOf((await answer(of(null, "userinfo")))?.get("code"))).toBe("urn:test:pwd");
+	// A voluntary request beside an essential one never meets it in its place.
+	const mixed = JSON.stringify({
+		id_token: { acr: { essential: true, value: "urn:test:mfa" } },
+		userinfo: { acr: { value: "urn:test:pwd" } },
+	});
+	expect((await answer(mixed))?.get("error")).toBe("unmet_authentication_requirements");
+	// Two essential requests: the acr must meet both, so one only one names is not carried.
+	const twice = JSON.stringify({
+		id_token: { acr: { essential: true, values: ["urn:test:pwd", "urn:test:mfa"] } },
+		userinfo: { acr: { essential: true, values: ["urn:test:mfa"] } },
+	});
+	expect((await answer(twice))?.get("error")).toBe("unmet_authentication_requirements");
+	// A value is one acr as written: one holding a blank names no acr of the table, never two.
+	const spaced = of({ essential: true, value: "urn:test:mfa urn:test:pwd" });
+	expect((await answer(spaced))?.get("error")).toBe("unmet_authentication_requirements");
+	expect(
+		await acrOf((await answer(of({ values: ["urn:test:mfa urn:test:pwd"] })))?.get("code")),
+	).toBe("urn:test:pwd");
 	expect((await answer(JSON.stringify({ id_token: { email: null } })))?.has("code")).toBe(true);
 });
 
@@ -1384,16 +1492,21 @@ it("offers a contributed acr unless the operator's table names the same acr", as
 		acr: { "urn:test:both": [["pwd"]] },
 	});
 	const cookie = await s.login();
-	const code = async (acr: string) =>
-		(await s.authorize(request({ acr_values: acr }), cookie)).at?.searchParams;
-	expect((await code("urn:test:own"))?.get("error")).toBe("unmet_authentication_requirements");
-	expect((await code("urn:test:both"))?.has("code")).toBe(true);
+	const code = async (claims: string) =>
+		(await s.authorize(request({ claims }), cookie)).at?.searchParams;
+	// Asked as essential, so one unmet is refused rather than passed over.
+	const essential = (acr: string) =>
+		JSON.stringify({ id_token: { acr: { essential: true, values: [acr] } } });
+	expect((await code(essential("urn:test:own")))?.get("error")).toBe(
+		"unmet_authentication_requirements",
+	);
+	expect((await code(essential("urn:test:both")))?.has("code")).toBe(true);
 	const strong = await s.login("alice", ["pwd", "mfa"]);
-	const met = await s.authorize(request({ acr_values: "urn:test:own" }), strong);
+	const met = await s.authorize(request({ claims: essential("urn:test:own") }), strong);
 	expect(met.at?.searchParams.has("code")).toBe(true);
 });
 
-it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer", async () => {
+it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer [rfc9207-2.3-c] [rfc9700-2.1.1-c] [rfc9700-2.1.1-d] [rfc8414-2-b] [rfc8414-2-g] [oidc-discovery-3-d] [oidc-discovery-3-v]", async () => {
 	const published = contract<readonly MetadataItem[]>("published");
 	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 		m.provide(published).by((c) => c.collect(metadata)),
@@ -1478,7 +1591,7 @@ describe("authorize: openid in the request", () => {
 		).toBe(false);
 	});
 
-	it("refuses a request that does not name openid itself with invalid_scope, sent back", async () => {
+	it("refuses a request that does not name openid itself with invalid_scope, sent back [oidc-core-3.1.2.2-a]", async () => {
 		const { authorize, login } = await serve(required);
 		const cookie = await login();
 		const refused = [false, "invalid_scope", "s1", issuer];
@@ -1495,7 +1608,7 @@ describe("authorize: openid in the request", () => {
 		]);
 	});
 
-	it("keeps the refusal of a scope left out with no default, and records it", async () => {
+	it("keeps the refusal of a scope left out with no default, and records it [rfc6749-3.3-b]", async () => {
 		const { authorize, login, events } = await serve(required);
 		const res = await authorize(request({ client_id: "nodefault" }), await login());
 		expect(res.at?.searchParams.get("error")).toBe("invalid_scope");
@@ -1549,7 +1662,7 @@ describe("authorize: audit events", () => {
 		]);
 	});
 
-	it("takes an empty scope as left out, and records it; a scope of whitespace alone is malformed, unrecorded", async () => {
+	it("takes an empty scope as left out, and records it; a scope of whitespace alone is malformed, unrecorded [rfc6749-3.1-d] [rfc6749-3.3-b]", async () => {
 		const { authorize, login, events } = await serve();
 		const cookie = await login();
 		const answer = (res: { at: URL | undefined }) =>

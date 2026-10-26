@@ -88,7 +88,7 @@ describe("the recipe for a login page with a second factor", () => {
 		await fake?.stop();
 	});
 
-	it("binds TOTP at a first login, lets the next login in with it, and shows each step as the recipe does", async () => {
+	it("binds TOTP at a first login, lets the next login in with it, and shows each step as the recipe does [rfc6749-4.1.2-f]", async () => {
 		const base = started?.baseUrl ?? "";
 		const t = transcript(base, issuer);
 		t.mask("expires_in", "<seconds>");

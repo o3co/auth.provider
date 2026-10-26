@@ -12,7 +12,7 @@
 - Which amr a login can produce: `login-gates`.
 
 ## Offers
-- `acr`: the known acr among the request's `acr_values`, in the order asked; the first of them a session's amr meet.
+- `acr`: the known acr among the request's `acr_values`, in the order asked; the first of them a session's amr meet; and the session's current acr, the first in the table's order its amr meet.
 - Extension point: table entries, an acr and the amr sets that meet it, keyed by acr; `isAmrSets` is the rule they follow.
 - Contribution to `issuer`'s metadata: `acr_values_supported`, the operator's table in its written order, then the entries; left out when empty.
 - Operator section: `values`, each acr and the amr sets that meet it, each set and each list non-empty; default empty.

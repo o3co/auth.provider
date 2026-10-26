@@ -732,7 +732,7 @@ From `@mod/token-exchange`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `token-exchange.max-actor-depth` | integer (1–10) | `3` |  |  |  | The longest chain of actors an exchanged token may carry. |
-| `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime. |
+| `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 2s to 1d, even past `tokens`' lifetime. |
 
 ## tokens
 
@@ -740,7 +740,7 @@ From `@mod/tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `1s` to `1d` in whole seconds. |
+| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `2s` to `1d` in whole seconds. |
 | `tokens.revocation` | denylist \| unsupported |  | yes | `TOKENS_REVOCATION` | `denylist` | Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported. |
 | `tokens.issuance-timeout` | string | `10s` |  |  |  | How long the issuance policies may take together, from `1s` to `1m`; past it, the issuance is unavailable. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |
@@ -819,7 +819,7 @@ From `@mod/client-assertion`.
 |---|---|---|---|---|
 | `sections.client-assertion.keys` | list of map | `[]` |  | The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. |
 | `sections.client-assertion.jwks-uri` | string |  |  | Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot. |
-| `sections.client-assertion.accept-loose-audience` | boolean | `false` |  | Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client still changing what it sends; to be removed. |
+| `sections.client-assertion.accept-loose-audience` | boolean | `false` |  | Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client whose library names the token endpoint; a registered client that sets it is warned of at every start. |
 
 ### sections.client-secret
 

@@ -114,7 +114,7 @@ describe("keys", () => {
 		expect(await k.verify(byOld, "JWT")).toEqual({ kind: "invalid", reason: "kid_expired" });
 	});
 
-	it("publishes and verifies the next key, but never signs with it", async () => {
+	it("publishes and verifies the next key, but never signs with it [oidc-core-10.1-d]", async () => {
 		const coming = ed25519Pem();
 		const { app, base } = await boot({
 			...rotated(),
@@ -170,7 +170,7 @@ describe("keys", () => {
 		expect(await read("https://evil.example")).toBeNull();
 	});
 
-	it("publishes only public members of unexpired keys with a strong ETag", async () => {
+	it("publishes only public members of unexpired keys with a strong ETag [oidc-core-10.1.1-a] [oidc-core-10.2.1-a]", async () => {
 		const { base } = await boot(rotated());
 		const res = await fetch(`${base}/.well-known/jwks.json`);
 		expect(res.status).toBe(200);

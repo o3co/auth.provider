@@ -180,6 +180,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `route` (`src/route`): the handler of `POST /oauth/token`, from the request to the answer, and what a grant issues through.
 - `@mod/token-exchange` (feature, `modules/oauth/token-exchange`): Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
 - `@mod/tokens` (feature, `modules/oauth/tokens`): Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
+  - `issuance` (`src/issuance`): the judgment `admits` and `issue` share, and the issuing `issue` does over it.
 - `@mod/userinfo` (feature, `modules/oauth/userinfo`): Serves OIDC's userinfo: admits the access token a request presents, checks the session it was issued in, and answers `sub` and the claims `oidc` releases for its scope.
 - `@mod/verified-email` (feature, `modules/oauth/verified-email`): Contributes the issuance policy `verified-email`: no access token for a subject whose email users has not stated verified.
 
@@ -310,6 +311,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `relay` (`src/relay`): a relay between an app and Redis that causes a fault at a known point and shows that it happened.
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
+  - `acr` (`src/acr`): the scenes of the acr a client asks for.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.

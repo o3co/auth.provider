@@ -176,7 +176,7 @@ describe("idp-apple", () => {
 		expect((await open()).upstream.issuer).toBe("https://appleid.apple.com");
 	});
 
-	it("asks for an answer in a posted form, at the callback checked at boot, without freshness", async () => {
+	it("asks for an answer in a posted form, at the callback checked at boot, without freshness [oidc-core-3.1.2.1-y] [oidc-core-7.2.1-a] [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", async () => {
 		const { upstream } = await open();
 		expect(upstream.responseMode).toBe("form_post");
 		const elsewhere = { ...start, redirectUri: "https://other.example/cb" };
@@ -427,7 +427,7 @@ describe("idp-apple", () => {
 		expect(later.payload.iat).toBe(seconds + 150);
 	});
 
-	it("refuses a callback naming another issuer before its code is used, and takes one naming none", async () => {
+	it("refuses a callback naming another issuer before its code is used, and takes one naming none [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
 		const { upstream, asked } = await open(async () => granted());
 		for (const iss of ["", "appleid.apple.com", `${issuer}/`, "https://evil.example"]) {
 			expect(await outcome(upstream.exchange(exchange({ iss }))), iss).toBe("refused");
@@ -438,7 +438,7 @@ describe("idp-apple", () => {
 		});
 	});
 
-	it("refuses an id_token that does not hold for this client and login", async () => {
+	it("refuses an id_token that does not hold for this client and login [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
 		const refusedBy = async (token: string) => {
 			const { upstream } = await open(async () => granted({ id_token: token }));
 			return outcome(upstream.exchange(exchange()));
@@ -468,7 +468,7 @@ describe("idp-apple", () => {
 		expect(timed).toMatchObject({ authenticatedAt: (seconds - 60) * 1000 });
 	});
 
-	it("takes an id_token's at_hash only as the access token's", async () => {
+	it("takes an id_token's at_hash only as the access token's [oidc-core-3.1.3.5-a]", async () => {
 		const full = createHash("sha256").update("at").digest();
 		const half = full.subarray(0, 16).toString("base64url");
 		const exchanged = async (claims: Record<string, unknown>) => {
@@ -518,7 +518,7 @@ describe("idp-apple", () => {
 		expect(narrow.upstream.clockSkewMs).toBe(5_000);
 	});
 
-	it("refuses an answer without an id_token, and is unavailable when Apple cannot be reached", async () => {
+	it("refuses an answer without an id_token, and is unavailable when Apple cannot be reached [oidc-core-3.1.3.5-a]", async () => {
 		const bare = await open(async () => granted({ id_token: undefined }));
 		expect(await outcome(bare.upstream.exchange(exchange()))).toBe("refused");
 		const down = await open(() => "unreachable");

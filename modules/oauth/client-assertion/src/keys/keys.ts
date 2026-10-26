@@ -42,7 +42,7 @@ export const clientKeys: Section<ClientKeys> = {
 				.boolean()
 				.prefault(false)
 				.describe(
-					"Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client still changing what it sends; to be removed.",
+					"Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client whose library names the token endpoint; a registered client that sets it is warned of at every start.",
 				),
 		})
 		.refine((s) => s.keys.length === 0 || s["jwks-uri"] === undefined, {

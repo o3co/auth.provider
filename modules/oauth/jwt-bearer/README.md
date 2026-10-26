@@ -25,7 +25,7 @@
   - `max-assertion-lifetime` (`1s` to `1d`, default `1h`): how far ahead its `exp`, and back its `iat`, an assertion may be when taken, not `exp - iat`. `clock-skew` (`0s` to `5m`, default `30s`). Each in whole seconds with its unit, narrowed by an entry alone.
 
 ## Invariants
-- Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once issued is handed to no one, also `expired`.
+- Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once signed is refused by `tokens`, also `expired`.
 - A trusted issuer's assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under that issuer's own policy, as `policy` makes it. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
 - Boot is refused on an entry `issuers` cannot read as a trusted issuer, as its card says, each at its place (`jwt-bearer.issuers.<i>`), never by its value; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them.
 - `as-is`: the token is for the signer's subject. `linked`: for the subject `linkedSubjects` resolves (`upstream`, the signer's subject) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.

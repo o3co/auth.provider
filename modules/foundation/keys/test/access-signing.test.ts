@@ -49,7 +49,7 @@ describe("accessTokenSigning", () => {
 		],
 	};
 
-	it("signs the claims as they are as an at+jwt with the current key, and verifies it", async () => {
+	it("signs the claims as they are as an at+jwt with the current key, and verifies it [oidc-core-10.1-d]", async () => {
 		const { access } = await open(rotated);
 		const token = await access.sign({ sub: "a", scope: "read" });
 		expect(decodeProtectedHeader(token)).toEqual({ alg: "EdDSA", typ: "at+jwt", kid: "now" });

@@ -125,7 +125,7 @@ async function introspect(token: string) {
 }
 
 describe("session grant", () => {
-	it("gives a confidential client an access token for the session's user, and nothing more", async () => {
+	it("gives a confidential client an access token for the session's user, and nothing more [rfc6749-5.1-a]", async () => {
 		const res = await sessionGrant(asBff);
 		expect(res.status).toBe(200);
 		expect(res.body).toMatchObject({ token_type: "Bearer", scope: "read" });
@@ -178,7 +178,7 @@ describe("session grant: refusals", () => {
 		expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);
 	});
 
-	it("refuses a client not allowed the grant", async () => {
+	it("refuses a client not allowed the grant [rfc6749-5.2-a]", async () => {
 		const res = await sessionGrant({ client: svc });
 		expect([res.status, res.body.error]).toEqual([400, "unauthorized_client"]);
 	});
@@ -215,7 +215,7 @@ describe("session grant: whose allowance", () => {
 		expect(res.body).not.toHaveProperty("access_token");
 	});
 
-	it("refuses a confidential client named in the body without its credentials", async () => {
+	it("refuses a confidential client named in the body without its credentials [rfc6749-2.2-a] [rfc6749-2.3.1-d] [rfc6749-3.2.1-a]", async () => {
 		const res = await sessionGrant({ form: { client_id: "bff", scope: "read" } });
 		expect([res.status, res.body.error]).toEqual([401, "invalid_client"]);
 	});

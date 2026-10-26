@@ -95,7 +95,7 @@ describe("the token route", () => {
 		["short of a requirement", "short"],
 		["open for another subject", "bob"],
 	] as const)(
-		"refuses the refreshed token when the session is %s once the upstream's tokens are written",
+		"refuses the refreshed token when the session is %s once the upstream's tokens are written [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f]",
 		async (_, now) => {
 			const at: { h?: Awaited<ReturnType<typeof linked>> } = {};
 			const offered: Offered = {
@@ -141,7 +141,7 @@ describe("the token route", () => {
 		});
 	});
 
-	it("refuses a token of an ended family, for another audience, or whose session is open for another subject", async () => {
+	it("refuses a token of an ended family, for another audience, or whose session is open for another subject [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f] [rfc6750-3.1-b] [rfc9700-2.3-c]", async () => {
 		const h = await linked();
 		const ended = await h.issue(h.session, "app", { family: "ended" });
 		const aside = await h.issue(h.session, "app", { audience: ["api"] });
@@ -159,7 +159,7 @@ describe("the token route", () => {
 		}
 	});
 
-	it("challenges a refused DPoP-bound token in its own scheme", async () => {
+	it("challenges a refused DPoP-bound token in its own scheme [rfc9449-7.1-c] [rfc9449-7.2-c]", async () => {
 		const h = await linked();
 		const ended = await h.issue(h.session, "app", { family: "ended", dpop: true });
 		const got = await h.call("token", ended.token, { scheme: "DPoP" });
@@ -176,7 +176,7 @@ describe("the token route", () => {
 		expect(await h.stores.records.read(h.session.id)).toBeUndefined();
 	});
 
-	it("refuses a token whose session is short of a requirement as one closed, keeping the session's upstream tokens", async () => {
+	it("refuses a token whose session is short of a requirement as one closed, keeping the session's upstream tokens [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f]", async () => {
 		const h = await linked();
 		h.shorten("alice");
 		for (const idp of ["corp", "other"]) {

@@ -95,7 +95,7 @@ describe("metadata document clients: ids refused before any fetch", () => {
 		] as const;
 	};
 
-	it("answers each with 400 and no redirect, and fetches nothing", async () => {
+	it("answers each with 400 and no redirect, and fetches nothing [rfc6749-4.1.2.1-a] [rfc6749-4.1.2.1-b] [oidc-core-3.1.2.6-b]", async () => {
 		const answers = [];
 		for (const [what, id] of ids()) {
 			const res = await authorizing(id, "https://other.example/cb");
