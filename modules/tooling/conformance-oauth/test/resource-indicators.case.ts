@@ -92,7 +92,7 @@ const credentials = (resources: string[]): [string, string][] => [
 describe("RFC 8707: client credentials narrowed to a resource", () => {
 	const s = running(() => scene(true));
 
-	it("issues for the one resource asked among the client's audiences, and its first audience when none is asked", async () => {
+	it("issues for the one resource asked among the client's audiences, and its first audience when none is asked [rfc8707-2-c]", async () => {
 		expect(await s.token("app", credentials([second]))).toMatchObject({
 			status: 200,
 			aud: [second],
@@ -169,7 +169,7 @@ describe.runIf(areaTarget().can("trusted-issuers"))(
 	() => {
 		const s = running(() => scene(true, true));
 
-		it("issues for the resource asked among the client's audiences, and refuses one outside them", async () => {
+		it("issues for the resource asked among the client's audiences, and refuses one outside them [rfc8707-2-c]", async () => {
 			expect(await s.token("bearer", bearer([second]))).toMatchObject({
 				status: 200,
 				aud: [second],
