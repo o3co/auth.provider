@@ -26,24 +26,33 @@ interface Job {
 	readonly steps?: readonly Step[];
 }
 
-type Rule = (inputs: Readonly<Record<string, unknown>>, step: Step) => string[];
+/** Where a workflow runs: CI, which may turn a cache off in the runs a release takes evidence from, or the release, which restores none at all. */
+export type Runs = "ci" | "release";
+
+type Rule = (inputs: Readonly<Record<string, unknown>>, step: Step, runs: Runs) => string[];
 
 const written = (inputs: Readonly<Record<string, unknown>>, input: string) =>
 	Object.hasOwn(inputs, input);
 const off = (v: unknown) => v === false || v === "false";
 
 /** A step that restores a cache whenever it runs. */
-const restores: Rule = (_, step) =>
-	step.if === offInEvidence ? [] : [`it restores a cache: its if: must be ${offInEvidence}`];
+const restores: Rule = (_, step, runs) =>
+	runs === "ci" && step.if === offInEvidence
+		? []
+		: [
+				runs === "ci"
+					? `it restores a cache: its if: must be ${offInEvidence}`
+					: "it restores a cache, which the release never does",
+			];
 
 /** An input left out, or written as one of the values given. */
 const onlyAs =
-	(input: string, ...taken: readonly unknown[]): Rule =>
-	(inputs) =>
-		!written(inputs, input) || taken.includes(inputs[input])
+	(input: string, taken: readonly unknown[], inCi: readonly unknown[] = []): Rule =>
+	(inputs, _, runs) =>
+		!written(inputs, input) || [...taken, ...(runs === "ci" ? inCi : [])].includes(inputs[input])
 			? []
 			: [
-					`its ${input} must be left out or written as ${taken.map((t) => JSON.stringify(t)).join(" or ")}`,
+					`its ${input} must be left out or written as ${[...taken, ...(runs === "ci" ? inCi : [])].map((t) => JSON.stringify(t)).join(" or ")}`,
 				];
 
 const absent =
@@ -63,22 +72,27 @@ const known: Readonly<
 	"actions/cache": { refs: ["v4"], rules: [restores] },
 	"actions/cache/restore": { refs: ["v4"], rules: [restores] },
 	// v5 and later cache on their own (package-manager-cache): not taken.
-	"actions/setup-node": { refs: ["v4"], rules: [onlyAs("cache", "")] },
-	"actions/setup-python": { refs: ["v5"], rules: [onlyAs("cache", "")] },
-	"actions/setup-java": { refs: ["v4"], rules: [onlyAs("cache", "", mavenOffInEvidence)] },
+	"actions/setup-node": { refs: ["v4"], rules: [onlyAs("cache", [""])] },
+	"actions/setup-python": { refs: ["v5"], rules: [onlyAs("cache", [""])] },
+	"actions/setup-java": { refs: ["v4"], rules: [onlyAs("cache", [""], [mavenOffInEvidence])] },
 	// Its cache is on unless written off.
 	"actions/setup-go": {
 		refs: ["v5"],
 		rules: [
-			(inputs) =>
-				written(inputs, "cache") && (off(inputs.cache) || inputs.cache === offInEvidence)
+			(inputs, _, runs) =>
+				written(inputs, "cache") &&
+				(off(inputs.cache) || (runs === "ci" && inputs.cache === offInEvidence))
 					? []
-					: [`its cache is on unless written as false or ${offInEvidence}`],
+					: [
+							runs === "ci"
+								? `its cache is on unless written as false or ${offInEvidence}`
+								: "its cache is on unless written as false, as the release restores none",
+						],
 		],
 	},
 	"pnpm/action-setup": {
 		refs: ["v4", "b906affcce14559ad1aafd4ab0e942779e9f58b1"],
-		rules: [onlyAs("cache", false, "false"), onlyAs("run_install", false, "false")],
+		rules: [onlyAs("cache", [false, "false"]), onlyAs("run_install", [false, "false"])],
 	},
 	"softprops/action-gh-release": {
 		refs: ["3bb12739c298aeb8a4eeaf626c5b8d85266b0e65"],
@@ -90,6 +104,7 @@ const known: Readonly<
 export function cacheProblems(
 	path: string,
 	readFile: (path: string) => string,
+	runs: Runs,
 	calling: readonly string[] = [],
 ): string[] {
 	if (calling.includes(path)) {
@@ -103,7 +118,7 @@ export function cacheProblems(
 			if (!job.uses.startsWith("./.github/workflows/")) {
 				problems.push(`${where} calls ${job.uses}, a workflow outside this tree`);
 			} else {
-				problems.push(...cacheProblems(job.uses.slice(2), readFile, [...calling, path]));
+				problems.push(...cacheProblems(job.uses.slice(2), readFile, runs, [...calling, path]));
 			}
 			continue;
 		}
@@ -127,7 +142,7 @@ export function cacheProblems(
 				inputs[name.toLowerCase()] = value;
 			}
 			for (const rule of action.rules) {
-				for (const problem of rule(inputs, step)) problems.push(`${at}: ${problem}`);
+				for (const problem of rule(inputs, step, runs)) problems.push(`${at}: ${problem}`);
 			}
 		}
 	}

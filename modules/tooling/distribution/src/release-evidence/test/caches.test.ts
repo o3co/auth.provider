@@ -11,8 +11,8 @@ const version = (JSON.parse(repository("package.json")) as { version: string }).
 
 describe("this repository's workflows", () => {
 	it("write every step that could restore a cache as set out, CI's and the release's, the API site's included", () => {
-		expect(cacheProblems(".github/workflows/ci.yml", repository)).toEqual([]);
-		expect(cacheProblems(".github/workflows/release.yml", repository)).toEqual([]);
+		expect(cacheProblems(".github/workflows/ci.yml", repository, "ci")).toEqual([]);
+		expect(cacheProblems(".github/workflows/release.yml", repository, "release")).toEqual([]);
 	});
 });
 
@@ -53,16 +53,24 @@ describe("the conditions set out", () => {
 });
 
 /** The problems of one job's steps, written as YAML. */
-const ofSteps = (steps: string, more: Record<string, string> = {}) => {
+const ofSteps = (
+	steps: string,
+	more: Record<string, string> = {},
+	runs: "ci" | "release" = "ci",
+) => {
 	const files: Record<string, string> = {
 		"w.yml": `jobs:\n  j:\n    runs-on: x\n    steps:\n${steps}`,
 		...more,
 	};
-	return cacheProblems("w.yml", (path) => {
-		const text = files[path];
-		if (text === undefined) throw new Error(`no ${path}`);
-		return text;
-	});
+	return cacheProblems(
+		"w.yml",
+		(path) => {
+			const text = files[path];
+			if (text === undefined) throw new Error(`no ${path}`);
+			return text;
+		},
+		runs,
+	);
 };
 const step = (uses: string, inputs = "", condition = "") =>
 	ofSteps(
@@ -149,6 +157,36 @@ describe("cacheProblems", () => {
 		).toContainEqual(expect.stringContaining("names CACHE twice"));
 	});
 
+	it("allows no cache at all in the release's own workflows, where the evidence condition holds", () => {
+		const tag: RunContext = { event_name: "push", ref: `refs/tags/v${version}`, base_ref: "" };
+		expect(inputOf(offInEvidence, tag)).toBe(true);
+		const inRelease = (steps: string) => ofSteps(steps, {}, "release");
+		expect(inRelease(`      - uses: actions/cache@v4\n        if: ${offInEvidence}\n`)).toEqual([
+			expect.stringContaining("which the release never does"),
+		]);
+		expect(
+			inRelease(
+				`      - uses: actions/setup-go@v5\n        with:\n          cache: ${offInEvidence}\n`,
+			),
+		).toEqual([expect.stringContaining("as the release restores none")]);
+		expect(
+			inRelease("      - uses: actions/setup-go@v5\n        with:\n          cache: false\n"),
+		).toEqual([]);
+		expect(
+			inRelease(
+				`      - uses: actions/setup-java@v4\n        with:\n          cache: ${mavenOffInEvidence}\n`,
+			),
+		).toHaveLength(1);
+		const files: Record<string, string> = {
+			"r.yml": "jobs:\n  c:\n    uses: ./.github/workflows/s.yml\n",
+			".github/workflows/s.yml": `jobs:\n  k:\n    runs-on: x\n    steps:\n      - uses: actions/cache@v4\n        if: ${offInEvidence}\n`,
+		};
+		expect(cacheProblems("r.yml", (p) => files[p] as string, "release")).toEqual([
+			expect.stringMatching(/^\.github\/workflows\/s\.yml: job k.*which the release never does/),
+		]);
+		expect(cacheProblems("r.yml", (p) => files[p] as string, "ci")).toEqual([]);
+	});
+
 	it("follows a workflow of this tree a job calls, refuses one outside it and a loop", () => {
 		const calls = (target: string) => `jobs:\n  c:\n    uses: ${target}\n`;
 		const cached = "jobs:\n  k:\n    runs-on: x\n    steps:\n      - uses: actions/cache@v4\n";
@@ -160,13 +198,13 @@ describe("cacheProblems", () => {
 			".github/workflows/l2.yml": calls("./.github/workflows/l1.yml"),
 		};
 		const read = (path: string) => files[path] as string;
-		expect(cacheProblems("a.yml", read)).toEqual([
+		expect(cacheProblems("a.yml", read, "ci")).toEqual([
 			expect.stringMatching(/^\.github\/workflows\/b\.yml: job k.*restores a cache/),
 		]);
-		expect(cacheProblems("o.yml", read)).toEqual([
+		expect(cacheProblems("o.yml", read, "ci")).toEqual([
 			expect.stringContaining("a workflow outside this tree"),
 		]);
-		expect(cacheProblems(".github/workflows/l1.yml", read)).toEqual([
+		expect(cacheProblems(".github/workflows/l1.yml", read, "ci")).toEqual([
 			expect.stringContaining("in a loop"),
 		]);
 	});
