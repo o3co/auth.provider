@@ -16,6 +16,7 @@ Preview: the ID-JAG profile follows draft-ietf-oauth-identity-assertion-authz-gr
 
 ## Offers
 - `idJagTyp`: `oauth-id-jag+jwt`.
+- `namesIdJag` (an assertion) → whether its header, read unverified, names that type, for sorting it before anything is verified; one that is no JWT names none.
 - `read` (the verified header and claims) → the client id, scope, resources and key thumbprint it names, or why it is refused.
 - `admit` (it, the request's client and binding) → admitted, or why not.
 - `asked` (it, the scope requested) → the scope asked and the ceiling it holds an issuance to.
@@ -23,6 +24,7 @@ Preview: the ID-JAG profile follows draft-ietf-oauth-identity-assertion-authz-gr
 
 ## Invariants
 - Pure: no state, no input or output.
+- The grant sorts every assertion by `namesIdJag` first, on whatever way it goes: delegated or not, its client named or none (`clientless`'s `identify`), whatever its issuer, before anything is verified or a delegate asked. While no entry takes the profile, one naming the ID-JAG's type is refused as an unknown signer is (`untrusted signer`), so none is taken by rules that would not hold its client or scope.
 - Its verified header's `typ` is the ID-JAG's, as `typOf` reads it (`untrusted signer` otherwise).
 - An `aud` list holds one audience (`wrong audience`). A `tenant` or `aud_tenant` is refused (`tenant not taken`).
 - `iat` is a number, and `client_id` a string of 1 to 255 characters. An `act` has a string `sub`. A claim of no such form is `missing or malformed claims`, as are those below.

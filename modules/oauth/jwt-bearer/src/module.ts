@@ -24,6 +24,7 @@ import {
 	sentIssuerOf,
 	spentBy,
 } from "./delegated/delegated.ts";
+import { namesIdJag } from "./id-jag/id-jag.ts";
 import {
 	delegatedIn,
 	delegatedSetting,
@@ -128,6 +129,12 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 		};
 		const refusedGrant = (description: string) =>
 			({ kind: "error", error: "invalid_grant", description }) as const;
+		/**
+		 * Sorted by type before every way an assertion goes, delegated or named or none, before anything
+		 * is verified: an ID-JAG, which no entry yet takes, is refused as an unknown signer is.
+		 */
+		const sortedOut = (assertion: string) =>
+			namesIdJag(assertion) ? refusedGrant("untrusted signer") : undefined;
 		const anotherClient = refusedGrant("assertion is for another client");
 		const assertionRequired = {
 			kind: "error",
@@ -230,6 +237,8 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 						identify: async ({ param }) => {
 							const assertion = param("assertion");
 							if (!assertion) return assertionRequired;
+							const sorted = sortedOut(assertion);
+							if (sorted) return sorted;
 							// A delegated issuer's identifies none: its delegate checks it for a client named.
 							if (delegation.by.has(sentIssuerOf(assertion) ?? "")) return unidentified;
 							return identifiedBy(await verify(assertion), (iss) => entries.get(iss), subjectOf);
@@ -239,6 +248,8 @@ export default defineModule({ name: "jwt-bearer", section, takes }, (m) => [
 			handle: async (input) => {
 				const assertion = input.param("assertion");
 				if (!assertion) return assertionRequired;
+				const sorted = sortedOut(assertion);
+				if (sorted) return sorted;
 				// A delegated issuer's assertion goes its delegate's way alone, whatever it answers.
 				const delegate = delegation.by.get(sentIssuerOf(assertion) ?? "");
 				if (delegate) return delegated(input, delegate, assertion);

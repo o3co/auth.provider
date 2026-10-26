@@ -1,6 +1,7 @@
 import { type Ceiling, clientAllowance } from "@mod/client-allowance";
 import { typOf } from "@mod/external-jwt";
 import type { GrantInput } from "@mod/grants";
+import { decodeProtectedHeader } from "jose";
 
 /** The `typ` of an ID-JAG (draft-ietf-oauth-identity-assertion-authz-grant-04 §3.1), as `typOf` reads one. */
 export const idJagTyp = "oauth-id-jag+jwt";
@@ -18,6 +19,18 @@ export interface IdJag {
 }
 
 export type Invalid = { readonly kind: "invalid"; readonly reason: string };
+
+/**
+ * Whether an assertion's header, read unverified, names the ID-JAG's type: for sorting it before
+ * anything is verified, never for taking it. One that is no JWT names none.
+ */
+export function namesIdJag(assertion: string): boolean {
+	try {
+		return typOf(decodeProtectedHeader(assertion)) === idJagTyp;
+	} catch {
+		return false;
+	}
+}
 
 const invalid = (reason: string): Invalid => ({ kind: "invalid", reason });
 const malformed = invalid("missing or malformed claims");
