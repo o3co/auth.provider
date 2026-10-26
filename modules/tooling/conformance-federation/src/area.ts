@@ -14,6 +14,8 @@ export interface IdpScene {
 	readonly clientId: string;
 	/** Required by every type but Apple, which takes it or `signing`. */
 	readonly clientSecret?: string;
+	/** OpenID Connect only: reads UserInfo after each login (`readsUserinfo`). */
+	readonly readUserinfo?: boolean;
 	/** Apple only: what signs the client's secret (all three, unless a scene means to leave some out). */
 	readonly signing?: {
 		readonly teamId?: string;
@@ -39,6 +41,9 @@ export const grantsLoginPage = "federation:grants-login-page";
 
 /** The need for a step-up page that a link's start short of a requirement names, and back. */
 export const linkStepUpPage = "federation:link-step-up-page";
+
+/** The need for an OpenID Connect IdP that reads its upstream's UserInfo after each login. */
+export const readsUserinfo = "federation:reads-userinfo";
 
 /** Federation grants: the consent page and the connections offered. */
 export interface GrantsPart {
@@ -68,6 +73,8 @@ export interface FederationPart {
 	readonly links?: boolean;
 	/** The page a link's start short of a session requirement names, on the origin (`linkStepUpPage`). */
 	readonly linkStepUpPage?: string;
+	/** A CONNECT proxy outbound reaches its upstreams through, for an upstream on https at loopback. */
+	readonly proxy?: string;
 }
 
 export const federationArea = area<FederationPart>("federation");
@@ -116,6 +123,7 @@ export function federationScene(scene: FederationScene): AreaScene {
 			...(scene.grants ? { grants: scene.grants } : {}),
 			...(scene.links ? { links: true } : {}),
 			...(scene.linkStepUpPage ? { linkStepUpPage: scene.linkStepUpPage } : {}),
+			...(scene.proxy ? { proxy: scene.proxy } : {}),
 		}),
 	);
 }

@@ -39,7 +39,12 @@ function settingsOf(idp: IdpScene): Record<string, unknown> {
 				"jwks-uri": `${idp.issuer}/oauth2/v3/certs`,
 			};
 		default:
-			return { type: "oidc", issuer: idp.issuer, ...client };
+			return {
+				type: "oidc",
+				issuer: idp.issuer,
+				...client,
+				...(idp.readUserinfo ? { "read-userinfo": true } : {}),
+			};
 	}
 }
 
@@ -102,6 +107,7 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 				.map((idp) => new URL(idp.issuer))
 				.filter((url) => url.protocol === "http:")
 				.map((url) => url.host),
+			...(part.proxy ? { proxy: part.proxy } : {}),
 		},
 	},
 });
