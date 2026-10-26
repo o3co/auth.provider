@@ -67,6 +67,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -212,6 +214,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -290,8 +294,8 @@ jobs:
 
   # On a pull request to main (a release), on the release branches, once a day
   # on develop, and on a push to develop every five merges: the new system's
-  # conformance and the legacy system's (0.17.0, built from this repository's
-  # own v0.17.0 tag), then the scenes on each pattern's app. A release is tested
+  # conformance and the legacy system's (0.17.0, built once for the run from the
+  # commit conformance-legacy names), then the scenes on each pattern's app. A release is tested
   # before it reaches main, so the push to main does not run it again. Each area
   # and each pattern runs in a job of its own; `conformance` passes only once
   # all of them have.
@@ -331,22 +335,87 @@ jobs:
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
+  # The legacy system, built once for the run from the commit conformance-legacy
+  # names, and handed to each area as this run's own artifact. A run whose
+  # evidence a release may take builds it afresh: it restores no cache, as
+  # whoever saved one is not known.
+  legacy-build:
+    needs: conformance-plan
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      legacy: ${{ steps.kept.outputs.artifact-id }}
+    env:
+      LEGACY_SOURCE: ${{ github.workspace }}
+    steps:
+      # The runner context is not available in a job's env, so the legacy
+      # build's directory is set here.
+      - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
+          # The legacy build checks out its commit from this clone's history.
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - name: Cache the legacy build
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/legacy-0.17.0
+          key: legacy-0.17.0-${{ hashFiles('modules/tooling/conformance-legacy/scripts/**', 'modules/tooling/conformance-legacy/src/dir.ts') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Build the legacy system
+        run: |
+          if [ ! -d "$LEGACY_DIR" ]; then
+            pnpm --filter @mod/conformance-legacy run prepare-legacy
+          fi
+      # Packed, so its links and modes reach each area as they are; without its clone's history,
+      # which the build checked and no area reads.
+      - name: Pack the legacy build
+        run: tar -C "$RUNNER_TEMP" --exclude=legacy-0.17.0/.git -czf "$RUNNER_TEMP/legacy.tgz" legacy-0.17.0
+      # A re-run of all jobs builds and writes it again; a re-run of the failed areas takes this one,
+      # so it is kept as long as their evidence, which GitHub re-runs within.
+      - name: Keep it for the areas
+        id: kept
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-build
+          path: ${{ runner.temp }}/legacy.tgz
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+
   # One area: its scenes on the new system, then on the legacy one. A scene the
   # legacy system cannot be set up for, or answers by a decided difference, is
   # skipped; any other fails.
   conformance-area:
-    needs: conformance-plan
+    needs: [conformance-plan, legacy-build]
     # A skipped conformance-due above would otherwise skip this job too.
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.legacy-build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         area: ${{ fromJSON(needs.conformance-plan.outputs.areas) }}
-    env:
-      LEGACY_SOURCE: ${{ github.workspace }}
-      LEGACY_BRANCH: v0.17.0
     steps:
       # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
       - name: Mark this attempt
@@ -366,9 +435,6 @@ jobs:
         with:
           # The commit the plan fixed: on the daily run, develop as the plan found it.
           ref: ${{ needs.conformance-plan.outputs.sha }}
-          # The legacy build clones the v0.17.0 tag from this checkout.
-          fetch-depth: 0
-          fetch-tags: true
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -378,22 +444,22 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
-      - name: Cache the legacy build
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/legacy-0.17.0
-          key: legacy-0.17.0-${{ hashFiles('modules/tooling/conformance-legacy/scripts/**') }}
       - run: pnpm install --frozen-lockfile
-      - name: Build the legacy system
-        run: |
-          if [ ! -d "$LEGACY_DIR" ]; then
-            pnpm --filter @mod/conformance-legacy run prepare-legacy
-          fi
+      # Only this run's own artifact, by the id legacy-build gave: no other run's can stand in.
+      - name: Take the legacy build this run made
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.legacy-build.outputs.legacy }}
+          path: ${{ runner.temp }}/legacy-archive
+          merge-multiple: true
+      - run: tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/legacy-archive/legacy.tgz"
       - name: Conformance on the new system
         env:
           SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
@@ -451,6 +517,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -569,7 +637,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: maven
+          cache: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) && 'maven' || '' }}
           cache-dependency-path: modules/tooling/interop-clients/adapters/*/pom.xml
       # Python for the Authlib adapter's environment, at the version it names.
       - uses: actions/setup-python@v5
@@ -578,6 +646,8 @@ jobs:
       # Go for the adapter `go build` makes, at the toolchain its go.mod pins.
       - uses: actions/setup-go@v5
         with:
+          # Its cache is on unless turned off, and a run whose evidence a release may take restores none.
+          cache: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
           go-version-file: modules/tooling/interop-clients/adapters/go/go.mod
           cache-dependency-path: modules/tooling/interop-clients/adapters/go/go.sum
       - name: Get pnpm store path
@@ -585,6 +655,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -643,6 +715,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -682,13 +756,13 @@ jobs:
 
   # The check required of a release: every area and every pattern passed.
   conformance:
-    needs: [conformance-due, conformance-plan, conformance-area, conformance-pattern]
+    needs: [conformance-due, conformance-plan, legacy-build, conformance-area, conformance-pattern]
     if: always() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true'))
     runs-on: ubuntu-latest
     steps:
       - name: Every area and every pattern passed
         run: |
-          for result in "${{ needs.conformance-plan.result }}" "${{ needs.conformance-area.result }}" "${{ needs.conformance-pattern.result }}"; do
+          for result in "${{ needs.conformance-plan.result }}" "${{ needs.legacy-build.result }}" "${{ needs.conformance-area.result }}" "${{ needs.conformance-pattern.result }}"; do
             [ "$result" = success ] || { echo "a conformance job ended $result"; exit 1; }
           done
 
@@ -746,6 +820,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -828,6 +904,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: compliance
+          # A re-run writes over the table an earlier attempt kept: an artifact's name is the run's.
+          overwrite: true
           path: |
             ${{ runner.temp }}/evidence/compliance.json
             ${{ runner.temp }}/evidence/compliance.md
