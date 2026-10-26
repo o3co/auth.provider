@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, randomBytes, X509Certificate } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:https";
+import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ import { deviceArea } from "@mod/conformance-device";
 import { exchangeArea } from "@mod/conformance-exchange";
 import { selfSigned } from "@mod/conformance-front";
 import type { ClientScene } from "@mod/conformance-oauth";
-import { startTunnel } from "@mod/conformance-tunnel";
+import { startTunnel, type Tunnel } from "@mod/conformance-tunnel";
 import { fronted, sender, signing } from "./fronted.ts";
 
 /** A client the world registers, as an adapter is told of it. */
@@ -130,6 +130,55 @@ export function authorizationQuery(url: string, issuer: string): string {
 }
 
 /**
+ * The metadata document's server, on a certificate of its own the app is told to trust (`cert`, a
+ * file under `under`), reached through a tunnel the app takes as its outbound proxy (`proxy`). Its
+ * files and listeners are gone once it stops, or where it does not start.
+ */
+async function startDocuments(under: string | undefined) {
+	const dir = await mkdtemp(join(under ?? tmpdir(), "interop-documents-"));
+	let server: Server | undefined;
+	let tunnel: Tunnel | undefined;
+	const stop = async () => {
+		await tunnel?.stop();
+		const listening = server;
+		if (listening?.listening) await new Promise((resolve) => listening.close(resolve));
+		await rm(dir, { recursive: true, force: true });
+	};
+	try {
+		const tls = await selfSigned(documentHost, dir);
+		const cert = join(dir, "document-cert.pem");
+		await writeFile(cert, tls.cert);
+		const document = {
+			client_id: documentUrl,
+			client_name: "Interop metadata document client",
+			redirect_uris: [redirectUri],
+			grant_types: ["authorization_code"],
+			response_types: ["code"],
+			token_endpoint_auth_method: "none",
+		};
+		const started = createServer(tls, (req, res) => {
+			const found = req.url === new URL(documentUrl).pathname;
+			res.writeHead(found ? 200 : 404, { "content-type": "application/json" });
+			res.end(found ? JSON.stringify(document) : "{}");
+		});
+		server = started;
+		await new Promise<void>((resolve) => started.listen(0, "127.0.0.1", resolve));
+		const at = `127.0.0.1:${(started.address() as AddressInfo).port}`;
+		const opened = await startTunnel({ allow: { [`${documentHost}:443`]: at } });
+		tunnel = opened;
+		return {
+			cert,
+			proxy: `http://127.0.0.1:${opened.port}`,
+			opened: () => opened.opened(),
+			stop,
+		};
+	} catch (failure) {
+		await stop();
+		throw failure;
+	}
+}
+
+/**
  * Starts the provider the code flows meet, behind its front (`fronted`): code, public, assertion and
  * device clients, one user, DPoP, a logout the client starts, the device grant and token exchange.
  */
@@ -146,28 +195,7 @@ export async function startWorld(
 		await crypto.subtle.digest("SHA-256", new X509Certificate(certificate.cert).raw),
 	).toString("base64url");
 	const backchannel = { port: await freePort(), path: "/backchannel" };
-	// The metadata document's server, on a certificate of its own the app trusts, reached through the tunnel.
-	const documentDir = await mkdtemp(join(tmpdir(), "interop-documents-"));
-	const documentTls = await selfSigned(documentHost, documentDir);
-	const documentCert = join(documentDir, "document-cert.pem");
-	await writeFile(documentCert, documentTls.cert);
-	const document = {
-		client_id: documentUrl,
-		client_name: "Interop metadata document client",
-		redirect_uris: [redirectUri],
-		grant_types: ["authorization_code"],
-		response_types: ["code"],
-		token_endpoint_auth_method: "none",
-	};
-	const documents = createServer(documentTls, (req, res) => {
-		const found = req.url === new URL(documentUrl).pathname;
-		res.writeHead(found ? 200 : 404, { "content-type": "application/json" });
-		res.end(found ? JSON.stringify(document) : "{}");
-	});
-	await new Promise<void>((resolve) => documents.listen(0, "127.0.0.1", resolve));
-	const tunnel = await startTunnel({
-		allow: { [`${documentHost}:443`]: `127.0.0.1:${(documents.address() as AddressInfo).port}` },
-	});
+	const documents = await startDocuments(given.under);
 	const receiver = `http://127.0.0.1:${backchannel.port}`;
 	const key = assertionKey();
 	const clients = {
@@ -293,10 +321,13 @@ export async function startWorld(
 		{
 			...given,
 			clientCertificateHeader: certificateHeader,
-			trustedCertificates: [documentCert],
-			outboundProxy: `http://127.0.0.1:${tunnel.port}`,
+			trustedCertificates: [documents.cert],
+			outboundProxy: documents.proxy,
 		},
-	);
+	).catch(async (failure: unknown) => {
+		await documents.stop();
+		throw failure;
+	});
 	const base = app.base();
 	const front = { origin: app.origin };
 	const world: World = {
@@ -447,12 +478,10 @@ export async function startWorld(
 				},
 			};
 		},
-		tunnelOpened: () => tunnel.opened(),
+		tunnelOpened: () => documents.opened(),
 		async stop() {
 			await app.stop();
-			await tunnel.stop();
-			await new Promise((resolve) => documents.close(resolve));
-			await rm(documentDir, { recursive: true, force: true });
+			await documents.stop();
 		},
 	};
 	return world;
