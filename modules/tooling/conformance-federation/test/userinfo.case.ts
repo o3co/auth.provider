@@ -242,6 +242,8 @@ describe.runIf(able)(
 					},
 					clients: [profileClient],
 					proxy: proxyAt,
+					// The upstream's email is never read as verified: verified-email would refuse alice.
+					without: ["@mod/verified-email"],
 				}),
 				{ trustedCertificates: [trustedAt] },
 			);
