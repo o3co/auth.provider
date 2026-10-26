@@ -165,7 +165,7 @@ flowchart LR
 | `@mod/exchange-id-tokens` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/kernel`, `@mod/subject-revocation`, `@mod/token-exchange`, `@mod/users` |
 | `@mod/grants` | feature | `@mod/clients`, `@mod/http`, `@mod/kernel`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/issuer` | feature | `@mod/http`, `@mod/kernel`, `@mod/url-setting` |
-| `@mod/jwt-bearer` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/external-jwt`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/sender-binding`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/users` |
+| `@mod/jwt-bearer` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/external-jwt`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/sender-binding`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/users` |
 | `@mod/jwt-bearer-id-tokens` | feature | `@mod/exchange-id-tokens`, `@mod/jwt-bearer`, `@mod/kernel` |
 | `@mod/jwt-bearer-users` | feature | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/users` |
 | `@mod/logout` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session` |
