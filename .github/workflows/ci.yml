@@ -659,15 +659,17 @@ jobs:
           path: ${{ runner.temp }}/evidence
           if-no-files-found: ignore
           retention-days: 30
-      # The runner's output, the suite's export and logs, each test's log, the front's log and what the shim added.
+      # The runner's output, the suite's export and logs, each test's log, the front's log, what the shim
+      # added, and the pages the suite left for a person's review: kept on every run, a passing one too,
+      # for the review a release needs.
       - name: Keep the run's records
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: oidf-records-${{ matrix.plan }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/oidf
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 30
 
   # The check required of a release: every area and every pattern passed.
   conformance:
