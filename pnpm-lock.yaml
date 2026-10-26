@@ -1943,6 +1943,9 @@ importers:
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
