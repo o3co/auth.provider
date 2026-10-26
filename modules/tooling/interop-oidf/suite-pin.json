@@ -1,0 +1,5 @@
+{
+	"tag": "release-v5.3.3",
+	"commit": "7d420f716e49d44f8a6b04f0a3e240ad6d68ab55",
+	"python": ["httpx==0.28.1", "pyparsing==3.3.3"]
+}
