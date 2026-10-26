@@ -362,6 +362,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
   - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
   - `results` (`src/results`): what each suite test of a plan proved.
+  - `review` (`src/review`): the pages the suite's browser kept for a person to review.
   - `scene` (`src/scene`): the app the OP plans meet.
   - `suite` (`src/suite`): the suite at its pinned version, started and stopped.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.

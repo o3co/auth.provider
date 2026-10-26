@@ -3,7 +3,7 @@
 ## Responsibilities
 - Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
 - Reports each suite test as a vitest test, its result excused only by an expected entry the checklist lets it take.
-- Its internal modules: `pkce` gives PKCE to requests that carry none, `login` is the login page, `expected` judges the expected entries, `results` reads each test's outcome, `scene` is the app's scene, `suite` starts and stops the suite, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time, `harness` runs a plan.
+- Its internal modules: `pkce` gives PKCE to requests that carry none, `login` is the login page, `expected` judges the expected entries, `results` reads each test's outcome, `review` reads the pages the suite left for a person's review, `scene` is the app's scene, `suite` starts and stops the suite, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time, `harness` runs a plan.
 
 ## Not here
 - The front itself (`conformance-front`), the app's start (`conformance`), and what an exception may be (`spec-checklist`'s `exceptionProblems`).
