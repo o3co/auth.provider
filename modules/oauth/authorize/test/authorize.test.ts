@@ -1231,7 +1231,7 @@ it("hashes a re-authentication the same whatever the order of parameters or prom
 	expect(res.at?.pathname).not.toBe("/login");
 });
 
-it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it [oidc-core-15.1-g] [oidc-core-5.5.1.1-b]", async () => {
+it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it", async () => {
 	const s = await serve({
 		acr: { "urn:test:mfa": [["mfa"]] },
 		authorize: { "step-up-page": "https://as.example/mfa" },
@@ -1269,7 +1269,7 @@ it("meets an acr by the amr sets its table names, and sends a session that falls
 	expect(`${raising.at?.origin}${raising.at?.pathname}`).toBe("https://as.example/mfa");
 });
 
-it("binds to the code the first acr met in the order asked, past any not met, or else the session's current acr [oidc-core-5.5.1.1-c]", async () => {
+it("binds to the code the first acr met in the order asked, past any not met, or else the session's current acr", async () => {
 	const asked: IdTokenRequest[] = [];
 	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
@@ -1368,7 +1368,7 @@ describe("authorize: one trip to raise the authentication", () => {
 	});
 });
 
-it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-a] [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a] [oidc-core-5.5.1.1-c]", async () => {
+it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a]", async () => {
 	const asked: IdTokenRequest[] = [];
 	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
