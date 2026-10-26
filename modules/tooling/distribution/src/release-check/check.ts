@@ -170,6 +170,9 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 			{ cwd: app, stdio: "pipe" },
 		);
 		const image = await run.build(app, name);
+		const tools = await run.carriedBy(image);
+		if (tools.length > 0)
+			problems.push(`${name}: its image holds a package manager: ${tools.join(", ")}`);
 		say(`${name}: ${await run.booted(app, image)}`);
 		// The resolver's helpers as a deployment constrains them, on one pattern's image.
 		if (name === "simple-web") {

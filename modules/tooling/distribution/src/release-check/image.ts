@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, join } from "node:path";
 import { trialLayer } from "@mod/trial";
+import { carried } from "./carried/carried.ts";
 import { type Container, withContainer } from "./containers/container.ts";
 import { DockerFailed, docker } from "./containers/docker.ts";
 import { refusalsIn } from "./refused.ts";
@@ -185,5 +186,12 @@ export function images(
 		if (built.length > 0) await docker(["image", "rm", "-f", ...built], commandWithin);
 	};
 
-	return { build, booted, remove };
+	/** Each path `image` holds a package manager at. */
+	const carriedBy = (image: string) =>
+		withContainer(
+			{ run, purpose: `tools-${image.slice(image.indexOf(":") + 1)}`, within: commandWithin },
+			(c) => carried(c, image),
+		);
+
+	return { build, booted, carriedBy, remove };
 }
