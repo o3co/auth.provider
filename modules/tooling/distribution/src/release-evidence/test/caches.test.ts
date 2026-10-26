@@ -121,6 +121,31 @@ describe("cacheProblems", () => {
 		).toEqual([expect.stringContaining("reaches past this run")]);
 	});
 
+	it("reads an input's name without regard to case, as GitHub does, and refuses one written twice", () => {
+		const step = (uses: string, inputs: string) =>
+			ofSteps(`      - uses: ${uses}\n        with:\n${inputs}`);
+		expect(step("actions/setup-java@v4", "          CACHE: maven\n")).toEqual([
+			expect.stringContaining('its cache is "maven"'),
+		]);
+		expect(step("actions/setup-go@v5", "          Cache: true\n")).toEqual([
+			expect.stringContaining("its cache is on"),
+		]);
+		for (const name of ["Run-Id", "GitHub-Token"]) {
+			expect(step("actions/download-artifact@v4", `          ${name}: x\n`)).toEqual([
+				expect.stringContaining("reaches past this run"),
+			]);
+		}
+		expect(
+			step("actions/setup-go@v5", "          cache: false\n          CACHE: true\n"),
+		).toContainEqual(expect.stringContaining("names CACHE twice"));
+	});
+
+	it("knows no action by a name an object inherits", () => {
+		expect(ofSteps("      - uses: constructor@v1\n")).toEqual([
+			expect.stringContaining("an action this check does not know"),
+		]);
+	});
+
 	it("passes over a job or step decided not to run, but not an action it does not know there", () => {
 		expect(
 			ofSteps("      - uses: actions/cache@v4\n        if: github.event_name == 'schedule'\n"),

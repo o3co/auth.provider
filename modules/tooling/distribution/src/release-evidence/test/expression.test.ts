@@ -41,6 +41,18 @@ describe("evaluate", () => {
 		);
 	});
 
+	it("reads only the github context's own fields and its own functions, never what an object inherits", () => {
+		for (const source of [
+			"github.constructor",
+			"!github.constructor",
+			"github.toString",
+			"constructor()",
+			"toString(github.ref)",
+		]) {
+			expect(evaluate(source, release)).toHaveProperty("unknown");
+		}
+	});
+
 	it("leaves undecided what it cannot read", () => {
 		expect(evaluate("github.ref == 'x", release)).toHaveProperty("unknown");
 		expect(evaluate("github.ref > 'x'", release)).toHaveProperty("unknown");

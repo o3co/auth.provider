@@ -201,7 +201,9 @@ export function evaluate(source: string, context: RunContext): Value | Unknown {
 				}
 			}
 			take(")");
-			const f = functions[word.toLowerCase()];
+			const f = Object.hasOwn(functions, word.toLowerCase())
+				? functions[word.toLowerCase()]
+				: undefined;
 			if (f === undefined)
 				return { unknown: `${word}() is not decided by the run's github context` };
 			const known = args.find(isUnknown);
@@ -211,7 +213,12 @@ export function evaluate(source: string, context: RunContext): Value | Unknown {
 		if (word === "false") return false;
 		if (word === "null") return null;
 		const [scope, name, ...rest] = word.split(".");
-		if (scope === "github" && name !== undefined && rest.length === 0 && name in github) {
+		if (
+			scope === "github" &&
+			name !== undefined &&
+			rest.length === 0 &&
+			Object.hasOwn(github, name)
+		) {
 			return github[name] as Value;
 		}
 		return { unknown: `${word} is not read here` };

@@ -42,6 +42,17 @@ it("builds the legacy system once and hands it to each area as this run's own ar
 	expect(take?.with).not.toHaveProperty("github-token");
 });
 
+it("keeps the legacy build as long as an area's evidence, so a re-run of a failed area still finds it", () => {
+	const kept = (job: string, name: (n: unknown) => boolean) =>
+		workflow.jobs[job]?.steps?.find(
+			(s) => s.uses?.startsWith("actions/upload-artifact@") && name(s.with?.name),
+		)?.with?.["retention-days"];
+	const legacy = kept("legacy-build", (n) => n === "legacy-build");
+	expect(legacy).toBeGreaterThanOrEqual(
+		kept("conformance-area", (n) => String(n).startsWith("evidence-area-")) as number,
+	);
+});
+
 it("fails conformance where the legacy build did not pass", () => {
 	expect(needsOf("conformance")).toContain("legacy-build");
 });

@@ -392,7 +392,8 @@ jobs:
       # which the build checked and no area reads.
       - name: Pack the legacy build
         run: tar -C "$RUNNER_TEMP" --exclude=legacy-0.17.0/.git -czf "$RUNNER_TEMP/legacy.tgz" legacy-0.17.0
-      # A re-run of all jobs builds and writes it again; a re-run of the failed areas takes this one.
+      # A re-run of all jobs builds and writes it again; a re-run of the failed areas takes this one,
+      # so it is kept as long as their evidence, which GitHub re-runs within.
       - name: Keep it for the areas
         id: kept
         uses: actions/upload-artifact@v4
@@ -400,7 +401,7 @@ jobs:
           name: legacy-build
           path: ${{ runner.temp }}/legacy.tgz
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
           overwrite: true
 
   # One area: its scenes on the new system, then on the legacy one. A scene the

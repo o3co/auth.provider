@@ -53,7 +53,9 @@ type Rule = (
 const off =
 	(input: string, byDefault: boolean): Rule =>
 	(inputs, context) => {
-		const v: Value | Unknown = input in inputs ? inputOf(inputs[input], context) : byDefault;
+		const v: Value | Unknown = Object.hasOwn(inputs, input)
+			? inputOf(inputs[input], context)
+			: byDefault;
 		if (isUnknown(v)) return [`its ${input} cannot be read (${v.unknown})`];
 		return String(v).toLowerCase() === "false" || v === false ? [] : [`its ${input} is on`];
 	};
@@ -62,7 +64,7 @@ const off =
 const empty =
 	(input: string): Rule =>
 	(inputs, context) => {
-		if (!(input in inputs)) return [];
+		if (!Object.hasOwn(inputs, input)) return [];
 		const v = inputOf(inputs[input], context);
 		if (isUnknown(v)) return [`its ${input} cannot be read (${v.unknown})`];
 		return v === "" || v === null ? [] : [`its ${input} is ${JSON.stringify(v)}`];
@@ -71,7 +73,9 @@ const empty =
 const absent =
 	(...names: string[]): Rule =>
 	(inputs) =>
-		names.filter((n) => n in inputs).map((n) => `it names ${n}, which reaches past this run`);
+		names
+			.filter((n) => Object.hasOwn(inputs, n))
+			.map((n) => `it names ${n}, which reaches past this run`);
 
 /** The actions a workflow may use, by name, each with the refs it may be used at and what turns its cache on. */
 const known: Readonly<
@@ -130,7 +134,7 @@ export function cacheProblems(
 			if (step.uses === undefined) continue;
 			const at = `${where}, step ${JSON.stringify(step.name ?? step.uses)}`;
 			const m = /^([^@./][^@]*)@([^@]+)$/.exec(step.uses);
-			const action = m ? known[m[1] as string] : undefined;
+			const action = m && Object.hasOwn(known, m[1] as string) ? known[m[1] as string] : undefined;
 			if (!m || action === undefined) {
 				problems.push(`${at} uses ${step.uses}, an action this check does not know`);
 				continue;
@@ -140,8 +144,14 @@ export function cacheProblems(
 				continue;
 			}
 			if (!runs || !mayRun(step.if, context)) continue;
+			// GitHub reads an input's name without regard to case.
+			const inputs: Record<string, unknown> = {};
+			for (const [name, value] of Object.entries(step.with ?? {})) {
+				if (Object.hasOwn(inputs, name.toLowerCase())) problems.push(`${at} names ${name} twice`);
+				inputs[name.toLowerCase()] = value;
+			}
 			for (const rule of action.rules) {
-				for (const problem of rule(step.with ?? {}, context, step)) {
+				for (const problem of rule(inputs, context, step)) {
 					problems.push(`${at}: ${problem} in a ${context.event_name} of ${context.ref}`);
 				}
 			}
