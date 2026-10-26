@@ -2163,9 +2163,6 @@ importers:
       '@mod/added-claims':
         specifier: workspace:*
         version: link:../../foundation/added-claims
-      '@mod/http':
-        specifier: workspace:*
-        version: link:../../foundation/http
       '@mod/issuer':
         specifier: workspace:*
         version: link:../issuer
@@ -2185,6 +2182,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

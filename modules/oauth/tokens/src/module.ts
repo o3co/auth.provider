@@ -1,6 +1,5 @@
 import { type AddedClaims, addedClaimsIn, addedClaimsOf } from "@mod/added-claims";
-import { site } from "@mod/http";
-import { issuer, metadata } from "@mod/issuer";
+import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { accessTokenSigning, keys } from "@mod/keys";
 import { senderBinding } from "@mod/sender-binding";
@@ -113,7 +112,6 @@ export default defineModule(
 		name: "tokens",
 		section,
 		takes: (s) => [
-			site,
 			keys,
 			accessTokenSigning,
 			senderBinding,
@@ -127,9 +125,9 @@ export default defineModule(
 	(m) => [
 		// Access tokens are signed by keys, which publishes the key set they are checked with.
 		m.contribute(metadata).by(async (c) => {
-			const origin = (await c.get(site)).origin;
+			const origin = endpointOrigin(await c.get(issuer));
 			const path = (await c.get(keys)).keySetPath();
-			return { name: "jwks_uri", value: origin && new URL(path, origin).href };
+			return { name: "jwks_uri", value: new URL(path, origin).href };
 		}),
 		m.provide(tokens).by(async (c) => {
 			const signing = await c.get(accessTokenSigning);
