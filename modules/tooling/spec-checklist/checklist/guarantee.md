@@ -1,0 +1,109 @@
+# Guarantees
+
+- source: docs/security-model.md#promises-across-modules
+- fault Pu: the network from the app to Redis is cut one way.
+- fault Pd: the network from Redis to the app is cut one way.
+- fault R: the app's connection to Redis is closed.
+- fault L: Redis answers later than the command timeout.
+- fault S: Redis is slow to run commands.
+- fault Lr: a write's success answer is lost once, and the store's retry with the same mark receives it.
+- fault Lx: a write's success answer is lost, and every retry's for the whole retry window too.
+- fault F: a replica that has caught up is promoted, and every connection moves to it.
+- fault Fs: after a failover, the app's operations go to the new primary while its confirmations stay on the old one.
+- fault C: Redis is killed at once (SIGKILL).
+- fault K: the app is killed after a write succeeds and before it answers.
+- fault H2: two app instances act on the same thing at once.
+- fault M: Redis runs out of its bounded memory and refuses writes.
+- fault Ev: Redis is set to evict keys.
+- fault R0: `redis.replication = replicas` is chosen and Redis has no replica.
+- fault Wt: a write's confirmation by the replicas times out.
+- fault Nr: Redis refuses a write as `NOREPLICAS`.
+- fault Ta: the app's clock is moved forward or back.
+
+## 1 Closing a session closes every path for the tokens issued from it.
+
+- **guarantee-1-a** MUST: a session left closing, with participants not yet done, is closed by its logout or a later sweep, and once closed no path is left open for the tokens issued from it; a logout that cannot finish answers `503`, never logged out.
+  faults: Lr, Lx, F, Fs, C, K, H2
+
+## 2 `prompt=login` and `max_age` are met only by a fresh authentication.
+
+- **guarantee-2-a** MUST: a request with `prompt=login` is met only by an authentication made for it, by `reauth`'s record, which `authorize` makes for the request and takes once.
+- **guarantee-2-b** MUST: a request with `max_age` is met only by an authentication within it, and an authentication time `session` does not know never counts as fresh.
+- **guarantee-2-c** MUST: through an upstream, a login counts as fresh only where the upstream reports it within its fresh login allowance of the demand, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default).
+
+## 3 A dependency that cannot answer never grants anything.
+
+- **guarantee-3-a** MUST NOT: the authorization endpoint issues a code while a dependency its decision waits on cannot answer; it answers the client `error=temporarily_unavailable` once it trusts the redirect URI.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-b** MUST NOT: the token endpoint issues a token for a code while a dependency its decision waits on cannot answer.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-c** MUST NOT: the token endpoint issues a token for a refresh token while a dependency its decision waits on cannot answer.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-d** MUST NOT: the token endpoint issues a token for a JWT bearer assertion while a dependency its decision waits on cannot answer.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-e** MUST NOT: the token endpoint issues a token for a device code while a dependency its decision waits on cannot answer.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-f** MUST NOT: a password login opens a session while a dependency its decision waits on cannot answer.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-g** MUST NOT: a revocation route answers that it is done while a dependency it waits on cannot answer.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-h** MUST NOT: a request limit lets a request pass while its store cannot count, where `rate-limit.fail-mode = closed`; `open` is the operator's declared exception.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-i** MUST NOT: an attempt limit lets an attempt pass while its store cannot count, whatever `rate-limit.fail-mode` is.
+  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-j** MUST NOT: anything is issued while the store cannot write, and a request made after it can write again passes.
+  faults: M, R0, Wt, Nr
+- **guarantee-3-k** MUST NOT: the provider boots on a Redis set to evict keys.
+  faults: Ev
+
+## 4 A subject's revocation boundary refuses everything made before it.
+
+- **guarantee-4-a** MUST NOT: once a subject's boundary is written, a read from any instance lets through what was made before it; a revocation that cannot finish never answers done. It does not hold where `tokens.subject-check = none` or `federation-grants.keep-on-subject-revocation` is chosen, and a split confirmation is held by guarantee-5-a, the store's one path.
+  faults: Lr, Lx, F, C, K, H2
+
+## 5 What is used once is used once, on any number of instances.
+
+- **guarantee-5-a** MUST: an authorization code is redeemed once.
+  faults: Lr, Lx, F, Fs, C, K, H2, Ta
+- **guarantee-5-b** MUST: a refresh token is rotated once.
+  faults: Lr, Lx, F, Fs, C, K, H2
+- **guarantee-5-c** MUST: a JWT bearer assertion's `jti` is spent once.
+  faults: Lr, Lx, F, C, K, H2
+- **guarantee-5-d** MUST: a client assertion's `jti` is spent once.
+  faults: Lr, Lx, F, C, K, H2
+- **guarantee-5-e** MUST: a DPoP proof's `jti` is spent once.
+  faults: Lr, Lx, F, C, K, H2
+- **guarantee-5-f** MUST: a device code is decided and redeemed once.
+  faults: Lr, Lx, F, C, K, H2
+- **guarantee-5-g** MUST: a recovery code is used once.
+  faults: Lr, Lx, F, C, K, H2
+- **guarantee-5-h** MUST: a passkey challenge is used once.
+  faults: Lr, Lx, F, C, K, H2
+- **guarantee-5-i** MUST: a login lockout's count holds across a crash and a failover, each attempt counted once, the same on every instance.
+  faults: Lr, F, C, K, H2
+
+## 6 A token bound to a key or a certificate is never used as a bearer token.
+
+- **guarantee-6-a** MUST NOT: a resource route takes a DPoP-bound or certificate-bound access token presented as a bearer token.
+- **guarantee-6-b** MUST NOT: a refresh or a token exchange issues, from a bound token, a token that is not bound.
+
+## 7 Every request to another server goes through `outbound`.
+
+- **guarantee-7-a** MUST NOT: product code reaches the network other than through `outbound` or as its manifest's `network` declares, as far as the code's form shows it.
+
+## 8 Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.
+
+- **guarantee-8-a** MUST NOT: a refusal at boot shows a setting's value; it names the setting by its key path.
+- **guarantee-8-b** MUST NOT: a log line carries a secret, credential, token, request body or header value, but for header values from a fixed set.
+- **guarantee-8-c** MUST NOT: an audit event carries a token or a secret.
+- **guarantee-8-d** MUST NOT: an answer carries a secret, but for tokens and codes to the one they are issued to, and a secret a registration shows once to its owner.
+
+## 9 A browser route that changes state needs CSRF or origin evidence.
+
+- **guarantee-9-a** MUST NOT: a browser route that changes state takes a request without CSRF or origin evidence, but where it declares why it takes other sites' requests.
+- **guarantee-9-b** MUST NOT: the provider boots with a route that changes state and declares neither a policy marked `own-site` nor why it takes other sites' requests.
+
+## 10 A `POST` taken before authentication is limited per source.
+
+- **guarantee-10-a** MUST: a `POST` taken before authentication is limited per source, but where its route declares why it counts no source.
+- **guarantee-10-b** MUST NOT: the provider boots with such a route that declares neither a policy marked `per-source` nor why it counts no source.
