@@ -410,6 +410,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/idp-github` (feature, `modules/upstream-login/idp-github`): Contributes the IdP type `github` to `upstreams`: GitHub's OAuth, which is not OpenID Connect, reached through `outbound`.
 - `@mod/idp-google` (feature, `modules/upstream-login/idp-google`): Contributes the IdP type `google` to `upstreams`: Google's OpenID Connect at fixed endpoints, reached through `outbound`.
 - `@mod/idp-oidc` (feature, `modules/upstream-login/idp-oidc`): Contributes the IdP type `oidc` to `upstreams`: an upstream OpenID Connect provider, reached through `outbound`.
+  - `userinfo` (`src/userinfo`): reading an upstream's UserInfo after a login, where the operator turns it on.
 - `@mod/rp-logout-federation` (feature, `modules/upstream-login/rp-logout-federation`): Sends a logout a client starts on to the upstream the session came from, bridging `rp-logout` and `federation-tokens`.
 - `@mod/upstream-client` (feature, `modules/upstream-login/upstream-client`): Gives IdP types what they share as OAuth clients of an upstream: the client's settings, the authorization request, the client's authentication, reading the upstream's answers, checking an OpenID Connect id_token (`src/id-token/`), and the end-session URL.
   - `id-token` (`src/id-token`): reading an upstream's OpenID Connect id_token for a login.

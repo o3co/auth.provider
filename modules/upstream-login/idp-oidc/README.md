@@ -15,7 +15,7 @@
 ## Offers
 - Composition definition only (the IdP type `oidc`)
 - IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (the asymmetric ones `external-jwt` knows; default RS256, ES256, EdDSA, one for each kind of key), `require-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
-- IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `outbound` reads a host list: a host, or `.name` for the name and the names under it; default none)
+- IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), UserInfo's (`src/userinfo/`), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `outbound` reads a host list: a host, or `.name` for the name and the names under it; default none)
 
 ## Invariants
 - Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives, and sent for an operator's URL (`internal`): the issuer for all its description names (an endpoint on another origin, another port too, reaches public addresses only), each given endpoint for itself; the client's secret goes to no other host.
@@ -35,7 +35,7 @@
 - The id_token must say no login time (`auth_time`) before 0 or past `kernel`'s clock by more than `clock-skew`.
 - Says when the upstream logged the user in from the id_token's `auth_time`.
 - Gives `federation` `clock-skew` as the upstream's clock allowance.
-- Gives `federation` the profile in the checked id_token: `email`, `name` and `picture` where they are text. No other claim, and nothing from userinfo.
+- Gives `federation` the profile in the checked id_token: `email`, `name` and `picture` where they are text. No other claim but UserInfo's, as `src/userinfo/` says.
 - The email is verified only where `email_verified` is the boolean `true`.
 - When `external-jwt` has no key set to give, a callback is unavailable.
 - The code goes with its PKCE verifier.

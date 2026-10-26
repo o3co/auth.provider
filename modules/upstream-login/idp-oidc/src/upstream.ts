@@ -29,9 +29,11 @@ import {
 	UpstreamMismatch,
 	type UpstreamRefresh,
 	UpstreamRefused,
+	type UpstreamTokens,
 } from "@mod/upstreams";
 import { z } from "zod";
 import { descriptionUrl, hostsOf, narrowerOf, type Settings, sentFor } from "./settings.ts";
+import { describedUserinfoRefusal, userinfoOf } from "./userinfo/userinfo.ts";
 
 const description = z.looseObject({
 	issuer: z.string(),
@@ -39,6 +41,7 @@ const description = z.looseObject({
 	token_endpoint: z.url(),
 	jwks_uri: z.url(),
 	end_session_endpoint: z.url().optional(),
+	userinfo_endpoint: z.url().optional(),
 	authorization_response_iss_parameter_supported: z.boolean().optional(),
 });
 /** The upstream's amr in its checked id_token, beyond what upstream-client reads. */
@@ -49,6 +52,8 @@ interface Endpoints {
 	readonly token: string;
 	readonly jwks: string;
 	readonly endSession?: string;
+	/** Where UserInfo is read, where the operator turns its reading on. */
+	readonly userinfo?: string;
 }
 
 /** How it reaches the upstream: outbound, and outbound's refusals of a destination at boot. */
@@ -101,11 +106,19 @@ async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: rea
 		const refused = destinationRefusal(refusals, url, narrowed, `the description's ${name}`);
 		if (refused !== undefined) throw mismatch(refused);
 	}
+	// UserInfo only where the operator reads it: a description naming it is no matter otherwise.
+	const userinfo = s["read-userinfo"] ? described.userinfo_endpoint : undefined;
+	if (s["read-userinfo"]) {
+		const narrowed = narrowerOf(hosts, s.issuer);
+		const refused = describedUserinfoRefusal(userinfo, hosts, narrowed, refusals);
+		if (refused !== undefined) throw mismatch(refused);
+	}
 	const endpoints: Endpoints = {
 		authorization: described.authorization_endpoint,
 		token: described.token_endpoint,
 		jwks: described.jwks_uri,
 		...(endSession ? { endSession } : {}),
+		...(userinfo ? { userinfo } : {}),
 	};
 	return {
 		endpoints,
@@ -119,6 +132,7 @@ const given = (s: Settings): Endpoints => ({
 	token: s["token-endpoint"] ?? "",
 	jwks: s["jwks-uri"] ?? "",
 	...(s["end-session-endpoint"] ? { endSession: s["end-session-endpoint"] } : {}),
+	...(s["read-userinfo"] && s["userinfo-endpoint"] ? { userinfo: s["userinfo-endpoint"] } : {}),
 });
 
 /** Opens an OpenID Connect upstream; throws, refusing boot, wherever its description does not hold. */
@@ -151,11 +165,25 @@ export async function opened(
 		},
 		at.clock,
 	);
-	/** The upstream login an id_token says, once it holds for this client, login and access token. */
-	const upstreamLoginOf = async (idToken: string, nonce: string, accessToken: string) => {
-		const { login, claims } = await idTokenOf(idToken, nonce, accessToken);
-		const read = amrClaim.safeParse(claims);
+	/**
+	 * The upstream login an id_token says, once it holds for this client, login and access token;
+	 * its profile completed by UserInfo where `userinfo` names it, the id_token checked first.
+	 */
+	const upstreamLoginOf = async (
+		idToken: string,
+		nonce: string,
+		tokens: UpstreamTokens,
+		userinfo: string | undefined,
+	) => {
+		const checked = await idTokenOf(idToken, nonce, tokens.accessToken);
+		const read = amrClaim.safeParse(checked.claims);
 		if (!read.success) throw new UpstreamRefused();
+		const login =
+			userinfo === undefined
+				? checked.login
+				: checked.withUserinfo(
+						await userinfoOf(outbound, userinfo, tokens, narrowerOf(hosts, from.userinfo)),
+					);
 		return { ...login, amr: read.data.amr ?? [] };
 	};
 	const post = s["token-auth"] === "client_secret_post";
@@ -176,8 +204,11 @@ export async function opened(
 			narrowerOf(hosts, from.token),
 		);
 	};
-	/** The login and the tokens of a code; its scopes are what an answer without a scope stands for. */
-	const exchanged = (code: DelegatedExchange) =>
+	/**
+	 * The login and the tokens of a code; its scopes are what an answer without a scope stands for.
+	 * UserInfo is read where `userinfo` names it: a login's code, never a delegation's.
+	 */
+	const exchanged = (code: DelegatedExchange, userinfo?: string) =>
 		guarded(async () => {
 			// Mix-up: an answer from another issuer is refused before its code is used.
 			if (code.iss === undefined ? requireIss : code.iss !== s.issuer) {
@@ -192,7 +223,7 @@ export async function opened(
 			});
 			const { tokens, idToken } = tokenAnswerOf(jsonObjectOf(answer), code.scopes);
 			if (!idToken) throw new UpstreamRefused();
-			const login = await upstreamLoginOf(idToken, code.nonce, tokens.accessToken);
+			const login = await upstreamLoginOf(idToken, code.nonce, tokens, userinfo);
 			return { ...login, tokens: { ...tokens, idToken } };
 		});
 	const refreshed = (refreshToken: string, scopes: readonly string[], resource?: string) =>
@@ -222,7 +253,7 @@ export async function opened(
 				{ clientId: client, scopes: s.scopes },
 				asking(start, start.prompt),
 			),
-		exchange: (code) => exchanged({ ...code, scopes: s.scopes }),
+		exchange: (code) => exchanged({ ...code, scopes: s.scopes }, endpoints.userinfo),
 		// The login's refresh passes no resource.
 		refresh: (refreshToken, scopes) => refreshed(refreshToken, scopes),
 		delegation: {
