@@ -27,6 +27,10 @@ export async function startTrace(target: string) {
 			},
 			(answer) => {
 				res.writeHead(answer.statusCode ?? 502, answer.rawHeaders);
+				// An answer cut short ends the client's too, rather than leaving it waiting for the rest.
+				answer.once("close", () => {
+					if (!answer.complete) res.destroy();
+				});
 				answer.pipe(res);
 			},
 		);

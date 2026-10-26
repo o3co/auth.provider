@@ -53,4 +53,21 @@ describe("an instance's trace", () => {
 		expect(trace.requests().map((r) => r.path)).toEqual(["/c"]);
 		await trace.stop();
 	});
+
+	it("ends the client's answer where the instance's is cut short, never leaving it waiting", async () => {
+		const cut = createServer((_req, res) => {
+			res.writeHead(200, { "content-length": "100" });
+			res.write("partial");
+			setTimeout(() => res.socket?.destroy(), 50);
+		});
+		await new Promise<void>((resolve) => cut.listen(0, "127.0.0.1", resolve));
+		const address = cut.address();
+		const port = typeof address === "object" && address ? address.port : 0;
+		const trace = await startTrace(`http://127.0.0.1:${port}`);
+		const read = fetch(trace.url, { signal: AbortSignal.timeout(3000) }).then((r) => r.text());
+		await expect(read).rejects.toThrow();
+		await expect(read).rejects.not.toThrow(/timeout|aborted due to timeout/i);
+		await trace.stop();
+		await new Promise((r) => cut.close(r));
+	});
 });

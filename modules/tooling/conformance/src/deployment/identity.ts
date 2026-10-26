@@ -1,4 +1,6 @@
-/** What an instance publishes of itself: its issuer and the ids of the keys it signs with; none where it publishes no metadata. */
+import { createHash } from "node:crypto";
+
+/** What an instance publishes of itself: its issuer and its keys, each as `<kid>#<thumbprint>`; none where it publishes no metadata. */
 export type Identity = { readonly issuer: string; readonly keys: readonly string[] } | null;
 
 const asked = (url: string) =>
@@ -6,15 +8,33 @@ const asked = (url: string) =>
 		r.ok ? ((await r.json()) as Record<string, unknown>) : undefined,
 	);
 
-/** An instance's identity, read straight from it (not through its trace): its metadata's issuer and its key set's ids. */
-export async function identityOf(baseUrl: string): Promise<Identity> {
+const required: Readonly<Record<string, readonly string[]>> = {
+	EC: ["crv", "kty", "x", "y"],
+	OKP: ["crv", "kty", "x"],
+	RSA: ["e", "kty", "n"],
+};
+
+/** A JWK's RFC 7638 thumbprint. */
+export function thumbprintOf(jwk: Readonly<Record<string, unknown>>): string {
+	const members = required[String(jwk.kty)];
+	if (!members) return `unknown-${String(jwk.kty)}`;
+	const canonical = `{${members.map((m) => `${JSON.stringify(m)}:${JSON.stringify(jwk[m])}`).join(",")}}`;
+	return createHash("sha256").update(canonical).digest("base64url");
+}
+
+/** An instance's identity, read straight from it (not through its trace), where `issuer` publishes it. */
+export async function identityOf(baseUrl: string, issuer: string): Promise<Identity> {
+	const path = new URL(issuer).pathname.replace(/\/$/, "");
 	const metadata =
-		(await asked(`${baseUrl}/.well-known/openid-configuration`)) ??
-		(await asked(`${baseUrl}/.well-known/oauth-authorization-server`));
+		(await asked(`${baseUrl}${path}/.well-known/openid-configuration`)) ??
+		(await asked(`${baseUrl}/.well-known/oauth-authorization-server${path}`));
 	if (!metadata || typeof metadata.issuer !== "string") return null;
-	const set = await asked(`${baseUrl}/.well-known/jwks.json`);
+	const uri = typeof metadata.jwks_uri === "string" ? metadata.jwks_uri : undefined;
+	const set = uri ? await asked(`${baseUrl}${new URL(uri).pathname}`) : undefined;
 	const keys = Array.isArray(set?.keys)
-		? (set.keys as { kid?: unknown }[]).map((k) => String(k.kid)).sort()
+		? (set.keys as Record<string, unknown>[])
+				.map((k) => `${String(k.kid)}#${thumbprintOf(k)}`)
+				.sort()
 		: [];
 	return { issuer: metadata.issuer, keys };
 }

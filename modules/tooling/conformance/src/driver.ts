@@ -90,28 +90,51 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 			process.kill(-child.pid, name);
 		} catch {}
 	};
-	/** Whether the target ended within `ms`; the timer is cleared either way. */
+	/** Whether any process of the target's group is still there: launched as a group, its end is the group's, not the target's alone. */
+	const groupAlive = () => {
+		if (child.pid === undefined) return false;
+		try {
+			process.kill(-child.pid, 0);
+			return true;
+		} catch (error) {
+			return (error as NodeJS.ErrnoException).code === "EPERM";
+		}
+	};
+	const ended = () =>
+		spec.group ? !groupAlive() : child.exitCode !== null || child.signalCode !== null;
+	/** Whether the target (its whole group, where launched as one) ended within `ms`; the timer is cleared either way. */
 	const endedWithin = async (ms: number) => {
 		let timer: NodeJS.Timeout | undefined;
 		const late = new Promise<false>((resolve) => {
 			timer = setTimeout(() => resolve(false), ms);
 		});
-		const ended = await Promise.race([exited.then(() => true as const), late]);
+		let waiting = true;
+		const gone = spec.group
+			? (async () => {
+					while (waiting && groupAlive()) await pause(20);
+					return true as const;
+				})()
+			: exited.then(() => true as const);
+		const done = await Promise.race([gone, late]);
+		waiting = false;
 		clearTimeout(timer);
-		return ended;
+		return done && !(spec.group && groupAlive());
 	};
 	// SIGTERM, then SIGKILL past its grace; one still there after that fails the stop.
 	const stop = async () => {
-		if (child.exitCode !== null || child.signalCode !== null) return;
+		if (ended()) return;
 		signal("SIGTERM");
 		if (await endedWithin(spec.stopGraceMs ?? stopGraceMs)) return;
 		signal("SIGKILL");
 		if (await endedWithin(spec.killWithinMs ?? killWithinMs)) return;
 		throw new Error(`target ${child.pid} did not end after SIGTERM and SIGKILL:\n${output}`);
 	};
+	// The group is signalled even where the target has ended, and answered only once all of it has.
 	const kill = async () => {
-		if (child.exitCode === null && child.signalCode === null) signal("SIGKILL");
+		signal("SIGKILL");
 		await exited;
+		if (!(await endedWithin(spec.killWithinMs ?? killWithinMs)))
+			throw new Error(`group ${child.pid} did not end after SIGKILL:\n${output}`);
 		return { signal: child.signalCode, endedAt: performance.now() };
 	};
 	const baseUrl = `http://127.0.0.1:${spec.port}`;

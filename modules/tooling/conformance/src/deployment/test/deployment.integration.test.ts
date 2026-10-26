@@ -1,4 +1,5 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -13,6 +14,20 @@ const probe = area<NewPart>("deployment-probe");
 onNew(probe, (part) => part);
 const scene = sceneOf(probe.part({ store: "pausable" }));
 const script: Match = { request: (c) => c.name === "EVAL", succeeded: () => true };
+
+/** Whether this is a fault run, which never skips what it can not do. */
+const faultRun = process.env.CONFORMANCE_FAULTS === "1";
+/** The live processes `pid` started, by pid; none once every instance it started has ended. */
+const childrenOf = (pid: number) => {
+	try {
+		return execFileSync("pgrep", ["-P", String(pid)])
+			.toString()
+			.split(/\s+/)
+			.filter(Boolean);
+	} catch {
+		return [];
+	}
+};
 
 let topology: Topology;
 beforeAll(async () => {
@@ -94,7 +109,8 @@ describe("a deployment of a scene", () => {
 		expect(record.redis.url).toBeUndefined();
 	});
 
-	it.runIf(hostLibfaketime())(
+	// A fault run moves the clock or fails: a host without the library never skips it.
+	it.runIf(faultRun || hostLibfaketime())(
 		"moves an instance's clock, restarting it, and leaves the others' alone",
 		async () => {
 			const d = await startDeployment({ name: "clock", scene, topology, instances: 2 });
@@ -114,7 +130,7 @@ describe("a deployment of a scene", () => {
 		},
 	);
 
-	it.runIf(!hostLibfaketime())(
+	it.runIf(!faultRun && !hostLibfaketime())(
 		"refuses to move a clock where this host has no thread-safe libfaketime",
 		async () => {
 			const d = await startDeployment({ name: "no-clock", scene, topology, instances: 1 });
@@ -125,6 +141,29 @@ describe("a deployment of a scene", () => {
 			}
 		},
 	);
+
+	it("leaves no instance running where marking one fails, or writing the set-up does", async () => {
+		const blocked = await mkdtemp(join(tmpdir(), "conformance-blocked-"));
+		// A file where the marks' directory would be, so marking the first instance fails.
+		await writeFile(join(blocked, "conformance-instances"), "");
+		const temp = process.env.TMPDIR;
+		process.env.TMPDIR = blocked;
+		try {
+			await expect(
+				startDeployment({ name: "unmarked", scene, topology, instances: 2 }),
+			).rejects.toThrow();
+		} finally {
+			if (temp === undefined) delete process.env.TMPDIR;
+			else process.env.TMPDIR = temp;
+		}
+		expect(childrenOf(process.pid)).toEqual([]);
+		// A file where the set-up's directory would be, so its last write fails.
+		const recordTo = join(blocked, "conformance-instances", "records");
+		await expect(
+			startDeployment({ name: "unwritten", scene, topology, instances: 2, recordTo }),
+		).rejects.toThrow();
+		expect(childrenOf(process.pid)).toEqual([]);
+	});
 
 	it("fails its stop where a relay was asked for a fault that never happened", async () => {
 		const d = await startDeployment({ name: "unfired", scene, topology, instances: 1 });

@@ -44,6 +44,55 @@ describe("a target launched as a group", () => {
 		expect(alive(child)).toBe(false);
 	});
 
+	it("stops what the target started with it too, though the target ends first and what it started holds on past SIGTERM", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "conformance-group-"));
+		const holding = `
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+const child = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)"], { stdio: ["ignore", "pipe", "ignore"] });
+process.on("SIGTERM", () => process.exit(0));
+// Served once the child holds on past SIGTERM, so a stop never finds it unready.
+child.stdout.once("data", () =>
+	createServer((req, res) => res.end(String(child.pid))).listen(Number(process.env.PORT), "127.0.0.1"),
+);
+`;
+		await writeFile(join(dir, "main.mjs"), holding);
+		const port = await freePort();
+		const started = await launch({
+			command: process.execPath,
+			args: ["main.mjs"],
+			cwd: dir,
+			env: { ...baseEnv(), PORT: String(port) },
+			port,
+			group: true,
+			stopGraceMs: 300,
+		});
+		if (started.kind !== "running") throw new Error("not started");
+		const child = Number(await (await fetch(`${started.baseUrl}/child`)).text());
+		expect(alive(child)).toBe(true);
+		await started.stop();
+		// Answered only once the whole group has ended, not when the target alone has.
+		expect(alive(child)).toBe(false);
+	});
+
+	it("answers a kill only once what the target started has ended too", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "conformance-group-"));
+		await writeFile(join(dir, "main.mjs"), program);
+		const port = await freePort();
+		const started = await launch({
+			command: process.execPath,
+			args: ["main.mjs"],
+			cwd: dir,
+			env: { ...baseEnv(), PORT: String(port) },
+			port,
+			group: true,
+		});
+		if (started.kind !== "running" || !started.kill) throw new Error("not started as a group");
+		const child = Number(await (await fetch(`${started.baseUrl}/child`)).text());
+		await started.kill();
+		expect(alive(child)).toBe(false);
+	});
+
 	it("offers no kill where not launched as a group", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "conformance-group-"));
 		await writeFile(join(dir, "main.mjs"), program);

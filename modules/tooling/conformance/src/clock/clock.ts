@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -69,15 +69,42 @@ export function appLibfaketimeIn(image: string): string {
 		.trim();
 }
 
-/** Where this host holds the thread-safe libfaketime: `CONFORMANCE_FAKETIME_LIB`, else Debian's place on Linux; none elsewhere. */
+/** Each library probed, and whether it moved a Node process's clock: probed once per path. */
+const probed = new Map<string, boolean>();
+
+/**
+ * Whether `library` moves this Node's clock: a Node started on it a day ahead says a time a day ahead.
+ * A file being there is not enough: on musl, on macOS, or by the library that is not thread-safe,
+ * Node's clock stays where it is.
+ */
+function moves(library: string): boolean {
+	const known = probed.get(library);
+	if (known !== undefined) return known;
+	const before = Date.now();
+	const answer = spawnSync(process.execPath, ["-e", "process.stdout.write(String(Date.now()))"], {
+		encoding: "utf8",
+		env: { PATH: process.env.PATH ?? "", ...appClockEnv("+1d", library) },
+		timeout: 10_000,
+	});
+	const told =
+		answer.status === 0 && answer.error === undefined ? Number(answer.stdout) : Number.NaN;
+	const moved = told - before > 23 * 3_600_000;
+	probed.set(library, moved);
+	return moved;
+}
+
+/**
+ * Where this host holds a thread-safe libfaketime that moves Node's clock: `CONFORMANCE_FAKETIME_LIB`,
+ * else Debian's place on Linux; none where there is none, or where the one there moves no clock.
+ */
 export function hostLibfaketime(): string | undefined {
 	const named = process.env.CONFORMANCE_FAKETIME_LIB;
-	if (named) return existsSync(named) ? named : undefined;
+	if (named) return existsSync(named) && moves(named) ? named : undefined;
 	if (process.platform !== "linux") return undefined;
 	const dir = "/usr/lib";
 	for (const arch of readdirSync(dir)) {
 		const at = join(dir, arch, "faketime", "libfaketimeMT.so.1");
-		if (existsSync(at)) return at;
+		if (existsSync(at) && moves(at)) return at;
 	}
 	return undefined;
 }

@@ -18,7 +18,7 @@
   - With `full+opt-ins`, a scene whose modules the app lacks fails
 - The pattern runs (the script `patterns`, internal module `patterns`)
 - Audit events (`auditEvents`, internal module `audit`): the need a scene states to read them, and a running target's trail
-- Starting a process and waiting for it to respond, in a process group of its own where asked (then killed with what it started); a free port.
+- Starting a process and waiting for it to respond, in a process group of its own where asked (then killed with what it started, and a stop or a kill answered only once the whole group has ended); a free port.
 - Shared tools: a throwaway Redis (on the settings its caller gives, as `drivers` does; paused as a hung store is and, resumed, back once it answers again, within ten seconds), a second start that can cause a storage failure, a fake HTTP server for a scene's outside parties (keeps every request, its body as text and as bytes, and answers as the area's script says, in JSON, text or bytes; plain http at loopback)
   - A fake's script that fails fails the scene when the fake stops
 - Test tools (`./testing`): a fake SMTP relay for a scene's mail (plain SMTP at loopback, on a free port each run; keeps every message, decoded, and finds the latest to an address)

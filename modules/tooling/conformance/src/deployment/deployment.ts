@@ -127,7 +127,13 @@ export async function startDeployment(spec: DeploymentSpec) {
 					},
 				);
 				if (s.kind !== "running") throw new Error(`instance ${index} refused:\n${s.output}`);
-				if (s.pid) await markInstance(s.pid);
+				if (s.pid) {
+					const pid = s.pid;
+					await markInstance(pid).catch(async (error: unknown) => {
+						await s.stop().catch(() => undefined);
+						throw error;
+					});
+				}
 				currents[index] = s;
 				return s;
 			};
@@ -138,10 +144,10 @@ export async function startDeployment(spec: DeploymentSpec) {
 			};
 			let current: Extract<Started, { kind: "running" }> = await start();
 			let alive = true;
-			const trace = await startTrace(current.baseUrl);
-			stops.push(() => trace.stop());
 			// Stopped after a kill too: the instance's audit sink and parties go with it.
 			stops.push(() => ending());
+			const trace = await startTrace(current.baseUrl);
+			stops.push(() => trace.stop());
 			instances.push({
 				index,
 				baseUrl: trace.url,
@@ -176,30 +182,33 @@ export async function startDeployment(spec: DeploymentSpec) {
 			});
 		}
 		// One deployment, as a scene takes it: every instance names the same issuer and keys.
-		const identities = await Promise.all(currents.map((c) => identityOf(c.baseUrl)));
+		const issuer = (config.issuer as { readonly url?: unknown } | undefined)?.url;
+		const identities = await Promise.all(
+			currents.map((c) => (typeof issuer === "string" ? identityOf(c.baseUrl, issuer) : null)),
+		);
 		const differences = identityDifferences(identities);
 		if (differences.length > 0)
 			throw new Error(`the instances are not one deployment:\n${differences.join("\n")}`);
 		identity = identities[0] ?? null;
+		record = {
+			name: spec.name,
+			image: redisImage,
+			replicas: spec.topology.replicas().length,
+			instances: spec.instances,
+			deployment: kernel.deployment,
+			relays: true,
+			redis,
+			settings: instances.map(() => hash),
+			identity,
+			clocks,
+			commit: process.env.GITHUB_SHA ?? null,
+			run: process.env.GITHUB_RUN_ID ?? null,
+		};
+		await written();
 	} catch (error) {
 		await stopAll().catch(() => undefined);
 		throw error;
 	}
-	record = {
-		name: spec.name,
-		image: redisImage,
-		replicas: spec.topology.replicas().length,
-		instances: spec.instances,
-		deployment: kernel.deployment,
-		relays: true,
-		redis,
-		settings: instances.map(() => hash),
-		identity,
-		clocks,
-		commit: process.env.GITHUB_SHA ?? null,
-		run: process.env.GITHUB_RUN_ID ?? null,
-	};
-	await written();
 	return { instances, record: record as DeploymentRecord, stop: stopAll };
 }
 
