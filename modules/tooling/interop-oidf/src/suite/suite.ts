@@ -73,9 +73,10 @@ export interface Suite {
  * after any suite whose owner is gone was taken down. Each setup step is held to its own time and to
  * `signal`, the plan's deadline. Stopping keeps every container's state and log, stdout and stderr,
  * in `log` first, then takes the containers and their volumes down by budgets of its own, past the
- * deadline too, and removes `dir`; however the start went. A stop that fails, a start's own too, is a `SuiteStopFailed`
- * telling every step that failed; where the containers were not taken down it keeps `dir`, which holds
- * what stops the suite.
+ * deadline too, and removes `dir`; however the start went, but a start failing before Compose was
+ * asked for a container removes `dir` alone. A stop that fails, a start's own too, is a
+ * `SuiteStopFailed` telling every step that failed; where the containers were not taken down it
+ * keeps `dir`, which holds what stops the suite.
  */
 export async function startSuite(
 	pin: SuitePin,
@@ -139,6 +140,7 @@ export async function startSuite(
 			);
 	};
 	await mkdir(dir, { recursive: true });
+	let composed = false;
 	try {
 		await reclaimOrphans(command, join(dirname(log), "reclaimed"));
 		await step(
@@ -165,6 +167,8 @@ export async function startSuite(
 		const venv = join(dir, "python");
 		await step("python3", ["-m", "venv", venv], budgetMs.quick);
 		await step(join(venv, "bin", "pip"), ["install", "--quiet", ...pin.python], budgetMs.pip);
+		// From here the containers may run: a failure stops them by Compose.
+		composed = true;
 		await step("docker", [...compose, "up", "--detach", "--quiet-pull"], budgetMs.up);
 		const deadline = Date.now() + readyWithinMs;
 		let ca: string | undefined;
@@ -194,6 +198,16 @@ export async function startSuite(
 			stop,
 		};
 	} catch (error) {
+		// Before Compose was asked for a container, there is nothing to stop: what was prepared goes.
+		if (!composed) {
+			const removed = await rm(dir, { recursive: true, force: true }).then(
+				() => undefined,
+				(failed: unknown) => failed,
+			);
+			if (removed !== undefined)
+				throw new AggregateError([error, removed], `${String(error)}; and ${dir} stays`);
+			throw error;
+		}
 		// The start's failure first, then each of the stop's.
 		const stopped = await stop().then(
 			() => undefined,
