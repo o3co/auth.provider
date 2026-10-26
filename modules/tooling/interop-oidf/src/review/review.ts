@@ -59,14 +59,12 @@ export function reviewPages(runs: readonly ModuleRun[]): ReviewPage[] {
 }
 
 /**
- * Keeps in `dir` each review page as a file of its own, and `index.json`: every review entry in
- * order, what the suite asks of it and the page's file (none where the suite kept no page). What an
- * earlier run kept there goes first, so no page is taken for this run's; nothing is made where no
- * test was left for review.
+ * Keeps in `dir` each page as a file of its own, and `index.json`: every page in order, what the
+ * suite asks of it and its file (none where there is no page). What an earlier run kept there goes
+ * first, so no page is taken for this run's; nothing is made where there is no page to keep.
  */
-export async function keepReviewPages(dir: string, runs: readonly ModuleRun[]): Promise<void> {
+export async function keepPages(dir: string, pages: readonly ReviewPage[]): Promise<void> {
 	await rm(dir, { recursive: true, force: true });
-	const pages = reviewPages(runs);
 	if (pages.length === 0) return;
 	await mkdir(dir, { recursive: true });
 	for (const p of pages) if (p.page !== undefined) await writeFile(join(dir, p.file), p.page);
@@ -76,3 +74,7 @@ export async function keepReviewPages(dir: string, runs: readonly ModuleRun[]): 
 	}));
 	await writeFile(join(dir, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
 }
+
+/** Keeps in `dir` the pages of the tests the suite left for review, as `keepPages` keeps them. */
+export const keepReviewPages = (dir: string, runs: readonly ModuleRun[]): Promise<void> =>
+	keepPages(dir, reviewPages(runs));
