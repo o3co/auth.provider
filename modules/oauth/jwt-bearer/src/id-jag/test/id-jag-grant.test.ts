@@ -28,12 +28,14 @@ import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
 import { issuancePolicies, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
-import { SignJWT } from "jose";
+import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import {
 	type DelegatedAssertions,
 	delegatedAssertions,
 	jtiLedgers,
+	type SignerKeys,
+	signerKeys,
 	spentAssertions,
 } from "../../contract.ts";
 import jwtBearer from "../../module.ts";
@@ -125,7 +127,17 @@ interface Asked {
 	spent: string[];
 }
 
-function fakes(asked: Asked, withCorpLedger: boolean) {
+/** What a test may change of the fakes: a target that ignores the allowance, the corp ledger, a shared store. */
+interface Fakes {
+	/** A target rule taking any `resource` asked, the allowance unasked: so only a later check holds it. */
+	readonly lax?: boolean;
+	/** Whether the corp issuer's jtis go to its own ledger (true, by default) or to the store. */
+	readonly corpLedger?: boolean;
+	/** The spent assertions' records, shared with another assembly where given. */
+	readonly spentRecords?: ReturnType<typeof memoryRecords<true>>;
+}
+
+function fakes(asked: Asked, withCorpLedger: boolean, given: Fakes) {
 	return [
 		defineModule({ name: "delegate", takes: [] }, (m) => [
 			m.contribute(delegatedAssertions).by(
@@ -142,7 +154,8 @@ function fakes(asked: Asked, withCorpLedger: boolean) {
 		]),
 		defineModule({ name: "spent-assertions", takes: [] }, (m) => [
 			m.provide(spentAssertions).by(() => {
-				const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
+				const stand =
+					given.spentRecords ?? memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
 				return {
 					save: (name: string, lifetimeMs: number) => {
 						asked.saved.push(name);
@@ -153,7 +166,7 @@ function fakes(asked: Asked, withCorpLedger: boolean) {
 		]),
 		// The corp issuer's own ledger, where it is named.
 		defineModule({ name: "corp-ledger", takes: [] }, (m) =>
-			withCorpLedger
+			withCorpLedger && given.corpLedger !== false
 				? [
 						m.contribute(jtiLedgers).by(() => {
 							const ledger = memoryJtiLedger(corp, () => now);
@@ -174,6 +187,7 @@ function fakes(asked: Asked, withCorpLedger: boolean) {
 				target: ({ param, audience, within }) => {
 					const asked = param("resource");
 					if (!asked) return { kind: "audience", audience };
+					if (given.lax) return { kind: "audience", audience: [asked] };
 					return within(asked)
 						? { kind: "audience", audience: [asked] }
 						: { kind: "error", error: "invalid_target", description: `not ${asked}` };
@@ -230,7 +244,7 @@ async function serve(
 		ceilEntry,
 		limitedEntry,
 	],
-	options: { readonly dpop?: boolean; readonly extra?: readonly Module[] } = {},
+	options: { readonly dpop?: boolean; readonly extra?: readonly Module[] } & Fakes = {},
 ) {
 	const asked: Asked = { checks: [], saved: [], spent: [] };
 	const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
@@ -257,6 +271,7 @@ async function serve(
 			...fakes(
 				asked,
 				issuers.some((i) => i.issuer === corp),
+				options,
 			),
 			...(options.extra ?? []),
 		],
@@ -317,7 +332,12 @@ const refusedAt = async (issuers: readonly Record<string, unknown>[], dpop = tru
 	return failure ?? "booted";
 };
 
-const sign = (claims: Record<string, unknown>, key: KeyObject, typ: string | null = idJagTyp) =>
+const sign = (
+	claims: Record<string, unknown>,
+	key: KeyObject,
+	typ: string | null = idJagTyp,
+	kid?: string,
+) =>
 	new SignJWT({
 		jti: `j-${Math.random()}`,
 		aud: issuer,
@@ -327,8 +347,13 @@ const sign = (claims: Record<string, unknown>, key: KeyObject, typ: string | nul
 		client_id: "agent",
 		...claims,
 	})
-		.setProtectedHeader({ alg: "EdDSA", ...(typ !== null ? { typ } : {}) })
+		.setProtectedHeader({ alg: "EdDSA", ...(typ !== null ? { typ } : {}), ...(kid ? { kid } : {}) })
 		.sign(key);
+/** An assembly of `issuers` whose spent assertions go to `records`, the corp issuer's too. */
+const s0 = (
+	records: ReturnType<typeof memoryRecords<true>>,
+	issuers: readonly Record<string, unknown>[],
+) => serve(issuers, { spentRecords: records, corpLedger: false });
 /** An ID-JAG of the corp IdP, for the client `agent`, narrow in scope and resource. */
 const ofCorp = (claims: Record<string, unknown> = {}) =>
 	sign(
@@ -378,6 +403,42 @@ describe("an ID-JAG where no issuer takes the profile", () => {
 			expect(said(await s.handle(assertion)), way).toBe(untrusted);
 		expect(s.asked.checks).toEqual([]);
 		expect(s.asked.saved).toEqual([]);
+	});
+
+	it("is refused for a self-issued signer, before its keys are asked for", async () => {
+		const device = generateKeyPairSync("ed25519");
+		const thumb = await calculateJwkThumbprint(await exportJWK(device.publicKey), "sha256");
+		const keysAsked: unknown[] = [];
+		const deviceKeys = defineModule({ name: "device-keys", takes: [] }, (m) => [
+			m.contribute(signerKeys).by(
+				(): SignerKeys => ({
+					issuer: "https://devices.example",
+					perSigner: true,
+					keysOf: async (signer) => {
+						keysAsked.push(signer);
+						return {
+							kind: "keys",
+							keys: [{ ...(await exportJWK(device.publicKey)), alg: "EdDSA", kid: thumb }],
+							algorithms: ["EdDSA"],
+						};
+					},
+				}),
+			),
+		]);
+		const devices = {
+			issuer: "https://devices.example",
+			subject: "as-is",
+			"subject-is-key-thumbprint": true,
+			"self-issued-prefix": "device:",
+		};
+		const s = await serve([plainEntry, devices], { extra: [deviceKeys] });
+		const name = `device:${thumb}`;
+		const asJag = await sign({ iss: name, sub: name }, device.privateKey, idJagTyp, thumb);
+		expect(said(await s.handle(asJag))).toBe(untrusted);
+		expect(keysAsked).toEqual([]);
+		// The same signer's assertion of no profile goes its way.
+		const plain = await sign({ iss: name, sub: name }, device.privateKey, "JWT", thumb);
+		expect(said(await s.handle(plain))).toBe("issued");
 	});
 
 	it("is refused for a request naming no client, by an entry whose client would take one", async () => {
@@ -554,6 +615,48 @@ describe("an issuer taking the ID-JAG profile", () => {
 		const past = await sign({ iss: ceil, scope: "chat.read chat.history" }, ceilKey.privateKey);
 		expect(said(await s.handle(past))).toBe("invalid_scope: undefined");
 		expect(s.asked.saved).toEqual([]);
+	});
+
+	it("checks again what is chosen, refusing an audience the ID-JAG does not name that a target let by", async () => {
+		let judged = 0;
+		const counting = defineModule({ name: "counting", takes: [] }, (m) => [
+			m.contribute(issuancePolicies).by(() => ({
+				name: "counting",
+				judge: async () => {
+					judged += 1;
+					return { kind: "allowed" };
+				},
+			})),
+		]);
+		// The target takes what is asked, unheld by the allowance: only the ID-JAG's own check stands.
+		const s = await serve(undefined, { lax: true, extra: [counting] });
+		const asked = await ofCorp();
+		expect(said(await s.handle(asked, "agent", { resource: otherApi }))).toBe(
+			"invalid_target: undefined",
+		);
+		expect([s.asked.spent, judged]).toEqual([[], 0]);
+		expect(said(await s.handle(asked))).toBe("issued");
+	});
+
+	it("shares its record of spent assertions with its issuer's assertions of no profile", async () => {
+		// One store, as an instance keeps it across a change of the entry's profile.
+		const records = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
+		const plainCorp = { ...jagEntry, profile: "rfc7523" };
+		const jti = `shared-${Math.random()}`;
+		const asJag = await s0(records, [jagEntry]).then((s) => s.handle);
+		expect(said(await asJag(await ofCorp({ jti })))).toBe("issued");
+		const asPlain = await s0(records, [plainCorp]).then((s) => s.handle);
+		expect(said(await asPlain(await sign({ iss: corp, jti }, corpKey.privateKey, "JWT")))).toBe(
+			"invalid_grant: assertion replayed",
+		);
+		// And the other way: one spent with no profile, presented as an ID-JAG once it takes it.
+		const other = `shared-${Math.random()}`;
+		expect(
+			said(await asPlain(await sign({ iss: corp, jti: other }, corpKey.privateKey, "JWT"))),
+		).toBe("issued");
+		expect(said(await asJag(await ofCorp({ jti: other })))).toBe(
+			"invalid_grant: assertion replayed",
+		);
 	});
 
 	it("gives back no jti spent before a refusal when the token is issued", async () => {
