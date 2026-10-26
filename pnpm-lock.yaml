@@ -3758,6 +3758,9 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../../oauth/claims-selection
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../../oauth/client-allowance
