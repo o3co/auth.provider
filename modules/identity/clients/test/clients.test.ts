@@ -311,6 +311,33 @@ describe("clients", () => {
 		expect(clientOf(await outcome(c, {}, { client_id: ["pub"] })).id).toBe("pub");
 	});
 
+	it("marks a refusal an assertion method is part of, with the challenges of the methods tried", async () => {
+		const assertion = method("test_assertion", {
+			assertion: true,
+			claimed: (r) => r.form.get("test_assertion")?.[0],
+			malformed: (r) => r.form.get("test_assertion")?.[0] === "",
+		});
+		const c = await boot([assertion]);
+		expect(await outcome(c, basic("conf", "s3cret"), { test_assertion: ["conf"] })).toEqual({
+			kind: "refused",
+			reason: "multiple_methods",
+			assertion: true,
+			challenges: ['Basic realm="client"'],
+		});
+		expect(await outcome(c, {}, { test_assertion: [""] })).toEqual({
+			kind: "refused",
+			reason: "malformed_credentials",
+			assertion: true,
+			challenges: [],
+		});
+		// No assertion among them: refused as a malformed request, unmarked and unchallenged.
+		expect(await outcome(c, basic("conf", "s3cret"), { client_secret: ["p0st"] })).toEqual({
+			kind: "refused",
+			reason: "multiple_methods",
+			challenges: [],
+		});
+	});
+
 	it("takes a client_id beside another method's credentials as that method's, never none as well", async () => {
 		const half = method("half", { claimed: (r) => r.form.get("half_id")?.[0] });
 		const c = await boot([half]);

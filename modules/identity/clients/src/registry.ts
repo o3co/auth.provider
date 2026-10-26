@@ -162,11 +162,31 @@ export function registry(
 			const tried = claimed.length > 0 ? claimed : claim(none);
 			const read = claimed.length > 0 ? others : methods;
 			const [only, ...more] = tried;
-			const every = methods.flatMap((m) => (m.challenge ? [m.challenge] : []));
-			if (more.length > 0) return { kind: "refused", reason: "multiple_methods", challenges: [] };
-			if (read.some((method) => method.malformed?.(request))) {
-				return { kind: "refused", reason: "malformed_credentials", challenges: [] };
+			const challengesOf = (of: readonly AuthMethod[]) =>
+				of.flatMap((m) => (m.challenge ? [m.challenge] : []));
+			const every = challengesOf(methods);
+			// Where an assertion method is part of it, the refusal is the assertion's: marked, and challenged
+			// by the methods tried, as RFC 7521 §4.2.1 answers it `invalid_client`.
+			const malformedRefusal = (
+				reason: "multiple_methods" | "malformed_credentials",
+				by: readonly AuthMethod[],
+			): Refused =>
+				by.some((m) => m.assertion === true)
+					? {
+							kind: "refused",
+							reason,
+							challenges: challengesOf(tried.map((t) => t.method)),
+							assertion: true,
+						}
+					: { kind: "refused", reason, challenges: [] };
+			if (more.length > 0) {
+				return malformedRefusal(
+					"multiple_methods",
+					tried.map((t) => t.method),
+				);
 			}
+			const malformed = read.filter((method) => method.malformed?.(request));
+			if (malformed.length > 0) return malformedRefusal("malformed_credentials", malformed);
 			if (!only) return { kind: "refused", reason: "no_credentials", challenges: every };
 			const challenges = only.method.challenge ? [only.method.challenge] : [];
 			const refused = (reason: Refused["reason"]) =>
