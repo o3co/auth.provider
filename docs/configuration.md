@@ -47,7 +47,7 @@ From `@mod/claims-selection`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `claims-selection.mode` | off \| draining \| on | `off` |  |  |  | off takes no claims request and touches no store; draining keeps holding back what was kept, but keeps nothing new; on takes claims requests. |
+| `claims-selection.mode` | off \| draining \| on | `on` |  |  |  | off takes no claims request and touches no store; draining keeps holding back what was kept, but keeps nothing new; on takes claims requests. |
 
 ## client-assertion
 

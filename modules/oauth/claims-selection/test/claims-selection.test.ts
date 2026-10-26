@@ -9,7 +9,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { afterEach, expect, it } from "vitest";
 import {
 	claimScopes,
@@ -354,15 +354,30 @@ it("keeps reading, pinning and holding back what is kept when draining, but keep
 	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow(TypeError);
 });
 
-it("reads its mode as an operator writes it, off by default, and refuses another value", async () => {
+it("reads its mode as an operator writes it, on by default, and refuses another value", async () => {
 	const stores = claimsSelectionInMemory();
 	const app = await assemble({
 		modules: [claimsSelectionModule, stores.module],
 		config: kernelConfig(),
 		runtime,
 	});
-	expect(app.get(claimsSelections).mode).toBe("off");
+	expect(app.get(claimsSelections).mode).toBe("on");
 	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
+});
+
+it("warns at start while it takes no claims requests, naming the mode", async () => {
+	for (const mode of ["off", "draining", "on"] as const) {
+		const logged = recordingLog();
+		await assemble({
+			modules: [claimsSelectionModule, claimsSelectionInMemory().module],
+			config: { ...kernelConfig(), ...claimsSelectionConfig({ mode }) },
+			runtime: quietRuntime({ log: logged.log }),
+		});
+		const warned = logged.lines().filter((line) => line.event === "claims-selection.not_taking");
+		expect(warned, mode).toEqual(
+			mode === "on" ? [] : [expect.objectContaining({ level: "warn", fields: { mode } })],
+		);
+	}
 });
 
 /** A table of claim scopes, as the module releasing claims contributes it. */

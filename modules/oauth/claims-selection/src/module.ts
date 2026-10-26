@@ -27,6 +27,9 @@ export default defineModule({ name: "claims-selection", section, takes }, (m) =>
 		if ((await c.collect(claimScopes)).length > 1) {
 			return c.refuse("claims-selection", "more than one table of claim scopes");
 		}
+		// Off or draining, claims requests go untaken; said at start, so it is never left so unawares.
+		if (c.section.mode !== "on")
+			c.log.warn("claims-selection.not_taking", { mode: c.section.mode });
 		return (await built(c)).selections;
 	}),
 	m.contribute(redemptionHooks).by(async (c) => (await built(c)).hook),
