@@ -514,7 +514,7 @@ describe("refresh tokens", () => {
 		expect([empty.status, empty.body.scope]).toEqual([200, "read write"]);
 	});
 
-	it("refuse another client without spending the token [rfc6749-6-c] [rfc6749-10.4-b] [rfc6749-10.4-c] [oidc-core-12.1-c]", async () => {
+	it("refuse another client without spending the token [rfc6749-6-c] [rfc6749-10.4-b] [rfc6749-10.4-c]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		expect((await s.refresh(token, "other")).body.error).toBe("invalid_grant");
@@ -563,7 +563,7 @@ describe("refresh tokens", () => {
 		expect((await s.refresh(first.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
-	it("refuse a token with anything after it, without spending the token [rfc6749-6-d] [oidc-core-12.1-b]", async () => {
+	it("refuse a token with anything after it, without spending the token [rfc6749-6-d]", async () => {
 		const s = await serve();
 		const first = await s.redeem();
 		expect((await s.refresh(`${first.refresh_token}x`)).body.error).toBe("invalid_grant");
