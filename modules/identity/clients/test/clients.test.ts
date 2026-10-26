@@ -289,7 +289,7 @@ describe("clients", () => {
 		).toEqual(["clients.registered"]);
 	});
 
-	it("refuses credentials a method finds malformed, after two methods at once and before anything else [rfc6749-2.3-b]", async () => {
+	it("refuses credentials a method finds malformed, after two methods at once and before anything else", async () => {
 		const half = method("half", {
 			claimed: (r) => r.form.get("half_id")?.[0],
 			malformed: (r) => r.form.has("half_id") !== r.form.has("half_proof"),
