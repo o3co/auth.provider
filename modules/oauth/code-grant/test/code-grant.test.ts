@@ -342,7 +342,7 @@ it("revokes the code's access token when its session closes, through session-tok
 	expect(await revoked(s, token)).toBe(true);
 });
 
-it("ends the access token no later than its session, when the session ends first", async () => {
+it("ends the access token no later than its session, when the session ends first [rfc6749-5.1-b]", async () => {
 	const s = await serve();
 	const entry = await s.app.get(sessions).entryOf(s.session.id);
 	if (entry.kind !== "entered") throw new Error("not entered");
@@ -366,7 +366,7 @@ it("refuses a code whose session authenticated far ahead of the clock, leaving i
 	expect(keptOf(s, code)?.state).toBe("issued");
 });
 
-it("asks the issuance policies before the code is used up, and only for its own client and verifier", async () => {
+it("asks the issuance policies before the code is used up, and only for its own client and verifier [rfc7636-4.6-b]", async () => {
 	const s = await serve({ extra: [policy(() => false)] });
 	const code = await s.issue();
 	const refused = { error: "invalid_grant", error_description: "refused here" };
@@ -450,7 +450,7 @@ it("refuses a code the policies refuse once it is used up, issuing nothing", asy
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 });
 
-it("redeems a code once, and a code that comes again revokes what it gave", async () => {
+it("redeems a code once, and a code that comes again revokes what it gave [rfc6749-4.1.2-d] [rfc6749-4.1.2-e]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const first = await s.redeem(code);
@@ -459,7 +459,7 @@ it("redeems a code once, and a code that comes again revokes what it gave", asyn
 	expect(await revoked(s, String(first.body.access_token))).toBe(true);
 });
 
-it("refuses a code another exchange used up while this one was turning it, and lists and marks it void", async () => {
+it("refuses a code another exchange used up while this one was turning it, and lists and marks it void [rfc6749-4.1.2-d]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	s.stores.raceNextChange((kept) => overwritten(kept, { state: "consumed" }));
@@ -505,7 +505,7 @@ it("drops a listed void whose record it does not know, as one it cannot revoke, 
 	expect(s.stores.pending()).toEqual([]);
 });
 
-it("refuses a request missing the code, the redirect URI or the verifier, or with a malformed verifier, leaving the code unused", async () => {
+it("refuses a request missing the code, the redirect URI or the verifier, or with a malformed verifier, leaving the code unused [rfc6749-5.2-f] [rfc7636-4.5-b] [rfc6749-4.1.3-e]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const cases: Record<string, Record<string, string>> = {
@@ -530,7 +530,7 @@ it("refuses a code whose subject was revoked after it signed in", async () => {
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 	expect(keptOf(s, code)?.token).toBeUndefined();
 });
-it("refuses a code issued to another client, or presented with another redirect URI", async () => {
+it("refuses a code issued to another client, or presented with another redirect URI [rfc6749-4.1.3-c] [rfc6749-4.1.3-e]", async () => {
 	const s = await serve();
 	const elsewhere = await s.app.get(codes).issue({ ...s.facts, clientId: "other" });
 	expect((await s.redeem(elsewhere)).body).toEqual(refusedBody);
@@ -607,7 +607,7 @@ it("voids the token it issued when the code is used again while the token is mad
 	expect(await revoked(s, given[0] as string)).toBe(true);
 });
 
-it("uses a code up on a wrong verifier", async () => {
+it("uses a code up on a wrong verifier [rfc7636-4.6-b]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	expect((await s.redeem(code, { code_verifier: "w".repeat(43) })).body.error).toBe(
@@ -616,7 +616,7 @@ it("uses a code up on a wrong verifier", async () => {
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 });
 
-it("refuses a held challenge of another length, or of the same length with other bytes", async () => {
+it("refuses a held challenge of another length, or of the same length with other bytes [rfc7636-4.5-a]", async () => {
 	const s = await serve();
 	const other = `${challenge.slice(0, -1)}${challenge.endsWith("A") ? "B" : "A"}`;
 	for (const held of [challenge.slice(0, -1), `${challenge}A`, other]) {
@@ -628,7 +628,7 @@ it("refuses a held challenge of another length, or of the same length with other
 	}
 });
 
-it("adds an ID token when the code's scope holds the maker's scope, and names that scope", async () => {
+it("adds an ID token when the code's scope holds the maker's scope, and names that scope [oidc-core-3.1.3.3-c] [oidc-core-3.1.3.2-f]", async () => {
 	const s = await serve({ extra: [maker("openid")] });
 	expect(s.app.get(codes).idTokenScope()).toBe("openid");
 	expect((await s.redeem(await s.issue(["openid", "read"]))).body.id_token).toBe("id.token");
@@ -891,7 +891,7 @@ it("refuses to issue a code for facts the session or the client contradict", asy
 	expect(typeof (await issue(s.facts))).toBe("string");
 });
 
-it("marks nothing void when listing a reused code fails, so a later reuse still revokes", async () => {
+it("marks nothing void when listing a reused code fails, so a later reuse still revokes [rfc6749-4.1.2-e]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const first = await s.redeem(code);

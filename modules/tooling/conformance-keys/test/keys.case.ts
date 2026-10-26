@@ -42,7 +42,7 @@ async function refusal(scene: Scene): Promise<string> {
 }
 
 describe("A. key set", () => {
-	it("publishes the current key and unexpired previous keys with public members only", async () => {
+	it("publishes the current key and unexpired previous keys with public members only [oidc-discovery-3-p] [oidc-core-10.1.1-a]", async () => {
 		const base = await serve({
 			keys: {
 				signing: eddsa("current"),
@@ -62,7 +62,7 @@ describe("A. key set", () => {
 		}
 	});
 
-	it("answers with a strong ETag, honours If-None-Match and allows caching", async () => {
+	it("answers with a strong ETag, honours If-None-Match and allows caching [oidc-core-10.2.1-a]", async () => {
 		const base = await serve({ keys: { signing: eddsa("current") } });
 		const res = await fetch(`${base}${jwksPath}`);
 		const etag = res.headers.get("etag") ?? "";
@@ -91,7 +91,7 @@ describe("A. key set", () => {
 		expect(kept(head)).toEqual(kept(got));
 	});
 
-	it("does not publish a key set when signing only with a shared secret", async () => {
+	it("does not publish a key set when signing only with a shared secret [oidc-discovery-3-p]", async () => {
 		const base = await serve({
 			keys: { signing: { kid: "h", alg: "HS256", secretHex: randomBytes(32).toString("hex") } },
 		});

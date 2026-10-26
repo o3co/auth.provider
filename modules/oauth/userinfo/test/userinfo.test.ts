@@ -96,7 +96,7 @@ function over(
 const noStore = { "cache-control": "no-store", pragma: "no-cache" };
 
 describe("userinfo", () => {
-	it("answers the claims oidc releases for the token's scope, with sub from the token, for its open session", async () => {
+	it("answers the claims oidc releases for the token's scope, with sub from the token, for its open session [oidc-core-5.3.2-a] [oidc-core-5.3.2-d]", async () => {
 		const o = over({ claims: { name: "Ann", sub: "someone else" } as never });
 		const answer = await o.run();
 		expect(answer).toEqual({ status: 200, headers: noStore, json: { name: "Ann", sub: "ann" } });
@@ -131,13 +131,13 @@ describe("userinfo", () => {
 		expect(failing.calls.map((c) => c[0])).not.toContain("claims");
 	});
 
-	it("answers only sub for a token issued in no session", async () => {
+	it("answers only sub for a token issued in no session [oidc-core-5.3.2-d]", async () => {
 		const o = over({ session: { kind: "unbound" } });
 		expect(await o.run()).toEqual({ status: 200, headers: noStore, json: { sub: "ann" } });
 		expect(o.calls.map((c) => c[0])).toEqual(["admitted", "session"]);
 	});
 
-	it("refuses a token whose session ended, is short of a requirement, or is another subject's, in the token's scheme", async () => {
+	it("refuses a token whose session ended, is short of a requirement, or is another subject's, in the token's scheme [rfc9449-7.1-c] [rfc6749-7.2-a]", async () => {
 		const refused = {
 			status: 401,
 			headers: { ...noStore, "www-authenticate": 'DPoP error="invalid_token"' },
@@ -158,7 +158,7 @@ describe("userinfo", () => {
 		expect(await other.run()).toEqual(refused);
 	});
 
-	it("refuses a token whose scope lacks openid as insufficient_scope, in the token's scheme, before reading its session", async () => {
+	it("refuses a token whose scope lacks openid as insufficient_scope, in the token's scheme, before reading its session [rfc6750-3.1-c] [rfc9449-7.1-c]", async () => {
 		for (const scope of [[], ["profile"], ["openidx"]]) {
 			const o = over({
 				admission: { kind: "admitted", access: valid("DPoP", { ...grant, scope }) },

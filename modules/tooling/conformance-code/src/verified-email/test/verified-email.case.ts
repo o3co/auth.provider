@@ -128,7 +128,7 @@ describe("verified email: the authorization endpoint", () => {
 	});
 
 	it.each(["bob", "carol"])(
-		"sends %s back with access_denied, the state and the issuer, and no code",
+		"sends %s back with access_denied, the state and the issuer, and no code [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d]",
 		async (user) => {
 			const answer = await as(at, user).authorize();
 			expect(`${answer.at?.origin}${answer.at?.pathname}`).toBe(callback);
@@ -173,15 +173,18 @@ describe("verified email: the session grant", () => {
 		expect((await as(at, "alice").sessionGrant()).status).toBe(200);
 	});
 
-	it.each(["bob", "carol"])("refuses %s as invalid_grant, saying why", async (user) => {
-		const res = await as(at, user).sessionGrant();
-		expect([res.status, res.body.error, res.body.error_description]).toEqual([
-			400,
-			"invalid_grant",
-			unverified,
-		]);
-		expect(res.body).not.toHaveProperty("access_token");
-	});
+	it.each(["bob", "carol"])(
+		"refuses %s as invalid_grant, saying why [rfc6749-5.2-a]",
+		async (user) => {
+			const res = await as(at, user).sessionGrant();
+			expect([res.status, res.body.error, res.body.error_description]).toEqual([
+				400,
+				"invalid_grant",
+				unverified,
+			]);
+			expect(res.body).not.toHaveProperty("access_token");
+		},
+	);
 
 	it.runIf(areaTarget().can(auditEvents.need))(
 		"records the refusal with the policy and its reason",

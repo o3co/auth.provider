@@ -38,6 +38,7 @@ function clientsSection(part: OauthPart): Record<string, unknown> {
 					...(c.defaultScopes ? { "default-scopes": c.defaultScopes } : {}),
 					audiences: c.audiences ?? [],
 				},
+				...(c.bindingRequired ? { "sender-binding": { required: true } } : {}),
 				...(c.keys || c.jwksUri
 					? {
 							"client-assertion": {
@@ -172,6 +173,7 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 										}),
 								...(i.conditions ? { conditions: i.conditions } : {}),
 								...(i.ceiling ? { ceiling: i.ceiling } : {}),
+								...(i.profile ? { profile: i.profile } : {}),
 								...(i.client ? { client: i.client } : {}),
 							})),
 						},

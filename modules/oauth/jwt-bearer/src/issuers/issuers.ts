@@ -86,6 +86,12 @@ const narrowing = {
 		.describe(
 			"This issuer's clock allowance for what is taken, no wider than the section's; a revocation keeps the section's.",
 		),
+	profile: z
+		.enum(["rfc7523", "id-jag"])
+		.prefault("rfc7523")
+		.describe(
+			'The rules its assertions are taken by: "rfc7523", or "id-jag" (preview, draft-ietf-oauth-identity-assertion-authz-grant-04), each ID-JAG presented by the confidential client it names, within its scope and resources.',
+		),
 	client: z
 		.string()
 		.min(1)
@@ -165,7 +171,21 @@ const issuerEntry = z
 			message: "a self-issued prefix needs subject-is-key-thumbprint and keys contributed",
 			path: ["self-issued-prefix"],
 		},
-	);
+	)
+	// An ID-JAG's `sub` is a user, never its signer's key; and its client authenticates and is named.
+	.refine((i) => i.profile !== "id-jag" || !i["subject-is-key-thumbprint"], {
+		message: "an ID-JAG's subject is a user: not written beside subject-is-key-thumbprint",
+		path: ["profile"],
+	})
+	.refine((i) => i.profile !== "id-jag" || i["self-issued-prefix"] === undefined, {
+		message: "an ID-JAG's signer is its IdP: not written beside self-issued-prefix",
+		path: ["profile"],
+	})
+	.refine((i) => i.profile !== "id-jag" || i.client === undefined, {
+		message:
+			"an ID-JAG is presented by the confidential client it names: not written beside client",
+		path: ["profile"],
+	});
 
 /** One trusted issuer, as the section gives it. */
 export type IssuerEntry = z.output<typeof issuerEntry>;

@@ -300,7 +300,7 @@ describe("login-password return targets", () => {
 });
 
 describe("login-password attempts", () => {
-	it("counts every attempt before checking it, successful or not, known user or not", async () => {
+	it("counts every attempt before checking it, successful or not, known user or not [rfc6749-10.10-d]", async () => {
 		const { login } = await serve({ login: { attempts: 2, window: "1m" } });
 		await login(right, from("198.51.100.1"));
 		await login({ username: "nobody", password: "x" }, from("198.51.100.1"));
@@ -518,7 +518,7 @@ describe("login-password attempts per account", () => {
 	const elsewhere = () => from(`198.51.100.${sender++}`);
 	const wrong = (username: string) => ({ username, password: "wrong" });
 
-	it("makes an identifier wait after its attempts, from any source, and answers alike whether its account exists", async () => {
+	it("makes an identifier wait after its attempts, from any source, and answers alike whether its account exists [rfc6749-10.10-d]", async () => {
 		for (const username of ["alice", "nobody"]) {
 			const { login } = await serve({ login: budget });
 			expect((await login(wrong(username), elsewhere())).status, username).toBe(401);

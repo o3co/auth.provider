@@ -120,7 +120,7 @@ it("authenticates a client by keys it publishes at its jwks-uri, fetching the se
 	expect(fetched - before).toBe(1);
 });
 
-it("refuses a key its jwks-uri does not publish", async () => {
+it("refuses a key its jwks-uri does not publish [rfc7523-3-u] [rfc7521-5.2-n]", async () => {
 	served = {
 		keys: [publicJwk(generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey, "ec")],
 	};

@@ -131,7 +131,7 @@ describe("refresh: rotation and reuse", () => {
 });
 
 describe("refresh: what a token may do", () => {
-	it("narrows the scope on request and never widens it", async () => {
+	it("narrows the scope on request and never widens it [rfc6749-6-a]", async () => {
 		const { refresh_token: token = "" } = await tokensFor();
 		const narrowed = await refresh(token, "app", { scope: "read" });
 		expect([narrowed.status, narrowed.body.scope]).toEqual([200, "read"]);
@@ -141,7 +141,7 @@ describe("refresh: what a token may do", () => {
 		expect(widened.body.error).toBe("invalid_scope");
 	});
 
-	it("refuses another client", async () => {
+	it("refuses another client [rfc6749-6-c] [rfc6749-10.4-b] [rfc6749-10.4-c] [oidc-core-12.1-c]", async () => {
 		const { refresh_token: token = "" } = await tokensFor();
 		expect((await refresh(token, "other")).body.error).toBe("invalid_grant");
 	});
@@ -154,7 +154,7 @@ describe("refresh: what a token may do", () => {
 });
 
 describe("refresh: revocation and introspection", () => {
-	it("revokes the family when the issuing client revokes a refresh token, and nobody else can", async () => {
+	it("revokes the family when the issuing client revokes a refresh token, and nobody else can [rfc7009-2-a] [rfc7009-2.1-c]", async () => {
 		const first = await tokensFor();
 		const second = await refresh(first.refresh_token ?? "");
 		const token = second.body.refresh_token ?? "";
@@ -170,7 +170,7 @@ describe("refresh: revocation and introspection", () => {
 		expect(await active(third.body.access_token ?? "")).toBe(false);
 	});
 
-	it("answers introspection of a refresh token as not active", async () => {
+	it("answers introspection of a refresh token as not active [rfc7662-2.2-a] [rfc7662-2.2-b] [rfc7662-2.2-c]", async () => {
 		const { refresh_token: token = "" } = await tokensFor();
 		expect((await post("/oauth/introspect", "resource", { token })).body).toEqual({
 			active: false,
@@ -181,7 +181,7 @@ describe("refresh: revocation and introspection", () => {
 describe.runIf(!areaTarget().differs("refresh-narrowed-scope-persists"))(
 	"refresh: narrowing",
 	() => {
-		it("narrows only the access token it asks for, and the family keeps the original grant", async () => {
+		it("narrows only the access token it asks for, and the family keeps the original grant [rfc6749-6-e]", async () => {
 			const { refresh_token: token = "" } = await tokensFor();
 			const narrowed = await refresh(token, "app", { scope: "read" });
 			expect([narrowed.status, narrowed.body.scope]).toEqual([200, "read"]);

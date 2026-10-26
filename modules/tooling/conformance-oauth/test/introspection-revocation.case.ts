@@ -72,7 +72,7 @@ const revoke = (token: string, by = "app") => post("/oauth/revoke", { token, ...
 const listOf = (aud: unknown) => (Array.isArray(aud) ? aud : [aud]);
 
 describe("introspection", () => {
-	it("describes an active token to a client allowed its audience, without caching", async () => {
+	it("describes an active token to a client allowed its audience, without caching [rfc7662-2.2-a]", async () => {
 		const token = await issue();
 		const answer = await introspect(token);
 		expect(answer.status).toBe(200);
@@ -89,12 +89,12 @@ describe("introspection", () => {
 		expect(typeof answer.body.exp).toBe("number");
 	});
 
-	it("answers inactive to a client not allowed the token's audience, and for a token it cannot verify", async () => {
+	it("answers inactive to a client not allowed the token's audience, and for a token it cannot verify [rfc7662-2.2-b] [rfc7662-2.2-c] [rfc7662-4-f]", async () => {
 		expect((await introspect(await issue(), "stranger")).body).toEqual({ active: false });
 		expect((await introspect("not-a-token")).body).toEqual({ active: false });
 	});
 
-	it("refuses a public client and a wrong secret", async () => {
+	it("refuses a public client and a wrong secret [rfc7662-2.1-d]", async () => {
 		const token = await issue();
 		expect((await introspect(token, "pub")).status).toBe(401);
 		const wrong = await post("/oauth/introspect", {
@@ -106,7 +106,7 @@ describe("introspection", () => {
 	});
 
 	it.skipIf(areaTarget().differs("introspection-without-token"))(
-		"refuses a request without a token",
+		"refuses a request without a token [rfc7662-2.1-a]",
 		async () => {
 			const missing = await post("/oauth/introspect", as("resource"));
 			expect([missing.status, missing.body.error]).toEqual([400, "invalid_request"]);
@@ -115,7 +115,7 @@ describe("introspection", () => {
 });
 
 describe("revocation", () => {
-	it("lets the issuing client revoke its access token", async () => {
+	it("lets the issuing client revoke its access token [rfc7009-2-b] [rfc7662-4-d]", async () => {
 		const token = await issue();
 		const answer = await revoke(token);
 		expect(answer.status).toBe(200);
@@ -133,7 +133,7 @@ describe("revocation", () => {
 		expect((await revoke("not-a-token")).status).toBe(200);
 	});
 
-	it("refuses a missing token and a wrong secret", async () => {
+	it("refuses a missing token and a wrong secret [rfc7009-2.1-a]", async () => {
 		const missing = await post("/oauth/revoke", as("app"));
 		expect([missing.status, missing.body.error]).toEqual([400, "invalid_request"]);
 		const wrong = await post("/oauth/revoke", {

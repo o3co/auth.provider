@@ -1,6 +1,7 @@
 import type { Ceiling } from "@mod/client-allowance";
 import type { Policy } from "@mod/external-jwt";
 import { algorithms } from "../contract.ts";
+import { idJagTyp } from "../id-jag/id-jag.ts";
 import type { IssuerEntry } from "../issuers/issuers.ts";
 
 /** The section's lifetime and clock skew, in seconds, which an entry narrows. */
@@ -18,17 +19,25 @@ const usedAllowanceMs = 60_000;
 export const skewOf = (entry: IssuerEntry, limits: Limits) =>
 	(entry["clock-skew"] ?? limits["clock-skew"]) * 1000;
 
-/** How an issuer's assertions are verified: its keys' algorithms, its lifetime and skew, this server's audiences. */
-export const verifierPolicy = (
-	entry: IssuerEntry,
-	limits: Limits,
-	audiences: readonly string[],
-): Policy => ({
+/** This server, as an assertion names it: its issuer's URL, and its token endpoint's absolute URL. */
+export interface Here {
+	readonly issuer: string;
+	readonly tokenEndpoint: string;
+}
+
+/**
+ * How an issuer's assertions are verified: its keys' algorithms, its lifetime and skew, and this
+ * server's audiences, the issuer's URL alone for an ID-JAG, whose type it names too.
+ */
+export const verifierPolicy = (entry: IssuerEntry, limits: Limits, here: Here): Policy => ({
 	algorithms:
 		"keys" in entry ? [...new Set(entry.keys.map((k) => k.alg))] : (entry.algorithms ?? algorithms),
 	skewMs: skewOf(entry, limits),
 	maxLifetimeMs: (entry["max-assertion-lifetime"] ?? limits["max-assertion-lifetime"]) * 1000,
-	expect: { aud: [...audiences] },
+	...(entry.profile === "id-jag" ? { typ: idJagTyp } : {}),
+	expect: {
+		aud: entry.profile === "id-jag" ? [here.issuer] : [here.issuer, here.tokenEndpoint],
+	},
 });
 
 /** Until when a spent assertion stays used (epoch ms): set by no setting, so a change of one never lets it back. */

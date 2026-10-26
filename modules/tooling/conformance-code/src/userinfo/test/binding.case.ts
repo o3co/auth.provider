@@ -93,7 +93,7 @@ async function userinfo(headers: Record<string, string>) {
 }
 
 describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", () => {
-	it("answers the holder that proves its key for this request and this token", async () => {
+	it("answers the holder that proves its key for this request and this token [rfc9449-5-b]", async () => {
 		const token = await boundToken();
 		const answer = await userinfo({
 			authorization: `DPoP ${token}`,
@@ -102,13 +102,13 @@ describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", ()
 		expect([answer.status, Object.keys(answer.body)]).toEqual([200, ["sub"]]);
 	});
 
-	it("refuses the token presented as a Bearer token, challenging for DPoP", async () => {
+	it("refuses the token presented as a Bearer token, challenging for DPoP [rfc9449-7.2-a]", async () => {
 		const answer = await userinfo({ authorization: `Bearer ${await boundToken()}` });
 		expect(answer.status).toBe(401);
 		expect(answer.challenge).toMatch(/^DPoP/);
 	});
 
-	it("refuses a proof by another key, and one bound to another token", async () => {
+	it("refuses a proof by another key, and one bound to another token [rfc9449-4.3-k] [rfc9449-4.3-l]", async () => {
 		const token = await boundToken();
 		const other = await userinfo({
 			authorization: `DPoP ${token}`,

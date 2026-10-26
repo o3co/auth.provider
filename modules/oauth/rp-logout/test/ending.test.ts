@@ -1,4 +1,4 @@
-import { clientSources } from "@mod/clients";
+import { type Clients, clientSources } from "@mod/clients";
 import { use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
@@ -100,7 +100,7 @@ describe("the logout a client starts", () => {
 		]);
 	});
 
-	it("refuses a request without a hint, with a hint it cannot verify, or one that names no session", async () => {
+	it("refuses a request without a hint, with a hint it cannot verify, or one that names no session [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const forged = (await h.hintFor(session.id)).replace(/\.[^.]+$/, ".AAAA");
@@ -128,7 +128,7 @@ describe("the logout a client starts", () => {
 		expect(h.events).toEqual([]);
 	});
 
-	it("takes a hint past its end", async () => {
+	it("takes a hint past its end [oidc-rpinit-2-f]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const iat = 1_800_000_000 - 7200;
@@ -137,7 +137,7 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(false);
 	});
 
-	it("refuses a hint issued more than a day ago, by GET or POST, and closes nothing", async () => {
+	it("refuses a hint issued more than a day ago, by GET or POST, and closes nothing [oidc-rpinit-2-d]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const iat = 1_800_000_000 - 86_401;
@@ -149,7 +149,7 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(true);
 	});
 
-	it("sends the browser back with its state only to a return the hint's client registered", async () => {
+	it("sends the browser back with its state only to a return the hint's client registered [oidc-rpinit-2-b] [oidc-rpinit-3-b]", async () => {
 		const h = await serve();
 		const go = async (asked: string, over: Record<string, unknown> = {}) => {
 			const { session } = await h.login();
@@ -160,14 +160,124 @@ describe("the logout a client starts", () => {
 		const sent = await go(back);
 		expect([sent.status, sent.headers.location]).toEqual([303, `${back}?state=s+1`]);
 		expect(sent.headers).toMatchObject(noCache);
-		const dropped = [
+	});
+
+	it("refuses a parameter sent twice, whichever it is, by GET or POST, and closes nothing", async () => {
+		const h = await serve();
+		const twice = (name: string, value: string) => [name, [value, value]] as const;
+		for (const [name, value] of [
+			["client_id", "other"],
+			["post_logout_redirect_uri", `${back}/`],
+			["state", "s"],
+			["ui_locales", "en"],
+		] as const) {
+			const { session } = await h.login();
+			const hint = await h.hintFor(session.id);
+			for (const method of ["GET", "POST"] as const) {
+				const out = await h.call(method, {
+					id_token_hint: hint,
+					...Object.fromEntries([twice(name, value)]),
+				});
+				expect([name, method, out.status, out.json]).toEqual([
+					name,
+					method,
+					400,
+					{ error: "invalid_request", error_description: "repeated parameter" },
+				]);
+			}
+			expect([name, await h.stillOpen(session.id)]).toEqual([name, true]);
+		}
+		const { session } = await h.login();
+		const hint = await h.hintFor(session.id);
+		const out = await h.call("GET", { id_token_hint: [hint, hint] });
+		expect([out.status, out.json]).toEqual([
+			400,
+			{ error: "invalid_request", error_description: "repeated parameter" },
+		]);
+		expect(await h.stillOpen(session.id)).toBe(true);
+		expect(h.events).toEqual([]);
+	});
+
+	it("refuses a client_id that is not the one the hint was issued to, and closes nothing", async () => {
+		const h = await serve();
+		const refused = [
+			["another client", "other", {}],
+			["a hint naming no one client", "app", { aud: ["app", "api"], azp: undefined }],
+		] as const;
+		for (const [name, clientId, over] of refused) {
+			const { session } = await h.login();
+			const hint = await h.hintFor(session.id, over);
+			for (const method of ["GET", "POST"] as const) {
+				const out = await h.call(method, { id_token_hint: hint, client_id: clientId });
+				expect([name, method, out.status, out.json]).toEqual([
+					name,
+					method,
+					400,
+					{
+						error: "invalid_request",
+						error_description: "client_id is not the client the id_token_hint was issued to",
+					},
+				]);
+			}
+			expect([name, await h.stillOpen(session.id)]).toEqual([name, true]);
+		}
+		expect(h.events).toEqual([]);
+		// The client the hint was issued to, named as client_id too, logs out.
+		const { session } = await h.login();
+		const named = await h.call("GET", {
+			id_token_hint: await h.hintFor(session.id),
+			client_id: "app",
+		});
+		expect([named.status, named.json]).toEqual([200, { logged_out: true }]);
+		expect(await h.stillOpen(session.id)).toBe(false);
+	});
+
+	it("refuses a return the hint's client did not register, and closes nothing", async () => {
+		const h = await serve();
+		const refused = [
 			["a return it did not register", `${back}/`, {}],
 			["a hint naming no one client", back, { aud: ["app", "api"], azp: undefined }],
 			["another client's hint", back, { aud: "other", azp: undefined }],
 		] as const;
-		for (const [name, asked, over] of dropped) {
-			expect([name, (await go(asked, over)).json]).toEqual([name, { logged_out: true }]);
+		for (const [name, asked, over] of refused) {
+			const { session } = await h.login();
+			const hint = await h.hintFor(session.id, over);
+			for (const method of ["GET", "POST"] as const) {
+				const out = await h.call(method, {
+					id_token_hint: hint,
+					post_logout_redirect_uri: asked,
+					state: "s",
+				});
+				expect([name, method, out.status, out.json]).toEqual([
+					name,
+					method,
+					400,
+					{
+						error: "invalid_request",
+						error_description: "post_logout_redirect_uri is not registered for the client",
+					},
+				]);
+				expect(out.headers).toMatchObject(noCache);
+			}
+			expect([name, await h.stillOpen(session.id)]).toEqual([name, true]);
 		}
+		expect(h.events).toEqual([]);
+	});
+
+	it("answers 503 where the client a return is judged by cannot be read, and closes nothing", async () => {
+		const down = unavailableSwitch<Clients>("clients");
+		const h = await serve({ clientRecordsDown: down });
+		const { session } = await h.login();
+		down.failNext("find");
+		const out = await h.call("GET", {
+			id_token_hint: await h.hintFor(session.id),
+			post_logout_redirect_uri: back,
+		});
+		expect([out.status, out.json]).toEqual([503, { error: "temporarily_unavailable" }]);
+		expect(h.logs().filter((l) => l.event === "rp-logout.unavailable")).toEqual([
+			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "clients" } },
+		]);
+		expect(await h.stillOpen(session.id)).toBe(true);
 	});
 
 	it("answers a close left pending 503, clearing the cookie and recording it by its sid and source alone, never as a logout", async () => {
@@ -429,7 +539,7 @@ describe("the upstream's end of session", () => {
 	});
 });
 
-it("publishes its endpoint and the front-channel and back-channel support", async () => {
+it("publishes its endpoint and the front-channel and back-channel support [oidc-rpinit-2.1-a] [oidc-bcl-2.1-a]", async () => {
 	const h = await serve();
 	expect(Object.fromEntries(h.items.map((i) => [i.name, i.value]))).toMatchObject({
 		end_session_endpoint: `${issuer}/oauth/logout`,

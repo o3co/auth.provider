@@ -1480,6 +1480,9 @@ importers:
       '@mod/outbound-policy':
         specifier: workspace:*
         version: link:../../foundation/outbound-policy
+      '@mod/sender-binding':
+        specifier: workspace:*
+        version: link:../sender-binding
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation

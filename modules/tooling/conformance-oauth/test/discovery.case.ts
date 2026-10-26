@@ -67,7 +67,7 @@ describe("the metadata document", () => {
 	const issuer = "https://issuer.example";
 	const get = running(issuer);
 
-	it("is one document under both well-known names, naming the issuer first", async () => {
+	it("is one document under both well-known names, naming the issuer first [oidc-discovery-4-a] [oidc-discovery-4.1-a] [oidc-discovery-4.3-a] [oidc-discovery-3-a] [rfc8414-2-a] [rfc8414-3-a] [rfc8414-3.1-a] [rfc8414-3.3-a] [rfc9700-2.6-a]", async () => {
 		const openid = await get("/.well-known/openid-configuration");
 		const oauth = await get("/.well-known/oauth-authorization-server");
 		expect([openid.status, oauth.status]).toEqual([200, 200]);
@@ -76,7 +76,7 @@ describe("the metadata document", () => {
 		expect(openid.body.issuer).toBe(issuer);
 	});
 
-	it("tells where the token, introspection and revocation endpoints are", async () => {
+	it("tells where the token, introspection and revocation endpoints are [rfc8414-2-c] [oidc-discovery-3-f]", async () => {
 		const { body } = await get("/.well-known/openid-configuration");
 		expect(body).toMatchObject({
 			token_endpoint: `${issuer}/oauth/token`,
@@ -117,7 +117,7 @@ describe("the metadata document of an issuer with a path", () => {
 	const issuer = "https://issuer.example/tenant";
 	const get = running(issuer);
 
-	it("is where RFC 8414 inserts the well-known name and where OpenID Connect appends it", async () => {
+	it("is where RFC 8414 inserts the well-known name and where OpenID Connect appends it [rfc8414-3-a] [oidc-discovery-4-a] [rfc8414-3.3-a] [oidc-discovery-4.3-a]", async () => {
 		for (const path of [
 			"/.well-known/oauth-authorization-server/tenant",
 			"/tenant/.well-known/openid-configuration",

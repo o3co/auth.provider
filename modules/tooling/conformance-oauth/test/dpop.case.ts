@@ -89,7 +89,7 @@ describe("without DPoP", () => {
 
 describe.runIf(areaTarget().can("dpop"))("with DPoP", () => {
 	const { token, introspect } = running(true);
-	it("binds the token to the proof's key, and says so at introspection", async () => {
+	it("binds the token to the proof's key, and says so at introspection [rfc9449-5-b] [rfc9449-6.1-a] [rfc9449-6.2-a]", async () => {
 		const answer = await token(await proof());
 		const cnf = { jkt: await calculateJwkThumbprint(await exportJWK(holder.publicKey), "sha256") };
 		expect([answer.status, answer.body.token_type]).toEqual([200, "DPoP"]);
@@ -101,14 +101,14 @@ describe.runIf(areaTarget().can("dpop"))("with DPoP", () => {
 		});
 	});
 
-	it("accepts each proof once", async () => {
+	it("accepts each proof once [rfc9449-5-a]", async () => {
 		const once = await proof();
 		expect((await token(once)).status).toBe(200);
 		const again = await token(once);
 		expect([again.status, again.body.error]).toEqual([400, "invalid_dpop_proof"]);
 	});
 
-	it("refuses a proof for another method or another endpoint", async () => {
+	it("refuses a proof for another method or another endpoint [rfc9449-4.3-f] [rfc9449-4.3-g] [rfc9449-5-a]", async () => {
 		for (const claims of [{ htm: "GET" }, { htu: `${issuer}/elsewhere` }]) {
 			const answer = await token(await proof(claims));
 			expect([answer.status, answer.body.error]).toEqual([400, "invalid_dpop_proof"]);

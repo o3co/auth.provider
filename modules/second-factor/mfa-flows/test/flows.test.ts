@@ -132,7 +132,7 @@ describe("mfa at login", () => {
 		expect(info.body.attempts_remaining).toBe(5);
 	});
 
-	it("holds a subject after repeated failures even for the right proof, but a way back works and ends the run", async () => {
+	it("holds a subject after repeated failures even for the right proof, but a way back works and ends the run [rfc6749-10.10-d]", async () => {
 		const s = await serve({
 			lockout: { threshold: 2, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
@@ -711,7 +711,7 @@ describe("mfa under races and misuse", () => {
 		expect(answers.filter((r) => r.status === 200)).toHaveLength(1);
 	});
 
-	it("judges no more racing guesses than the lockout and the transaction allow", async () => {
+	it("judges no more racing guesses than the lockout and the transaction allow [rfc6749-10.10-d]", async () => {
 		const s = await serve(
 			{
 				"attempts-per-transaction": 2,

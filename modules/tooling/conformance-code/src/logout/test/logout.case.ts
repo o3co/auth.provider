@@ -132,10 +132,13 @@ type SignedIn = Awaited<ReturnType<typeof signedIn>>;
 async function logout(
 	at: SignedIn,
 	method: "GET" | "POST",
-	params: Record<string, string>,
+	/** The parameters, or their pairs in order where a name is sent more than once. */
+	params: Record<string, string> | readonly (readonly [string, string])[],
 	extra: Record<string, string> = {},
 ) {
-	const query = new URLSearchParams(params).toString();
+	const query = new URLSearchParams(
+		Array.isArray(params) ? params.map(([k, v]) => [k, v]) : (params as Record<string, string>),
+	).toString();
 	const res = await fetch(`${base}/oauth/logout${method === "GET" ? `?${query}` : ""}`, {
 		method,
 		redirect: "manual",
@@ -178,7 +181,7 @@ const hashOf = (script: string) =>
 	`'sha256-${createHash("sha256").update(script).digest("base64")}'`;
 
 describe("a logout the client starts", () => {
-	it("ends the session the hint names and sends the browser back with its state, by GET or POST", async () => {
+	it("ends the session the hint names and sends the browser back with its state, by GET or POST [oidc-rpinit-2-d]", async () => {
 		for (const method of ["GET", "POST"] as const) {
 			const at = await signedIn();
 			expect(await stillSignedIn(at)).toBe(true);
@@ -197,20 +200,75 @@ describe("a logout the client starts", () => {
 		expect([again.status, again.json]).toEqual([200, { logged_out: true }]);
 	});
 
-	// Open redirect: only a return the hint's client registered, compared exactly, is followed.
-	it("never sends the browser to a return the client did not register, and still ends the session", async () => {
+	// Open redirect: only a return the hint's client registered, compared exactly, is taken; any other
+	// refuses the request, the session left as it was.
+	it("refuses a return the client did not register, never sending the browser to it, and leaves the session [oidc-rpinit-2-b] [oidc-rpinit-3-b]", async () => {
 		for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
 			const at = await signedIn();
-			const answer = await logout(at, "GET", {
-				id_token_hint: at.idToken,
-				post_logout_redirect_uri: asked,
-			});
-			expect([answer.status, answer.json]).toEqual([200, { logged_out: true }]);
-			expect(await stillSignedIn(at)).toBe(false);
+			for (const accept of ["application/json", "text/html"]) {
+				const answer = await logout(
+					at,
+					"GET",
+					{ id_token_hint: at.idToken, post_logout_redirect_uri: asked },
+					{ accept },
+				);
+				expect([asked, accept, answer.status, answer.json]).toEqual([
+					asked,
+					accept,
+					400,
+					{
+						error: "invalid_request",
+						error_description: "post_logout_redirect_uri is not registered for the client",
+					},
+				]);
+				expect(answer.headers.get("location")).toBeNull();
+			}
+			expect(await stillSignedIn(at)).toBe(true);
 		}
 	});
 
-	it("refuses a request without a hint", async () => {
+	// A client_id beside the hint must be the client the ID token was issued to (RP-Initiated Logout 1.0 §2).
+	it("refuses a client_id that is not the client the hint was issued to, leaving the session [oidc-rpinit-2-a]", async () => {
+		const at = await signedIn();
+		for (const method of ["GET", "POST"] as const) {
+			const answer = await logout(at, method, { id_token_hint: at.idToken, client_id: "other" });
+			expect([answer.status, answer.json]).toEqual([
+				400,
+				{
+					error: "invalid_request",
+					error_description: "client_id is not the client the id_token_hint was issued to",
+				},
+			]);
+		}
+		expect(await stillSignedIn(at)).toBe(true);
+	});
+
+	// A parameter sent twice reads as none: refused first, so neither the client_id check nor the
+	// return's can be passed by sending it twice.
+	it("refuses a client_id or a return sent twice, leaving the session", async () => {
+		for (const [name, value] of [
+			["client_id", "other"],
+			["post_logout_redirect_uri", `${back}/x`],
+		] as const) {
+			const at = await signedIn();
+			for (const method of ["GET", "POST"] as const) {
+				const answer = await logout(at, method, [
+					["id_token_hint", at.idToken],
+					[name, value],
+					[name, value],
+				]);
+				expect([name, method, answer.status, answer.json]).toEqual([
+					name,
+					method,
+					400,
+					{ error: "invalid_request", error_description: "repeated parameter" },
+				]);
+			}
+			expect([name, await stillSignedIn(at)]).toEqual([name, true]);
+		}
+	});
+
+	it("refuses a request without a hint [oidc-rpinit-3-a] [oidc-rpinit-4-c]", async () => {
 		const at = await signedIn();
 		for (const method of ["GET", "POST"] as const) {
 			const answer = await logout(at, method, { post_logout_redirect_uri: back });
@@ -229,7 +287,7 @@ describe("a logout the client starts", () => {
 	});
 
 	// Token confusion: only an ID token is taken as the hint, never another kind the provider signs.
-	it("refuses as the hint a token of another kind, or one the provider did not sign", async () => {
+	it("refuses as the hint a token of another kind, or one the provider did not sign [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
 		const at = await signedIn();
 		const other = generateKeyPairSync("ed25519").privateKey;
 		const foreign = signed({ typ: "JWT" }, claimsOf(at.idToken), other);
@@ -247,19 +305,20 @@ describe("hints past their time", () => {
 		const now = Math.floor(Date.now() / 1000);
 		return signed({ typ: "JWT" }, { ...claimsOf(idToken), iat: now - ago, exp: now - 3600 });
 	};
-	const unless = (difference: string) => it.runIf(!areaTarget().differs(difference));
+	it.runIf(!areaTarget().differs("expired-logout-hint"))(
+		"ends the session for a hint past its end",
+		async () => {
+			const at = await signedIn();
+			const answer = await logout(at, "GET", { id_token_hint: aged(at.idToken, 7200) });
+			expect([answer.status, answer.json, await stillSignedIn(at)]).toEqual([
+				200,
+				{ logged_out: true },
+				false,
+			]);
+		},
+	);
 
-	unless("expired-logout-hint")("ends the session for a hint past its end", async () => {
-		const at = await signedIn();
-		const answer = await logout(at, "GET", { id_token_hint: aged(at.idToken, 7200) });
-		expect([answer.status, answer.json, await stillSignedIn(at)]).toEqual([
-			200,
-			{ logged_out: true },
-			false,
-		]);
-	});
-
-	unless("old-logout-hint")(
+	it.runIf(!areaTarget().differs("old-logout-hint"))(
 		"refuses a hint issued over a day ago, by GET or POST, leaving the session open",
 		async () => {
 			const at = await signedIn();
@@ -325,31 +384,22 @@ describe("telling the session's clients", () => {
 	});
 
 	// Open redirect and XSS through a return: a page with no return to follow has no script and moves nowhere.
-	it("gives a page with no script when there is no registered return to move on to", async () => {
-		for (const asked of [undefined, "https://other.example/after"]) {
-			const at = await signedIn();
-			const params = {
-				id_token_hint: at.idToken,
-				...(asked ? { post_logout_redirect_uri: asked } : {}),
-			};
-			const answer = await logout(at, "GET", params, { accept: "text/html" });
-			expect(answer.status, asked).toBe(200);
-			const page = pageOf(answer);
-			expect(page.frames.map((url) => url.origin + url.pathname)).toEqual([
-				"https://app.example/fc",
-			]);
-			expect([page.scripts, page.target, page.policy.has("script-src")], asked).toEqual([
-				[],
-				undefined,
-				false,
-			]);
-			expect(page.policy.get("default-src")).toEqual(["'none'"]);
-			if (asked) expect(answer.text).not.toContain("other.example");
-			expect(await stillSignedIn(at)).toBe(false);
-		}
+	it("gives a page with no script when there is no return to move on to", async () => {
+		const at = await signedIn();
+		const answer = await logout(at, "GET", { id_token_hint: at.idToken }, { accept: "text/html" });
+		expect(answer.status).toBe(200);
+		const page = pageOf(answer);
+		expect(page.frames.map((url) => url.origin + url.pathname)).toEqual(["https://app.example/fc"]);
+		expect([page.scripts, page.target, page.policy.has("script-src")]).toEqual([
+			[],
+			undefined,
+			false,
+		]);
+		expect(page.policy.get("default-src")).toEqual(["'none'"]);
+		expect(await stillSignedIn(at)).toBe(false);
 	});
 
-	it("posts each client of the session a logout token signed by the provider", async () => {
+	it("posts each client of the session a logout token signed by the provider [oidc-bcl-2.4-a] [oidc-bcl-2.4-b] [oidc-bcl-2.4-f] [oidc-bcl-2.4-i] [oidc-bcl-2.4-j] [oidc-bcl-2.4-k] [oidc-bcl-2.4-m] [oidc-bcl-2.6-a]", async () => {
 		const at = await signedIn();
 		const before = told.received.length;
 		await logout(at, "POST", { id_token_hint: at.idToken });
@@ -380,7 +430,7 @@ describe("telling the session's clients", () => {
 	});
 
 	// OpenID Connect Back-Channel Logout 1.0 §2.4: a token without sid still names the subject.
-	it("puts the session in the logout token of a client that requires it, and leaves it out, naming the subject, for one that does not", async () => {
+	it("puts the session in the logout token of a client that requires it, and leaves it out, naming the subject, for one that does not [oidc-bcl-2.4-i]", async () => {
 		const at = await signedIn();
 		await at.tokensFor("keen");
 		await at.tokensFor("lean");
@@ -426,7 +476,7 @@ describe("telling the session's clients", () => {
 	);
 });
 
-it("names its endpoint and the channels it tells in the metadata document", async () => {
+it("names its endpoint and the channels it tells in the metadata document [oidc-rpinit-2.1-a] [oidc-bcl-2.1-a]", async () => {
 	const res = await fetch(`${base}/.well-known/openid-configuration`, {
 		headers: { "x-forwarded-proto": "https", "x-forwarded-host": new URL(issuer).host },
 	});
