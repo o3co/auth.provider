@@ -191,7 +191,7 @@ describe("OpenID Connect: openid required by default", () => {
 			name === "code" ? res.at?.searchParams.has(name) : res.at?.searchParams.get(name),
 		);
 
-	it("refuses a request whose own scope does not name openid with invalid_scope, sent back [oidc-core-3.1.2.2-a] [rfc6749-3.3-b] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d] [rfc9207-2-a]", async () => {
+	it("refuses a request whose own scope does not name openid with invalid_scope, sent back [oidc-core-3.1.2.2-a] [rfc6749-3.3-b] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a]", async () => {
 		const { scope: _, ...unscoped } = request();
 		const refused = [false, "invalid_scope", "s1", issuer];
 		expect(answer(await browser.authorize(request({ scope: "read" })))).toEqual(refused);
