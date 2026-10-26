@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
+import { authMethods } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import {
 	clientSecret,
@@ -268,6 +269,25 @@ describe("device authorization", () => {
 				attributes: { source: "198.51.100.1", reason: "bad_credentials" },
 			},
 		]);
+	});
+
+	it("answers an assertion beside another method invalid_client, as the token endpoint does, and two other methods invalid_request", async () => {
+		// A method saying it authenticates by an assertion: what makes the refusal the assertion's.
+		const assertionMethod = defineModule({ name: "test-assertion", takes: [] }, (m) => [
+			m.contribute(authMethods).by(() => ({
+				name: "test_assertion",
+				assertion: true,
+				claimed: (request) => request.fields.single("test_assertion"),
+				verify: async () => false,
+			})),
+		]);
+		const s = await serve({}, [assertionMethod]);
+		const secret = { client_id: "tv", client_secret: clientSecret("tv") };
+		const beside = await s.post("/oauth/device_authorization", { ...secret, test_assertion: "tv" });
+		expect([beside.status, beside.body.error]).toEqual([401, "invalid_client"]);
+		const basic = `Basic ${Buffer.from(`tv:${clientSecret("tv")}`).toString("base64")}`;
+		const two = await s.post("/oauth/device_authorization", secret, { authorization: basic });
+		expect([two.status, two.body.error]).toEqual([400, "invalid_request"]);
 	});
 
 	it("refuses a resource where the composed rule refuses one to what takes no audience", async () => {
