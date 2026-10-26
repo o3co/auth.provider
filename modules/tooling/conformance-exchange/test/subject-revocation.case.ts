@@ -167,7 +167,7 @@ describe.runIf(areaTarget().can(ledgerRevocation))(
 			await told?.stop();
 		});
 
-		it("refuses what was issued or begun before it, tells the session's client, and takes a fresh login", async () => {
+		it("refuses what was issued or begun before it, tells the session's client, and takes a fresh login [oidc-bcl-2.4-a] [oidc-bcl-2.4-b] [oidc-bcl-2.4-f] [oidc-bcl-2.4-i] [oidc-core-3.1.2.3-a] [oidc-core-3.1.2.3-d] [rfc7662-4-d] [rfc8693-2.1-g] [rfc8693-2.2.2-a] [rfc8693-2.2.2-b]", async () => {
 			const tokens = (await redeem(await codeOf())).body;
 			const unredeemed = await codeOf();
 			const exchanged = await exchange(tokens.access_token);
