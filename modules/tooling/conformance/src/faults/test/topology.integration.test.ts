@@ -198,6 +198,8 @@ describe("the faults of a node", () => {
 		// The hint can come early under load: a probe Redis served before the sleep began proves
 		// nothing, and the round is tried again; one served during the sleep cannot be.
 		for (let round = 0; round < 5; round++) {
+			// Connected before the sleep, so the probe is written at once once the check is made.
+			const probe = await rawClient(`redis://127.0.0.1:${node.upstream().port}`);
 			const sleeping = t.sleep(node, 1);
 			let over = false;
 			void sleeping.awake.then(() => {
@@ -205,8 +207,14 @@ describe("the faults of a node", () => {
 			});
 			await sleeping.asleep;
 			// A probe sent once the sleep has answered would be served after it, held or not.
-			if (over) continue;
-			const served = microsOf(await node.ask("TIME"));
+			if (over) {
+				probe.end();
+				continue;
+			}
+			probe.write(encode("TIME"));
+			const [reply] = await probe.replies(1, 30_000);
+			probe.end();
+			const served = microsOf(reply);
 			const { from, to } = await sleeping.awake;
 			if (served < from) continue;
 			expect(served).toBeGreaterThanOrEqual(to);
@@ -278,9 +286,22 @@ describe("what a topology keeps true across its faults", () => {
 		const [, next, moved] = t.replicas();
 		if (!next || !moved) throw new Error("no replicas");
 		const old = t.primary();
-		t.pause(moved, true);
-		await expect(t.promote({ replica: next, reattach: [moved], keepOld: true })).rejects.toThrow();
-		t.pause(moved, false);
+		// The reattached replica refuses to follow, after the barrier and at once.
+		await moved.ask(
+			"ACL",
+			"SETUSER",
+			"default",
+			"on",
+			"nopass",
+			"~*",
+			"&*",
+			"+@all",
+			"-replicaof",
+			"-slaveof",
+		);
+		await expect(t.promote({ replica: next, reattach: [moved], keepOld: true })).rejects.toThrow(
+			/REPLICAOF/,
+		);
 		const taken = await ask(old.upstream(), ["SET", "after", "1"], 1_000);
 		expect(taken).toEqual({ kind: "simple", text: "OK" });
 	});

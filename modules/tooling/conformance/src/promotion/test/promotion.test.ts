@@ -85,3 +85,20 @@ describe("a barrier whose answer was lost", () => {
 		expect(m.primary().name).toBe("old");
 	});
 });
+
+describe("a kill that ends past the hold", () => {
+	it("fails the promotion, the topology needing recovery, never a success", async () => {
+		const old = member("old");
+		const [next, other] = [member("next"), member("other")];
+		const m = membership(old, [old, next, other]);
+		// A kill that returns only once the hold has lapsed, as a slow Docker can.
+		m.kill = () => {
+			const until = performance.now() + 150;
+			while (performance.now() < until) {}
+		};
+		await expect(
+			promote(m, { replica: next, reattach: [other], catchUpMs: 0, holdMs: 1_050 }),
+		).rejects.toThrow(/recovery/);
+		expect(m.primary().name).toBe("old");
+	});
+});

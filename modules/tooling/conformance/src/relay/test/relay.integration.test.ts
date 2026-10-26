@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRedis } from "../../driver.ts";
-import { type Command, type Match, startRelay, upstreamOf } from "../relay.ts";
+import { type Command, type Match, type Reply, startRelay, upstreamOf } from "../relay.ts";
 import { ask, encode, rawClient, tricklingServer } from "./client.ts";
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -481,5 +481,30 @@ describe("a caller's code that throws", () => {
 		await expect(within(held)).rejects.toThrow(/DECR's request threw/);
 		await expect(within(dropped)).rejects.toThrow(/PING's success threw/);
 		await expect(relay.close()).rejects.toThrow(/threw/);
+	});
+});
+
+describe("a match made as an object of its own", () => {
+	it("is asked with itself as its receiver, as before its predicates were guarded", async () => {
+		class SetOf implements Match {
+			readonly key: string;
+			constructor(key: string) {
+				this.key = key;
+			}
+			request(c: Command) {
+				return c.name === "SET" && c.args[0]?.toString() === this.key;
+			}
+			succeeded(r: Reply) {
+				return r.kind === "simple" && r.text === "OK" && this.key.length > 0;
+			}
+		}
+		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		const k = fresh();
+		const seen = relay.observe(new SetOf(k));
+		const c = await rawClient(relay.url);
+		c.write(encode("SET", k, "1"));
+		expect((await seen).reply).toEqual(ok);
+		c.end();
+		await relay.close();
 	});
 });

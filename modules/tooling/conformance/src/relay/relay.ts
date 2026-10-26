@@ -132,7 +132,11 @@ function guardedMatch(match: Match, failed: (error: Error) => void): Match {
 				throw error;
 			}
 		};
-	return { request: guard(match.request), succeeded: guard(match.succeeded) };
+	// Asked through the match itself, so a match whose predicates read `this` keeps it.
+	return {
+		request: guard((c: Command) => match.request(c)),
+		succeeded: guard((r: Reply) => match.succeeded(r)),
+	};
 }
 
 /**

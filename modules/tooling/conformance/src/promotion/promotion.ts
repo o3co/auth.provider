@@ -107,6 +107,8 @@ export async function promote<N extends Member>(m: Membership<N>, o: PromoteOpti
 		if (!o.keepOld) {
 			m.kill(old);
 			m.killed.add(old.name);
+			// The kill can end past the hold, the old primary having taken writes meanwhile.
+			inTime(`before ${old.name} was killed; the topology needs recovery`);
 		}
 		await done(o.replica, "REPLICAOF", "NO", "ONE");
 		m.follows.set(o.replica.name, undefined);
