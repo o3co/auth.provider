@@ -17,10 +17,11 @@ import {
 	type SelectionConsent,
 	selectionConsents,
 	selectionLimits,
+	selectionRecords,
 	type Target,
 } from "../src/contract.ts";
 import claimsSelectionModule from "../src/module.ts";
-import { claimsSelectionInMemory } from "../src/testing.ts";
+import { claimsSelectionConfig, claimsSelectionInMemory } from "../src/testing.ts";
 
 let shift = 0;
 const runtime = quietRuntime({ clock: { now: () => 1_000_000 + shift } });
@@ -56,16 +57,24 @@ const clientAllowed = (scopes: string[]): Client => ({
 	section: <T>() => ({ grants: [], scopes, audiences: [] }) as T,
 });
 
-async function serve(extra: Module[] = [judging(new Set(["profile", "email"]))]) {
-	const stores = claimsSelectionInMemory();
+async function serve(
+	extra: Module[] = [judging(new Set(["profile", "email"]))],
+	mode: "off" | "draining" | "on" = "on",
+	stores: { readonly module: Module } = claimsSelectionInMemory(),
+) {
 	const app = await assemble({
 		modules: [claimsSelectionModule, stores.module, reader, ...extra],
-		config: kernelConfig(),
+		config: { ...kernelConfig(), ...claimsSelectionConfig({ mode }) },
 		runtime,
 	});
 	await app.start();
 	stop = () => app.stop(1000);
-	return { app, stores, selections: app.get(claimsSelections), ...app.get(seen) };
+	return {
+		app,
+		stores: stores as ReturnType<typeof claimsSelectionInMemory>,
+		selections: app.get(claimsSelections),
+		...app.get(seen),
+	};
 }
 
 const none: Target = { names: [], constraints: [] };
@@ -294,6 +303,61 @@ it("fails a read of a record it cannot read as unavailable, never taking it for 
 	await expect(s.selections.forCode("r-1")).rejects.toMatchObject(unreadable);
 	await expect(s.tie.tieOf("tok-1")).rejects.toMatchObject(unreadable);
 	await expect(s.selections.forToken("tok-1")).rejects.toSatisfy(isUnavailable);
+});
+
+/** A store that fails every call, to show a mode that never touches it. */
+const untouchable = defineModule({ name: "untouchable-stores", takes: [] }, (m) => [
+	m.provide(selectionRecords).by(() => ({
+		save: async () => {
+			throw new Error("touched");
+		},
+		read: async () => {
+			throw new Error("touched");
+		},
+	})),
+]);
+
+it("touches no store when off: nothing pinned, kept or read, and refuses to keep a code's selection", async () => {
+	const s = await serve(undefined, "off", { module: untouchable });
+	expect(s.selections.mode).toBe("off");
+	const client = clientAllowed(["profile"]);
+	await s.hook.pin("r-1");
+	expect(await s.selections.forCode("r-1")).toBeUndefined();
+	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
+	await s.selections.follow("r-1", "fam-1", 86_400_000);
+	await s.selections.forRefreshed("fam-1", client, "alice", {
+		id: "tok-2",
+		expiresAt: runtime.clock.now() + 600_000,
+	});
+	expect(await s.selections.forToken("tok-1")).toBeUndefined();
+	expect(await s.tie.tieOf("tok-1")).toEqual({ kind: "none" });
+	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow(TypeError);
+});
+
+it("keeps reading, pinning and holding back what is kept when draining, but keeps no new selection", async () => {
+	const stores = claimsSelectionInMemory();
+	const on = await serve(undefined, "on", stores);
+	await on.selections.keepForCode("r-1", asked, 600_000);
+	await stop();
+	const s = await serve(undefined, "draining", stores);
+	expect(s.selections.mode).toBe("draining");
+	await s.hook.pin("r-1");
+	expect(await s.selections.forCode("r-1")).toEqual(asked);
+	await s.hook.redeemed(redeemedOf("r-1", "tok-1"));
+	expect(await s.selections.forToken("tok-1")).toEqual(asked.userinfo);
+	await expect(s.hook.redeemed(redeemedOf("r-3", "tok-3"))).rejects.toThrow();
+	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow(TypeError);
+});
+
+it("reads its mode as an operator writes it, on by default, and refuses another value", async () => {
+	const stores = claimsSelectionInMemory();
+	const app = await assemble({
+		modules: [claimsSelectionModule, stores.module],
+		config: kernelConfig(),
+		runtime,
+	});
+	expect(app.get(claimsSelections).mode).toBe("on");
+	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
 });
 
 it("takes all its module names", async () => {

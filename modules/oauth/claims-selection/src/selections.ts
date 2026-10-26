@@ -3,7 +3,14 @@ import type { Client } from "@mod/clients";
 import type { RedemptionHook } from "@mod/code-grant";
 import type { TokenTie } from "@mod/grants";
 import { Unavailable } from "@mod/kernel";
-import type { ClaimsSelections, Issued, Selection, SelectionConsent, Target } from "./contract.ts";
+import type {
+	ClaimsSelections,
+	Issued,
+	Selection,
+	SelectionConsent,
+	SelectionMode,
+	Target,
+} from "./contract.ts";
 import type { SelectionRecords, StoredSelection } from "./store.ts";
 import { holds, read, stored, withinLimits } from "./stored.ts";
 
@@ -25,9 +32,12 @@ export function selectionsWith(parts: {
 	readonly records: SelectionRecords;
 	/** Whoever judges consent; with none, no name is agreed to. */
 	readonly consent: SelectionConsent | undefined;
+	readonly mode: SelectionMode;
 	readonly now: () => number;
 }) {
-	const { records, consent, now } = parts;
+	const { records, consent, mode, now } = parts;
+	/** Off, no store is touched: nothing was kept, so nothing is read, pinned or held back. */
+	const off = mode === "off";
 	/** Keeps a record once; a name already holding one keeps the first. */
 	const save = async (name: string, value: StoredSelection, lifetimeMs: number) => {
 		await records.save(name, value, Math.max(1, lifetimeMs));
@@ -47,13 +57,14 @@ export function selectionsWith(parts: {
 		if (!withinLimits(asked)) throw new TypeError("claims-selection: a selection past its bounds");
 	};
 	const pinned = async (redemption: string) => {
+		if (off) return undefined;
 		const kept = await records.read(nameOf.pin(redemption));
 		// A pin gone holds nothing back any more: the redemption fails rather than release unconstrained.
 		if (kept === undefined) throw new Unavailable("claims-selection");
 		return read.pin(kept);
 	};
 	const keepForToken = async (access: Issued, target: Target) => {
-		if (!holds(target)) return;
+		if (off || !holds(target)) return;
 		await save(
 			nameOf.token(access.id),
 			stored.target(target),
@@ -61,10 +72,12 @@ export function selectionsWith(parts: {
 		);
 	};
 	const forToken = async (tokenId: string) => {
+		if (off) return undefined;
 		const kept = await records.read(nameOf.token(tokenId));
 		return kept === undefined ? undefined : read.target(kept);
 	};
 	const selections: ClaimsSelections = {
+		mode,
 		select: async (client, subject, asked) => {
 			bounded(asked);
 			return {
@@ -73,6 +86,8 @@ export function selectionsWith(parts: {
 			};
 		},
 		keepForCode: async (redemption, selection, lifetimeMs) => {
+			// Only while on: a caller keeping one otherwise has read a request it should not have.
+			if (mode !== "on") throw new TypeError(`claims-selection: keeps no selection while ${mode}`);
 			bounded(selection);
 			if (!holds(selection.idToken) && !holds(selection.userinfo)) return;
 			const saved = await records.save(
@@ -91,6 +106,7 @@ export function selectionsWith(parts: {
 			await save(nameOf.family(familyId), stored.target(selection.userinfo), lifetimeMs);
 		},
 		forRefreshed: async (familyId, client, subject, access) => {
+			if (off) return;
 			const kept = await records.read(nameOf.family(familyId));
 			if (kept === undefined) return;
 			await keepForToken(access, await cut(client, subject, read.target(kept)));
@@ -99,6 +115,7 @@ export function selectionsWith(parts: {
 	const hook: RedemptionHook = {
 		name: "claims-selection",
 		pin: async (redemption) => {
+			if (off) return;
 			const kept = await records.read(nameOf.code(redemption));
 			await save(
 				nameOf.pin(redemption),

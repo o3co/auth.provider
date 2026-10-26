@@ -19,10 +19,12 @@
 - Contribution to `code-grant`'s redemption hooks: the pin, and a redeemed code's token kept the pinned userinfo target.
 - Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
 - Store interface, wired by the assembly: records by name, each kept once for its lifetime.
+- Operator section: `mode`, `off`, `draining` or `on` (default `on`), offered as `claimsSelections.mode`.
 
 ## Invariants
 - A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; `value` or a non-empty `values` of up to 16, never both; 4 KiB whole. Another is a `TypeError`.
 - Without a judge of consent, no name is agreed to.
+- `off` touches no store: nothing is pinned, kept or read, and none is held back. `draining` keeps no new selection but pins, reads and holds back what was kept. A selection is kept for a code only while `on`; otherwise it is a `TypeError`.
 - A pin copies the code's selection, or marks it none, and holds it five minutes; the redemption's other reads use only the pin. A pin gone fails the read, never answering none.
 - A code still alive at its pin finds its selection, which outlives the code by a minute; a code past its life is refused by `code-grant` before anything reads its pin.
 - A family's target is written once and never cut: each refresh cuts the names from it again, so a name allowed and agreed to again comes back, as a scope does.

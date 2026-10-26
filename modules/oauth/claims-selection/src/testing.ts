@@ -1,5 +1,6 @@
 import { type Clock, defineModule } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
+import type { Settings } from "./section.ts";
 import { type SelectionRecords, type StoredSelection, selectionRecords } from "./store.ts";
 
 /** A place that keeps selections, as one implementation of the store interface offers it. */
@@ -81,4 +82,9 @@ export function claimsSelectionInMemory() {
 		entries.set(name, { value: kept as StoredSelection, ends: now() + 60_000 });
 	};
 	return { module, records, overwrite, names: () => [...entries.keys()].filter((k) => live(k)) };
+}
+
+/** claims-selection's section, as a configuration gives it. */
+export function claimsSelectionConfig(settings: Partial<Settings> = {}) {
+	return { "claims-selection": { ...settings } };
 }
