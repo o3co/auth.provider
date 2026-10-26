@@ -1,7 +1,7 @@
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
-import { type MetadataItem, metadata } from "@mod/issuer";
+import { issuer, type MetadataItem, metadata } from "@mod/issuer";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { releasedClaims } from "@mod/oidc";
@@ -16,8 +16,11 @@ import userinfoModule from "../src/module.ts";
 let stop = async () => {};
 afterEach(async () => {
 	failing = undefined;
+	issuerUrl = "https://as.example";
 	await stop();
 });
+/** The issuer this provider is named by. */
+let issuerUrl = "https://as.example";
 /** How sessions fail: unable to tell answers 503; anything else is not userinfo's to answer. */
 let failing: "unavailable" | "bug" | undefined;
 const items = contract<readonly MetadataItem[]>("items");
@@ -52,27 +55,28 @@ const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
 	),
 	m.provide(releasedClaims).by(() => ({ of: async () => ({}) })),
 	m.provide(items).by((c) => c.collect(metadata)),
+	m.provide(issuer).by(() => ({ url: issuerUrl })),
 ]);
 
 let logged = recordingLog();
-async function serve() {
+async function serve(publicOrigin: string | undefined = "https://as.example") {
 	logged = recordingLog();
-	const app = await assemble(composition());
+	const app = await assemble(composition(publicOrigin));
 	await app.start();
 	stop = () => app.stop(1000);
 	const url = `http://127.0.0.1:${app.get(listening).port()}/oauth/userinfo`;
 	return { app, url };
 }
 
-/** userinfo beside http and the parts it reads, on many instances. */
-function composition() {
+/** userinfo beside http and the parts it reads, on many instances, reached at `publicOrigin` where one is written. */
+function composition(publicOrigin: string | undefined = "https://as.example") {
 	return {
 		modules: [http, parts, userinfoModule],
 		config: {
 			// Many instances: userinfo keeps nothing, so it never refuses them.
 			...kernelConfig({ deployment: "multi" }),
 			...httpConfig({
-				"public-origin": "https://as.example",
+				...(publicOrigin ? { "public-origin": publicOrigin } : {}),
 				"cors-origins": ["https://app.example"],
 				"trusted-proxies": ["127.0.0.1"],
 			}),
@@ -161,6 +165,15 @@ it("names itself in the issuer's metadata [oidc-discovery-3-h]", async () => {
 	expect(app.get(items)).toContainEqual({
 		name: "userinfo_endpoint",
 		value: "https://as.example/oauth/userinfo",
+	});
+});
+
+it("names itself on the issuer's origin where no public origin is written [oidc-discovery-3-h]", async () => {
+	issuerUrl = "https://login.example/tenant";
+	const { app } = await serve(undefined);
+	expect(app.get(items)).toContainEqual({
+		name: "userinfo_endpoint",
+		value: "https://login.example/oauth/userinfo",
 	});
 });
 

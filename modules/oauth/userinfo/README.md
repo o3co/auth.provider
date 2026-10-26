@@ -8,7 +8,7 @@
 
 ## Offers
 - Routes `GET` and `POST /oauth/userinfo`, the GET declared not to change state and the POST to take requests from other sites without a per-source limit, taking cross-origin requests from the operator's origins: a page may send `authorization`, `dpop` and `content-type`, and read `www-authenticate`, `dpop-nonce` and `retry-after`.
-- The issuer's metadata `userinfo_endpoint`.
+- The issuer's metadata `userinfo_endpoint`, on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
 
 ## Invariants
 - The token comes from the `Authorization` header only, admitted by `sender-binding`; a body or query `access_token` is never read. A refusal is passed on with its status and challenge; one for a request with no token carries no `error`.
@@ -23,4 +23,4 @@
 - None.
 
 ## Depends on
-- `kernel`, `http`, `issuer` (metadata), `sender-binding`, `tokens`, `session`, `session-tokens`, `oidc` (released claims)
+- `kernel`, `http`, `issuer` (metadata, the endpoints' origin), `sender-binding`, `tokens`, `session`, `session-tokens`, `oidc` (released claims)

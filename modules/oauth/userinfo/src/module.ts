@@ -1,5 +1,5 @@
-import { type Route, routes, site } from "@mod/http";
-import { metadata } from "@mod/issuer";
+import { type Route, routes } from "@mod/http";
+import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { type BuildContext, defineModule, isUnavailable } from "@mod/kernel";
 import { releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
@@ -38,7 +38,7 @@ async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 }
 
 /** What its routes and its metadata take. */
-const moduleTakes = [senderBinding, tokens, sessionTokens, sessions, releasedClaims, site];
+const moduleTakes = [senderBinding, tokens, sessionTokens, sessions, releasedClaims, issuer];
 
 export default defineModule({ name: "userinfo", replicaSafe: true, takes: moduleTakes }, (m) => [
 	...(["GET", "POST"] as const).map((method) =>
@@ -59,7 +59,7 @@ export default defineModule({ name: "userinfo", replicaSafe: true, takes: module
 		})),
 	),
 	m.contribute(metadata).by(async (c) => {
-		const origin = (await c.get(site)).origin;
-		return { name: "userinfo_endpoint", value: origin && `${origin}${path}` };
+		const origin = endpointOrigin(await c.get(issuer));
+		return { name: "userinfo_endpoint", value: `${origin}${path}` };
 	}),
 ]);
