@@ -22,6 +22,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -110,7 +111,12 @@ public final class Main {
             .send(
                 HttpRequest.newBuilder(URI.create(issuer + "/.well-known/" + where)).build(),
                 HttpResponse.BodyHandlers.ofString());
-    String endpoint = JSONObjectUtils.getString(JSONObjectUtils.parse(answer.body()), "token_endpoint");
+    Map<String, Object> metadata = JSONObjectUtils.parse(answer.body());
+    // The provider named is the one described, as written (RFC 8414 §3.3): else its endpoints are another's,
+    // and would be sent the client's credentials and the assertion or subject token.
+    if (!issuer.equals(metadata.get("issuer")))
+      throw new Refused("issuer_mismatch", "the metadata names another issuer, or none");
+    String endpoint = JSONObjectUtils.getString(metadata, "token_endpoint");
     if (!endpoint.startsWith("https://"))
       throw new Refused("insecure", "the metadata names token_endpoint " + endpoint + ", not https");
     return endpoint;
@@ -191,11 +197,18 @@ public final class Main {
             now.plusSeconds(60));
     RestClientTokenExchangeTokenResponseClient responses = new RestClientTokenExchangeTokenResponseClient();
     responses.setRestClient(rest);
+    // The issued token type as the answer names it, which Spring keeps among the answer's other parameters.
+    AtomicReference<Object> issuedType = new AtomicReference<>();
     TokenExchangeOAuth2AuthorizedClientProvider provider = new TokenExchangeOAuth2AuthorizedClientProvider();
-    provider.setAccessTokenResponseClient(responses);
+    provider.setAccessTokenResponseClient(
+        request -> {
+          var response = responses.getTokenResponse(request);
+          issuedType.set(response.getAdditionalParameters().get("issued_token_type"));
+          return response;
+        });
     provider.setSubjectTokenResolver(context -> subject);
     Map<String, Object> result = authorized(provider, registration(AuthorizationGrantType.TOKEN_EXCHANGE));
-    result.put("issuedTokenType", "urn:ietf:params:oauth:token-type:access_token");
+    result.put("issuedTokenType", issuedType.get());
     return result;
   }
 
