@@ -217,7 +217,7 @@ What each module contains is described by that module's contract card (each modu
 | ID token contents (a contribution to code-grant's extension point), claim scope | vocabulary | oidc |
 | The claim table (the claims each scope releases, and the scope of each claim), and the claims released for a subject, scope and what a request asks beyond it, held to its constraints | contract | oidc |
 | Judging an ID token given back as a hint | contract | oidc |
-| OpenID Connect's userinfo: an access token's subject, and its session's claims while that session is open | route | userinfo |
+| OpenID Connect's userinfo: an access token's subject, and its session's claims by its scope and kept selection while that session is open | route | userinfo |
 | Authorization server metadata items (what this server names itself by) | extension point kind | issuer |
 | Each metadata item | vocabulary | the module that contributes that item |
 | Building and publishing the discovery document | contract | discovery |
