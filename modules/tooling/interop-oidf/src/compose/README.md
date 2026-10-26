@@ -3,7 +3,7 @@
 Internal module of `interop-oidf`: how the suite's containers are composed beside the suite's own compose file.
 
 ## Offers
-- `composeOverride`: the compose file beside the suite's own: the store in memory, the name the server reaches this machine by, each container labelled with its owner.
+- `composeOverride`: the compose file beside the suite's own: the store in memory, the harness's certificate for nginx, the name the server reaches this machine by, each container labelled with its owner.
 - `suiteEnv`: the compose file's environment: the pinned image tag and the suite's origins as the harness names them.
 - `projectOf`: a start's Compose project, from a hash of its whole directory.
 

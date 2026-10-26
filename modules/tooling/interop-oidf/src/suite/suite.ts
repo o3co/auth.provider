@@ -1,6 +1,6 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { certificateAt, getJson } from "../api/api.ts";
+import { getJson } from "../api/api.ts";
 import { type Command, systemCommand } from "../commands/commands.ts";
 import { composeOverride, projectOf, suiteEnv } from "../compose/compose.ts";
 import { reclaimOrphans } from "../orphans/orphans.ts";
@@ -60,7 +60,7 @@ export interface Suite {
 	readonly scripts: string;
 	/** The Python that runs them, with their packages. */
 	readonly python: string;
-	/** The suite's own certificate, as PEM in a file: the one its nginx answers with. */
+	/** The certificate its nginx answers with, as PEM in a file: for the app to trust. */
 	readonly certificate: string;
 	/** The suite's API, as a JSON GET from this machine. */
 	api(path: string): Promise<unknown>;
@@ -83,10 +83,20 @@ export async function startSuite(
 	dir: string,
 	host: SuiteHost,
 	log: string,
-	options: { readonly command?: Command; readonly signal?: AbortSignal } = {},
+	/** The certificate its nginx answers with, as PEM: one naming `localhost.emobix.co.uk`. */
+	tls: { readonly cert: string; readonly key: string },
+	options: {
+		readonly command?: Command;
+		/** The JSON GET the suite's API is asked by. */
+		readonly get?: typeof getJson;
+		readonly signal?: AbortSignal;
+	} = {},
 ): Promise<Suite> {
 	const command = options.command ?? systemCommand;
 	const signal = options.signal;
+	const get = options.get ?? getJson;
+	// Each request to the API is held to the plan's deadline besides its own time.
+	const asked = signal ? { signal } : {};
 	const source = join(dir, "suite");
 	const name = projectOf(dir);
 	const compose = [
@@ -163,7 +173,10 @@ export async function startSuite(
 				`the suite's tag ${pin.tag} names ${head.trim()}, not the pinned ${pin.commit}`,
 			);
 		}
-		await writeFile(join(dir, "override.yml"), composeOverride(host));
+		const files = { cert: join(dir, "nginx-cert.pem"), key: join(dir, "nginx-key.pem") };
+		await writeFile(files.cert, tls.cert);
+		await writeFile(files.key, tls.key, { mode: 0o600 });
+		await writeFile(join(dir, "override.yml"), composeOverride(host, files));
 		const venv = join(dir, "python");
 		await step("python3", ["-m", "venv", venv], budgetMs.quick);
 		await step(join(venv, "bin", "pip"), ["install", "--quiet", ...pin.python], budgetMs.pip);
@@ -171,26 +184,25 @@ export async function startSuite(
 		composed = true;
 		await step("docker", [...compose, "up", "--detach", "--quiet-pull"], budgetMs.up);
 		const deadline = Date.now() + readyWithinMs;
-		let ca: string | undefined;
+		// Only the harness's certificate is trusted, by its fingerprint: an nginx answering with its own fails.
+		const ca = tls.cert;
 		for (;;) {
 			signal?.throwIfAborted();
 			try {
-				ca ??= await certificateAt();
-				if ((await getJson(`${suiteOrigin}/api/plan?length=1`, ca)).status === 200) break;
+				if ((await get(`${suiteOrigin}/api/plan?length=1`, ca, asked)).status === 200) break;
 			} catch {}
 			if (Date.now() > deadline)
 				throw new Error(`the suite did not answer within ${readyWithinMs / 1000}s`);
 			await sleep(2_000, signal);
 		}
-		const certificate = join(dir, "suite-cert.pem");
-		await writeFile(certificate, ca);
-		const trusted = await readFile(certificate, "utf8");
+		const certificate = files.cert;
+		const trusted = ca;
 		return {
 			scripts: join(source, "scripts"),
 			python: join(venv, "bin", "python"),
 			certificate,
 			api: async (path) => {
-				const answer = await getJson(`${suiteOrigin}/${path}`, trusted);
+				const answer = await get(`${suiteOrigin}/${path}`, trusted, asked);
 				if (answer.status !== 200)
 					throw new Error(`the suite answered ${answer.status} to ${path}`);
 				return answer.body;
