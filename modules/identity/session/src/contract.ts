@@ -82,7 +82,7 @@ export interface Sessions {
 	 * authenticated. None for no cookie, one sent twice, a forged one or one retired; an index that
 	 * cannot be read is Unavailable.
 	 */
-	handleOf?(request: HttpRequest): Promise<string | undefined>;
+	handleOf(request: HttpRequest): Promise<string | undefined>;
 	closeRequest(request: HttpRequest): Promise<CloseOutcome>;
 	close(id: string, request?: HttpRequest): Promise<CloseOutcome>;
 	/**

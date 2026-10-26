@@ -461,10 +461,9 @@ export function sessionsContract(
 			}
 		});
 
-		it("answers the handle a request's cookie opens, and none for a cookie that opens nothing", async (context) => {
+		it("answers the handle a request's cookie opens, and none for a cookie that opens nothing", async () => {
 			const place = await open();
-			const { handleOf } = place.sessions;
-			if (handleOf === undefined) return context.skip("this implementation offers no handleOf yet");
+			const handleOf = (request: HttpRequest) => place.sessions.handleOf(request);
 			const done = await place.sessions.complete(place.request(), facts(place));
 			expect(await handleOf(place.request(done.cookies))).toBe(done.session.id);
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
