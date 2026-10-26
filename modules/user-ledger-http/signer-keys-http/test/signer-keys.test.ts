@@ -317,7 +317,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 			],
 			config: {
 				...kernelConfig(),
-				...httpConfig(),
+				...httpConfig({ "public-origin": new URL(issuer).origin }),
 				...issuerConfig({ url: issuer }),
 				outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
 				...clientsConfig([
