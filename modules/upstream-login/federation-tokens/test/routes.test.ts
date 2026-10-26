@@ -95,7 +95,7 @@ describe("the token route", () => {
 		["short of a requirement", "short"],
 		["open for another subject", "bob"],
 	] as const)(
-		"refuses the refreshed token when the session is %s once the upstream's tokens are written",
+		"refuses the refreshed token when the session is %s once the upstream's tokens are written [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f]",
 		async (_, now) => {
 			const at: { h?: Awaited<ReturnType<typeof linked>> } = {};
 			const offered: Offered = {
@@ -141,7 +141,7 @@ describe("the token route", () => {
 		});
 	});
 
-	it("refuses a token of an ended family, for another audience, or whose session is open for another subject", async () => {
+	it("refuses a token of an ended family, for another audience, or whose session is open for another subject [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f] [rfc6750-3.1-b] [rfc9700-2.3-c]", async () => {
 		const h = await linked();
 		const ended = await h.issue(h.session, "app", { family: "ended" });
 		const aside = await h.issue(h.session, "app", { audience: ["api"] });
@@ -159,7 +159,7 @@ describe("the token route", () => {
 		}
 	});
 
-	it("challenges a refused DPoP-bound token in its own scheme", async () => {
+	it("challenges a refused DPoP-bound token in its own scheme [rfc9449-7.1-c] [rfc9449-7.2-c]", async () => {
 		const h = await linked();
 		const ended = await h.issue(h.session, "app", { family: "ended", dpop: true });
 		const got = await h.call("token", ended.token, { scheme: "DPoP" });
@@ -176,7 +176,7 @@ describe("the token route", () => {
 		expect(await h.stores.records.read(h.session.id)).toBeUndefined();
 	});
 
-	it("refuses a token whose session is short of a requirement as one closed, keeping the session's upstream tokens", async () => {
+	it("refuses a token whose session is short of a requirement as one closed, keeping the session's upstream tokens [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f]", async () => {
 		const h = await linked();
 		h.shorten("alice");
 		for (const idp of ["corp", "other"]) {
@@ -350,7 +350,7 @@ describe("the upstream logout route", () => {
 		},
 	};
 
-	it("forgets the IdP's tokens first, then sends the browser to the upstream with its hint", async () => {
+	it("forgets the IdP's tokens first, then sends the browser to the upstream with its hint [oidc-rpinit-2-l] [oidc-rpinit-2-m]", async () => {
 		const h = await linked({ offered: ending }, { idToken: "id-1" });
 		const out = await h.logout(h.token, { post_logout_redirect_uri: back, state: "s1" });
 		expect([out.status, out.headers["cache-control"]]).toEqual([303, "no-store"]);
@@ -368,7 +368,7 @@ describe("the upstream logout route", () => {
 		expect((await h.ask(h.token)).status).toBe(404);
 	});
 
-	it("still sends the login's hint after a refresh that gave no ID token, or an empty one", async () => {
+	it("still sends the login's hint after a refresh that gave no ID token, or an empty one [oidc-rpinit-2-l]", async () => {
 		for (const answered of [refreshed(), refreshed({ idToken: "" })]) {
 			const offered: Offered = { ...refreshing(answered).offered, ...ending };
 			const due = { idToken: "id-1", refreshToken: "r-1", expiresInSeconds: 0 };

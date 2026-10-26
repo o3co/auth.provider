@@ -105,7 +105,7 @@ function handedOn(location: string) {
 describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 	"federation logins meeting a client's demand for a fresh login",
 	() => {
-		it("meets prompt=login only with a login the upstream says came after the demand, never one it says is older", async () => {
+		it("meets prompt=login only with a login the upstream says came after the demand, never one it says is older [oidc-core-3.1.2.3-b] [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m]", async () => {
 			const b = browser();
 			const hourAgo = { subject: "u-alice", authTime: seconds() - 3600 };
 			expect((await federated(b, hourAgo)).status).toBe(302);
@@ -145,7 +145,7 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
 
-		it("tells the login page the prompt=login and max_age asked, which reach the upstream through it", async () => {
+		it("tells the login page the prompt=login and max_age asked, which reach the upstream through it [oidc-core-3.1.3.7-n]", async () => {
 			const b = browser();
 			const sent = (await authorize(b, { prompt: "login", max_age: "600" })).location;
 			expect(handedOn(sent)).toEqual({ prompt: "login", max_age: "600" });
@@ -162,7 +162,7 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
 
-		it("meets a max age only with a login the upstream says when it made", async () => {
+		it("meets a max age only with a login the upstream says when it made [oidc-core-3.1.3.7-n]", async () => {
 			const b = browser();
 			const back = sentToLogIn((await authorize(b, { max_age: "600" })).location);
 			const silent = await federated(b, { subject: "u-alice" }, back);
@@ -211,7 +211,7 @@ async function idTokenClaims(b: Browser) {
 describe.skipIf(areaTarget().differs("federation-auth-time-from-upstream"))(
 	"the ID token after a federation login",
 	() => {
-		it("says when the user logged in only as the upstream says it, and nothing where the upstream says nothing", async () => {
+		it("says when the user logged in only as the upstream says it, and nothing where the upstream says nothing [oidc-core-15.1-e]", async () => {
 			const said = browser();
 			const at = seconds() - 60;
 			expect((await federated(said, { subject: "u-alice", authTime: at })).status).toBe(302);

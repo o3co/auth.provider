@@ -468,7 +468,7 @@ describe("users-http", () => {
 		expect((await roomy.ledger.verify("alice", "correct horse")).kind).toBe("user");
 	});
 
-	it("refuses a malformed user as unavailable", async () => {
+	it("refuses a malformed user as unavailable [oidc-core-2-c]", async () => {
 		const malformed: Record<string, unknown> = {
 			"empty id": { ...alice, id: "" },
 			"no id": { username: "alice" },

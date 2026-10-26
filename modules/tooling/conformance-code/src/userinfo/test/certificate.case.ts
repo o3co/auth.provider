@@ -89,13 +89,13 @@ async function userinfo(token: string, certificate?: Issued) {
 }
 
 describe("OpenID Connect userinfo: a token bound to the client's certificate (mTLS)", () => {
-	it("answers the client that presents the certificate the token is bound to", async () => {
+	it("answers the client that presents the certificate the token is bound to [rfc8705-3-b] [rfc8705-3.1-a] [rfc8705-3.1-b] [rfc8705-3.1-c]", async () => {
 		const own = await issue({ cn: "client" });
 		const answer = await userinfo(await boundTo(own), own);
 		expect([answer.status, Object.keys(answer.body)]).toEqual([200, ["sub"]]);
 	});
 
-	it("refuses the token with another certificate, or with none", async () => {
+	it("refuses the token with another certificate, or with none [rfc8705-3-b]", async () => {
 		const own = await issue({ cn: "client" });
 		const token = await boundTo(own);
 		for (const [name, certificate] of [

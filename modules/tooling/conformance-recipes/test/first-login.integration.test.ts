@@ -93,7 +93,7 @@ describe("the recipe for a first login", () => {
 		await started?.stop();
 	});
 
-	it("logs a configured user in with the key and hash its scripts make, and shows each step as the recipe does", async () => {
+	it("logs a configured user in with the key and hash its scripts make, and shows each step as the recipe does [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [oidc-core-3.1.2.5-a] [rfc7636-4.6-a]", async () => {
 		const base = started?.baseUrl ?? "";
 		const t = transcript(base, origin);
 		t.name(password, "<password>");

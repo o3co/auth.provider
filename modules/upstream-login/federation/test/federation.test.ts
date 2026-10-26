@@ -570,7 +570,7 @@ describe("federation", () => {
 		expect(await refusedAt({ withoutCsrf: true })).toContain("federation-link");
 	});
 
-	it("sends the browser upstream with PKCE, a state and a nonce, and logs it in on its way back", async () => {
+	it("sends the browser upstream with PKCE, a state and a nonce, and logs it in on its way back [oidc-core-3.1.2.1-x] [rfc9700-2.1.1-f] [rfc9700-2.1.1-h]", async () => {
 		const s = await serve();
 		const started = await s.begin("?prompt=login&max_age=60");
 		expect(started.status).toBe(302);
@@ -632,7 +632,7 @@ describe("federation", () => {
 		await expect(type.open({ issuer: "i", port: 1 }, at)).rejects.toThrow("i:1");
 	});
 
-	it("returns only to a target a login may return to", async () => {
+	it("returns only to a target a login may return to [rfc9700-4.1.3-b]", async () => {
 		const s = await serve({ extra: [returnTo("/oauth/authorize")] });
 		expect((await s.begin("?redirect_to=https://evil.example/")).status).toBe(400);
 		const target = `${origin}/oauth/authorize?client_id=app`;
@@ -640,7 +640,7 @@ describe("federation", () => {
 		expect([back.status, back.location]).toEqual([302, target]);
 	});
 
-	it("takes a transaction only with its own state, once, so a request from elsewhere cannot spend it", async () => {
+	it("takes a transaction only with its own state, once, so a request from elsewhere cannot spend it [oidc-core-3.1.2.7-a] [rfc9700-2.1-d] [rfc9700-2.1-g] [rfc9700-4.2.4-b] [rfc9700-4.7.1-c]", async () => {
 		const s = await serve();
 		const started = await s.begin();
 		const wrong = await s.callback("code=good&state=wrong", started.cookie);
@@ -668,7 +668,7 @@ describe("federation", () => {
 		expect(s.asked.exchanges).toHaveLength(1);
 	});
 
-	it("never takes one IdP's transaction at another's callback", async () => {
+	it("never takes one IdP's transaction at another's callback [rfc9700-2.1-e] [rfc9700-4.4.2-a] [rfc9700-4.4.2.2-a]", async () => {
 		const s = await serve({
 			federation: {
 				idps: {
@@ -702,7 +702,7 @@ describe("federation", () => {
 		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(400);
 	});
 
-	it("answers an upstream that refuses, fails, cannot be reached, or names no linked user with its error, clearing the transaction's cookie and logging no upstream subject", async () => {
+	it("answers an upstream that refuses, fails, cannot be reached, or names no linked user with its error, clearing the transaction's cookie and logging no upstream subject [oidc-core-3.1.2.7-a]", async () => {
 		const s = await serve({
 			answers: answering(
 				["good", alice],
@@ -820,7 +820,7 @@ describe("federation", () => {
 		expect(await prompted("second-before")).toBe(401);
 	});
 
-	it("logs in a browser that set a max age only with an upstream login within it and the allowance, even one before the start, and needs the login time only under a max age or prompt=login", async () => {
+	it("logs in a browser that set a max age only with an upstream login within it and the allowance, even one before the start, and needs the login time only under a max age or prompt=login [oidc-core-3.1.3.7-n]", async () => {
 		const s = await serve({
 			answers: answering(
 				["none", { subject: "u-alice", amr: [] }],
