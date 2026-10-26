@@ -232,7 +232,7 @@ const refusalsOf = (extra: readonly Module[], section: Record<string, unknown>) 
 	);
 
 describe("delegated issuers", () => {
-	it("issues for an assertion the delegate takes, whose audience is no server's of ours, to the one client it is for [rfc7521-4.1-c]", async () => {
+	it("issues for an assertion the delegate takes, whose audience is no server's of ours, to the one client it is for", async () => {
 		const d = delegating();
 		const s = await serve([d.module]);
 		const a = sent();
