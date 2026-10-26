@@ -116,6 +116,17 @@ describe(`${library.name}: an ID-JAG from an enterprise IdP, for a token`, () =>
 		async () => {
 			const outcome = await exchanged(true);
 			expect(outcome).toMatchObject({ kind: "result", result: { tokenType: "DPoP" } });
+			// One key across both: the ID-JAG the IdP issued names it, and the token here is bound to it.
+			const jag = world.idp.issued().at(-1);
+			const jkt = (jag?.cnf as { jkt?: unknown } | undefined)?.jkt;
+			expect(typeof jkt).toBe("string");
+			const [, payload = ""] = String(
+				outcome.kind === "result" ? outcome.result.accessToken : "",
+			).split(".");
+			const token = JSON.parse(Buffer.from(payload, "base64url").toString()) as {
+				cnf?: { jkt?: unknown };
+			};
+			expect(token.cnf?.jkt).toBe(jkt);
 		},
 	);
 

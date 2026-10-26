@@ -11,7 +11,7 @@ export interface ServicesWorld {
 	readonly ca: string;
 	readonly clients: Readonly<Record<"bearer" | "agents" | "jagAgent", WorldClient>>;
 	/** The enterprise IdP the harness plays, whose ID-JAGs the provider takes (`profile = id-jag`). */
-	readonly idp: Pick<PlayedIdp, "issuer" | "ca" | "otherwise">;
+	readonly idp: Pick<PlayedIdp, "issuer" | "ca" | "otherwise" | "issued">;
 	/** The issuer whose JWT assertions the jwt-bearer grant trusts, with its private key as a JWK. */
 	readonly assertionIssuer: {
 		readonly issuer: string;
@@ -125,7 +125,7 @@ export async function startServicesWorld(
 		issuer: app.origin,
 		ca: app.ca,
 		clients: { bearer, agents: { id: agents.id, method: "none" }, jagAgent },
-		idp: { issuer: idp.issuer, ca: idp.ca, otherwise: idp.otherwise },
+		idp: { issuer: idp.issuer, ca: idp.ca, otherwise: idp.otherwise, issued: idp.issued },
 		clientlessIssuer: {
 			issuer: clientlessIssuer,
 			privateJwk: { ...agentsSigner.privateKey.export({ format: "jwk" }), alg: "RS256" },

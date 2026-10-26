@@ -30,6 +30,8 @@ export interface PlayedIdp {
 	readonly publicPem: string;
 	/** The next ID-JAG is otherwise as told, once. */
 	otherwise(next: Otherwise): void;
+	/** The claims of each ID-JAG it issued, in order. */
+	issued(): readonly Readonly<Record<string, unknown>>[];
 	stop(): Promise<void>;
 }
 
@@ -64,6 +66,7 @@ export async function startPlayedIdp(under?: string): Promise<PlayedIdp> {
 	);
 	let origin = "";
 	let next: Otherwise = {};
+	const issued: Record<string, unknown>[] = [];
 	const server = createServer(tls, (req, res) => {
 		const json = (status: number, value: unknown) => {
 			res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
@@ -94,7 +97,7 @@ export async function startPlayedIdp(under?: string): Promise<PlayedIdp> {
 			next = {};
 			const now = Math.floor(Date.now() / 1000);
 			const head = b64({ alg: "ES256", typ: told.typ ?? "oauth-id-jag+jwt" });
-			const body = b64({
+			const claims = {
 				iss: origin,
 				sub: "alice",
 				aud: told.aud ?? form.get("audience"),
@@ -104,7 +107,9 @@ export async function startPlayedIdp(under?: string): Promise<PlayedIdp> {
 				exp: now + 300,
 				...(form.get("scope") ? { scope: form.get("scope") } : {}),
 				...(jkt ? { cnf: { jkt } } : {}),
-			});
+			};
+			issued.push(claims);
+			const body = b64(claims);
 			const signature = sign("sha256", Buffer.from(`${head}.${body}`), {
 				key: key.privateKey,
 				dsaEncoding: "ieee-p1363",
@@ -126,6 +131,7 @@ export async function startPlayedIdp(under?: string): Promise<PlayedIdp> {
 		otherwise: (told) => {
 			next = told;
 		},
+		issued: () => [...issued],
 		stop: () => new Promise((resolve) => server.close(() => resolve())),
 	};
 }
