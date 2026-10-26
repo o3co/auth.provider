@@ -5,26 +5,38 @@ import { clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import externalJwtModule from "@mod/external-jwt/module";
-import { type Grant, grants } from "@mod/grants";
+import { type Grant, type GrantInput, grants, targetRules } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
-import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
+import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
+import {
+	type SenderBinding,
+	type SenderBindings,
+	senderBinding,
+	senderBindings,
+} from "@mod/sender-binding";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
-import { tokens } from "@mod/tokens";
+import { issuancePolicies, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { type DelegatedAssertions, delegatedAssertions, spentAssertions } from "../../contract.ts";
+import {
+	type DelegatedAssertions,
+	delegatedAssertions,
+	jtiLedgers,
+	spentAssertions,
+} from "../../contract.ts";
 import jwtBearer from "../../module.ts";
+import { memoryJtiLedger } from "../../testing.ts";
 
 const now = 1_800_000_000_000;
 const runtime = quietRuntime({
@@ -32,30 +44,64 @@ const runtime = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n).fill(3) },
 });
 const issuer = "https://as.example";
+const tokenEndpoint = `${issuer}/oauth/token`;
 const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const pem = (k: KeyObject) => k.export({ format: "pem", type: "spki" }).toString();
+const keyOf = (k: KeyObject) => [{ alg: "EdDSA", "public-key": pem(k) }];
 const idpKey = generateKeyPairSync("ed25519");
 const agentsKey = generateKeyPairSync("ed25519");
+const corpKey = generateKeyPairSync("ed25519");
+const ceilKey = generateKeyPairSync("ed25519");
+const limitedKey = generateKeyPairSync("ed25519");
 
 const idp = "https://idp.example";
 const agentsIdp = "https://agents.example";
 const delegatedIss = "https://delegated.example";
+const corp = "https://corp.example";
+const ceil = "https://ceil.example";
+const limited = "https://limited.example";
+const api = "https://api.example";
+const otherApi = "https://other.example";
 const idJagTyp = "oauth-id-jag+jwt";
+const jkt = "A".repeat(43);
 
 /** A trusted issuer taking no profile. */
 const plainEntry = {
 	issuer: idp,
 	subject: "as-is",
-	keys: [{ alg: "EdDSA", "public-key": pem(idpKey.publicKey) }],
+	keys: keyOf(idpKey.publicKey),
 	"accept-any-subject": true,
 };
 /** One whose `client` takes a request naming none. */
 const agentsEntry = {
 	issuer: agentsIdp,
 	subject: "as-is",
-	keys: [{ alg: "EdDSA", "public-key": pem(agentsKey.publicKey) }],
+	keys: keyOf(agentsKey.publicKey),
 	conditions: { "subject-prefix": "agents/" },
 	client: "agents",
+};
+/** An enterprise IdP whose ID-JAGs this server takes. */
+const jagEntry = {
+	issuer: corp,
+	subject: "as-is",
+	keys: keyOf(corpKey.publicKey),
+	"accept-any-subject": true,
+	profile: "id-jag",
+};
+/** One whose tokens its own ceiling holds too. */
+const ceilEntry = {
+	...jagEntry,
+	issuer: ceil,
+	keys: keyOf(ceilKey.publicKey),
+	ceiling: { scopes: ["chat.read"] },
+};
+/** One whose ID-JAGs one client alone may present, for its subjects alone: 0.17's allowedClients. */
+const limitedEntry = {
+	issuer: limited,
+	subject: "as-is",
+	keys: keyOf(limitedKey.publicKey),
+	conditions: { "subject-prefix": "corp|", claims: { client_id: ["agent"] } },
+	profile: "id-jag",
 };
 
 const jwtOnly = allowancesFor({
@@ -63,14 +109,22 @@ const jwtOnly = allowancesFor({
 	scopes: ["read"],
 	"default-scopes": ["read"],
 });
+/** Wide defaults: an issuance the ID-JAG does not hold would take them all. */
+const wide = allowancesFor({
+	grants: [grantType],
+	scopes: ["chat.read", "chat.history", "admin"],
+	"default-scopes": ["chat.read", "chat.history", "admin"],
+	audiences: [api, otherApi],
+});
 
-/** What the fakes were asked: a delegate's checks, the store's saves. */
+/** What the fakes were asked: a delegate's checks, the store's saves, the corp ledger's spends. */
 interface Asked {
 	checks: string[];
 	saved: string[];
+	spent: string[];
 }
 
-function fakes(asked: Asked) {
+function fakes(asked: Asked, withCorpLedger: boolean) {
 	return [
 		defineModule({ name: "delegate", takes: [] }, (m) => [
 			m.contribute(delegatedAssertions).by(
@@ -96,8 +150,61 @@ function fakes(asked: Asked) {
 				};
 			}),
 		]),
+		// The corp issuer's own ledger, where it is named.
+		defineModule({ name: "corp-ledger", takes: [] }, (m) =>
+			withCorpLedger
+				? [
+						m.contribute(jtiLedgers).by(() => {
+							const ledger = memoryJtiLedger(corp, () => now);
+							return {
+								issuer: corp,
+								spend: (a) => {
+									asked.spent.push(a.jti);
+									return ledger.spend(a);
+								},
+							};
+						}),
+					]
+				: [],
+		),
+		// The audience asked by `resource`, as resource indicators narrow it.
+		defineModule({ name: "narrowing", takes: [] }, (m) => [
+			m.contribute(targetRules).by(() => ({
+				target: ({ param, audience, within }) => {
+					const asked = param("resource");
+					if (!asked) return { kind: "audience", audience };
+					return within(asked)
+						? { kind: "audience", audience: [asked] }
+						: { kind: "error", error: "invalid_target", description: `not ${asked}` };
+				},
+			})),
+		]),
 	];
 }
+
+/** Sender binding as the endpoint composes it: with a DPoP kind writing `jkt`, or with none. */
+const bindingKinds = (dpop: boolean) =>
+	defineModule({ name: "sender-binding", takes: [] }, (m) => [
+		m.provide(senderBinding).by(
+			() =>
+				({
+					tokenTypeOf: (member: string) => (dpop && member === "jkt" ? "DPoP" : undefined),
+				}) as unknown as SenderBindings,
+		),
+		...(dpop
+			? [
+					m.contribute(senderBindings).by(
+						(): SenderBinding => ({
+							member: "jkt",
+							name: "dpop",
+							tokenType: "DPoP",
+							explicit: true,
+							read: async () => ({ kind: "absent" }),
+						}),
+					),
+				]
+			: []),
+	]);
 
 const grantOf = contract<Grant>("test.id-jag-grant");
 const exposing = defineModule({ name: "test-grant", takes: [grants] }, (m) => [
@@ -108,10 +215,19 @@ const exposing = defineModule({ name: "test-grant", takes: [grants] }, (m) => [
 	}),
 ]);
 
-async function serve(issuers: readonly Record<string, unknown>[] = [plainEntry, agentsEntry]) {
-	const asked: Asked = { checks: [], saved: [] };
+async function serve(
+	issuers: readonly Record<string, unknown>[] = [
+		plainEntry,
+		agentsEntry,
+		jagEntry,
+		ceilEntry,
+		limitedEntry,
+	],
+	options: { readonly dpop?: boolean; readonly extra?: readonly Module[] } = {},
+) {
+	const asked: Asked = { checks: [], saved: [], spent: [] };
 	const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
-		m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` })),
+		m.provide(tokenEndpointLocation).by(() => ({ url: tokenEndpoint })),
 	]);
 	const app = await assemble({
 		modules: [
@@ -129,7 +245,12 @@ async function serve(issuers: readonly Record<string, unknown>[] = [plainEntry, 
 			subjectRevocationStandIn,
 			jwtBearer,
 			exposing,
-			...fakes(asked),
+			bindingKinds(options.dpop ?? true),
+			...fakes(
+				asked,
+				issuers.some((i) => i.issuer === corp),
+			),
+			...(options.extra ?? []),
 		],
 		config: {
 			...kernelConfig(),
@@ -137,7 +258,10 @@ async function serve(issuers: readonly Record<string, unknown>[] = [plainEntry, 
 			...issuerConfig({ url: issuer }),
 			...clientsConfig([
 				publicClient({ id: "agents", sections: jwtOnly }),
-				confidentialClient({ id: "agent", sections: jwtOnly }),
+				confidentialClient({ id: "agent", sections: wide }),
+				confidentialClient({ id: "other", sections: wide }),
+				confidentialClient({ id: "excluded", sections: wide }),
+				publicClient({ id: "pub", sections: wide }),
 			]),
 			"jwt-bearer": { issuers, "delegated-issuers": [delegatedIss] },
 		},
@@ -154,11 +278,34 @@ async function serve(issuers: readonly Record<string, unknown>[] = [plainEntry, 
 		});
 		return grant.identify?.({ request: input.request, param: input.param, value: input.value });
 	};
-	/** The grant's `handle` for a client that named itself. */
-	const handle = (assertion: string, client = "agent") =>
-		app.get(grantCalls).call(grantType, client, { grant_type: grantType, assertion });
+	/** The grant's `handle` for a client that named itself, with the request's parameters and binding. */
+	const handle = (
+		assertion: string,
+		client = "agent",
+		more: Record<string, string> = {},
+		binding?: GrantInput["binding"],
+	) =>
+		app
+			.get(grantCalls)
+			.call(
+				grantType,
+				client,
+				{ grant_type: grantType, assertion, ...more },
+				binding ? { binding } : {},
+			);
 	return { identify, handle, asked };
 }
+
+/** Why boot is refused, by place. */
+const refusedAt = async (issuers: readonly Record<string, unknown>[], dpop = true) => {
+	const failure = await serve(issuers, { dpop }).then(
+		() => undefined,
+		(e: { refusals?: readonly { where: string; reason: string }[]; message?: string }) => {
+			return e.refusals ?? [];
+		},
+	);
+	return failure ?? "booted";
+};
 
 const sign = (claims: Record<string, unknown>, key: KeyObject, typ: string | null = idJagTyp) =>
 	new SignJWT({
@@ -172,22 +319,41 @@ const sign = (claims: Record<string, unknown>, key: KeyObject, typ: string | nul
 	})
 		.setProtectedHeader({ alg: "EdDSA", ...(typ !== null ? { typ } : {}) })
 		.sign(key);
+/** An ID-JAG of the corp IdP, for the client `agent`, narrow in scope and resource. */
+const ofCorp = (claims: Record<string, unknown> = {}) =>
+	sign(
+		{ iss: corp, scope: "chat.read chat.history", resource: api, ...claims },
+		corpKey.privateKey,
+	);
 
-const said = (
-	outcome:
-		| { readonly kind: string; readonly error?: string; readonly description?: string }
-		| undefined,
-) =>
+type Outcome =
+	| {
+			readonly kind: string;
+			readonly error?: string;
+			readonly description?: string;
+			readonly body?: Readonly<Record<string, unknown>>;
+	  }
+	| undefined;
+const said = (outcome: Outcome) =>
 	outcome === undefined
 		? "no identify"
 		: outcome.kind === "error"
 			? `${outcome.error}: ${outcome.description}`
 			: outcome.kind;
+const bodyOf = (outcome: Outcome) => {
+	if (outcome?.kind !== "issued" || !outcome.body) throw new Error(said(outcome));
+	return outcome.body;
+};
 const untrusted = "invalid_grant: untrusted signer";
+const dpop = (confirmation: string): GrantInput["binding"] => ({
+	member: "jkt",
+	confirmation,
+	tokenType: "DPoP",
+});
 
 describe("an ID-JAG where no issuer takes the profile", () => {
 	it("is refused on every way an assertion goes, before anything is verified or used up", async () => {
-		const s = await serve();
+		const s = await serve([plainEntry, agentsEntry]);
 		const ways = {
 			"a trusted issuer": await sign({ iss: idp }, idpKey.privateKey),
 			"its type as external-jwt reads one": await sign(
@@ -212,10 +378,14 @@ describe("an ID-JAG where no issuer takes the profile", () => {
 		expect(s.asked.saved).toEqual([]);
 	});
 
-	it("leaves an assertion of any other type as it was", async () => {
+	it("leaves an assertion of any other type as it was, its answer naming no resource", async () => {
 		const s = await serve();
-		expect(said(await s.handle(await sign({ iss: idp }, idpKey.privateKey, null)))).toBe("issued");
+		const plain = await s.handle(await sign({ iss: idp }, idpKey.privateKey, null));
+		expect(bodyOf(plain)).not.toHaveProperty("resource");
 		expect(said(await s.handle(await sign({ iss: idp }, idpKey.privateKey, "JWT")))).toBe("issued");
+		// The token endpoint's URL is still an audience such an assertion may name.
+		const toEndpoint = await sign({ iss: idp, aud: tokenEndpoint }, idpKey.privateKey, "JWT");
+		expect(said(await s.handle(toEndpoint))).toBe("issued");
 		expect(
 			said(
 				await s.identify(
@@ -223,5 +393,272 @@ describe("an ID-JAG where no issuer takes the profile", () => {
 				),
 			),
 		).toBe("client");
+	});
+});
+
+describe("an issuer taking the ID-JAG profile", () => {
+	it("issues within the ID-JAG, answering the scope and resource issued and no refresh token", async () => {
+		const s = await serve();
+		const body = bodyOf(await s.handle(await ofCorp()));
+		expect(body.scope).toBe("chat.read chat.history");
+		expect(body.resource).toBe(api);
+		expect(body).not.toHaveProperty("refresh_token");
+		expect(body).not.toHaveProperty("authorization_details");
+		expect(s.asked.spent).toHaveLength(1);
+	});
+
+	it("never lets an empty request take the client's wider defaults past the ID-JAG's scope", async () => {
+		const s = await serve();
+		const narrow = { scope: "chat.read" };
+		expect(bodyOf(await s.handle(await ofCorp(narrow))).scope).toBe("chat.read");
+		expect(bodyOf(await s.handle(await ofCorp(narrow), "agent", { scope: "" })).scope).toBe(
+			"chat.read",
+		);
+		expect(said(await s.handle(await ofCorp(narrow), "agent", { scope: "admin" }))).toBe(
+			"invalid_scope: undefined",
+		);
+		expect(said(await s.handle(await ofCorp({ scope: "" })))).toBe(
+			"invalid_grant: missing or malformed claims",
+		);
+		// With no scope, the client's defaults stand, within its issuer's ceiling.
+		const unscoped = await sign({ iss: ceil }, ceilKey.privateKey);
+		expect(bodyOf(await s.handle(unscoped)).scope).toBe("chat.read");
+	});
+
+	it("answers the resource issued, asked or not, and refuses one the ID-JAG does not name", async () => {
+		const s = await serve();
+		const both = { resource: [api, otherApi] };
+		expect(
+			bodyOf(await s.handle(await ofCorp(both), "agent", { resource: otherApi })).resource,
+		).toBe(otherApi);
+		expect(bodyOf(await s.handle(await ofCorp(both))).resource).toBe(api);
+		expect(said(await s.handle(await ofCorp(), "agent", { resource: otherApi }))).toBe(
+			`invalid_target: not ${otherApi}`,
+		);
+	});
+
+	it("drops authorization details beside a scope, and refuses them with none", async () => {
+		const s = await serve();
+		const details = { authorization_details: [{ type: "chat_export", limit: 3 }] };
+		expect(bodyOf(await s.handle(await ofCorp(details)))).not.toHaveProperty(
+			"authorization_details",
+		);
+		const noScope = await sign({ iss: corp, ...details }, corpKey.privateKey);
+		expect(said(await s.handle(noScope))).toBe(
+			"invalid_grant: authorization details are not served",
+		);
+	});
+
+	it("takes this server's issuer alone as its audience, never the token endpoint", async () => {
+		const s = await serve();
+		expect(said(await s.handle(await ofCorp({ aud: tokenEndpoint })))).toBe(
+			"invalid_grant: wrong audience",
+		);
+		expect(said(await s.handle(await ofCorp({ aud: [issuer, tokenEndpoint] })))).toBe(
+			"invalid_grant: wrong audience",
+		);
+		expect(said(await s.handle(await ofCorp({ aud: [issuer] })))).toBe("issued");
+	});
+
+	it("takes its own type alone, and none by a request naming no client", async () => {
+		const s = await serve();
+		for (const typ of [null, "JWT"])
+			expect(
+				said(
+					await s.handle(await sign({ iss: corp, scope: "chat.read" }, corpKey.privateKey, typ)),
+				),
+				String(typ),
+			).toBe(untrusted);
+		expect(said(await s.identify(await ofCorp()))).toBe(untrusted);
+		expect(s.asked.spent).toEqual([]);
+	});
+
+	it("is bound to the key its cnf names, proved by DPoP alone", async () => {
+		const s = await serve();
+		const bound = { cnf: { jkt } };
+		const issued = bodyOf(await s.handle(await ofCorp(bound), "agent", {}, dpop(jkt)));
+		expect(issued.token_type).toBe("DPoP");
+		const unproved = "invalid_grant: the request does not prove the key the assertion names";
+		expect(said(await s.handle(await ofCorp(bound)))).toBe(unproved);
+		expect(said(await s.handle(await ofCorp(bound), "agent", {}, dpop("B".repeat(43))))).toBe(
+			unproved,
+		);
+		const mtls = { member: "x5t#S256", confirmation: jkt, tokenType: "Bearer" };
+		expect(said(await s.handle(await ofCorp(bound), "agent", {}, mtls))).toBe(unproved);
+		// One naming no key is bound as the request proves, or not at all.
+		expect(bodyOf(await s.handle(await ofCorp(), "agent", {}, dpop(jkt))).token_type).toBe("DPoP");
+		expect(String(bodyOf(await s.handle(await ofCorp())).token_type).toLowerCase()).toBe("bearer");
+	});
+
+	it("uses nothing up on a refusal before its jti is spent, so the request put right is taken", async () => {
+		const s = await serve();
+		const cases: [string, () => Promise<Outcome>, () => Promise<Outcome>, string][] = [];
+		const forAgent = await ofCorp();
+		cases.push([
+			"another client",
+			() => s.handle(forAgent, "other"),
+			() => s.handle(forAgent),
+			"invalid_grant: assertion is for another client",
+		]);
+		const forPub = await ofCorp({ client_id: "pub" });
+		cases.push([
+			"a public client",
+			() => s.handle(forPub, "pub"),
+			async () => undefined,
+			"invalid_grant: the profile needs a confidential client",
+		]);
+		const keyed = await ofCorp({ cnf: { jkt } });
+		cases.push([
+			"no proof of its key",
+			() => s.handle(keyed),
+			() => s.handle(keyed, "agent", {}, dpop(jkt)),
+			"invalid_grant: the request does not prove the key the assertion names",
+		]);
+		const scoped = await ofCorp();
+		cases.push([
+			"a scope past it",
+			() => s.handle(scoped, "agent", { scope: "admin" }),
+			() => s.handle(scoped),
+			"invalid_scope: undefined",
+		]);
+		const aimed = await ofCorp();
+		cases.push([
+			"a resource past it",
+			() => s.handle(aimed, "agent", { resource: otherApi }),
+			() => s.handle(aimed),
+			`invalid_target: not ${otherApi}`,
+		]);
+		for (const [what, refused, putRight, answer] of cases) {
+			expect(said(await refused()), what).toBe(answer);
+			expect(s.asked.spent, what).toEqual([]);
+			const taken = await putRight();
+			if (taken !== undefined) {
+				expect(said(taken), what).toBe("issued");
+				s.asked.spent.length = 0;
+			}
+		}
+		const unmet = await sign({ iss: limited, scope: "chat.read" }, limitedKey.privateKey);
+		expect(said(await s.handle(unmet))).toBe(
+			"invalid_grant: assertion does not meet its issuer's conditions",
+		);
+		const past = await sign({ iss: ceil, scope: "chat.read chat.history" }, ceilKey.privateKey);
+		expect(said(await s.handle(past))).toBe("invalid_scope: undefined");
+		expect(s.asked.saved).toEqual([]);
+	});
+
+	it("gives back no jti spent before a refusal when the token is issued", async () => {
+		let asked = 0;
+		const secondRefuses = defineModule({ name: "second-refuses", takes: [] }, (m) => [
+			m.contribute(issuancePolicies).by(() => ({
+				name: "second-refuses",
+				judge: async () => {
+					asked += 1;
+					return asked === 2
+						? { kind: "refused", reason: "test", description: "refused when issuing" }
+						: { kind: "allowed" };
+				},
+			})),
+		]);
+		const s = await serve(undefined, { extra: [secondRefuses] });
+		const assertion = await ofCorp();
+		expect(said(await s.handle(assertion)).startsWith("issued")).toBe(false);
+		expect(said(await s.handle(assertion))).toBe("invalid_grant: assertion replayed");
+	});
+
+	it("is held to its issuer's client and subject conditions, the client named first", async () => {
+		const s = await serve();
+		const forExcluded = await sign(
+			{ iss: limited, sub: "corp|bob", client_id: "excluded", scope: "chat.read" },
+			limitedKey.privateKey,
+		);
+		expect(said(await s.handle(forExcluded, "excluded"))).toBe(
+			"invalid_grant: assertion does not meet its issuer's conditions",
+		);
+		const taken = await sign(
+			{ iss: limited, sub: "corp|bob", scope: "chat.read" },
+			limitedKey.privateKey,
+		);
+		expect(said(await s.handle(taken))).toBe("issued");
+		const otherSubject = await sign(
+			{ iss: limited, sub: "bob", scope: "chat.read" },
+			limitedKey.privateKey,
+		);
+		expect(said(await s.handle(otherSubject))).toBe(
+			"invalid_grant: assertion does not meet its issuer's conditions",
+		);
+		// For another client, and outside the conditions too: the client is told first.
+		expect(said(await s.handle(forExcluded, "agent"))).toBe(
+			"invalid_grant: assertion is for another client",
+		);
+		expect(s.asked.saved).toHaveLength(1);
+	});
+});
+
+describe("the ID-JAG profile at boot", () => {
+	const at = "jwt-bearer.issuers.0.profile";
+
+	it("is refused where no binding kind proves a DPoP key, and needs none without a profile", async () => {
+		expect(await refusedAt([jagEntry], false)).toEqual([
+			{ where: at, reason: "the ID-JAG profile needs DPoP composed" },
+		]);
+		expect(await refusedAt([plainEntry], false)).toBe("booted");
+	});
+
+	it("is refused beside a thumbprint subject, a self-issued prefix and a client", async () => {
+		for (const [what, entry] of [
+			[
+				"a thumbprint subject",
+				{ ...jagEntry, "accept-any-subject": undefined, "subject-is-key-thumbprint": true },
+			],
+			[
+				"a client",
+				{
+					...jagEntry,
+					"accept-any-subject": undefined,
+					conditions: { "subject-prefix": "corp|" },
+					client: "agents",
+				},
+			],
+		] as const) {
+			const refusals = await refusedAt([JSON.parse(JSON.stringify(entry))]);
+			expect(refusals, what).toEqual(
+				expect.arrayContaining([expect.objectContaining({ where: at })]),
+			);
+		}
+		const { keys: _, ...contributed } = jagEntry;
+		const prefixed = {
+			...contributed,
+			"accept-any-subject": undefined,
+			"subject-is-key-thumbprint": true,
+			"self-issued-prefix": "corp.devices",
+		};
+		expect(await refusedAt([JSON.parse(JSON.stringify(prefixed))])).toEqual(
+			expect.arrayContaining([expect.objectContaining({ where: at })]),
+		);
+	});
+
+	it("needs a subject condition or accept-any-subject as any as-is issuer does", async () => {
+		const { "accept-any-subject": _, ...bare } = jagEntry;
+		expect(await refusedAt([bare])).not.toBe("booted");
+	});
+
+	it("refuses an empty list of clients, which 0.17 read as none allowed: such an issuer is left out", async () => {
+		const empty = { ...limitedEntry, conditions: { claims: { client_id: [] } } };
+		expect(await refusedAt([empty])).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					// Refused as no entry at all, at its place: never read as "none allowed".
+					where: expect.stringContaining("jwt-bearer.issuers.0"),
+				}),
+			]),
+		);
+		// Left out, its ID-JAGs are an unknown signer's, whichever client presents them.
+		const s = await serve([plainEntry]);
+		const fromLeftOut = await sign(
+			{ iss: limited, sub: "corp|bob", scope: "chat.read" },
+			limitedKey.privateKey,
+		);
+		expect(said(await s.handle(fromLeftOut))).toBe(untrusted);
+		expect(s.asked.saved).toEqual([]);
 	});
 });

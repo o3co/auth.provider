@@ -24,7 +24,11 @@ Preview: the ID-JAG profile follows draft-ietf-oauth-identity-assertion-authz-gr
 
 ## Invariants
 - Pure: no state, no input or output.
-- The grant sorts every assertion by `namesIdJag` first, on whatever way it goes: delegated or not, its client named or none (`clientless`'s `identify`), whatever its issuer, before anything is verified or a delegate asked. While no entry takes the profile, one naming the ID-JAG's type is refused as an unknown signer is (`untrusted signer`), so none is taken by rules that would not hold its client or scope.
+- The grant sorts every assertion by `namesIdJag` first, on whatever way it goes: delegated or not, its client named or none (`clientless`'s `identify`), whatever its issuer, before anything is verified or a delegate asked.
+- One naming the ID-JAG's type goes on only to an entry with `profile = id-jag`, by the `iss` it sends, and such an entry takes nothing else; either way the rest is refused as an unknown signer is (`untrusted signer`). A request naming no client takes no ID-JAG, as its entry has no `client`.
+- An entry with the profile takes no `subject-is-key-thumbprint` or `self-issued-prefix` (an ID-JAG's `sub` is a user, its signer its IdP) and no `client` (it is presented by the confidential client it names); `issuers` refuses them at boot.
+- An entry with the profile needs a binding kind proving a DPoP key (`sender-binding`'s `tokenTypeOf("jkt")`), else boot is refused at its `profile`: a proof none reads would bind nothing. Proofs are checked and spent by the endpoint before the grant runs, so a retry needs a new one.
+- The grant reads and admits an ID-JAG where it binds an assertion to its client, before its issuer's conditions and subject; its ceiling joins its issuer's, and `recheck` is asked once the scope and audience are chosen, all before the `jti` is spent, so a refusal leaves it usable. Its answer names the audience issued as `resource` (one, or a list), however it was chosen; no other entry's answer does.
 - Its verified header's `typ` is the ID-JAG's, as `typOf` reads it (`untrusted signer` otherwise).
 - An `aud` list holds one audience (`wrong audience`). A `tenant` or `aud_tenant` is refused (`tenant not taken`).
 - `iat` is a number, and `client_id` a string of 1 to 255 characters. An `act` has a string `sub`. A claim of no such form is `missing or malformed claims`, as are those below.
@@ -36,4 +40,4 @@ Preview: the ID-JAG profile follows draft-ietf-oauth-identity-assertion-authz-gr
 - The scope asked is the request's where it names one, else the ID-JAG's. Its ceiling holds its scope and resources, each where it names them; what is about to be issued must lie within both.
 
 ## Depends on
-- `client-allowance` (`parseScope`, a ceiling's form), `external-jwt` (`typOf`), `grants` (the client's and binding's types)
+- `client-allowance` (`parseScope`, a ceiling's form), `external-jwt` (`typOf`), `grants` (the client's and binding's types), `jose` (reading a header unverified)
