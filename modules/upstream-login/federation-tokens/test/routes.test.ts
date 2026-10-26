@@ -350,7 +350,7 @@ describe("the upstream logout route", () => {
 		},
 	};
 
-	it("forgets the IdP's tokens first, then sends the browser to the upstream with its hint [oidc-rpinit-2-l] [oidc-rpinit-2-m]", async () => {
+	it("forgets the IdP's tokens first, then sends the browser to the upstream with its hint", async () => {
 		const h = await linked({ offered: ending }, { idToken: "id-1" });
 		const out = await h.logout(h.token, { post_logout_redirect_uri: back, state: "s1" });
 		expect([out.status, out.headers["cache-control"]]).toEqual([303, "no-store"]);
@@ -368,7 +368,7 @@ describe("the upstream logout route", () => {
 		expect((await h.ask(h.token)).status).toBe(404);
 	});
 
-	it("still sends the login's hint after a refresh that gave no ID token, or an empty one [oidc-rpinit-2-l]", async () => {
+	it("still sends the login's hint after a refresh that gave no ID token, or an empty one", async () => {
 		for (const answered of [refreshed(), refreshed({ idToken: "" })]) {
 			const offered: Offered = { ...refreshing(answered).offered, ...ending };
 			const due = { idToken: "id-1", refreshToken: "r-1", expiresInSeconds: 0 };

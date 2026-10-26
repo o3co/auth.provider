@@ -14,7 +14,7 @@ const ending = (throws = false): Offered => ({
 const paramsOf = (url: string | undefined) =>
 	url === undefined ? undefined : Object.fromEntries(new URL(url).searchParams);
 
-it("sends a session to its first upstream's end of session, with that login's ID token as the hint [oidc-rpinit-2-l] [oidc-rpinit-2-m]", async () => {
+it("sends a session to its first upstream's end of session, with that login's ID token as the hint", async () => {
 	const h = await harness({ offered: ending() });
 	const session = await h.login();
 	await h.receive(session, { idToken: "id-1" });
