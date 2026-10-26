@@ -70,7 +70,7 @@ export interface Instance {
  */
 export async function startDeployment(spec: DeploymentSpec) {
 	// Instances a run that ended abruptly left behind would answer on ports and hold Redis connections.
-	await sweepStrayInstances();
+	for (const left of await sweepStrayInstances()) process.stderr.write(`conformance: ${left}\n`);
 	const { modules, config, layers, store } = composition(spec.scene);
 	if (store !== "pausable") throw new Error("a fault scene runs on the Redis store");
 	const kernel: Record<string, unknown> =

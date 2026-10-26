@@ -13,21 +13,21 @@ const jwkOf = (kid: string) => ({
 type KeysAnswer = { readonly status: number; readonly body: string };
 
 /**
- * A server publishing `metadata` at `metadataPath` alone, naming `/keys` as its key set unless
- * `jwks` is false, and `keys` there (or `answer` as written); every other path is 404.
+ * A server publishing `metadata` at `metadataPath` alone, naming `at` (`/keys` by default) as its
+ * key set unless `jwks` is false, and `keys` there (or `answer` as written); every other path is 404.
  */
 async function publishing(
 	metadataPath: string,
 	issuer: string,
 	keys: readonly object[],
-	{ jwks = true, answer }: { jwks?: boolean; answer?: KeysAnswer } = {},
+	{ jwks = true, answer, at = "/keys" }: { jwks?: boolean; answer?: KeysAnswer; at?: string } = {},
 ) {
 	const server = createServer((req, res) => {
-		const metadata = jwks ? { issuer, jwks_uri: "https://as.example/keys" } : { issuer };
+		const metadata = jwks ? { issuer, jwks_uri: `https://as.example${at}` } : { issuer };
 		const written =
 			req.url === metadataPath
 				? { status: 200, body: JSON.stringify(metadata) }
-				: req.url === "/keys"
+				: req.url === at
 					? (answer ?? { status: 200, body: JSON.stringify({ keys }) })
 					: { status: 404, body: "" };
 		res.writeHead(written.status, { "content-type": "application/json" }).end(written.body);
@@ -114,5 +114,15 @@ describe("the instances of a deployment", () => {
 			);
 			await server.stop();
 		}
+	});
+
+	it("reads the key set at the path and query its metadata names", async () => {
+		const issuer = "https://as.example";
+		const server = await publishing("/.well-known/openid-configuration", issuer, [jwkOf("k1")], {
+			at: "/keys?set=current",
+		});
+		const read = await identityOf(server.base, issuer);
+		expect(read?.keys).toEqual([expect.stringMatching(/^k1#/)]);
+		await server.stop();
 	});
 });

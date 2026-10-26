@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import type { AuditTrail } from "./audit/audit.ts";
+import { groupLive, running } from "./processes.ts";
 import type { Mailbox } from "./smtp.ts";
 
 export type Started =
@@ -83,23 +84,23 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 		output += chunk;
 	});
 	const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-	/** Signals the target, its whole process group where launched as one. */
+	// No pid is taken again while a group holds it as its id: a process holding the reaped target's pid means its group has ended.
+	const groupGone = (pid: number) =>
+		(child.exitCode !== null || child.signalCode !== null) && running(pid);
+	/** Signals the target, its whole process group where launched as one and still its own. */
 	const signal = (name: NodeJS.Signals) => {
 		if (!spec.group || child.pid === undefined) return child.kill(name);
+		if (groupGone(child.pid)) return;
 		try {
 			process.kill(-child.pid, name);
 		} catch {}
 	};
-	/** Whether any process of the target's group is still there: launched as a group, its end is the group's, not the target's alone. */
-	const groupAlive = () => {
-		if (child.pid === undefined) return false;
-		try {
-			process.kill(-child.pid, 0);
-			return true;
-		} catch (error) {
-			return (error as NodeJS.ErrnoException).code === "EPERM";
-		}
-	};
+	/** Whether a process of the target's group is still there and no zombie: launched as a group, its end is the group's, not the target's alone. */
+	const groupAlive = () =>
+		child.pid !== undefined &&
+		!groupGone(child.pid) &&
+		running(-child.pid) &&
+		(groupLive(child.pid) ?? true);
 	const ended = () =>
 		spec.group ? !groupAlive() : child.exitCode !== null || child.signalCode !== null;
 	/** Whether the target (its whole group, where launched as one) ended within `ms`; the timer is cleared either way. */
@@ -169,16 +170,6 @@ export function baseEnv(): Record<string, string> {
 }
 
 const owner = "conformance.owner";
-
-/** Whether a process of the pid runs here. */
-const running = (pid: number) => {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === "EPERM";
-	}
-};
 
 /** Removes the throwaway Redis that a process no longer running left behind, such as a run killed mid-scene. */
 function sweepLeftBehind(): void {

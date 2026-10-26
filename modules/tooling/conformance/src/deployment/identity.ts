@@ -38,7 +38,8 @@ export async function identityOf(baseUrl: string, issuer: string): Promise<Ident
 
 async function keysAt(baseUrl: string, uri: unknown): Promise<Record<string, unknown>[]> {
 	if (typeof uri !== "string") throw new Error(`the key set ${String(uri)} is no URL`);
-	const answer = await fetch(`${baseUrl}${new URL(uri).pathname}`, {
+	const { pathname, search } = new URL(uri);
+	const answer = await fetch(`${baseUrl}${pathname}${search}`, {
 		signal: AbortSignal.timeout(5000),
 	});
 	if (!answer.ok) throw new Error(`the key set ${uri} answered ${answer.status}`);

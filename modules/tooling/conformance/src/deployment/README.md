@@ -19,7 +19,7 @@ Internal module of `conformance`: a fault scene's app as a deployment runs it, o
 - A start that fails at any step (an instance refused, its mark not written, a trace that cannot start, the identities differing, the set-up not written) stops everything it started before failing.
 - The instances are one deployment: each names the same issuer and publishes the same keys, told apart by kid and RFC 7638 thumbprint, or the start fails naming the instance that differs. The metadata is read where the configured issuer publishes it (OpenID Connect's place under its path, then RFC 8414's), and the keys where its `jwks_uri` says: none where it names none, and a set it names that cannot be read (an error answer, no `keys` array) fails the start.
 - An instance's clock moves only where the thread-safe libfaketime of glibc Linux is at hand (`CONFORMANCE_FAKETIME_LIB`, else the system's); elsewhere `clock` fails rather than run on the real clock. The record names each instance's clock and is written again as one moves.
-- An instance a run left behind, its run killed mid-scene, is killed with its process group at the next start.
+- An instance a run left behind, its run killed mid-scene, is killed with its process group at the next start, only where its leader is the process marked (by when it started, as `ps` tells it); a group it cannot hold to its mark is left running and named on stderr.
 - The app reads its public origin from configuration only, so the trace in front of it changes nothing it answers. An instance's answer cut short ends the client's too.
 
 ## Depends on

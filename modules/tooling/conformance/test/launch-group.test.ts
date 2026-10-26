@@ -164,4 +164,39 @@ child.stdout.once("data", () => {
 			if (alive(child)) process.kill(child, "SIGKILL");
 		}
 	});
+
+	it("ends a stop and a kill once only zombies are left of the group, its processes all ended", async () => {
+		// The target's child leaves the group and never reaps its own child, which stays in it a zombie.
+		const reaping = `
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+const perl = spawn("perl", ["-e", '$| = 1; my $c = fork(); if (!$c) { exit 0 } setpgrp(0, 0); print "$$ $c\\n"; sleep 30'], { stdio: ["ignore", "pipe", "ignore"] });
+process.on("SIGTERM", () => process.exit(0));
+perl.stdout.once("data", (pids) =>
+	createServer((req, res) => res.end(String(pids).trim())).listen(Number(process.env.PORT), "127.0.0.1"),
+);
+`;
+		for (const end of ["stop", "kill"] as const) {
+			const dir = await mkdtemp(join(tmpdir(), "conformance-group-"));
+			await writeFile(join(dir, "main.mjs"), reaping);
+			const port = await freePort();
+			const started = await launch({
+				command: process.execPath,
+				args: ["main.mjs"],
+				cwd: dir,
+				env: { ...baseEnv(), PORT: String(port) },
+				port,
+				group: true,
+				stopGraceMs: 300,
+				killWithinMs: 300,
+			});
+			if (started.kind !== "running" || !started.kill) throw new Error("not started as a group");
+			const [holder = 0] = (await (await fetch(started.baseUrl)).text()).split(" ").map(Number);
+			try {
+				await expect(started[end](), end).resolves.not.toThrow();
+			} finally {
+				process.kill(holder, "SIGKILL");
+			}
+		}
+	});
 });
