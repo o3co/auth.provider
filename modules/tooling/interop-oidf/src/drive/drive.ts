@@ -9,7 +9,10 @@ export type State = "CREATED" | "CONFIGURED" | "WAITING" | "RUNNING" | "FINISHED
 /** A plan the suite made, by its id, and the tests it holds. */
 export interface MadePlan {
 	readonly id: string;
-	readonly modules: readonly { readonly testModule: string }[];
+	readonly modules: readonly {
+		readonly testModule: string;
+		readonly variant?: Readonly<Record<string, string>>;
+	}[];
 }
 
 /** One suite test driven: its instance, and what the harness found at the app meanwhile. */
@@ -81,7 +84,7 @@ export async function makePlan(
 	const query = new URLSearchParams({ planName: name, variant: JSON.stringify(variant) });
 	const made = (await answered(call, "POST", `api/plan?${query}`, [200, 201], configuration)) as {
 		id?: string;
-		modules?: { testModule: string }[];
+		modules?: { testModule: string; variant?: Record<string, string> }[];
 	};
 	if (typeof made.id !== "string") throw new Error(`the suite made no plan of ${name}`);
 	return { id: made.id, modules: made.modules ?? [] };
