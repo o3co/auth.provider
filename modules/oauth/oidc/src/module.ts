@@ -1,4 +1,4 @@
-import { claimsSelections } from "@mod/claims-selection";
+import { claimScopes, claimsSelections } from "@mod/claims-selection";
 import { idTokens } from "@mod/code-grant";
 import { issuer, metadata } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
@@ -33,7 +33,6 @@ const releasedOver = (read: SubjectAttributes): ReleasedClaims => ({
 		const { [userAttribute.emailVerified]: _, ...unvouched } = found.attributes;
 		return claimsOf(found.vouched ? found.attributes : unvouched, scope, asked);
 	},
-	scopeOf: scopeOfClaim,
 });
 
 export default defineModule(
@@ -86,6 +85,8 @@ export default defineModule(
 				},
 			};
 		}),
+		// The table's scopes, so a claims request's names are selected by them.
+		m.contribute(claimScopes).by(() => ({ scopeOf: scopeOfClaim })),
 		m
 			.contribute(metadata)
 			.by(() => ({ name: "scopes_supported", value: [openid, ...tableScopes] })),
