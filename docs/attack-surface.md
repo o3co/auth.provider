@@ -116,6 +116,7 @@ Settings that name where it reaches:
 | `federation.idps.<name>.token-endpoint` | `@mod/idp-github` | `"https://github.com/login/oauth/access_token"` | by its name |
 | `federation.idps.<name>.token-endpoint` | `@mod/idp-google` | `"https://oauth2.googleapis.com/token"` | by its name |
 | `federation.idps.<name>.token-endpoint` | `@mod/idp-oidc` |  | by its name |
+| `federation.idps.<name>.userinfo-endpoint` | `@mod/idp-oidc` |  | by its name |
 | `issuer.url` | `@mod/issuer` |  | by its name |
 | `jti-ledger-http.consume-url` | `@mod/jti-ledger-http` |  | by its name |
 | `jwt-bearer.issuers` | `@mod/jwt-bearer` | `[]` | each trusted issuer's `jwks-uri`, where its key set is fetched |

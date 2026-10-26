@@ -21,6 +21,7 @@ function ledgerConfig(ledger: LedgerScene) {
 			"verify-url": ledger.verifyUrl,
 			credential: ledger.credential,
 			...(ledger.timeoutMs ? { timeout: `${ledger.timeoutMs}ms` } : {}),
+			...(ledger.upstreamUrl ? { "upstream-url": ledger.upstreamUrl } : {}),
 		},
 		outbound: {
 			allow: [at.hostname],

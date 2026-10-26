@@ -1334,4 +1334,216 @@ describe("idp-oidc", () => {
 				.map((line) => line.fields),
 		).toEqual([{ idp: "corp" }]);
 	});
+
+	describe("reading the upstream's UserInfo, where the operator turns it on", () => {
+		const userinfoAt = `${issuer}/userinfo`;
+		const json = (body: unknown, status = 200, contentType = "application/json") => ({
+			status,
+			headers: new Map([["content-type", contentType]]),
+			body: new TextEncoder().encode(typeof body === "string" ? body : JSON.stringify(body)),
+		});
+		const reading = {
+			settings: { "read-userinfo": true },
+			description: { userinfo_endpoint: userinfoAt },
+		};
+		/** An upstream whose UserInfo answers as `answer`, the id_token saying `claims`. */
+		const withUserinfo = async (
+			answer: Handler,
+			claims: Record<string, unknown> = {},
+			world: Omit<World, "token" | "more"> = reading,
+		) => {
+			const opened_ = await answering(await idToken(claims), {
+				...world,
+				more: { [userinfoAt]: answer },
+			});
+			const asked = () => opened_.asked.filter((a) => a.url === userinfoAt);
+			return { ...opened_, asked };
+		};
+
+		it("boots without reading UserInfo whatever the description says of it, as before", async () => {
+			for (const userinfo_endpoint of [null, "", "not a url", 7, "http://elsewhere.example/u"]) {
+				const { upstream } = await open({ description: { userinfo_endpoint } });
+				expect(upstream.issuer, String(userinfo_endpoint)).toBe(issuer);
+			}
+			await expect(
+				open({ settings: { "read-userinfo": true }, description: { userinfo_endpoint: null } }),
+			).rejects.toThrow(UpstreamMismatch);
+		});
+
+		it("asks nothing of UserInfo by default, whatever the description names", async () => {
+			const { upstream, asked } = await withUserinfo(
+				() => json({ sub: "u-alice", name: "Info" }),
+				{},
+				{
+					description: { userinfo_endpoint: "https://elsewhere.example/userinfo" },
+				},
+			);
+			expect(await outcome(upstream.exchange(codeExchange()))).toMatchObject({
+				subject: "u-alice",
+			});
+			expect(asked()).toEqual([]);
+		});
+
+		it("asks UserInfo by GET with the access token as a Bearer credential, completing the id_token's profile [oidc-core-5.3.1-a]", async () => {
+			const { upstream, asked } = await withUserinfo(
+				() =>
+					json({
+						sub: "u-alice",
+						name: "Info",
+						picture: "p",
+						email: "i@x.test",
+						email_verified: true,
+					}),
+				{ name: "Token", amr: ["pwd"], auth_time: Math.floor(start / 1000) - 60 },
+			);
+			expect(await upstream.exchange(codeExchange())).toMatchObject({
+				subject: "u-alice",
+				amr: ["pwd"],
+				authenticatedAt: start - 60_000,
+				profile: { name: "Token", picture: "p", email: "i@x.test", emailVerified: true },
+			});
+			expect(asked()).toEqual([
+				{
+					url: userinfoAt,
+					request: {
+						method: "GET",
+						headers: { accept: "application/json" },
+						credential: "Bearer at",
+					},
+					hosts: ["idp.example"],
+					internal: issuer,
+				},
+			]);
+		});
+
+		it("never takes from UserInfo who logged in, or how", async () => {
+			const { upstream } = await withUserinfo(
+				() => json({ sub: "u-alice", amr: ["mfa"], auth_time: 1, acr: "gold", groups: ["admin"] }),
+				{ amr: ["pwd"] },
+			);
+			const login = await upstream.exchange(codeExchange());
+			expect([login.subject, login.amr, login.authenticatedAt, login.profile]).toEqual([
+				"u-alice",
+				["pwd"],
+				undefined,
+				undefined,
+			]);
+		});
+
+		it("refuses the login on any answer but its subject's JSON, and is unavailable while UserInfo is down [oidc-core-5.3.2-n]", async () => {
+			const refusing: Handler[] = [
+				() => json({ sub: "u-bob", name: "Info" }),
+				() => json({ name: "Info" }),
+				() => json("", 401, ""),
+				() => json("Bearer error=invalid_token", 401, "text/plain"),
+				() => json({ error: "insufficient_scope" }, 403),
+				() => json({ sub: "u-alice" }, 302),
+				() => json("eyJ.a.b", 200, "application/jwt"),
+				() => "broken",
+			];
+			for (const answer of refusing) {
+				const { upstream } = await withUserinfo(answer);
+				expect(await outcome(upstream.exchange(codeExchange()))).toBe("refused");
+			}
+			for (const answer of [
+				() => json("", 502, ""),
+				() => json({}, 503),
+				() => "unreachable" as const,
+			]) {
+				const { upstream } = await withUserinfo(answer);
+				expect(await outcome(upstream.exchange(codeExchange()))).toBe("unavailable");
+			}
+		});
+
+		it("refuses a token that is no Bearer token, asking UserInfo nothing", async () => {
+			const token = await idToken();
+			const { upstream, asked } = await open({
+				...reading,
+				token: () => granted(token, { token_type: "DPoP" }),
+				more: { [userinfoAt]: () => json({ sub: "u-alice" }) },
+			});
+			expect(await outcome(upstream.exchange(codeExchange()))).toBe("refused");
+			expect(asked.filter((a) => a.url === userinfoAt)).toEqual([]);
+		});
+
+		it("asks UserInfo nothing for an id_token that does not hold, a refresh or a delegation's code", async () => {
+			const answer = () => json({ sub: "u-alice", name: "Info" });
+			const bad = await withUserinfo(answer, { nonce: "other" });
+			expect(await outcome(bad.upstream.exchange(codeExchange()))).toBe("refused");
+			expect(bad.asked()).toEqual([]);
+			const token = await idToken();
+			const { upstream, asked } = await open({
+				...reading,
+				token: () => granted(token, { refresh_token: "rt" }),
+				more: { [userinfoAt]: answer },
+			});
+			await offered(upstream.refresh, "refresh")("rt", ["openid"]);
+			await offered(upstream.delegation, "delegation").exchange(delegatedExchange());
+			expect(asked.filter((a) => a.url === userinfoAt)).toEqual([]);
+		});
+
+		it("refuses at boot a description naming no UserInfo, or one elsewhere or not on https", async () => {
+			for (const description of [
+				{},
+				{ userinfo_endpoint: "https://elsewhere.example/userinfo" },
+				{ userinfo_endpoint: "http://idp.example/userinfo" },
+			]) {
+				const opening = open({ settings: { "read-userinfo": true }, description });
+				await expect(opening, JSON.stringify(description)).rejects.toThrow(UpstreamMismatch);
+			}
+		});
+
+		it("asks https of UserInfo and its description, even where outbound takes plain http", async () => {
+			const settings = settingsOf(asymmetric, loopbackRefusals());
+			const base = { "client-id": "client", "client-secret": "s", "read-userinfo": true };
+			const refusedAt = (read: Record<string, unknown>) =>
+				settings.safeParse({ ...base, ...read }).error?.issues.map((i) => i.path.join("."));
+			expect(refusedAt({ issuer: loopbackIssuer })).toEqual(["issuer"]);
+			expect(
+				refusedAt({
+					issuer,
+					...givenEndpoints,
+					"userinfo-endpoint": `${loopbackIssuer}/userinfo`,
+				}),
+			).toEqual(["userinfo-endpoint"]);
+			// Without UserInfo, plain http stays outbound's to take.
+			expect(
+				settings.safeParse({ ...base, "read-userinfo": false, issuer: loopbackIssuer }).success,
+			).toBe(true);
+		});
+
+		it("takes a UserInfo endpoint given without discovery, only with the reading on", () => {
+			const settings = settingsOf(asymmetric, policyRefusing(["elsewhere.example"]));
+			const base = { issuer, "client-id": "client", "client-secret": "s" };
+			const holds = (read: Record<string, unknown>) =>
+				settings.safeParse({ ...base, ...read }).success;
+			expect(
+				holds({ ...givenEndpoints, "read-userinfo": true, "userinfo-endpoint": userinfoAt }),
+			).toBe(true);
+			expect(holds({ ...givenEndpoints, "read-userinfo": true })).toBe(false);
+			expect(holds({ ...givenEndpoints, "userinfo-endpoint": userinfoAt })).toBe(false);
+			expect(holds({ "read-userinfo": true, "userinfo-endpoint": userinfoAt })).toBe(false);
+			expect(
+				holds({
+					...givenEndpoints,
+					"read-userinfo": true,
+					"userinfo-endpoint": "https://elsewhere.example/userinfo",
+					"endpoint-hosts": ["elsewhere.example"],
+				}),
+			).toBe(false);
+		});
+
+		it("sends the access token to the given UserInfo endpoint as its own URL, and to no other host", async () => {
+			const token = await idToken();
+			const { upstream, asked } = await open({
+				settings: { ...givenEndpoints, "read-userinfo": true, "userinfo-endpoint": userinfoAt },
+				token: () => granted(token),
+				more: { [userinfoAt]: () => json({ sub: "u-alice" }) },
+			});
+			await upstream.exchange(codeExchange());
+			expect(asked.filter((a) => a.request.credential === "Bearer at")).toEqual([
+				expect.objectContaining({ url: userinfoAt, internal: userinfoAt }),
+			]);
+		});
+	});
 });

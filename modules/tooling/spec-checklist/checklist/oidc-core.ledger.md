@@ -180,7 +180,7 @@
 - 5.2 #5 SHOULD NOT: oidc-core-5.2-e
 - 5.2 #6 RECOMMENDED: oidc-core-5.2-f
 - 5.2 #7 RECOMMENDED: oidc-core-5.2-g
-- 5.3 #1 MUST: excluded deployment: TLS ends at the proxy in front, which the deployment provides
+- 5.3 #1 MUST: excluded deployment: the provider's own UserInfo endpoint's TLS ends at the proxy in front, which the deployment provides; an upstream's UserInfo o3co's RP reads is held to https by oidc-core-5.3.4-a
 - 5.3 #2 MUST: oidc-core-5.3-a
 - 5.3 #3 MUST: oidc-core-5.3-b
 - 5.3 #4 SHOULD: oidc-core-5.3-c

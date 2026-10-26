@@ -61,7 +61,8 @@ describe("upstream-client's id_token reader", () => {
 
 	it("reads the subject, the login time and the claims of an id_token that holds", async () => {
 		const { read } = readerOf(valid({ auth_time: seconds - 60, amr: ["pwd"] }));
-		expect(await read("t", "n")).toEqual({
+		const { login, claims: given } = await read("t", "n");
+		expect({ login, claims: given }).toEqual({
 			login: { subject: "alice", authenticatedAt: (seconds - 60) * 1000 },
 			claims: { ...claims, auth_time: seconds - 60, amr: ["pwd"] },
 		});
@@ -166,5 +167,31 @@ describe("upstream-client's id_token reader", () => {
 			name: "Alice",
 		});
 		expect(await profileOf({})).toBeUndefined();
+	});
+
+	it("completes the login's profile from a UserInfo answer for its own subject, the id_token first", async () => {
+		const { read } = readerOf(valid({ name: "Token", email_verified: true }));
+		const checked = await read("t", "n");
+		const answer = (body: Record<string, unknown>) => ({
+			status: 200,
+			headers: new Map([["content-type", "application/json"]]),
+			body: new TextEncoder().encode(JSON.stringify(body)),
+		});
+		expect(
+			checked.withUserinfo(
+				answer({ sub: "alice", name: "Info", email: "a@x.test", email_verified: true }),
+			),
+		).toEqual({
+			subject: "alice",
+			profile: { name: "Token", email: "a@x.test", emailVerified: true },
+		});
+		expect(() => checked.withUserinfo(answer({ sub: "bob", name: "Info" }))).toThrow(
+			UpstreamRefused,
+		);
+		expect((await readerOf(valid()).read("t", "n")).withUserinfo(answer({ sub: "alice" }))).toEqual(
+			{
+				subject: "alice",
+			},
+		);
 	});
 });
