@@ -21,10 +21,7 @@
 - `./testing`: a configuration builder, and the contract tests of both store interfaces.
 
 ## Invariants
-- Reads `id_token_hint`, `post_logout_redirect_uri` and `state`, from the query on a `GET` and the form on a `POST` (no other body is taken); nothing else.
-- No hint, or one naming no session, is `400 invalid_request`; one `oidc` refuses, or one issued more than 24 hours ago, is `400 invalid_token`; a hint that cannot be judged, or any other check that cannot tell, is `503`, logged as `rp-logout.unavailable` (warn) with what failed.
-- `sid` is taken from outside only in a hint the provider signed, and only to close that session.
-- The return is used only when it exactly matches one the hint's client registered; otherwise, or where the hint names no one client, the request is `400 invalid_request` and nothing is closed. `state` goes with it. A client record that cannot be read leaves out its frame, logged as `rp-logout.client_unavailable`; one a return is judged by answers `503`, nothing closed.
+- What a logout request is read for, and each refusal before its close: `ending`'s card.
 - The session closes through `session`'s `close`, which clears the cookie only when it opens the same session. A session closed before, or gone, is `200 {"logged_out":true}`, with no event, its cookie still cleared; one whose record the close found open, even past its lifetime or short of a requirement, is logged out.
 - A close that is unavailable is `503` with `logout.cascade_failed`; any other error it throws is passed on, a mistake and no outage, so `http` answers it `500`.
 - A close left pending records `logout.close_pending` and answers `503 temporarily_unavailable`, clearing the cookie, as `logout` does, however often it is sent again: its tokens live until the close is swept, so it is no logout yet.
