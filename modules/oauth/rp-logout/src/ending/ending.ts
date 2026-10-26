@@ -6,6 +6,7 @@ import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { type IdTokenHints, idTokenHints } from "@mod/oidc";
 import { type CloseOutcome, type Entry, sessions } from "@mod/session";
 import { type Closed, closingOver } from "../closing/closing.ts";
+import { confirmPath } from "../confirm/confirm.ts";
 import type { UpstreamEnd } from "../contract.ts";
 import { frontChannelPage } from "../page/page.ts";
 import { registration } from "../registration/registration.ts";
@@ -113,7 +114,13 @@ export function endingOver(p: EndingParts) {
 		// A value sent twice reads as none: refused first, so no check is passed by sending it twice.
 		if (values.repeated().length > 0) return repeated;
 		const hint = values.single("id_token_hint");
-		if (!hint) return refused("invalid_request", "id_token_hint is required");
+		if (!hint) {
+			// A return cannot be confirmed without a hint (RP-Initiated Logout 1.0 §3); with none asked,
+			// the person is asked whether to log out (§2), on this site, where their session's cookie is sent.
+			if (values.single("post_logout_redirect_uri"))
+				return refused("invalid_request", "id_token_hint is required");
+			return { status: 303, headers: { ...noStore, location: confirmPath } };
+		}
 		const checked = await p.hints.check(hint);
 		if (checked.kind === "sessionless") {
 			return refused("invalid_request", "id_token_hint names no session");
