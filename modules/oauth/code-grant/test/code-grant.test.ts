@@ -44,6 +44,7 @@ import {
 	type IdTokenRequest,
 	idTokens,
 	type Redeemed,
+	redemptionHooks,
 	type StoredCode,
 	sessionRedemptions,
 	type VoidList,
@@ -688,6 +689,14 @@ describe("what the ID token maker is told", () => {
 		expect(asked.map((r) => r.session)).toEqual([s.session.id]);
 	});
 
+	it("the redemption's name, the same the code's name gives", async () => {
+		const asked: IdTokenRequest[] = [];
+		const s = await serve({ extra: [recordingMaker(asked)] });
+		const code = await s.issue(["openid"]);
+		expect((await s.redeem(code)).status).toBe(200);
+		expect(asked.map((r) => r.redemption)).toEqual([s.app.get(codes).redemptionOf(code)]);
+	});
+
 	it("the scope the code was issued for", async () => {
 		const asked: IdTokenRequest[] = [];
 		const s = await serve({ extra: [recordingMaker(asked)] });
@@ -915,6 +924,108 @@ it("tells each contribution the session and client a code was redeemed in", asyn
 	expect(noted).toEqual([[s.session.id, "app"]]);
 });
 
+it("names a code's redemption as its record is named, from the code alone", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	expect(s.app.get(codes).redemptionOf(code)).toBe(nameOf(code));
+	expect(s.app.get(codes).redemptionOf(code)).not.toBe(code);
+});
+
+describe("redemption hooks", () => {
+	/** Notes what each hook is told, in order, into `seen`; `fail` makes one throw. */
+	const hooking = (
+		seen: string[],
+		fail: { pin?: boolean; redeemed?: boolean } = {},
+		redeemedSeen: Redeemed[] = [],
+	) =>
+		defineModule({ name: "hooking", takes: [] }, (m) => [
+			m.contribute(redemptionHooks).by(() => ({
+				name: "hooking",
+				pin: async (redemption) => {
+					seen.push(`pin ${redemption}`);
+					if (fail.pin) throw new Error("cannot pin");
+				},
+				redeemed: async (redeemed) => {
+					seen.push(`redeemed ${redeemed.redemption}`);
+					redeemedSeen.push(redeemed);
+					if (fail.redeemed) throw new Error("cannot note");
+				},
+			})),
+			m.contribute(additions).by(() => ({
+				field: "extra",
+				issue: async (redeemed) => {
+					seen.push(`addition ${redeemed.redemption}`);
+					return undefined;
+				},
+				revoke: async (redemption) => {
+					seen.push(`revoke ${redemption}`);
+				},
+			})),
+		]);
+
+	it("pins a used-up code before its token is issued, and tells of the redemption after the additions", async () => {
+		const seen: string[] = [];
+		const redeemedSeen: Redeemed[] = [];
+		const s = await serve({ extra: [hooking(seen, {}, redeemedSeen)] });
+		const code = await s.issue();
+		const name = nameOf(code);
+		const answer = await handleDirectly(s, code, {
+			issue: async (g) => {
+				seen.push("issue");
+				const issued = await s.app.get(tokens).issue({ grant: g, grantType: "authorization_code" });
+				return issued.kind === "refused" ? { kind: "refused", refusal: issued } : issued;
+			},
+		});
+		expect(answer).toMatchObject({ kind: "issued" });
+		expect(seen).toEqual([`pin ${name}`, "issue", `addition ${name}`, `redeemed ${name}`]);
+		expect(redeemedSeen).toMatchObject([{ redemption: name, subject: "alice", scope: ["read"] }]);
+		expect(redeemedSeen[0]?.access.id).toEqual(expect.any(String));
+	});
+
+	it("pins nothing for a code refused before it is used up, or used up by a wrong verifier", async () => {
+		const seen: string[] = [];
+		const s = await serve({ extra: [hooking(seen)] });
+		const code = await s.issue();
+		expect((await s.redeem(code, { redirect_uri: "https://other.example/cb" })).status).toBe(400);
+		expect((await s.redeem(code)).status).toBe(400);
+		const other = await s.issue();
+		expect((await s.redeem(other, { code_verifier: "w".repeat(43) })).status).toBe(400);
+		expect(seen.filter((step) => step.startsWith("pin"))).toEqual([]);
+	});
+
+	it("voids the code and issues nothing when the pin fails", async () => {
+		const seen: string[] = [];
+		const s = await serve({ extra: [hooking(seen, { pin: true })] });
+		const code = await s.issue();
+		const answer = await handleDirectly(s, code, {
+			issue: async () => {
+				throw new Error("issued after a failed pin");
+			},
+		}).catch((error: unknown) => ({ kind: "thrown", error }));
+		expect(answer).toMatchObject({ kind: "thrown", error: { message: "cannot pin" } });
+		expect(keptOf(s, code)).toMatchObject({ state: "consumed", void: true });
+		expect(keptOf(s, code)).not.toHaveProperty("token");
+	});
+
+	it("voids the code, revoking its token and what the additions gave, when telling of the redemption fails", async () => {
+		const seen: string[] = [];
+		const s = await serve({ extra: [hooking(seen, { redeemed: true })] });
+		const code = await s.issue();
+		const given: string[] = [];
+		const answer = await handleDirectly(s, code, {
+			issue: async (g) => {
+				const issued = await s.app.get(tokens).issue({ grant: g, grantType: "authorization_code" });
+				if (issued.kind === "refused") return { kind: "refused", refusal: issued };
+				given.push(issued.access.token);
+				return issued;
+			},
+		}).catch((error: unknown) => ({ kind: "thrown", error }));
+		expect(answer).toMatchObject({ kind: "thrown", error: { message: "cannot note" } });
+		expect(await revoked(s, given[0] ?? "")).toBe(true);
+		expect(seen).toContain(`revoke ${nameOf(code)}`);
+	});
+});
+
 describe("tokens issued while the exchange goes wrong are revoked", () => {
 	const redeemWith = async (
 		s: Served,
@@ -1068,7 +1179,14 @@ it("takes all its module names, with an ID token maker and an addition or with n
 	const adding = defineModule({ name: "adds-extra", takes: [] }, (m) => [
 		m.contribute(additions).by(() => ({ field: "extra", issue: async () => undefined })),
 	]);
-	for (const extra of [[], [maker("openid"), adding]]) {
+	const hooked = defineModule({ name: "hooked", takes: [] }, (m) => [
+		m.contribute(redemptionHooks).by(() => ({
+			name: "hooked",
+			pin: async () => {},
+			redeemed: async () => {},
+		})),
+	]);
+	for (const extra of [[], [maker("openid"), adding, hooked]]) {
 		const { input } = assembly({ extra });
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 		expect((await takesUnused(input))["code-grant"]).toBeUndefined();
