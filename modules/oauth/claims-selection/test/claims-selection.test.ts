@@ -1,7 +1,14 @@
 import type { Client } from "@mod/clients";
 import { type Redeemed, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import { type TokenTie, tokenTies } from "@mod/grants";
-import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	assemble,
+	contract,
+	defineModule,
+	isUnavailable,
+	kernelConfig,
+	type Module,
+} from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { afterEach, expect, it } from "vitest";
 import {
@@ -278,13 +285,15 @@ it("ties an exchanged token to the constraints of its subject token, never to it
 	expect(await s.tie.tieOf("tok-unknown")).toEqual({ kind: "none" });
 });
 
-it("fails a read of a record it cannot read, never taking it for none", async () => {
+it("fails a read of a record it cannot read as unavailable, never taking it for none", async () => {
 	const s = await serve();
 	s.stores.overwrite("t.tok-1", { format: 2, target: none });
 	s.stores.overwrite("p.r-1", { format: 1, selection: { idToken: none } });
-	await expect(s.selections.forToken("tok-1")).rejects.toThrow(/cannot read/);
-	await expect(s.selections.forCode("r-1")).rejects.toThrow(/cannot read/);
-	await expect(s.tie.tieOf("tok-1")).rejects.toThrow(/cannot read/);
+	const unreadable = { what: "claims-selection: a record it cannot read" };
+	await expect(s.selections.forToken("tok-1")).rejects.toMatchObject(unreadable);
+	await expect(s.selections.forCode("r-1")).rejects.toMatchObject(unreadable);
+	await expect(s.tie.tieOf("tok-1")).rejects.toMatchObject(unreadable);
+	await expect(s.selections.forToken("tok-1")).rejects.toSatisfy(isUnavailable);
 });
 
 it("takes all its module names", async () => {

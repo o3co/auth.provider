@@ -1,3 +1,4 @@
+import { Unavailable } from "@mod/kernel";
 import { z } from "zod";
 import { type Selection, selectionLimits, type Target } from "./contract.ts";
 import type { StoredSelection } from "./store.ts";
@@ -38,8 +39,9 @@ const targetRecord = z.strictObject({ format: z.literal(1), target });
 
 const opened = <T>(shape: z.ZodType<T>, kept: StoredSelection): T => {
 	const read = shape.safeParse(kept);
-	// One it cannot read holds back what it may constrain: never taken for none.
-	if (!read.success) throw new TypeError("claims-selection: a record it cannot read");
+	// One it cannot read holds back what it may constrain: never taken for none, and answered as
+	// one the place cannot tell, as a read that fails is.
+	if (!read.success) throw new Unavailable("claims-selection: a record it cannot read");
 	return read.data;
 };
 

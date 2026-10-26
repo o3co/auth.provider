@@ -26,7 +26,7 @@
 - A pin copies the code's selection, or marks it none, and holds it five minutes; the redemption's other reads use only the pin. A pin gone fails the read, never answering none.
 - A code still alive at its pin finds its selection, which outlives the code by a minute; a code past its life is refused by `code-grant` before anything reads its pin.
 - A family's target is written once and never cut: each refresh cuts the names from it again, so a name allowed and agreed to again comes back, as a scope does.
-- A record of another format or shape fails the read, never answered as none.
+- A record of another format or shape fails the read as unavailable, as a read the place cannot answer does; never answered as none.
 - Writes and reads that fail throw to the caller.
 
 ## Data
