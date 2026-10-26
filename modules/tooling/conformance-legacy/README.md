@@ -15,7 +15,8 @@
 - Registration of legacy set-ups (area → fragments, needs that cannot be provided, declared differences)
 - Registration of driver `legacy` (registered on import)
 - Driver `legacy` runs the build in the legacy directory
-- Preparation script (`prepare-legacy`): clones the baseline (`LEGACY_BRANCH`, by default the tag `v0.17.0`, the version the legacy directory is named for) into the legacy directory and builds the standalone build and the packages the composed entry adds
+- Preparation script (`prepare-legacy`): clones the baseline into the legacy directory at `legacyCommit`, the commit of `v0.17.0` (the version the legacy directory is named for), or at `LEGACY_COMMIT` (a full sha, for trying another by hand), and builds the standalone build and the packages the composed entry adds
+- `legacyCommit` and `legacyCommitOf` (the commit the script builds)
 - The preparation script and the composed entry read those packages from one list
 - The legacy directory: `LEGACY_DIR` where set, else `auth-provider/legacy-0.17.0` under `$XDG_CACHE_HOME` (`~/.cache` when that is unset or relative), never the OS temp dir
 
@@ -24,6 +25,7 @@
 - The legacy knowledge here is the defaults for starting the legacy build with no features in any scene (port, configuration name, in-memory store, values that turn features off, empty registrations).
 - Area set-ups override the defaults that live here.
 - Makes no changes to the legacy build.
+- Runs nothing of the legacy source before the legacy directory's commit is the one this tree names; a tag or branch is never what chooses it, and a directory holding another commit is refused.
 - Runs the legacy build only through configuration files and environment variables, and, for extra packages, through the composed entry.
 - Keeps the composed entry outside the build.
 - The composed entry imports the build's own files and packages as they are.
