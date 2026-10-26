@@ -3,18 +3,23 @@ import { describe, expect, it } from "vitest";
 import { composeOverride, projectOf, suiteEnv } from "../../compose/compose.ts";
 import { suiteOrigin } from "../suite.ts";
 
+const files = { cert: "/run/nginx-cert.pem", key: "/run/nginx-key.pem" };
+
 describe("the suite, as the harness starts it", () => {
 	it("lets the suite's server reach this machine by name, in IPv4 alone", () => {
-		const linux = composeOverride({
-			name: "host.docker.internal",
-			mapped: "172.17.0.1",
-		});
+		const linux = composeOverride(
+			{
+				name: "host.docker.internal",
+				mapped: "172.17.0.1",
+			},
+			files,
+		);
 		expect(linux).toContain(
 			'  server:\n    extra_hosts:\n      - "host.docker.internal:172.17.0.1"\n',
 		);
 		expect(linux).not.toContain("host-gateway");
 		// Docker Desktop names the machine itself.
-		expect(composeOverride({ name: "host.docker.internal" })).not.toContain("extra_hosts");
+		expect(composeOverride({ name: "host.docker.internal" }, files)).not.toContain("extra_hosts");
 	});
 
 	it("keeps the suite's store in memory, never in a directory of this machine", () => {
@@ -22,7 +27,7 @@ describe("the suite, as the harness starts it", () => {
 			{ name: "h", listen: "127.0.0.1" },
 			{ name: "h", listen: "1.2.3.4", mapped: "1.2.3.4" },
 		]) {
-			expect(composeOverride(host)).toMatch(
+			expect(composeOverride(host, files)).toMatch(
 				/^services:\n {2}mongodb:\n {4}volumes:\n {6}- type: tmpfs\n {8}target: \/data\/db\n/,
 			);
 		}
@@ -50,5 +55,15 @@ describe("the suite, as the harness starts it", () => {
 		const other = projectOf(join("/tmp/interop-oidf-basic-b2", "suite"));
 		expect(one).not.toBe(other);
 		for (const name of [one, other]) expect(name).toMatch(/^o3co-oidf-[a-z0-9]+$/);
+	});
+
+	it("has the suite's nginx answer with the harness's certificate, read only", () => {
+		const text = composeOverride({ name: "h" }, files);
+		expect(text).toContain(
+			"  nginx:\n    volumes:\n      - type: bind\n        source: /run/nginx-cert.pem\n        target: /etc/ssl/certs/nginx-selfsigned.crt\n        read_only: true\n",
+		);
+		expect(text).toContain(
+			"        source: /run/nginx-key.pem\n        target: /etc/ssl/private/nginx-selfsigned.key\n        read_only: true\n",
+		);
 	});
 });

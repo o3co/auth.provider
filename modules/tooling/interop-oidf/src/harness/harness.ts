@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { areaTarget } from "@mod/conformance";
 import { type FrontRequest, selfSigned, startFront } from "@mod/conformance-front";
+import { startTunnel } from "@mod/conformance-tunnel";
 import { readChecklist } from "@mod/spec-checklist";
 import { type Expected, expectedProblems, suiteEntries } from "../expected/expected.ts";
 import { loginPage } from "../login/login.ts";
 import { pkceShim } from "../pkce/pkce.ts";
 import { type ModuleRun, type Outcome, outcomesOf } from "../results/results.ts";
+import { keepReviewPages } from "../review/review.ts";
 import { suiteScene } from "../scene/scene.ts";
 import {
 	hostForSuite,
@@ -27,6 +29,8 @@ export interface PlanDefinition {
 	readonly name: string;
 	readonly suitePlan: string;
 	readonly configuration: string;
+	/** How the plan logs out: by the redirect alone, or telling the clients on a channel too; the back channel goes to the suite through a proxy. */
+	readonly logout?: "redirect" | "backchannel" | "frontchannel";
 }
 
 /** A plan as it ran: each suite test's outcome, the expected entries no test used, and the runner's own word. */
@@ -193,14 +197,23 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 	let failure: unknown;
 	try {
 		const host = await hostForSuite();
+		// The suite answers under a certificate naming its host, so the app's checks of names hold.
+		const suiteTls = await selfSigned("localhost.emobix.co.uk", join(work, "suite-tls"));
 		const suite = await startSuite(
 			pin,
 			join(work, "suite"),
 			host,
 			join(artifacts, "suite-server.log"),
+			suiteTls,
 			{ signal: deadline },
 		);
 		stops.push(() => suite.stop());
+		// The suite's host resolves to loopback, which the app's outbound reaches over https by a proxy alone.
+		const tunnel =
+			plan.logout === "backchannel"
+				? await startTunnel({ allow: { "localhost.emobix.co.uk:8443": "127.0.0.1:8443" } })
+				: undefined;
+		if (tunnel) stops.push(() => tunnel.stop());
 		const shim = pkceShim();
 		const passed: string[] = [];
 		let app = "http://127.0.0.1:1";
@@ -303,7 +316,16 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 					{ id: "client2", secret: secrets.client2, method: "client_secret_basic" },
 					{ id: "client_secret_post", secret: secrets.post, method: "client_secret_post" },
 				],
+				...(plan.logout === undefined
+					? {}
+					: {
+							logout: {
+								...(plan.logout === "redirect" ? {} : { channel: plan.logout }),
+								...(tunnel ? { proxy: `http://127.0.0.1:${tunnel.port}` } : {}),
+							},
+						}),
 			}),
+			{ trustedCertificates: [suite.certificate] },
 		);
 		if (started.kind !== "running") throw new Error(`the app refused to start:\n${started.output}`);
 		stops.push(() => started.stop());
@@ -351,6 +373,8 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 		const planName = plan.suitePlan.split("[")[0] ?? plan.suitePlan;
 		const tests = await testsOf(suite.api, planName);
 		await writeFile(join(artifacts, "tests.json"), JSON.stringify(tests, null, 2));
+		// The pages a person must look at, kept apart: the suite holds them only while it runs.
+		await keepReviewPages(join(artifacts, "review"), tests);
 		const judged = outcomesOf(tests, {
 			configuration,
 			failures: expected.failures,

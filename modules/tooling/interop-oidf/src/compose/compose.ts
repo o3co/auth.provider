@@ -12,9 +12,14 @@ export interface ComposedHost {
  * machine's (a run's store is thrown away, and Docker Desktop's shared directories can refuse its
  * writes); its server reaches this machine by name, mapped to an IPv4 address alone (`host-gateway`
  * adds an IPv6 one the suite's Java may pick and find no route to); every container is labelled with
- * the process that owns it.
+ * the process that owns it; its nginx answers with the harness's certificate, which names the
+ * suite's host, so a client checking names can reach it.
  */
-export const composeOverride = (host: ComposedHost, owner: number = process.pid) => {
+export const composeOverride = (
+	host: ComposedHost,
+	tls: { readonly cert: string; readonly key: string },
+	owner: number = process.pid,
+) => {
 	const labels = `    labels:\n      ${ownerLabel}: "${owner}"\n`;
 	return `services:
   mongodb:
@@ -22,6 +27,15 @@ export const composeOverride = (host: ComposedHost, owner: number = process.pid)
       - type: tmpfs
         target: /data/db
 ${labels}  nginx:
+    volumes:
+      - type: bind
+        source: ${tls.cert}
+        target: /etc/ssl/certs/nginx-selfsigned.crt
+        read_only: true
+      - type: bind
+        source: ${tls.key}
+        target: /etc/ssl/private/nginx-selfsigned.key
+        read_only: true
 ${labels}  server:
 ${host.mapped === undefined ? "" : `    extra_hosts:\n      - "${host.name}:${host.mapped}"\n`}${labels}`;
 };

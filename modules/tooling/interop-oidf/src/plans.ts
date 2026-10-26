@@ -18,6 +18,27 @@ export const plans = {
 		suitePlan: "oidcc-config-certification-test-plan",
 		configuration: "op.json",
 	},
+	"rp-initiated-logout": {
+		name: "rp-initiated-logout",
+		suitePlan:
+			"oidcc-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]",
+		configuration: "logout.json",
+		logout: "redirect",
+	},
+	"backchannel-logout": {
+		name: "backchannel-logout",
+		suitePlan:
+			"oidcc-backchannel-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]",
+		configuration: "logout.json",
+		logout: "backchannel",
+	},
+	"frontchannel-logout": {
+		name: "frontchannel-logout",
+		suitePlan:
+			"oidcc-frontchannel-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]",
+		configuration: "logout.json",
+		logout: "frontchannel",
+	},
 } as const satisfies Record<string, PlanDefinition>;
 
 /** The runs the package's evidence comes from, as `spec-checklist` lists the runs a CI run must report: one job of the kind `oidf-plan` per plan, a gate run. */

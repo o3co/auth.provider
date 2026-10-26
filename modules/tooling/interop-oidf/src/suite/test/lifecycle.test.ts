@@ -9,6 +9,7 @@ import { SuiteStopFailed, startSuite } from "../suite.ts";
 
 const pin = { tag: "release-v1", commit: "c0ffee", python: ["httpx==1"] };
 const host = { name: "host.docker.internal", listen: "127.0.0.1" };
+const tls = { cert: "-----BEGIN CERTIFICATE-----", key: "-----BEGIN PRIVATE KEY-----" };
 
 /** A command that answers as `answer` says, keeping each call; one it does not know answers nothing. */
 function commands(
@@ -36,7 +37,7 @@ const isDown = (args: readonly string[]) => args.includes("down");
 
 describe("the suite's start and stop, held to their time and leaving nothing behind", () => {
 	it("marks every container with the process that owns it", () => {
-		const text = composeOverride(host, 4242);
+		const text = composeOverride(host, { cert: "/c", key: "/k" }, 4242);
 		for (const service of ["mongodb", "nginx", "server"]) {
 			expect(text).toMatch(
 				new RegExp(
@@ -60,7 +61,7 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 					resolve("");
 				}),
 		);
-		const started = startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), {
+		const started = startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), tls, {
 			command,
 			signal: AbortSignal.timeout(200),
 		});
@@ -80,7 +81,7 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 			if (cmd === "docker" && isDown(args)) throw new Error("the daemon did not answer");
 			return "";
 		});
-		const started = startSuite(pin, suiteDir, host, join(dir, "suite.log"), {
+		const started = startSuite(pin, suiteDir, host, join(dir, "suite.log"), tls, {
 			command,
 			signal: AbortSignal.timeout(300),
 		});
@@ -108,7 +109,7 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 			return "";
 		});
 		await expect(
-			startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), { command }),
+			startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), tls, { command }),
 		).rejects.toThrow("server-1 exited");
 		const log = await readFile(join(dir, "suite.log"), "utf8");
 		expect(log).toContain("server-1 | started\n");
@@ -124,7 +125,9 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 			if (cmd === "docker" && args[0] === "compose") throw new Error("the daemon did not answer");
 			return "";
 		});
-		const error = await startSuite(pin, suiteDir, host, join(dir, "suite.log"), { command }).then(
+		const error = await startSuite(pin, suiteDir, host, join(dir, "suite.log"), tls, {
+			command,
+		}).then(
 			() => undefined,
 			(e: unknown) => e,
 		);
@@ -132,5 +135,30 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 		expect(error).not.toBeInstanceOf(SuiteStopFailed);
 		expect(calls.some((c) => c.cmd === "docker" && c.args[0] === "compose")).toBe(false);
 		expect(existsSync(suiteDir)).toBe(false);
+	});
+
+	it("holds every request to its API, while it starts and after, to the plan's deadline", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "suite-api-"));
+		const { command } = commands((cmd, args) =>
+			cmd === "git" && args[0] === "-C" ? `${pin.commit}\n` : "",
+		);
+		const asked: { url: string; signal?: AbortSignal }[] = [];
+		const get = async (url: string, _ca: string, options: { signal?: AbortSignal } = {}) => {
+			asked.push({ url, ...(options.signal ? { signal: options.signal } : {}) });
+			return { status: 200, body: {} };
+		};
+		const deadline = new AbortController().signal;
+		const suite = await startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), tls, {
+			command,
+			get,
+			signal: deadline,
+		});
+		await suite.api("api/info/abc");
+		await suite.stop();
+		expect(asked.map((a) => a.url)).toEqual([
+			expect.stringContaining("/api/plan?length=1"),
+			expect.stringContaining("/api/info/abc"),
+		]);
+		for (const a of asked) expect(a.signal).toBe(deadline);
 	});
 });

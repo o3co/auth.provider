@@ -367,7 +367,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `differences` (`src/differences`): the differences accepted between a library and the provider.
   - `libraries` (`src/libraries`): the client libraries the harness runs.
   - `pins` (`src/pins`): the SHA-256 of each jar an adapter is built from.
-- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config, on the `simple-web` pattern's app behind an https front.
+- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
   - `api` (`src/api`): the suite's API, reached trusting its certificate alone.
   - `commands` (`src/commands`): a command a plan runs, held to its time.
   - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
@@ -377,6 +377,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
   - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
   - `results` (`src/results`): what each suite test of a plan proved.
+  - `review` (`src/review`): the pages the suite's browser kept for a person to review.
   - `scene` (`src/scene`): the app the OP plans meet.
   - `suite` (`src/suite`): the suite at its pinned version, started and stopped.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.
