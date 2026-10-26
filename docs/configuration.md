@@ -732,7 +732,7 @@ From `@mod/token-exchange`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `token-exchange.max-actor-depth` | integer (1–10) | `3` |  |  |  | The longest chain of actors an exchanged token may carry. |
-| `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime. |
+| `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 2s to 1d, even past `tokens`' lifetime. |
 
 ## tokens
 
@@ -740,7 +740,7 @@ From `@mod/tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `1s` to `1d` in whole seconds. |
+| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `2s` to `1d` in whole seconds. |
 | `tokens.revocation` | denylist \| unsupported |  | yes | `TOKENS_REVOCATION` | `denylist` | Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported. |
 | `tokens.issuance-timeout` | string | `10s` |  |  |  | How long the issuance policies may take together, from `1s` to `1m`; past it, the issuance is unavailable. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |
