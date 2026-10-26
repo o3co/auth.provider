@@ -299,9 +299,13 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 - `@mod/api-docs` (assembly, `modules/tooling/api-docs`): Builds a release's API site from the shipped bundles, as an app installs them: one module per member's contract, named and imported by its public name.
 - `@mod/conformance` (verification, `modules/tooling/conformance`): Owns the conformance test base: the area contract, scene composition, the driver contract and selection, assembly of the new system, the pattern mode (every scene on one pattern's app), shared tools.
+  - `ask` (`src/ask`): Redis at hand, for the topology and the scenes that check a node themselves.
   - `audit` (`src/audit`): the events a running target sends, for the scenes that read them.
+  - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
+  - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
   - `patterns` (`src/patterns`): running every pattern's areas on its app.
+  - `promotion` (`src/promotion`): promoting a replica of a Redis topology's primary without losing what the primary took.
   - `relay` (`src/relay`): a relay between an app and Redis that causes a fault at a known point and shows that it happened.
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
