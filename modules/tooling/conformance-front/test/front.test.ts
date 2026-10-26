@@ -1,5 +1,5 @@
 import { X509Certificate } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { request } from "node:https";
 import { type AddressInfo, createServer as createNetServer } from "node:net";
@@ -107,6 +107,27 @@ describe("a self-signed certificate for a front", () => {
 	});
 });
 
+describe("a self-signed certificate whose openssl never ends", () => {
+	it("fails within the time it is given, naming the command", async () => {
+		// An openssl that never ends, first on the path.
+		const bin = await mkdtemp(join(tmpdir(), "front-openssl-"));
+		await writeFile(join(bin, "openssl"), "#!/bin/sh\nexec sleep 60\n");
+		await chmod(join(bin, "openssl"), 0o755);
+		const path = process.env.PATH;
+		process.env.PATH = `${bin}:${path}`;
+		try {
+			const dir = await mkdtemp(join(tmpdir(), "front-hung-"));
+			const started = Date.now();
+			await expect(selfSigned("hung.test", dir, { timeoutMs: 200 })).rejects.toThrow(
+				"openssl did not finish",
+			);
+			expect(Date.now() - started).toBeLessThan(5_000);
+		} finally {
+			process.env.PATH = path;
+		}
+	});
+});
+
 describe("an https front of an app, as a deployment's proxy is", () => {
 	it("is reached at its public host, on the port it took, under its own certificate", async () => {
 		const a = await app(() => ({ status: 200 }));
@@ -161,6 +182,29 @@ describe("an https front of an app, as a deployment's proxy is", () => {
 		const a = await app(() => ({ status: 204 }));
 		upstream = a.base;
 		expect((await send(f.origin, "/late")).status).toBe(204);
+	});
+
+	it("answers 504 where the app takes the request and never answers, within the time it is given", async () => {
+		// An app that reads the request and says nothing back.
+		const silent = createServer(() => {});
+		await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+		stops.push(
+			() =>
+				new Promise((resolve) => {
+					silent.closeAllConnections();
+					silent.close(() => resolve());
+				}),
+		);
+		const at = (
+			await front(`http://127.0.0.1:${(silent.address() as AddressInfo).port}`, {
+				appTimeoutMs: 200,
+			})
+		).origin;
+		const started = Date.now();
+		const answered = await send(at, "/slow");
+		expect(answered.status).toBe(504);
+		expect(answered.body).toContain("did not answer");
+		expect(Date.now() - started).toBeLessThan(5_000);
 	});
 
 	it("answers 502 while the app cannot be reached", async () => {

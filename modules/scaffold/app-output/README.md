@@ -24,12 +24,13 @@
 - `Packages.outside`, where the caller has packages outside the release: what the app is given beside them, see the internal module `outside`; `appZod`, the zod every app depends on.
 
 ## Invariants
+- The manifest's `bundledInside` names each bundled file the package ships, by its path in the package, with every package from outside it holds inside, for the release's list of what it ships: the package's test holds it to the files there and to the packages each bundle's own regions name.
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken. Every file is made before any is written.
 - A name not an npm package is refused by `namesPackages`, before anything is written.
 - The manifest names the pnpm the workspace builds with, and the app also depends on `zod` at the packages' version.
 - A scalar its owner's example gives in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer; the guide and the env example say such a value goes in the local layer.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
-- The image follows Node 24's latest, neither patch nor digest pinned, so a build takes Node's security fixes over repeating the last build; it pins corepack by version, installs the locked production dependencies in a stage of their own, and runs node under `tini` as a user other than root.
+- The image follows Node 24's latest, neither patch nor digest pinned, so a build takes Node's security fixes over repeating the last build; it pins corepack by version and installs the locked production dependencies in a stage of their own; the stage the app runs in starts again from Node's image and takes out the corepack and the yarn Node's image bundles, so no package manager but npm is in it, and runs node under `tini` as a user other than root.
 - Only an app composing `http` is given its port and interface in the image and the guide, and only one composing `http-ops` is checked for liveness (`/_healthcheck`, after a start period) or told of its endpoints.
 - The app reads the configuration files `APP_CONFIG` lists, comma-separated, layered in order; the generated configuration file when unset.
 - The app exits 78 on a refused boot, told by the kernel's mark (`BootRefused.is`), writing each refusal on standard error, every line handed on before it exits.

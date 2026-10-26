@@ -168,18 +168,8 @@ it("writes the image, and what git and the image leave out", async () => {
 	const docker = await read(target, "Dockerfile");
 	// A Node 24 or later image; which tag it follows is app-output's, held by its own test.
 	expect(docker).toMatch(/^FROM node:2[4-9]\S* AS base$/m);
-	// Dependencies are installed in their own stage; the image takes only what they left.
-	expect(docker.match(/^FROM .*$/gm)).toEqual([
-		"FROM " + docker.match(/^FROM (\S+) AS base$/m)?.[1] + " AS base",
-		"FROM base AS deps",
-		"FROM base AS runtime",
-	]);
-	expect(docker).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
+	// The image's stages and what each installs are app-output's, held by its own test.
 	expect(docker).toMatch(/^USER node$/m);
-	// An init as process 1 passes signals on and reaps what node leaves behind; pnpm comes through a pinned corepack.
-	expect(docker).toMatch(
-		/^RUN apk add --no-cache tini && npm install --global corepack@\d+\.\d+\.\d+ && corepack enable$/m,
-	);
 	expect(docker).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
 	expect(docker).toContain("pnpm install --frozen-lockfile --prod");
 	// The workspace file, where the operator writes one, installs as pnpm reads it; none is needed.

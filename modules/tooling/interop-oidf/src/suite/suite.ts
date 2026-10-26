@@ -85,10 +85,18 @@ export async function startSuite(
 	log: string,
 	/** The certificate its nginx answers with, as PEM: one naming `localhost.emobix.co.uk`. */
 	tls: { readonly cert: string; readonly key: string },
-	options: { readonly command?: Command; readonly signal?: AbortSignal } = {},
+	options: {
+		readonly command?: Command;
+		/** The JSON GET the suite's API is asked by. */
+		readonly get?: typeof getJson;
+		readonly signal?: AbortSignal;
+	} = {},
 ): Promise<Suite> {
 	const command = options.command ?? systemCommand;
 	const signal = options.signal;
+	const get = options.get ?? getJson;
+	// Each request to the API is held to the plan's deadline besides its own time.
+	const asked = signal ? { signal } : {};
 	const source = join(dir, "suite");
 	const name = projectOf(dir);
 	const compose = [
@@ -181,7 +189,7 @@ export async function startSuite(
 		for (;;) {
 			signal?.throwIfAborted();
 			try {
-				if ((await getJson(`${suiteOrigin}/api/plan?length=1`, ca)).status === 200) break;
+				if ((await get(`${suiteOrigin}/api/plan?length=1`, ca, asked)).status === 200) break;
 			} catch {}
 			if (Date.now() > deadline)
 				throw new Error(`the suite did not answer within ${readyWithinMs / 1000}s`);
@@ -194,7 +202,7 @@ export async function startSuite(
 			python: join(venv, "bin", "python"),
 			certificate,
 			api: async (path) => {
-				const answer = await getJson(`${suiteOrigin}/${path}`, trusted);
+				const answer = await get(`${suiteOrigin}/${path}`, trusted, asked);
 				if (answer.status !== 200)
 					throw new Error(`the suite answered ${answer.status} to ${path}`);
 				return answer.body;

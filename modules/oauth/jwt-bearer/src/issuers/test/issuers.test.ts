@@ -34,13 +34,20 @@ function recording() {
 	return { jwt, sources };
 }
 const section = { "max-assertion-lifetime": 3600, "clock-skew": 30 };
-const trust = (issuers: readonly IssuerEntry[], jwt = recording().jwt) =>
+/** A registered client an entry's `client` may name: no credentials, allowed this grant alone. */
+const agents = { id: "agents", credentialless: true, thisGrantAlone: true };
+const trust = (
+	issuers: readonly IssuerEntry[],
+	jwt = recording().jwt,
+	clients: readonly (typeof agents)[] = [agents],
+) =>
 	trustedWith({
 		jwt,
 		issuers,
 		section,
 		contributed: [],
 		ledgers: [],
+		clients,
 		policyOf: () => ({ algorithms: ["EdDSA"], skewMs: 0 }),
 	});
 const parsed = (entry: Record<string, unknown>) => {
@@ -169,6 +176,7 @@ describe("an issuer whose every signer becomes a subject", () => {
 			section,
 			contributed: contributions,
 			ledgers: [],
+			clients: [],
 			policyOf: () => ({ algorithms: ["EdDSA"], skewMs: 0 }),
 		});
 	const needs = {
@@ -245,5 +253,55 @@ describe("an issuer whose every signer becomes a subject", () => {
 	it("reads conditions as the conditions module does, refusing ones that hold no predicate", () => {
 		expect(read({ ...written, conditions: {} }).success).toBe(false);
 		expect(read({ ...written, conditions: { claims: { aud: "x" } } }).success).toBe(false);
+	});
+});
+
+describe("an entry's client", () => {
+	const at = (where: string, reason: string) => ({ where, reason });
+	const named = { ...written, ...held, client: "agents" };
+
+	it("takes a registered client with no credentials allowed this grant alone, warning of each such entry by place", async () => {
+		expect(read({ ...named, client: "" }).success).toBe(false);
+		expect(await trust(parsed(named))).toMatchObject({
+			kind: "trusted",
+			warnings: [{ event: "jwt-bearer.clientless_issuer", where: "jwt-bearer.issuers.0" }],
+		});
+		// One whose keys or table bind its subjects needs no conditions beside it.
+		const linked = { ...contributed, subject: "linked", upstream: "idp", client: "agents" };
+		expect(read(linked).success).toBe(true);
+	});
+
+	it("refuses, at the entry's client and never by its value, a client not registered, one with credentials, one allowed another grant", async () => {
+		for (const [clients, reason] of [
+			[[], "names no registered client"],
+			[
+				[{ ...agents, credentialless: false }],
+				"names a client with credentials: it needs to be public with method none",
+			],
+			[
+				[{ ...agents, thisGrantAlone: false }],
+				"names a client allowed another grant than this one",
+			],
+		] as const) {
+			expect(await trust(parsed(named), recording().jwt, clients)).toEqual({
+				kind: "refused",
+				refusals: [at("jwt-bearer.issuers.0.client", reason)],
+			});
+		}
+	});
+
+	it("refuses a client two entries name, and accept-any-subject beside a client", async () => {
+		const other = { ...fetched, ...held, client: "agents" };
+		expect(await trust([...parsed(named), ...parsed(other)])).toEqual({
+			kind: "refused",
+			refusals: [
+				at("jwt-bearer.issuers.1.client", "names the same client as jwt-bearer.issuers.0"),
+			],
+		});
+		const accepting = { ...written, "accept-any-subject": true, client: "agents" };
+		expect(await trust(parsed(accepting))).toEqual({
+			kind: "refused",
+			refusals: [at("jwt-bearer.issuers.0.accept-any-subject", "is written beside client")],
+		});
 	});
 });

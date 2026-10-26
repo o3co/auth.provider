@@ -20,6 +20,7 @@ Internal module of `conformance`: a relay between an app and Redis that causes a
 - A match on a request inside a transaction (after `MULTI`, until `EXEC` or `DISCARD`) is refused, as `QUEUED` shows nothing ran.
 - RESP3, subscriptions and unsubscriptions, `MONITOR`, `CLIENT REPLY OFF` and `SKIP`, inline commands and frames it cannot read cut their connection: each would part an answer from its request.
 - What it refused, or a fault that did not happen (a drop or a hold that never matched, a drop whose answer showed no write), fails the relay's `close`.
+- A caller's match or `roleOf` that throws fails the relay and cuts its connection; it never ends the run. A match that throws rejects whoever waits on its rule (`observe`, `hold`, a drop's first), the relay still open. A match is asked through itself, so one whose predicates read `this` keeps it.
 - A connection's role comes from the caller's `roleOf`, read from what the connection sends; the relay holds no store or feature vocabulary.
 - Times are on the relay's monotonic clock.
 

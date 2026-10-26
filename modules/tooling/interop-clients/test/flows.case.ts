@@ -269,3 +269,38 @@ describe(`${library.name}: exchanging a token`, () => {
 			}),
 	);
 });
+
+describe(`${library.name}: a token bound to a certificate`, () => {
+	it.runIf(runs("mtls"))(
+		"gets a token by the client credentials grant over TLS presenting a certificate, bound to it",
+		(context) =>
+			excusable(context, "mtls", async () => {
+				const result = await run("mtls", world.clients.mtls, {
+					scope: "read",
+					clientCertificate: {
+						cert: world.clientCertificate.cert,
+						key: world.clientCertificate.key,
+					},
+				});
+				const told = await world.introspect(String(result.accessToken));
+				expect(told.active).toBe(true);
+				expect(claims(told.cnf)["x5t#S256"]).toBe(world.clientCertificate.thumbprint);
+			}),
+	);
+});
+
+describe(`${library.name}: told a session ended`, () => {
+	it.runIf(runs("backchannel-logout"))(
+		"is posted a logout token for the session it signed in, which it validates, once the session ends",
+		(context) =>
+			excusable(context, "backchannel-logout", async () => {
+				const result = await run("backchannel-logout", world.clients.backchannel, {
+					postLogoutRedirectUri: world.postLogoutRedirectUri,
+					backchannel: world.backchannel,
+				});
+				expect(result.sub).toBe(result.signedInSub);
+				expect(result.sid).toEqual(expect.any(String));
+				expect(result.sid).toBe(result.signedInSid);
+			}),
+	);
+});

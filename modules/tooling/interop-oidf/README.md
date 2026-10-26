@@ -3,7 +3,7 @@
 ## Responsibilities
 - Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
 - Reports each suite test as a vitest test, its result excused only by an expected entry the checklist lets it take.
-- Its internal modules: `pkce` gives PKCE to requests that carry none, `login` is the login page, `expected` judges the expected entries, `results` reads each test's outcome, `scene` is the app's scene, `suite` starts and stops the suite, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time, `harness` runs a plan.
+- Its internal modules: `pkce` gives PKCE to requests that carry none, `login` is the login page, `expected` judges the expected entries, `results` reads each test's outcome, `review` reads the pages the suite left for a person's review, `scene` is the app's scene, `suite` starts and stops the suite, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time, `harness` runs a plan.
 
 ## Not here
 - The front itself (`conformance-front`), the app's start (`conformance`), and what an exception may be (`spec-checklist`'s `exceptionProblems`).
@@ -16,7 +16,7 @@
 - `suite-pin.json`: the suite's release tag, the commit the tag must name, and the Python packages its scripts run on, each at one version.
 - `plans/op.json`: the plans' configuration, which the harness fills at run time (origin, alias, secrets, user).
 - `expected/<plan>.failures.json` and `expected/<plan>.skips.json`: the suite's expected entries, each with its class.
-- `OIDF_ARTIFACTS_DIR`: where the runs keep their records, each plan in a directory of its own under it (the runner's output, the export, each suite test's result and log, every container's log, what the shim added); where none is named, the plan script makes one and names it (a plan run any other way, a directory of its own, named in a failure).
+- `OIDF_ARTIFACTS_DIR`: where the runs keep their records, each plan in a directory of its own under it (the runner's output, the export, each suite test's result and log, every container's log, what the shim added, and in `review/` the pages the suite left for a person's review with their `index.json`); where none is named, the plan script makes one and names it (a plan run any other way, a directory of its own, named in a failure).
 
 ## Invariants
 - The pattern is `simple-web`, set by the package's vitest configuration; a run on any other refuses to start.

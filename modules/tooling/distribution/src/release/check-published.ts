@@ -7,8 +7,8 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { packedOf } from "../packed/packed.ts";
 import { lookupOf, publishedProblems } from "./published.ts";
-import { packedOf } from "./seal.ts";
 
 const directory = process.argv[2];
 if (!directory) {

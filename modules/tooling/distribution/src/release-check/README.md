@@ -8,7 +8,7 @@
 - Packing and sealing them: `release`, whose packing it uses, so it checks the tarballs the release would publish.
 
 ## Offers
-- `pnpm release:check`: builds and packs the release as `release-pack` does, the index sealed, then checks it; it tells each problem and exits 1 on any.
+- `pnpm release:check [<tarballs>]`: checks the tarballs in the directory named, the very ones the release publishes; named none, builds and packs the release as `release-pack` does, the index sealed, and checks those. It tells each problem and exits 1 on any.
   - Each pattern: an app made with the packed `create-auth-provider`, installed from the tarballs alone, type-checked, and booted to `/readyz` or to its refusals, each told.
   - By hand, as one keeping its own composition root does: `combinations`' full names, made published, installed from the tarballs, each module imported, and assembled to the kernel's refusals.
   - Outside: a package outside the release composed beside it, from a registry of the check's own (`outside-scene`).
@@ -16,7 +16,8 @@
 
 ## Invariants
 - The release check refuses a tarball without its `LICENSE`.
-- The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet.
+- The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet. That install runs as the runner's own user, in directories the check made, so what it writes is the runner's to remove.
+- Each app's image is looked in before it boots, with no network: a package manager it holds, npm aside, is a problem told (corepack, pnpm or yarn on its PATH, or the corepack and the yarn Node's image bundles where it keeps them), as the app runs node alone.
 - Without Docker, the release check exits 1 at once: no boot is skipped.
 - The processes a container takes are read from its cgroup (`cgroup`): v2's count, or v1's under its pids controller, only where v2's file is not there; any other failure, Docker's included, is thrown.
 - Every docker command, and each container, goes through `containers`: a command within a minute (a build fifteen); the install's container and each boot's run under one deadline (fifteen minutes; three for a boot, a minute of it to be ready or end, failing where it does neither, each look five seconds) and are removed at the end, however the work ends.
