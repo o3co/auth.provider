@@ -144,7 +144,7 @@ describe("password login", () => {
 		);
 	});
 
-	it("limits attempts per sender, counting successes too", async () => {
+	it("limits attempts per sender, counting successes too [rfc6749-10.10-d]", async () => {
 		const from = nextSender();
 		for (let i = 0; i < 3; i++) await login(right, from);
 		expect((await login(right, from)).status).toBe(429);
@@ -264,7 +264,7 @@ describe.skipIf(areaTarget().differs("login-attempts-per-account"))(
 			if (budgeted?.kind === "running") await budgeted.stop();
 		});
 
-		it("makes an identifier wait after its failed attempts from many senders, alike whether its account exists", async () => {
+		it("makes an identifier wait after its failed attempts from many senders, alike whether its account exists [rfc6749-10.10-d]", async () => {
 			for (const username of ["dana", "nobody"]) {
 				const wrong = { username, password: "wrong" };
 				expect((await login(wrong, nextSender())).status, username).toBe(401);
