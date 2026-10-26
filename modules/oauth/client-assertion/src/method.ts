@@ -51,6 +51,8 @@ export function assertionMethod(p: Parts): AuthMethod {
 	return {
 		name: "private_key_jwt",
 		signingAlgorithms: p.algorithms,
+		// A refusal this method is part of is the assertion's: RFC 7521 §4.2.1 answers it invalid_client.
+		assertion: true,
 		// Any assertion is this method's to judge (RFC 7521 §4.2.1), so one of a type not taken here
 		// is refused rather than left to another method.
 		claimed: (request) => {

@@ -482,6 +482,26 @@ describe("private_key_jwt", () => {
 		expect(await outcome(c, asked({ ...other, ...secret }))).toBe("multiple_methods");
 	});
 
+	it("marks as the assertion's the refusal of an assertion beside another method, or of half of one", async () => {
+		const { c } = await boot();
+		const secret = { client_id: "post", client_secret: clientSecret("post") };
+		const beside = asked({
+			client_assertion_type: assertionType,
+			client_assertion: await sign(claims()),
+			...secret,
+		});
+		expect(await c.authenticate(beside)).toMatchObject({
+			kind: "refused",
+			reason: "multiple_methods",
+			assertion: true,
+		});
+		expect(await c.authenticate(asked({ client_assertion_type: assertionType }))).toMatchObject({
+			kind: "refused",
+			reason: "malformed_credentials",
+			assertion: true,
+		});
+	});
+
 	it("takes an assertion from a JSON body as from a form", async () => {
 		const { c } = await boot();
 		const json = async (extra: Record<string, unknown> = {}) =>
