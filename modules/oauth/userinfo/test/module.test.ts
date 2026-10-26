@@ -1,5 +1,5 @@
 import { claimsSelections } from "@mod/claims-selection";
-import { listening } from "@mod/http";
+import { listening, site } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { issuer, type MetadataItem, metadata } from "@mod/issuer";
@@ -63,7 +63,7 @@ const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
 ]);
 
 let logged = recordingLog();
-async function serve(publicOrigin: string | undefined = "https://as.example") {
+async function serve(publicOrigin: string | null = "https://as.example") {
 	logged = recordingLog();
 	const app = await assemble(composition(publicOrigin));
 	await app.start();
@@ -72,8 +72,8 @@ async function serve(publicOrigin: string | undefined = "https://as.example") {
 	return { app, url };
 }
 
-/** userinfo beside http and the parts it reads, on many instances, reached at `publicOrigin` where one is written. */
-function composition(publicOrigin: string | undefined = "https://as.example") {
+/** userinfo beside http and the parts it reads, on many instances, reached at `publicOrigin`; null writes none. */
+function composition(publicOrigin: string | null = "https://as.example") {
 	return {
 		modules: [http, parts, userinfoModule],
 		config: {
@@ -174,7 +174,8 @@ it("names itself in the issuer's metadata [oidc-discovery-3-h]", async () => {
 
 it("names itself on the issuer's origin where no public origin is written [oidc-discovery-3-h]", async () => {
 	issuerUrl = "https://login.example/tenant";
-	const { app } = await serve(undefined);
+	const { app } = await serve(null);
+	expect(app.get(site).origin).toBeUndefined();
 	expect(app.get(items)).toContainEqual({
 		name: "userinfo_endpoint",
 		value: "https://login.example/oauth/userinfo",
