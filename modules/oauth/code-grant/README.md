@@ -9,10 +9,12 @@
 
 ## Offers
 - Code issuance, for `authorize` only: client, redirect URI, PKCE challenge, nonce, scope, audience, session handle, subject, optional acr met → code. It checks again the session enters at use with that subject, the client may use the grant with that scope and audience, and the challenge's shape; the authentication context comes from the session.
+- A redemption's name from a code (`redemptionOf`): the name its record goes by, never the code.
 - A session closed or short since it was read throws `Unavailable`, for the caller to answer as it can; any other contradiction is a `TypeError`. `challengeShape` is offered for a request to be checked by.
 - The `authorization_code` grant (`codeGrantType`, taking its audience from the request) to `grants`' grant extension point, and the scope that asks for an ID token (the maker's, or none).
-- Extension point: the ID token maker, declaring its scope (two or more refuse boot). It is told the subject, client, nonce, authentication time (and whether the session knew it), amr, the code's acr if any, its scope and the session's handle.
+- Extension point: the ID token maker, declaring its scope (two or more refuse boot). It is told the subject, client, nonce, authentication time (and whether the session knew it), amr, the code's acr if any, its scope, the session's handle and the redemption's name.
 - Extension point: session redemptions, told the session's handle and the client of each code redeemed in a session.
+- Extension point: redemption hooks, one per name: pinned with the redemption's name once the code is used up, then told the redemption facts after the additions.
 - Extension point: additions, one per answer field (one on the answer's own fields refuses boot): redemption facts → value or none, and optionally a revocation by redemption name.
 - Store interfaces, wired by the assembly, never shown what a record holds: codes by a name made from the code (put; rewrite from the current contents, answering before and after); the void list (add, done, go through in order).
 - Operator section: `code-lifetime` (10s–10m, default `10m`), `sweep-interval` (retry of failed revocations, 1s–1h, default `30s`). Times are written with their unit; a bare number is refused.
@@ -25,7 +27,8 @@
 - The audience asked (`grants`' `target`, within the code's), then the issuance policies, are asked before the code is used up, only for its client, redirect URI and verifier (a refusal leaves it unused), and again when issuing (a refusal then leaves it used up, giving nothing). The access token and the additions carry the code's amr, authentication time (or that it is not known) and acr, from the code's session; the access token ends no later than that session.
 - A code that comes again is listed first, whatever it holds, then marked void. A listed code's token is revoked, then the additions' revocations run, then it leaves the list; each host retries every `sweep-interval`. One that gave nothing leaves once its record ends; one with no record is logged and removed.
 - A record that vanished during a redemption is refused and never written back (the code would be unused again). A record of a format or shape not known is a code that cannot be used: refused (not unavailable), or logged and removed from the list.
-- The code is voided when a session redemption, the ID token or an addition fails, however it fails. Issuing that fails leaves it used up, giving nothing.
+- The code is voided when a session redemption, the ID token, an addition or a hook's `redeemed` fails, however it fails. Issuing that fails leaves it used up, giving nothing.
+- A redemption is pinned to each hook after the code is used up, presented right and its session entered, and before its token is issued; a failed pin voids the code and issues nothing. A code whose record ends before its token is recorded is refused there, before the ID token, the additions and `redeemed`, so a pin that found its hook's holding gone reaches none of them.
 - A configuration that cannot revoke access tokens refuses boot.
 - Boot is refused where nothing contributes to `grants`' session issuances: its tokens are issued from the code's session and must be recorded there, so that a logout ends them; `combinations` composes `session-tokens` for it.
 - Trade-offs: whoever holds a leaked code can revoke the legitimate tokens while the code lives; a client that resends a redemption by itself fails it.

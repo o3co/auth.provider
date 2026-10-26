@@ -30,6 +30,7 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
+		"@mod/claims-selection": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session-requirements": "workspace:*",

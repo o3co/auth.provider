@@ -41,6 +41,14 @@ From `@mod/authorize`.
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both methods together; over it, 429. |
 | `authorize.window` | string | `1m` |  |  |  | The rate limit's window: a duration with a unit, e.g. 1m. |
 
+## claims-selection
+
+From `@mod/claims-selection`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `claims-selection.mode` | off \| draining \| on | `off` |  |  |  | off takes no claims request and touches no store; draining keeps holding back what was kept, but keeps nothing new; on takes claims requests. |
+
 ## client-assertion
 
 From `@mod/client-assertion`.

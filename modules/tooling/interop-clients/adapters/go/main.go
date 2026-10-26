@@ -24,6 +24,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
+	"golang.org/x/oauth2/jwt"
 )
 
 type client struct {
@@ -41,7 +42,13 @@ type instruction struct {
 	Scope                 string `json:"scope"`
 	Resource              string `json:"resource"`
 	PostLogoutRedirectURI string `json:"postLogoutRedirectUri"`
-	Backchannel           *struct {
+	// The issuer whose assertion is presented by the jwt-bearer grant, with its private key.
+	AssertionIssuer *struct {
+		Issuer     string `json:"issuer"`
+		PrivatePem string `json:"privatePem"`
+	} `json:"assertionIssuer"`
+	Subject     string `json:"subject"`
+	Backchannel *struct {
 		Port int    `json:"port"`
 		Path string `json:"path"`
 	} `json:"backchannel"`
@@ -355,6 +362,29 @@ func (r *run) backchannelLogout() (any, error) {
 	}, nil
 }
 
+// jwtBearerNoClient gets a token by the jwt-bearer grant as x/oauth2/jwt sends it: an RS256 assertion
+// of the issuer's, its `aud` the token endpoint, and no client authentication (RFC 7523 §3.1).
+func (r *run) jwtBearerNoClient() (any, error) {
+	issuer := r.in.AssertionIssuer
+	if issuer == nil {
+		return nil, refused{"instruction", "no assertion issuer"}
+	}
+	conf := &jwt.Config{
+		Email:         issuer.Issuer,
+		PrivateKey:    []byte(issuer.PrivatePem),
+		Subject:       r.in.Subject,
+		Scopes:        strings.Fields(r.in.Scope),
+		TokenURL:      r.provider.Endpoint().TokenURL,
+		Expires:       5 * time.Minute,
+		PrivateClaims: map[string]any{"jti": random()},
+	}
+	token, err := conf.TokenSource(r.ctx).Token()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"accessToken": token.AccessToken, "tokenType": token.TokenType}, nil
+}
+
 func main() {
 	lines.Buffer(make([]byte, 1<<20), 1<<24)
 	if !lines.Scan() {
@@ -377,6 +407,7 @@ func main() {
 		"client-credentials-secret": r.clientCredentials,
 		"public-device":             r.device,
 		"backchannel-logout":        r.backchannelLogout,
+		"jwt-bearer-no-client":      r.jwtBearerNoClient,
 	}
 	flow, known := flows[in.Flow]
 	var result any

@@ -1,3 +1,4 @@
+import type { Target } from "@mod/claims-selection";
 import { defineModule, isUnavailable, type Module } from "@mod/kernel";
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { type AuthContext, type Sessions, sessions } from "@mod/session";
@@ -201,5 +202,77 @@ describe("released claims where users cannot look the subject up", () => {
 		await expect(app.get(releasedClaims).of("s-alice", scope, "u")).rejects.toSatisfy(
 			isUnavailable,
 		);
+	});
+});
+
+describe("claims asked by name, and their constraints", () => {
+	const target = (names: readonly string[], constraints: Target["constraints"] = []): Target => ({
+		names: names.map((name) => ({ name, scope: "any" })),
+		constraints,
+	});
+	const of = async (scope: readonly string[], asked: Target) =>
+		(await boot(full)).get(releasedClaims).of("s-alice", scope, undefined, asked);
+
+	it("names each table claim's scope, and none for a claim outside the table", async () => {
+		const claims = (await boot(full)).get(releasedClaims);
+		expect(["name", "picture", "email", "email_verified", "groups"].map(claims.scopeOf)).toEqual([
+			"profile",
+			"profile",
+			"email",
+			"email",
+			"groups",
+		]);
+		for (const outside of ["sub", "acr", "auth_time", "nonce", "constructor", "openid", ""]) {
+			expect(claims.scopeOf(outside), outside).toBeUndefined();
+		}
+	});
+
+	it("releases the table claims asked by name beside the scope's, and never one outside the table", async () => {
+		expect(await of(["openid"], target(["name", "email_verified"]))).toEqual({
+			name: "Alice",
+			email_verified: true,
+		});
+		expect(await of(["profile"], target(["groups", "sub", "constructor"]))).toEqual({
+			name: "Alice",
+			picture: "https://pic.example/a",
+			groups: ["admins", "staff"],
+		});
+	});
+
+	it("leaves out a released claim its constraint does not hold, whether its scope or its name released it", async () => {
+		const mismatch = [{ name: "email", value: "other@example.com" }];
+		// Released by the scope, held back by the constraint.
+		expect(await of(["email"], target([], mismatch))).toEqual({ email_verified: true });
+		// Released by name, held back the same.
+		expect(await of(["openid"], target(["email"], mismatch))).toEqual({});
+		// A value, or one of the values, that holds keeps it.
+		expect(
+			await of(["email"], target([], [{ name: "email", value: "alice@example.com" }])),
+		).toEqual({
+			email: "alice@example.com",
+			email_verified: true,
+		});
+		expect(
+			await of(["profile"], target([], [{ name: "name", values: ["Bob", "Alice"] }])),
+		).toMatchObject({ name: "Alice" });
+	});
+
+	it("compares a constraint by type too, and holds back a list claim any constraint names", async () => {
+		expect(await of(["email"], target([], [{ name: "email_verified", value: "true" }]))).toEqual({
+			email: "alice@example.com",
+		});
+		expect(
+			await of(["email"], target([], [{ name: "email_verified", value: true }])),
+		).toMatchObject({
+			email_verified: true,
+		});
+		expect(
+			await of(["groups"], target([], [{ name: "groups", values: ["admins", "staff"] }])),
+		).toEqual({});
+		// A constraint on a claim not released changes nothing.
+		expect(await of(["profile"], target([], [{ name: "email", value: "x" }]))).toEqual({
+			name: "Alice",
+			picture: "https://pic.example/a",
+		});
 	});
 });
