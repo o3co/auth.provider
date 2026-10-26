@@ -232,6 +232,18 @@ describe(`${library.name}: a provider the harness plays`, () => {
 	let audienceOf = (client: string): string[] => [client];
 	let nonce = "";
 	let client = "";
+	/** The issuer its discovery names, where it names one; none leaves it out. */
+	let issuerSaid = (origin: string): string | undefined => origin;
+	/** The subject its userinfo names, where it names one. */
+	let userinfoSub: string | undefined = "alice";
+	/** How many token requests reached it. */
+	let tokenAsked = 0;
+	const asPlayed = () => {
+		audienceOf = (c) => [c];
+		issuerSaid = (o) => o;
+		userinfoSub = "alice";
+		tokenAsked = 0;
+	};
 	const encoded = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 	const idToken = () => {
 		const now = Math.floor(Date.now() / 1000);
@@ -258,7 +270,7 @@ describe(`${library.name}: a provider the harness plays`, () => {
 			};
 			if (req.url === "/.well-known/openid-configuration")
 				return json(200, {
-					issuer: origin,
+					...(issuerSaid(origin) !== undefined ? { issuer: issuerSaid(origin) } : {}),
 					authorization_endpoint: `${origin}/authorize`,
 					token_endpoint: `${origin}/token`,
 					userinfo_endpoint: `${origin}/userinfo`,
@@ -273,6 +285,7 @@ describe(`${library.name}: a provider the harness plays`, () => {
 				return json(200, { keys: [jwk] });
 			}
 			if (req.url === "/token") {
+				tokenAsked += 1;
 				req.resume();
 				return req.on("end", () =>
 					json(200, {
@@ -284,7 +297,7 @@ describe(`${library.name}: a provider the harness plays`, () => {
 					}),
 				);
 			}
-			if (req.url === "/userinfo") return json(200, { sub: "alice" });
+			if (req.url === "/userinfo") return json(200, userinfoSub ? { sub: userinfoSub } : {});
 			return json(404, {});
 		});
 		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -325,7 +338,7 @@ describe(`${library.name}: a provider the harness plays`, () => {
 	it.runIf(runs("login"))(
 		"signs in, fetching the provider's keys with no access token, and leaves no file behind",
 		async () => {
-			audienceOf = (c) => [c];
+			asPlayed();
 			keySetAsked.length = 0;
 			const tmp = freshTmp();
 			expect(await signIn(tmp)).toMatchObject({ kind: "result" });
@@ -338,12 +351,48 @@ describe(`${library.name}: a provider the harness plays`, () => {
 	it.runIf(runs("login"))(
 		"refuses an ID token for another audience, though its azp names the client",
 		async () => {
+			asPlayed();
 			audienceOf = () => ["someone-else"];
 			expect(await signIn(freshTmp())).toMatchObject({ kind: "error" });
 		},
 	);
 
+	it.runIf(runs("login"))("refuses userinfo for another subject, or naming none", async () => {
+		for (const sub of ["mallory", undefined]) {
+			asPlayed();
+			userinfoSub = sub;
+			expect(await signIn(freshTmp()), String(sub)).toMatchObject({ kind: "error" });
+		}
+	});
+
+	it.runIf(runs("client-credentials-secret"))(
+		"refuses a discovery naming another issuer, or none, before any credential is sent",
+		async () => {
+			for (const said of ["https://elsewhere.example", undefined]) {
+				asPlayed();
+				issuerSaid = () => said;
+				const dialog = await converse(
+					library.adapter(),
+					{
+						flow: "client-credentials-secret",
+						issuer: origin,
+						ca: cert,
+						client: world.clients.service,
+						scope: "read",
+					},
+					async (ask) => {
+						throw new Error(`asked ${ask.ask}`);
+					},
+					30_000,
+				);
+				expect(dialog.outcome, String(said)).toMatchObject({ kind: "error" });
+				expect(tokenAsked, String(said)).toBe(0);
+			}
+		},
+	);
+
 	it.runIf(runs("login"))("leaves no file behind where its discovery fails", async () => {
+		asPlayed();
 		const tmp = freshTmp();
 		expect(await signIn(tmp, `${origin}/nowhere`)).toMatchObject({ kind: "error" });
 		expect(readdirSync(tmp)).toEqual([]);
