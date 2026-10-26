@@ -243,9 +243,11 @@ it("installs the dependencies in a stage of their own, with pnpm through a pinne
 	]);
 	expect(docker).toMatch(/^RUN npm install --global corepack@\d+\.\d+\.\d+ && corepack enable$/m);
 	const runtime = docker.slice(docker.indexOf(`FROM ${image} AS runtime`));
-	// An init as process 1 passes signals on and reaps what node leaves behind; the corepack Node
-	// bundles is taken out, and none put in, nor pnpm.
-	expect(runtime).toMatch(/^RUN apk add --no-cache tini && npm uninstall --global corepack$/m);
+	// An init as process 1 passes signals on and reaps what node leaves behind; the corepack and the
+	// yarn Node's image bundles are taken out, and none put in, nor pnpm.
+	expect(runtime).toMatch(
+		/^RUN apk add --no-cache tini && npm uninstall --global corepack && rm -rf \/opt\/yarn-v\* \/usr\/local\/bin\/yarn \/usr\/local\/bin\/yarnpkg$/m,
+	);
 	expect(runtime).not.toMatch(/corepack@|corepack enable|pnpm/);
 	expect(runtime).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
 	expect(runtime).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);

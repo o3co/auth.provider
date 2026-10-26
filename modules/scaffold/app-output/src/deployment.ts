@@ -264,8 +264,9 @@ ${installed(beside)}
 
 # The image the app runs in starts from Node's own: the tools that install stay in the stages before.
 FROM ${nodeImage} AS runtime
-# An init as process 1 passes signals on and reaps what node leaves behind; Node's bundled corepack goes.
-RUN apk add --no-cache tini && npm uninstall --global corepack
+# An init as process 1 passes signals on and reaps what node leaves behind; the corepack and the yarn
+# Node's image bundles go, as the app runs neither.
+RUN apk add --no-cache tini && npm uninstall --global corepack && rm -rf /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
