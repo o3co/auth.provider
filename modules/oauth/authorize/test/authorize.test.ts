@@ -305,7 +305,7 @@ const request = (extra: Record<string, string> = {}) => ({
 });
 
 describe("authorize: trust in the redirect URI", () => {
-	it("answers locally until the client and an exactly registered redirect URI are known [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [oidc-core-3.1.2.6-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [oidc-core-3.1.2.1-f] [rfc9700-2.1-a] [rfc9700-4.1.3-a]", async () => {
+	it("answers locally until the client and an exactly registered redirect URI are known [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		for (const params of [
@@ -325,7 +325,7 @@ describe("authorize: trust in the redirect URI", () => {
 		expect(loopback.at?.origin).toBe("http://127.0.0.1:9555");
 	});
 
-	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [oidc-core-6.1-a] [oidc-core-6.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d] [rfc9207-2-a] [oidc-core-16.22-a]", async () => {
+	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const cases: [Record<string, string> | string, string][] = [
@@ -374,7 +374,7 @@ it("refuses a client not allowed the code grant with the token endpoint's words 
 });
 
 describe("authorize: session and consent", () => {
-	it("sends a request without a session to the login page, with the way back from the public origin [rfc6749-3.1-a] [oidc-core-3.1.2.3-a] [oidc-core-3.1.2.3-d] [oidc-core-3.1.2.1-k]", async () => {
+	it("sends a request without a session to the login page, with the way back from the public origin [rfc6749-3.1-a]", async () => {
 		const { authorize } = await serve();
 		const res = await authorize(request());
 		expect(res.status).toBe(302);
@@ -387,7 +387,7 @@ describe("authorize: session and consent", () => {
 		);
 	});
 
-	it("asks a third party for consent, and lets it through once granted [oidc-core-3.1.2.1-k] [oidc-core-3.1.2.1-n] [oidc-core-3.1.2.4-a]", async () => {
+	it("asks a third party for consent, and lets it through once granted", async () => {
 		const { app, authorize, login } = await serve();
 		const cookie = await login();
 		expect(
@@ -406,7 +406,7 @@ describe("authorize: session and consent", () => {
 		).toBe("/consent");
 	});
 
-	it("refuses a third party when consent cannot ask, after login, whatever it was granted [oidc-core-3.1.2.1-o]", async () => {
+	it("refuses a third party when consent cannot ask, after login, whatever it was granted", async () => {
 		const { app, authorize, login, events } = await serve({ asking: false });
 		expect((await authorize(request({ client_id: "third" }))).at?.pathname).toBe("/login");
 		const cookie = await login();
@@ -435,7 +435,7 @@ describe("authorize: session and consent", () => {
 		expect((await authorize(request(), cookie)).at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("asks for a newer login on prompt=login, and takes each re-authentication once [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.3-b] [oidc-core-3.1.2.1-m]", async () => {
+	it("asks for a newer login on prompt=login, and takes each re-authentication once", async () => {
 		const { authorize, login } = await serve();
 		const old = await login();
 		now += 10_000;
@@ -666,7 +666,7 @@ describe("authorize: the code grant", () => {
 	const codeOf = async (s: Awaited<ReturnType<typeof serve>>, cookie: string) =>
 		(await s.authorize(request(), cookie)).at?.searchParams.get("code") ?? "";
 
-	it("exchanges a code once, and revokes what it gave when the code comes again [rfc6749-4.1.2-d] [rfc6749-4.1.2-e] [oidc-core-3.1.3.2-d] [rfc6749-3.3-b] [rfc6749-5.1-a] [rfc7636-4.6-a] [oidc-core-3.1.3.3-a]", async () => {
+	it("exchanges a code once, and revokes what it gave when the code comes again [rfc6749-4.1.2-d] [rfc6749-4.1.2-e] [rfc6749-3.3-b] [rfc6749-5.1-a] [rfc7636-4.6-a]", async () => {
 		const s = await serve();
 		const code = await codeOf(s, await s.login());
 		const first = await s.token({ code, redirect_uri: callback, code_verifier: verifier });
@@ -682,7 +682,7 @@ describe("authorize: the code grant", () => {
 		});
 	});
 
-	it("uses up a code on a wrong verifier, client or redirect URI, but not on a malformed request [rfc7636-4.6-b] [rfc7636-4.5-a] [rfc7636-4.4-a] [rfc9700-2.1.1-a] [rfc6749-4.1.3-c] [rfc6749-4.1.3-e] [oidc-core-3.1.3.2-b] [oidc-core-3.1.3.2-e]", async () => {
+	it("uses up a code on a wrong verifier, client or redirect URI, but not on a malformed request [rfc7636-4.6-b] [rfc7636-4.5-a] [rfc7636-4.4-a] [rfc9700-2.1.1-a] [rfc6749-4.1.3-c] [rfc6749-4.1.3-e]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const malformed = await codeOf(s, cookie);
@@ -706,7 +706,7 @@ describe("authorize: the code grant", () => {
 		}
 	});
 
-	it("refuses a code after its time, or after its session ended [rfc6749-4.1.2-b] [rfc6749-4.1.3-d] [oidc-core-3.1.3.2-c]", async () => {
+	it("refuses a code after its time, or after its session ended [rfc6749-4.1.2-b] [rfc6749-4.1.3-d]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const late = await codeOf(s, cookie);
@@ -775,7 +775,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect(v6.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("refuses or accepts each parameter as the rules say [oidc-core-6.1-a] [oidc-core-6.2-a] [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a] [oidc-core-3.1.2.5-a]", async () => {
+	it("refuses or accepts each parameter as the rules say [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const error = async (extra: Record<string, string>) =>
@@ -806,7 +806,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		]).toEqual([true, "s1", issuer]);
 	});
 
-	it("sends a POST on to the same GET without reading the session [oidc-core-3.1.2.1-a]", async () => {
+	it("sends a POST on to the same GET without reading the session", async () => {
 		const { base, login } = await serve();
 		const cookie = await login();
 		const res = await fetch(`${base}/oauth/authorize`, {
@@ -849,7 +849,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		).toBe("login_required");
 	});
 
-	it("asks for a newer login past max_age, and lets the resumed request through after one [oidc-core-3.1.2.1-r] [oidc-core-15.1-f]", async () => {
+	it("asks for a newer login past max_age, and lets the resumed request through after one", async () => {
 		const { authorize, login } = await serve();
 		const old = await login();
 		now += 120_000;
@@ -873,7 +873,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		).toBe("consent_required");
 	});
 
-	it("goes through the consent page and back, both ways [oidc-core-3.1.2.4-a]", async () => {
+	it("goes through the consent page and back, both ways", async () => {
 		const { authorize, login, base } = await serve();
 		const cookie = await login();
 		const answer = async (decision: string) => {
@@ -1156,7 +1156,7 @@ it("tells the login page the prompt=login and max_age the request asked, beside 
 	]);
 });
 
-it("refuses a request back from its login whose session is still not new enough, the time known, rather than sending it round again [oidc-core-3.1.2.1-m]", async () => {
+it("refuses a request back from its login whose session is still not new enough, the time known, rather than sending it round again", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
 	now += 10_000;
@@ -1174,7 +1174,7 @@ it("refuses a request back from its login whose session is still not new enough,
 	);
 });
 
-it("never counts a login whose authentication time is unknown as the newer one prompt=login asks, and refuses it back from the login [oidc-core-3.1.2.1-m]", async () => {
+it("never counts a login whose authentication time is unknown as the newer one prompt=login asks, and refuses it back from the login", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
 	now += 10_000;
@@ -1200,7 +1200,7 @@ it("never counts a session whose authentication time is unknown within max_age, 
 	expect((await authorize(request(), again)).at?.searchParams.has("code")).toBe(true);
 });
 
-it("judges max_age on the kernel's clock, the one its session's login time is on [oidc-core-3.1.2.1-r] [oidc-core-15.1-f]", async () => {
+it("judges max_age on the kernel's clock, the one its session's login time is on", async () => {
 	const { authorize, login } = await serve();
 	now += 120_000;
 	const cookie = await login();
@@ -1226,7 +1226,7 @@ it("hashes a re-authentication the same whatever the order of parameters or prom
 	expect(res.at?.pathname).not.toBe("/login");
 });
 
-it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it [oidc-core-3.1.2.3-c]", async () => {
+it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it", async () => {
 	const s = await serve({
 		acr: { "urn:test:mfa": [["mfa"]] },
 		authorize: { "step-up-page": "https://as.example/mfa" },
