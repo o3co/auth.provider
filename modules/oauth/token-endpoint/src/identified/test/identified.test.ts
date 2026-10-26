@@ -284,7 +284,7 @@ describe("a request naming no client", () => {
 		expect(events).toEqual([]);
 	});
 
-	it("checks repeated and mistyped parameters on the way, as for any request", async () => {
+	it("checks repeated and mistyped parameters on the way, as for any request [rfc6749-3.2-d]", async () => {
 		const { post, raw, seen } = await serving();
 		const twice = new URLSearchParams([
 			["grant_type", "urn:test:assert"],
@@ -349,7 +349,7 @@ describe("a request naming no client", () => {
 		expect(events).toHaveLength(7);
 	});
 
-	it("keeps today's answers for clients that authenticate, or fail to, where a grant can identify", async () => {
+	it("keeps today's answers for clients that authenticate, or fail to, where a grant can identify [rfc6749-2.3-b] [rfc6749-5.2-b]", async () => {
 		const { post, raw, seen } = await serving();
 		const asConf = await post(assert("as:agents"), "conf");
 		expect([asConf.status, asConf.body]).toEqual([200, { client: "conf", identified: null }]);
