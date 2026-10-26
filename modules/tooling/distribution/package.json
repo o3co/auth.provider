@@ -10,12 +10,15 @@
 		"release-check": "node src/release-check/check.ts",
 		"release-pack": "node src/release/pack.ts",
 		"release-published": "node src/release/check-published.ts",
-		"release-evidence": "node src/release-evidence/collect.ts"
+		"release-evidence": "node src/release-evidence/collect.ts",
+		"release-sbom": "node src/release-sbom/make.ts",
+		"release-listed": "node src/release-listed/listed.ts"
 	},
 	"exports": {
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
+		"@mod/combinations": "workspace:*",
 		"@mod/create-app": "workspace:*",
 		"@mod/trial": "workspace:*",
 		"typescript": "6.0.3",
