@@ -220,6 +220,7 @@ async function logout(i: Instruction) {
 const flows: Record<string, (i: Instruction) => Promise<unknown>> = {
 	login,
 	"public-login": login,
+	cimd: login,
 	refresh,
 	resource,
 	"client-credentials": clientCredentials,

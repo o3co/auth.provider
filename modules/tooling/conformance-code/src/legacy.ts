@@ -68,5 +68,12 @@ onLegacy(codeArea, {
 		"userinfo-needs-openid",
 		// Ours takes a front-channel URL only at an origin one of the client's redirect URIs has.
 		"frontchannel-within-redirect-origins",
+		// Ours refuses a logout whose return the hint's client did not register, leaving the session;
+		// the legacy build drops the return and logs out.
+		"logout-unregistered-return-refused",
+		// Ours refuses a logout whose client_id is not the client the hint was issued to.
+		"logout-client-id-checked",
+		// Ours refuses a logout request that sends any parameter more than once.
+		"logout-repeated-parameter-refused",
 	],
 });

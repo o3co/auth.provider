@@ -40,7 +40,6 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		const script = plan.steps.find((s) => s.id === "plan")?.run ?? "";
 		expect(script).toContain("@mod/spec-checklist run plan area");
 		expect(script).toContain("@mod/spec-checklist run plan pattern");
-		expect(script).toContain("@mod/spec-checklist run plan library");
 		expect(script).toContain('echo "sha=$(git rev-parse HEAD)"');
 		expect(plan.outputs?.sha).toBe(expr("steps.plan.outputs.sha"));
 		expect(job("conformance-area").strategy?.matrix?.area).toBe(
@@ -49,21 +48,34 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(job("conformance-pattern").strategy?.matrix?.pattern).toBe(
 			expr("fromJSON(needs.conformance-plan.outputs.patterns)"),
 		);
+	});
+
+	it("take the interop matrices from `run plan` in interop-due, which fixes their commit", () => {
+		const due = job("interop-due");
+		const script = due.steps.find((s) => s.id === "plan")?.run ?? "";
+		expect(script).toContain("@mod/spec-checklist run plan oidf-plan");
+		expect(script).toContain("@mod/spec-checklist run plan library");
+		expect(script).toContain('echo "sha=$(git rev-parse HEAD)"');
+		expect(due.outputs?.sha).toBe(expr("steps.plan.outputs.sha"));
+		expect(job("interop-oidf").strategy?.matrix?.plan).toBe(
+			expr("fromJSON(needs.interop-due.outputs.oidf-plans)"),
+		);
 		expect(job("interop-clients").strategy?.matrix?.library).toBe(
-			expr("fromJSON(needs.conformance-plan.outputs.libraries)"),
+			expr("fromJSON(needs.interop-due.outputs.libraries)"),
 		);
 	});
 
-	it("check out the plan's commit in every conformance job and in compliance", () => {
+	it("check out the plan's commit in every conformance and interop job and in compliance", () => {
 		expect(checkout("conformance-area")?.with?.ref).toBe(
 			expr("needs.conformance-plan.outputs.sha"),
 		);
 		expect(checkout("conformance-pattern")?.with?.ref).toBe(
 			expr("needs.conformance-plan.outputs.sha"),
 		);
-		expect(checkout("interop-clients")?.with?.ref).toBe(expr("needs.conformance-plan.outputs.sha"));
+		expect(checkout("interop-oidf")?.with?.ref).toBe(expr("needs.interop-due.outputs.sha"));
+		expect(checkout("interop-clients")?.with?.ref).toBe(expr("needs.interop-due.outputs.sha"));
 		expect(checkout("compliance")?.with?.ref).toBe(
-			expr("needs.conformance-plan.outputs.sha || ''"),
+			expr("needs.conformance-plan.outputs.sha || needs.interop-due.outputs.sha || ''"),
 		);
 	});
 
@@ -74,6 +86,7 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			"conformance-area": "area",
 			"conformance-pattern": "pattern",
 			"interop-clients": "library",
+			"interop-oidf": "oidf-plan",
 			"release-check": "release",
 		};
 		for (const [name, kind] of Object.entries(reporting)) {
@@ -89,6 +102,9 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			(s) => s.name === "Each item's status from this run's evidence",
 		);
 		expect(told?.env?.NEEDS).toBe(expr("toJSON(needs)"));
+		// Compliance waits for every job that reports, whatever it ended.
+		const needs = (jobs.compliance as unknown as { needs: readonly string[] }).needs;
+		for (const name of Object.keys(reporting)) expect(needs, name).toContain(name);
 		expect(told?.run).toContain('select(.value.result != "success")');
 	});
 });

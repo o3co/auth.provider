@@ -202,71 +202,80 @@ describe("a logout the client starts", () => {
 
 	// Open redirect: only a return the hint's client registered, compared exactly, is taken; any other
 	// refuses the request, the session left as it was.
-	it("refuses a return the client did not register, never sending the browser to it, and leaves the session [oidc-rpinit-2-b] [oidc-rpinit-3-b]", async () => {
-		for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
+	it.runIf(!areaTarget().differs("logout-unregistered-return-refused"))(
+		"refuses a return the client did not register, never sending the browser to it, and leaves the session [oidc-rpinit-2-b] [oidc-rpinit-3-b]",
+		async () => {
+			for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
+				const at = await signedIn();
+				for (const accept of ["application/json", "text/html"]) {
+					const answer = await logout(
+						at,
+						"GET",
+						{ id_token_hint: at.idToken, post_logout_redirect_uri: asked },
+						{ accept },
+					);
+					expect([asked, accept, answer.status, answer.json]).toEqual([
+						asked,
+						accept,
+						400,
+						{
+							error: "invalid_request",
+							error_description: "post_logout_redirect_uri is not registered for the client",
+						},
+					]);
+					expect(answer.headers.get("location")).toBeNull();
+				}
+				expect(await stillSignedIn(at)).toBe(true);
+			}
+		},
+	);
+
+	// A client_id beside the hint must be the client the ID token was issued to (RP-Initiated Logout 1.0 §2).
+	it.runIf(!areaTarget().differs("logout-client-id-checked"))(
+		"refuses a client_id that is not the client the hint was issued to, leaving the session [oidc-rpinit-2-a]",
+		async () => {
 			const at = await signedIn();
-			for (const accept of ["application/json", "text/html"]) {
-				const answer = await logout(
-					at,
-					"GET",
-					{ id_token_hint: at.idToken, post_logout_redirect_uri: asked },
-					{ accept },
-				);
-				expect([asked, accept, answer.status, answer.json]).toEqual([
-					asked,
-					accept,
+			for (const method of ["GET", "POST"] as const) {
+				const answer = await logout(at, method, { id_token_hint: at.idToken, client_id: "other" });
+				expect([answer.status, answer.json]).toEqual([
 					400,
 					{
 						error: "invalid_request",
-						error_description: "post_logout_redirect_uri is not registered for the client",
+						error_description: "client_id is not the client the id_token_hint was issued to",
 					},
 				]);
-				expect(answer.headers.get("location")).toBeNull();
 			}
 			expect(await stillSignedIn(at)).toBe(true);
-		}
-	});
-
-	// A client_id beside the hint must be the client the ID token was issued to (RP-Initiated Logout 1.0 §2).
-	it("refuses a client_id that is not the client the hint was issued to, leaving the session [oidc-rpinit-2-a]", async () => {
-		const at = await signedIn();
-		for (const method of ["GET", "POST"] as const) {
-			const answer = await logout(at, method, { id_token_hint: at.idToken, client_id: "other" });
-			expect([answer.status, answer.json]).toEqual([
-				400,
-				{
-					error: "invalid_request",
-					error_description: "client_id is not the client the id_token_hint was issued to",
-				},
-			]);
-		}
-		expect(await stillSignedIn(at)).toBe(true);
-	});
+		},
+	);
 
 	// A parameter sent twice reads as none: refused first, so neither the client_id check nor the
 	// return's can be passed by sending it twice.
-	it("refuses a client_id or a return sent twice, leaving the session", async () => {
-		for (const [name, value] of [
-			["client_id", "other"],
-			["post_logout_redirect_uri", `${back}/x`],
-		] as const) {
-			const at = await signedIn();
-			for (const method of ["GET", "POST"] as const) {
-				const answer = await logout(at, method, [
-					["id_token_hint", at.idToken],
-					[name, value],
-					[name, value],
-				]);
-				expect([name, method, answer.status, answer.json]).toEqual([
-					name,
-					method,
-					400,
-					{ error: "invalid_request", error_description: "repeated parameter" },
-				]);
+	it.runIf(!areaTarget().differs("logout-repeated-parameter-refused"))(
+		"refuses a client_id or a return sent twice, leaving the session",
+		async () => {
+			for (const [name, value] of [
+				["client_id", "other"],
+				["post_logout_redirect_uri", `${back}/x`],
+			] as const) {
+				const at = await signedIn();
+				for (const method of ["GET", "POST"] as const) {
+					const answer = await logout(at, method, [
+						["id_token_hint", at.idToken],
+						[name, value],
+						[name, value],
+					]);
+					expect([name, method, answer.status, answer.json]).toEqual([
+						name,
+						method,
+						400,
+						{ error: "invalid_request", error_description: "repeated parameter" },
+					]);
+				}
+				expect([name, await stillSignedIn(at)]).toEqual([name, true]);
 			}
-			expect([name, await stillSignedIn(at)]).toEqual([name, true]);
-		}
-	});
+		},
+	);
 
 	it("refuses a request without a hint [oidc-rpinit-3-a] [oidc-rpinit-4-c]", async () => {
 		const at = await signedIn();

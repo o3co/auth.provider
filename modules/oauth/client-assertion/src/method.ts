@@ -27,6 +27,9 @@ export interface Parts {
 
 // Read from the body only, a form or a JSON object; never the query, where an assertion would be logged.
 const field = (request: HttpRequest, name: string) => request.fields.single(name);
+/** Whether the body sends this name, as a string or of another type. */
+const sends = (request: HttpRequest, name: string) =>
+	request.fields.has(name) || request.mistyped?.has(name) === true;
 const singleFields = ["client_id", "client_assertion", "client_assertion_type"];
 const issuerOf = (assertion: string) => {
 	try {
@@ -51,10 +54,13 @@ export function assertionMethod(p: Parts): AuthMethod {
 	return {
 		name: "private_key_jwt",
 		signingAlgorithms: p.algorithms,
+		// A refusal this method is part of is the assertion's: RFC 7521 §4.2.1 answers it invalid_client.
+		assertion: true,
 		// Any assertion is this method's to judge (RFC 7521 §4.2.1), so one of a type not taken here
 		// is refused rather than left to another method.
 		claimed: (request) => {
-			if (!request.fields.has("client_assertion") && !request.fields.has("client_assertion_type")) {
+			// Sent at all, given twice or in JSON not a string, the request uses an assertion.
+			if (!sends(request, "client_assertion") && !sends(request, "client_assertion_type")) {
 				return undefined;
 			}
 			// Named by `client_id` when given, which the assertion's issuer must then match. The final

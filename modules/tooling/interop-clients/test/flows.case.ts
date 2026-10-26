@@ -80,6 +80,18 @@ describe(`${library.name}: signing in`, () => {
 			expect(claims(result.userinfo).sub).toBe(id.sub);
 		}),
 	);
+
+	it.runIf(runs("cimd"))(
+		"signs in a client whose id is its metadata document's URL, the document fetched over https",
+		(context) =>
+			excusable(context, "cimd", async () => {
+				const result = await run("cimd", world.clients.cimd);
+				const id = claims(result.idToken);
+				expect([id.aud].flat()).toContain(world.clients.cimd.id);
+				expect(claims(result.userinfo).sub).toBe(id.sub);
+				expect(world.tunnelOpened()).toContain(`${new URL(world.clients.cimd.id).host}:443`);
+			}),
+	);
 });
 
 describe(`${library.name}: refreshing`, () => {
@@ -226,12 +238,41 @@ describe(`${library.name}: a provider the harness plays`, () => {
 	let userinfoSub: string | undefined = "alice";
 	/** How many token requests reached it. */
 	let tokenAsked = 0;
+	/** The `issued_token_type` its token answers name, where they name one. */
+	let issuedTypeSaid: string | undefined;
 	const asPlayed = () => {
 		audienceOf = (c) => [c];
 		issuerSaid = (o) => o;
 		userinfoSub = "alice";
 		tokenAsked = 0;
+		issuedTypeSaid = undefined;
 	};
+	// An issuer of assertions for the jwt-bearer grant, whose key the played provider never asks.
+	const assertionKey = generateKeyPairSync("ec", { namedCurve: "P-256" });
+	const playedAssertionIssuer = {
+		issuer: "https://assertions.example",
+		privateJwk: { ...assertionKey.privateKey.export({ format: "jwk" }), alg: "ES256" },
+	};
+	/** Each flow sending a credential with no browser, with what it needs, as the library runs it. */
+	const credentialed = (): [Flow, Record<string, unknown>][] =>
+		(
+			[
+				["client-credentials-secret", { client: world.clients.service, scope: "read" }],
+				[
+					"token-exchange",
+					{ client: world.clients.post, subjectToken: "played-subject", scope: "openid" },
+				],
+				[
+					"jwt-bearer",
+					{
+						client: world.clients.post,
+						assertionIssuer: playedAssertionIssuer,
+						subject: "service-a",
+						scope: "read",
+					},
+				],
+			] as [Flow, Record<string, unknown>][]
+		).filter(([flow]) => runs(flow));
 	const encoded = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 	const idToken = () => {
 		const now = Math.floor(Date.now() / 1000);
@@ -256,7 +297,10 @@ describe(`${library.name}: a provider the harness plays`, () => {
 				res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
 				res.end(JSON.stringify(value));
 			};
-			if (req.url === "/.well-known/openid-configuration")
+			if (
+				req.url === "/.well-known/openid-configuration" ||
+				req.url === "/.well-known/oauth-authorization-server"
+			)
 				return json(200, {
 					...(issuerSaid(origin) !== undefined ? { issuer: issuerSaid(origin) } : {}),
 					authorization_endpoint: `${origin}/authorize`,
@@ -282,6 +326,7 @@ describe(`${library.name}: a provider the harness plays`, () => {
 						expires_in: 300,
 						scope: "openid",
 						id_token: idToken(),
+						...(issuedTypeSaid ? { issued_token_type: issuedTypeSaid } : {}),
 					}),
 				);
 			}
@@ -353,29 +398,51 @@ describe(`${library.name}: a provider the harness plays`, () => {
 		}
 	});
 
-	it.runIf(runs("client-credentials-secret"))(
+	/** A flow with no browser against the played provider, its outcome. */
+	const runPlayed = async (flow: Flow, extra: Record<string, unknown>) =>
+		(
+			await converse(
+				library.adapter(),
+				{ flow, issuer: origin, ca: cert, ...extra },
+				async (ask) => {
+					throw new Error(`asked ${ask.ask}`);
+				},
+				30_000,
+			)
+		).outcome;
+
+	it.runIf(
+		["client-credentials-secret", "token-exchange", "jwt-bearer"].some((f) => runs(f as Flow)),
+	)(
 		"refuses a discovery naming another issuer, or none, before any credential is sent",
 		async () => {
-			for (const said of ["https://elsewhere.example", undefined]) {
-				asPlayed();
-				issuerSaid = () => said;
-				const dialog = await converse(
-					library.adapter(),
-					{
-						flow: "client-credentials-secret",
-						issuer: origin,
-						ca: cert,
-						client: world.clients.service,
-						scope: "read",
-					},
-					async (ask) => {
-						throw new Error(`asked ${ask.ask}`);
-					},
-					30_000,
-				);
-				expect(dialog.outcome, String(said)).toMatchObject({ kind: "error" });
-				expect(tokenAsked, String(said)).toBe(0);
-			}
+			for (const [flow, extra] of credentialed())
+				for (const said of ["https://elsewhere.example", undefined]) {
+					asPlayed();
+					issuerSaid = () => said;
+					const at = `${flow}, ${String(said)}`;
+					expect(await runPlayed(flow, extra), at).toMatchObject({ kind: "error" });
+					expect(tokenAsked, at).toBe(0);
+				}
+		},
+	);
+
+	it.runIf(runs("token-exchange"))(
+		"tells the issued token type as the exchange's answer names it, and none it does not name",
+		async () => {
+			const exchange = credentialed().find(([flow]) => flow === "token-exchange")?.[1] ?? {};
+			asPlayed();
+			issuedTypeSaid = "urn:ietf:params:oauth:token-type:jwt";
+			expect(await runPlayed("token-exchange", exchange)).toMatchObject({
+				kind: "result",
+				result: { issuedTokenType: "urn:ietf:params:oauth:token-type:jwt" },
+			});
+			// Left out, as RFC 8693 §2.2.1 requires it: refused, or told as none, never as the one asked.
+			asPlayed();
+			const unsaid = await runPlayed("token-exchange", exchange);
+			if (unsaid.kind === "result")
+				expect((unsaid.result as Record<string, unknown>).issuedTokenType ?? null).toBeNull();
+			else expect(unsaid.kind).toBe("error");
 		},
 	);
 
@@ -510,11 +577,17 @@ describe(`${library.name}: exchanging a token`, () => {
 		"exchanges a signed-in user's access token for another of the same subject, by token exchange",
 		(context) =>
 			excusable(context, "token-exchange", async () => {
-				const result = await run("token-exchange", world.clients.post);
+				// The subject token the harness signs in for itself, as an app holding one would.
+				const subject = await world.issue(world.clients.post);
+				const result = await run("token-exchange", world.clients.post, {
+					subjectToken: subject.accessToken,
+					// The subject token's own scope, for a library that asks one.
+					scope: "openid",
+				});
 				expect(result.issuedTokenType).toBe("urn:ietf:params:oauth:token-type:access_token");
 				expect(await world.introspect(String(result.accessToken))).toMatchObject({
 					active: true,
-					sub: result.sub,
+					sub: subject.sub,
 				});
 			}),
 	);

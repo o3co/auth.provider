@@ -142,23 +142,47 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 		const { command } = commands((cmd, args) =>
 			cmd === "git" && args[0] === "-C" ? `${pin.commit}\n` : "",
 		);
-		const asked: { url: string; signal?: AbortSignal }[] = [];
-		const get = async (url: string, _ca: string, options: { signal?: AbortSignal } = {}) => {
-			asked.push({ url, ...(options.signal ? { signal: options.signal } : {}) });
+		const asked: { method: string; url: string; body?: unknown; signal?: AbortSignal }[] = [];
+		const request = async (
+			method: string,
+			url: string,
+			_ca: string,
+			options: { body?: unknown; signal?: AbortSignal } = {},
+		) => {
+			asked.push({
+				method,
+				url,
+				...(options.body === undefined ? {} : { body: options.body }),
+				...(options.signal ? { signal: options.signal } : {}),
+			});
+			// The suite's answers: ready, then a plan made, then a test no longer running.
+			if (url.includes("/api/plan?planName")) return { status: 201, body: { id: "p1" } };
+			if (url.includes("wait-state")) return { status: 404, body: {} };
 			return { status: 200, body: {} };
 		};
 		const deadline = new AbortController().signal;
 		const suite = await startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), tls, {
 			command,
-			get,
+			request,
 			signal: deadline,
 		});
 		await suite.api("api/info/abc");
+		// Any method, the status answered as it comes for the caller to judge.
+		expect(await suite.call("POST", "api/plan?planName=p", { alias: "a" })).toEqual({
+			status: 201,
+			body: { id: "p1" },
+		});
+		expect((await suite.call("GET", "api/runner/m1/wait-state")).status).toBe(404);
+		expect((await suite.call("DELETE", "api/runner/m1")).status).toBe(200);
 		await suite.stop();
-		expect(asked.map((a) => a.url)).toEqual([
-			expect.stringContaining("/api/plan?length=1"),
-			expect.stringContaining("/api/info/abc"),
+		expect(asked.map((a) => [a.method, a.url.replace(/^https:\/\/[^/]+/, "")])).toEqual([
+			["GET", "/api/plan?length=1"],
+			["GET", "/api/info/abc"],
+			["POST", "/api/plan?planName=p"],
+			["GET", "/api/runner/m1/wait-state"],
+			["DELETE", "/api/runner/m1"],
 		]);
+		expect(asked[2]?.body).toEqual({ alias: "a" });
 		for (const a of asked) expect(a.signal).toBe(deadline);
 	});
 });

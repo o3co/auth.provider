@@ -1,5 +1,7 @@
-import { generateKeyPairSync, X509Certificate } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash, generateKeyPairSync, randomBytes, X509Certificate } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:https";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AreaScene, freePort, type Started } from "@mod/conformance";
@@ -9,6 +11,7 @@ import { deviceArea } from "@mod/conformance-device";
 import { exchangeArea } from "@mod/conformance-exchange";
 import { selfSigned } from "@mod/conformance-front";
 import type { ClientScene } from "@mod/conformance-oauth";
+import { startTunnel, type Tunnel } from "@mod/conformance-tunnel";
 import { fronted, sender, signing } from "./fronted.ts";
 
 /** A client the world registers, as an adapter is told of it. */
@@ -36,7 +39,8 @@ export interface World {
 			| "mtls"
 			| "backchannel"
 			| "service"
-			| "publicDevice",
+			| "publicDevice"
+			| "cimd",
 			WorldClient
 		>
 	>;
@@ -46,6 +50,8 @@ export interface World {
 		readonly key: string;
 		readonly thumbprint: string;
 	};
+	/** The destinations the app opened through the tunnel, such as a client's metadata document's host. */
+	tunnelOpened(): readonly string[];
 	/** Where the `backchannel` client is told a session ended: the port and path its receiver listens at. */
 	readonly backchannel: { readonly port: number; readonly path: string };
 	readonly redirectUri: string;
@@ -55,6 +61,8 @@ export interface World {
 	readonly resource: string;
 	/** What the provider's introspection answers of a token, asked as the `post` client. */
 	introspect(token: string): Promise<Record<string, unknown>>;
+	/** An access token the harness signs in for itself, by the code flow as `client_secret_post`, with its subject. */
+	issue(client: WorldClient): Promise<{ readonly accessToken: string; readonly sub: string }>;
 	/** Each authorization URL a library sent the browser to, and each token request it sent through the front, in order. */
 	readonly seen: {
 		readonly authorizations: readonly URL[];
@@ -81,6 +89,9 @@ const postLogoutRedirectUri = "https://rp.example/logged-out";
 const deviceGrant = "urn:ietf:params:oauth:grant-type:device_code";
 const exchangeGrant = "urn:ietf:params:oauth:grant-type:token-exchange";
 const certificateHeader = "x-client-certificate";
+// A client whose id is its metadata document's URL (CIMD), the document served over https by its name.
+const documentHost = "docs.example";
+const documentUrl = `https://${documentHost}/client.json`;
 // A secret with the characters RFC 6749 §2.3.1 form-encodes before Basic, where libraries part ways.
 const awkward = "s3cret+with%odd:chars and space";
 
@@ -119,6 +130,55 @@ export function authorizationQuery(url: string, issuer: string): string {
 }
 
 /**
+ * The metadata document's server, on a certificate of its own the app is told to trust (`cert`, a
+ * file under `under`), reached through a tunnel the app takes as its outbound proxy (`proxy`). Its
+ * files and listeners are gone once it stops, or where it does not start.
+ */
+async function startDocuments(under: string | undefined) {
+	const dir = await mkdtemp(join(under ?? tmpdir(), "interop-documents-"));
+	let server: Server | undefined;
+	let tunnel: Tunnel | undefined;
+	const stop = async () => {
+		await tunnel?.stop();
+		const listening = server;
+		if (listening?.listening) await new Promise((resolve) => listening.close(resolve));
+		await rm(dir, { recursive: true, force: true });
+	};
+	try {
+		const tls = await selfSigned(documentHost, dir);
+		const cert = join(dir, "document-cert.pem");
+		await writeFile(cert, tls.cert);
+		const document = {
+			client_id: documentUrl,
+			client_name: "Interop metadata document client",
+			redirect_uris: [redirectUri],
+			grant_types: ["authorization_code"],
+			response_types: ["code"],
+			token_endpoint_auth_method: "none",
+		};
+		const started = createServer(tls, (req, res) => {
+			const found = req.url === new URL(documentUrl).pathname;
+			res.writeHead(found ? 200 : 404, { "content-type": "application/json" });
+			res.end(found ? JSON.stringify(document) : "{}");
+		});
+		server = started;
+		await new Promise<void>((resolve) => started.listen(0, "127.0.0.1", resolve));
+		const at = `127.0.0.1:${(started.address() as AddressInfo).port}`;
+		const opened = await startTunnel({ allow: { [`${documentHost}:443`]: at } });
+		tunnel = opened;
+		return {
+			cert,
+			proxy: `http://127.0.0.1:${opened.port}`,
+			opened: () => opened.opened(),
+			stop,
+		};
+	} catch (failure) {
+		await stop();
+		throw failure;
+	}
+}
+
+/**
  * Starts the provider the code flows meet, behind its front (`fronted`): code, public, assertion and
  * device clients, one user, DPoP, a logout the client starts, the device grant and token exchange.
  */
@@ -135,6 +195,7 @@ export async function startWorld(
 		await crypto.subtle.digest("SHA-256", new X509Certificate(certificate.cert).raw),
 	).toString("base64url");
 	const backchannel = { port: await freePort(), path: "/backchannel" };
+	const documents = await startDocuments(given.under);
 	const receiver = `http://127.0.0.1:${backchannel.port}`;
 	const key = assertionKey();
 	const clients = {
@@ -154,6 +215,7 @@ export async function startWorld(
 			secret: "service-secret-0123456789abcdef",
 		},
 		publicDevice: { id: "public-device", method: "none" },
+		cimd: { id: documentUrl, method: "none" },
 		backchannel: {
 			id: "backchannel",
 			method: "client_secret_basic",
@@ -244,6 +306,8 @@ export async function startWorld(
 					header: { dialect: "pem", name: certificateHeader },
 					trustedProxies: ["127.0.0.1"],
 				},
+				// Clients whose id is a metadata document's URL, from the one host the tunnel reaches.
+				documents: { allow: [documentHost], scopes: ["openid"] },
 			});
 			return {
 				...scene,
@@ -254,11 +318,19 @@ export async function startWorld(
 				},
 			};
 		},
-		{ ...given, clientCertificateHeader: certificateHeader },
-	);
+		{
+			...given,
+			clientCertificateHeader: certificateHeader,
+			trustedCertificates: [documents.cert],
+			outboundProxy: documents.proxy,
+		},
+	).catch(async (failure: unknown) => {
+		await documents.stop();
+		throw failure;
+	});
 	const base = app.base();
 	const front = { origin: app.origin };
-	return {
+	const world: World = {
 		issuer: front.origin,
 		ca: app.ca,
 		clients,
@@ -288,8 +360,76 @@ export async function startWorld(
 				);
 			return (await answer.json()) as Record<string, unknown>;
 		},
+		async issue(code: WorldClient) {
+			const verifier = randomBytes(32).toString("base64url");
+			const query = new URLSearchParams({
+				response_type: "code",
+				client_id: code.id,
+				redirect_uri: redirectUri,
+				scope: "openid",
+				state: randomBytes(8).toString("base64url"),
+				code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+				code_challenge_method: "S256",
+			});
+			const back = new URL(
+				await world.browser().authorize(`${front.origin}/oauth/authorize?${query}`),
+			);
+			const answer = await fetch(`${base}/oauth/token`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					"x-forwarded-proto": "https",
+					"x-forwarded-for": sender,
+				},
+				body: new URLSearchParams({
+					grant_type: "authorization_code",
+					code: back.searchParams.get("code") ?? "",
+					redirect_uri: redirectUri,
+					code_verifier: verifier,
+					client_id: code.id,
+					client_secret: code.secret ?? "",
+				}),
+			});
+			if (!answer.ok)
+				throw new Error(
+					`the harness's code redemption answered ${answer.status}: ${(await answer.text()).slice(0, 200)}`,
+				);
+			const accessToken = String(((await answer.json()) as Record<string, unknown>).access_token);
+			return { accessToken, sub: String((await world.introspect(accessToken)).sub) };
+		},
 		browser() {
 			const at = browserAt(() => base, front.origin, user);
+			/** Follows the provider's redirects to the first place off it. */
+			const follow = async (location: string): Promise<string> => {
+				const to = new URL(location, front.origin);
+				if (to.origin !== front.origin) return to.href;
+				const answer = await fetch(`${base}${to.pathname}${to.search}`, {
+					redirect: "manual",
+					headers: at.headers({ cookie: await at.login() }),
+				});
+				const next = answer.headers.get("location");
+				if (!next) throw new Error(`${to.pathname} answered ${answer.status}, sending nowhere`);
+				return follow(next);
+			};
+			/** Accepts the consent page's challenge as the user, and follows on to the client. */
+			const consented = async (challenge: string) => {
+				const answer = await fetch(`${base}/oauth/consent`, {
+					method: "POST",
+					redirect: "manual",
+					headers: at.headers({
+						cookie: await at.login(),
+						origin: front.origin,
+						"content-type": "application/x-www-form-urlencoded",
+					}),
+					body: new URLSearchParams({ challenge, decision: "accept" }).toString(),
+				});
+				const location = answer.headers.get("location");
+				if (!location)
+					throw new Error(
+						`the consent answered ${answer.status}: ${(await answer.text()).slice(0, 200)}`,
+					);
+				return follow(location);
+			};
 			return {
 				async authorize(url: string) {
 					authorizations.push(new URL(url));
@@ -298,7 +438,10 @@ export async function startWorld(
 						throw new Error(
 							`the authorization endpoint answered ${answer.status}: ${answer.text.slice(0, 300)}`,
 						);
-					return answer.at.href;
+					// A client that is not first-party, such as one by its metadata document, is asked consent first.
+					if (answer.at.origin !== front.origin || answer.at.pathname !== "/consent")
+						return answer.at.href;
+					return consented(answer.at.searchParams.get("challenge") ?? "");
 				},
 				async approve(userCode: string) {
 					// The deployment's page posts the user's decision as JSON, the session's cookie with it.
@@ -335,6 +478,11 @@ export async function startWorld(
 				},
 			};
 		},
-		stop: () => app.stop(),
+		tunnelOpened: () => documents.opened(),
+		async stop() {
+			await app.stop();
+			await documents.stop();
+		},
 	};
+	return world;
 }

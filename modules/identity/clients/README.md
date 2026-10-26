@@ -16,13 +16,13 @@
 - `methods` names the usable authentication methods, built in and contributed; `signingAlgorithms` names the algorithms they take signed credentials in.
 - A client gives its metadata by section, and says whether the operator registered it or another source named it.
 - Asking a client for a section no module contributed throws; it never answers undefined.
-- Extension point `authMethods`: a method names its challenge for a refusal and its signing algorithms, and may say a request carries its credentials malformed.
+- Extension point `authMethods`: a method names its challenge for a refusal and its signing algorithms, may say a request carries its credentials malformed, and may say it authenticates by an assertion (RFC 7521).
 - Extension points `clientSources` and `metadataSections`; a section may give `checkAtBoot`, which takes a registered client's value of that section after the schema, and the client that holds it, and may give a reason to refuse boot.
 - Operator section `registered`: a list of `id`, `kind` (`public` or `confidential`), `method` and `sections` (values by section name); built-in section `client-secret` holds `hash`, a bcrypt or scrypt hash in the forms `secret-hash` reads.
 - `./testing`: test clients and configuration builders.
 
 ## Invariants
-- A request uses one authentication method: two or more are refused first, then credentials a method finds malformed, both before any lookup.
+- A request uses one authentication method: two or more are refused first, then credentials a method finds malformed, both before any lookup. Where an assertion method claims the request, it uses an assertion: either refusal is then marked `assertion` and carries the challenges of every method claiming the request or finding it malformed, as RFC 7521 §4.2.1 answers it `invalid_client`; a method that only finds the request malformed marks nothing, and an unmarked refusal carries no challenge.
 - `none` is the method only when no other method claims the request; an Authorization header no method reads claims nothing.
 - `bare` is false for an `authorization` header, a client certificate (a malformed one included), any of `client_id`, `client_secret`, `client_assertion` and `client_assertion_type` sent at all (empty, repeated or not a string included), and anything a composed method claims or finds malformed; a field only a method not composed reads cannot be told.
 - A Basic header is malformed unless it is canonical base64 of UTF-8 that decodes to a non-empty id and secret; a `client_id` in the body beside it must name the same client, or the credentials are bad.

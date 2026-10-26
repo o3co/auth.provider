@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ModuleRun } from "../../results/results.ts";
-import { keepReviewPages, reviewPages } from "../review.ts";
+import { keepPages, keepReviewPages, reviewPages } from "../review.ts";
 
 const variant = { client_auth_type: "client_secret_basic" };
 const page = (source: string, regexp: string) =>
@@ -148,5 +148,32 @@ describe("the pages the suite's browser kept for a person to review", () => {
 		await writeFile(join(dir, "oidcc-prompt-login.html"), "<html>an earlier run's</html>");
 		await keepReviewPages(dir, [now]);
 		expect((await readdir(dir)).sort()).toEqual(["index.json", "oidcc-max-age-1.html"]);
+	});
+
+	it("keeps pages handed in by a driver that holds them itself, in the same form", async () => {
+		const dir = join(await mkdtemp(join(tmpdir(), "records-")), "review");
+		await mkdir(dir, { recursive: true });
+		await writeFile(join(dir, "stale.html"), "<html>an earlier run's</html>");
+		await keepPages(dir, [
+			{
+				file: "oidcc-client-test-invalid-iss.html",
+				test: "oidcc-client-test-invalid-iss",
+				asks: "The RP must show an error page",
+				contentType: "text/html",
+				page: "<html>login refused</html>",
+			},
+		]);
+		expect((await readdir(dir)).sort()).toEqual([
+			"index.json",
+			"oidcc-client-test-invalid-iss.html",
+		]);
+		expect(JSON.parse(await readFile(join(dir, "index.json"), "utf8"))).toEqual([
+			{
+				file: "oidcc-client-test-invalid-iss.html",
+				test: "oidcc-client-test-invalid-iss",
+				asks: "The RP must show an error page",
+				contentType: "text/html",
+			},
+		]);
 	});
 });

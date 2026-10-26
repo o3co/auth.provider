@@ -174,6 +174,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/token-denylist` (feature, `modules/oauth/token-denylist`): Owns the access tokens revoked before their end: keeps a revoked token's id, and tells whether an id is kept.
 - `@mod/token-endpoint` (feature, `modules/oauth/token-endpoint`): Answers the token endpoint: authenticates the client, then dispatches to a grant by its grant type; for a request naming no client, has the grant identify it, where the grant can.
   - `allowed` (`src/allowed`): whether every grant a registered client is allowed is served.
+  - `answers` (`src/answers`): the answers the OAuth endpoints share, an error response and a refused client authentication's.
   - `built-in` (`src/built-in`): what the package contributes of its own, the composed rule for a request's audience.
   - `caller` (`src/caller`): calling a contributed grant directly, as the endpoint does once a request has passed it, for the tests of the modules that contribute grants.
   - `endpoint-in` (`src/endpoint-in`): the endpoint's handler, built over what the assembly gives.
@@ -313,6 +314,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
   - `acr` (`src/acr`): the scenes of the acr a client asks for.
+  - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.
@@ -374,9 +376,11 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
   - `expected` (`src/expected`): whether the expected entries may go to the suite.
   - `harness` (`src/harness`): one plan run end to end, reported as tests.
+  - `lifecycle` (`src/lifecycle`): what every plan run has, whichever side of the suite it plays.
   - `login` (`src/login`): the deployment's login page, as the suite's browser meets it.
   - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
   - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
+  - `report` (`src/report`): a plan's run, reported as vitest tests.
   - `results` (`src/results`): what each suite test of a plan proved.
   - `review` (`src/review`): the pages the suite's browser kept for a person to review.
   - `scene` (`src/scene`): the app the OP plans meet.
