@@ -1,4 +1,4 @@
-import { reportRun } from "../report.ts";
+import { reportRun } from "../vitest.ts";
 
 // A run whose every test passed, was excused, or waits for review, and whose driver ended well:
 // each of its tests is reported, and none fails.
