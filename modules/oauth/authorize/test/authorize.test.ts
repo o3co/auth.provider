@@ -1386,9 +1386,16 @@ it("reads the acr a claims parameter asks for, refuses only an essential one unm
 	const cookie = await s.login();
 	const answer = async (claims: string, extra: Record<string, string> = {}) =>
 		(await s.authorize(request({ scope: "openid", claims, ...extra }), cookie)).at?.searchParams;
-	/** The acr the ID token of this code carries. */
+	/** The acr the ID token of this code carries: the code redeemed, and an ID token made for it. */
 	const acrOf = async (code: string | null | undefined) => {
-		await s.token({ code: code ?? "", redirect_uri: callback, code_verifier: verifier });
+		const before = asked.length;
+		const redeemed = await s.token({
+			code: code ?? "",
+			redirect_uri: callback,
+			code_verifier: verifier,
+		});
+		expect(redeemed.status, JSON.stringify(redeemed.body)).toBe(200);
+		expect(asked.length).toBe(before + 1);
 		return asked.at(-1)?.acr;
 	};
 	for (const malformed of [
@@ -1422,6 +1429,24 @@ it("reads the acr a claims parameter asks for, refuses only an essential one unm
 		"urn:test:pwd",
 	);
 	expect(await acrOf((await answer(of(null, "userinfo")))?.get("code"))).toBe("urn:test:pwd");
+	// A voluntary request beside an essential one never meets it in its place.
+	const mixed = JSON.stringify({
+		id_token: { acr: { essential: true, value: "urn:test:mfa" } },
+		userinfo: { acr: { value: "urn:test:pwd" } },
+	});
+	expect((await answer(mixed))?.get("error")).toBe("unmet_authentication_requirements");
+	// Two essential requests: the acr must meet both, so one only one names is not carried.
+	const twice = JSON.stringify({
+		id_token: { acr: { essential: true, values: ["urn:test:pwd", "urn:test:mfa"] } },
+		userinfo: { acr: { essential: true, values: ["urn:test:mfa"] } },
+	});
+	expect((await answer(twice))?.get("error")).toBe("unmet_authentication_requirements");
+	// A value is one acr as written: one holding a blank names no acr of the table, never two.
+	const spaced = of({ essential: true, value: "urn:test:mfa urn:test:pwd" });
+	expect((await answer(spaced))?.get("error")).toBe("unmet_authentication_requirements");
+	expect(
+		await acrOf((await answer(of({ values: ["urn:test:mfa urn:test:pwd"] })))?.get("code")),
+	).toBe("urn:test:pwd");
 	expect((await answer(JSON.stringify({ id_token: { email: null } })))?.has("code")).toBe(true);
 });
 

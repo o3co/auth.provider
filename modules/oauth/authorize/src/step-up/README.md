@@ -13,10 +13,11 @@ Internal module of `authorize`: the acr a request asks for, and raising a sessio
 
 ## Invariants
 - `acr`'s table picks the known acr in the order asked, and the first the session's amr meets. Without `acr_values` or an `acr` in `claims` nothing is asked.
-- `claims` is parsed as JSON; its `id_token` and `userinfo` members are read for `acr` (OpenID Connect Core §5.5.1.1): `null`, or an object whose `essential` is a boolean, `value` a string and `values` a list of strings; another shape is `invalid_request`. Asked of both, their values count together, essential where either says so. Its values stand in for `acr_values`.
-- Asked by `acr_values`, or in `claims` without `essential`, an acr is voluntary (Core §3.1.2.1).
+- `claims` is parsed as JSON; its `id_token` and `userinfo` members are read for `acr` (OpenID Connect Core §5.5.1.1): `null`, or an object whose `essential` is a boolean, `value` a string and `values` a list of strings; another shape is `invalid_request`. Each value is one acr as written, known only where the table holds it whole (a value holding a blank names none). Each request is kept apart.
+- An acr asked as essential, with values: the acr carried meets every essential request, one of the values all of them name, in the first's order; another request's voluntary values never stand in.
+  - None known is `unmet_authentication_requirements`; none met is `interaction_required` under `prompt=none`, and `unmet_authentication_requirements` without a page or back from it unraised.
+- Asked by `acr_values`, or in `claims` without `essential`, an acr is voluntary (Core §3.1.2.1); the claims parameter's values stand in for `acr_values`.
   - None known, or none met where the step-up page cannot or did not raise the session (none set, `prompt=none`, or back from it), goes on with the session's current acr (`acr`'s: the first in its table the session meets, Core §5.5.1.1), none where it meets none.
-  - Asked as essential, none known is `unmet_authentication_requirements`, and none met is `interaction_required` under `prompt=none` and `unmet_authentication_requirements` without a page or back from it unraised.
 - An `auth_time` asked as essential under `id_token` needs a known authentication time; asked otherwise, it needs nothing.
 - The page gets `acr_values` and a `redirect_to` back to the endpoint carrying a re-authentication record made for the trip; a taken record marked as the trip stops a second one.
 - The trip's record takes the time of the record already taken, so a confirmed fresh login is kept across the trip (a raise does not change the authentication time).
