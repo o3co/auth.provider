@@ -4,12 +4,16 @@ import acrModule from "@mod/acr/module";
 import { acrConfig } from "@mod/acr/testing";
 import type { AuditEvent } from "@mod/audit";
 import { auditStandIn } from "@mod/audit/testing";
+import { claimScopes, claimsSelections, selectionRecords } from "@mod/claims-selection";
+import claimsSelectionModule from "@mod/claims-selection/module";
+import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
+import { clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
-import { type IdTokenRequest, idTokens } from "@mod/code-grant";
+import { codes, type IdTokenRequest, idTokens } from "@mod/code-grant";
 import codeGrantModule from "@mod/code-grant/module";
 import { codeGrantConfig } from "@mod/code-grant/testing";
 import codeGrantStore from "@mod/code-grant-store/module";
@@ -111,6 +115,10 @@ async function serve(
 		asking?: boolean;
 		/** The deployment's environment, production unless a test tries a page on this machine. */
 		environment?: "production" | "development";
+		/** claims-selection's mode; on unless a test is about another. */
+		claims?: "off" | "draining" | "on";
+		/** claims-selection's store; the in-memory one unless a test makes it fail. */
+		selectionStore?: Module;
 	} = {},
 ) {
 	const proving = defineModule({ name: "proving", takes: [] }, (m) => [
@@ -167,6 +175,9 @@ async function serve(
 			acrModule,
 			gatesModule,
 			proving,
+			claimsSelectionModule,
+			options.selectionStore ?? claimsSelectionInMemory().module,
+			scoping,
 			...(options.extra ?? []),
 		],
 		config: {
@@ -231,6 +242,7 @@ async function serve(
 			...authorizeConfig({ "oidc-mode": "dual", ...options.authorize }),
 			...acrConfig(options.acr ?? {}),
 			...codeGrantConfig({ "code-lifetime": "1m", ...options.codeGrant }),
+			...claimsSelectionConfig({ mode: options.claims ?? "on" }),
 		},
 		runtime,
 	};
@@ -293,6 +305,16 @@ async function serve(
 		events: audit.events,
 	};
 }
+
+/** The claim scopes oidc would contribute, here a stand-in: groups' scope is one no client is allowed. */
+const claimScopeTable = new Map([
+	["name", "read"],
+	["email", "write"],
+	["groups", "admin"],
+]);
+const scoping = defineModule({ name: "scoping", takes: [] }, (m) => [
+	m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => claimScopeTable.get(claim) })),
+]);
 
 const request = (extra: Record<string, string> = {}) => ({
 	response_type: "code",
@@ -1455,6 +1477,128 @@ it("reads the acr a claims parameter asks for, refuses only an essential one unm
 		await acrOf((await answer(of({ values: ["urn:test:mfa urn:test:pwd"] })))?.get("code")),
 	).toBe("urn:test:pwd");
 	expect((await answer(JSON.stringify({ id_token: { email: null } })))?.has("code")).toBe(true);
+});
+
+describe("authorize: the claims a request names beyond its scope", () => {
+	const claimsOf = (members: Record<string, unknown>) => JSON.stringify(members);
+	/** The code's selection as its redemption pins it: none for a code without one. */
+	const selectionOf = async (
+		s: Awaited<ReturnType<typeof serve>>,
+		code: string | null | undefined,
+	) => {
+		const redeemed = await s.token({
+			code: code ?? "",
+			redirect_uri: callback,
+			code_verifier: verifier,
+		});
+		expect(redeemed.status, JSON.stringify(redeemed.body)).toBe(200);
+		return s.app.get(claimsSelections).forCode(s.app.get(codes).redemptionOf(code ?? ""));
+	};
+	const asking = (claims: string, extra: Record<string, string> = {}) =>
+		request({ scope: "openid read", claims, ...extra });
+
+	it("keeps for the code the names whose scope the client is allowed and the subject agreed to, by target, with their constraints [oidc-core-5.5-a]", async () => {
+		const s = await serve();
+		const cookie = await s.login();
+		const claims = claimsOf({
+			id_token: { name: { essential: true } },
+			userinfo: { name: null, groups: null, email: { value: "a@example.com" }, nickname: null },
+		});
+		const res = await s.authorize(asking(claims), cookie);
+		expect(await selectionOf(s, res.at?.searchParams.get("code"))).toEqual({
+			idToken: { names: [{ name: "name", scope: "read" }], constraints: [] },
+			// groups' scope is not the client's; nickname is no table claim; neither is an error.
+			userinfo: {
+				names: [
+					{ name: "name", scope: "read" },
+					{ name: "email", scope: "write" },
+				],
+				constraints: [{ name: "email", value: "a@example.com" }],
+			},
+		});
+	});
+
+	it("keeps nothing for a request without openid, or one naming no table claim", async () => {
+		const s = await serve();
+		const cookie = await s.login();
+		const claims = claimsOf({ userinfo: { name: null } });
+		const plain = await s.authorize(request({ scope: "read", claims }), cookie);
+		expect(await selectionOf(s, plain.at?.searchParams.get("code"))).toBeUndefined();
+		const other = await s.authorize(asking(claimsOf({ userinfo: { nickname: null } })), cookie);
+		expect(await selectionOf(s, other.at?.searchParams.get("code"))).toBeUndefined();
+	});
+
+	it("refuses a claim it keeps asked in a shape it does not take, as invalid_request", async () => {
+		const s = await serve();
+		const cookie = await s.login();
+		const res = await s.authorize(asking(claimsOf({ userinfo: { name: { values: [] } } })), cookie);
+		expect(res.at?.searchParams.get("error")).toBe("invalid_request");
+	});
+
+	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode [oidc-core-5.5.1-b] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]", async () => {
+		for (const mode of ["on", "off"] as const) {
+			const s = await serve({ claims: mode });
+			const cookie = await s.login();
+			for (const at of ["id_token", "userinfo"]) {
+				const other = await s.authorize(
+					asking(claimsOf({ [at]: { sub: { value: "bob" } } })),
+					cookie,
+				);
+				expect(other.at?.searchParams.get("error"), `${mode} ${at}`).toBe("login_required");
+				const named = await s.authorize(
+					asking(claimsOf({ [at]: { sub: { values: ["bob", "alice"] } } })),
+					cookie,
+				);
+				expect(named.at?.searchParams.has("code"), `${mode} ${at}`).toBe(true);
+			}
+			const both = claimsOf({
+				id_token: { sub: { value: "alice" } },
+				userinfo: { sub: { value: "bob" } },
+			});
+			expect((await s.authorize(asking(both), cookie)).at?.searchParams.get("error")).toBe(
+				"login_required",
+			);
+			await stop();
+		}
+	});
+
+	it("reads no names and keeps nothing unless on, and says it supports the claims parameter only when on", async () => {
+		const published = contract<readonly MetadataItem[]>("published");
+		const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+			m.provide(published).by((c) => c.collect(metadata)),
+		]);
+		for (const mode of ["off", "draining", "on"] as const) {
+			const s = await serve({ claims: mode, extra: [reader] });
+			const cookie = await s.login();
+			const res = await s.authorize(asking(claimsOf({ userinfo: { name: null } })), cookie);
+			const kept = await selectionOf(s, res.at?.searchParams.get("code"));
+			expect(kept === undefined, mode).toBe(mode !== "on");
+			const supported = s.app
+				.get(published)
+				.find((item) => item.name === "claims_parameter_supported");
+			expect(supported?.value, mode).toBe(mode === "on" ? true : undefined);
+			await stop();
+		}
+	});
+
+	it("answers temporarily_unavailable where the code's selection cannot be kept", async () => {
+		const stand = claimsSelectionInMemory();
+		const failing = defineModule({ name: "failing-selections", takes: [] }, (m) => [
+			m.provide(selectionRecords).by(() => ({
+				read: stand.records.read,
+				save: async () => {
+					throw new Unavailable("selections");
+				},
+			})),
+		]);
+		const s = await serve({ selectionStore: failing });
+		const cookie = await s.login();
+		const res = await s.authorize(asking(claimsOf({ userinfo: { name: null } })), cookie);
+		expect(res.at?.searchParams.get("error")).toBe("temporarily_unavailable");
+		// A request asking no claim is not held up by the store.
+		const plain = await s.authorize(request({ scope: "openid read" }), cookie);
+		expect(plain.at?.searchParams.has("code")).toBe(true);
+	});
 });
 
 it("asks a session whose authentication time is unknown to log in again for an essential auth_time, as max_age does", async () => {

@@ -1,3 +1,4 @@
+import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import type { Client } from "@mod/clients";
 import { type Codes, codeGrantType, codes } from "@mod/code-grant";
 import type { BuildContext, Clock } from "@mod/kernel";
@@ -11,6 +12,7 @@ import {
 	targetCheckOver,
 	targetCheckTakes,
 } from "../checks/checks.ts";
+import { claimsAsked, noClaims } from "../claims-request/claims-request.ts";
 import {
 	type ConsentDecision,
 	consentDecisionOver,
@@ -49,7 +51,9 @@ export interface Place {
 
 export interface FlowParts extends Place {
 	readonly sessions: Pick<Sessions, "enter">;
-	readonly codes: Pick<Codes, "issue">;
+	readonly codes: Pick<Codes, "issue" | "redemptionOf" | "lifetimeMs">;
+	/** What a claims request names beyond its scope: read, selected and kept only while `on`. */
+	readonly selections: Pick<ClaimsSelections, "mode" | "scopeOf" | "select" | "keepForCode">;
 	/** Whether `tokens`' issuance policies would let the code's access token be issued. */
 	readonly tokens: Pick<Tokens, "admits">;
 	readonly clock: Clock;
@@ -70,6 +74,9 @@ export type Flow = (trusted: Trusted) => Promise<Decision>;
 export function flowWith(parts: FlowParts): Flow {
 	const { issuer, self, sessions: entered, codes: issued, clock, loginPage } = parts;
 	const { reauths, stepUp, consent, openidRequired, tokens: issuance, target: targetOf } = parts;
+	const { selections } = parts;
+	// The names a claims request asks are read only while selections are taken.
+	const scopeOf = selections.mode === "on" ? selections.scopeOf : undefined;
 	const urlWith = (params: Iterable<readonly [string, string]>) =>
 		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
 
@@ -79,7 +86,10 @@ export function flowWith(parts: FlowParts): Flow {
 		const checked = checkRequest(client, one, params);
 		if (checked.kind !== "checked") return checked;
 		const { challenge, nonce, prompt } = checked;
-		const asked = stepUp.asked(one, params);
+		const claimsText = one("claims");
+		const claims = claimsText === undefined ? noClaims : claimsAsked(claimsText, scopeOf);
+		if (claims === "malformed") return refusal("invalid_request", "claims is malformed");
+		const asked = stepUp.asked(one, params, claims);
 		if (asked.kind !== "asked") return asked;
 		const allowed = checkScope(client, one("scope"), issuer, openidRequired);
 		if (allowed.kind !== "allowed") return allowed;
@@ -123,6 +133,10 @@ export function flowWith(parts: FlowParts): Flow {
 			if (taken) return refusal("login_required");
 			return toLogin();
 		}
+		// A sub asked by value names the only user the code may be for (OpenID Connect Core §3.1.2.2).
+		if (!claims.subs.every((values) => values.includes(session.context.subject))) {
+			return refusal("login_required");
+		}
 		const raised = await stepUp.met({
 			acrs: asked.acrs,
 			wanted: asked.wanted,
@@ -157,6 +171,13 @@ export function flowWith(parts: FlowParts): Flow {
 		const consented = await consent.decide(client, session, allowed.scope, prompt, again);
 		if (consented) return consented;
 		if (target.kind !== "audience") return target;
+		// What an OpenID Connect request asks beyond its scope, cut to what is allowed and agreed to.
+		const { idToken, userinfo } = claims.selection;
+		const asksMore = [idToken, userinfo].some((t) => t.names.length + t.constraints.length > 0);
+		const selection =
+			asksMore && allowed.scope.includes("openid")
+				? await selections.select(client, subject, claims.selection)
+				: undefined;
 		const code = await issued.issue({
 			clientId: client.id,
 			redirectUri,
@@ -168,6 +189,10 @@ export function flowWith(parts: FlowParts): Flow {
 			subject: session.context.subject,
 			...(raised.acr !== undefined ? { acr: raised.acr } : {}),
 		});
+		// Kept before the code goes out: one it cannot keep is never answered.
+		if (selection) {
+			await selections.keepForCode(issued.redemptionOf(code), selection, issued.lifetimeMs());
+		}
 		return { kind: "code", code, subject: session.context.subject };
 	};
 }
@@ -178,6 +203,7 @@ export const flowTakes = [
 	sessions,
 	codes,
 	tokens,
+	claimsSelections,
 	...stepUpTakes,
 	...consentDecisionTakes,
 	...targetCheckTakes,
@@ -190,6 +216,7 @@ export async function flowOver(c: BuildContext<Settings>, place: Place): Promise
 		...place,
 		sessions: await c.get(sessions),
 		codes: await c.get(codes),
+		selections: await c.get(claimsSelections),
 		tokens: await c.get(tokens),
 		clock: c.clock,
 		loginPage: c.section["login-page"],

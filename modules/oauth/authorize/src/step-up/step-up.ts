@@ -1,7 +1,7 @@
 import { type Acr, acr } from "@mod/acr";
 import type { BuildContext } from "@mod/kernel";
 import type { Reauth, Reauths } from "@mod/reauth";
-import { claimsAsked } from "../claims-request/claims-request.ts";
+import type { ClaimsRequest } from "../claims-request/claims-request.ts";
 import { type Again, type Decision, refusal } from "../decision.ts";
 import type { Settings } from "../section.ts";
 
@@ -24,12 +24,13 @@ export interface Standing {
 export interface StepUp {
 	/**
 	 * The acr asked that `acr` knows, in the asked order, whether they are essential, and whether an
-	 * essential `auth_time` asks for a known authentication time; a refusal for a malformed `claims`,
-	 * or an essential acr `acr` knows none of.
+	 * essential `auth_time` asks for a known authentication time; a refusal for an essential acr `acr`
+	 * knows none of. `claims` is the claims parameter as `claims-request` read it.
 	 */
 	asked(
 		one: (name: string) => string | undefined,
 		params: ReadonlyMap<string, string>,
+		claims: Pick<ClaimsRequest, "acr" | "knownTime">,
 	):
 		| {
 				readonly kind: "asked";
@@ -52,11 +53,7 @@ export interface StepUpParts {
 
 export function stepUpWith({ acr: table, stepUpPage, reauths }: StepUpParts): StepUp {
 	return {
-		asked(one, params) {
-			const claimsText = one("claims");
-			const claims =
-				claimsText === undefined ? { knownTime: false, acr: [] } : claimsAsked(claimsText);
-			if (claims === "malformed") return refusal("invalid_request", "claims is not a JSON object");
+		asked(one, params, claims) {
 			const { knownTime } = claims;
 			// A claims value is one acr as written: known only where the table holds it whole.
 			const known = (value: string) => {

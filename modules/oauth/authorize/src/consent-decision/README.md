@@ -9,7 +9,7 @@ Internal module of `authorize`: whether a request needs the user's consent befor
 - Consent records, the first-party decision and the consent page (`consent`). Which scope is asked (`checks`).
 
 ## Offers
-- `consentDecisionOver` (the build context) → `consentDecisionWith` (`consent`'s records) → denied (single values → a refusal / none), served (client → a refusal / none), decide (client, session, scope, prompt words, the endpoint's URL again → none / a refusal / the consent page).
+- `consentDecisionOver` (the build context) → `consentDecisionWith` (`consent`'s records) → denied (single values → a refusal / none), served (client → a refusal / none), decide (client, session, scope, prompt words, the endpoint's URL again → none / a refusal / the consent page), consented (client, subject, one scope → whether agreed to, always for a first-party client).
 
 ## Invariants
 - `served` refuses a client that is not first-party with `unauthorized_client` while `consent` is not `asking`; `decide` is asked after it, and reads no records for a first-party client.

@@ -113,6 +113,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/acr` (feature, `modules/oauth/acr`): Holds the acr table: the operator's, and the entries modules offer by themselves.
 - `@mod/authorize` (feature, `modules/oauth/authorize`): Provides the authorization endpoint, decides whether to issue a code, and has `code-grant` issue the code. Adds `issuer`'s URL to the redirect as `iss`.
   - `checks` (`src/checks`): the form of an authorization request, and the scope it may get.
+  - `claims-request` (`src/claims-request`): reading the `claims` request parameter (OpenID Connect Core §5.5).
   - `client-metadata` (`src/client-metadata`): what it contributes for clients' metadata.
   - `consent-decision` (`src/consent-decision`): whether a request needs the user's consent before its code.
   - `flow` (`src/flow`): the steps a request goes through once its redirect URI is trusted, up to its code.
