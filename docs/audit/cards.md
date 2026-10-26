@@ -138,8 +138,12 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/issuer` (feature, `modules/oauth/issuer`): Owns this provider's canonical name, the issuer: the configured URL, never derived from a request, the same for every module that names it.
 - `@mod/jwt-bearer` (feature, `modules/oauth/jwt-bearer`): Contributes the grant by JWT assertion.
   - `assertion` (`src/assertion`): checking a JWT assertion, all but its single use.
+  - `clientless` (`src/clientless`): a grant naming no client (RFC 7523 §3.1), where an entry's `client` is the client its verified assertion identifies, and the binding of entries and their clients.
+  - `conditions` (`src/conditions`): the conditions an issuer holds an assertion's verified claims to, and whether claims meet them.
   - `delegated` (`src/delegated`): an assertion of a delegated issuer, which another module checks by its own rules (`delegatedAssertions`).
+  - `id-jag` (`src/id-jag`): the ID-JAG profile's rules (Identity Assertion JWT Authorization Grant), read off a verified assertion and held against the request.
   - `issuers` (`src/issuers`): the trusted issuers, each entry of the section's `issuers`, and the signers and ledgers each is read with.
+  - `policy` (`src/policy`): what a trusted issuer's own policy makes of the section's, for verifying its assertions, keeping them used and issuing their tokens.
 - `@mod/jwt-bearer-id-tokens` (feature, `modules/oauth/jwt-bearer-id-tokens`): Ties `jwt-bearer` and `exchange-id-tokens` together: Apple's and Google's id_tokens, sent as JWT bearer assertions, are checked and taken once by `exchange-id-tokens`' rules, for the apps already sent out that send them so.
 - `@mod/jwt-bearer-users` (feature, `modules/oauth/jwt-bearer-users`): Joins `jwt-bearer` and `users`: resolves the subject a linked issuer's signer stands for through `users`, and declares the linked issuers' IdP names to `users`.
 - `@mod/logout` (feature, `modules/oauth/logout`): Provides the session logout endpoint.
@@ -177,6 +181,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `route` (`src/route`): the handler of `POST /oauth/token`, from the request to the answer, and what a grant issues through.
 - `@mod/token-exchange` (feature, `modules/oauth/token-exchange`): Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
 - `@mod/tokens` (feature, `modules/oauth/tokens`): Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
+  - `issuance` (`src/issuance`): the judgment `admits` and `issue` share, and the issuing `issue` does over it.
 - `@mod/userinfo` (feature, `modules/oauth/userinfo`): Serves OIDC's userinfo: admits the access token a request presents, checks the session it was issued in, and answers `sub` and the claims `oidc` releases for its scope.
 - `@mod/verified-email` (feature, `modules/oauth/verified-email`): Contributes the issuance policy `verified-email`: no access token for a subject whose email users has not stated verified.
 
@@ -297,12 +302,17 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 - `@mod/api-docs` (assembly, `modules/tooling/api-docs`): Builds a release's API site from the shipped bundles, as an app installs them: one module per member's contract, named and imported by its public name.
 - `@mod/conformance` (verification, `modules/tooling/conformance`): Owns the conformance test base: the area contract, scene composition, the driver contract and selection, assembly of the new system, the pattern mode (every scene on one pattern's app), shared tools.
+  - `ask` (`src/ask`): Redis at hand, for the topology and the scenes that check a node themselves.
   - `audit` (`src/audit`): the events a running target sends, for the scenes that read them.
+  - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
+  - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
   - `patterns` (`src/patterns`): running every pattern's areas on its app.
+  - `promotion` (`src/promotion`): promoting a replica of a Redis topology's primary without losing what the primary took.
   - `relay` (`src/relay`): a relay between an app and Redis that causes a fault at a known point and shows that it happened.
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
+  - `acr` (`src/acr`): the scenes of the acr a client asks for.
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
@@ -330,11 +340,19 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-second-factor` (verification, `modules/tooling/conformance-second-factor`): Owns the conformance scenes of the second-factor area: second factor at login (by a form or a JSON body), enrollment, naming factors, step-up, lockout, a recovery code that lets in one login only when two use it at once, store failure, the audit events they record.
 - `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
+  - `fetched` (`src/fetched`): the packages of this version npm already holds, taken from the registry for a release run again.
   - `outside-scene` (`src/outside-scene`): Composes a package outside the release as an operator does, beside the packed release, and checks that the app is held to what the release sealed.
+  - `packed` (`src/packed`): a packed tarball read for what it is, its name, version and integrity.
   - `release` (`src/release`): Packs the release, the index sealed in between, into the tarballs it publishes.
   - `release-check` (`src/release-check`): Checks the release as an operator meets it: apps made by the packed `create-auth-provider`, installed from the tarballs, type-checked, and booted in their image; an app assembled by hand from them; and a package outside the release composed beside them (`outside-scene`).
+  - `carried` (`src/release-check/carried`): which package managers an app's image holds.
   - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
+  - `given` (`src/release-check/given`): which tarballs the release check holds to.
   - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
+  - `release-listed` (`src/release-listed`): where the release publishes, the tarballs held to those its lists of what it ships were made of.
+  - `release-sbom` (`src/release-sbom`): the release's lists of what it ships (SBOMs), made from the tarballs it publishes.
+  - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
+  - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
 - `@mod/guard` (verification, `modules/tooling/guard`): Checks the workspace's invariants, each reported by its id, place and what went over:
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
   - `change-record` (`src/change-record`): a change record's machine rows, what two commits of the workspace differ in.
@@ -351,6 +369,19 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `differences` (`src/differences`): the differences accepted between a library and the provider.
   - `libraries` (`src/libraries`): the client libraries the harness runs.
   - `pins` (`src/pins`): the SHA-256 of each jar an adapter is built from.
+- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
+  - `api` (`src/api`): the suite's API, reached trusting its certificate alone.
+  - `commands` (`src/commands`): a command a plan runs, held to its time.
+  - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
+  - `expected` (`src/expected`): whether the expected entries may go to the suite.
+  - `harness` (`src/harness`): one plan run end to end, reported as tests.
+  - `login` (`src/login`): the deployment's login page, as the suite's browser meets it.
+  - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
+  - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
+  - `results` (`src/results`): what each suite test of a plan proved.
+  - `review` (`src/review`): the pages the suite's browser kept for a person to review.
+  - `scene` (`src/scene`): the app the OP plans meet.
+  - `suite` (`src/suite`): the suite at its pinned version, started and stopped.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.
 - `@mod/references` (assembly, `modules/tooling/references`): Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), and the audit index's generated parts, the cards and the dependencies (internal module `audit-index`).
   - `attack-surface` (`src/attack-surface`): the attack surface reference, what reaches the provider from outside and what it reaches out to.

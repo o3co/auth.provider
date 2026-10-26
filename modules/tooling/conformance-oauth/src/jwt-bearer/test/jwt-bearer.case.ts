@@ -95,7 +95,7 @@ describe("C. jwt-bearer when the grant is not offered", () => {
 		if (running?.kind === "running") await running.stop();
 	});
 
-	it("answers unsupported_grant_type", async () => {
+	it("answers unsupported_grant_type [rfc6749-5.2-f]", async () => {
 		if (running.kind !== "running") throw new Error(running.output);
 		const res = await post(running.baseUrl, { grant_type: grantType, assertion: assertion({}) });
 		expect([res.status, res.body.error]).toEqual([400, "unsupported_grant_type"]);
@@ -114,7 +114,7 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		if (running?.kind === "running") await running.stop();
 	});
 
-	it("issues a token that does not outlive the assertion", async () => {
+	it("issues a token that does not outlive the assertion [rfc6749-5.1-a] [rfc7521-4.1-c]", async () => {
 		const exp = Math.floor(Date.now() / 1000) + 120;
 		const res = await post(base, { grant_type: grantType, assertion: assertion({ exp }) });
 		expect(res.status).toBe(200);
@@ -129,7 +129,7 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		expect(claims.client_id).toBe("app");
 	});
 
-	it("refuses assertions that do not verify", async () => {
+	it("refuses assertions that do not verify [rfc7523-3-t] [rfc7521-5.2-m] [rfc7523-3-h] [rfc7521-5.2-g] [rfc7523-3-n] [rfc7521-5.2-k] [rfc7523-3-l] [rfc7521-5.2-i] [rfc7523-3-e] [rfc7521-5.2-d] [rfc7523-3-p] [rfc7523-3-r] [rfc7521-3-a] [rfc7523-2.1-a] [rfc7523-3.1-b] [rfc7521-4.1.1-a]", async () => {
 		const now = Math.floor(Date.now() / 1000);
 		const cases = [
 			assertion({}, stranger.privateKey),
@@ -158,7 +158,7 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		);
 	});
 
-	it("refuses a missing assertion and a client not allowed the grant", async () => {
+	it("refuses a missing assertion and a client not allowed the grant [rfc7521-4.1-a]", async () => {
 		expect((await post(base, { grant_type: grantType })).body.error).toBe("invalid_request");
 		const other = await post(base, { grant_type: grantType, assertion: assertion({}) }, "other");
 		expect([other.status, other.body.error]).toEqual([400, "unauthorized_client"]);

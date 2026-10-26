@@ -1,0 +1,19 @@
+{
+	"name": "@mod/interop-oidf",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"dependencies": {
+		"@mod/conformance": "workspace:*",
+		"@mod/conformance-code": "workspace:*",
+		"@mod/conformance-front": "workspace:*",
+		"@mod/conformance-tunnel": "workspace:*",
+		"@mod/spec-checklist": "workspace:*",
+		"vitest": "5.0.5"
+	},
+	"scripts": {
+		"plan": "node src/plans.ts plan",
+		"evidence-runs": "node src/plans.ts evidence-runs"
+	}
+}

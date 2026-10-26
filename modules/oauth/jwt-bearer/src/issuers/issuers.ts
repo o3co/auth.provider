@@ -1,16 +1,20 @@
+import { clientAllowance } from "@mod/client-allowance";
+import { clients } from "@mod/clients";
 import { type ExternalJwt, externalJwt, type Policy } from "@mod/external-jwt";
-import type { BuildContext, Refusal } from "@mod/kernel";
+import { type BuildContext, type Refusal, setting } from "@mod/kernel";
 import { publicPem } from "@mod/keys";
 import { withinHosts } from "@mod/outbound-policy";
 import { z } from "zod";
+import { conditionsSetting } from "../conditions/conditions.ts";
 import {
-	algorithms,
 	type DelegatedAssertions,
 	delegatedAssertions,
 	type JtiLedger,
 	jtiLedgers,
+	type SignerAlgorithm,
 	type SignerKeys,
 	signerKeys,
+	takenAlgorithms,
 } from "../contract.ts";
 import { contributedSigners, fetchedSigners, type Signers, writtenSigners } from "../signers.ts";
 
@@ -49,6 +53,65 @@ const subjectOf = {
 		),
 };
 
+const taken = z.enum(takenAlgorithms as [SignerAlgorithm, ...SignerAlgorithm[]]);
+const listed = z.array(z.string().min(1)).min(1);
+
+/** What an entry narrows of the section's policy. */
+const narrowing = {
+	conditions: conditionsSetting.optional(),
+	"accept-any-subject": z
+		.boolean()
+		.prefault(false)
+		.describe(
+			"Takes any signer of an issuer whose every signer becomes a subject, with no conditions. Warned at boot.",
+		),
+	ceiling: z
+		.strictObject({ scopes: listed.optional(), audiences: listed.optional() })
+		.refine((c) => c.scopes !== undefined || c.audiences !== undefined, "names no list")
+		.optional()
+		.describe(
+			"A ceiling over what this issuer's assertions are issued, within the client's allowance: `scopes`, `audiences`, each a list not empty.",
+		),
+	"max-assertion-lifetime": setting
+		.duration("s")
+		.pipe(z.number().int().min(1).max(86_400))
+		.optional()
+		.describe(
+			"How far ahead its `exp`, and how far back its `iat`, this issuer's assertion may be when it is taken, no longer than the section's.",
+		),
+	"clock-skew": setting
+		.duration("s")
+		.pipe(z.number().int().min(0).max(300))
+		.optional()
+		.describe(
+			"This issuer's clock allowance for what is taken, no wider than the section's; a revocation keeps the section's.",
+		),
+	profile: z
+		.enum(["rfc7523", "id-jag"])
+		.prefault("rfc7523")
+		.describe(
+			'The rules its assertions are taken by: "rfc7523", or "id-jag" (preview, draft-ietf-oauth-identity-assertion-authz-grant-04), each ID-JAG presented by the confidential client it names, within its scope and resources.',
+		),
+	client: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"The registered client this issuer's assertions identify where a request names none: public with method `none`, allowed this grant alone, no other entry's. Warned at boot.",
+		),
+};
+
+/** The algorithms keys not written with theirs are taken under. */
+const takes = {
+	algorithms: z
+		.array(taken)
+		.min(1)
+		.optional()
+		.describe(
+			"The algorithms this issuer's keys are taken under, by default EdDSA, ES256 and RS256.",
+		),
+};
+
 const issuerEntry = z
 	.union([
 		z.strictObject({
@@ -57,7 +120,7 @@ const issuerEntry = z
 				.array(
 					z.strictObject({
 						kid: z.string().min(1).optional(),
-						alg: z.enum(algorithms),
+						alg: taken,
 						"public-key": z
 							.string()
 							.refine(readable, "not readable as a public key PEM (a private key is refused)"),
@@ -65,20 +128,32 @@ const issuerEntry = z
 				)
 				.min(1),
 			...subjectOf,
+			...narrowing,
 		}),
 		z
-			.strictObject({ issuer: z.string().min(1), "jwks-uri": z.string(), ...subjectOf })
+			.strictObject({
+				issuer: z.string().min(1),
+				"jwks-uri": z.string(),
+				"accept-key-set-elsewhere": z
+					.boolean()
+					.prefault(false)
+					.describe("Takes a key set off the issuer's host, at https still. Warned at boot."),
+				...subjectOf,
+				...narrowing,
+				...takes,
+			})
 			.refine(
 				(i) =>
-					withinHosts(i["jwks-uri"], hostsOf(i.issuer)) &&
-					new URL(i["jwks-uri"]).protocol === "https:",
+					URL.canParse(i["jwks-uri"]) &&
+					new URL(i["jwks-uri"]).protocol === "https:" &&
+					(i["accept-key-set-elsewhere"] || withinHosts(i["jwks-uri"], hostsOf(i.issuer))),
 				"the key set is not at https on the issuer's host",
 			)
 			.refine(
 				(i) => !i["subject-is-key-thumbprint"],
 				"a key set fetched here cannot tell which key signed: subject-is-key-thumbprint needs keys written or contributed",
 			),
-		z.strictObject({ issuer: z.string().min(1), ...subjectOf }),
+		z.strictObject({ issuer: z.string().min(1), ...subjectOf, ...narrowing, ...takes }),
 	])
 	.refine((i) => i.subject !== undefined, {
 		message: 'required: "as-is" or "linked"',
@@ -96,7 +171,21 @@ const issuerEntry = z
 			message: "a self-issued prefix needs subject-is-key-thumbprint and keys contributed",
 			path: ["self-issued-prefix"],
 		},
-	);
+	)
+	// An ID-JAG's `sub` is a user, never its signer's key; and its client authenticates and is named.
+	.refine((i) => i.profile !== "id-jag" || !i["subject-is-key-thumbprint"], {
+		message: "an ID-JAG's subject is a user: not written beside subject-is-key-thumbprint",
+		path: ["profile"],
+	})
+	.refine((i) => i.profile !== "id-jag" || i["self-issued-prefix"] === undefined, {
+		message: "an ID-JAG's signer is its IdP: not written beside self-issued-prefix",
+		path: ["profile"],
+	})
+	.refine((i) => i.profile !== "id-jag" || i.client === undefined, {
+		message:
+			"an ID-JAG is presented by the confidential client it names: not written beside client",
+		path: ["profile"],
+	});
 
 /** One trusted issuer, as the section gives it. */
 export type IssuerEntry = z.output<typeof issuerEntry>;
@@ -157,24 +246,52 @@ export type Trust =
 			readonly kind: "trusted";
 			readonly trusted: ReadonlyMap<string, Signers>;
 			readonly ledgers: ReadonlyMap<string, JtiLedger>;
+			/** What boot warns of, each at its place. */
+			readonly warnings: readonly { readonly event: string; readonly where: string }[];
 	  }
 	| { readonly kind: "refused"; readonly refusals: readonly Refusal[] };
+
+/** A registered client, as an entry's `client` is held to it. */
+export interface RegisteredClient {
+	readonly id: string;
+	/** Public with method `none`: nothing it authenticates with. */
+	readonly credentialless: boolean;
+	/** Allowed this grant, and no other. */
+	readonly thisGrantAlone: boolean;
+}
 
 /** Each issuer's signers, from its written keys, its key set or the keys contributed for it. */
 export async function trustedWith(p: {
 	readonly jwt: ExternalJwt;
 	readonly issuers: readonly IssuerEntry[];
+	/** The section's lifetime and clock skew (seconds), which an entry may narrow alone. */
+	readonly section: { readonly "max-assertion-lifetime": number; readonly "clock-skew": number };
 	readonly contributed: readonly SignerKeys[];
 	readonly ledgers: readonly JtiLedger[];
+	/** The registered clients, which an entry's `client` names. */
+	readonly clients: readonly RegisteredClient[];
 	readonly policyOf: (entry: IssuerEntry) => Policy;
 }): Promise<Trust> {
 	const contributed = new Map(p.contributed.map((k) => [k.issuer, k]));
 	const trusted = new Map<string, Signers>();
 	// Named by its place in the settings, never by its value: a refusal tells no setting's value.
 	const refused: Refusal[] = [];
+	const warnings: { event: string; where: string }[] = [];
 	const firstAt = new Map<string, number>();
+	const clientAt = new Map<string, number>();
 	for (const [at, i] of p.issuers.entries()) {
 		const where = `jwt-bearer.issuers.${at}`;
+		const lifetime = i["max-assertion-lifetime"];
+		if (lifetime !== undefined && lifetime > p.section["max-assertion-lifetime"]) {
+			refused.push({
+				where: `${where}.max-assertion-lifetime`,
+				reason: "is longer than the section's",
+			});
+		}
+		const skew = i["clock-skew"];
+		if (skew !== undefined && skew > p.section["clock-skew"]) {
+			refused.push({ where: `${where}.clock-skew`, reason: "is wider than the section's" });
+		}
 		const first = firstAt.get(i.issuer);
 		if (first === undefined) firstAt.set(i.issuer, at);
 		else refused.push({ where, reason: `names the same issuer as jwt-bearer.issuers.${first}` });
@@ -183,6 +300,13 @@ export async function trustedWith(p: {
 		if (written && keys) refused.push({ where, reason: "has its keys written and contributed" });
 		if (!written && !keys) refused.push({ where, reason: "has no keys written or contributed" });
 		const thumbprint = i["subject-is-key-thumbprint"];
+		refused.push(...anySubjectRefusals(i, where, keys));
+		if (i["accept-any-subject"] && !i.conditions)
+			warnings.push({ event: "jwt-bearer.any_subject", where });
+		if (i.client !== undefined) {
+			refused.push(...clientRefusals(i.client, at, p.clients, clientAt));
+			warnings.push({ event: "jwt-bearer.clientless_issuer", where });
+		}
 		trusted.set(
 			i.issuer,
 			"keys" in i
@@ -197,9 +321,12 @@ export async function trustedWith(p: {
 						thumbprint,
 					)
 				: "jwks-uri" in i
-					? fetchedSigners(p.jwt, { url: i["jwks-uri"], hosts: hostsOf(i.issuer) }, p.policyOf(i))
+					? fetchedSigners(p.jwt, keySetOf(i), p.policyOf(i))
 					: contributedSigners(p.jwt, keys as NonNullable<typeof keys>, p.policyOf(i), thumbprint),
 		);
+		if ("jwks-uri" in i && i["accept-key-set-elsewhere"]) {
+			warnings.push({ event: "jwt-bearer.key_set_elsewhere", where });
+		}
 	}
 	refused.push(...prefixRefusals(p.issuers));
 	const ledgers = new Map(p.ledgers.map((l) => [l.issuer, l]));
@@ -216,25 +343,117 @@ export async function trustedWith(p: {
 		}
 	}
 	if (refused.length > 0) return { kind: "refused", refusals: refused };
-	return { kind: "trusted", trusted, ledgers };
+	return { kind: "trusted", trusted, ledgers, warnings };
 }
 
+/**
+ * An issuer whose every signer becomes a subject (as-is, no thumbprint, its keys the issuer's whole:
+ * written, a key set, or contributed without the promise of answering each signer's own alone) is
+ * held to conditions, or to accept-any-subject, and accept-any-subject to such an issuer alone.
+ */
+function anySubjectRefusals(
+	i: IssuerEntry,
+	where: string,
+	keys: SignerKeys | undefined,
+): Refusal[] {
+	const accepted = i["accept-any-subject"];
+	const whole = "keys" in i || "jwks-uri" in i || (keys !== undefined && keys.perSigner !== true);
+	const anySigner = i.subject === "as-is" && !i["subject-is-key-thumbprint"] && whole;
+	const at = `${where}.accept-any-subject`;
+	// A request naming no client has no authentication: conditions, a table or keys narrow it alone.
+	if (accepted && i.client !== undefined)
+		return [{ where: at, reason: "is written beside client" }];
+	if (accepted && i.conditions) return [{ where: at, reason: "is written beside conditions" }];
+	if (accepted && !anySigner)
+		return [{ where: at, reason: "is for an issuer whose every signer becomes a subject" }];
+	if (anySigner && !accepted && !i.conditions) {
+		return [
+			{
+				where,
+				reason:
+					"an issuer whose every signer becomes a subject needs conditions, or accept-any-subject",
+			},
+		];
+	}
+	return [];
+}
+
+/**
+ * An entry's client: registered with nothing it authenticates with, allowed this grant alone and no
+ * other entry's, so a request naming none skips no client's authentication and opens no other grant.
+ */
+function clientRefusals(
+	id: string,
+	at: number,
+	registered: readonly RegisteredClient[],
+	firstAt: Map<string, number>,
+): Refusal[] {
+	const where = `jwt-bearer.issuers.${at}.client`;
+	const first = firstAt.get(id);
+	if (first !== undefined) {
+		return [{ where, reason: `names the same client as jwt-bearer.issuers.${first}` }];
+	}
+	firstAt.set(id, at);
+	const found = registered.find((k) => k.id === id);
+	if (found === undefined) return [{ where, reason: "names no registered client" }];
+	if (!found.credentialless) {
+		return [
+			{ where, reason: "names a client with credentials: it needs to be public with method none" },
+		];
+	}
+	if (!found.thisGrantAlone) {
+		return [{ where, reason: "names a client allowed another grant than this one" }];
+	}
+	return [];
+}
+
+/** Where an entry's key set is fetched from: its URL, from the issuer's host, or its own where accepted. */
+const keySetOf = (i: Extract<IssuerEntry, { readonly "jwks-uri": string }>) => ({
+	url: i["jwks-uri"],
+	hosts: i["accept-key-set-elsewhere"] ? [new URL(i["jwks-uri"]).hostname] : hostsOf(i.issuer),
+});
+
 /** What `issuersIn` takes from the build context. */
-export const issuersTakes = [externalJwt, signerKeys, jtiLedgers] as const;
+export const issuersTakes = [externalJwt, signerKeys, jtiLedgers, clients] as const;
 
 /** The trusted issuers, their keys and ledgers taken from the composition. */
 export async function issuersIn(
-	c: Pick<BuildContext<unknown>, "get" | "collect">,
-	issuers: readonly IssuerEntry[],
+	c: Pick<BuildContext<unknown>, "get" | "collect" | "log">,
+	section: Parameters<typeof trustedWith>[0]["section"] & {
+		readonly issuers: readonly IssuerEntry[];
+	},
 	policyOf: (entry: IssuerEntry) => Policy,
+	/** This grant's type, the one an entry's client may be allowed. */
+	grantType: string,
 ): Promise<Trust> {
-	return trustedWith({
+	const registered = (await c.get(clients)).registered().map((k) => {
+		const allowed = clientAllowance.grantsOf(k);
+		return {
+			id: k.id,
+			credentialless: k.kind === "public" && k.method === "none",
+			thisGrantAlone: allowed.length > 0 && allowed.every((g) => g === grantType),
+		};
+	});
+	const trust = await trustedWith({
 		jwt: await c.get(externalJwt),
-		issuers,
+		issuers: section.issuers,
+		section,
 		contributed: await c.collect(signerKeys),
 		ledgers: await c.collect(jtiLedgers),
+		clients: registered,
 		policyOf,
 	});
+	// Told once each boot, by place: the operator's values are never written out.
+	if (trust.kind === "trusted") {
+		for (const w of trust.warnings) c.log.warn(w.event, { at: w.where });
+		const selfIssued = selfIssuedOf(section.issuers);
+		if (selfIssued.length > 0) {
+			c.log.info("jwt-bearer.self_issued_signers", {
+				at: selfIssued.map((s) => s.where).join(","),
+			});
+		}
+	}
+	return trust;
 }
 
 /** The section's `delegated-issuers`. */

@@ -128,7 +128,7 @@ describe("subject shape", () => {
 		}
 	});
 
-	it("refuses an empty subject, one past 255, a character outside ASCII, or no string", () => {
+	it("refuses an empty subject, one past 255, a character outside ASCII, or no string [oidc-core-2-c]", () => {
 		for (const subject of ["", "x".repeat(256), "é", "s-\u{1F600}", "\x80", 7, null, undefined]) {
 			expect(isWellFormedSubject(subject), JSON.stringify(subject)).toBe(false);
 		}

@@ -43,7 +43,7 @@ const runtime = quietRuntime();
 const verifier = "v".repeat(43);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 
-it("redeems a code once through code-grant wired to records, and revokes what it gave when it comes again", async () => {
+it("redeems a code once through code-grant wired to records, and revokes what it gave when it comes again [rfc6749-4.1.2-d] [rfc6749-4.1.2-e]", async () => {
 	const app = await assemble({
 		modules: [
 			http,

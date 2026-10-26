@@ -17,7 +17,7 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issuance.ts";
+import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issuance/issuance.ts";
 import { defaultLifetimeSeconds, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import type { section } from "./section.ts";
@@ -405,16 +405,17 @@ export function tokensContract(
 			}
 		});
 
-		it("issues for the lifetime the issuing side asks, up to a day, and refuses any other as its mistake", async () => {
+		it("issues for the lifetime the issuing side asks, two seconds to a day, and refuses any other as its mistake", async () => {
 			const place = await open({ revocable: true });
 			const longer = await issueFor(place.tokens, grant, { lifetimeSeconds: 86_400 });
 			expect(longer.expiresIn).toBe(86_400);
+			expect((await issueFor(place.tokens, grant, { lifetimeSeconds: 2 })).expiresIn).toBe(2);
 			const capped = await issueFor(place.tokens, grant, {
 				lifetimeSeconds: 86_400,
 				notAfter: place.now() + 120_000,
 			});
 			expect(capped.expiresIn).toBe(120);
-			for (const lifetimeSeconds of [0, 86_401, 1.5, Number.NaN]) {
+			for (const lifetimeSeconds of [0, 1, 86_401, 1.5, Number.NaN]) {
 				await expect(
 					issueFor(place.tokens, grant, { lifetimeSeconds }),
 					String(lifetimeSeconds),
@@ -436,6 +437,23 @@ export function tokensContract(
 			const issued = await issueFor(place.tokens, grant, { notAfter: place.now() + 120_000 });
 			expect(issued.expiresAt).toBeLessThanOrEqual(place.now() + 120_000);
 			expect(issued.expiresIn).toBe(120);
+		});
+
+		it("refuses, as its own rule, a token its cap leaves less than a second, and issues one a second", async () => {
+			const place = await open({ revocable: true });
+			for (const ahead of [-10_000, 0, 999]) {
+				expect(
+					await place.tokens.issue({ grant, grantType: "test" }, { notAfter: place.now() + ahead }),
+					String(ahead),
+				).toEqual({
+					kind: "refused",
+					policy: "tokens",
+					reason: "no_lifetime_left",
+					description: "expired",
+				});
+			}
+			const issued = await issueFor(place.tokens, grant, { notAfter: place.now() + 1000 });
+			expect(issued.expiresIn).toBe(1);
 		});
 
 		it("revokes a token, and only that one, directly or by its reference", async () => {
@@ -599,22 +617,27 @@ export function tokensStandIn(
 					const id = tokenId(c.random);
 					const token = `stand-in.${id}`;
 					const binding = limits?.binding;
-					issued.set(token, {
-						grant: keptGrant(grant, iat),
-						id,
-						issuedAt: iat * 1000,
-						expiresAt: exp * 1000,
-						...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
-					});
 					return {
-						token,
-						id,
-						expiresAt: exp * 1000,
-						expiresIn: exp - iat,
-						tokenType: binding?.tokenType ?? "Bearer",
-						...(grant.claims
-							? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) }
-							: {}),
+						access: {
+							token,
+							id,
+							expiresAt: exp * 1000,
+							expiresIn: exp - iat,
+							tokenType: binding?.tokenType ?? "Bearer",
+							...(grant.claims
+								? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) }
+								: {}),
+						},
+						// Kept only once handed out, so a token refused leaves nothing.
+						keep: () => {
+							issued.set(token, {
+								grant: keptGrant(grant, iat),
+								id,
+								issuedAt: iat * 1000,
+								expiresAt: exp * 1000,
+								...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
+							});
+						},
 					};
 				};
 				const stand: Tokens = {

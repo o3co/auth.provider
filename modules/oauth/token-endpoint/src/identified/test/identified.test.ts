@@ -284,7 +284,7 @@ describe("a request naming no client", () => {
 		expect(events).toEqual([]);
 	});
 
-	it("checks repeated and mistyped parameters on the way, as for any request", async () => {
+	it("checks repeated and mistyped parameters on the way, as for any request [rfc6749-3.2-d]", async () => {
 		const { post, raw, seen } = await serving();
 		const twice = new URLSearchParams([
 			["grant_type", "urn:test:assert"],
@@ -349,7 +349,7 @@ describe("a request naming no client", () => {
 		expect(events).toHaveLength(7);
 	});
 
-	it("keeps today's answers for clients that authenticate, or fail to, where a grant can identify", async () => {
+	it("keeps today's answers for clients that authenticate, or fail to, where a grant can identify [rfc6749-2.3-b] [rfc6749-5.2-b]", async () => {
 		const { post, raw, seen } = await serving();
 		const asConf = await post(assert("as:agents"), "conf");
 		expect([asConf.status, asConf.body]).toEqual([200, { client: "conf", identified: null }]);
@@ -403,7 +403,7 @@ describe("a request naming no client", () => {
 		]);
 	});
 
-	it("answers as today a request whose trusted proxy forwards a client's certificate, malformed or not", async () => {
+	it("answers as today a request whose trusted proxy forwards a client's certificate, well-formed or malformed", async () => {
 		const { raw, seen } = await serving({
 			"trusted-proxies": ["127.0.0.1/32"],
 			"client-certificate": { dialect: "pem", header: "x-client-cert" },
@@ -416,9 +416,19 @@ describe("a request naming no client", () => {
 			"x-client-cert": "not a pem",
 		});
 		expect([certified.status, certified.body.error]).toEqual([401, "invalid_client"]);
+		// A well-formed one, which no method composed here reads, is a credential as well.
+		const der = Uint8Array.from({ length: 300 }, (_, i) => (i * 7) % 256);
+		const b64 = Buffer.from(der).toString("base64").replace(/.{64}/g, "$&\n");
+		const pem = `-----BEGIN CERTIFICATE-----\n${b64}\n-----END CERTIFICATE-----\n`;
+		const wellFormed = await raw(assert("as:agents"), {
+			...forwarded,
+			"x-client-cert": encodeURIComponent(pem),
+		});
+		expect([wellFormed.status, wellFormed.body.error]).toEqual([401, "invalid_client"]);
 		expect(seen.identify).toBe(1);
 		expect(events.map((e) => [e.kind, e.attributes?.reason])).toEqual([
 			["token.issued", undefined],
+			["client.authentication.failure", "no_credentials"],
 			["client.authentication.failure", "no_credentials"],
 		]);
 	});

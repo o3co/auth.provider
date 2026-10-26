@@ -91,7 +91,7 @@ mtls("self-signed certificates", () => {
 		trustedProxies: loopback,
 	}));
 
-	it("binds a token to the certificate's thumbprint, as a bearer token, and says so at introspection", async () => {
+	it("binds a token to the certificate's thumbprint, as a bearer token, and says so at introspection [rfc8705-3.1-a] [rfc8705-3.1-b] [rfc8705-3.1-c]", async () => {
 		const own = await issue({ cn: "client" });
 		const answer = await at.token(pemHeader(own));
 		const cnf = { "x5t#S256": thumbprintOf(own.der) };
@@ -127,7 +127,7 @@ mtls("a peer that is not a trusted proxy", () => {
 		trustedProxies: ["192.0.2.1"],
 	}));
 
-	it("binds nothing to the certificate header it sends", async () => {
+	it("binds nothing to the certificate header it sends [rfc8705-3-a]", async () => {
 		const own = await issue({ cn: "client" });
 		expect(await at.boundTo(own, pemHeader(own))).toBe(false);
 	});

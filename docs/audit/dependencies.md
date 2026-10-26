@@ -165,7 +165,7 @@ flowchart LR
 | `@mod/exchange-id-tokens` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/kernel`, `@mod/subject-revocation`, `@mod/token-exchange`, `@mod/users` |
 | `@mod/grants` | feature | `@mod/clients`, `@mod/http`, `@mod/kernel`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/issuer` | feature | `@mod/http`, `@mod/kernel`, `@mod/url-setting` |
-| `@mod/jwt-bearer` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/external-jwt`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/users` |
+| `@mod/jwt-bearer` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/external-jwt`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/sender-binding`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/users` |
 | `@mod/jwt-bearer-id-tokens` | feature | `@mod/exchange-id-tokens`, `@mod/jwt-bearer`, `@mod/kernel` |
 | `@mod/jwt-bearer-users` | feature | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/users` |
 | `@mod/logout` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session` |
@@ -297,10 +297,11 @@ flowchart LR
 | `@mod/conformance-recipes` | verification | `@mod/conformance`, `@mod/create-app` |
 | `@mod/conformance-second-factor` | verification | `@mod/conformance`, `@mod/conformance-legacy` |
 | `@mod/conformance-tunnel` | verification | none |
-| `@mod/distribution` | assembly | `@mod/create-app`, `@mod/trial` |
+| `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/trial` |
 | `@mod/guard` | verification | `@mod/guard-imports`, `@mod/kinds` |
 | `@mod/guard-imports` | verification | none |
 | `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-exchange`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
+| `@mod/interop-oidf` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-front`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/ledger-fakes` | verification | `@mod/ledger-wire` |
 | `@mod/references` | assembly | `@mod/app-output`, `@mod/combinations`, `@mod/config-files`, `@mod/create-app`, `@mod/guard-imports`, `@mod/kernel`, `@mod/trial` |
 | `@mod/spec-checklist` | verification | `@mod/guard-imports` |

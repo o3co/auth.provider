@@ -16,6 +16,8 @@ export interface ClientScene {
 	/** Its assertions are also taken for the token endpoint, or naming their audience in a list. */
 	readonly looseAudience?: boolean;
 	readonly grants: readonly string[];
+	/** Every token it is issued must be sender-bound (`sender-binding`'s `required`); for scenes the legacy build is not asked. */
+	readonly bindingRequired?: boolean;
 	readonly scopes: readonly string[];
 	readonly defaultScopes?: readonly string[];
 	readonly audiences?: readonly string[];
@@ -51,7 +53,7 @@ export interface JtiLedgerScene {
 export type TrustedIssuerScene = (
 	| {
 			readonly issuer: string;
-			readonly alg: "EdDSA" | "ES256" | "RS256";
+			readonly alg: "EdDSA" | "ES256" | "RS256" | "PS256";
 			readonly publicPem: string;
 	  }
 	/**
@@ -71,6 +73,22 @@ export type TrustedIssuerScene = (
 ) & {
 	/** Its assertions used up in this ledger in place of the store. */
 	readonly jtiLedger?: JtiLedgerScene;
+	/** Conditions its assertions' verified claims meet; an issuer with written keys and none takes any subject. */
+	readonly conditions?: {
+		readonly "subject-prefix"?: string;
+		readonly claims?: Readonly<
+			Record<string, string | number | boolean | readonly (string | number | boolean)[]>
+		>;
+	};
+	/** The registered client its assertions identify where a request names none: public, method none. */
+	readonly client?: string;
+	/** Its assertions taken as ID-JAGs (preview): on the new target alone, as the legacy build takes no trusted issuer. */
+	readonly profile?: "id-jag";
+	/** A ceiling over what its assertions are issued, within the client's allowance. */
+	readonly ceiling?: {
+		readonly scopes?: readonly string[];
+		readonly audiences?: readonly string[];
+	};
 };
 
 /** Clients, the token endpoint and what is offered beside it. */

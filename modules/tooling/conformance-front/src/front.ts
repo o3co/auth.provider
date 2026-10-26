@@ -13,36 +13,51 @@ import { join } from "node:path";
 import type { TLSSocket } from "node:tls";
 import { promisify } from "node:util";
 
-/** A key and a self-signed certificate naming `host` and loopback, written in `dir` by openssl. */
+/** How long openssl is given to make a key and its certificate, unless the caller says. */
+const opensslTimeoutMs = 30_000;
+
+/**
+ * A key and a self-signed certificate naming `host` and loopback, written in `dir` by openssl,
+ * which is stopped and the call failed past `timeoutMs`.
+ */
 export async function selfSigned(
 	host: string,
 	dir: string,
+	{ timeoutMs = opensslTimeoutMs }: { readonly timeoutMs?: number } = {},
 ): Promise<{ key: string; cert: string }> {
 	await mkdir(dir, { recursive: true });
 	const key = join(dir, "key.pem");
 	const cert = join(dir, "cert.pem");
-	await promisify(execFile)("openssl", [
-		"req",
-		"-x509",
-		"-newkey",
-		"ec",
-		"-pkeyopt",
-		"ec_paramgen_curve:P-256",
-		// LibreSSL writes explicit curve parameters otherwise, which Java's TLS refuses.
-		"-pkeyopt",
-		"ec_param_enc:named_curve",
-		"-nodes",
-		"-days",
-		"2",
-		"-subj",
-		`/CN=${host}`,
-		"-addext",
-		`subjectAltName=DNS:${host},DNS:localhost,IP:127.0.0.1`,
-		"-keyout",
-		key,
-		"-out",
-		cert,
-	]);
+	const made = promisify(execFile)(
+		"openssl",
+		[
+			"req",
+			"-x509",
+			"-newkey",
+			"ec",
+			"-pkeyopt",
+			"ec_paramgen_curve:P-256",
+			// LibreSSL writes explicit curve parameters otherwise, which Java's TLS refuses.
+			"-pkeyopt",
+			"ec_param_enc:named_curve",
+			"-nodes",
+			"-days",
+			"2",
+			"-subj",
+			`/CN=${host}`,
+			"-addext",
+			`subjectAltName=DNS:${host},DNS:localhost,IP:127.0.0.1`,
+			"-keyout",
+			key,
+			"-out",
+			cert,
+		],
+		{ timeout: timeoutMs, killSignal: "SIGKILL" },
+	);
+	await made.catch((error: { readonly killed?: boolean }) => {
+		if (error.killed) throw new Error(`openssl did not finish within ${timeoutMs} ms`);
+		throw error;
+	});
 	return { key: await readFile(key, "utf8"), cert: await readFile(cert, "utf8") };
 }
 
@@ -82,6 +97,11 @@ export interface FrontOptions {
 	handle?(request: FrontRequest): FrontAnswer | undefined | Promise<FrontAnswer | undefined>;
 	/** The URL and body a request goes on to the app with. */
 	rewrite?(request: FrontRequest): { readonly url: URL; readonly body: Buffer };
+	/**
+	 * How long the app is given to answer a request, and to go on with an answer it began; past it the
+	 * front answers 504, or ends an answer begun. 30 seconds unless given.
+	 */
+	readonly appTimeoutMs?: number;
 	/** Told each answer the app gives, with the request it answers. */
 	answered?(
 		request: FrontRequest,
@@ -133,6 +153,9 @@ const pemOf = (der: Buffer) =>
 		.toString("base64")
 		.match(/.{1,64}/g)
 		?.join("\n")}\n-----END CERTIFICATE-----`;
+
+/** How long the app is given to answer, unless the harness says. */
+const appTimeoutMs = 30_000;
 
 const answer = (res: ServerResponse, given: FrontAnswer) => {
 	res.writeHead(given.status, given.headers ?? {});
@@ -197,10 +220,25 @@ export async function startFront(options: FrontOptions): Promise<Front> {
 				app.pipe(res);
 			},
 		);
+		// An app that says nothing for its time is cut off: 504 before its answer, the answer ended after.
+		const within = options.appTimeoutMs ?? appTimeoutMs;
+		let silent = false;
+		sent.setTimeout(within, () => {
+			silent = true;
+			sent.destroy(new Error(`the app did not answer within ${within} ms`));
+		});
 		// Once the answer began, the client's is ended rather than answered twice.
-		sent.on("error", (error) =>
-			res.headersSent ? res.destroy(error) : answer(res, { status: 502 }),
-		);
+		sent.on("error", (error) => {
+			if (res.headersSent) return res.destroy(error);
+			if (silent) {
+				return answer(res, {
+					status: 504,
+					headers: { "content-type": "text/plain" },
+					body: `the app did not answer within ${within} ms`,
+				});
+			}
+			answer(res, { status: 502 });
+		});
 		sent.end(body);
 	};
 	const server = createServer(

@@ -83,7 +83,7 @@ describe.runIf(able)("federation through GitHub", () => {
 		expect(await b.session()).toBe(false);
 	});
 
-	it("refuses an answer naming another issuer before its code is used", async () => {
+	it("refuses an answer naming another issuer before its code is used [rfc9700-4.4.2.1-a] [rfc9700-2.1-e] [rfc9700-2.1-f]", async () => {
 		const b = browser();
 		const query = await authorized(b, 583231);
 		const code = query.get("code") ?? "";

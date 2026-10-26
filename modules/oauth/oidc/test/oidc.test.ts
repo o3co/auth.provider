@@ -40,7 +40,7 @@ const makerOf = (app: Assembly) => {
 };
 
 describe("the ID token", () => {
-	it("is signed with the core claims and the session", async () => {
+	it("is signed with the core claims and the session [oidc-core-2-a] [oidc-core-2-b] [oidc-core-2-d] [oidc-core-2-e] [oidc-core-2-f] [oidc-core-2-g] [oidc-core-2-i] [oidc-core-2-n] [oidc-core-2-o] [oidc-core-15.1-e]", async () => {
 		const app = await booted({ runtime, config: { oidc: { "id-token-lifetime": "5m" } } });
 		const token = await makerOf(app).make(
 			request({
@@ -107,7 +107,7 @@ describe("the ID token", () => {
 		expect(known.payload.auth_time).toBe((now - 5000) / 1000);
 	});
 
-	it("names the JWT type, the algorithm keys signs with, and its key id in the header", async () => {
+	it("names the JWT type, the algorithm keys signs with, and its key id in the header [oidc-core-10.1-d]", async () => {
 		const { header } = decoded(await makerOf(await booted({ runtime })).make(request()));
 		expect([header.typ, header.alg, typeof header.kid]).toEqual(["JWT", "EdDSA", "string"]);
 	});
@@ -167,7 +167,7 @@ describe("the released claims an ID token carries", () => {
 	const alice = { subject: "s-alice", clientId: "app", amr: ["pwd"], session: "h" };
 	const sessionsAs = sessionsOf({ h: loginOf("s-alice", "users") });
 
-	it("carries users' attributes through the table for the code's scope, beside the core claims", async () => {
+	it("carries users' attributes through the table for the code's scope, beside the core claims [oidc-core-5.6-a]", async () => {
 		const registered = testUser("alice", "pw", {
 			subject: "s-alice",
 			attributes: { [userAttribute.name]: "Alice", [userAttribute.email]: "alice@example.com" },
@@ -210,25 +210,25 @@ describe("the released claims an ID token carries", () => {
 describe("issuer's metadata", () => {
 	const items = async () => (await booted({ runtime })).get(published);
 
-	it("names openid and the table's scopes as the scopes it supports", async () => {
+	it("names openid and the table's scopes as the scopes it supports [oidc-discovery-3-s] [rfc8414-2-f]", async () => {
 		expect(await items()).toContainEqual({
 			name: "scopes_supported",
 			value: ["openid", "profile", "email", "groups"],
 		});
 	});
 
-	it("names sub and the table's claims as the claims it supports", async () => {
+	it("names sub and the table's claims as the claims it supports [oidc-discovery-3-af]", async () => {
 		expect(await items()).toContainEqual({
 			name: "claims_supported",
 			value: ["sub", "name", "picture", "email", "email_verified", "groups"],
 		});
 	});
 
-	it("names that every client sees a user by the same subject", async () => {
+	it("names that every client sees a user by the same subject [oidc-discovery-3-y] [oidc-core-8-a]", async () => {
 		expect(await items()).toContainEqual({ name: "subject_types_supported", value: ["public"] });
 	});
 
-	it("names the algorithm ID tokens are signed with", async () => {
+	it("names the algorithm ID tokens are signed with [oidc-discovery-3-z]", async () => {
 		expect(await items()).toContainEqual({
 			name: "id_token_signing_alg_values_supported",
 			value: ["EdDSA"],

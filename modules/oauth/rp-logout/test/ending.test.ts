@@ -100,7 +100,7 @@ describe("the logout a client starts", () => {
 		]);
 	});
 
-	it("refuses a request without a hint, with a hint it cannot verify, or one that names no session", async () => {
+	it("refuses a request without a hint, with a hint it cannot verify, or one that names no session [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const forged = (await h.hintFor(session.id)).replace(/\.[^.]+$/, ".AAAA");
@@ -128,7 +128,7 @@ describe("the logout a client starts", () => {
 		expect(h.events).toEqual([]);
 	});
 
-	it("takes a hint past its end", async () => {
+	it("takes a hint past its end [oidc-rpinit-2-f]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const iat = 1_800_000_000 - 7200;
@@ -137,7 +137,7 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(false);
 	});
 
-	it("refuses a hint issued more than a day ago, by GET or POST, and closes nothing", async () => {
+	it("refuses a hint issued more than a day ago, by GET or POST, and closes nothing [oidc-rpinit-2-d]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const iat = 1_800_000_000 - 86_401;
@@ -149,7 +149,7 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(true);
 	});
 
-	it("sends the browser back with its state only to a return the hint's client registered", async () => {
+	it("sends the browser back with its state only to a return the hint's client registered [oidc-rpinit-2-b] [oidc-rpinit-3-b]", async () => {
 		const h = await serve();
 		const go = async (asked: string, over: Record<string, unknown> = {}) => {
 			const { session } = await h.login();
@@ -429,7 +429,7 @@ describe("the upstream's end of session", () => {
 	});
 });
 
-it("publishes its endpoint and the front-channel and back-channel support", async () => {
+it("publishes its endpoint and the front-channel and back-channel support [oidc-rpinit-2.1-a] [oidc-bcl-2.1-a]", async () => {
 	const h = await serve();
 	expect(Object.fromEntries(h.items.map((i) => [i.name, i.value]))).toMatchObject({
 		end_session_endpoint: `${issuer}/oauth/logout`,
