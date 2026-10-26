@@ -19,7 +19,7 @@
 
 ## Invariants
 - An adapter is one program per library, its library pinned in its own manifest (`package.json` for Node, `pom.xml` for Maven, `go.mod` for Go, its toolchain too, `requirements.txt` for Python) and installed from the library's registry; a jar is pinned by its SHA-256 too (`jars.sha256`), as npm's are by the lockfile's integrity, Go's modules by `go.sum`, and Python's packages by `requirements.txt`'s hashes.
-- An adapter trusts the front's certificate, as its instruction gives it, and nothing else, no public root either; no library is told to take plain http.
+- An adapter trusts the front's certificate, as its instruction gives it, and nothing else, no public root either; no library is told to take plain http, nor follows a redirect to it, which would send a request's body and credentials again in clear.
 - The front tells the app the libraries send from `198.51.100.30`: on loopback the sender would be the app's trusted proxy, and its source undetermined.
 - A check that fails is skipped as excused only where a known difference names its library, flow and title; a difference no check met fails the run.
 - A flow test runs only for a library that runs the flow first-class; the others skip it.

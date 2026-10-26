@@ -8,6 +8,7 @@ import secrets
 import sys
 import tempfile
 import traceback
+from urllib.parse import urljoin, urlsplit
 
 from authlib.integrations.requests_client import OAuth2Session, OAuthError
 from authlib.jose import JsonWebKey, jwt
@@ -31,6 +32,16 @@ class Refused(Exception):
         self.kind = kind
 
 
+def https_redirects_only(response, *args, **kwargs):
+    """A response hook: a redirect is followed to https alone; one to plain http would send the
+    request's body, and with it any secret it holds, again in clear."""
+    if response.is_redirect:
+        target = urljoin(response.url, response.headers["location"])
+        if urlsplit(target).scheme != "https":
+            raise Refused("insecure", f"refused a redirect to {urlsplit(target).netloc}, not https")
+    return response
+
+
 class Run:
     def __init__(self, given):
         self.given = given
@@ -47,7 +58,9 @@ class Run:
         import requests
 
         url = self.given["issuer"].rstrip("/") + "/.well-known/openid-configuration"
-        metadata = requests.get(url, verify=self.ca, timeout=30).json()
+        metadata = requests.get(
+            url, verify=self.ca, timeout=30, hooks={"response": https_redirects_only}
+        ).json()
         for key, value in metadata.items():
             if (key.endswith("_endpoint") or key == "jwks_uri") and isinstance(value, str) and not value.startswith("https://"):
                 raise Refused("insecure", f"the discovery names {key} {value}, not https")
@@ -67,6 +80,7 @@ class Run:
             **more,
         )
         session.verify = self.ca
+        session.hooks["response"].append(https_redirects_only)
         return session
 
     def resource(self):
