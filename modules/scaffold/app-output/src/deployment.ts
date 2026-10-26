@@ -264,8 +264,8 @@ ${installed(beside)}
 
 # The image the app runs in starts from Node's own: the tools that install stay in the stages before.
 FROM ${nodeImage} AS runtime
-# An init as process 1 passes signals on and reaps what node leaves behind.
-RUN apk add --no-cache tini
+# An init as process 1 passes signals on and reaps what node leaves behind; Node's bundled corepack goes.
+RUN apk add --no-cache tini && npm uninstall --global corepack
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
