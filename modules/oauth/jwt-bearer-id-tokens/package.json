@@ -16,6 +16,8 @@
 	"devDependencies": {
 		"@mod/audit": "workspace:*",
 		"@mod/client-allowance": "workspace:*",
+		"@mod/client-assertion": "workspace:*",
+		"@mod/client-assertion-store": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/dpop": "workspace:*",
 		"@mod/dpop-store": "workspace:*",

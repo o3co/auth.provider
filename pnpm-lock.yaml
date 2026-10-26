@@ -1508,6 +1508,12 @@ importers:
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
+      '@mod/client-assertion':
+        specifier: workspace:*
+        version: link:../client-assertion
+      '@mod/client-assertion-store':
+        specifier: workspace:*
+        version: link:../../templates/client-assertion-store
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients

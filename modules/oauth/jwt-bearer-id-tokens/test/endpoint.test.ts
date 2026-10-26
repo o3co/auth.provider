@@ -2,6 +2,8 @@ import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
+import clientAssertion from "@mod/client-assertion/module";
+import clientAssertionStore from "@mod/client-assertion-store/module";
 import clientsModule from "@mod/clients/module";
 import {
 	clientSecret,
@@ -189,6 +191,10 @@ async function serve(
 		on?: Served;
 		/** Whether the bound phone, a trusted issuer's client, is registered beside the others. */
 		bound?: true;
+		/** Whether client assertions are composed too, with their store. */
+		assertions?: true;
+		/** Leaves `http`'s public origin unwritten: the issuer alone names this provider. */
+		noPublicOrigin?: true;
 	} = {},
 ): Promise<Served> {
 	const store = settings.on?.store ?? simulatedStore();
@@ -231,10 +237,11 @@ async function serve(
 			jwtBearer,
 			jwtBearerStore,
 			bridge,
+			...(settings.assertions ? [clientAssertion, clientAssertionStore] : []),
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig({ "public-origin": origin }),
+			...httpConfig(settings.noPublicOrigin ? {} : { "public-origin": origin }),
 			...keysConfig(),
 			...issuerConfig({ url: origin }),
 			...tokensConfig({ revocation: "denylist" }),
@@ -340,6 +347,17 @@ const said = (r: { status: number; body: Record<string, unknown> }) =>
 const refusedKey = "400 invalid_grant: the request does not prove the key the assertion names";
 const replayed = "400 invalid_grant: assertion replayed";
 const exchangeUsed = "400 invalid_request: subject_token has been used";
+
+it("refuses to boot without a public origin at jwt-bearer and client-assertion, though the token endpoint names its location on the issuer's origin", async () => {
+	await serve({ assertions: true });
+	const refused = await serve({ assertions: true, noPublicOrigin: true }).catch((error) => error);
+	expect(refused.refusals).toEqual(
+		expect.arrayContaining([
+			{ where: "jwt-bearer", reason: "the token endpoint's location needs a public origin" },
+			{ where: "client-assertion", reason: "the token endpoint's location needs a public origin" },
+		]),
+	);
+});
 
 describe("the JWT bearer grant over the whole token endpoint, for id_tokens", () => {
 	it("binds a public app's token to the key its id_token names, proved by real DPoP; leaving out or changing the proof never gets one [rfc9449-5-b]", async () => {
