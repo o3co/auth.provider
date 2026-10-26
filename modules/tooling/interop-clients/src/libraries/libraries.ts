@@ -40,6 +40,29 @@ const java = () => (process.env.JAVA_HOME ? join(process.env.JAVA_HOME, "bin", "
 
 export const libraries: readonly Library[] = [
 	{
+		name: "spring",
+		// Spring runs headless only the grants its authorized-client providers make; its login needs an app.
+		flows: ["jwt-bearer", "token-exchange"],
+		build: [
+			[
+				"mvn",
+				"-B",
+				"-q",
+				"-f",
+				join("adapters", "spring", "pom.xml"),
+				"dependency:copy-dependencies",
+			],
+			[process.execPath, join("src", "main.ts"), "verify-jars", join("adapters", "spring")],
+			["mvn", "-B", "-q", "-f", join("adapters", "spring", "pom.xml"), "package"],
+		],
+		adapter: () => ({
+			command: java(),
+			args: ["-jar", join(packageDir, "adapters", "spring", "target", "spring-adapter.jar")],
+			cwd: packageDir,
+			env: path(),
+		}),
+	},
+	{
 		name: "authlib",
 		flows: [
 			"login",

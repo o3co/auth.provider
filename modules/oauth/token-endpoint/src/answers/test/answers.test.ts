@@ -3,8 +3,8 @@ import type { Authentication, Client, Clients } from "@mod/clients";
 import clientEvents from "@mod/clients/audit-events";
 import { testRequest } from "@mod/http/testing";
 import { describe, expect, it } from "vitest";
-import declared from "../src/audit-events.ts";
-import { authenticateClient } from "../src/contract.ts";
+import declared from "../../audit-events.ts";
+import { authenticateClient } from "../answers.ts";
 
 type Refused = Extract<Authentication, { kind: "refused" }>["reason"];
 
@@ -31,6 +31,47 @@ const reasons: readonly Refused[] = [
 ];
 
 describe("authenticateClient", () => {
+	it("answers two methods or malformed credentials invalid_request, but invalid_client where an assertion is part of them, challenged as the methods tried", async () => {
+		const answered = async (refused: Extract<Authentication, { kind: "refused" }>) => {
+			const result = await authenticateClient(
+				answering(refused),
+				testRequest({}),
+				recording().audit,
+			);
+			if (result.kind !== "refused") throw new Error("authenticated");
+			const { status, headers, body } = result.response;
+			return [
+				status,
+				(body as { json: { error: string } }).json.error,
+				headers?.["www-authenticate"],
+			];
+		};
+		const basic = 'Basic realm="client"';
+		for (const reason of ["multiple_methods", "malformed_credentials"] as const) {
+			expect(await answered({ kind: "refused", reason, challenges: [] }), reason).toEqual([
+				400,
+				"invalid_request",
+				undefined,
+			]);
+		}
+		expect(
+			await answered({
+				kind: "refused",
+				reason: "multiple_methods",
+				challenges: [basic],
+				assertion: true,
+			}),
+		).toEqual([401, "invalid_client", basic]);
+		expect(
+			await answered({
+				kind: "refused",
+				reason: "malformed_credentials",
+				challenges: [],
+				assertion: true,
+			}),
+		).toEqual([401, "invalid_client", undefined]);
+	});
+
 	it("records each refusal once, with its reason and the source, and no client or credential", async () => {
 		for (const reason of reasons) {
 			const { records, audit } = recording();

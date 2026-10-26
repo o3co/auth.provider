@@ -50,6 +50,12 @@ export interface AuthMethod {
 	readonly signingAlgorithms?: readonly string[];
 	/** The WWW-Authenticate challenge to send when this method's credentials are refused. */
 	readonly challenge?: string;
+	/**
+	 * Set for a method that authenticates by an assertion (RFC 7521): a refusal for two methods or
+	 * malformed credentials of a request it claims is marked. It claims any request carrying a part of
+	 * its assertion.
+	 */
+	readonly assertion?: true;
 	/** The client id the request claims through this method, if it uses this method at all. */
 	claimed(request: HttpRequest): string | undefined;
 	/** Whether the request carries this method's credentials only in part, or in a form it does not take. */
@@ -76,8 +82,18 @@ export type Authentication =
 				| "wrong_method"
 				| "bad_credentials"
 				| "invalid_record";
-			/** Challenges for the response: the tried method's, or every method's when none was tried; none for `multiple_methods` and `malformed_credentials`, answered as malformed requests. */
+			/**
+			 * Challenges for the response: the tried method's, or every method's when none was tried; for
+			 * `multiple_methods` and `malformed_credentials`, where an assertion method claims the request,
+			 * those of the methods claiming it or finding it malformed, else none, answered as malformed
+			 * requests.
+			 */
 			readonly challenges: readonly string[];
+			/**
+			 * Set on `multiple_methods` and `malformed_credentials` where an assertion method claims the
+			 * request, so the request uses an assertion: RFC 7521 §4.2.1 answers it `invalid_client`.
+			 */
+			readonly assertion?: true;
 	  };
 
 export interface Clients {

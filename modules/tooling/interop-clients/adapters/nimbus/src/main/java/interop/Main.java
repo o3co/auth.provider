@@ -386,12 +386,15 @@ public final class Main {
 
   /** Signs in, then exchanges the access token for another (RFC 8693), the client authenticated. */
   private Map<String, Object> tokenExchange() throws Exception {
-    SignedIn in = signIn();
-    AccessToken subject = in.tokens().getOIDCTokens().getAccessToken();
+    // The subject token the driver gives; Nimbus signs in for one where none is given.
+    Object given = instruction.get("subjectToken");
+    SignedIn in = given instanceof String ? null : signIn();
+    OIDCProviderMetadata op = in != null ? in.op() : provider();
+    AccessToken subject = in != null ? in.tokens().getOIDCTokens().getAccessToken() : new BearerAccessToken((String) given);
     TokenRequest request =
         new TokenRequest(
-            in.op().getTokenEndpointURI(),
-            authentication(in.op().getTokenEndpointURI()),
+            op.getTokenEndpointURI(),
+            authentication(op.getTokenEndpointURI()),
             new TokenExchangeGrant(subject, TokenTypeURI.ACCESS_TOKEN));
     TokenResponse answer = TokenResponse.parse(sending(request.toHTTPRequest()).send());
     if (!answer.indicatesSuccess()) throw Refused.of(answer.toErrorResponse().getErrorObject());
@@ -400,7 +403,6 @@ public final class Main {
     result.put("accessToken", success.getTokens().getAccessToken().getValue());
     TokenTypeURI issued = success.getTokens().getAccessToken().getIssuedTokenType();
     result.put("issuedTokenType", issued == null ? null : issued.getURI().toString());
-    result.put("sub", in.claims().getSubject().getValue());
     return result;
   }
 

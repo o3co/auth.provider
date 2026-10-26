@@ -174,6 +174,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/token-denylist` (feature, `modules/oauth/token-denylist`): Owns the access tokens revoked before their end: keeps a revoked token's id, and tells whether an id is kept.
 - `@mod/token-endpoint` (feature, `modules/oauth/token-endpoint`): Answers the token endpoint: authenticates the client, then dispatches to a grant by its grant type; for a request naming no client, has the grant identify it, where the grant can.
   - `allowed` (`src/allowed`): whether every grant a registered client is allowed is served.
+  - `answers` (`src/answers`): the answers the OAuth endpoints share, an error response and a refused client authentication's.
   - `built-in` (`src/built-in`): what the package contributes of its own, the composed rule for a request's audience.
   - `caller` (`src/caller`): calling a contributed grant directly, as the endpoint does once a request has passed it, for the tests of the modules that contribute grants.
   - `endpoint-in` (`src/endpoint-in`): the endpoint's handler, built over what the assembly gives.
