@@ -60,8 +60,10 @@ async function boot({
 	keys = [jwk(ec.publicKey, { kid: "ec" })] as readonly Jwk[],
 	method = "private_key_jwt",
 	issuerUrl = issuer,
-	/** Where the token endpoint is; null for a deployment without a public origin. */
+	/** Where the token endpoint is; null for none at all. */
 	tokenEndpoint = tokenUrl as string | null,
+	/** Whether `http`'s public origin is written; the token endpoint has a location either way. */
+	publicOrigin = true,
 	/** The clients whose section accepts a loose audience. */
 	loose = [] as readonly string[],
 	/** The operator section's settings. */
@@ -113,7 +115,7 @@ async function boot({
 		config: {
 			...kernelConfig(),
 			outbound: {},
-			...httpConfig({ "public-origin": issuer }),
+			...httpConfig(publicOrigin ? { "public-origin": issuer } : {}),
 			...issuerConfig({ url: issuerUrl }),
 			...clientAssertionConfig(settings),
 			...clientsConfig([
@@ -241,6 +243,17 @@ describe("private_key_jwt", () => {
 		expect(await tried(c, { ...twin, aud: tenant })).toBe("app:twin");
 		const nowhere = await boot({ tokenEndpoint: null }).catch((error) => error);
 		expect(nowhere).toBeInstanceOf(BootRefused);
+		// The token endpoint has a location on the issuer's origin wherever it is composed: the public
+		// origin, not the location, is what boot asks for.
+		const unplaced = await boot({ publicOrigin: false }).catch((error) => error);
+		expect(unplaced).toMatchObject({
+			refusals: [
+				{
+					where: "client-assertion",
+					reason: "the token endpoint's location needs a public origin",
+				},
+			],
+		});
 	});
 
 	it("takes the client from client_id when given, which the assertion's issuer and subject must match [rfc7523-3-g] [rfc7521-5.2-f] [oidc-core-9-i] [rfc7521-5.2-c] [oidc-core-9-h] [rfc7521-4.2-c]", async () => {

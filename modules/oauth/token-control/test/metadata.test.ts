@@ -65,14 +65,14 @@ it("publishes where it introspects and revokes, on the public origin", async () 
 	expect(document.revocation_endpoint).toBe("https://as.example/oauth/revoke");
 });
 
-it("publishes revocation only where some token can be revoked, and nothing without a public origin", async () => {
+it("publishes revocation only where some token can be revoked, and both on the issuer's origin where no public origin is written", async () => {
 	expect(await documentOf(false, "https://as.example")).not.toHaveProperty("revocation_endpoint");
 	expect((await documentOf(false, "https://as.example", [refreshKind])).revocation_endpoint).toBe(
 		"https://as.example/oauth/revoke",
 	);
 	const unplaced = await documentOf(true);
-	expect(unplaced).not.toHaveProperty("introspection_endpoint");
-	expect(unplaced).not.toHaveProperty("revocation_endpoint");
+	expect(unplaced.introspection_endpoint).toBe("https://issuer.example/oauth/introspect");
+	expect(unplaced.revocation_endpoint).toBe("https://issuer.example/oauth/revoke");
 });
 
 /** A signed method, as client-assertion contributes one. */

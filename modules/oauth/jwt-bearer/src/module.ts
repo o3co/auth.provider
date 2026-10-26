@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type Ceiling, clientAllowance } from "@mod/client-allowance";
 import { clients, metadataSections } from "@mod/clients";
 import { type GrantInput, type GrantOutcome, grants, type Refused } from "@mod/grants";
+import { site } from "@mod/http";
 import { issuer, metadata } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
 import { senderBinding } from "@mod/sender-binding";
@@ -79,6 +80,7 @@ const spentName = (issuer: string, jti: string) =>
 /** What the grant takes; its own `linkedIssuers` is not named, its own points it collects are. */
 const takes = [
 	issuer,
+	site,
 	tokenEndpointLocation,
 	spentAssertions,
 	revocations,
@@ -112,7 +114,8 @@ export default defineModule(
 		m.contribute(grants).by(async (c) => {
 			const named = (await c.get(issuer)).url;
 			const { url } = await c.get(tokenEndpointLocation);
-			if (url === undefined) {
+			// A public origin is required, as written, though the token endpoint has a location without one.
+			if ((await c.get(site)).origin === undefined || url === undefined) {
 				return c.refuse("jwt-bearer", "the token endpoint's location needs a public origin");
 			}
 			const spent = await c.get(spentAssertions);

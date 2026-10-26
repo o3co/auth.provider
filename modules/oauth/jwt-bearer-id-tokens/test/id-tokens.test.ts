@@ -104,7 +104,7 @@ function assembly(
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig(),
+			...httpConfig({ "public-origin": new URL(issuer).origin }),
 			...issuerConfig({ url: issuer }),
 			...clientsConfig(
 				["ios-app", "android-app"].map((id) => confidentialClient({ id, sections: allowed })),

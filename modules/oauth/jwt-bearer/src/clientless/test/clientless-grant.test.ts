@@ -199,7 +199,7 @@ async function serve(
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig(),
+			...httpConfig({ "public-origin": new URL(issuer).origin }),
 			...issuerConfig({ url: issuer }),
 			...clientsConfig(options.registered ?? registered),
 			"jwt-bearer": { issuers, "delegated-issuers": [delegatedIss] },

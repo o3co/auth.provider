@@ -268,7 +268,7 @@ it("names and stamps the issuer that issuer owns", async () => {
 	expect((await t.verifyAccess(issued.token)).kind).toBe("valid");
 });
 
-it("names among the issuer's metadata where the keys its tokens are signed with are published, on the public origin", async () => {
+it("names among the issuer's metadata where the keys its tokens are signed with are published, on the public origin, or on the issuer's where none is written [oidc-discovery-3-j]", async () => {
 	let seen: readonly MetadataItem[] = [];
 	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 		m.provide(contract<readonly MetadataItem[]>("seen")).by(async (c) => {
@@ -284,8 +284,8 @@ it("names among the issuer's metadata where the keys its tokens are signed with 
 		issuerUrl: "https://as.example/tenant",
 	});
 	expect(jwks(seen)).toBe("https://as.example/.well-known/jwks.json");
-	await boot(section, { extra: [reader] });
-	expect(jwks(seen)).toBeUndefined();
+	await boot(section, { extra: [reader], issuerUrl: "https://login.example/tenant" });
+	expect(jwks(seen)).toBe("https://login.example/.well-known/jwks.json");
 });
 
 it("writes the actor chain as act, and amr, auth_time and acr, only when the grant gives them", async () => {

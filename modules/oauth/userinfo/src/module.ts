@@ -1,6 +1,6 @@
 import { claimsSelections } from "@mod/claims-selection";
-import { type Route, routes, site } from "@mod/http";
-import { metadata } from "@mod/issuer";
+import { type Route, routes } from "@mod/http";
+import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { type BuildContext, defineModule, isUnavailable } from "@mod/kernel";
 import { releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
@@ -48,7 +48,7 @@ const moduleTakes = [
 	sessions,
 	claimsSelections,
 	releasedClaims,
-	site,
+	issuer,
 ];
 
 export default defineModule({ name: "userinfo", replicaSafe: true, takes: moduleTakes }, (m) => [
@@ -70,7 +70,7 @@ export default defineModule({ name: "userinfo", replicaSafe: true, takes: module
 		})),
 	),
 	m.contribute(metadata).by(async (c) => {
-		const origin = (await c.get(site)).origin;
-		return { name: "userinfo_endpoint", value: origin && `${origin}${path}` };
+		const origin = endpointOrigin(await c.get(issuer));
+		return { name: "userinfo_endpoint", value: `${origin}${path}` };
 	}),
 ]);

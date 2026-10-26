@@ -1,6 +1,6 @@
 import { metadataSections } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, routes, site, use } from "@mod/http";
-import { metadata } from "@mod/issuer";
+import { type HttpRequest, type HttpResponse, routes, use } from "@mod/http";
+import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
 import { outboundRefusals } from "@mod/outbound-policy";
 import { requestsPerSource } from "@mod/rate-limit";
@@ -26,14 +26,7 @@ export default defineModule(
 		name,
 		section,
 		replicaSafe: true,
-		takes: [
-			upstreamEnds,
-			site,
-			outboundRefusals,
-			...noticesTakes,
-			...endingTakes,
-			...rememberingTakes,
-		],
+		takes: [upstreamEnds, outboundRefusals, ...noticesTakes, ...endingTakes, ...rememberingTakes],
 	},
 	(m) => [
 		m.contribute(metadataSections).by(registrationIn),
@@ -89,8 +82,8 @@ export default defineModule(
 			})),
 		),
 		m.contribute(metadata).by(async (c) => {
-			const origin = (await c.get(site)).origin;
-			return { name: "end_session_endpoint", value: origin && `${origin}${path}` };
+			const origin = endpointOrigin(await c.get(issuer));
+			return { name: "end_session_endpoint", value: `${origin}${path}` };
 		}),
 		...[
 			"frontchannel_logout_supported",

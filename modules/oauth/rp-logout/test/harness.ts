@@ -67,6 +67,8 @@ export async function harness(
 		/** Each client's redirect URIs, by id; `https://app.example/cb` for one not named. */
 		readonly redirects?: Readonly<Record<string, readonly string[]>>;
 		readonly extra?: readonly Module[];
+		/** Leaves `http`'s public origin unwritten: the issuer alone names this provider. */
+		readonly noPublicOrigin?: true;
 		readonly sessionsModule?: Module;
 		/** Makes rp-logout's session clients store fail as it says. */
 		readonly clientsDown?: UnavailableSwitch<SessionClients>;
@@ -162,7 +164,7 @@ export async function harness(
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig({ "public-origin": issuer }),
+			...httpConfig(options.noPublicOrigin ? {} : { "public-origin": issuer }),
 			...keysConfig(),
 			...issuerConfig({ url: issuer }),
 			...usersConfig([]),

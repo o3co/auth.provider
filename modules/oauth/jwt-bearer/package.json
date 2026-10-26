@@ -19,6 +19,7 @@
 		"@mod/clients": "workspace:*",
 		"@mod/external-jwt": "workspace:*",
 		"@mod/grants": "workspace:*",
+		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
@@ -32,7 +33,6 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"@mod/http": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*",

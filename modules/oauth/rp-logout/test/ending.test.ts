@@ -550,6 +550,13 @@ it("publishes its endpoint and the front-channel and back-channel support [oidc-
 	});
 });
 
+it("publishes its endpoint on the issuer's origin where no public origin is written [oidc-rpinit-2.1-a]", async () => {
+	const h = await serve({ noPublicOrigin: true });
+	expect(h.items.find((i) => i.name === "end_session_endpoint")?.value).toBe(
+		`${issuer}/oauth/logout`,
+	);
+});
+
 it("refuses to start with a client whose return, front-channel or back-channel URL does not fit", async () => {
 	const cases = [
 		["a return with a fragment", "post-logout-redirect-uris", ["https://app.example/after#x"]],

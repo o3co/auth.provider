@@ -68,11 +68,15 @@ it("publishes its location, the grants it dispatches to, and the client authenti
 	expect(document.token_endpoint_auth_signing_alg_values_supported).toEqual(["ES256"]);
 });
 
-it("lists no grant that is not contributed, no algorithms when no method signs, and no location without a public origin", async () => {
+it("lists no grant that is not contributed, and no algorithms when no method signs", async () => {
 	const document = await documentOf([]);
 	expect(document.grant_types_supported).toEqual(["client_credentials"]);
 	expect(document).not.toHaveProperty("token_endpoint_auth_signing_alg_values_supported");
-	expect(document).not.toHaveProperty("token_endpoint");
+});
+
+it("publishes its location on the issuer's origin where no public origin is written [rfc8414-2-c] [oidc-discovery-3-f]", async () => {
+	const document = await documentOf([]);
+	expect(document.token_endpoint).toBe("https://issuer.example/oauth/token");
 });
 
 it("says which grant types are composed: the built-in one and those contributed, no other", async () => {
