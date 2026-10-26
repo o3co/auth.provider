@@ -50,8 +50,8 @@ export interface IdTokenRequest {
 	readonly scope: readonly string[];
 	/** The session's handle, which never lets anyone into it. */
 	readonly session: string;
-	/** The redemption's name, as `redemptionOf` gives it; a redemption always tells it. */
-	readonly redemption?: string;
+	/** The redemption's name, as `redemptionOf` gives it. */
+	readonly redemption: string;
 }
 
 export interface IdTokenMaker {
