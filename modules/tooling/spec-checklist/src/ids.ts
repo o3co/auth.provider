@@ -1,10 +1,13 @@
-/** An item's ID: its spec, its section in the spec, and its letter within the section. */
+/**
+ * An item's ID: its spec, its section in the spec, and its letter within the section. `guarantee`
+ * is the provider's own promises, numbered as docs/security-model.md numbers them.
+ */
 export const itemId =
-	/^(rfc\d{4}|oidc-(?:core|discovery|rpinit|bcl))-((?:\d+|[A-Z])(?:\.\d+)*)-([a-z]{1,2})$/;
+	/^(rfc\d{4}|oidc-(?:core|discovery|rpinit|bcl)|guarantee)-((?:\d+|[A-Z])(?:\.\d+)*)-([a-z]{1,2})$/;
 
 /** Anything written like an item ID, well formed or not, so that none goes unseen. */
 export const idCandidate =
-	/(?<![\w-])(?:rfc\d{4}|oidc-(?:core|discovery|rpinit|bcl))-[0-9A-Za-z.-]*[0-9A-Za-z]/g;
+	/(?<![\w-])(?:rfc\d{4}|oidc-(?:core|discovery|rpinit|bcl)|guarantee)-[0-9A-Za-z.-]*[0-9A-Za-z]/g;
 
 export type Strength = "MUST" | "MUST NOT" | "SHOULD" | "SHOULD NOT";
 

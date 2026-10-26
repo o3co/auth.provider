@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isFaultName } from "./guarantee/faults.ts";
 import { idCandidate, itemId } from "./ids.ts";
 
 const runners = new Set(["it", "test", "describe"]);
@@ -38,6 +39,26 @@ export interface Title {
 	readonly path: readonly (string | null)[];
 	/** Whether it is a suite's title (`describe`), which the tests inside it meet. */
 	readonly suite: boolean;
+	/** The faults its marks `{fault:<name>}` name, each once. */
+	readonly faults: readonly string[];
+	/** Every other mark it reserves: `{fault` or `{faults` not followed by a letter, up to `}` or its end. */
+	readonly malformed: readonly string[];
+}
+
+/** A fault mark's candidate: the reserved `{fault` or `{faults`, then all up to the next `}`, or to the end where none closes it. */
+const faultCandidate = /\{faults?(?![A-Za-z])[^}]*\}?/gi;
+const faultMark = /^\{fault:([A-Za-z0-9]+)\}$/;
+
+/** A title's fault marks: those well formed, each once, and the rest of what it reserves. */
+function marksIn(text: string) {
+	const faults: string[] = [];
+	const malformed: string[] = [];
+	for (const [candidate] of text.matchAll(faultCandidate)) {
+		const name = faultMark.exec(candidate)?.[1];
+		if (name && isFaultName(name) && !faults.includes(name)) faults.push(name);
+		else malformed.push(candidate);
+	}
+	return { faults, malformed };
 }
 
 interface Literal {
@@ -122,8 +143,12 @@ export function titlesIn(
 			if (l.title && bracketed && itemId.test(m[0])) ids.push(m[0]);
 			else found.push({ at: l.start + m.index, id: m[0] });
 		}
-		if (l.title && candidates.length > 0)
-			titles.push({ at: l.start, title: { title: l.text, ids, path: l.path, suite: l.suite } });
+		const marks = l.title ? marksIn(l.text) : { faults: [], malformed: [] };
+		if (l.title && candidates.length + marks.faults.length + marks.malformed.length > 0)
+			titles.push({
+				at: l.start,
+				title: { title: l.text, ids, path: l.path, suite: l.suite, ...marks },
+			});
 	}
 	let rest = source;
 	for (const l of literals)

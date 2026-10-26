@@ -1,3 +1,5 @@
+import { type FaultName, faultNames, isFaultName } from "./guarantee/faults.ts";
+import { promisesSource } from "./guarantee/promises.ts";
 import { classOf, itemId, type Keyword, keywords, type Strength, specOf } from "./ids.ts";
 
 export type Mark =
@@ -16,7 +18,19 @@ export interface Item {
 	readonly updates: readonly string[];
 	/** The role of the server's the requirement binds. */
 	readonly role: Role;
+	/** A guarantee's faults: each a column its tests must hold, marked `{fault:<name>}`. */
+	readonly faults?: readonly FaultName[];
 }
+
+/** What the guarantee file holds besides its items: its source lines, the faults it gives a meaning, and each section's title. */
+export interface GuaranteeHead {
+	readonly sources: readonly string[];
+	readonly meanings: readonly string[];
+	readonly sections: ReadonlyMap<string, string>;
+}
+
+/** The spec of the provider's own promises, held to the security model rather than a ledger. */
+export const guaranteeSpec = "guarantee";
 
 /**
  * The roles the server takes: authorization server, OpenID Provider, resource server at its own
@@ -76,6 +90,7 @@ export interface Spec {
 	readonly title: string;
 	readonly items: readonly Item[];
 	readonly ledger: Ledger | undefined;
+	readonly guarantee?: GuaranteeHead;
 }
 
 export interface Checklist {
@@ -87,7 +102,7 @@ export interface Checklist {
 
 const section = "(?:\\d+|[A-Z])(?:\\.\\d+)*";
 const itemLine = /^- \*\*(\S+?)\*\* (MUST NOT|MUST|SHOULD NOT|SHOULD): (\S.*)$/;
-const markLine = /^ {2}(out-of-scope|deviates|noncompliant|updates|role): (\S.*)$/;
+const markLine = /^ {2}(out-of-scope|deviates|noncompliant|updates|role|faults): (\S.*)$/;
 const heading = new RegExp(`^## (${section}) \\S`);
 
 export function parseItems(spec: string, text: string) {
@@ -103,14 +118,33 @@ export function parseItems(spec: string, text: string) {
 	let roled = false;
 	let role = defaultRoleOf(spec);
 	let headRoled = false;
+	const guaranteed = spec === guaranteeSpec;
+	const sources: string[] = [];
+	const meanings: string[] = [];
+	const sections = new Map<string, string>();
 	for (const line of text.split("\n")) {
 		const item = itemLine.exec(line);
 		const mark = markLine.exec(line);
 		const sectionHead = heading.exec(line);
 		if (line.trim() === "") continue;
 		const head = /^- role: (\S+)$/.exec(line);
+		const source = /^- source: (\S.*)$/.exec(line);
+		const meaning = /^- fault (\S+): \S/.exec(line);
+		const promise = /^## (\S+) (\S.*)$/.exec(line);
 		if (line.startsWith("# ") && title === "") title = line.slice(2);
-		else if (head && current === undefined) {
+		else if (guaranteed && current === undefined && (source || meaning)) {
+			if (source) sources.push(source[1] ?? "");
+			if (meaning) meanings.push(meaning[1] ?? "");
+		} else if (guaranteed && head) found("a guarantee takes no role line");
+		else if (guaranteed && promise) {
+			const [, number = "", heading = ""] = promise;
+			if (!/^\d+$/.test(number)) found(`section ${number}: not a promise's number`);
+			else if (/\s#+\s*$/.test(heading)) found(`section ${number}: a heading closed by #`);
+			else if (sections.has(number)) found(`section ${number}: written twice`);
+			else sections.set(number, heading);
+			current = /^\d+$/.test(number) ? number : undefined;
+			last = undefined;
+		} else if (head && current === undefined) {
 			const given = head[1] as Role;
 			if (headRoled) found("the file has more than one role line");
 			else if (roles.includes(given)) role = given;
@@ -146,6 +180,17 @@ export function parseItems(spec: string, text: string) {
 		} else if (mark) {
 			const [, kind, value = ""] = mark;
 			if (!last) found(`a mark with no item before it: ${line.trim()}`);
+			else if (kind === "faults") {
+				const names = value.split(",").map((n) => n.trim());
+				if (!guaranteed) found(`${last.id}: a faults line is a guarantee's alone`);
+				else if (last.faults) found(`${last.id}: has more than one faults line`);
+				else if (names.some((n) => !isFaultName(n)))
+					found(`${last.id}: faults ${value} names a fault none of ${faultNames.join(", ")}`);
+				else if (new Set(names).size !== names.length)
+					found(`${last.id}: faults ${value} names one twice`);
+				else last.faults = names as FaultName[];
+			} else if (guaranteed && (kind === "role" || kind === "updates"))
+				found(`${last.id}: a guarantee takes no ${kind} line`);
 			else if (kind === "role" && roled) found(`${last.id}: has more than one role line`);
 			else if (kind === "role") {
 				// A role line seen, taken or not, so a second one is refused either way.
@@ -167,7 +212,43 @@ export function parseItems(spec: string, text: string) {
 							: { kind: "noncompliant", issue: value };
 		} else found(`not an item, a heading, a mark or a blank line: ${line}`);
 	}
-	return { title, items: items as Item[], findings };
+	const guarantee = guaranteed ? { sources, meanings, sections } : undefined;
+	return { title, items: items as Item[], findings, ...(guarantee ? { guarantee } : {}) };
+}
+
+/** The guarantee file's own rules: one source naming the promises and no ledger, a meaning for each fault and no other, MUST alone, noncompliant alone. */
+function guaranteeRules(s: Spec): Finding[] {
+	const where = `checklist/${s.spec}.md`;
+	const findings: Finding[] = [];
+	const sources = s.guarantee?.sources ?? [];
+	if (sources.length !== 1 || sources[0] !== promisesSource)
+		findings.push({
+			where,
+			detail: `needs one source line, ${promisesSource}; has ${sources.join(", ") || "none"}`,
+		});
+	if (s.ledger)
+		findings.push({
+			where: `checklist/${s.spec}.ledger.md`,
+			detail: "a guarantee is held to the security model, and takes no ledger",
+		});
+	const meanings = s.guarantee?.meanings ?? [];
+	for (const name of faultNames) {
+		const given = meanings.filter((m) => m === name).length;
+		if (given !== 1)
+			findings.push({ where, detail: `fault ${name}: has ${given} meaning lines, not one` });
+	}
+	for (const m of meanings.filter((m) => !isFaultName(m)))
+		findings.push({ where, detail: `fault ${m}: a meaning for a fault the package does not name` });
+	for (const i of s.items) {
+		if (classOf(i.strength) !== "MUST")
+			findings.push({ where: i.id, detail: `${i.id}: a guarantee is a MUST or a MUST NOT` });
+		if (i.mark && i.mark.kind !== "noncompliant")
+			findings.push({
+				where: i.id,
+				detail: `${i.id}: a guarantee takes noncompliant alone, not ${i.mark.kind}`,
+			});
+	}
+	return findings;
 }
 
 const rowLine = new RegExp(`^- (front|${section}) #(\\d+) (${keywords.join("|")}): (\\S.*)$`);
@@ -236,7 +317,8 @@ export function checklistFindings(c: Checklist): Finding[] {
 	const findings = [...c.parsing];
 	const all = new Map(c.specs.flatMap((s) => s.items.map((i) => [i.id, i] as const)));
 	for (const s of c.specs) {
-		if (!s.ledger)
+		if (s.spec === guaranteeSpec) findings.push(...guaranteeRules(s));
+		else if (!s.ledger)
 			findings.push({ where: `checklist/${s.spec}.md`, detail: `${s.spec}: has no ledger` });
 	}
 	for (const i of c.specs.flatMap((s) => s.items)) {
