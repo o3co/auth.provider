@@ -132,10 +132,13 @@ type SignedIn = Awaited<ReturnType<typeof signedIn>>;
 async function logout(
 	at: SignedIn,
 	method: "GET" | "POST",
-	params: Record<string, string>,
+	/** The parameters, or their pairs in order where a name is sent more than once. */
+	params: Record<string, string> | readonly (readonly [string, string])[],
 	extra: Record<string, string> = {},
 ) {
-	const query = new URLSearchParams(params).toString();
+	const query = new URLSearchParams(
+		Array.isArray(params) ? params.map(([k, v]) => [k, v]) : (params as Record<string, string>),
+	).toString();
 	const res = await fetch(`${base}/oauth/logout${method === "GET" ? `?${query}` : ""}`, {
 		method,
 		redirect: "manual",
@@ -238,6 +241,31 @@ describe("a logout the client starts", () => {
 			]);
 		}
 		expect(await stillSignedIn(at)).toBe(true);
+	});
+
+	// A parameter sent twice reads as none: refused first, so neither the client_id check nor the
+	// return's can be passed by sending it twice.
+	it("refuses a client_id or a return sent twice, leaving the session", async () => {
+		for (const [name, value] of [
+			["client_id", "other"],
+			["post_logout_redirect_uri", `${back}/x`],
+		] as const) {
+			const at = await signedIn();
+			for (const method of ["GET", "POST"] as const) {
+				const answer = await logout(at, method, [
+					["id_token_hint", at.idToken],
+					[name, value],
+					[name, value],
+				]);
+				expect([name, method, answer.status, answer.json]).toEqual([
+					name,
+					method,
+					400,
+					{ error: "invalid_request", error_description: "repeated parameter" },
+				]);
+			}
+			expect([name, await stillSignedIn(at)]).toEqual([name, true]);
+		}
 	});
 
 	it("refuses a request without a hint", async () => {
