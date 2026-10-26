@@ -125,6 +125,7 @@ export function flowWith(parts: FlowParts): Flow {
 		}
 		const raised = await stepUp.met({
 			acrs: asked.acrs,
+			essential: asked.essential,
 			amr: session.context.amr,
 			authenticatedAt: session.context.authenticatedAt,
 			none: prompt.has("none"),

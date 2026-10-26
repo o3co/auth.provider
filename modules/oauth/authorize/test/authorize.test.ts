@@ -336,7 +336,12 @@ describe("authorize: trust in the redirect URI", () => {
 			[request({ request_uri: "urn:x" }), "request_uri_not_supported"],
 			[request({ response_mode: "fragment" }), "invalid_request"],
 			[request({ scope: "admin" }), "invalid_scope"],
-			[request({ acr_values: "gold" }), "unmet_authentication_requirements"],
+			[
+				request({
+					claims: JSON.stringify({ id_token: { acr: { essential: true, values: ["gold"] } } }),
+				}),
+				"unmet_authentication_requirements",
+			],
 			[request({ client_id: "nocode" }), "unauthorized_client"],
 			[request({ prompt: "none login" }), "invalid_request"],
 			[`${new URLSearchParams(request())}&code_challenge_method=S256`, "invalid_request"],
@@ -1226,7 +1231,7 @@ it("hashes a re-authentication the same whatever the order of parameters or prom
 	expect(res.at?.pathname).not.toBe("/login");
 });
 
-it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it", async () => {
+it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it [oidc-core-15.1-g] [oidc-core-5.5.1.1-b]", async () => {
 	const s = await serve({
 		acr: { "urn:test:mfa": [["mfa"]] },
 		authorize: { "step-up-page": "https://as.example/mfa" },
@@ -1239,13 +1244,29 @@ it("meets an acr by the amr sets its table names, and sends a session that falls
 	expect(`${back.origin}${back.pathname}`).toBe("https://as.example/oauth/authorize");
 	const met = await s.authorize(asked, await s.login("alice", ["pwd", "otp", "mfa"]));
 	expect(met.at?.searchParams.get("code")).toBeTruthy();
+	// Asked by acr_values, an acr is voluntary: one not met under prompt=none, or not known, is passed over.
 	const quiet = await s.authorize(
 		request({ acr_values: "urn:test:mfa", prompt: "none" }),
 		await s.login(),
 	);
-	expect(quiet.at?.searchParams.get("error")).toBe("interaction_required");
+	expect(quiet.at?.searchParams.has("code")).toBe(true);
 	const unknown = await s.authorize(request({ acr_values: "gold" }), await s.login());
-	expect(unknown.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+	expect(unknown.at?.searchParams.has("code")).toBe(true);
+	// Asked as essential in claims, it is not: unmet under prompt=none, or not known, is refused.
+	const essential = (values: string[]) =>
+		JSON.stringify({ id_token: { acr: { essential: true, values } } });
+	const held = await s.authorize(
+		request({ claims: essential(["urn:test:mfa"]), prompt: "none" }),
+		await s.login(),
+	);
+	expect(held.at?.searchParams.get("error")).toBe("interaction_required");
+	const unknowable = await s.authorize(request({ claims: essential(["gold"]) }), await s.login());
+	expect(unknowable.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+	const raising = await s.authorize(
+		request({ claims: essential(["urn:test:mfa"]) }),
+		await s.login(),
+	);
+	expect(`${raising.at?.origin}${raising.at?.pathname}`).toBe("https://as.example/mfa");
 });
 
 it("binds to the code the first acr met in the order asked, past any not met", async () => {
@@ -1271,6 +1292,7 @@ it("binds to the code the first acr met in the order asked, past any not met", a
 		"urn:test:either urn:test:one",
 		"urn:test:one urn:test:either",
 		"urn:test:two urn:test:one",
+		"urn:test:two",
 	]) {
 		const res = await s.authorize(request({ scope: "openid", acr_values: order }), await s.login());
 		const code = res.at?.searchParams.get("code") ?? "";
@@ -1288,6 +1310,8 @@ it("binds to the code the first acr met in the order asked, past any not met", a
 		"urn:test:either",
 		"urn:test:one",
 		"urn:test:one",
+		// Voluntary and not met: the code goes on without an acr.
+		undefined,
 		undefined,
 	]);
 });
@@ -1305,13 +1329,20 @@ describe("authorize: one trip to raise the authentication", () => {
 		authorize: { "step-up-page": "https://as.example/mfa" },
 	};
 
-	it("answers unmet when the browser comes back without raising, and issues once it raised", async () => {
+	it("goes on without a voluntary acr when the browser comes back without raising, answers unmet for an essential one, and issues once it raised", async () => {
 		const s = await serve(table);
 		const cookie = await s.login();
 		const sent = await s.authorize(request({ acr_values: "urn:test:mfa" }), cookie);
 		const back = new URL(sent.at?.searchParams.get("redirect_to") ?? "");
 		const unraised = await s.authorize(back.search.slice(1), cookie);
-		expect(unraised.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+		expect(unraised.at?.searchParams.has("code")).toBe(true);
+		const essential = JSON.stringify({
+			id_token: { acr: { essential: true, value: "urn:test:mfa" } },
+		});
+		const held = await s.authorize(request({ claims: essential }), cookie);
+		const heldBack = new URL(held.at?.searchParams.get("redirect_to") ?? "");
+		const refused = await s.authorize(heldBack.search.slice(1), cookie);
+		expect(refused.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
 		const again = await s.authorize(request({ acr_values: "urn:test:mfa" }), cookie);
 		const resume = new URL(again.at?.searchParams.get("redirect_to") ?? "");
 		const done = await s.authorize(resume.search.slice(1), await raised(s, cookie));
@@ -1336,16 +1367,60 @@ describe("authorize: one trip to raise the authentication", () => {
 	});
 });
 
-it("refuses a claims parameter that is no object or asks for acr, and ignores the other claims it names", async () => {
-	const s = await serve({ acr: { "urn:test:pwd": [["pwd"]] } });
+it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-a] [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a]", async () => {
+	const asked: IdTokenRequest[] = [];
+	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
+		m.contribute(idTokens).by(() => ({
+			scope: "openid",
+			make: async (r: IdTokenRequest) => {
+				asked.push(r);
+				return "id.token.here";
+			},
+		})),
+	]);
+	const s = await serve({
+		extra: [maker],
+		acr: { "urn:test:pwd": [["pwd"]], "urn:test:mfa": [["mfa"]] },
+	});
 	const cookie = await s.login();
 	const answer = async (claims: string, extra: Record<string, string> = {}) =>
-		(await s.authorize(request({ claims, ...extra }), cookie)).at?.searchParams;
-	const acr = JSON.stringify({ id_token: { acr: { essential: true, values: ["urn:test:pwd"] } } });
-	for (const asked of [acr, JSON.stringify({ userinfo: { acr: null } }), "[]", "not json"]) {
-		expect((await answer(asked))?.get("error")).toBe("invalid_request");
+		(await s.authorize(request({ scope: "openid", claims, ...extra }), cookie)).at?.searchParams;
+	/** The acr the ID token of this code carries. */
+	const acrOf = async (code: string | null | undefined) => {
+		await s.token({ code: code ?? "", redirect_uri: callback, code_verifier: verifier });
+		return asked.at(-1)?.acr;
+	};
+	for (const malformed of [
+		"[]",
+		"not json",
+		JSON.stringify({ id_token: { acr: { values: "urn:test:pwd" } } }),
+	]) {
+		expect((await answer(malformed))?.get("error"), malformed).toBe("invalid_request");
 	}
-	expect((await answer(acr, { acr_values: "urn:test:pwd" }))?.get("error")).toBe("invalid_request");
+	const of = (acr: unknown, at = "id_token") => JSON.stringify({ [at]: { acr } });
+	// Essential and met, by value or values, from id_token or userinfo: the code carries it.
+	expect(
+		await acrOf((await answer(of({ essential: true, values: ["urn:test:pwd"] })))?.get("code")),
+	).toBe("urn:test:pwd");
+	expect(
+		await acrOf(
+			(await answer(of({ essential: true, value: "urn:test:pwd" }, "userinfo")))?.get("code"),
+		),
+	).toBe("urn:test:pwd");
+	// Its values over acr_values, which they stand in for.
+	const both = await answer(of({ essential: true, values: ["urn:test:pwd"] }), {
+		acr_values: "urn:test:mfa",
+	});
+	expect(await acrOf(both?.get("code"))).toBe("urn:test:pwd");
+	// Essential and unmet, with no step-up page: refused.
+	expect((await answer(of({ essential: true, values: ["urn:test:mfa"] })))?.get("error")).toBe(
+		"unmet_authentication_requirements",
+	);
+	// Not essential, or with no values: voluntary, so unmet goes on without one.
+	expect(
+		await acrOf((await answer(of({ values: ["urn:test:mfa"] })))?.get("code")),
+	).toBeUndefined();
+	expect(await acrOf((await answer(of(null, "userinfo")))?.get("code"))).toBeUndefined();
 	expect((await answer(JSON.stringify({ id_token: { email: null } })))?.has("code")).toBe(true);
 });
 
@@ -1384,12 +1459,17 @@ it("offers a contributed acr unless the operator's table names the same acr", as
 		acr: { "urn:test:both": [["pwd"]] },
 	});
 	const cookie = await s.login();
-	const code = async (acr: string) =>
-		(await s.authorize(request({ acr_values: acr }), cookie)).at?.searchParams;
-	expect((await code("urn:test:own"))?.get("error")).toBe("unmet_authentication_requirements");
-	expect((await code("urn:test:both"))?.has("code")).toBe(true);
+	const code = async (claims: string) =>
+		(await s.authorize(request({ claims }), cookie)).at?.searchParams;
+	// Asked as essential, so one unmet is refused rather than passed over.
+	const essential = (acr: string) =>
+		JSON.stringify({ id_token: { acr: { essential: true, values: [acr] } } });
+	expect((await code(essential("urn:test:own")))?.get("error")).toBe(
+		"unmet_authentication_requirements",
+	);
+	expect((await code(essential("urn:test:both")))?.has("code")).toBe(true);
 	const strong = await s.login("alice", ["pwd", "mfa"]);
-	const met = await s.authorize(request({ acr_values: "urn:test:own" }), strong);
+	const met = await s.authorize(request({ claims: essential("urn:test:own") }), strong);
 	expect(met.at?.searchParams.has("code")).toBe(true);
 });
 
