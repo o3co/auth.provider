@@ -224,6 +224,22 @@ describe("a logout the client starts", () => {
 		}
 	});
 
+	// A client_id beside the hint must be the client the ID token was issued to (RP-Initiated Logout 1.0 §2).
+	it("refuses a client_id that is not the client the hint was issued to, leaving the session", async () => {
+		const at = await signedIn();
+		for (const method of ["GET", "POST"] as const) {
+			const answer = await logout(at, method, { id_token_hint: at.idToken, client_id: "other" });
+			expect([answer.status, answer.json]).toEqual([
+				400,
+				{
+					error: "invalid_request",
+					error_description: "client_id is not the client the id_token_hint was issued to",
+				},
+			]);
+		}
+		expect(await stillSignedIn(at)).toBe(true);
+	});
+
 	it("refuses a request without a hint", async () => {
 		const at = await signedIn();
 		for (const method of ["GET", "POST"] as const) {
