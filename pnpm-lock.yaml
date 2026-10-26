@@ -4489,9 +4489,15 @@ importers:
       '@mod/conformance-code':
         specifier: workspace:*
         version: link:../conformance-code
+      '@mod/conformance-federation':
+        specifier: workspace:*
+        version: link:../conformance-federation
       '@mod/conformance-front':
         specifier: workspace:*
         version: link:../conformance-front
+      '@mod/conformance-oauth':
+        specifier: workspace:*
+        version: link:../conformance-oauth
       '@mod/conformance-tunnel':
         specifier: workspace:*
         version: link:../conformance-tunnel

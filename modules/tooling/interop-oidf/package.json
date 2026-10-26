@@ -7,7 +7,9 @@
 	"dependencies": {
 		"@mod/conformance": "workspace:*",
 		"@mod/conformance-code": "workspace:*",
+		"@mod/conformance-federation": "workspace:*",
 		"@mod/conformance-front": "workspace:*",
+		"@mod/conformance-oauth": "workspace:*",
 		"@mod/conformance-tunnel": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",
 		"vitest": "5.0.5"
