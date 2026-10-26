@@ -520,6 +520,11 @@ jobs:
           java-version: '21'
           cache: maven
           cache-dependency-path: modules/tooling/interop-clients/adapters/*/pom.xml
+      # Go for the adapter `go build` makes, at the toolchain its go.mod pins.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: modules/tooling/interop-clients/adapters/go/go.mod
+          cache-dependency-path: modules/tooling/interop-clients/adapters/go/go.sum
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
