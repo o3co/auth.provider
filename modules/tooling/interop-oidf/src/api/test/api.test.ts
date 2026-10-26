@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { selfSigned } from "@mod/conformance-front";
 import { describe, expect, it } from "vitest";
-import { certificateAt, getJson, pemOf, pinnedTo } from "../api.ts";
+import { certificateAt, getJson, pemOf, pinnedTo, requestJson } from "../api.ts";
 
 describe("the suite's API, reached trusting its certificate alone", () => {
 	it("takes the certificate first read alone, by its fingerprint, whatever host it names", async () => {
@@ -78,6 +78,55 @@ describe("the suite's API, reached trusting its certificate alone", () => {
 		} finally {
 			drip.closeAllConnections();
 			drip.close();
+		}
+	});
+	it("sends any method, with a JSON body where given, and answers every status without refusing it", async () => {
+		const tls = await selfSigned("localhost", await mkdtemp(join(tmpdir(), "suite-")));
+		const seen: { method?: string; url?: string; type?: string; body: string }[] = [];
+		const echo = createHttpsServer(tls, (req, res) => {
+			let body = "";
+			req.on("data", (chunk) => {
+				body += chunk;
+			});
+			req.on("end", () => {
+				seen.push({
+					...(req.method ? { method: req.method } : {}),
+					...(req.url ? { url: req.url } : {}),
+					...(req.headers["content-type"] ? { type: req.headers["content-type"] } : {}),
+					body,
+				});
+				const status = req.method === "POST" ? 201 : req.method === "DELETE" ? 200 : 404;
+				res.writeHead(status, { "content-type": "application/json" });
+				res.end(JSON.stringify({ id: "m1" }));
+			});
+		});
+		await new Promise<void>((resolve) => echo.listen(0, "127.0.0.1", resolve));
+		const at = `https://localhost:${(echo.address() as AddressInfo).port}`;
+		try {
+			const made = await requestJson("POST", `${at}/api/plan?planName=p`, tls.cert, {
+				body: { alias: "a" },
+			});
+			expect(made).toEqual({ status: 201, body: { id: "m1" } });
+			expect(await requestJson("DELETE", `${at}/api/runner/m1`, tls.cert)).toEqual({
+				status: 200,
+				body: { id: "m1" },
+			});
+			expect((await requestJson("GET", `${at}/api/runner/m1/wait-state`, tls.cert)).status).toBe(
+				404,
+			);
+			expect(seen).toEqual([
+				{
+					method: "POST",
+					url: "/api/plan?planName=p",
+					type: "application/json",
+					body: '{"alias":"a"}',
+				},
+				{ method: "DELETE", url: "/api/runner/m1", body: "" },
+				{ method: "GET", url: "/api/runner/m1/wait-state", body: "" },
+			]);
+		} finally {
+			echo.closeAllConnections();
+			echo.close();
 		}
 	});
 	it("writes the certificate its nginx answers with as PEM, the same certificate", async () => {
