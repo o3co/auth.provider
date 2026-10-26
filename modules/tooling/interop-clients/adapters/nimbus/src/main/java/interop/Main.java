@@ -73,6 +73,7 @@ import com.nimbusds.openid.connect.sdk.OIDCTokenResponse;
 import com.nimbusds.openid.connect.sdk.OIDCTokenResponseParser;
 import com.nimbusds.openid.connect.sdk.UserInfoRequest;
 import com.nimbusds.openid.connect.sdk.UserInfoResponse;
+import com.nimbusds.openid.connect.sdk.claims.UserInfo;
 import com.nimbusds.openid.connect.sdk.claims.IDTokenClaimsSet;
 import com.nimbusds.openid.connect.sdk.op.OIDCProviderMetadata;
 import com.nimbusds.openid.connect.sdk.validators.IDTokenValidator;
@@ -439,6 +440,13 @@ public final class Main {
   /** What a sign-in gave: the provider, the tokens and the ID token's claims as the validator took them. */
   record SignedIn(OIDCProviderMetadata op, OIDCTokenResponse tokens, IDTokenClaimsSet claims) {}
 
+  /** Userinfo is the signed-in user's only where it names the ID token's subject (OpenID Connect Core §5.3.2). */
+  private static UserInfo sameSubject(UserInfo info, IDTokenClaimsSet claims) {
+    if (info.getSubject() == null || !info.getSubject().equals(claims.getSubject()))
+      throw new Refused("userinfo_subject", "the userinfo names another subject, or none");
+    return info;
+  }
+
   private Map<String, Object> login() throws Exception {
     SignedIn in = signIn();
     BearerAccessToken access = in.tokens().getOIDCTokens().getBearerAccessToken();
@@ -448,7 +456,7 @@ public final class Main {
     if (!info.indicatesSuccess()) throw Refused.of(info.toErrorResponse().getErrorObject());
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("idToken", in.claims().toJSONObject());
-    result.put("userinfo", info.toSuccessResponse().getUserInfo().toJSONObject());
+    result.put("userinfo", sameSubject(info.toSuccessResponse().getUserInfo(), in.claims()).toJSONObject());
     result.put("tokenType", access.getType().getValue());
     result.put("scope", access.getScope() == null ? null : access.getScope().toString());
     result.put("refreshToken", in.tokens().getOIDCTokens().getRefreshToken() != null);
@@ -559,7 +567,7 @@ public final class Main {
     result.put("tokenType", token.getType().getValue());
     result.put("accessToken", token.getValue());
     result.put("sub", in.claims().getSubject().getValue());
-    result.put("userinfo", info.toSuccessResponse().getUserInfo().toJSONObject());
+    result.put("userinfo", sameSubject(info.toSuccessResponse().getUserInfo(), in.claims()).toJSONObject());
     return result;
   }
 
