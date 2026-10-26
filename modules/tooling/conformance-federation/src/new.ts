@@ -44,6 +44,7 @@ function settingsOf(idp: IdpScene): Record<string, unknown> {
 				issuer: idp.issuer,
 				...client,
 				...(idp.readUserinfo ? { "read-userinfo": true } : {}),
+				...(idp.endpointHosts ? { "endpoint-hosts": idp.endpointHosts } : {}),
 			};
 	}
 }
@@ -102,7 +103,10 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 		...(part.linkStepUpPage ? { "federation-link": { "step-up-page": part.linkStepUpPage } } : {}),
 		// Every upstream is named so outbound reaches it, and those on plain http at loopback as such.
 		outbound: {
-			allow: part.idps.map((idp) => new URL(idp.issuer).hostname),
+			allow: part.idps.flatMap((idp) => [
+				new URL(idp.issuer).hostname,
+				...(idp.endpointHosts ?? []),
+			]),
 			"plain-loopback": part.idps
 				.map((idp) => new URL(idp.issuer))
 				.filter((url) => url.protocol === "http:")

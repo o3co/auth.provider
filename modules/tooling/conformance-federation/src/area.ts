@@ -16,6 +16,8 @@ export interface IdpScene {
 	readonly clientSecret?: string;
 	/** OpenID Connect only: reads UserInfo after each login (`readsUserinfo`). */
 	readonly readUserinfo?: boolean;
+	/** OpenID Connect only: hosts besides the issuer's its described endpoints may be on. */
+	readonly endpointHosts?: readonly string[];
 	/** Apple only: what signs the client's secret (all three, unless a scene means to leave some out). */
 	readonly signing?: {
 		readonly teamId?: string;

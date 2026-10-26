@@ -69,6 +69,8 @@ export async function fakeUpstream(
 		readonly endSession?: boolean;
 		/** The origin it is reached by, an https front before it say, in place of its own base. */
 		readonly origin?: string;
+		/** The origin its description names UserInfo at, where not the one it is reached by. */
+		readonly userinfoOrigin?: string;
 	} = {},
 ) {
 	const shape = options.shape ?? ownShape;
@@ -88,8 +90,8 @@ export async function fakeUpstream(
 	const refreshAnswers: Scripted[] = [];
 	const refreshCalls: string[] = [];
 	const idTokens: string[] = [];
-	/** What the next UserInfo requests answer, in turn; past them, the subject and its name. */
-	const userinfoAnswers: Scripted[] = [];
+	/** What the next UserInfo requests answer, in turn, each as given or when it comes; past them, the subject and its name. */
+	const userinfoAnswers: (Scripted | (() => Promise<Scripted>))[] = [];
 	const userinfoCalls: string[] = [];
 	let n = 0;
 	const refresh = (form: URLSearchParams): Scripted => {
@@ -184,7 +186,9 @@ export async function fakeUpstream(
 					token_endpoint_auth_methods_supported: ["client_secret_basic"],
 					authorization_response_iss_parameter_supported: true,
 					...(options.endSession ? { end_session_endpoint: `${base}/logout` } : {}),
-					...(shape.userinfo ? { userinfo_endpoint: `${base}${shape.userinfo}` } : {}),
+					...(shape.userinfo
+						? { userinfo_endpoint: `${options.userinfoOrigin ?? base}${shape.userinfo}` }
+						: {}),
 				},
 			};
 		}
@@ -196,7 +200,9 @@ export async function fakeUpstream(
 			const subject = accessed.get((asked.headers.authorization ?? "").replace(/^Bearer /, ""));
 			userinfoCalls.push(subject ?? "");
 			if (subject === undefined) return { status: 401, json: { error: "invalid_token" } };
-			return userinfoAnswers.shift() ?? { json: { sub: subject, name: `${subject} upstream` } };
+			const next = userinfoAnswers.shift();
+			if (typeof next === "function") return next();
+			return next ?? { json: { sub: subject, name: `${subject} upstream` } };
 		}
 		return { status: 404, json: { error: "not_found" } };
 	});
@@ -215,7 +221,7 @@ export async function fakeUpstream(
 		/** The UserInfo requests made, by the subject of the access token they carried. */
 		userinfoCalls,
 		/** The next UserInfo answers as given, before any already set. */
-		answerUserinfo: (...answers: Scripted[]) => {
+		answerUserinfo: (...answers: (Scripted | (() => Promise<Scripted>))[]) => {
 			userinfoAnswers.push(...answers);
 		},
 		/** The next refresh answers as given, before any already set. */
