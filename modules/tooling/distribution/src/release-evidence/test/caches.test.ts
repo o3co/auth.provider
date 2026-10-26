@@ -146,6 +146,39 @@ describe("cacheProblems", () => {
 		]);
 	});
 
+	it("counts a cache step whose condition holds in a pull request it cannot number", () => {
+		const [, pull] = evidenceRuns("0.19.1");
+		const files: Record<string, string> = {
+			"w.yml":
+				"jobs:\n  j:\n    runs-on: x\n    steps:\n      - uses: actions/cache@v4\n        if: github.event_name == 'pull_request' && github.ref != 'refs/pull/1/merge'\n",
+		};
+		expect(
+			cacheProblems("w.yml", pull as NonNullable<typeof pull>, (path) => files[path] as string),
+		).toEqual([expect.stringContaining("restores a cache in a pull_request")]);
+	});
+
+	it("reads an `if:` left empty as GitHub's default, a step or job that runs", () => {
+		expect(ofSteps("      - uses: actions/cache@v4\n        if:\n")).toEqual([
+			expect.stringContaining("restores a cache"),
+		]);
+		expect(ofSteps("      - uses: actions/cache@v4\n        if: null\n")).toEqual([
+			expect.stringContaining("restores a cache"),
+		]);
+		expect(ofSteps("      - uses: actions/cache@v4\n        if: ${{ null }}\n")).toEqual([]);
+		const files: Record<string, string> = {
+			"w.yml": "jobs:\n  j:\n    if:\n    runs-on: x\n    steps:\n      - uses: actions/cache@v4\n",
+		};
+		expect(cacheProblems("w.yml", run, (path) => files[path] as string)).toEqual([
+			expect.stringContaining("restores a cache"),
+		]);
+	});
+
+	it("counts a cache step whose condition turns text into a number as GitHub might otherwise", () => {
+		expect(ofSteps("      - uses: actions/cache@v4\n        if: ${{ '0b1' != 1 }}\n")).toEqual([
+			expect.stringContaining("restores a cache"),
+		]);
+	});
+
 	it("passes over a job or step decided not to run, but not an action it does not know there", () => {
 		expect(
 			ofSteps("      - uses: actions/cache@v4\n        if: github.event_name == 'schedule'\n"),

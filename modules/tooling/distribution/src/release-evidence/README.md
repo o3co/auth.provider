@@ -26,6 +26,7 @@ Internal module of `distribution`: the evidence a release keeps, from the CI run
 - Every stop names the run, what is missing (no run, another tree, compliance not passed, an artifact missing or expired) and what to do.
 - A workflow uses only the actions its internal list names, each at a ref the list takes; a local action, an image or another repository's workflow is refused, and a workflow of this tree a job calls is read in the caller's run, a loop refused.
 - An action's cache is read from its inputs as GitHub reads them, its default where one is not written (setup-go's on, pnpm's off); an expression is decided by the run's `github` context alone, and one it does not decide counts as restoring.
+- What GitHub might read otherwise is left undecided: text as a number but in JSON's syntax (`''` as 0), text beyond printable ASCII compared or searched, a number cast to text, and a pull request's ref, its number unknown. An `if:` left empty runs.
 - CI's workflow, in either run a release may take evidence from, and the release's own workflow restore no cache, held by a test; CI hands the legacy build to each area as the run's own artifact, by the id the job that built it gave, and lets a re-run write over the compliance table.
 
 ## Depends on

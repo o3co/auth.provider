@@ -53,6 +53,30 @@ describe("evaluate", () => {
 		}
 	});
 
+	it("turns text into a number only in JSON's syntax, '' as 0, and leaves any other text undecided", () => {
+		expect(evaluate("'1' == 1", release)).toBe(true);
+		expect(evaluate("'1.5e3' == 1500", release)).toBe(true);
+		expect(evaluate("'' == 0", release)).toBe(true);
+		expect(evaluate("null == 0", release)).toBe(true);
+		expect(evaluate("true == 1", release)).toBe(true);
+		for (const text of ["0b1", "0x10", " 1", "1 ", "+1", ".5", "1.", "Infinity", "1,000", "abc"]) {
+			expect(evaluate(`'${text}' != 1`, release)).toHaveProperty("unknown");
+		}
+	});
+
+	it("compares and searches printable ASCII text alone, and casts no number to text", () => {
+		expect(evaluate("'É' == 'é'", release)).toHaveProperty("unknown");
+		expect(evaluate("startsWith(github.ref, 1)", release)).toHaveProperty("unknown");
+		expect(evaluate("contains(true, 'TRU')", release)).toBe(true);
+		expect(evaluate("contains(null, '')", release)).toBe(true);
+	});
+
+	it("leaves a field the context does not give undecided, as a pull request's ref", () => {
+		const pull: RunContext = { event_name: "pull_request", base_ref: "main" };
+		expect(evaluate("github.ref != 'refs/pull/1/merge'", pull)).toHaveProperty("unknown");
+		expect(evaluate("github.base_ref == 'main'", pull)).toBe(true);
+	});
+
 	it("leaves undecided what it cannot read", () => {
 		expect(evaluate("github.ref == 'x", release)).toHaveProperty("unknown");
 		expect(evaluate("github.ref > 'x'", release)).toHaveProperty("unknown");

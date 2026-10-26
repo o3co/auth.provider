@@ -20,7 +20,8 @@ export type { RunContext } from "./expression.ts";
 /** The runs whose evidence a release may take, for its version: a push to its release branch, and a pull request to main. */
 export const evidenceRuns = (version: string): RunContext[] => [
 	{ event_name: "push", ref: `refs/heads/release/${version}`, base_ref: "" },
-	{ event_name: "pull_request", ref: "refs/pull/1/merge", base_ref: "main" },
+	// A release's pull request's number, and so its ref, is not known: left out, it is unknown.
+	{ event_name: "pull_request", base_ref: "main" },
 ];
 
 /** The release's own run, for its version: a push of its tag. */
@@ -89,6 +90,7 @@ const known: Readonly<
 	// v5 and later cache on their own (package-manager-cache): not taken.
 	"actions/setup-node": { refs: ["v4"], rules: [empty("cache")] },
 	"actions/setup-java": { refs: ["v4"], rules: [empty("cache")] },
+	"actions/setup-python": { refs: ["v5"], rules: [empty("cache")] },
 	"actions/setup-go": { refs: ["v5"], rules: [off("cache", true)] },
 	"pnpm/action-setup": {
 		refs: ["v4", "b906affcce14559ad1aafd4ab0e942779e9f58b1"],
@@ -99,7 +101,14 @@ const known: Readonly<
 
 /** Whether a job or step may run in the context: only one decided false never runs. */
 const mayRun = (written: unknown, context: RunContext): boolean => {
-	if (written === undefined) return true;
+	// An `if:` left empty is GitHub's default, success(): it may run.
+	if (
+		written === undefined ||
+		written === null ||
+		(typeof written === "string" && written.trim() === "")
+	) {
+		return true;
+	}
 	const v = conditionOf(written, context);
 	return isUnknown(v) || truthy(v);
 };
@@ -152,7 +161,9 @@ export function cacheProblems(
 			}
 			for (const rule of action.rules) {
 				for (const problem of rule(inputs, context, step)) {
-					problems.push(`${at}: ${problem} in a ${context.event_name} of ${context.ref}`);
+					problems.push(
+						`${at}: ${problem} in a ${context.event_name} of ${context.ref ?? `a pull request to ${context.base_ref}`}`,
+					);
 				}
 			}
 		}

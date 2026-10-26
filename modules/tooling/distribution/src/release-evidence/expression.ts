@@ -4,10 +4,10 @@
  * context, a status function, a function or syntax not here) is `unknown`, never guessed.
  */
 
-/** The parts of a run's `github` context an expression here may read. */
+/** The parts of a run's `github` context an expression here may read; one left out is unknown. */
 export interface RunContext {
 	readonly event_name: string;
-	readonly ref: string;
+	readonly ref?: string;
 	readonly base_ref: string;
 }
 
@@ -30,26 +30,49 @@ export const truthy = (v: Value): boolean =>
 		(typeof v === "number" && (v === 0 || Number.isNaN(v)))
 	);
 
-const toNumber = (v: Value): number =>
-	v === null
-		? 0
+const ascii = (s: string) => /^[\x20-\x7e]*$/.test(s);
+const unknownAs = (why: string): Unknown => ({ unknown: why });
+
+/**
+ * GitHub's number of a value. A string is read only in JSON's number syntax, `''` as 0: any other
+ * string GitHub might read otherwise than here, so it is unknown rather than NaN.
+ */
+const toNumber = (v: Value): number | Unknown => {
+	if (v === null) return 0;
+	if (typeof v === "boolean") return v ? 1 : 0;
+	if (typeof v === "number") return v;
+	if (v === "") return 0;
+	return /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/.test(v)
+		? Number(v)
+		: unknownAs(`${JSON.stringify(v)} as a number`);
+};
+
+/** GitHub's `==`: printable ASCII strings without regard to case, other kinds as numbers. */
+const equal = (a: Value, b: Value): boolean | Unknown => {
+	if (typeof a === "string" && typeof b === "string") {
+		return ascii(a) && ascii(b)
+			? a.toLowerCase() === b.toLowerCase()
+			: unknownAs("a comparison of text beyond printable ASCII");
+	}
+	if (typeof a === typeof b) return a === b;
+	const x = toNumber(a);
+	const y = toNumber(b);
+	if (isUnknown(x)) return x;
+	if (isUnknown(y)) return y;
+	return x === y;
+};
+
+/** A value cast to text, as GitHub's string functions do; a number, whose text may differ, is unknown. */
+const asText = (v: Value | undefined): string | Unknown =>
+	v === null || v === undefined
+		? ""
 		: typeof v === "boolean"
-			? Number(v)
+			? String(v)
 			: typeof v === "number"
-				? v
-				: v.trim() === ""
-					? 0
-					: Number(v);
-
-/** GitHub's `==`: strings without regard to case, other kinds as numbers. */
-const equal = (a: Value, b: Value): boolean =>
-	typeof a === "string" && typeof b === "string"
-		? a.toLowerCase() === b.toLowerCase()
-		: typeof a === typeof b
-			? a === b
-			: toNumber(a) === toNumber(b);
-
-const asText = (v: Value): string => (v === null ? "" : String(v));
+				? unknownAs("a number cast to text")
+				: ascii(v)
+					? v.toLowerCase()
+					: unknownAs("text beyond printable ASCII");
 
 type Token =
 	| { readonly kind: "string"; readonly value: string }
@@ -120,24 +143,22 @@ export function evaluate(source: string, context: RunContext): Value | Unknown {
 		at++;
 	};
 
-	const github: Record<string, Value> = {
+	const github: Record<string, Value | undefined> = {
 		event_name: context.event_name,
 		ref: context.ref,
 		base_ref: context.base_ref,
 	};
-	const functions: Record<string, (args: Value[]) => Value> = {
-		startswith: ([a, b]) =>
-			asText(a ?? null)
-				.toLowerCase()
-				.startsWith(asText(b ?? null).toLowerCase()),
-		endswith: ([a, b]) =>
-			asText(a ?? null)
-				.toLowerCase()
-				.endsWith(asText(b ?? null).toLowerCase()),
-		contains: ([a, b]) =>
-			asText(a ?? null)
-				.toLowerCase()
-				.includes(asText(b ?? null).toLowerCase()),
+	const texts =
+		(test: (a: string, b: string) => boolean) =>
+		([a, b]: Value[]): Value | Unknown => {
+			const x = asText(a);
+			const y = asText(b);
+			return isUnknown(x) ? x : isUnknown(y) ? y : test(x, y);
+		};
+	const functions: Record<string, (args: Value[]) => Value | Unknown> = {
+		startswith: texts((a, b) => a.startsWith(b)),
+		endswith: texts((a, b) => a.endsWith(b)),
+		contains: texts((a, b) => a.includes(b)),
 	};
 
 	const or = (): Value | Unknown => {
@@ -166,7 +187,8 @@ export function evaluate(source: string, context: RunContext): Value | Unknown {
 			const right = not();
 			if (isUnknown(left)) return left;
 			if (isUnknown(right)) return right;
-			return t.value === "==" ? equal(left, right) : !equal(left, right);
+			const same = equal(left, right);
+			return isUnknown(same) ? same : t.value === "==" ? same : !same;
 		}
 		return left;
 	};
@@ -217,7 +239,8 @@ export function evaluate(source: string, context: RunContext): Value | Unknown {
 			scope === "github" &&
 			name !== undefined &&
 			rest.length === 0 &&
-			Object.hasOwn(github, name)
+			Object.hasOwn(github, name) &&
+			github[name] !== undefined
 		) {
 			return github[name] as Value;
 		}
