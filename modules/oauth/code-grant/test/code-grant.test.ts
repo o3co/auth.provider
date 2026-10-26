@@ -449,7 +449,7 @@ it("refuses a code the policies refuse once it is used up, issuing nothing", asy
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 });
 
-it("redeems a code once, and a code that comes again revokes what it gave [rfc6749-4.1.2-d] [rfc6749-4.1.2-e] [oidc-core-3.1.3.2-d]", async () => {
+it("redeems a code once, and a code that comes again revokes what it gave [rfc6749-4.1.2-d] [rfc6749-4.1.2-e]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const first = await s.redeem(code);
@@ -529,7 +529,7 @@ it("refuses a code whose subject was revoked after it signed in", async () => {
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 	expect(keptOf(s, code)?.token).toBeUndefined();
 });
-it("refuses a code issued to another client, or presented with another redirect URI [rfc6749-4.1.3-c] [rfc6749-4.1.3-e] [oidc-core-3.1.3.2-b] [oidc-core-3.1.3.2-e]", async () => {
+it("refuses a code issued to another client, or presented with another redirect URI [rfc6749-4.1.3-c] [rfc6749-4.1.3-e]", async () => {
 	const s = await serve();
 	const elsewhere = await s.app.get(codes).issue({ ...s.facts, clientId: "other" });
 	expect((await s.redeem(elsewhere)).body).toEqual(refusedBody);
