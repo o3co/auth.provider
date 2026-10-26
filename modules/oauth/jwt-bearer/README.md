@@ -9,6 +9,7 @@
   - `conditions`
   - `policy`
   - `clientless`
+  - `id-jag`
 
 ## Not here
 - Client authentication (`token-endpoint`).
@@ -26,7 +27,6 @@
 
 ## Invariants
 - Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once signed is refused by `tokens`, also `expired`.
-- A trusted issuer's assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under that issuer's own policy, as `policy` makes it. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
 - Boot is refused on an entry `issuers` cannot read as a trusted issuer, as its card says, each at its place (`jwt-bearer.issuers.<i>`), never by its value; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them.
 - `as-is`: the token is for the signer's subject. `linked`: for the subject `linkedSubjects` resolves (`upstream`, the signer's subject) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.
 - A refusal's reason is told in this grant's own words. Keys or subjects that cannot be told make the grant unavailable, using up no `jti`.
@@ -41,4 +41,4 @@
 - Spent assertions, through the store interface (a wiring keeps them) or an issuer's ledger, by name as the invariants say. The lifetime is a relative value, as the store judges it by its own clock: until `policy`'s time. Only well-formed `jti` strings (without lone surrogates) are accepted.
 
 ## Depends on
-- `kernel`, `grants`, `client-allowance`, `clients`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `outbound-policy`, `keys`, `subject-revocation`, and `users`, through its internal modules `assertion` and `delegated`
+- `kernel`, `grants`, `client-allowance`, `clients`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `outbound-policy`, `keys`, `subject-revocation`, `sender-binding` (where an entry takes the ID-JAG profile), and `users`, through its internal modules `assertion` and `delegated`

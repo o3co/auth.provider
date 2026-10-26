@@ -79,7 +79,7 @@ describe("federation through Google", () => {
 		expect(await b.session()).toBe(true);
 	});
 
-	it("refuses a callback without Google's iss, or naming another, before its code is used", async () => {
+	it("refuses a callback without Google's iss, or naming another, before its code is used [rfc9700-4.4.2.1-a] [rfc9700-2.1-e] [rfc9700-2.1-f]", async () => {
 		for (const iss of [undefined, "https://evil.example"]) {
 			const b = browser();
 			const { query } = await authorized(b, { subject: "1078-alice" });
@@ -92,7 +92,7 @@ describe("federation through Google", () => {
 		}
 	});
 
-	it("refuses an id_token Google did not sign, one for another login, and one under another algorithm", async () => {
+	it("refuses an id_token Google did not sign, one for another login, and one under another algorithm [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-16.3-a] [oidc-core-3.1.3.7-k] [oidc-core-2-v] [rfc9700-4.5.3.2-a]", async () => {
 		const cases: Record<string, Authorized> = {
 			forged: { subject: "1078-alice", forged: true },
 			"another nonce": { subject: "1078-alice", nonce: "not-this-login" },
@@ -110,7 +110,7 @@ describe("federation through Google", () => {
 describe.skipIf(areaTarget().differs("google-freshness-not-forwarded"))(
 	"federation through Google: freshness",
 	() => {
-		it("passes a request to log in again on to Google, and logs in when Google says it just did", async () => {
+		it("passes a request to log in again on to Google, and logs in when Google says it just did [oidc-core-3.1.3.7-n]", async () => {
 			const b = browser();
 			const now = Math.floor(Date.now() / 1000);
 			const { query, asked } = await authorized(
@@ -125,7 +125,7 @@ describe.skipIf(areaTarget().differs("google-freshness-not-forwarded"))(
 			expect(await b.session()).toBe(true);
 		});
 
-		it("refuses a login Google says is older than the max age", async () => {
+		it("refuses a login Google says is older than the max age [oidc-core-3.1.3.7-n]", async () => {
 			const b = browser();
 			const old = Math.floor(Date.now() / 1000) - 3600;
 			const { query } = await authorized(

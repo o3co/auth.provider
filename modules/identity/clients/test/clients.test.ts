@@ -87,7 +87,7 @@ const bootRefusal = async (list: unknown[]) =>
 	(await refusalsOf(boot([], list))).map((r) => r.where).sort();
 
 describe("clients", () => {
-	it("authenticates each built-in method and hands out the owner's section", async () => {
+	it("authenticates each built-in method and hands out the owner's section [rfc6749-2.3.1-a]", async () => {
 		const c = await boot();
 		expect(clientOf(await outcome(c, basic("conf", "s3cret"), {})).section(grants)).toEqual({
 			allowed: ["x"],
@@ -117,7 +117,7 @@ describe("clients", () => {
 		expect(() => client.section(stray)).toThrow(/stray/);
 	});
 
-	it("form-decodes the Basic id and secret", async () => {
+	it("form-decodes the Basic id and secret [rfc6749-2.3.1-a]", async () => {
 		const id = "a+b %c";
 		const c = await boot(
 			[],
@@ -139,7 +139,7 @@ describe("clients", () => {
 		});
 	});
 
-	it("refuses each way the credentials do not fit the client", async () => {
+	it("refuses each way the credentials do not fit the client [rfc6749-2.3-b] [rfc6749-2.2-a] [rfc6749-2.3.2-a] [oidc-core-3.1.3.1-a]", async () => {
 		const c = await boot();
 		expect(await outcome(c, basic("conf", "nope"), {})).toMatchObject({
 			reason: "bad_credentials",
@@ -160,7 +160,7 @@ describe("clients", () => {
 		expect(await outcome(c, {}, { client_id: ["conf"] })).toMatchObject({ reason: "wrong_method" });
 	});
 
-	it("refuses a confidential client whose method is none", async () => {
+	it("refuses a confidential client whose method is none [rfc6749-2.2-a]", async () => {
 		const c = await boot([], [{ id: "conf-none", kind: "confidential", method: "none" }]);
 		expect(await outcome(c, {}, { client_id: ["conf-none"] })).toMatchObject({
 			reason: "bad_credentials",
@@ -394,7 +394,7 @@ describe("clients", () => {
 		expect(await outcome(c, {}, { client_id: [""] })).toMatchObject({ reason: "no_credentials" });
 	});
 
-	it("refuses two methods' credentials as two methods, even when malformed", async () => {
+	it("refuses two methods' credentials as two methods, even when malformed [rfc6749-2.3-b]", async () => {
 		const c = await boot();
 		const undecodable = { authorization: `Basic ${Buffer.from("conf").toString("base64")}` };
 		expect(

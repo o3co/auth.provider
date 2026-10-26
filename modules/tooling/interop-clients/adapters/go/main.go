@@ -207,6 +207,10 @@ func (r *run) login() (any, error) {
 	if err := info.Claims(&userinfo); err != nil {
 		return nil, err
 	}
+	// Userinfo is the signed-in user's only where it names the ID token's subject (OpenID Connect Core §5.3.2).
+	if info.Subject == "" || info.Subject != in.id.Subject {
+		return nil, refused{"userinfo_subject", "the userinfo names another subject, or none"}
+	}
 	scope, _ := in.token.Extra("scope").(string)
 	return map[string]any{
 		"idToken":      in.claims,

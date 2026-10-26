@@ -114,7 +114,7 @@ describe("client authentication by private_key_jwt", () => {
 		},
 	);
 
-	it("takes an assertion for the token endpoint, or naming its audience in a list, from a client accepting a loose audience", async () => {
+	it("takes an assertion for the token endpoint, or naming its audience in a list, from a client accepting a loose audience [rfc7523-3-i] [rfc7521-5.2-h] [oidc-core-9-j]", async () => {
 		const loose = (aud: unknown) => sign(claims({ iss: "loose", sub: "loose", aud }));
 		for (const aud of [tokenUrl, [tokenUrl], ["x", issuer], issuer]) {
 			expect((await token(await loose(aud))).status, JSON.stringify(aud)).toBe(200);
@@ -122,7 +122,7 @@ describe("client authentication by private_key_jwt", () => {
 		expect(await refused(token(await loose(`${issuer}/other`)))).toEqual([401, "invalid_client"]);
 	});
 
-	it("authenticates a client at introspection too", async () => {
+	it("authenticates a client at introspection too [rfc7523-3-u] [rfc7521-5.2-n]", async () => {
 		const issued = await token(await sign(claims()));
 		const ask = async (key?: KeyObject) =>
 			post("/oauth/introspect", {
@@ -135,7 +135,7 @@ describe("client authentication by private_key_jwt", () => {
 		expect(await refused(ask(stranger))).toEqual([401, "invalid_client"]);
 	});
 
-	it("refuses an assertion for another audience, too long-lived, expired, or of another issuer", async () => {
+	it("refuses an assertion for another audience, too long-lived, expired, or of another issuer [rfc7523-3-i] [rfc7521-5.2-h] [oidc-core-9-j] [rfc7523-3-o] [rfc7521-5.2-l] [oidc-core-9-m] [rfc7523-3-g] [rfc7521-5.2-f] [oidc-core-9-i] [rfc7521-4.2-c] [rfc7521-4.2.1-a] [rfc7523-3.2-a]", async () => {
 		const wrong = [401, "invalid_client"];
 		expect(await refused(token(await sign(claims({ aud: `${issuer}/other` }))))).toEqual(wrong);
 		expect(await refused(token(await sign(claims({ exp: now() + 7200 }))))).toEqual(wrong);
@@ -144,13 +144,13 @@ describe("client authentication by private_key_jwt", () => {
 		expect(await refused(token(await sign(claims()), { client_id: "other" }))).toEqual(wrong);
 	});
 
-	it("takes each assertion once", async () => {
+	it("takes each assertion once [oidc-core-9-l]", async () => {
 		const once = await sign(claims());
 		expect((await token(once)).status).toBe(200);
 		expect(await refused(token(once))).toEqual([401, "invalid_client"]);
 	});
 
-	it("refuses a symmetric algorithm and a key that is not the client's", async () => {
+	it("refuses a symmetric algorithm and a key that is not the client's [rfc7523-3-u] [rfc7521-5.2-n]", async () => {
 		const hmac = await new SignJWT(claims())
 			.setProtectedHeader({ alg: "HS256", kid: "k1" })
 			.sign(new Uint8Array(32));
@@ -160,7 +160,7 @@ describe("client authentication by private_key_jwt", () => {
 	});
 
 	it.skipIf(areaTarget().differs("assertion-with-secret"))(
-		"refuses an assertion sent beside a client secret as invalid_client [rfc7521-4.2.1-b]",
+		"refuses an assertion sent beside a client secret as invalid_client [rfc6749-2.3-b] [rfc7521-4.2.1-b]",
 		async () => {
 			expect(await refused(token(await sign(claims()), { client_secret: "x" }))).toEqual([
 				401,
@@ -169,7 +169,7 @@ describe("client authentication by private_key_jwt", () => {
 		},
 	);
 
-	it("refuses an assertion of a type it does not take, whatever else the request carries", async () => {
+	it("refuses an assertion of a type it does not take, whatever else the request carries [oidc-core-9-q]", async () => {
 		const answer = await post("/oauth/token", {
 			grant_type: "client_credentials",
 			client_assertion_type: "urn:unsupported",
@@ -178,7 +178,7 @@ describe("client authentication by private_key_jwt", () => {
 		expect([answer.status, answer.body.error]).toEqual([401, "invalid_client"]);
 	});
 
-	it("refuses an assertion given twice as invalid_client, and spends neither [rfc7521-4.2.1-a]", async () => {
+	it("refuses an assertion given twice as invalid_client, and spends neither [rfc6749-3.2-d] [rfc7521-4.2.1-a]", async () => {
 		const [first, second] = [await sign(claims()), await sign(claims())];
 		const res = await fetch(`${base}/oauth/token`, {
 			method: "POST",
@@ -205,7 +205,7 @@ describe("client authentication by private_key_jwt", () => {
 		expect(await refused(token(unencoded, { client_id: "app" }))).toEqual([401, "invalid_client"]);
 	});
 
-	it("refuses half of an assertion as invalid_client [rfc7521-4.2.1-a]", async () => {
+	it("refuses half of an assertion as invalid_client [rfc7521-4.2-a] [rfc7521-4.2-b] [rfc7521-4.2.1-a]", async () => {
 		const malformed = [401, "invalid_client"];
 		expect(
 			await refused(

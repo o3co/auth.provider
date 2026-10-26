@@ -50,7 +50,7 @@ describe("a connection in the browser, through the assembled module", () => {
 		expect((await h.grantCall(flow.id, "status")).json?.status).toBe("pending");
 	});
 
-	it("refuses the link to another account's session, and the question and callback to another browser", async () => {
+	it("refuses the link to another account's session, and the question and callback to another browser [rfc9700-4.2.4-b]", async () => {
 		const h = await harness();
 		const lodged = await h.lodge();
 		expect((await h.open(lodged.link, await h.login("bob"))).opened.status).toBe(403);
@@ -119,7 +119,7 @@ describe("a connection in the browser, through the assembled module", () => {
 		expect((await h.grantCall(id, "token")).status).toBe(200);
 	});
 
-	it("sends back only to a return the client still lists", async () => {
+	it("sends back only to a return the client still lists [rfc9700-4.1.3-b]", async () => {
 		const h = await harness();
 		const flow = await h.started();
 		h.relist(["cal"], []);

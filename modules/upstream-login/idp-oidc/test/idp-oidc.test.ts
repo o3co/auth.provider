@@ -310,7 +310,7 @@ describe("idp-oidc", () => {
 		expect((await open()).upstream.issuer).toBe(issuer);
 	});
 
-	it("builds the authorization request at the described endpoint, with nonce, PKCE, prompt and max_age", async () => {
+	it("builds the authorization request at the described endpoint, with nonce, PKCE, prompt and max_age [oidc-core-3.1.2.1-y] [oidc-core-7.2.1-a] [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", async () => {
 		const { upstream } = await open();
 		const url = new URL(
 			upstream.authorizationUrl({ ...authorizationStart, prompt: "login", maxAgeSeconds: 0 }),
@@ -333,7 +333,7 @@ describe("idp-oidc", () => {
 		expect(asked.searchParams.get("scope")).toBe("openid profile");
 	});
 
-	it("refuses at boot a description that names another issuer, one only starting with it included", async () => {
+	it("refuses at boot a description that names another issuer, one only starting with it included [oidc-discovery-4.3-b] [oidc-discovery-4.3-c] [oidc-discovery-7.2-a]", async () => {
 		for (const named of ["https://other.example", `${issuer}/`, `${issuer}/tenant`]) {
 			await expect(open({ description: { issuer: named } }), named).rejects.toThrow(
 				/another issuer/,
@@ -341,7 +341,7 @@ describe("idp-oidc", () => {
 		}
 	});
 
-	it("reads the description of an issuer named with a trailing slash at one slash before .well-known", async () => {
+	it("reads the description of an issuer named with a trailing slash at one slash before .well-known [oidc-discovery-4.1-c]", async () => {
 		const slashed = `${issuer}/`;
 		const { asked } = await open({
 			settings: { issuer: slashed },
@@ -527,7 +527,7 @@ describe("idp-oidc", () => {
 		expect(await outcome(upstream.exchange(codeExchange({ iss: other })))).toBe("refused");
 	});
 
-	it("refuses, asking the token endpoint nothing, an iss of the issuer's origin in another form", async () => {
+	it("refuses, asking the token endpoint nothing, an iss of the issuer's origin in another form [rfc9700-4.4.2.1-a]", async () => {
 		const token = await idToken({ iss: loopbackIssuer });
 		const { upstream, asked } = await open({
 			settings: { issuer: loopbackIssuer },
@@ -628,7 +628,7 @@ describe("idp-oidc", () => {
 		expect(isUnavailable(unreachable)).toBe(true);
 	});
 
-	it("reaches as the operator's URL the issuer for all its description names, and each given endpoint for itself", async () => {
+	it("reaches as the operator's URL the issuer for all its description names, and each given endpoint for itself [oidc-core-3.1.3.7-j]", async () => {
 		const described = await answering(await idToken());
 		await described.upstream.exchange(codeExchange());
 		expect(described.asked.map((a) => [a.url, a.internal])).toEqual([
@@ -668,7 +668,7 @@ describe("idp-oidc", () => {
 		expect(isUnavailable(reached)).toBe(true);
 	});
 
-	it("reaches an endpoint the operator gives on another host", async () => {
+	it("reaches an endpoint the operator gives on another host [oidc-core-3.1.3.7-j]", async () => {
 		const { upstream, asked } = await answering(await idToken(), {
 			settings: { ...givenEndpoints, "jwks-uri": "https://keys.other.example/jwks" },
 			more: { "https://keys.other.example/jwks": () => ok({ keys: [rsa.jwk] }) },
@@ -760,7 +760,7 @@ describe("idp-oidc", () => {
 		expect(settingsOf(["RS256"], policyRefusing()).safeParse(base).success).toBe(false);
 	});
 
-	it("takes an id_token's at_hash only as the access token's, by its signature's digest", async () => {
+	it("takes an id_token's at_hash only as the access token's, by its signature's digest [oidc-core-3.1.3.5-a]", async () => {
 		const half = (digest: string, token: string) => {
 			const full = createHash(digest).update(token).digest();
 			return full.subarray(0, full.length / 2).toString("base64url");
@@ -866,7 +866,7 @@ describe("idp-oidc", () => {
 		expect(sent?.request.credential).toBeUndefined();
 	});
 
-	it("refuses an answer from another issuer before using its code, and one without iss where iss is asked", async () => {
+	it("refuses an answer from another issuer before using its code, and one without iss where iss is asked [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
 		const token = await idToken();
 		const { upstream, asked } = await answering(token);
 		for (const iss of ["https://evil.example", ""]) {
@@ -905,7 +905,7 @@ describe("idp-oidc", () => {
 		}
 	});
 
-	it("refuses an id_token that does not hold", async () => {
+	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [oidc-discovery-7.2-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
 		const hmac = new TextEncoder().encode("a".repeat(32));
 		const cases: Record<
 			string,
@@ -945,7 +945,7 @@ describe("idp-oidc", () => {
 		}
 	});
 
-	it("takes by default one algorithm for each kind of key, PS256 only where the operator names it", async () => {
+	it("takes by default one algorithm for each kind of key, PS256 only where the operator names it [oidc-core-3.1.3.7-i]", async () => {
 		const base = { issuer, "client-id": "c", "client-secret": "s" };
 		const read = settingsOf(asymmetric, policyRefusing()).parse(base);
 		expect(read.algorithms).toEqual(["RS256", "ES256", "EdDSA"]);
@@ -960,7 +960,7 @@ describe("idp-oidc", () => {
 		);
 	});
 
-	it("reads each key of the IdP's set under one algorithm, its own alg or the one taken for its kind", async () => {
+	it("reads each key of the IdP's set under one algorithm, its own alg or the one taken for its kind [oidc-core-3.1.3.7-i]", async () => {
 		const both = { settings: { algorithms: ["RS256", "PS256"] } };
 		// Two RSA algorithms taken: a key naming no alg is used under neither.
 		expect(await exchanged(await idToken(), both)).toBe("refused");
@@ -997,7 +997,7 @@ describe("idp-oidc", () => {
 		});
 	});
 
-	it("allows the upstream's clock its skew, and no more", async () => {
+	it("allows the upstream's clock its skew, and no more [oidc-core-2-t] [oidc-core-2-u]", async () => {
 		const token = await idToken();
 		const { upstream } = await open({ token: () => granted(token) });
 		now += 300_000 + 29_000;
@@ -1056,7 +1056,7 @@ describe("idp-oidc", () => {
 		});
 	});
 
-	it("refuses a token answer without an access token and its type, or with a lifetime that is none", async () => {
+	it("refuses a token answer without an access token and its type, or with a lifetime that is none [oidc-core-3.1.3.5-a]", async () => {
 		const token = await idToken();
 		const answers: Record<string, unknown> = {
 			"no access token": { id_token: token, token_type: "Bearer" },
@@ -1178,7 +1178,7 @@ describe("idp-oidc", () => {
 		).toBe(false);
 	});
 
-	it("asks for offline access to delegate, with the delegation's scopes and resource", async () => {
+	it("asks for offline access to delegate, with the delegation's scopes and resource [oidc-core-11-g]", async () => {
 		const { upstream } = await open();
 		const url = delegationUrl(upstream, delegationStart);
 		expect(`${url.origin}${url.pathname}`).toBe(`${issuer}/authorize`);
@@ -1212,7 +1212,7 @@ describe("idp-oidc", () => {
 		});
 	});
 
-	it("exchanges a delegation's code for the checked login, its issuer and the tokens", async () => {
+	it("exchanges a delegation's code for the checked login, its issuer and the tokens [oidc-core-3.1.3.7-k]", async () => {
 		const token = await idToken();
 		const { upstream } = await open({
 			token: () => granted(token, { refresh_token: "rt", scope: "openid files.read" }),

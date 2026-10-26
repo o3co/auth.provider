@@ -174,7 +174,7 @@ const tried = async (
 ) => outcome(c, presenting(await sign(claims(extra), key, header), form));
 
 describe("private_key_jwt", () => {
-	it("authenticates a client by an assertion signed with its key, for the issuer as one string", async () => {
+	it("authenticates a client by an assertion signed with its key, for the issuer as one string [rfc7523-3-i] [rfc7521-5.2-h] [oidc-core-9-j]", async () => {
 		const { c } = await boot();
 		expect(await tried(c)).toBe("app");
 		expect(await tried(c, {}, { client_id: "app" })).toBe("app");
@@ -190,7 +190,7 @@ describe("private_key_jwt", () => {
 		expect(await tried(c, { jti: "kept" })).toBe("app");
 	});
 
-	it("names the asymmetric algorithms an assertion may be signed with: by default one for each kind of key", async () => {
+	it("names the asymmetric algorithms an assertion may be signed with: by default one for each kind of key [oidc-discovery-3-ad]", async () => {
 		const { c } = await boot();
 		expect(c.signingAlgorithms()).toEqual(["RS256", "ES256", "ES384", "ES512", "EdDSA"]);
 		const named = await boot({ settings: { algorithms: ["RS256", "PS256", "RS256"] } });
@@ -242,7 +242,7 @@ describe("private_key_jwt", () => {
 		expect(nowhere).toBeInstanceOf(BootRefused);
 	});
 
-	it("takes the client from client_id when given, which the assertion's issuer and subject must match", async () => {
+	it("takes the client from client_id when given, which the assertion's issuer and subject must match [rfc7523-3-g] [rfc7521-5.2-f] [oidc-core-9-i] [rfc7521-5.2-c] [oidc-core-9-h] [rfc7521-4.2-c]", async () => {
 		const { c } = await boot();
 		expect(await tried(c, {}, { client_id: "other" })).toBe("unknown_client");
 		expect(await tried(c, { sub: "x" })).toBe("bad_credentials");
@@ -254,7 +254,7 @@ describe("private_key_jwt", () => {
 		expect(await tried(c, { iss: "x", sub: "x" }, { client_id: "app" })).toBe("bad_credentials");
 	});
 
-	it("takes an assertion once per client and jti", async () => {
+	it("takes an assertion once per client and jti [oidc-core-9-l]", async () => {
 		const { c } = await boot();
 		const once = await sign(claims({ jti: "same" }));
 		expect(await outcome(c, presenting(once))).toBe("app");
@@ -270,7 +270,7 @@ describe("private_key_jwt", () => {
 		expect(await twin("-joined")).toBe("app:twin");
 	});
 
-	it("spends the jti last, and remembers it past the assertion's end", async () => {
+	it("spends the jti last, and remembers it past the assertion's end [oidc-core-9-l]", async () => {
 		const { c } = await boot();
 		expect(await tried(c, { jti: "late", aud: "elsewhere" })).toBe("bad_credentials");
 		expect(await tried(c, { jti: "late" })).toBe("app");
@@ -293,7 +293,7 @@ describe("private_key_jwt", () => {
 		await expect(c.authenticate(presenting(await sign(claims())))).rejects.toSatisfy(isUnavailable);
 	});
 
-	it("bounds the assertion's times by the lifetime cap and the clock allowance", async () => {
+	it("bounds the assertion's times by the lifetime cap and the clock allowance [rfc7523-3-m] [rfc7521-5.2-j] [rfc7523-3-o] [rfc7521-5.2-l] [rfc7523-3-q]", async () => {
 		const { c } = await boot();
 		const at = (extra: Record<string, unknown>) => tried(c, extra);
 		expect(await at({ exp: seconds() - 29 })).toBe("app");
@@ -314,7 +314,7 @@ describe("private_key_jwt", () => {
 		expect(await at({ jti: "j\ud800" })).toBe("bad_credentials");
 	});
 
-	it("verifies with the one key the header picks, by asymmetric algorithms only", async () => {
+	it("verifies with the one key the header picks, by asymmetric algorithms only [rfc7523-3-u] [rfc7521-5.2-n] [rfc8414-2-i]", async () => {
 		const { c } = await boot({
 			keys: [jwk(ec.publicKey, { kid: "ec" }), jwk(ed.publicKey), jwk(rsa.publicKey, { kid: "r" })],
 		});
@@ -377,7 +377,7 @@ describe("private_key_jwt", () => {
 		);
 	});
 
-	it("logs why it refused an assertion", async () => {
+	it("logs why it refused an assertion [rfc7523-3-u] [rfc7521-5.2-n]", async () => {
 		const { c } = await boot({
 			keys: [jwk(ec.publicKey, { kid: "ec" }), jwk(ecPair().publicKey, { kid: "ec" })],
 		});
@@ -457,7 +457,7 @@ describe("private_key_jwt", () => {
 		expect(await outcome(c, presenting(first))).toBe("app");
 	});
 
-	it("answers a request with only half of an assertion as malformed, and refuses one of a type not taken here", async () => {
+	it("answers a request with only half of an assertion as malformed, and refuses one of a type not taken here [rfc7521-4.2-a] [rfc7521-4.2-b] [oidc-core-9-q] [rfc6749-2.3-b]", async () => {
 		const { c } = await boot();
 		expect(await outcome(c, asked({ client_assertion_type: assertionType }))).toBe(
 			"malformed_credentials",
@@ -550,7 +550,7 @@ describe("private_key_jwt", () => {
 		).toBe("app");
 	});
 
-	it("reads the body only, never the query, where an assertion would be logged", async () => {
+	it("reads the body only, never the query, where an assertion would be logged [rfc6749-2.3.1-b]", async () => {
 		const { c } = await boot();
 		const query = new Map([
 			["client_assertion_type", [assertionType]],
@@ -565,7 +565,7 @@ describe("private_key_jwt", () => {
 		expect(await outcome(c, halves)).toBe("malformed_credentials");
 	});
 
-	it("leaves a request with no part of an assertion to the other methods, and claims one with either part", async () => {
+	it("leaves a request with no part of an assertion to the other methods, and claims one with either part [rfc6749-2.3-b]", async () => {
 		const { c } = await boot();
 		const secret = { client_id: "post", client_secret: clientSecret("post") };
 		expect(await outcome(c, asked(secret))).toBe("post");
@@ -604,7 +604,7 @@ describe("private_key_jwt", () => {
 		expect(saved).toEqual([]);
 	});
 
-	it("is used only by clients registered for it", async () => {
+	it("is used only by clients registered for it [oidc-core-3.1.3.1-a]", async () => {
 		const other = await boot({ method: "client_secret_post" });
 		expect(await tried(other.c)).toBe("wrong_method");
 		const none = await boot({ keys: [] });

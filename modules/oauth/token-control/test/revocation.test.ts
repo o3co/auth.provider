@@ -18,7 +18,7 @@ describe("revocation", () => {
 			),
 		]);
 
-	it("lets the issuing client revoke its access token, with an empty answer that is not cached", async () => {
+	it("lets the issuing client revoke its access token, with an empty answer that is not cached [rfc7009-2-b] [rfc7662-4-d]", async () => {
 		const s = await serve();
 		const token = await s.issue();
 		const answer = await s.post("/oauth/revoke", "app", { token });
@@ -37,7 +37,7 @@ describe("revocation", () => {
 		expect(await s.active(token)).toBe(true);
 	});
 
-	it("answers 200 for a token it does not know, and takes the hint only as a hint", async () => {
+	it("answers 200 for a token it does not know, and takes the hint only as a hint [rfc7009-2.1-b]", async () => {
 		const s = await serve();
 		expect((await s.post("/oauth/revoke", "app", { token: "not-a-token" })).status).toBe(200);
 		const refreshLike = { token: "rt-0123456789abcdef", token_type_hint: "refresh_token" };
@@ -71,7 +71,7 @@ describe("revocation", () => {
 		expect(await s.active(access)).toBe(false);
 	});
 
-	it("revokes an access token hinted as another kind, after that kind does not know it", async () => {
+	it("revokes an access token hinted as another kind, after that kind does not know it [rfc7009-2.1-b]", async () => {
 		const tried: string[] = [];
 		const s = await serve({ extra: [kind("refresh_token", {}, tried)] });
 		const access = await s.issue();
@@ -129,7 +129,7 @@ describe("revocation", () => {
 		expect([(await s.post("/oauth/revoke", "app", { token })).status, s.events]).toEqual([503, []]);
 	});
 
-	it("refuses a request without a token, a repeated parameter, and an unknown client, recording only the client's refusal", async () => {
+	it("refuses a request without a token, a repeated parameter, and an unknown client, recording only the client's refusal [rfc7009-2.1-a]", async () => {
 		const s = await serve();
 		const error = async (form: Form, as = "app") => {
 			const answer = await s.post("/oauth/revoke", as, form);
@@ -182,7 +182,7 @@ describe("revocation", () => {
 	});
 });
 
-it("lets a listed origin's page revoke its token, sending its credentials and reading the challenge and the wait", async () => {
+it("lets a listed origin's page revoke its token, sending its credentials and reading the challenge and the wait [oidc-discovery-3-aj]", async () => {
 	const { base } = await serve({ http: { "cors-origins": ["https://app.example"] } });
 	const origin = "https://app.example";
 	const asked = await fetch(`${base}/oauth/revoke`, {

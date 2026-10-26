@@ -58,7 +58,7 @@ const request = (client: string) => ({
 });
 
 describe("authorize: without the consent step", () => {
-	it("refuses a client that is not first-party, once logged in, with unauthorized_client", async () => {
+	it("refuses a client that is not first-party, once logged in, with unauthorized_client [rfc6749-3.1-a] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [oidc-core-3.1.2.3-a] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d]", async () => {
 		const browser = browserAt(() => base, issuer, { username: "alice", password });
 		const before = await browser.authorize(request("third"), false);
 		expect(`${before.at?.origin}${before.at?.pathname}`).toBe(`${issuer}/login`);
@@ -80,7 +80,7 @@ describe("authorize: without the consent step", () => {
 		]);
 	});
 
-	it("still gives a first-party client its code", async () => {
+	it("still gives a first-party client its code [rfc6749-4.1.2-a] [oidc-core-3.1.2.5-a]", async () => {
 		const browser = browserAt(() => base, issuer, { username: "alice", password });
 		const res = await browser.authorize(request("app"));
 		expect(`${res.at?.origin}${res.at?.pathname}`).toBe(callback);

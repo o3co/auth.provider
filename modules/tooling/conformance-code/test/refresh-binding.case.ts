@@ -103,7 +103,7 @@ const refresh = (refreshToken: string, key?: { publicKey: KeyObject; privateKey:
 	token({ grant_type: "refresh_token", refresh_token: refreshToken }, key);
 
 describe.runIf(areaTarget().can("dpop"))("refresh: binding a public client's family", () => {
-	it("never binds a family after it started, so a stolen token cannot lock its holder out", async () => {
+	it("never binds a family after it started, so a stolen token cannot lock its holder out [rfc9700-2.2.2-a]", async () => {
 		const { refresh_token: first = "" } = await redeem();
 		const stolen = await refresh(first, thief);
 		expect(stolen.status).toBe(200);
@@ -113,7 +113,7 @@ describe.runIf(areaTarget().can("dpop"))("refresh: binding a public client's fam
 		);
 	});
 
-	it("asks the binding a family started with, after taking a spent token as a reuse", async () => {
+	it("asks the binding a family started with, after taking a spent token as a reuse [rfc9449-5-c] [rfc9449-5-d] [rfc9700-2.2.2-a]", async () => {
 		const { refresh_token: first = "" } = await redeem(holder);
 		expect((await refresh(first)).body.error).toBe("invalid_grant");
 		expect((await refresh(first, thief)).body.error).toBe("invalid_grant");

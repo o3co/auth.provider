@@ -6,7 +6,7 @@ import { issuer, keptNotices, servedEach, settled, until } from "./harness.ts";
 
 const serve = servedEach();
 
-it("posts each client of a closing session a logout token, however the session closes", async () => {
+it("posts each client of a closing session a logout token, however the session closes [oidc-bcl-2.4-a] [oidc-bcl-2.4-b] [oidc-bcl-2.4-c] [oidc-bcl-2.4-d] [oidc-bcl-2.4-e] [oidc-bcl-2.4-f] [oidc-bcl-2.4-g] [oidc-bcl-2.4-h] [oidc-bcl-2.4-i] [oidc-bcl-2.4-j] [oidc-bcl-2.4-k] [oidc-bcl-2.4-m]", async () => {
 	const h = await serve();
 	const { session } = await h.login();
 	await h.redeemed(session.id, "app");
@@ -88,7 +88,7 @@ it.each([
 			});
 		},
 	],
-])("settles a notice once %s", async (_name, answer) => {
+])("settles a notice once %s [oidc-bcl-2.5-b]", async (_name, answer) => {
 	const h = await serve();
 	h.answering.answer = answer;
 	const { session } = await h.login();
@@ -179,7 +179,7 @@ it("logs the clients the store pushes out of a session's set", async () => {
 	]);
 });
 
-it("settles a notice the client takes with any 2xx, as taken", async () => {
+it("settles a notice the client takes with any 2xx, as taken [oidc-bcl-2.5-b]", async () => {
 	const h = await serve();
 	h.answering.answer = async () => 204;
 	const { session } = await h.login();

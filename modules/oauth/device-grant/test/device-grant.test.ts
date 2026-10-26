@@ -238,7 +238,7 @@ async function serve(...given: Parameters<typeof assembly>) {
 }
 
 describe("device authorization", () => {
-	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant", async () => {
+	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d]", async () => {
 		const s = await serve();
 		const given = await s.authorize();
 		expect(given.status).toBe(200);
@@ -378,7 +378,7 @@ describe("device authorization", () => {
 });
 
 describe("polling", () => {
-	it("waits, slows a device that polls too often, then issues once to an approved device, with the approval's authentication", async () => {
+	it("waits, slows a device that polls too often, then issues once to an approved device, with the approval's authentication [rfc6749-3.3-b] [rfc6749-5.1-a]", async () => {
 		const s = await serve();
 		const { code, user } = await s.started();
 		expect(await s.poll(code)).toBe("authorization_pending");
@@ -452,7 +452,7 @@ describe("polling", () => {
 		expect(await s.poll(code)).toBe("invalid_grant");
 	});
 
-	it("spends nothing on a poll by another client, and still issues to the device's own", async () => {
+	it("spends nothing on a poll by another client, and still issues to the device's own [rfc8628-3.4-b]", async () => {
 		const s = await serve();
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });

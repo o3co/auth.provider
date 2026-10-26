@@ -87,7 +87,7 @@ describe("idp-github", () => {
 		);
 	});
 
-	it("asks GitHub to authorize with PKCE, and its own endpoints unless told others", () => {
+	it("asks GitHub to authorize with PKCE, and its own endpoints unless told others [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", () => {
 		const { upstream } = open({});
 		const url = new URL(upstream.authorizationUrl(start));
 		expect(`${url.origin}${url.pathname}`).toBe("https://github.com/login/oauth/authorize");
@@ -107,7 +107,7 @@ describe("idp-github", () => {
 		expect(enterprise.upstream.authorizationUrl(start)).toMatch(/^https:\/\/ghe\.example\//);
 	});
 
-	it("exchanges the code with its verifier and the client's secret, and answers the user's numeric id", async () => {
+	it("exchanges the code with its verifier and the client's secret, and answers the user's numeric id [rfc6750-2.3-d] [rfc9700-4.3.2-a]", async () => {
 		const { upstream, asked } = open({});
 		expect(await upstream.exchange(exchange())).toEqual({ subject: "583231", amr: [] });
 		const [token, user] = asked;
@@ -153,7 +153,7 @@ describe("idp-github", () => {
 		expect(await profileOf({ login: "octocat" })).toBeUndefined();
 	});
 
-	it("sends the code and the access token only to the hosts of the endpoints the operator set", async () => {
+	it("sends the code and the access token only to the hosts of the endpoints the operator set [rfc6750-5.3-f]", async () => {
 		const { upstream, asked } = open({});
 		await upstream.exchange(exchange());
 		expect(asked.map((a) => a.hosts)).toEqual([
@@ -300,7 +300,7 @@ describe("idp-github", () => {
 		}
 	});
 
-	it("refuses an answer from another issuer before using its code, and takes the issuer's own", async () => {
+	it("refuses an answer from another issuer before using its code, and takes the issuer's own [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a]", async () => {
 		const { upstream, asked } = open({});
 		expect(await outcome(upstream.exchange(exchange({ iss: "https://evil.example" })))).toBe(
 			"refused",
