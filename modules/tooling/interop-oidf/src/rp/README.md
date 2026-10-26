@@ -11,4 +11,4 @@ Internal module of `interop-oidf`: the provider as a relying party, logging a br
 ## Invariants
 - The browser goes only to origins whose certificate it was given, follows at most ten redirects, and holds each visit to a time and to the signal given.
 - A redirect to the return target is never followed: the app's answer to its callback is what a sign-in judges.
-- A probe that is not sent back to the probe client's redirect URI fails, never reads as logged out.
+- A probe reads as logged out only on an explicit `login_required`: one not sent back to the probe client's redirect URI, refused otherwise, or whose exchanged code's id_token names no subject (none, empty, not text) fails.

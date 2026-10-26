@@ -24,9 +24,11 @@ async function site(name: string, handle: (req: IncomingMessage, res: ServerResp
 const returnTarget = "https://app.example/back";
 /** How the fake OP answers: a code, or the app's callback refusing it. */
 let opAnswers: "code" | "refused" = "code";
+/** The subject the probe's id_token names: text as a login's, or anything else. */
+let probeSubject: unknown = "local-subject";
 let app: { origin: string; cert: string };
 let op: { origin: string; cert: string };
-const idToken = (sub: string) =>
+const idToken = (sub: unknown) =>
 	`e30.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.sig`;
 
 beforeAll(async () => {
@@ -59,7 +61,7 @@ beforeAll(async () => {
 				expect(form.get("code")).toBe("c9");
 				expect(form.get("client_id")).toBe(probe.id);
 				res.writeHead(200, { "content-type": "application/json" });
-				res.end(JSON.stringify({ id_token: idToken("local-subject") }));
+				res.end(JSON.stringify({ id_token: idToken(probeSubject) }));
 				return;
 			} else res.writeHead(404);
 			res.end(at.pathname.endsWith("/callback") ? '{"error":"exchange_failed"}' : "");
@@ -95,5 +97,18 @@ describe("a sign-in through the suite", () => {
 			'{"error":"exchange_failed"}',
 		]);
 		expect(await loggedInAs(b, { origin: app.origin })).toBeUndefined();
+	});
+
+	it("never reads a login the probe's code proves as logged out, whatever its id_token names", async () => {
+		opAnswers = "code";
+		for (const named of [undefined, "", 7, null]) {
+			probeSubject = named;
+			const b = fresh();
+			await signIn(b, { origin: app.origin, returnTarget });
+			await expect(loggedInAs(b, { origin: app.origin }), String(named)).rejects.toThrow(
+				"the probe's id_token names no subject",
+			);
+		}
+		probeSubject = "local-subject";
 	});
 });

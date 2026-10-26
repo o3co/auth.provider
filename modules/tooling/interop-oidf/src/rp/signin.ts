@@ -81,5 +81,8 @@ export async function loggedInAs(
 	if (token.status !== 200) throw new Error(`the probe's code was refused: ${token.status}`);
 	const idToken = String((JSON.parse(token.body) as Record<string, unknown>).id_token ?? "");
 	const claims = JSON.parse(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString());
-	return typeof claims.sub === "string" ? claims.sub : undefined;
+	if (typeof claims.sub !== "string" || claims.sub === "") {
+		throw new Error("the probe's id_token names no subject");
+	}
+	return claims.sub;
 }
