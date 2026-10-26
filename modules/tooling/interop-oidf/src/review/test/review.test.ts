@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -128,5 +128,25 @@ describe("the pages the suite's browser kept for a person to review", () => {
 		const dir = join(await mkdtemp(join(tmpdir(), "records-")), "review");
 		await keepReviewPages(dir, []);
 		await expect(readdir(dir)).rejects.toThrow();
+	});
+
+	it("leaves no page or index of an earlier run in the directory, though this run kept none", async () => {
+		const dir = join(await mkdtemp(join(tmpdir(), "records-")), "review");
+		await mkdir(dir, { recursive: true });
+		await writeFile(join(dir, "index.json"), "[]");
+		await writeFile(join(dir, "oidcc-prompt-login.html"), "<html>an earlier run's</html>");
+		await keepReviewPages(dir, []);
+		await expect(readdir(dir)).rejects.toThrow();
+		const now: ModuleRun = {
+			testModule: "oidcc-max-age-1",
+			variant,
+			instance: "f6",
+			info: { status: "FINISHED", result: "REVIEW" },
+			log: [page("<html>this run's</html>", "Log in")],
+		};
+		await mkdir(dir, { recursive: true });
+		await writeFile(join(dir, "oidcc-prompt-login.html"), "<html>an earlier run's</html>");
+		await keepReviewPages(dir, [now]);
+		expect((await readdir(dir)).sort()).toEqual(["index.json", "oidcc-max-age-1.html"]);
 	});
 });

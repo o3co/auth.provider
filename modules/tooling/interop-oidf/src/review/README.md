@@ -9,3 +9,4 @@ Internal module of `interop-oidf`: the pages the suite's browser kept for a pers
 ## Invariants
 - Only a test whose result is a review gives pages; a review entry without a page is still given, its page none, for a person to look at in the suite's log.
 - A file is named by its test alone; a second of the same name is numbered, so none overwrites another.
+- Keeping the pages first removes what an earlier run kept in the directory, a run with no review too, so no earlier page stands beside this run's records.
