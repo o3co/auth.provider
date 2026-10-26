@@ -24,6 +24,7 @@
 		"@mod/keys": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
+		"@mod/sender-binding": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/users": "workspace:*",

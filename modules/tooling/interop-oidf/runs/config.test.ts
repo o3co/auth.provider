@@ -1,6 +1,6 @@
-import { runPlan } from "../src/harness/harness.ts";
-import { reportRun } from "../src/harness/report.ts";
+import { runPlan, titleOf } from "../src/harness/harness.ts";
 import { plans } from "../src/plans.ts";
+import { reportRun } from "../src/report/vitest.ts";
 
 // The plan runs as the file is read, so that each suite test is a test of its own.
-reportRun(plans.config.suitePlan, await runPlan(plans.config));
+reportRun(titleOf(plans.config), await runPlan(plans.config));

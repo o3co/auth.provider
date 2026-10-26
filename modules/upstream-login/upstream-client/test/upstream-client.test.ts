@@ -27,7 +27,7 @@ const start = {
 const object = (value: Record<string, unknown>) => ({ kind: "object", value }) as const;
 
 describe("upstream-client", () => {
-	it("builds the authorization request federation asks for, then a type's own parameters", () => {
+	it("builds the authorization request federation asks for, then a type's own parameters [oidc-core-3.1.2.1-x] [oidc-core-3.1.2.1-y] [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", () => {
 		const url = new URL(
 			authorizationUrl(
 				"https://idp.example/authorize?tenant=t",

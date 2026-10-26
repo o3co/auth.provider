@@ -342,7 +342,7 @@ const replayed = "400 invalid_grant: assertion replayed";
 const exchangeUsed = "400 invalid_request: subject_token has been used";
 
 describe("the JWT bearer grant over the whole token endpoint, for id_tokens", () => {
-	it("binds a public app's token to the key its id_token names, proved by real DPoP; leaving out or changing the proof never gets one", async () => {
+	it("binds a public app's token to the key its id_token names, proved by real DPoP; leaving out or changing the proof never gets one [rfc9449-5-b]", async () => {
 		const s = await serve();
 		const bound = await idToken("com.example.phone", { nonce: digest });
 		expect(said(await s.bearer("phone", bound))).toBe(refusedKey);

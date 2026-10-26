@@ -91,7 +91,7 @@ describe("security headers", () => {
 		{ method: "GET", path: "/void", handle: () => undefined as never },
 	];
 
-	it("go on every answer, whatever answers it, with the route's own headers kept", async () => {
+	it("go on every answer, whatever answers it, with the route's own headers kept [rfc9700-4.16-a] [rfc9700-4.16-b] [rfc9700-4.16-d]", async () => {
 		const base = await serveWith(answering);
 		const asked: [string, RequestInit, number][] = [
 			["/page", {}, 200],
@@ -118,7 +118,7 @@ describe("security headers", () => {
 		expect((await fetch(`${base}/page`)).headers.get("vary")).toBe("Accept");
 	});
 
-	it("replace a route's own, its policy included", async () => {
+	it("replace a route's own, its policy included [rfc9700-4.16-a]", async () => {
 		const base = await serveWith([
 			{
 				method: "GET",

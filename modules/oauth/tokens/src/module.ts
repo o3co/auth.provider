@@ -16,7 +16,7 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { type IssueAccess, issuing, judging } from "./issuance.ts";
+import { type IssueAccess, issuing, judging } from "./issuance/issuance.ts";
 import { chainWithin, expiryOf, issuedWithin, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import { section } from "./section.ts";
@@ -221,13 +221,18 @@ export default defineModule(
 				if (token.length > compactLimit) {
 					throw new TypeError(`tokens: the access token is over ${compactLimit} bytes`);
 				}
+				// Nothing kept: a token is signed and handed back, no store or record written.
 				return {
-					token,
-					id: claims.jti,
-					expiresAt: exp * 1000,
-					expiresIn: exp - iat,
-					tokenType: limits?.binding?.tokenType ?? "Bearer",
-					...(grant.claims ? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) } : {}),
+					access: {
+						token,
+						id: claims.jti,
+						expiresAt: exp * 1000,
+						expiresIn: exp - iat,
+						tokenType: limits?.binding?.tokenType ?? "Bearer",
+						...(grant.claims
+							? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) }
+							: {}),
+					},
 				};
 			};
 			const access: Tokens = {

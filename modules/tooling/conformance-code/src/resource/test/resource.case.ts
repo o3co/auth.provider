@@ -104,7 +104,7 @@ function running(resourceIndicators: boolean) {
 describe("RFC 8707: the code flow narrowed to a resource", () => {
 	const s = running(true);
 
-	it("issues the code for the resource asked, and the exchange keeps it or asks it again", async () => {
+	it("issues the code for the resource asked, and the exchange keeps it or asks it again [rfc8707-2-c] [rfc6750-5.3-c] [rfc9700-2.3-b]", async () => {
 		expect(await s.exchange(await s.codeOf({ resource: second }))).toMatchObject({ aud: [second] });
 		expect(
 			await s.exchange(await s.codeOf({ resource: second }), { resource: second }),
@@ -130,7 +130,7 @@ describe("RFC 8707: the code flow narrowed to a resource", () => {
 		},
 	);
 
-	it("answers a resource outside the client's audiences with invalid_target, its state and iss, and no code", async () => {
+	it("answers a resource outside the client's audiences with invalid_target, its state and iss, and no code [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d]", async () => {
 		const res = await s.authorize({ resource: unlisted });
 		expect([
 			`${res.at?.origin}${res.at?.pathname}`,
@@ -141,7 +141,7 @@ describe("RFC 8707: the code flow narrowed to a resource", () => {
 		]).toEqual([callback, "invalid_target", "s1", issuer, null]);
 	});
 
-	it("sends a browser with no session to log in first, and answers consent before the resource", async () => {
+	it("sends a browser with no session to log in first, and answers consent before the resource [oidc-core-3.1.2.1-k]", async () => {
 		const away = await s.authorize({ resource: unlisted }, "app", false);
 		expect(away.at?.searchParams.get("error")).toBeNull();
 		expect(away.at?.searchParams.get("redirect_to")).toMatch(/oauth\/authorize/);
@@ -166,7 +166,7 @@ describe("RFC 8707: the code flow narrowed to a resource", () => {
 describe("RFC 8707: off in the code flow unless composed", () => {
 	const s = running(false);
 
-	it("reads no resource at authorization", async () => {
+	it("reads no resource at authorization [rfc6749-3.1-e] [oidc-core-3.1.2.2-h]", async () => {
 		expect(await s.codeOf({ resource: unlisted })).not.toBe("");
 	});
 });

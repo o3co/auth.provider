@@ -1,1 +1,2 @@
-adapters/nimbus/target/
+adapters/*/target/
+bin/

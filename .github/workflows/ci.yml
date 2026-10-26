@@ -571,6 +571,15 @@ jobs:
           java-version: '21'
           cache: maven
           cache-dependency-path: modules/tooling/interop-clients/adapters/*/pom.xml
+      # Python for the Authlib adapter's environment, at the version it names.
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: modules/tooling/interop-clients/adapters/authlib/.python-version
+      # Go for the adapter `go build` makes, at the toolchain its go.mod pins.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: modules/tooling/interop-clients/adapters/go/go.mod
+          cache-dependency-path: modules/tooling/interop-clients/adapters/go/go.sum
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash

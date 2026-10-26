@@ -84,13 +84,22 @@
 					]
 				},
 				{
-					"comment": "the return is not registered: the provider logs out and answers that it logged out, sending the browser nowhere",
+					"comment": "the return is not registered: the provider refuses the request as invalid, logging no one out and sending the browser nowhere",
 					"match": "{ORIGIN}/oauth/logout*",
 					"tasks": [
 						{
 							"task": "Expect the provider's own answer",
 							"match": "{ORIGIN}/oauth/logout*",
-							"commands": [["wait", "xpath", "//*", 10, "logged_out", "update-image-placeholder"]]
+							"commands": [
+								[
+									"wait",
+									"xpath",
+									"//*",
+									10,
+									"post_logout_redirect_uri is not registered",
+									"update-image-placeholder"
+								]
+							]
 						}
 					]
 				}
@@ -119,13 +128,22 @@
 					]
 				},
 				{
-					"comment": "the return is not registered: the provider logs out and answers that it logged out, sending the browser nowhere",
+					"comment": "the return is not registered: the provider refuses the request as invalid, logging no one out and sending the browser nowhere",
 					"match": "{ORIGIN}/oauth/logout*",
 					"tasks": [
 						{
 							"task": "Expect the provider's own answer",
 							"match": "{ORIGIN}/oauth/logout*",
-							"commands": [["wait", "xpath", "//*", 10, "logged_out", "update-image-placeholder"]]
+							"commands": [
+								[
+									"wait",
+									"xpath",
+									"//*",
+									10,
+									"post_logout_redirect_uri is not registered",
+									"update-image-placeholder"
+								]
+							]
 						}
 					]
 				}

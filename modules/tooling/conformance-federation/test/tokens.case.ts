@@ -236,7 +236,7 @@ describe("federation tokens: refusals", () => {
 		expect(got).toMatchObject({ status: 404, body: { error: "federation_not_linked" } });
 	});
 
-	it("refuses a token whose refresh family ended, here and at userinfo alike", async () => {
+	it("refuses a token whose refresh family ended, here and at userinfo alike [oidc-core-5.3-b] [rfc6750-2.1-a] [rfc6750-3-a] [rfc6750-3-f] [rfc6750-3.1-b]", async () => {
 		const b = await loggedIn();
 		const mine = await clientTokens(b);
 		const refresh = (token: string) =>
@@ -327,7 +327,7 @@ describe("federation tokens: refusals", () => {
 });
 
 describe("federation tokens: upstream logout", () => {
-	it("sends the browser to the upstream's end of session with its hint and the registered return", async () => {
+	it("sends the browser to the upstream's end of session with its hint and the registered return [oidc-rpinit-2-l] [oidc-rpinit-2-m]", async () => {
 		const b = await loggedIn();
 		const mine = await clientTokens(b);
 		const out = await upstreamLogout(mine.access_token, {

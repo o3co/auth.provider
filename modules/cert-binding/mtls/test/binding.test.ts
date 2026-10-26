@@ -59,7 +59,7 @@ describe("reading the client's certificate", () => {
 		}
 	});
 
-	it("binds a self-signed certificate by its thumbprint, once it parses", async () => {
+	it("binds a self-signed certificate by its thumbprint, once it parses [rfc8705-3.1-b] [rfc8705-3.1-c]", async () => {
 		const own = await issue({ cn: "client" });
 		const forwarded = { kind: "certificate" as const, leaf: own.der, chain: [] };
 		expect(await readCertificate(forwarded, issuance, under().checking)).toEqual({

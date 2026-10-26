@@ -112,7 +112,7 @@ describe("upstream-client's id_token reader", () => {
 		expect(await outcome(readerOf({ kind: "unavailable" }).read("t", "n"))).toBe("idp-x");
 	});
 
-	it("refuses an id_token that does not hold", async () => {
+	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-k]", async () => {
 		const cases: Record<string, Verified> = {
 			"a reason external-jwt gives": { kind: "invalid", reason: "signature" },
 			"no subject": valid({ sub: undefined }),

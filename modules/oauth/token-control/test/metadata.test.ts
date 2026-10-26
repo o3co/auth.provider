@@ -85,7 +85,7 @@ const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
 	})),
 ]);
 
-it("publishes how a client authenticates at each: no public client at introspection, and the algorithms of signed methods", async () => {
+it("publishes how a client authenticates at each: no public client at introspection, and the algorithms of signed methods [rfc8414-2-l] [rfc8414-2-n]", async () => {
 	const plain = await documentOf(true, "https://as.example");
 	expect(plain.introspection_endpoint_auth_methods_supported).toEqual([
 		"client_secret_basic",

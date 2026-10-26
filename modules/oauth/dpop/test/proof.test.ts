@@ -80,20 +80,20 @@ describe("DPoP proof", () => {
 	});
 
 	describe("header", () => {
-		it("takes one DPoP header only", async () => {
+		it("takes one DPoP header only [rfc9449-4.3-a]", async () => {
 			await expectRefused({ twice: `${await proof()}, ${await proof()}` }, "one DPoP header only");
 		});
 
-		it("refuses what is no JWT, or a JWT not written in its one form", async () => {
+		it("refuses what is no JWT, or a JWT not written in its one form [rfc9449-4.3-b]", async () => {
 			const variant = spareBitFlipped(await proof());
 			await expectRefused({ text: "not-a-jwt", "another form": variant }, "not a JWT");
 		});
 
-		it("needs typ dpop+jwt", async () => {
+		it("needs typ dpop+jwt [rfc9449-4.3-c]", async () => {
 			await expectRefused({ jwt: await proof({}, { typ: "JWT" }) }, "typ must be dpop+jwt");
 		});
 
-		it("takes only the algorithms the rules allow", async () => {
+		it("takes only the algorithms the rules allow [rfc9449-4.3-d]", async () => {
 			await expectRefused(
 				{
 					none: `${segment({ alg: "none", typ: "dpop+jwt", jwk })}.${segment(claims)}.`,
@@ -104,7 +104,7 @@ describe("DPoP proof", () => {
 			);
 		});
 
-		it("needs a public key of a known type, even where the rules allow a shared secret", async () => {
+		it("needs a public key of a known type, even where the rules allow a shared secret [rfc9449-4.2-c]", async () => {
 			const secret = new Uint8Array(32).fill(7);
 			const oct = { kty: "oct", k: Buffer.from(secret).toString("base64url") };
 			await expectRefused(
@@ -137,7 +137,7 @@ describe("DPoP proof", () => {
 		});
 	});
 
-	it("refuses a signature by another key, a weak key, or a key of another curve", async () => {
+	it("refuses a signature by another key, a weak key, or a key of another curve [rfc9449-4.3-e]", async () => {
 		const weak = generateKeyPairSync("rsa", { modulusLength: 1024 });
 		const p384 = generateKeyPairSync("ec", { namedCurve: "P-384" });
 		await expectRefused(
@@ -182,7 +182,7 @@ describe("DPoP proof", () => {
 			);
 		});
 
-		it("needs the request's method", async () => {
+		it("needs the request's method [rfc9449-4.3-f]", async () => {
 			await expectRefused({ GET: await proof({ htm: "GET" }) }, "htm does not match");
 		});
 
@@ -204,7 +204,7 @@ describe("DPoP proof", () => {
 			);
 		});
 
-		it("takes iat up to the window's edge on either side, and no further", async () => {
+		it("takes iat up to the window's edge on either side, and no further [rfc9449-4.3-i]", async () => {
 			const p = await proof();
 			const at = async (time: number) => (await check(p, {}, { kind: "issue" }, time)).kind;
 			expect(await at(iat * 1000 + 60_000)).toBe("proved");
@@ -220,7 +220,7 @@ describe("DPoP proof", () => {
 			);
 		});
 
-		it("needs the token's ath at a resource", async () => {
+		it("needs the token's ath at a resource [rfc9449-4.2-f] [rfc9449-4.3-k]", async () => {
 			const token = "access-token";
 			const ath = createHash("sha256").update(token).digest("base64url");
 			const scene = { kind: "resource", token } as const;

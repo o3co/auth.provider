@@ -233,7 +233,7 @@ describe("jwt-bearer", () => {
 		expect(errorOf(await s.grant(signed))).toBe("invalid_grant");
 	});
 
-	it("issues a token for the assertion's subject, capped at its expiry, once per jti", async () => {
+	it("issues a token for the assertion's subject, capped at its expiry, once per jti [rfc7521-4.1-c]", async () => {
 		const s = await serve();
 		const signed = await assertion(base);
 		const first = await s.grant(signed);
@@ -246,7 +246,7 @@ describe("jwt-bearer", () => {
 		expect(errorOf(await s.grant(signed))).toBe("invalid_grant");
 	});
 
-	it("refuses as expired an assertion with less than a second left when its jti would be used up, or a token with less once issued", async () => {
+	it("refuses as expired an assertion with less than a second left when its jti would be used up, and is refused a token with less once signed", async () => {
 		/** How long each asking of the issuance policies takes: before the jti is used up, then in issuing. */
 		let waits: number[] = [];
 		const waiting = defineModule({ name: "test-policy", takes: [] }, (m) => [
@@ -276,7 +276,7 @@ describe("jwt-bearer", () => {
 			waits = [119_500];
 			expect(saidOf(await s.grant(await assertion(base)))).toBe("invalid_grant: expired");
 			expect(saved.length).toBe(before);
-			// A second left then, but issuing takes it: the token is handed to no one, the jti used up.
+			// A second left then, but issuing takes it: tokens refuses the token, the jti used up.
 			clock.at = now;
 			waits = [0, 119_500];
 			expect(saidOf(await s.grant(await assertion(base)))).toBe("invalid_grant: expired");
@@ -289,7 +289,7 @@ describe("jwt-bearer", () => {
 		}
 	});
 
-	it("holds an issuer's assertions to its own lifetime and clock skew, narrower than the section's", async () => {
+	it("holds an issuer's assertions to its own lifetime and clock skew, narrower than the section's [rfc7523-3-p]", async () => {
 		const own = (more: Record<string, unknown>) =>
 			serve(undefined, issuer, `${issuer}/oauth/token`, [{ ...trustedUpstream[0], ...more }]);
 		const short = await own({ "max-assertion-lifetime": "10m" });
@@ -492,7 +492,7 @@ describe("jwt-bearer", () => {
 		}
 	});
 
-	it("takes the token endpoint's own location as an audience, whatever path the issuer has", async () => {
+	it("takes the token endpoint's own location as an audience, whatever path the issuer has [rfc7523-3-h] [rfc7521-5.2-g]", async () => {
 		const tenant = `${issuer}/tenant`;
 		const s = await serve(undefined, tenant);
 		const ok = async (aud: string) => (await s.grant(await assertion({ ...base, aud }))).kind;
@@ -504,7 +504,7 @@ describe("jwt-bearer", () => {
 		);
 	});
 
-	it("refuses assertions from strangers, for others, expired, too long-lived or missing claims", async () => {
+	it("refuses assertions from strangers, for others, expired, too long-lived or missing claims [rfc7523-2.1-a] [rfc7523-3-e] [rfc7521-5.2-d] [rfc7523-3-h] [rfc7521-5.2-g] [rfc7523-3-n] [rfc7521-5.2-k] [rfc7523-3-t] [rfc7521-5.2-m] [rfc7523-3.1-b] [rfc7521-4.1.1-a]", async () => {
 		const s = await serve();
 		const error = async (a: string) => errorOf(await s.grant(a));
 		expect(await error(await assertion(base, stranger.privateKey))).toBe("invalid_grant");
@@ -531,7 +531,7 @@ describe("jwt-bearer", () => {
 		expect(await error("")).toBe("invalid_request");
 	});
 
-	it("refuses, rather than throws on, an assertion whose signed payload is no JSON", async () => {
+	it("refuses, rather than throws on, an assertion whose signed payload is no JSON [rfc7523-3-x]", async () => {
 		const signer = await testSigner("EdDSA");
 		const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
 			{
@@ -600,7 +600,7 @@ describe("jwt-bearer", () => {
 		expect(await aud([issuer, 5])).toBe("invalid_grant");
 	});
 
-	it("says why in its own words", async () => {
+	it("says why in its own words [rfc7523-3-l] [rfc7521-5.2-i] [rfc7523-3-p]", async () => {
 		const s = await serve();
 		const said = async (a: string) => saidOf(await s.grant(a));
 		expect(await said(await assertion(base, stranger.privateKey))).toBe(
@@ -885,7 +885,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		return `${data}.${sign(null, Buffer.from(data), key).toString("base64url")}`;
 	};
 
-	it("answers every refusal before the signature alike, whether the signer has keys or none", async () => {
+	it("answers every refusal before the signature alike, whether the signer has keys or none [rfc7523-3-x]", async () => {
 		const thumb = await thumbOf();
 		const held: Answer = { kind: "keys", keys: [await deviceKey()], algorithms: ["EdDSA"] };
 		let keys: Answer = held;

@@ -141,6 +141,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `clientless` (`src/clientless`): a grant naming no client (RFC 7523 §3.1), where an entry's `client` is the client its verified assertion identifies, and the binding of entries and their clients.
   - `conditions` (`src/conditions`): the conditions an issuer holds an assertion's verified claims to, and whether claims meet them.
   - `delegated` (`src/delegated`): an assertion of a delegated issuer, which another module checks by its own rules (`delegatedAssertions`).
+  - `id-jag` (`src/id-jag`): the ID-JAG profile's rules (Identity Assertion JWT Authorization Grant), read off a verified assertion and held against the request.
   - `issuers` (`src/issuers`): the trusted issuers, each entry of the section's `issuers`, and the signers and ledgers each is read with.
   - `policy` (`src/policy`): what a trusted issuer's own policy makes of the section's, for verifying its assertions, keeping them used and issuing their tokens.
 - `@mod/jwt-bearer-id-tokens` (feature, `modules/oauth/jwt-bearer-id-tokens`): Ties `jwt-bearer` and `exchange-id-tokens` together: Apple's and Google's id_tokens, sent as JWT bearer assertions, are checked and taken once by `exchange-id-tokens`' rules, for the apps already sent out that send them so.
@@ -180,6 +181,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `route` (`src/route`): the handler of `POST /oauth/token`, from the request to the answer, and what a grant issues through.
 - `@mod/token-exchange` (feature, `modules/oauth/token-exchange`): Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
 - `@mod/tokens` (feature, `modules/oauth/tokens`): Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
+  - `issuance` (`src/issuance`): the judgment `admits` and `issue` share, and the issuing `issue` does over it.
 - `@mod/userinfo` (feature, `modules/oauth/userinfo`): Serves OIDC's userinfo: admits the access token a request presents, checks the session it was issued in, and answers `sub` and the claims `oidc` releases for its scope.
 - `@mod/verified-email` (feature, `modules/oauth/verified-email`): Contributes the issuance policy `verified-email`: no access token for a subject whose email users has not stated verified.
 
@@ -310,6 +312,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `relay` (`src/relay`): a relay between an app and Redis that causes a fault at a known point and shows that it happened.
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
+  - `acr` (`src/acr`): the scenes of the acr a client asks for.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.
@@ -371,9 +374,11 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
   - `expected` (`src/expected`): whether the expected entries may go to the suite.
   - `harness` (`src/harness`): one plan run end to end, reported as tests.
+  - `lifecycle` (`src/lifecycle`): what every plan run has, whichever side of the suite it plays.
   - `login` (`src/login`): the deployment's login page, as the suite's browser meets it.
   - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
   - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
+  - `report` (`src/report`): a plan's run, reported as vitest tests.
   - `results` (`src/results`): what each suite test of a plan proved.
   - `review` (`src/review`): the pages the suite's browser kept for a person to review.
   - `scene` (`src/scene`): the app the OP plans meet.

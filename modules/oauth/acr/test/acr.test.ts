@@ -94,6 +94,17 @@ it("meets the first known acr whose one set the session holds whole", async () =
 	expect(decided.met(["constructor"], ["pwd"])).toBeUndefined();
 });
 
+it("answers the session's current acr: the first in the table's order its amr meet, none where they meet none", async () => {
+	const { decided } = await serve(table, offers());
+	expect(decided.current(["pwd"])).toBe("urn:t:zz");
+	expect(decided.current(["hwk"])).toBe("urn:t:aa");
+	// The operator's sets for the same acr, then the offered entries after the operator's own.
+	expect(decided.current(["otp"])).toBe("urn:t:offered");
+	expect(decided.current(["mfa"])).toBeUndefined();
+	await stop();
+	expect((await serve({}, [])).decided.current(["pwd"])).toBeUndefined();
+});
+
 it("takes the operator's sets over an offered entry for the same acr", async () => {
 	const { decided } = await serve(table, offers());
 	expect(decided.met(decided.known("urn:t:both"), ["pwd"])).toBe("urn:t:both");

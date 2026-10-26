@@ -176,7 +176,7 @@ describe("H. passkey login at the token endpoint", () => {
 	);
 	const c = calls(() => s.at.base);
 
-	it("gives the client its tokens for a registered passkey, with a passkey's amr; the refresh token rotates and the client can revoke", async () => {
+	it("gives the client its tokens for a registered passkey, with a passkey's amr and login time that a refresh keeps, and lets the client revoke [rfc6749-5.1-a] [rfc7009-2-b] [rfc7662-2.2-a] [rfc7662-2.2-b] [rfc7662-2.2-c] [rfc7662-4-d]", async () => {
 		const { authenticator } = await c.register("alice");
 		const first = await c.login("app", await c.assertion(authenticator), { scope: "read write" });
 		expect(first.status).toBe(200);
@@ -208,7 +208,7 @@ describe("H. passkey login at the token endpoint", () => {
 		expect(answer.body.refresh_token).toBeUndefined();
 	});
 
-	it("refuses a client not allowed the grant, and a form body", async () => {
+	it("refuses a client not allowed the grant, and a form body [rfc6749-5.2-a]", async () => {
 		const { authenticator } = await c.register("carol");
 		const other = await c.login("other", await c.assertion(authenticator, "other"));
 		expect([other.status, other.body.error]).toEqual([400, "unauthorized_client"]);
@@ -221,7 +221,7 @@ describe("H. passkey login at the token endpoint", () => {
 		expect((await c.login("app", assertion)).status).toBe(200);
 	});
 
-	it("refuses the same assertion twice, and a count that goes back", async () => {
+	it("refuses the same assertion twice, and a count that goes back [rfc6749-5.2-a]", async () => {
 		const { authenticator } = await c.register("dave");
 		const assertion = await c.assertion(authenticator);
 		expect((await c.login("app", assertion)).status).toBe(200);
@@ -236,7 +236,7 @@ describe("H. passkey login: who the assertion names", () => {
 	const s = running(sceneFor(["erin", "fay", "gus", "hal"], { requests: 1000, windowSeconds: 60 }));
 	const c = calls(() => s.at.base);
 
-	it("refuses an assertion naming another account's user handle, issuing for neither; its own handle passes", async () => {
+	it("refuses an assertion naming another account's user handle, issuing for neither; its own handle passes [rfc6749-5.2-a]", async () => {
 		const owner = await c.register("erin");
 		const other = await c.register("fay");
 		const crossed = await c.login(
@@ -249,7 +249,7 @@ describe("H. passkey login: who the assertion names", () => {
 		expect(own.status).toBe(200);
 	});
 
-	it("refuses an assertion without a user handle, and leaves its challenge for the right one", async () => {
+	it("refuses an assertion without a user handle, and leaves its challenge for the right one [rfc6749-5.2-a]", async () => {
 		const { authenticator } = await c.register("gus");
 		const offered = (await c.options()).body;
 		const bare = await c.login("app", authenticator.get(offered, at, { userHandle: null }));
@@ -283,7 +283,7 @@ describe("H. passkey login: who the assertion names", () => {
 		}
 	});
 
-	it("binds the token to the key a DPoP proof shows", async () => {
+	it("binds the token to the key a DPoP proof shows [rfc9449-5-b] [rfc9449-6.1-a]", async () => {
 		const { authenticator } = await c.register("gus");
 		const holder = generateKeyPairSync("ed25519");
 		const proof = await new SignJWT({

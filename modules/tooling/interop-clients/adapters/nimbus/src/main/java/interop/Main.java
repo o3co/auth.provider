@@ -73,6 +73,7 @@ import com.nimbusds.openid.connect.sdk.OIDCTokenResponse;
 import com.nimbusds.openid.connect.sdk.OIDCTokenResponseParser;
 import com.nimbusds.openid.connect.sdk.UserInfoRequest;
 import com.nimbusds.openid.connect.sdk.UserInfoResponse;
+import com.nimbusds.openid.connect.sdk.claims.UserInfo;
 import com.nimbusds.openid.connect.sdk.claims.IDTokenClaimsSet;
 import com.nimbusds.openid.connect.sdk.op.OIDCProviderMetadata;
 import com.nimbusds.openid.connect.sdk.validators.IDTokenValidator;
@@ -385,12 +386,15 @@ public final class Main {
 
   /** Signs in, then exchanges the access token for another (RFC 8693), the client authenticated. */
   private Map<String, Object> tokenExchange() throws Exception {
-    SignedIn in = signIn();
-    AccessToken subject = in.tokens().getOIDCTokens().getAccessToken();
+    // The subject token the driver gives; Nimbus signs in for one where none is given.
+    Object given = instruction.get("subjectToken");
+    SignedIn in = given instanceof String ? null : signIn();
+    OIDCProviderMetadata op = in != null ? in.op() : provider();
+    AccessToken subject = in != null ? in.tokens().getOIDCTokens().getAccessToken() : new BearerAccessToken((String) given);
     TokenRequest request =
         new TokenRequest(
-            in.op().getTokenEndpointURI(),
-            authentication(in.op().getTokenEndpointURI()),
+            op.getTokenEndpointURI(),
+            authentication(op.getTokenEndpointURI()),
             new TokenExchangeGrant(subject, TokenTypeURI.ACCESS_TOKEN));
     TokenResponse answer = TokenResponse.parse(sending(request.toHTTPRequest()).send());
     if (!answer.indicatesSuccess()) throw Refused.of(answer.toErrorResponse().getErrorObject());
@@ -399,7 +403,6 @@ public final class Main {
     result.put("accessToken", success.getTokens().getAccessToken().getValue());
     TokenTypeURI issued = success.getTokens().getAccessToken().getIssuedTokenType();
     result.put("issuedTokenType", issued == null ? null : issued.getURI().toString());
-    result.put("sub", in.claims().getSubject().getValue());
     return result;
   }
 
@@ -437,6 +440,13 @@ public final class Main {
   /** What a sign-in gave: the provider, the tokens and the ID token's claims as the validator took them. */
   record SignedIn(OIDCProviderMetadata op, OIDCTokenResponse tokens, IDTokenClaimsSet claims) {}
 
+  /** Userinfo is the signed-in user's only where it names the ID token's subject (OpenID Connect Core §5.3.2). */
+  private static UserInfo sameSubject(UserInfo info, IDTokenClaimsSet claims) {
+    if (info.getSubject() == null || !info.getSubject().equals(claims.getSubject()))
+      throw new Refused("userinfo_subject", "the userinfo names another subject, or none");
+    return info;
+  }
+
   private Map<String, Object> login() throws Exception {
     SignedIn in = signIn();
     BearerAccessToken access = in.tokens().getOIDCTokens().getBearerAccessToken();
@@ -446,7 +456,7 @@ public final class Main {
     if (!info.indicatesSuccess()) throw Refused.of(info.toErrorResponse().getErrorObject());
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("idToken", in.claims().toJSONObject());
-    result.put("userinfo", info.toSuccessResponse().getUserInfo().toJSONObject());
+    result.put("userinfo", sameSubject(info.toSuccessResponse().getUserInfo(), in.claims()).toJSONObject());
     result.put("tokenType", access.getType().getValue());
     result.put("scope", access.getScope() == null ? null : access.getScope().toString());
     result.put("refreshToken", in.tokens().getOIDCTokens().getRefreshToken() != null);
@@ -557,7 +567,7 @@ public final class Main {
     result.put("tokenType", token.getType().getValue());
     result.put("accessToken", token.getValue());
     result.put("sub", in.claims().getSubject().getValue());
-    result.put("userinfo", info.toSuccessResponse().getUserInfo().toJSONObject());
+    result.put("userinfo", sameSubject(info.toSuccessResponse().getUserInfo(), in.claims()).toJSONObject());
     return result;
   }
 
@@ -565,10 +575,14 @@ public final class Main {
   private Map<String, Object> device() throws Exception {
     OIDCProviderMetadata op = provider();
     ClientAuthentication auth = authentication(op.getTokenEndpointURI());
+    ClientID id = new ClientID(JSONObjectUtils.getString(client(), "id"));
+    // A public client names itself alone, an authenticated one authenticates.
+    DeviceAuthorizationRequest.Builder asking =
+        auth != null ? new DeviceAuthorizationRequest.Builder(auth) : new DeviceAuthorizationRequest.Builder(id);
     var started =
         DeviceAuthorizationResponse.parse(
             sending(
-                    new DeviceAuthorizationRequest.Builder(auth)
+                    asking
                         .endpointURI(op.getDeviceAuthorizationEndpointURI())
                         .scope(Scope.parse(orElse(instruction, "scope", "openid")))
                         .build()
@@ -586,8 +600,11 @@ public final class Main {
       TokenResponse answer =
           TokenResponse.parse(
               sending(
-                      new TokenRequest(
-                              op.getTokenEndpointURI(), auth, new DeviceCodeGrant(codes.getDeviceCode()))
+                      (auth != null
+                              ? new TokenRequest(
+                                  op.getTokenEndpointURI(), auth, new DeviceCodeGrant(codes.getDeviceCode()))
+                              : new TokenRequest(
+                                  op.getTokenEndpointURI(), id, new DeviceCodeGrant(codes.getDeviceCode())))
                           .toHTTPRequest())
                   .send());
       if (answer.indicatesSuccess()) {
@@ -640,10 +657,10 @@ public final class Main {
             case "login", "public-login" -> main.login();
             case "refresh" -> main.refresh();
             case "resource" -> main.resourceFlow();
-            case "client-credentials" -> main.clientCredentials();
+            case "client-credentials", "client-credentials-secret" -> main.clientCredentials();
             case "revocation" -> main.revocation();
             case "dpop" -> main.dpopFlow();
-            case "device" -> main.device();
+            case "device", "public-device" -> main.device();
             case "logout" -> main.logout();
             case "jwt-bearer" -> main.jwtBearer();
             case "token-exchange" -> main.tokenExchange();

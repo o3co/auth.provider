@@ -127,7 +127,7 @@ describe("dpop", () => {
 		expect(await publishedAlgorithms()).toEqual(["ES256", "ES384", "EdDSA", "RS256"]);
 	});
 
-	it("refuses a section outside its bounds", async () => {
+	it("refuses a section outside its bounds [rfc9449-11.6-a] [rfc9449-11.6-b]", async () => {
 		for (const refused of [
 			{ algorithms: ["HS256"] },
 			{ algorithms: [] },
@@ -249,7 +249,7 @@ describe("server nonces (RFC 9449 §8)", () => {
 	const toResource = () => proof({ htu: `${issuer}/api`, ath });
 	const askedAgain = { kind: "refused", error: "use_dpop_nonce" };
 
-	it("refuses a proof without the current nonce as use_dpop_nonce, giving it, and spends no jti", async () => {
+	it("refuses a proof without the current nonce as use_dpop_nonce, giving it, and spends no jti [rfc9449-4.2-e] [rfc9449-4.3-h]", async () => {
 		// Starts at a bucket's edge, so the clock never crosses one by chance within the test.
 		shift = bucketMs - (Date.now() % bucketMs) + 1;
 		const read = await asking("as");

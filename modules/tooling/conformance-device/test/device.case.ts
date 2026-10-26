@@ -111,7 +111,7 @@ const verify = (cookie: string, json: Record<string, string>, origin = issuer) =
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe.runIf(areaTarget().can("device-grant"))("the device authorization grant", () => {
-	it("gives an allowed client codes, and refuses a client not allowed the grant", async () => {
+	it("gives an allowed client codes, and refuses a client not allowed the grant [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a]", async () => {
 		const given = await authorize();
 		expect(given.status).toBe(200);
 		expect(given.body).toMatchObject({
@@ -124,7 +124,7 @@ describe.runIf(areaTarget().can("device-grant"))("the device authorization grant
 		expect([refused.status, refused.body.error]).toEqual([400, "unauthorized_client"]);
 	});
 
-	it("issues a token once to the device whose code a signed-in user approved", async () => {
+	it("issues a token once to the device whose code a signed-in user approved [rfc8628-3.2-a]", async () => {
 		const { device_code: code = "", user_code: user = "" } = (await authorize()).body;
 		expect((await poll(code)).body.error).toBe("authorization_pending");
 		const cookie = await login("alice", "correct horse battery");

@@ -1,4 +1,4 @@
-import { generateKeyPairSync, X509Certificate } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, X509Certificate } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +28,15 @@ export interface World {
 	readonly ca: string;
 	readonly clients: Readonly<
 		Record<
-			"basic" | "post" | "public" | "assertion" | "device" | "mtls" | "backchannel",
+			| "basic"
+			| "post"
+			| "public"
+			| "assertion"
+			| "device"
+			| "mtls"
+			| "backchannel"
+			| "service"
+			| "publicDevice",
 			WorldClient
 		>
 	>;
@@ -47,6 +55,8 @@ export interface World {
 	readonly resource: string;
 	/** What the provider's introspection answers of a token, asked as the `post` client. */
 	introspect(token: string): Promise<Record<string, unknown>>;
+	/** An access token the harness signs in for itself, by the code flow as `client_secret_post`, with its subject. */
+	issue(client: WorldClient): Promise<{ readonly accessToken: string; readonly sub: string }>;
 	/** Each authorization URL a library sent the browser to, and each token request it sent through the front, in order. */
 	readonly seen: {
 		readonly authorizations: readonly URL[];
@@ -140,6 +150,12 @@ export async function startWorld(
 			secret: "device-secret-0123456789abcdef",
 		},
 		mtls: { id: "mtls", method: "client_secret_post", secret: "mtls-secret-0123456789abcdef" },
+		service: {
+			id: "service",
+			method: "client_secret_basic",
+			secret: "service-secret-0123456789abcdef",
+		},
+		publicDevice: { id: "public-device", method: "none" },
 		backchannel: {
 			id: "backchannel",
 			method: "client_secret_basic",
@@ -155,6 +171,12 @@ export async function startWorld(
 		scopes: ["read"],
 		defaultScopes: ["read"],
 		audiences: [resource],
+	};
+	const byService: ClientScene = {
+		...byMtls,
+		id: clients.service.id,
+		method: "client_secret_basic",
+		secret: clients.service.secret,
 	};
 	const byBackchannel: ClientScene = {
 		...client(clients.backchannel.id, clients.backchannel.method, clients.backchannel.secret),
@@ -187,13 +209,29 @@ export async function startWorld(
 		// The audience the harness's introspecting client may see too.
 		audiences: [resource],
 	};
+	// The device grant's own case (RFC 8628 §3.1): a public client, which names itself alone.
+	const { secret: _, ...deviceAllowance } = byDevice;
+	const byPublicDevice: ClientScene = {
+		...deviceAllowance,
+		id: clients.publicDevice.id,
+		kind: "public",
+		method: "none",
+	};
 	const app = await fronted(
 		(origin) => {
 			const scene = codeScene({
 				issuer: origin,
 				keys: { signing: signing() },
 				users: [{ identifier: user.username, password: user.password }],
-				clients: [...byCode, byAssertion, byDevice, byMtls, byBackchannel],
+				clients: [
+					...byCode,
+					byAssertion,
+					byDevice,
+					byMtls,
+					byService,
+					byPublicDevice,
+					byBackchannel,
+				],
 				discovery: true,
 				userinfo: true,
 				refresh: {},
@@ -222,7 +260,7 @@ export async function startWorld(
 	);
 	const base = app.base();
 	const front = { origin: app.origin };
-	return {
+	const world: World = {
 		issuer: front.origin,
 		ca: app.ca,
 		clients,
@@ -251,6 +289,43 @@ export async function startWorld(
 					`introspection answered ${answer.status}: ${(await answer.text()).slice(0, 200)}`,
 				);
 			return (await answer.json()) as Record<string, unknown>;
+		},
+		async issue(code: WorldClient) {
+			const verifier = randomBytes(32).toString("base64url");
+			const query = new URLSearchParams({
+				response_type: "code",
+				client_id: code.id,
+				redirect_uri: redirectUri,
+				scope: "openid",
+				state: randomBytes(8).toString("base64url"),
+				code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+				code_challenge_method: "S256",
+			});
+			const back = new URL(
+				await world.browser().authorize(`${front.origin}/oauth/authorize?${query}`),
+			);
+			const answer = await fetch(`${base}/oauth/token`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					"x-forwarded-proto": "https",
+					"x-forwarded-for": sender,
+				},
+				body: new URLSearchParams({
+					grant_type: "authorization_code",
+					code: back.searchParams.get("code") ?? "",
+					redirect_uri: redirectUri,
+					code_verifier: verifier,
+					client_id: code.id,
+					client_secret: code.secret ?? "",
+				}),
+			});
+			if (!answer.ok)
+				throw new Error(
+					`the harness's code redemption answered ${answer.status}: ${(await answer.text()).slice(0, 200)}`,
+				);
+			const accessToken = String(((await answer.json()) as Record<string, unknown>).access_token);
+			return { accessToken, sub: String((await world.introspect(accessToken)).sub) };
 		},
 		browser() {
 			const at = browserAt(() => base, front.origin, user);
@@ -301,4 +376,5 @@ export async function startWorld(
 		},
 		stop: () => app.stop(),
 	};
+	return world;
 }
