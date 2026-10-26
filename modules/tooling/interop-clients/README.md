@@ -22,7 +22,7 @@
 - The front tells the app the libraries send from `198.51.100.30`: on loopback the sender would be the app's trusted proxy, and its source undetermined.
 - A check that fails is skipped as excused only where a known difference names its library, flow and title; a difference no check met fails the run.
 - A flow test runs only for a library that runs the flow first-class; the others skip it.
-- Where the app does not start, the front is closed and the run's files removed before the failure is told.
+- The world keeps no file but its front's, under `under` where given: the client certificate's are removed once read back. Where the app does not start, the front is closed and the run's files removed before the failure is told.
 
 ## Depends on
 - `conformance`, `conformance-code`, `conformance-oauth`, `conformance-front`, `spec-checklist`, `openid-client`, `undici`; a JDK and Maven for the Nimbus adapter, Go for the Go adapter, Python for the Authlib adapter.
