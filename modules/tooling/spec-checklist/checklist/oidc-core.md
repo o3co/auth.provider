@@ -410,7 +410,6 @@
 ## 5.5 Requesting Claims using the "claims" Request Parameter
 
 - **oidc-core-5.5-a** SHOULD: an OP that does not support the `claims` parameter returns the claims it believes useful where a client uses it.
-  deviates: D-2
 - **oidc-core-5.5-b** MUST: the OP ignores members of a `claims` request it does not understand.
 - **oidc-core-5.5-c** MUST: an authorization request of o3co's RP whose `claims` uses the `userinfo` member also uses a `response_type` that issues an access token for the UserInfo endpoint.
   role: rp
