@@ -19,7 +19,7 @@
 - Contribution to `code-grant`'s redemption hooks: the pin, and a redeemed code's token kept the pinned userinfo target.
 - Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
 - Store interface, wired by the assembly: records by name, each kept once for its lifetime.
-- Operator section: `mode`, `off`, `draining` or `on` (default `on`), offered as `claimsSelections.mode`.
+- Operator section: `mode`, `off`, `draining` or `on` (default `off`), offered as `claimsSelections.mode`.
 
 ## Invariants
 - A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; `value` or a non-empty `values` of up to 16, never both; 4 KiB whole. Another is a `TypeError`.

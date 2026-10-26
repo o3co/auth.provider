@@ -349,14 +349,14 @@ it("keeps reading, pinning and holding back what is kept when draining, but keep
 	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow(TypeError);
 });
 
-it("reads its mode as an operator writes it, on by default, and refuses another value", async () => {
+it("reads its mode as an operator writes it, off by default, and refuses another value", async () => {
 	const stores = claimsSelectionInMemory();
 	const app = await assemble({
 		modules: [claimsSelectionModule, stores.module],
 		config: kernelConfig(),
 		runtime,
 	});
-	expect(app.get(claimsSelections).mode).toBe("on");
+	expect(app.get(claimsSelections).mode).toBe("off");
 	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
 });
 
