@@ -16,6 +16,8 @@ export const flows = [
 	"token-exchange",
 	"mtls",
 	"backchannel-logout",
+	"client-credentials-secret",
+	"public-device",
 ] as const;
 export type Flow = (typeof flows)[number];
 
@@ -35,6 +37,26 @@ const java = () => (process.env.JAVA_HOME ? join(process.env.JAVA_HOME, "bin", "
 
 export const libraries: readonly Library[] = [
 	{
+		name: "go",
+		flows: [
+			"login",
+			"public-login",
+			"refresh",
+			"resource",
+			"client-credentials-secret",
+			"public-device",
+			"backchannel-logout",
+		],
+		// The module and its toolchain pinned by go.mod, every module's hash by go.sum.
+		build: [["go", "build", "-C", join("adapters", "go"), "-o", join("bin", "go-adapter"), "."]],
+		adapter: () => ({
+			command: join(packageDir, "adapters", "go", "bin", "go-adapter"),
+			args: [],
+			cwd: packageDir,
+			env: path(),
+		}),
+	},
+	{
 		name: "openid-client",
 		flows: [
 			"login",
@@ -42,9 +64,11 @@ export const libraries: readonly Library[] = [
 			"refresh",
 			"resource",
 			"client-credentials",
+			"client-credentials-secret",
 			"revocation",
 			"dpop",
 			"device",
+			"public-device",
 			"logout",
 		],
 		build: [],
@@ -63,9 +87,11 @@ export const libraries: readonly Library[] = [
 			"refresh",
 			"resource",
 			"client-credentials",
+			"client-credentials-secret",
 			"revocation",
 			"dpop",
 			"device",
+			"public-device",
 			"logout",
 			"jwt-bearer",
 			"token-exchange",

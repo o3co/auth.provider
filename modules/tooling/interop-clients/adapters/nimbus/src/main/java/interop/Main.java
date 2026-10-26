@@ -565,10 +565,14 @@ public final class Main {
   private Map<String, Object> device() throws Exception {
     OIDCProviderMetadata op = provider();
     ClientAuthentication auth = authentication(op.getTokenEndpointURI());
+    ClientID id = new ClientID(JSONObjectUtils.getString(client(), "id"));
+    // A public client names itself alone, an authenticated one authenticates.
+    DeviceAuthorizationRequest.Builder asking =
+        auth != null ? new DeviceAuthorizationRequest.Builder(auth) : new DeviceAuthorizationRequest.Builder(id);
     var started =
         DeviceAuthorizationResponse.parse(
             sending(
-                    new DeviceAuthorizationRequest.Builder(auth)
+                    asking
                         .endpointURI(op.getDeviceAuthorizationEndpointURI())
                         .scope(Scope.parse(orElse(instruction, "scope", "openid")))
                         .build()
@@ -586,8 +590,11 @@ public final class Main {
       TokenResponse answer =
           TokenResponse.parse(
               sending(
-                      new TokenRequest(
-                              op.getTokenEndpointURI(), auth, new DeviceCodeGrant(codes.getDeviceCode()))
+                      (auth != null
+                              ? new TokenRequest(
+                                  op.getTokenEndpointURI(), auth, new DeviceCodeGrant(codes.getDeviceCode()))
+                              : new TokenRequest(
+                                  op.getTokenEndpointURI(), id, new DeviceCodeGrant(codes.getDeviceCode())))
                           .toHTTPRequest())
                   .send());
       if (answer.indicatesSuccess()) {
@@ -640,10 +647,10 @@ public final class Main {
             case "login", "public-login" -> main.login();
             case "refresh" -> main.refresh();
             case "resource" -> main.resourceFlow();
-            case "client-credentials" -> main.clientCredentials();
+            case "client-credentials", "client-credentials-secret" -> main.clientCredentials();
             case "revocation" -> main.revocation();
             case "dpop" -> main.dpopFlow();
-            case "device" -> main.device();
+            case "device", "public-device" -> main.device();
             case "logout" -> main.logout();
             case "jwt-bearer" -> main.jwtBearer();
             case "token-exchange" -> main.tokenExchange();

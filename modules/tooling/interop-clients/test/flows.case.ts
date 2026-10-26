@@ -1,4 +1,5 @@
 import { mkdtemp } from "node:fs/promises";
+import { createServer as createPlainServer, type Server as PlainServer } from "node:http";
 import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -101,10 +102,27 @@ describe(`${library.name}: a discovery that names plain http`, () => {
 	let origin = "";
 	let cert = "";
 	let told: Record<string, unknown> = {};
+	// Plain http on the same host, where the token endpoint sends a request on: what reaches it, in clear.
+	let plain: PlainServer;
+	let plainOrigin = "";
+	const reachedInClear: string[] = [];
 	beforeAll(async () => {
 		const tls = await selfSigned("127.0.0.1", await mkdtemp(join(tmpdir(), "interop-http-")));
 		cert = tls.cert;
+		plain = createPlainServer((req, res) => {
+			reachedInClear.push(`${req.method} ${req.url} ${req.headers.authorization ?? ""}`);
+			res.writeHead(400, { "content-type": "application/json" });
+			res.end(JSON.stringify({ error: "invalid_request" }));
+		});
+		await new Promise<void>((resolve) => plain.listen(0, "127.0.0.1", resolve));
+		plainOrigin = `http://127.0.0.1:${(plain.address() as AddressInfo).port}`;
 		server = createServer(tls, (req, res) => {
+			if (req.url === "/token") {
+				// Sent on with its method and body (307), to the same host over plain http.
+				res.writeHead(307, { location: `${plainOrigin}/token` });
+				res.end();
+				return;
+			}
 			res.writeHead(req.url === "/.well-known/openid-configuration" ? 200 : 404, {
 				"content-type": "application/json",
 			});
@@ -115,10 +133,15 @@ describe(`${library.name}: a discovery that names plain http`, () => {
 	});
 	afterAll(async () => {
 		await new Promise((resolve) => server?.close(resolve));
+		await new Promise((resolve) => plain?.close(resolve));
 	});
 
 	/** The flow's end against a provider whose discovery says `endpoints`; any browser step fails it. */
-	async function against(endpoints: Record<string, string>) {
+	async function against(
+		endpoints: Record<string, string>,
+		flow: Flow = "login",
+		client: WorldClient = world.clients.basic,
+	) {
 		told = {
 			issuer: origin,
 			authorization_endpoint: `${origin}/authorize`,
@@ -132,13 +155,7 @@ describe(`${library.name}: a discovery that names plain http`, () => {
 		};
 		const dialog = await converse(
 			library.adapter(),
-			{
-				flow: "login",
-				issuer: origin,
-				ca: cert,
-				client: world.clients.basic,
-				redirectUri: world.redirectUri,
-			},
+			{ flow, issuer: origin, ca: cert, client, redirectUri: world.redirectUri, scope: "read" },
 			async (ask) => {
 				throw new Error(`asked ${ask.ask} before refusing plain http`);
 			},
@@ -154,6 +171,17 @@ describe(`${library.name}: a discovery that names plain http`, () => {
 				kind: "error",
 				type: "insecure",
 			});
+		},
+	);
+
+	it.runIf(runs("client-credentials-secret"))(
+		"follows no redirect from an https token endpoint to plain http, sending its secret nowhere in clear",
+		async () => {
+			reachedInClear.length = 0;
+			expect(await against({}, "client-credentials-secret", world.clients.service)).toMatchObject({
+				kind: "error",
+			});
+			expect(reachedInClear).toEqual([]);
 		},
 	);
 
@@ -203,6 +231,23 @@ describe(`${library.name}: a client's own token`, () => {
 	);
 });
 
+describe(`${library.name}: a client's own token, by its secret`, () => {
+	it.runIf(runs("client-credentials-secret"))(
+		"gets a token by the client credentials grant, the client authenticated by client_secret_basic",
+		(context) =>
+			excusable(context, "client-credentials-secret", async () => {
+				const result = await run("client-credentials-secret", world.clients.service, {
+					scope: "read",
+				});
+				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+				expect(await world.introspect(String(result.accessToken))).toMatchObject({
+					active: true,
+					client_id: world.clients.service.id,
+				});
+			}),
+	);
+});
+
 describe(`${library.name}: revoking`, () => {
 	it.runIf(runs("revocation"))(
 		"introspects an access token as active, revokes it, and introspects it as inactive",
@@ -234,6 +279,20 @@ describe(`${library.name}: a device`, () => {
 		(context) =>
 			excusable(context, "device", async () => {
 				const result = await run("device", world.clients.device, { scope: "openid read" });
+				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+				expect((await world.introspect(String(result.accessToken))).active).toBe(true);
+			}),
+	);
+});
+
+describe(`${library.name}: a public device`, () => {
+	it.runIf(runs("public-device"))(
+		"gets a token by the device authorization grant as a public client, once the user approves the code",
+		(context) =>
+			excusable(context, "public-device", async () => {
+				const result = await run("public-device", world.clients.publicDevice, {
+					scope: "openid read",
+				});
 				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
 				expect((await world.introspect(String(result.accessToken))).active).toBe(true);
 			}),
