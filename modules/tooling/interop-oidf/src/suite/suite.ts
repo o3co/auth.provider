@@ -48,6 +48,12 @@ export async function hostForSuite(command: Command = systemCommand): Promise<Su
 	return { name: "host.docker.internal", listen: gateway, mapped: gateway };
 }
 
+/**
+ * The suite's stop failed, a start's own or a stop's: what stops the suite may still be needed, so
+ * whatever holds it is kept.
+ */
+export class SuiteStopFailed extends AggregateError {}
+
 /** The suite at its pinned version, started in `dir`: a directory of its own, removed when it stops. */
 export interface Suite {
 	/** The suite's scripts, as the pinned commit holds them. */
@@ -65,10 +71,11 @@ export interface Suite {
  * Starts the suite at `pin` in `dir`: its source at the pinned commit (the compose file and the
  * scripts), a Python of its own for the scripts, and its containers under a project of their own,
  * after any suite whose owner is gone was taken down. Each setup step is held to its own time and to
- * `signal`, the plan's deadline. Stopping keeps every container's state and log in `log` first, then
- * takes the containers and their volumes down by budgets of its own, past the deadline too, and
- * removes `dir`; however the start went. A stop that fails keeps `dir`, which holds what stops the
- * suite, and tells every step that failed.
+ * `signal`, the plan's deadline. Stopping keeps every container's state and log, stdout and stderr,
+ * in `log` first, then takes the containers and their volumes down by budgets of its own, past the
+ * deadline too, and removes `dir`; however the start went. A stop that fails, a start's own too, is
+ * a `SuiteStopFailed` telling every step that failed; where the containers were not taken down it
+ * keeps `dir`, which holds what stops the suite.
  */
 export async function startSuite(
 	pin: SuitePin,
@@ -98,9 +105,11 @@ export async function startSuite(
 		command(cmd, args, { timeoutMs, env, ...(signal ? { signal } : {}), ...(cwd ? { cwd } : {}) });
 	const stop = async () => {
 		const problems: unknown[] = [];
+		/** What a command wrote, its stderr after its stdout. */
 		const kept = async (args: readonly string[]) =>
 			command("docker", [...compose, ...args], { timeoutMs: budgetMs.logs, env }).then(
-				(r) => r.stdout,
+				({ stdout, stderr = "" }) =>
+					stderr === "" ? stdout : `${stdout}\n--- stderr ---\n${stderr}`,
 				(error: unknown) => {
 					problems.push(error);
 					return "";
@@ -126,7 +135,7 @@ export async function startSuite(
 				problems.push(error),
 			);
 		if (problems.length > 0)
-			throw new AggregateError(
+			throw new SuiteStopFailed(
 				problems,
 				`the suite's stop failed${down ? "" : `; its compose files stay in ${dir}`}`,
 			);
@@ -191,13 +200,13 @@ export async function startSuite(
 	} catch (error) {
 		// The start's failure first, then each of the stop's.
 		const stopped = await stop().then(
-			() => [],
-			(failed: unknown) => (failed instanceof AggregateError ? failed.errors : [failed]),
+			() => undefined,
+			(failed: unknown) => failed,
 		);
-		if (stopped.length > 0)
-			throw new AggregateError(
-				[error, ...stopped],
-				`${String(error)}; and the suite's stop failed`,
+		if (stopped !== undefined)
+			throw new SuiteStopFailed(
+				[error, ...(stopped instanceof AggregateError ? stopped.errors : [stopped])],
+				`${String(error)}; and ${stopped instanceof Error ? stopped.message : String(stopped)}`,
 			);
 		throw error;
 	}

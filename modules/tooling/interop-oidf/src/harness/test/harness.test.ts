@@ -1,6 +1,10 @@
+import { existsSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { artifactsOf, keptThenStopped, stopAll } from "../harness.ts";
+import { SuiteStopFailed } from "../../suite/suite.ts";
+import { artifactsOf, cleared, keptThenStopped, stopAll } from "../harness.ts";
 
 describe("a plan run's records and its stops", () => {
 	it("keeps each plan's records in a directory of its own under the one named", () => {
@@ -35,5 +39,22 @@ describe("a plan run's records and its stops", () => {
 		]);
 		expect(ran).toEqual(["app", "front", "suite"]);
 		expect(problems.map(String)).toEqual(["Error: front would not stop"]);
+	});
+
+	it("keeps its work directory where the suite's start could not stop the suite, and removes it otherwise", async () => {
+		const kept = await mkdtemp(join(tmpdir(), "interop-oidf-work-"));
+		const start = new SuiteStopFailed([new Error("no answer")], "the suite's stop failed");
+		const problems: unknown[] = [];
+		await cleared(kept, start, problems);
+		expect(existsSync(kept)).toBe(true);
+		expect(problems).toEqual([]);
+
+		const removed = await mkdtemp(join(tmpdir(), "interop-oidf-work-"));
+		await cleared(removed, new Error("the app refused to start"), problems);
+		expect(existsSync(removed)).toBe(false);
+
+		const stopFailed = await mkdtemp(join(tmpdir(), "interop-oidf-work-"));
+		await cleared(stopFailed, undefined, [new Error("the front did not stop")]);
+		expect(existsSync(stopFailed)).toBe(true);
 	});
 });

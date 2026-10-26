@@ -3,14 +3,29 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	test: {
-		// Follows the guard's test-file convention.
-		include: ["test/**/*.case.ts"],
 		reporters: ["default", evidenceReporter()],
-		// The libraries meet the full template with every feature that opts in; the reporter, in the main
-		// process, does not see it, so the run is named by its library alone.
-		env: { CONFORMANCE_PATTERN: "full+opt-ins" },
 		testTimeout: 120_000,
 		hookTimeout: 300_000,
 		fileParallelism: false,
+		// Each file meets a pattern's app: the full template with every feature that opts in, and the
+		// services' (`a2a`). The reporter, in the main process, sees no pattern: the run is the library's.
+		projects: [
+			{
+				extends: true,
+				test: {
+					name: "full",
+					include: ["test/flows.case.ts"],
+					env: { CONFORMANCE_PATTERN: "full+opt-ins" },
+				},
+			},
+			{
+				extends: true,
+				test: {
+					name: "services",
+					include: ["test/services.case.ts"],
+					env: { CONFORMANCE_PATTERN: "a2a" },
+				},
+			},
+		],
 	},
 });

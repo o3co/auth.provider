@@ -1,5 +1,6 @@
+import { rmdirSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { evidenceRuns, planCommands, plans } from "../src/plans.ts";
+import { evidenceRuns, planCommands, plans, recordsOf } from "../src/plans.ts";
 
 describe("the plans the package runs, one evidence run each", () => {
 	it("starts one vitest for each plan named, on that plan's file, naming its run", () => {
@@ -33,5 +34,14 @@ describe("the plans the package runs, one evidence run each", () => {
 				gate: true,
 			})),
 		);
+	});
+
+	it("keeps the plans' records where they are named, and in a directory it makes and names otherwise", async () => {
+		expect(await recordsOf("/records")).toEqual({ dir: "/records", made: false });
+		// With none named, a killed run's suite still leaves its logs somewhere told.
+		const made = await recordsOf(undefined);
+		expect(made.made).toBe(true);
+		expect(statSync(made.dir).isDirectory()).toBe(true);
+		rmdirSync(made.dir);
 	});
 });

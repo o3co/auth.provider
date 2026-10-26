@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Command } from "../../commands/commands.ts";
 import { composeOverride } from "../../compose/compose.ts";
-import { startSuite } from "../suite.ts";
+import { SuiteStopFailed, startSuite } from "../suite.ts";
 
 const pin = { tag: "release-v1", commit: "c0ffee", python: ["httpx==1"] };
 const host = { name: "host.docker.internal", listen: "127.0.0.1" };
@@ -13,7 +13,10 @@ const tls = { cert: "-----BEGIN CERTIFICATE-----", key: "-----BEGIN PRIVATE KEY-
 
 /** A command that answers as `answer` says, keeping each call; one it does not know answers nothing. */
 function commands(
-	answer: (cmd: string, args: readonly string[]) => Promise<string> | string = () => "",
+	answer: (
+		cmd: string,
+		args: readonly string[],
+	) => Promise<string> | string | { stdout: string; stderr: string } = () => "",
 ) {
 	const calls: { cmd: string; args: readonly string[]; timeoutMs: number; signal?: AbortSignal }[] =
 		[];
@@ -24,7 +27,8 @@ function commands(
 			timeoutMs: options.timeoutMs,
 			...(options.signal ? { signal: options.signal } : {}),
 		});
-		return { stdout: await answer(cmd, args) };
+		const said = await answer(cmd, args);
+		return typeof said === "string" ? { stdout: said } : said;
 	};
 	return { command, calls };
 }
@@ -84,9 +88,29 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 			() => undefined,
 			(e: unknown) => e,
 		);
+		// Told as the suite's stop failing, for the caller to keep what stops it.
+		expect(error).toBeInstanceOf(SuiteStopFailed);
 		const told =
 			error instanceof AggregateError ? error.errors.map(String).join("\n") : String(error);
+		expect(String(error)).toContain(`its compose files stay in ${suiteDir}`);
 		expect(told).toContain("the daemon did not answer");
 		expect(existsSync(join(suiteDir, "override.yml"))).toBe(true);
+	});
+
+	it("keeps what the containers wrote to their stderr in the suite's log, beside their stdout", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "suite-log-"));
+		const { command } = commands((cmd, args) => {
+			// The tag names another commit: the start fails, and its stop keeps the log.
+			if (cmd === "git" && args[0] === "-C") return "deadbeef\n";
+			if (cmd === "docker" && args.includes("logs"))
+				return { stdout: "server-1 | started\n", stderr: "server-1 | OutOfMemoryError\n" };
+			return "";
+		});
+		await expect(
+			startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), tls, { command }),
+		).rejects.toThrow("not the pinned");
+		const log = await readFile(join(dir, "suite.log"), "utf8");
+		expect(log).toContain("server-1 | started\n");
+		expect(log).toContain("server-1 | OutOfMemoryError\n");
 	});
 });

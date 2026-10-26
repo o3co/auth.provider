@@ -13,6 +13,14 @@ import com.nimbusds.oauth2.sdk.TokenIntrospectionRequest;
 import com.nimbusds.oauth2.sdk.TokenIntrospectionResponse;
 import com.nimbusds.oauth2.sdk.TokenRevocationRequest;
 import com.nimbusds.oauth2.sdk.auth.PrivateKeyJWT;
+import com.nimbusds.jwt.SignedJWT;
+import com.nimbusds.oauth2.sdk.JWTBearerGrant;
+import com.nimbusds.oauth2.sdk.as.AuthorizationServerMetadata;
+import com.nimbusds.oauth2.sdk.assertions.jwt.JWTAssertionDetails;
+import com.nimbusds.oauth2.sdk.assertions.jwt.JWTAssertionFactory;
+import com.nimbusds.oauth2.sdk.id.Subject;
+import com.nimbusds.oauth2.sdk.token.TokenTypeURI;
+import com.nimbusds.oauth2.sdk.tokenexchange.TokenExchangeGrant;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.oauth2.sdk.device.DeviceAuthorizationRequest;
@@ -144,8 +152,8 @@ public final class Main {
   }
 
   /** An endpoint or key set the discovery names over anything but https fails the flow before any request. */
-  private static void refuseInsecure(OIDCProviderMetadata op) throws Refused {
-    for (Map.Entry<String, Object> e : op.toJSONObject().entrySet()) {
+  private static void refuseInsecure(Map<String, Object> metadata) throws Refused {
+    for (Map.Entry<String, Object> e : metadata.entrySet()) {
       String key = e.getKey();
       if (!(key.endsWith("_endpoint") || key.equals("jwks_uri")) || !(e.getValue() instanceof String value)) continue;
       if (!value.startsWith("https://"))
@@ -264,8 +272,68 @@ public final class Main {
     OIDCProviderMetadata op =
         OIDCProviderMetadata.resolve(
             new Issuer(JSONObjectUtils.getString(instruction, "issuer")), this::sending);
-    refuseInsecure(op);
+    refuseInsecure(op.toJSONObject());
     return op;
+  }
+
+  /** The provider's OAuth metadata (RFC 8414), for a provider that is no OpenID one, held to https alike. */
+  private AuthorizationServerMetadata server() throws Exception {
+    AuthorizationServerMetadata as =
+        AuthorizationServerMetadata.resolve(
+            new Issuer(JSONObjectUtils.getString(instruction, "issuer")), this::sending);
+    refuseInsecure(as.toJSONObject());
+    return as;
+  }
+
+  /** Signs in, then exchanges the access token for another (RFC 8693), the client authenticated. */
+  private Map<String, Object> tokenExchange() throws Exception {
+    SignedIn in = signIn();
+    AccessToken subject = in.tokens().getOIDCTokens().getAccessToken();
+    TokenRequest request =
+        new TokenRequest(
+            in.op().getTokenEndpointURI(),
+            authentication(in.op().getTokenEndpointURI()),
+            new TokenExchangeGrant(subject, TokenTypeURI.ACCESS_TOKEN));
+    TokenResponse answer = TokenResponse.parse(sending(request.toHTTPRequest()).send());
+    if (!answer.indicatesSuccess()) throw Refused.of(answer.toErrorResponse().getErrorObject());
+    var success = answer.toSuccessResponse();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("accessToken", success.getTokens().getAccessToken().getValue());
+    TokenTypeURI issued = success.getTokens().getAccessToken().getIssuedTokenType();
+    result.put("issuedTokenType", issued == null ? null : issued.getURI().toString());
+    result.put("sub", in.claims().getSubject().getValue());
+    return result;
+  }
+
+  /** The jwt-bearer grant: an assertion an issuer the provider trusts signs, built by Nimbus, the client authenticated. */
+  private Map<String, Object> jwtBearer() throws Exception {
+    AuthorizationServerMetadata as = server();
+    Map<String, Object> signer = JSONObjectUtils.getJSONObject(instruction, "assertionIssuer");
+    ECKey key = ECKey.parse(JSONObjectUtils.getJSONObject(signer, "privateJwk"));
+    SignedJWT assertion =
+        JWTAssertionFactory.create(
+            new JWTAssertionDetails(
+                new Issuer(JSONObjectUtils.getString(signer, "issuer")),
+                new Subject(JSONObjectUtils.getString(instruction, "subject")),
+                new Audience(as.getIssuer().getValue())),
+            JWSAlgorithm.ES256,
+            key.toECPrivateKey(),
+            key.getKeyID(),
+            null);
+    TokenRequest request =
+        new TokenRequest.Builder(
+                as.getTokenEndpointURI(),
+                authentication(as.getTokenEndpointURI()),
+                new JWTBearerGrant(assertion))
+            .scope(Scope.parse(orElse(instruction, "scope", "read")))
+            .build();
+    TokenResponse answer = TokenResponse.parse(sending(request.toHTTPRequest()).send());
+    if (!answer.indicatesSuccess()) throw Refused.of(answer.toErrorResponse().getErrorObject());
+    AccessToken token = answer.toSuccessResponse().getTokens().getAccessToken();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("accessToken", token.getValue());
+    result.put("tokenType", token.getType().getValue());
+    return result;
   }
 
   /** What a sign-in gave: the provider, the tokens and the ID token's claims as the validator took them. */
@@ -476,6 +544,8 @@ public final class Main {
             case "dpop" -> main.dpopFlow();
             case "device" -> main.device();
             case "logout" -> main.logout();
+            case "jwt-bearer" -> main.jwtBearer();
+            case "token-exchange" -> main.tokenExchange();
             default -> throw new Refused("unsupported", "no flow " + flow);
           });
     } catch (Refused refused) {
