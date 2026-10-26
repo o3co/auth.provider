@@ -11,11 +11,11 @@
 ## Offers
 - Route `POST /oauth/token`: a form, JSON or no body (any other `415`); cross-origin requests from the operator's origins (`http`) may send `content-type` and `dpop`, and read `dpop-nonce`, `www-authenticate` and `retry-after`.
 - Provides `grants`' `composedGrants` (the grant types it dispatches to) and `targets`.
-- Where the token endpoint is: its absolute URL on `http`'s public origin, none without one.
+- Where the token endpoint is: its absolute URL on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
 - `oauthError`: an error response with the status, the code, an optional description, and the members `grants` lets a grant's refusal keep.
 - `authenticateClient`, for other OAuth endpoints too: two methods at once or malformed credentials are `400 invalid_request`, others `401 invalid_client`. It records a refusal on the `audit` it is handed through `clients`' `recordRefusedAuthentication`.
 - For tests (`./testing`): `grantCaller` calls a contributed grant as the endpoint does once the client is in, the grant allowed and the binding read, beside `client-allowance`, refusing a mistyped parameter and asking the rule's `untargeted` first; `grantInput` is what it hands the grant.
-- `issuer`'s metadata items: `token_endpoint` (none without a public origin), `grant_types_supported`, `token_endpoint_auth_methods_supported` and `token_endpoint_auth_signing_alg_values_supported` (left out when `clients` names none).
+- `issuer`'s metadata items: `token_endpoint`, `grant_types_supported`, `token_endpoint_auth_methods_supported` and `token_endpoint_auth_signing_alg_values_supported` (left out when `clients` names none).
 - Audit events once the client is authenticated, with `client`, `source` (when determined) and `grant_type` (when dispatched to): `token.issued` (with `claims`, the names of the claims a grant added, never their values, as many as fit 2048 characters, and `claims_left` past that), and `token.issued.failure` with `reason` and `error` (the code answered); declared in `./audit-events`, listed in the audit event reference.
 - A request naming no client, sent to a grant that identifies its client, is recorded with `identified` (`grant`) from the first check on, its `client` once the grant identifies it; its authentication's refusal is not recorded.
 - The failure's `reason`: `client_not_identified`, `repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with `policy` and `refusal`.

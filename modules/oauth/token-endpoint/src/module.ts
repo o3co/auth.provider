@@ -1,7 +1,7 @@
 import { clients } from "@mod/clients";
 import { composedGrants, grants, targets } from "@mod/grants";
-import { routes, site, use } from "@mod/http";
-import { metadata } from "@mod/issuer";
+import { routes, use } from "@mod/http";
+import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
 import { unservedGrants } from "./allowed/allowed.ts";
@@ -17,8 +17,8 @@ const cors = {
 	exposes: ["dpop-nonce", "www-authenticate", "retry-after"],
 };
 
-/** What the endpoint takes: its helpers' (`composedRule`, `endpointIn`), and the grants, the site and clients. */
-const takes = [...targetTakes, ...endpointTakes, grants, site, clients];
+/** What the endpoint takes: its helpers' (`composedRule`, `endpointIn`), and the grants, the issuer and clients. */
+const takes = [...targetTakes, ...endpointTakes, grants, issuer, clients];
 
 export default defineModule({ name: "token-endpoint", section, takes }, (m) => [
 	m.provide(targets).by(composedRule),
@@ -26,8 +26,7 @@ export default defineModule({ name: "token-endpoint", section, takes }, (m) => [
 		.provide(composedGrants)
 		.by(async (c) => new Set((await c.collect(grants)).map((g) => g.grantType))),
 	m.provide(tokenEndpointLocation).by(async (c) => {
-		const { origin } = await c.get(site);
-		return { url: origin === undefined ? undefined : new URL(tokenPath, origin).href };
+		return { url: new URL(tokenPath, endpointOrigin(await c.get(issuer))).href };
 	}),
 	m.contribute(metadata).by(async (c) => ({
 		name: "token_endpoint",

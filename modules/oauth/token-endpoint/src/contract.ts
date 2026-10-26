@@ -10,7 +10,7 @@ import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { contract } from "@mod/kernel";
 import { challenged } from "./route/challenges.ts";
 
-/** Where the token endpoint answers, absolute on the public origin; nothing without one. */
+/** Where the token endpoint answers, absolute on the origin `issuer` names its endpoints on. */
 export interface TokenEndpointLocation {
 	readonly url: string | undefined;
 }
