@@ -40,6 +40,7 @@ const scene = oauthScene({
 		},
 	],
 	introspection: true,
+	revocation: true,
 });
 
 let running: Started;
@@ -70,13 +71,17 @@ const claims = (extra: Record<string, unknown> = {}): JWTPayload =>
 	);
 const sign = (payload: JWTPayload, key: KeyObject = clientKey.privateKey, alg = "ES256") =>
 	new SignJWT(payload).setProtectedHeader({ alg, kid: "k1" }).sign(key);
-async function post(path: string, form: Record<string, string>) {
+async function post(path: string, form: Record<string, string>, headers = {}) {
 	const res = await fetch(`${base}${path}`, {
 		method: "POST",
-		headers: { "content-type": "application/x-www-form-urlencoded" },
+		headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
 		body: new URLSearchParams(form),
 	});
-	return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+	return {
+		status: res.status,
+		body: (await res.json()) as Record<string, unknown>,
+		challenge: res.headers.get("www-authenticate"),
+	};
 }
 const token = async (assertion: string, extra: Record<string, string> = {}) =>
 	post("/oauth/token", {
@@ -155,11 +160,11 @@ describe("client authentication by private_key_jwt", () => {
 	});
 
 	it.skipIf(areaTarget().differs("assertion-with-secret"))(
-		"answers an assertion sent beside a client secret as a malformed request [rfc6749-2.3-b]",
+		"refuses an assertion sent beside a client secret as invalid_client [rfc6749-2.3-b] [rfc7521-4.2.1-b]",
 		async () => {
 			expect(await refused(token(await sign(claims()), { client_secret: "x" }))).toEqual([
-				400,
-				"invalid_request",
+				401,
+				"invalid_client",
 			]);
 		},
 	);
@@ -173,24 +178,27 @@ describe("client authentication by private_key_jwt", () => {
 		expect([answer.status, answer.body.error]).toEqual([401, "invalid_client"]);
 	});
 
-	it("answers an assertion given twice as a malformed request, and spends neither [rfc6749-3.2-d]", async () => {
-		const [first, second] = [await sign(claims()), await sign(claims())];
-		const res = await fetch(`${base}/oauth/token`, {
-			method: "POST",
-			headers: { "content-type": "application/x-www-form-urlencoded" },
-			body: new URLSearchParams([
-				["grant_type", "client_credentials"],
-				["client_assertion_type", type],
-				["client_assertion", first],
-				["client_assertion", second],
-			]),
-		});
-		expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([
-			400,
-			"invalid_request",
-		]);
-		expect((await token(first)).status).toBe(200);
-	});
+	it.skipIf(areaTarget().differs("malformed-assertion"))(
+		"refuses an assertion given twice as invalid_client, and spends neither [rfc6749-3.2-d] [rfc7521-4.2.1-a]",
+		async () => {
+			const [first, second] = [await sign(claims()), await sign(claims())];
+			const res = await fetch(`${base}/oauth/token`, {
+				method: "POST",
+				headers: { "content-type": "application/x-www-form-urlencoded" },
+				body: new URLSearchParams([
+					["grant_type", "client_credentials"],
+					["client_assertion_type", type],
+					["client_assertion", first],
+					["client_assertion", second],
+				]),
+			});
+			expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([
+				401,
+				"invalid_client",
+			]);
+			expect((await token(first)).status).toBe(200);
+		},
+	);
 
 	it("refuses an assertion with an unencoded payload", async () => {
 		const flat = await new FlattenedSign(new TextEncoder().encode(JSON.stringify(claims())))
@@ -200,20 +208,55 @@ describe("client authentication by private_key_jwt", () => {
 		expect(await refused(token(unencoded, { client_id: "app" }))).toEqual([401, "invalid_client"]);
 	});
 
-	it("answers half of an assertion as a malformed request [rfc7521-4.2-a] [rfc7521-4.2-b]", async () => {
-		const malformed = [400, "invalid_request"];
-		expect(
-			await refused(
-				post("/oauth/token", { grant_type: "client_credentials", client_assertion_type: type }),
-			),
-		).toEqual(malformed);
-		expect(
-			await refused(
-				post("/oauth/token", {
-					grant_type: "client_credentials",
+	it.skipIf(areaTarget().differs("malformed-assertion"))(
+		"refuses half of an assertion as invalid_client [rfc7521-4.2-a] [rfc7521-4.2-b] [rfc7521-4.2.1-a]",
+		async () => {
+			const malformed = [401, "invalid_client"];
+			expect(
+				await refused(
+					post("/oauth/token", { grant_type: "client_credentials", client_assertion_type: type }),
+				),
+			).toEqual(malformed);
+			expect(
+				await refused(
+					post("/oauth/token", {
+						grant_type: "client_credentials",
+						client_assertion: await sign(claims()),
+					}),
+				),
+			).toEqual(malformed);
+		},
+	);
+
+	it.skipIf(areaTarget().differs("assertion-with-secret"))(
+		"refuses an assertion beside another client authentication method as invalid_client, challenging for Basic where the request used it, at the token, introspection and revocation endpoints [rfc7521-4.2.1-b]",
+		async () => {
+			const issued = String((await token(await sign(claims()))).body.access_token);
+			const basic = { authorization: `Basic ${Buffer.from("app:a-secret").toString("base64")}` };
+			const endpoints: [string, Record<string, string>][] = [
+				["/oauth/token", { grant_type: "client_credentials" }],
+				["/oauth/introspect", { token: issued }],
+				["/oauth/revoke", { token: issued }],
+			];
+			for (const [path, form] of endpoints) {
+				const beside = async (extra: Record<string, string> = {}) => ({
+					...form,
+					client_assertion_type: type,
 					client_assertion: await sign(claims()),
-				}),
-			),
-		).toEqual(malformed);
-	});
+					...extra,
+				});
+				const byHeader = await post(path, await beside(), basic);
+				expect([byHeader.status, byHeader.body.error, byHeader.challenge], path).toEqual([
+					401,
+					"invalid_client",
+					'Basic realm="client"',
+				]);
+				const byBody = await post(
+					path,
+					await beside({ client_id: "app", client_secret: "a-secret" }),
+				);
+				expect([byBody.status, byBody.body.error], path).toEqual([401, "invalid_client"]);
+			}
+		},
+	);
 });
