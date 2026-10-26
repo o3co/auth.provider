@@ -4333,6 +4333,9 @@ importers:
 
   modules/tooling/distribution:
     dependencies:
+      '@mod/combinations':
+        specifier: workspace:*
+        version: link:../../scaffold/combinations
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
