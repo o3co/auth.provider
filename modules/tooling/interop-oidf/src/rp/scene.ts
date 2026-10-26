@@ -55,6 +55,7 @@ export function rpScene(given: {
 	readonly proxy: string;
 	/** Where a login returns to: never followed, the harness reads where it was sent. */
 	readonly returnTarget: string;
+	readonly readUserinfo: boolean;
 }): AreaScene {
 	const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 	const probeClient: ClientScene = {
@@ -83,7 +84,7 @@ export function rpScene(given: {
 				issuer: given.issuer,
 				clientId: given.client.id,
 				clientSecret: given.client.secret,
-				readUserinfo: true,
+				readUserinfo: given.readUserinfo,
 				scopes: ["openid", "profile", "email"],
 			},
 		],

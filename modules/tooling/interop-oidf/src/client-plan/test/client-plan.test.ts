@@ -14,6 +14,9 @@ describe("a relying party plan's declared tests", () => {
 		expect(declarationProblem(held, { run: ["a", "b", "c"], notRun: ["gone"] })).toBe(
 			"declared, but the plan holds none: gone",
 		);
+		expect(declarationProblem(held, { run: ["a", "b"], notRun: ["c"], bootOnly: ["c"] })).toBe(
+			"run otherwise, but not declared run: c",
+		);
 		expect(declarationProblem(["a", "new"], { run: ["a", "old"], notRun: [] })).toBe(
 			"declared neither run nor not run: new; declared, but the plan holds none: old",
 		);

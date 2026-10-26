@@ -34,6 +34,10 @@ export interface ClientPlanDefinition {
 	readonly run: readonly string[];
 	/** The tests it does not run, the provider not offering what each asks; each excused by a skip entry of its own. */
 	readonly notRun: readonly string[];
+	/** Tests of `run` the app is only started for: the suite ends each once the app has read the OP's configuration. */
+	readonly bootOnly: readonly string[];
+	/** Tests of `run` the app reads no UserInfo for: the suite ends each once the app has read the OP's keys, before it would. */
+	readonly withoutUserinfo: readonly string[];
 }
 
 /**
@@ -42,18 +46,23 @@ export interface ClientPlanDefinition {
  */
 export function declarationProblem(
 	held: readonly string[],
-	plan: Pick<ClientPlanDefinition, "run" | "notRun">,
+	plan: Pick<ClientPlanDefinition, "run" | "notRun"> &
+		Partial<Pick<ClientPlanDefinition, "bootOnly" | "withoutUserinfo">>,
 ): string | undefined {
 	const both = plan.run.filter((t) => plan.notRun.includes(t));
 	const declared = [...plan.run, ...plan.notRun];
 	const undeclared = held.filter((t) => !declared.includes(t));
 	const stray = declared.filter((t) => !held.includes(t));
+	const unrun = [...(plan.bootOnly ?? []), ...(plan.withoutUserinfo ?? [])].filter(
+		(t) => !plan.run.includes(t),
+	);
 	const said = [
 		...(both.length > 0 ? [`declared both run and not run: ${both.join(", ")}`] : []),
 		...(undeclared.length > 0
 			? [`declared neither run nor not run: ${undeclared.join(", ")}`]
 			: []),
 		...(stray.length > 0 ? [`declared, but the plan holds none: ${stray.join(", ")}`] : []),
+		...(unrun.length > 0 ? [`run otherwise, but not declared run: ${unrun.join(", ")}`] : []),
 	];
 	return said.length > 0 ? said.join("; ") : undefined;
 }
@@ -138,6 +147,8 @@ export async function runClientPlan(plan: ClientPlanDefinition): Promise<ClientP
 		const front = await startFront({
 			upstream: () => app,
 			publicHost: "127.0.0.1",
+			// The harness reaches the front from loopback, the app's trusted proxy: it is told one sender.
+			sender: "198.51.100.41",
 			listen: "127.0.0.1",
 			tls: frontTls,
 		});
@@ -180,6 +191,7 @@ export async function runClientPlan(plan: ClientPlanDefinition): Promise<ClientP
 					user,
 					proxy: `http://127.0.0.1:${tunnel.port}`,
 					returnTarget,
+					readUserinfo: !plan.withoutUserinfo.includes(test),
 				}),
 				{ trustedCertificates: [suite.certificate] },
 			);
@@ -194,20 +206,25 @@ export async function runClientPlan(plan: ClientPlanDefinition): Promise<ClientP
 				return { booted: false, status: 0, returned: false };
 			}
 			app = started.baseUrl;
+			if (plan.bootOnly.includes(test)) {
+				tell(`${test}: started, and asked nothing`);
+				await started.stop();
+				return { booted: true, status: 0, returned: false };
+			}
 			try {
 				const b = browser(trusted);
 				const signed = await signIn(b, { origin: front.origin, returnTarget, signal: deadline });
-				const subject = await loggedInAs(b, { origin: front.origin, signal: deadline });
 				const error = errorOf(signed.callback.body);
-				tell(
-					`${test}: ${signed.callback.status}${error ? ` ${error}` : ""}, logged in as ${subject ?? "nobody"}`,
-				);
+				// The app's answer is kept first: a probe that fails still leaves it to look at.
 				pages.push({
 					file: `${test}.app.txt`,
 					test,
 					contentType: String(signed.callback.headers["content-type"] ?? ""),
 					page: signed.callback.body,
 				});
+				tell(`${test}: the callback answered ${signed.callback.status}${error ? ` ${error}` : ""}`);
+				const subject = await loggedInAs(b, { origin: front.origin, signal: deadline });
+				tell(`${test}: logged in as ${subject ?? "nobody"}`);
 				return {
 					booted: true,
 					status: signed.callback.status,

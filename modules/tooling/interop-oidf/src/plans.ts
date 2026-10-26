@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ClientPlanDefinition } from "./client-plan/client-plan.ts";
 import type { PlanDefinition } from "./harness/harness.ts";
 import { reclaimOrphans } from "./orphans/orphans.ts";
 
@@ -41,8 +42,62 @@ export const plans = {
 	},
 } as const satisfies Record<string, PlanDefinition>;
 
+/** The relying party plans the harness drives itself, each one evidence run of its own. */
+export const clientPlans = {
+	rp: {
+		name: "rp",
+		suitePlan: "oidcc-client-test-plan",
+		variant: {
+			client_auth_type: "client_secret_basic",
+			response_type: "code",
+			response_mode: "default",
+			client_registration: "static_client",
+			request_type: "plain_http_request",
+		},
+		configuration: "rp.json",
+		run: [
+			"oidcc-client-test",
+			"oidcc-client-test-client-secret-basic",
+			"oidcc-client-test-scope-userinfo-claims",
+			"oidcc-client-test-kid-absent-single-jwks",
+			"oidcc-client-test-kid-absent-multiple-jwks",
+			"oidcc-client-test-idtoken-sig-rs256",
+			"oidcc-client-test-userinfo-bearer-header",
+			"oidcc-client-test-aggregated-claims",
+			"oidcc-client-test-discovery-openid-config",
+			"oidcc-client-test-discovery-jwks-uri-keys",
+			"oidcc-client-test-nonce-invalid",
+			"oidcc-client-test-missing-iat",
+			"oidcc-client-test-missing-aud",
+			"oidcc-client-test-invalid-aud",
+			"oidcc-client-test-missing-sub",
+			"oidcc-client-test-invalid-sig-rs256",
+			"oidcc-client-test-invalid-sig-hs256",
+			"oidcc-client-test-invalid-sig-es256",
+			"oidcc-client-test-invalid-iss",
+			"oidcc-client-test-userinfo-invalid-sub",
+			"oidcc-client-test-discovery-issuer-mismatch",
+		],
+		// The suite ends these on the app's first reads: the configuration at its start, the keys at
+		// a login's id_token; any request after fails them.
+		bootOnly: ["oidcc-client-test-discovery-openid-config"],
+		withoutUserinfo: ["oidcc-client-test-discovery-jwks-uri-keys"],
+		// What the provider does not offer: each has a skip entry naming why.
+		notRun: [
+			"oidcc-client-test-userinfo-bearer-body",
+			"oidcc-client-test-distributed-claims",
+			"oidcc-client-test-userinfo-signed",
+			"oidcc-client-test-idtoken-sig-none",
+			"oidcc-client-test-discovery-webfinger-acct",
+			"oidcc-client-test-discovery-webfinger-url",
+			"oidcc-client-test-signing-key-rotation",
+			"oidcc-client-test-signing-key-rotation-just-before-signing",
+		],
+	},
+} as const satisfies Record<string, ClientPlanDefinition>;
+
 /** The runs the package's evidence comes from, as `spec-checklist` lists the runs a CI run must report: one job of the kind `oidf-plan` per plan, a gate run. */
-export const evidenceRuns = Object.keys(plans).map((name) => ({
+export const evidenceRuns = [...Object.keys(plans), ...Object.keys(clientPlans)].map((name) => ({
 	entry: `@mod/interop-oidf#${name}`,
 	kind: "oidf-plan",
 	matrix: name,
@@ -54,12 +109,19 @@ export const evidenceRuns = Object.keys(plans).map((name) => ({
 export function planCommands(
 	names: readonly string[],
 ): { readonly args: string[]; readonly run: string }[] {
-	const known = Object.keys(plans);
+	const known = [...Object.keys(plans), ...Object.keys(clientPlans)];
 	const unknown = names.filter((n) => !known.includes(n));
 	if (unknown.length > 0)
 		throw new Error(`no plan ${unknown.join(", ")}: the plans are ${known.join(", ")}`);
 	return (names.length === 0 ? known : names).map((run) => ({
-		args: ["exec", "vitest", "run", "--config", "vitest.config.ts", `runs/${run}.test.ts`],
+		args: [
+			"exec",
+			"vitest",
+			"run",
+			"--config",
+			run in clientPlans ? "vitest.rp.config.ts" : "vitest.config.ts",
+			`runs/${run}.test.ts`,
+		],
 		run,
 	}));
 }
