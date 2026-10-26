@@ -5,7 +5,7 @@ import { excusable, library, runs, unmetOf } from "./library.ts";
 import { type ServicesWorld, startServicesWorld } from "./world/services.ts";
 
 /** The flows of this file: those of services, which need no user. */
-const here: Flow[] = ["jwt-bearer", "jwt-bearer-no-client"];
+const here: Flow[] = ["jwt-bearer", "jwt-bearer-no-client", "id-jag"];
 
 let world: ServicesWorld;
 beforeAll(async () => {
@@ -75,6 +75,76 @@ describe(`${library.name}: an assertion for a token, naming no client`, () => {
 					`${world.clientlessIssuer.subjectPrefix}ci`,
 				]);
 			}),
+	);
+});
+
+describe(`${library.name}: an ID-JAG from an enterprise IdP, for a token`, () => {
+	/** Gets an ID-JAG from the played IdP by token exchange, then a token for it here by jwt-bearer. */
+	const exchanged = (dpop = false) =>
+		converse(
+			library.adapter(),
+			{
+				flow: "id-jag",
+				issuer: world.issuer,
+				ca: world.ca,
+				idp: { issuer: world.idp.issuer, ca: world.idp.ca },
+				client: world.clients.jagAgent,
+				// The user's ID token at the IdP, which the played IdP does not read.
+				subjectToken: "played-id-token",
+				scope: "read",
+				dpop,
+			},
+			async (ask) => {
+				throw new Error(`the driver has no answer to ${ask.ask}`);
+			},
+			90_000,
+		).then((d) => d.outcome);
+
+	it.runIf(runs("id-jag"))(
+		"gets an ID-JAG for this provider by token exchange, and a token for it by jwt-bearer, its scope and resource answered",
+		async () => {
+			const outcome = await exchanged();
+			expect(outcome).toMatchObject({ kind: "result" });
+			const result = (outcome as { result: Record<string, unknown> }).result;
+			expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+			expect([result.scope, result.resource]).toEqual(["read", world.issuer]);
+		},
+	);
+
+	it.runIf(runs("id-jag"))(
+		"binds the token to the DPoP key the ID-JAG names, proved by the client at both",
+		async () => {
+			const outcome = await exchanged(true);
+			expect(outcome).toMatchObject({ kind: "result", result: { tokenType: "DPoP" } });
+			// One key across both: the ID-JAG the IdP issued names it, and the token here is bound to it.
+			const jag = world.idp.issued().at(-1);
+			const jkt = (jag?.cnf as { jkt?: unknown } | undefined)?.jkt;
+			expect(typeof jkt).toBe("string");
+			const [, payload = ""] = String(
+				outcome.kind === "result" ? outcome.result.accessToken : "",
+			).split(".");
+			const token = JSON.parse(Buffer.from(payload, "base64url").toString()) as {
+				cnf?: { jkt?: unknown };
+			};
+			expect(token.cnf?.jkt).toBe(jkt);
+		},
+	);
+
+	it.runIf(runs("id-jag"))(
+		"is refused an ID-JAG for another client, of another type, or for another audience",
+		async () => {
+			for (const otherwise of [
+				{ clientId: "someone-else" },
+				{ typ: "JWT" },
+				{ aud: "https://another-as.example" },
+			]) {
+				world.idp.otherwise(otherwise);
+				expect(await exchanged(), JSON.stringify(otherwise)).toMatchObject({
+					kind: "error",
+					type: "invalid_grant",
+				});
+			}
+		},
 	);
 });
 
