@@ -1,3 +1,4 @@
+import { claimsSelections } from "@mod/claims-selection";
 import { type Route, routes, site } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { type BuildContext, defineModule, isUnavailable } from "@mod/kernel";
@@ -23,6 +24,7 @@ async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 		tokens: await c.get(tokens),
 		sessionTokens: await c.get(sessionTokens),
 		sessions: await c.get(sessions),
+		selections: await c.get(claimsSelections),
 		claims: await c.get(releasedClaims),
 	});
 	return async (request) => {
@@ -38,7 +40,15 @@ async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 }
 
 /** What its routes and its metadata take. */
-const moduleTakes = [senderBinding, tokens, sessionTokens, sessions, releasedClaims, site];
+const moduleTakes = [
+	senderBinding,
+	tokens,
+	sessionTokens,
+	sessions,
+	claimsSelections,
+	releasedClaims,
+	site,
+];
 
 export default defineModule({ name: "userinfo", replicaSafe: true, takes: moduleTakes }, (m) => [
 	...(["GET", "POST"] as const).map((method) =>

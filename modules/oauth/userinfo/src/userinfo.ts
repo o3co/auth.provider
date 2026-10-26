@@ -1,3 +1,4 @@
+import type { ClaimsSelections } from "@mod/claims-selection";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import type { ReleasedClaims } from "@mod/oidc";
 import { challengeOf, type SenderBindings } from "@mod/sender-binding";
@@ -10,6 +11,7 @@ export interface UserinfoParts {
 	readonly tokens: Pick<Tokens, "verifyAccess">;
 	readonly sessionTokens: Pick<SessionTokens, "sessionOf">;
 	readonly sessions: Pick<Sessions, "entryOf">;
+	readonly selections: Pick<ClaimsSelections, "forToken">;
 	readonly claims: Pick<ReleasedClaims, "of">;
 }
 
@@ -20,7 +22,7 @@ export const unavailable = answer(503, { error: "temporarily_unavailable" });
 
 /**
  * Answers the subject of the access token the request presents, and the claims oidc releases for its
- * scope while the session it was issued in enters at use for that subject. Throws Unavailable when a
+ * scope and the selection kept for it while the session it was issued in enters at use for that subject. Throws Unavailable when a
  * check cannot tell.
  */
 export function userinfoOver(p: UserinfoParts) {
@@ -48,7 +50,9 @@ export function userinfoOver(p: UserinfoParts) {
 			// Challenged in the token's own scheme, as sender-binding challenges a token it refuses.
 			return answer(401, { error: "invalid_token" }, challengeOf(tokenType, "invalid_token"));
 		}
-		const claims = await p.claims.of(grant.subject, grant.scope, bound.handle);
+		// What the token's request asked beyond its scope, and the constraints on all it releases.
+		const selection = await p.selections.forToken(id);
+		const claims = await p.claims.of(grant.subject, grant.scope, bound.handle, selection);
 		return answer(200, { ...claims, sub: grant.subject });
 	};
 }

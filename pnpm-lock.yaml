@@ -2225,6 +2225,9 @@ importers:
 
   modules/oauth/userinfo:
     dependencies:
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../claims-selection
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http

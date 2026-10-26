@@ -1,3 +1,4 @@
+import { claimsSelections } from "@mod/claims-selection";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
@@ -53,6 +54,7 @@ const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
 	m
 		.provide(releasedClaims)
 		.by(() => ({ of: async () => ({}), scopeOf: () => undefined }) as ReleasedClaims),
+	m.provide(claimsSelections).by(() => ({ forToken: async () => undefined }) as never),
 	m.provide(items).by((c) => c.collect(metadata)),
 ]);
 

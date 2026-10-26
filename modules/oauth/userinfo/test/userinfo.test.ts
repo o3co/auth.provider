@@ -1,3 +1,4 @@
+import type { Target } from "@mod/claims-selection";
 import { testRequest } from "@mod/http/testing";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import type { Claim } from "@mod/oidc";
@@ -38,7 +39,8 @@ function over(
 		session?: TokenSession;
 		entry?: Entry;
 		claims?: Record<string, Claim>;
-		failing?: "admitted" | "session" | "entry" | "claims";
+		selection?: Target;
+		failing?: "admitted" | "session" | "entry" | "selection" | "claims";
 	} = {},
 ) {
 	const calls: unknown[][] = [];
@@ -69,9 +71,16 @@ function over(
 				return told.entry ?? entered(open);
 			},
 		},
+		selections: {
+			forToken: async (id) => {
+				calls.push(["selection", id]);
+				fail("selection");
+				return told.selection;
+			},
+		},
 		claims: {
-			of: async (subject, scope, handle) => {
-				calls.push(["claims", subject, scope, handle]);
+			of: async (subject, scope, handle, asked) => {
+				calls.push(["claims", subject, scope, handle, asked]);
 				fail("claims");
 				return told.claims ?? { name: "Ann" };
 			},
@@ -95,8 +104,31 @@ describe("userinfo", () => {
 			["admitted"],
 			["session", "token-1"],
 			["entry", "h1"],
-			["claims", "ann", ["openid", "profile"], "h1"],
+			["selection", "token-1"],
+			["claims", "ann", ["openid", "profile"], "h1", undefined],
 		]);
+	});
+
+	it("hands oidc the selection kept for the token: the names it asks beyond its scope, and the constraints", async () => {
+		const selection: Target = {
+			names: [{ name: "email", scope: "email" }],
+			constraints: [{ name: "name", value: "Ann" }],
+		};
+		const o = over({ selection });
+		expect((await o.run()).status).toBe(200);
+		expect(o.calls.at(-1)).toEqual(["claims", "ann", ["openid", "profile"], "h1", selection]);
+	});
+
+	it("reads no selection for a token issued in no session, or one whose session ended, and answers 503 when it cannot read one", async () => {
+		expect((await over({ session: { kind: "unbound" } }).run()).status).toBe(200);
+		const unbound = over({ session: { kind: "unbound" } });
+		await unbound.run();
+		const ended = over({ entry: { kind: "absent" } });
+		await ended.run();
+		for (const o of [unbound, ended]) expect(o.calls.map((c) => c[0])).not.toContain("selection");
+		const failing = over({ failing: "selection" });
+		await expect(failing.run()).rejects.toSatisfy(isUnavailable);
+		expect(failing.calls.map((c) => c[0])).not.toContain("claims");
 	});
 
 	it("answers only sub for a token issued in no session", async () => {
