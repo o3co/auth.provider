@@ -58,7 +58,12 @@ export interface Fronted {
  */
 export async function fronted(
 	sceneAt: (origin: string) => AreaScene,
-	given: { readonly start?: (scene: AreaScene) => Promise<Started>; readonly under?: string } = {},
+	given: {
+		readonly start?: (scene: AreaScene) => Promise<Started>;
+		readonly under?: string;
+		/** The header the front forwards a client's certificate in, as a deployment's proxy does. */
+		readonly clientCertificateHeader?: string;
+	} = {},
 ): Promise<Fronted> {
 	const start = given.start ?? ((scene: AreaScene) => areaTarget().start(scene));
 	const dir = await mkdtemp(join(given.under ?? tmpdir(), "interop-clients-"));
@@ -71,6 +76,9 @@ export async function fronted(
 		listen: "127.0.0.1",
 		tls,
 		sender,
+		...(given.clientCertificateHeader
+			? { clientCertificate: { header: given.clientCertificateHeader } }
+			: {}),
 		answered: (request) => {
 			if (request.method === "POST" && request.url.pathname === "/oauth/token")
 				tokenRequests.push(new URLSearchParams(request.body.toString()));

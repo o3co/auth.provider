@@ -86,15 +86,19 @@ Tag the merge commit on `main` as `v<version>` and push the tag. The workflow re
 
 ## What the workflow does
 
+It runs in four jobs before the API site's. `evidence` reads the CI runs, and nothing else. `pack` runs the checks and packs, and `sbom` makes the lists; both run what the release packed, and read alone. `publish` alone holds what publishing takes (its OIDC token and writing the release), and runs nothing the release packed. The API site's own two jobs build it where nothing can write, then push it in a job that runs none of the build's code.
+
 1. Finds the CI run of the release pull request that tested the tag's tree, and keeps its evidence: each test's result and the compliance table (`pnpm release:evidence`). It stops the release where none will do; see [When the release finds no evidence](#when-the-release-finds-no-evidence).
-2. Checks that npm can publish through trusted publishing (11.5.1 or later).
-3. Runs `pnpm check` and `pnpm release:check`: every pattern generated from the packed tarballs alone, type-checked and booted, and a package outside the release composed beside them, its app held to the integrity the release sealed.
-4. Restores the tarballs an earlier attempt of the run saved, or, where none was saved, packs every package (`pnpm release:pack`): every bundle but the scaffold, then the scaffold's index sealed with their integrity and zod's, then the scaffold and the entrance. Refuses any tarball without the root `LICENSE` word for word, and saves the tarballs it packed to the run.
-5. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
-6. Creates a draft GitHub release with generated notes, and attaches the evidence as `auth-provider-<version>-evidence.tar.gz`: the CI run's artifacts with a manifest naming the run and the commit it tested (of the tag's tree), this run's own `pnpm check` results, `pnpm audit --json`, and the commands and environment they ran in.
-7. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
-8. Publishes the draft release.
-9. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
+2. Runs `pnpm check`.
+3. Packs every package (`pnpm release:pack --from-registry`): every bundle but the scaffold, then the scaffold's index sealed with their integrity and zod's, then the scaffold and the entrance; a package an earlier attempt published is taken from the registry instead, of the integrity npm gave it. Writes beside them the order the release publishes them in. Refuses any tarball without the root `LICENSE` word for word, Runs `pnpm release:check` on those very tarballs, the ones it will publish: every pattern generated from them alone, type-checked and booted, and a package outside the release composed beside them, its app held to the integrity the release sealed. Then saves them to the run, with that order, and hands each artifact to the jobs after it by its id.
+4. Makes the release's lists of what it ships (`pnpm release:sbom`), CycloneDX 1.6, from those very tarballs: the operator's app (the full template with every feature that opts in) and the entrance, each installed from them with its lock; the packages bundles hold inside, as the manifests declare them; the tools that build the release; and the reference image built from the app's Dockerfile, listed by syft. Each list names the release's own packages as npm publishes them, with their tarballs' SHA-512; a tarball no list holds, or a bundled file undeclared, stops the release.
+5. Checks that npm can publish through trusted publishing (11.5.1 or later).
+6. Holds the tarballs it is about to publish to those the lists were made of, by name, version, integrity and file, and the order beside them to the tarballs (`pnpm release:listed`).
+7. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
+8. Creates a draft GitHub release with generated notes, and attaches the lists as `auth-provider-<version>-sbom.tar.gz` (its `README.md` says what each file is) and the evidence as `auth-provider-<version>-evidence.tar.gz`: the CI run's artifacts with a manifest naming the run and the commit it tested (of the tag's tree), this run's own `pnpm check` results, `pnpm audit --json`, and the commands and environment they ran in.
+9. Publishes each tarball with provenance, in the order the pack wrote: the bundles the index seals over, then the scaffold, then the entrance, which depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
+10. Publishes the draft release.
+11. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
 
 ## A package name never published before
 
@@ -107,12 +111,11 @@ A release whose new name is missing either stops at that package; see the next s
 
 ## When a publish stops partway
 
-Fix the cause and re-run the failed job of the same run (not a new run, and not a new tag). Each attempt first restores the tarballs an earlier attempt saved, and packs only where none was saved:
+Fix the cause and re-run the failed jobs of the same run (not a new run, and not a new tag). Each attempt asks npm for each package of this version: every one an earlier attempt published is taken from the registry, of the integrity npm gave it, and the rest are packed, the index sealed again over the bundles before it. The run's evidence names those taken in `fetched.json`.
 
-- A failure before the tarballs were saved (installing, the checks, packing, saving them) published nothing: the rerun packs, checks and saves them anew.
-- A failure after they were saved, publishing included: the rerun restores them, never packing again, and checks that every package of this version already on npm is that very tarball before publishing anything; one that is passed over, so the rerun publishes only what is missing, and the release is published once every package is.
-
-The tarballs are kept 90 days. A rerun after that, or one whose restore fails, packs anew; the same check then lets it go on only where what is on npm is the same bytes.
+- A failure before anything was published: the rerun packs, checks and publishes everything anew.
+- A failure partway through publishing: the rerun takes what is on npm and packs the rest. The release publishes the index's bundle after every bundle it seals over, so the index is sealed again over what is packed, or, once it is on npm, taken as it is. Each package already on npm is passed over, so the rerun publishes only what is missing, and the release is published once every package is.
+- The index's bundle on npm while a bundle it seals over is not (published out of order, as by hand): the pack stops, as the index cannot be sealed again, and no rerun changes that. Publish the next version instead.
 
 The check stops for one of two reasons, and its output names which for each package:
 

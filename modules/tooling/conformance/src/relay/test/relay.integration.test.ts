@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRedis } from "../../driver.ts";
-import { type Command, type Match, startRelay, upstreamOf } from "../relay.ts";
+import { type Command, type Match, type Reply, startRelay, upstreamOf } from "../relay.ts";
 import { ask, encode, rawClient, tricklingServer } from "./client.ts";
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -427,5 +427,84 @@ describe("what the relay keeps in order and on record", () => {
 		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
 		void relay.hold(setOf(fresh()));
 		await expect(relay.close()).rejects.toThrow(/never/);
+	});
+});
+
+describe("a caller's code that throws", () => {
+	it("fails the relay, its connection cut, and never ends the run", async () => {
+		const relay = await startRelay({
+			upstream: upstreamOf(redis.url),
+			roleOf: (c) => {
+				if (c.name === "ECHO") throw new Error("a role that cannot be told");
+				return undefined;
+			},
+		});
+		relay.observe({
+			request: (c) => {
+				if (c.name === "INCR") throw new Error("a match that cannot be read");
+				return false;
+			},
+			succeeded: () => true,
+		});
+		for (const command of [encode("ECHO", "x"), encode("INCR", fresh())]) {
+			const c = await rawClient(relay.url);
+			c.write(command);
+			await Promise.race([c.closed, pause(2_000)]);
+			expect(c.isClosed()).toBe(true);
+		}
+		await expect(relay.close()).rejects.toThrow(/cannot be told[\s\S]*cannot be read/);
+	});
+
+	it("releases a scene waiting on the rule whose match threw, the relay still open", async () => {
+		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		const throws = (where: "request" | "succeeded", name: string): Match => ({
+			request: (c) => {
+				if (where === "request" && c.name === name) throw new Error(`${name}'s request threw`);
+				return c.name === name;
+			},
+			succeeded: () => {
+				if (where === "succeeded") throw new Error(`${name}'s success threw`);
+				return true;
+			},
+		});
+		const seen = relay.observe(throws("request", "INCR"));
+		const held = relay.hold(throws("request", "DECR"));
+		const dropped = relay.dropReplyTo(throws("succeeded", "PING")).first;
+		for (const command of [encode("INCR", fresh()), encode("DECR", fresh()), encode("PING")]) {
+			const c = await rawClient(relay.url);
+			c.write(command);
+			await Promise.race([c.closed, pause(2_000)]);
+		}
+		const within = <T>(p: Promise<T>) =>
+			Promise.race([p, pause(2_000).then(() => Promise.reject(new Error("still waiting")))]);
+		await expect(within(seen)).rejects.toThrow(/INCR's request threw/);
+		await expect(within(held)).rejects.toThrow(/DECR's request threw/);
+		await expect(within(dropped)).rejects.toThrow(/PING's success threw/);
+		await expect(relay.close()).rejects.toThrow(/threw/);
+	});
+});
+
+describe("a match made as an object of its own", () => {
+	it("is asked with itself as its receiver, as before its predicates were guarded", async () => {
+		class SetOf implements Match {
+			readonly key: string;
+			constructor(key: string) {
+				this.key = key;
+			}
+			request(c: Command) {
+				return c.name === "SET" && c.args[0]?.toString() === this.key;
+			}
+			succeeded(r: Reply) {
+				return r.kind === "simple" && r.text === "OK" && this.key.length > 0;
+			}
+		}
+		const relay = await startRelay({ upstream: upstreamOf(redis.url) });
+		const k = fresh();
+		const seen = relay.observe(new SetOf(k));
+		const c = await rawClient(relay.url);
+		c.write(encode("SET", k, "1"));
+		expect((await seen).reply).toEqual(ok);
+		c.end();
+		await relay.close();
 	});
 });

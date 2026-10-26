@@ -138,6 +138,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/issuer` (feature, `modules/oauth/issuer`): Owns this provider's canonical name, the issuer: the configured URL, never derived from a request, the same for every module that names it.
 - `@mod/jwt-bearer` (feature, `modules/oauth/jwt-bearer`): Contributes the grant by JWT assertion.
   - `assertion` (`src/assertion`): checking a JWT assertion, all but its single use.
+  - `clientless` (`src/clientless`): a grant naming no client (RFC 7523 §3.1), where an entry's `client` is the client its verified assertion identifies, and the binding of entries and their clients.
   - `conditions` (`src/conditions`): the conditions an issuer holds an assertion's verified claims to, and whether claims meet them.
   - `delegated` (`src/delegated`): an assertion of a delegated issuer, which another module checks by its own rules (`delegatedAssertions`).
   - `issuers` (`src/issuers`): the trusted issuers, each entry of the section's `issuers`, and the signers and ledgers each is read with.
@@ -299,9 +300,13 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 - `@mod/api-docs` (assembly, `modules/tooling/api-docs`): Builds a release's API site from the shipped bundles, as an app installs them: one module per member's contract, named and imported by its public name.
 - `@mod/conformance` (verification, `modules/tooling/conformance`): Owns the conformance test base: the area contract, scene composition, the driver contract and selection, assembly of the new system, the pattern mode (every scene on one pattern's app), shared tools.
+  - `ask` (`src/ask`): Redis at hand, for the topology and the scenes that check a node themselves.
   - `audit` (`src/audit`): the events a running target sends, for the scenes that read them.
+  - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
+  - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
   - `patterns` (`src/patterns`): running every pattern's areas on its app.
+  - `promotion` (`src/promotion`): promoting a replica of a Redis topology's primary without losing what the primary took.
   - `relay` (`src/relay`): a relay between an app and Redis that causes a fault at a known point and shows that it happened.
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
@@ -331,11 +336,19 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-second-factor` (verification, `modules/tooling/conformance-second-factor`): Owns the conformance scenes of the second-factor area: second factor at login (by a form or a JSON body), enrollment, naming factors, step-up, lockout, a recovery code that lets in one login only when two use it at once, store failure, the audit events they record.
 - `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
+  - `fetched` (`src/fetched`): the packages of this version npm already holds, taken from the registry for a release run again.
   - `outside-scene` (`src/outside-scene`): Composes a package outside the release as an operator does, beside the packed release, and checks that the app is held to what the release sealed.
+  - `packed` (`src/packed`): a packed tarball read for what it is, its name, version and integrity.
   - `release` (`src/release`): Packs the release, the index sealed in between, into the tarballs it publishes.
   - `release-check` (`src/release-check`): Checks the release as an operator meets it: apps made by the packed `create-auth-provider`, installed from the tarballs, type-checked, and booted in their image; an app assembled by hand from them; and a package outside the release composed beside them (`outside-scene`).
+  - `carried` (`src/release-check/carried`): which package managers an app's image holds.
   - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
+  - `given` (`src/release-check/given`): which tarballs the release check holds to.
   - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
+  - `release-listed` (`src/release-listed`): where the release publishes, the tarballs held to those its lists of what it ships were made of.
+  - `release-sbom` (`src/release-sbom`): the release's lists of what it ships (SBOMs), made from the tarballs it publishes.
+  - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
+  - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
 - `@mod/guard` (verification, `modules/tooling/guard`): Checks the workspace's invariants, each reported by its id, place and what went over:
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
   - `change-record` (`src/change-record`): a change record's machine rows, what two commits of the workspace differ in.

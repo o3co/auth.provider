@@ -1,0 +1,4 @@
+{
+	"cyclonedx": "1.6",
+	"syft": "anchore/syft:v1.54.1@sha256:3eb5379ba7b409c3f4069b686110527af0c47df993fa5c10d13e7cf34f49b1aa"
+}

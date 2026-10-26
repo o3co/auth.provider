@@ -10,6 +10,7 @@ import { outsideScene } from "../outside-scene/contract.ts";
 import { packedOf, packRelease, zodOf } from "../release/contract.ts";
 import { releaseOf } from "../workspace.ts";
 import { sweptRun } from "./containers/container.ts";
+import { tarballsToCheck } from "./given/given.ts";
 import { helperScene } from "./helpers.ts";
 import { dockerMissing, images, overridesFile } from "./image.ts";
 
@@ -46,13 +47,13 @@ if (unbuilt.length > 0) {
 }
 
 const scratch = mkdtempSync(join(tmpdir(), "release-check-"));
-const tarballs = join(scratch, "tarballs");
-// Packed as the release packs them: the index sealed in between.
-const packed = packRelease(root, tarballs);
+// The tarballs named, as the release publishes them; else packed as the release packs them, the index sealed in between.
+const packed = tarballsToCheck(process.argv[2], (into) => packRelease(root, into), scratch);
 if ("problems" in packed) {
 	for (const problem of packed.problems) console.error(problem);
 	process.exit(1);
 }
+const tarballs = packed.dir;
 const overrides: Record<string, string> = {};
 for (const tarball of packed.tarballs) {
 	const { name } = packedOf(tarball);
@@ -169,6 +170,9 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 			{ cwd: app, stdio: "pipe" },
 		);
 		const image = await run.build(app, name);
+		const tools = await run.carriedBy(image);
+		if (tools.length > 0)
+			problems.push(`${name}: its image holds a package manager: ${tools.join(", ")}`);
 		say(`${name}: ${await run.booted(app, image)}`);
 		// The resolver's helpers as a deployment constrains them, on one pattern's image.
 		if (name === "simple-web") {

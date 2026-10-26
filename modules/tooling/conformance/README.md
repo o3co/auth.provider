@@ -2,7 +2,8 @@
 
 ## Responsibilities
 - Owns the conformance test base: the area contract, scene composition, the driver contract and selection, assembly of the new system, the pattern mode (every scene on one pattern's app), shared tools.
-- Its internal modules: `drivers` runs the new system, on a scene's parts or a pattern's app; `audit` keeps the events a target sends; `patterns` runs every pattern's areas; `relay` sits between an app and Redis to cause a fault at a known point and show that it happened; `store-wire` reads the Redis adapter's wire for it.
+- Its internal modules for running a target: `drivers` runs the new system, on a scene's parts or a pattern's app; `audit` keeps the events a target sends; `patterns` runs every pattern's areas.
+- Its internal modules for fault scenes: `relay` sits between an app and Redis to cause a fault at a known point and show that it happened; `store-wire` reads the Redis adapter's wire for the relay; `faults` runs a Redis topology and the faults of its nodes; `promotion` promotes a replica without losing what the primary took; `ask` sends a node commands; `clock` runs a process on a moved clock.
 
 ## Not here
 - Scenes and scene vocabulary, and the set-ups for legacy and new (each area's conformance module). Starting the legacy system (`conformance-legacy`). The internals of the system under test.
@@ -10,6 +11,7 @@
 ## Offers
 - Area (name and shape of its parts), scene composition, registration of set-ups for the new system (modules and sections, store kind; a set-up is told the modules composed, and the sections are those it gives knowing them)
 - Driver contract: start with a scene, and on the new system the PEM files its process trusts besides the system's (`trustedCertificates`, for a party it reaches over https under a certificate of its own) → root URL or boot refusal, stop, storage failure (only when the scene asks for it), the mail sent where the driver runs a relay, `can` (the needs the target cannot provide) and `differs` (among the differences the owner decided, those the target answers differently).
+  - A target's stop sends SIGTERM, then SIGKILL past its grace (40 seconds, beyond the kernel's stop deadline, unless the launch gives one), and fails where the target is still there after it.
 - Driver registration and selection by `CONFORMANCE_TARGET` (the default is the new system)
 - Pattern mode, with `CONFORMANCE_PATTERN` naming a pattern on the new system: `full` is the full template, `full+opt-ins` adds every feature that opts in
   - An area may adapt its part to the app's modules (`onNew`'s third argument): a set-up with a party the app reaches at loopback, started before it and stopped after it, or a reason to leave the scene out because the app chose an alternative, which even `full+opt-ins` leaves out
