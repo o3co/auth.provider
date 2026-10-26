@@ -8,6 +8,7 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/claims-selection": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",

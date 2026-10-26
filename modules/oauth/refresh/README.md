@@ -23,6 +23,7 @@
 - Only a family's current token is usable, and each use swaps it for a new one. Any other token of the family is reuse and revokes the family; so is the loser of two concurrent uses.
 - A token with anything after it, another client's token, and one without the family's binding are refused without spending it.
 - A family's end is fixed when it starts; no access token from it outlives it, nor the family's session, where it has one. Each one carries the amr, authentication time and acr the family started with; a time not known when it started is stated by none. None carries claims a grant added to the access token its family began with: a family keeps none.
+- A family started from a code keeps, through `claims-selection`, what the code's request asked beyond its scope, before its record is written and from the same end, read once before it, so the selection outlives the family; failing, the code is voided. Each round keeps for its access token that selection, its names cut to what is allowed and agreed to now, before the rotation; failing, that access token is revoked, the round fails and the refresh token stays usable.
 - Scope narrows only within the original grant, for that round's access token, each value once; omitted or empty is all of it. The audience asked narrows that round alone, within the family's and the client's.
 - Before rotating: the family's session, if any, enters at use (not closed, ended, or short of a requirement); the subject's authentication is past the revocation boundary; the client's allowance covers this round; `tokens`' issuance policies allow it, told the issuance continues a grant (`continuing`). A refusal leaves the token usable.
 - A binding is attached to a public client's family, and to a confidential one's where set, only when it starts. Every refusal is the same `invalid_grant`; a store failure is unavailable, never a negative verdict.
@@ -33,7 +34,7 @@
 - Family records (the current secret's hash, client, subject, scope, audience, session, authentication context, binding, end; or a revoked mark), what each redemption left, and each access token's family. Every record outlives what it covers by one allowance, for hosts whose clocks lag.
 
 ## Depends on
-- `kernel`, `tokens`, `grants`, `client-allowance`, `code-grant`, `token-control`, `session`, `session-participants`, `subject-revocation`, `clients`, `issuer`, `sender-binding`, `audit`
+- `kernel`, `tokens`, `grants`, `client-allowance`, `claims-selection`, `code-grant`, `token-control`, `session`, `session-participants`, `subject-revocation`, `clients`, `issuer`, `sender-binding`, `audit`
 
 ## Vocabulary
 - family: the series of refresh tokens that starts from one code redemption or one `start`. reuse: a token arriving that is not the family's current token.

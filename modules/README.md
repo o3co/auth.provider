@@ -82,6 +82,7 @@ What each module contains is described by that module's contract card (each modu
 | Wiring subject-revocation's store interface to records | wiring | subject-revocation-store |
 | Wiring consent's store interfaces to records | wiring | consent-store |
 | Wiring session-tokens' store interfaces to records' keyed sets, records and deferred work | wiring | session-tokens-store |
+| Wiring claims-selection's store interface to records | wiring | claims-selection-store |
 | Wiring mfa's store interface to records | wiring | mfa-store |
 | Wiring mfa-flows' store interface to records | wiring | mfa-flows-store |
 | Wiring users' store interfaces to records | wiring | users-store |
@@ -168,6 +169,10 @@ What each module contains is described by that module's contract card (each modu
 | scope, audience, actor | vocabulary | tokens |
 | Records of access tokens issued per session, cleaning them up when the session closes, the link between an access token and its session | contract | session-tokens |
 | Recording each access token issued from a session, as `grants`' session issuances tell of it | contribution | session-tokens |
+| The claim names a `claims` request releases beyond its scope, by allowance and consent, and their value constraints, kept for the code, the redemption, the refresh family and each access token | contract | claims-selection |
+| Judging consent for a selection's names | extension point kind | claims-selection |
+| Pinning a redemption's selection and keeping it for the redeemed token, as `code-grant`'s redemption hooks tell of it | contribution | claims-selection |
+| Carrying a token's constraints to a token exchanged from it, as `grants`' token ties | contribution | claims-selection |
 | A logout a client starts, its returns, the front-channel page and back-channel notices, the clients of each session (client metadata fields, routes, data) | contract / setting / data | rp-logout |
 | Ending the upstream session before a logout a client starts returns | extension point kind | rp-logout |
 | Sending a client's logout on to the session's upstream | contribution | rp-logout-federation |
@@ -207,11 +212,12 @@ What each module contains is described by that module's contract card (each modu
 | ID token producers | extension point kind | code-grant |
 | Additions issued with the redemption response | extension point kind | code-grant |
 | Clients told of each code redeemed in a session | extension point kind | code-grant |
+| Hooks pinned with each code redemption and told what it gave | extension point kind | code-grant |
 | Consent records | contract | consent |
 | ID token contents (a contribution to code-grant's extension point), claim scope | vocabulary | oidc |
-| The claim table (the claims each scope releases), and the claims released for a subject and scope | contract | oidc |
+| The claim table (the claims each scope releases, and the scope of each claim), and the claims released for a subject, scope and what a request asks beyond it, held to its constraints | contract | oidc |
 | Judging an ID token given back as a hint | contract | oidc |
-| OpenID Connect's userinfo: an access token's subject, and its session's claims while that session is open | route | userinfo |
+| OpenID Connect's userinfo: an access token's subject, and its session's claims by its scope and kept selection while that session is open | route | userinfo |
 | Authorization server metadata items (what this server names itself by) | extension point kind | issuer |
 | Each metadata item | vocabulary | the module that contributes that item |
 | Building and publishing the discovery document | contract | discovery |

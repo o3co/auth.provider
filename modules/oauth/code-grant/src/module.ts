@@ -13,6 +13,7 @@ import {
 	codeStore,
 	codes,
 	idTokens,
+	redemptionHooks,
 	sessionRedemptions,
 	voidList,
 } from "./contract.ts";
@@ -30,6 +31,7 @@ const takes = [
 	additions,
 	sessionIssuances,
 	sessionRedemptions,
+	redemptionHooks,
 ];
 
 export default defineModule({ name: "code-grant", section, takes }, (m) => [
@@ -73,6 +75,7 @@ export default defineModule({ name: "code-grant", section, takes }, (m) => [
 				if (saved !== "created") throw new Unavailable("code-grant");
 				return code;
 			},
+			redemptionOf: (code) => store.nameOf(code),
 			idTokenScope: () => (makers.length === 1 ? makers[0]?.scope : undefined),
 		};
 	}),
@@ -115,6 +118,7 @@ export default defineModule({ name: "code-grant", section, takes }, (m) => [
 			idToken: makers[0],
 			additions: contributed,
 			redemptions: await c.collect(sessionRedemptions),
+			hooks: await c.collect(redemptionHooks),
 		});
 	}),
 ]);

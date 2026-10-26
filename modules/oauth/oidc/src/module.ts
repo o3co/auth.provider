@@ -1,3 +1,4 @@
+import { claimsSelections } from "@mod/claims-selection";
 import { idTokens } from "@mod/code-grant";
 import { issuer, metadata } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
@@ -5,7 +6,7 @@ import { keys } from "@mod/keys";
 import { type SubjectAttributes, subjectAttributes } from "@mod/subject-attributes";
 import { userAttribute } from "@mod/users";
 import { z } from "zod";
-import { claimsOf, tableClaims, tableScopes } from "./claims/table.ts";
+import { claimsOf, scopeOfClaim, tableClaims, tableScopes } from "./claims/table.ts";
 import { idTokenHints, type ReleasedClaims, releasedClaims } from "./contract.ts";
 import { hintsOver } from "./hints.ts";
 
@@ -26,16 +27,17 @@ const openid = "openid";
 // vouches for may say the email is verified: an upstream verified an address it controls, which
 // need not be this user's, so its word on that is left out.
 const releasedOver = (read: SubjectAttributes): ReleasedClaims => ({
-	of: async (subject, scope, handle) => {
+	of: async (subject, scope, handle, asked) => {
 		const found = await read.of(subject, handle);
 		if (found.kind === "unknown") return nothing;
 		const { [userAttribute.emailVerified]: _, ...unvouched } = found.attributes;
-		return claimsOf(found.vouched ? found.attributes : unvouched, scope);
+		return claimsOf(found.vouched ? found.attributes : unvouched, scope, asked);
 	},
+	scopeOf: scopeOfClaim,
 });
 
 export default defineModule(
-	{ name: "oidc", section, takes: [subjectAttributes, keys, issuer] },
+	{ name: "oidc", section, takes: [subjectAttributes, keys, issuer, claimsSelections] },
 	(m) => [
 		m.provide(releasedClaims).by(async (c) => releasedOver(await c.get(subjectAttributes))),
 		m
@@ -50,10 +52,14 @@ export default defineModule(
 			const issuerUrl = (await c.get(issuer)).url;
 			const lifetime = c.section["id-token-lifetime"];
 			const released = releasedOver(await c.get(subjectAttributes));
+			const selections = await c.get(claimsSelections);
 			return {
 				scope: openid,
 				make: async (r) => {
-					const claims = await released.of(r.subject, r.scope, r.session);
+					// The redemption's pinned selection; one whose pin is gone fails, never released unconstrained.
+					const selection =
+						r.redemption === undefined ? undefined : await selections.forCode(r.redemption);
+					const claims = await released.of(r.subject, r.scope, r.session, selection?.idToken);
 					const iat = Math.floor(c.clock.now() / 1000);
 					return signer.sign(
 						{

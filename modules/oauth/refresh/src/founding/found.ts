@@ -23,15 +23,22 @@ export function founding(
 		/** The binding a new family takes: a public client's, and a confidential one's where bound too. */
 		bindingFor: (client: Client, binding: Binding | undefined) =>
 			client.kind === "public" || bindConfidential ? binding : undefined,
-		/** Writes a named family and remembers its first access token; answers its first refresh token. */
-		found: async (id: string, founded: Founded, access: { id: string; expiresAt: number }) => {
+		/** When a family started now ends: read once, so all that is kept for it ends by the same time. */
+		endsAt: () => now() + lifetimeMs,
+		/** Writes a named family ending at `expiresAt` and remembers its first access token; answers its first refresh token. */
+		found: async (
+			id: string,
+			founded: Founded,
+			access: { id: string; expiresAt: number },
+			expiresAt: number,
+		) => {
 			const first = text(random, 32);
 			const at = now();
 			const family: Family = {
 				format: 2,
 				current: hashOf(first),
 				...founded,
-				expiresAt: at + lifetimeMs,
+				expiresAt,
 			};
 			// Kept while what it issued lives, so revoking its token still revokes them once it expired.
 			const familyMs = Math.max(lifetimeMs, access.expiresAt - at) + allowanceMs;
