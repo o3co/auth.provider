@@ -25,8 +25,8 @@ type Tagged = {
 	readonly lightweight?: boolean;
 	readonly on?: string;
 	readonly none?: boolean;
-	/** A message this long, past what a process's output is read to. */
-	readonly long?: boolean;
+	/** A message of this many bytes, past what a process's output is read to. */
+	readonly long?: number;
 };
 
 function released(merge = true, declared = false, tagged: Tagged = {}) {
@@ -57,7 +57,7 @@ function released(merge = true, declared = false, tagged: Tagged = {}) {
 	if (tagged.lightweight) git("tag", "v1.0.1", on);
 	else if (tagged.long) {
 		const message = join(dir, "..", `${dir.split("/").pop()}-message`);
-		writeFileSync(message, `v1.0.1\n\n${"x".repeat(2 << 20)}\nRelease-Evidence: security\n`);
+		writeFileSync(message, `v1.0.1\n\n${"x".repeat(tagged.long)}\nRelease-Evidence: security\n`);
 		git("tag", "-a", "v1.0.1", "-F", message, on);
 	} else if (!tagged.none)
 		git("tag", "-a", "v1.0.1", "-m", "v1.0.1", ...lines.flatMap((l) => ["-m", l]), on);
@@ -234,7 +234,9 @@ describe("judge", () => {
 	it("reads the tag as pushed, refusing one it cannot read, of another commit, or declaring another value", () => {
 		for (const [tagged, told, more] of [
 			[{ none: true }, "cannot be read in this checkout", {}],
-			[{ long: true }, "message of the tag v1.0.1 cannot be read", {}],
+			[{ long: 2 << 20 }, "message of the tag v1.0.1 cannot be read", {}],
+			// Just past the default buffer: git may exit 0 with its output cut short, its last line lost.
+			[{ long: (1 << 20) + 64 }, "message of the tag v1.0.1 cannot be read", {}],
 			[{ on: "HEAD^1" }, "are not one commit", {}],
 			[{}, "are not one commit", { GITHUB_SHA: "0".repeat(40) }],
 			[

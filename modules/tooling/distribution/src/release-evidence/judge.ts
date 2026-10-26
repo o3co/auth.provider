@@ -32,6 +32,7 @@ import {
 	tagOf,
 	testedCommitOf,
 } from "./evidence.ts";
+import { succeeded } from "./spawned.ts";
 
 const [fetched, directory] = process.argv.slice(2);
 const repository = process.env.EVIDENCE_REPOSITORY || process.env.GITHUB_REPOSITORY;
@@ -53,11 +54,11 @@ if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) {
 
 const git = (...args: string[]) => {
 	const answer = spawnSync("git", args, { encoding: "utf8" });
-	return { ok: answer.status === 0, out: answer.stdout.trim() };
+	return { ok: succeeded(answer), out: answer.stdout.trim() };
 };
 const ran = (command: string, args: readonly string[]) => {
 	const answer = spawnSync(command, args, { encoding: "utf8", maxBuffer: 1 << 28 });
-	if (answer.status !== 0) throw new Error(`${command} ${args.join(" ")}: ${answer.stderr.trim()}`);
+	if (!succeeded(answer)) throw new Error(`${command} ${args.join(" ")}: ${answer.stderr.trim()}`);
 	return answer.stdout.trim();
 };
 
@@ -196,7 +197,7 @@ function recomputed(run: RunSeen, tested: string, dir: string) {
 		// No table written: what it printed on standard error is told instead.
 	}
 	// Passed only where it ran and wrote its table: a filter matching nothing exits 0 too.
-	return { releasable: read.status === 0 && existsSync(join(dir, "compliance.json")), told };
+	return { releasable: succeeded(read) && existsSync(join(dir, "compliance.json")), told };
 }
 
 /** A candidate's artifacts, as fetch brought them, unpacked; the commit its reports name; how its jobs ended. */

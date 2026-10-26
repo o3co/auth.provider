@@ -9,6 +9,7 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { succeeded } from "./spawned.ts";
 
 const directory = process.argv[2];
 // The repository whose CI tested the release: this one, or the one a security release was tested in.
@@ -26,7 +27,7 @@ const stop = (problem: string): never => {
 };
 const ran = (command: string, args: readonly string[]) => {
 	const answer = spawnSync(command, args, { encoding: "utf8", maxBuffer: 1 << 28 });
-	return { ok: answer.status === 0, out: answer.stdout.trim(), err: answer.stderr.trim() };
+	return { ok: succeeded(answer), out: answer.stdout.trim(), err: answer.stderr.trim() };
 };
 /** Each JSON value a paginated API answer's jq filter writes, one a line; the answer failing stops. */
 const listed = <T>(path: string, filter: string): T[] => {
@@ -72,7 +73,7 @@ for (const run of runs.filter((r) => r.conclusion === "success" && r.headSha ===
 			stdio: ["ignore", out, "pipe"],
 		});
 		closeSync(out);
-		if (got.status !== 0) stop(`artifact ${a.name} of run ${id} could not be downloaded`);
+		if (!succeeded(got)) stop(`artifact ${a.name} of run ${id} could not be downloaded`);
 	}
 	examined[id] = { jobs, artifacts };
 }
