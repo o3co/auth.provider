@@ -12,6 +12,7 @@ How a maintainer cuts a release. The release workflow (`release.yml`) does the b
 - [A package name never published before](#a-package-name-never-published-before)
 - [When a publish stops partway](#when-a-publish-stops-partway)
 - [When the release finds no evidence](#when-the-release-finds-no-evidence)
+- [A security release](#a-security-release)
 - [The API site](#the-api-site)
 - [After the release](#after-the-release)
 
@@ -133,6 +134,27 @@ The first job holds the tag to a release's: it names its version, and its commit
 - **A run's reports name another commit than the one GitHub ran it on.** Its evidence is not that run's own: re-run all its jobs, and where it stays so, find what wrote those reports before releasing.
 - **A run could not be examined** (an archive or a file that failed). The next older run was examined in its place; where none would do, re-run the failed jobs of the release's run.
 - **GitHub could not be asked** (fetching stops on an answer it cannot have, never taking it for no runs). Re-run the failed jobs of the release's run once GitHub answers.
+
+## A security release
+
+A fix for a reported hole is made and tested in the security repository (`o3co/auth.provider-security`, private), which mirrors this one, and is made public with the version that carries it (`SECURITY.md`, [findings and fixes](audit/findings.md)). Where the tag declares a security release, the release takes that repository's run as its evidence, by the same rules, in a job of its own; no tag that does not declare one takes it, whatever ran here.
+
+What the owner sets up once: the GitHub App that reads the security repository's runs, installed there alone; the `security-evidence` environment, its reviewer and its `v*` tag rule; and that repository's branch rules. The App's private key exists only from step 6 to step 11.
+
+1. Draft the advisory and request its CVE. Add the finding to the ledger.
+2. Bring the security repository's mirrors up to date, after checking that `git remote get-url security` names it: `git fetch origin`, so the mirrors get this repository's current branches and not a stale checkout's, then `git push security origin/main:refs/heads/mirror/main origin/develop:refs/heads/mirror/develop`. The refspecs are fast-forward only; never force-push.
+3. Make the fix on `security/<finding>` from `mirror/main`: the fix, the version's commit, the changelog (the kind of hole and the module, never how to reach it) and the migration guide. Run the checks locally.
+4. Have it reviewed.
+5. Push its head to the security repository as `release/<version>`: CI there runs every job a release needs. Wait for that run to finish and pass before going on: the release takes only a successful run as its evidence, and from step 7 the fix is public. Where it fails, fix it on `security/<finding>`, have it reviewed and push again. Run `pnpm release:sbom` locally over the release check's tarballs, the one job of the release CI does not run.
+6. Fetch both branches from the security repository, `git fetch security mirror/main release/<version>`, and check that `security/release/<version>` is the head reviewed in step 4 and tested in step 5. On top of `security/mirror/main` (`git switch --detach security/mirror/main`), make the merge commit, `git merge --no-ff security/release/<version> -m "Merge release/<version>"`, and check that its tree is the branch head's. Read that whole tree before you tag it, not only `release.yml`: the tag rules and the environment's approval stop a writer only where the owner has read every file the release will run. Then tag it, declaring the security release in the tag's message: `git tag -a v<version> -m "v<version>" -m "Release-Evidence: security"`. Add the App's ID and private key to the environment's secrets.
+7. Push the tag alone: `git push origin refs/tags/v<version>`. From here the fix is public.
+8. The release workflow reads the tag's declaration and hands over to the security repository's run: approve the `security-evidence` deployment once you have checked that it runs the tag you made.
+9. Once npm has the version, publish the advisory. Where it does not within two hours of step 7, publish the advisory then, with the versions affected and any workaround, and update it every day until the version is out; the steps of [When a publish stops partway](#when-a-publish-stops-partway) still hold.
+10. Fast-forward `main` to the merge commit, an owner's push past the required checks it has none of here, and push its second parent as `release/<version>`: CI runs every job on it in public. Bring `main` into `develop` through a pull request.
+11. Remove the secrets and delete the App's key.
+12. Add the public run to the change record, have it reviewed and publish it. Delete `security/<finding>` and `release/<version>` from the security repository, and mark the finding fixed.
+
+Where `main` here moved after step 2, start again from step 2 before step 6. Where it moved after step 7, `main` cannot be fast-forwarded: bring the merge commit into it through a pull request.
 
 ## The API site
 
