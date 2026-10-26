@@ -18,6 +18,7 @@ export const flows = [
 	"backchannel-logout",
 	"client-credentials-secret",
 	"public-device",
+	"cimd",
 ] as const;
 export type Flow = (typeof flows)[number];
 
@@ -67,6 +68,7 @@ export const libraries: readonly Library[] = [
 		flows: [
 			"login",
 			"public-login",
+			"cimd",
 			"refresh",
 			"resource",
 			"client-credentials",
@@ -98,6 +100,7 @@ export const libraries: readonly Library[] = [
 		flows: [
 			"login",
 			"public-login",
+			"cimd",
 			"refresh",
 			"resource",
 			"client-credentials-secret",
@@ -118,6 +121,7 @@ export const libraries: readonly Library[] = [
 		flows: [
 			"login",
 			"public-login",
+			"cimd",
 			"refresh",
 			"resource",
 			"client-credentials",
@@ -141,6 +145,7 @@ export const libraries: readonly Library[] = [
 		flows: [
 			"login",
 			"public-login",
+			"cimd",
 			"refresh",
 			"resource",
 			"client-credentials",

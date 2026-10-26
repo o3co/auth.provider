@@ -371,6 +371,7 @@ func main() {
 	flows := map[string]func() (any, error){
 		"login":                     r.login,
 		"public-login":              r.login,
+		"cimd":                      r.login,
 		"refresh":                   r.refresh,
 		"resource":                  r.resource,
 		"client-credentials-secret": r.clientCredentials,

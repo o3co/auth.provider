@@ -15,6 +15,7 @@
 		"@mod/conformance-exchange": "workspace:*",
 		"@mod/conformance-front": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
+		"@mod/conformance-tunnel": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",
 		"openid-client": "6.8.8",
 		"undici": "8.12.2"
