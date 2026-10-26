@@ -1080,17 +1080,18 @@ describe("lineage", () => {
 		expect((await s.refresh(next.body.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
-	it("refuses a family's token at exactly the family's end, and takes it a millisecond before", async () => {
+	it("refuses a family's token at exactly the family's end, and takes it two seconds before", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		const s = await serve();
 		// A family bound to no session, so only the family's own end can refuse it.
 		const token = await s.app.get(lineage).start(await beginning(s, "app"));
 		const stored = await s.stores.kept.records.read(familyNameOf(token));
 		const end = (stored as unknown as { expiresAt: number }).expiresAt;
-		shift = end - Date.now() - 1;
+		// Two seconds before: the access token, cut to the family's end in whole seconds, still has over one.
+		shift = end - Date.now() - 2000;
 		const before = await s.refresh(token);
-		expect(before.status).toBe(200);
-		shift += 1;
+		expect([before.status, before.body.expires_in]).toEqual([200, 2]);
+		shift += 2000;
 		expect((await s.refresh(before.body.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
