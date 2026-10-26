@@ -7,11 +7,10 @@ import { Unavailable } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
 import type { Tokens } from "@mod/tokens";
+import { challenged, oauthError, refusedAuthenticationAnswer } from "../answers/answers.ts";
 import events from "../audit-events.ts";
-import { oauthError, refusedAuthenticationAnswer } from "../contract.ts";
 import { identifiedClient, identifierOf } from "../identified/identified.ts";
 import { answeredBody } from "./answer.ts";
-import { challenged } from "./challenges.ts";
 import { issuanceFor, refusedAnswer } from "./issuance.ts";
 
 export const tokenPath = "/oauth/token";

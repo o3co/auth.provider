@@ -3,8 +3,8 @@ import type { Authentication, Client, Clients } from "@mod/clients";
 import clientEvents from "@mod/clients/audit-events";
 import { testRequest } from "@mod/http/testing";
 import { describe, expect, it } from "vitest";
-import declared from "../src/audit-events.ts";
-import { authenticateClient } from "../src/contract.ts";
+import declared from "../../audit-events.ts";
+import { authenticateClient } from "../answers.ts";
 
 type Refused = Extract<Authentication, { kind: "refused" }>["reason"];
 
