@@ -12,6 +12,7 @@ import type {
 	Verified,
 	Verifier,
 } from "./contract.ts";
+import { typOf } from "./contract.ts";
 import { jwksAt, type KeySet } from "./jwks.ts";
 import { algorithms, type Candidate, fromJwk, fromPem, isAlgorithm, picked } from "./keys.ts";
 
@@ -27,9 +28,6 @@ type Choose = (
 /** A key read under another algorithm, or none, is no key for this one. */
 const settled = (pick: ReturnType<typeof picked>) => (pick === "unbound" ? "no-key" : pick);
 
-/** A `typ` as RFC 7515 compares it: without case and without `application/`. */
-const mediaTypeOf = (typ: unknown) =>
-	typeof typ === "string" ? typ.toLowerCase().replace(/^application\//, "") : undefined;
 /** Claims are UTF-8, as RFC 7519 says; bytes that are not refuse them. */
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 const isTime = (value: unknown): value is number =>
@@ -150,7 +148,7 @@ function verifierWith(choose: Choose, policy: Policy, clock: Clock): Verifier {
 			if (!header) return invalid("malformed");
 			// A JWT is encoded, and no critical extension is taken.
 			if (header.b64 !== undefined || header.crit !== undefined) return invalid("malformed");
-			if (policy.typ !== undefined && mediaTypeOf(header.typ) !== mediaTypeOf(policy.typ))
+			if (policy.typ !== undefined && typOf(header) !== typOf({ typ: policy.typ }))
 				return invalid("malformed");
 			const kid = header.kid;
 			if (kid !== undefined && typeof kid !== "string") return invalid("malformed");

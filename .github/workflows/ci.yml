@@ -588,6 +588,10 @@ jobs:
           java-version: '21'
           cache: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) && 'maven' || '' }}
           cache-dependency-path: modules/tooling/interop-clients/adapters/*/pom.xml
+      # Python for the Authlib adapter's environment, at the version it names.
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: modules/tooling/interop-clients/adapters/authlib/.python-version
       # Go for the adapter `go build` makes, at the toolchain its go.mod pins.
       - uses: actions/setup-go@v5
         with:
