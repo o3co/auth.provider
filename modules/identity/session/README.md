@@ -13,7 +13,7 @@
 - `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked.
 - `complete`: login fact → session and cookie at `kernel`'s time; an authentication time neither epoch milliseconds (0 to 8.64e15) nor `unknown` is a `TypeError`, before anything is closed; the carried session is closed first, and the login is unavailable when that close cannot be added to the closings, or the new session cannot be listed under its subject.
 - `enterFor`: request and level (use / none / credentials) → entered (with its end: the opening plus the lifetime in force), absent, or short with the requirement's name and its answer, passed on unread; a session closed or revoked while the requirements are asked is absent.
-- Extension point `entryJudge`: context and level → the first requirement that falls short, or admitted with whether one judged the level; asked with "use" by `enter` and the checks by handle. Where nothing judges `credentials`, entry there needs a sign-in at a known time that `recent` holds recent, else short `session` `{"error":"step_up_required"}`.
+- Extension point `entryJudge`: context and level → the first requirement that falls short, or admitted with whether one judged the level; asked with "use" by `enter` and the checks by handle. Where nothing judges `credentials`, `sessionRules` holds the floor (`rules`' card), as it closes a subject's listed sessions in the listing's order, for an implementation and the stand-in alike.
 - `refusedEntry`: an entry that did not enter → its answer, absent `401` `{"error":"login_required"}`, short `403` with the requirement's answer, both kept out of caches.
 - `raise`: request and amr → the raised session and a new cookie, or none; it adds the amr and keeps the raise time (`kernel`'s clock).
 - `recent`: a time (`kernel`'s clock) → whether it is within the one recent-authentication window, at most `longestRecentMs` (1 hour); the checker passes the time of what it judges.
@@ -23,7 +23,6 @@
   - None is called for a session that ends by expiry alone, while a close calls them for a session whose record it finds, even one the lifetime in force has ended.
 - Each seam takes at most one contribution, from the module keeping the requirements (`session-requirements`) or the participants (`session-participants`); its factory takes `sessions` only late.
 - An implementation refuses to boot where a seam has no contribution; the stand-in takes none as no requirement and no participant, the `credentials` floor still kept.
-- `sessionRules`: that floor over the judge's answer, and closing a subject's listed sessions in the listing's order, for an implementation and the stand-in alike.
 - `./testing`: a stub, a stand-in in memory behind cookies by `cookies`' rule (each subject's listing as the contract has it; a pending close goes on only when asked again), and contract tests of the sessions.
 
 ## Invariants
