@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
-- Starts the provider the libraries meet, behind an https front whose origin is the issuer: the full template with every feature that opts in, and the services' (`a2a`) for the grants that need no user, such as jwt-bearer, which the full template's ledger of users cannot hold; there an issuer's entry names a client too, for a jwt-bearer request naming none (RFC 7523 §3.1).
+- Starts the provider the libraries meet, behind an https front whose origin is the issuer: the full template with every feature that opts in, and the services' (`a2a`) for the grants that need no user, such as jwt-bearer, which the full template's ledger of users cannot hold; there an issuer's entry names a client too, for a jwt-bearer request naming none (RFC 7523 §3.1), and an enterprise IdP the harness plays issues ID-JAGs, which an issuer taking the profile is written for.
 - Plays the browser in each flow: the driver logs in and follows the authorization URL a library built, only where it is the provider's authorization endpoint at the issuer, and hands the library the redirect, accepting the consent page on the way for a client that is not first-party.
 - Serves a client's metadata document over https by its host's name, on a certificate the app is told to trust, and reaches it for the app through a tunnel set as its outbound proxy.
 - Holds the differences accepted between a library and the provider, each written narrowly and held to the checklist's exception rules.
@@ -23,7 +23,7 @@
 - An adapter reports what the provider's answers name, never a value a check expects; takes a discovery only for the issuer asked, as written, before any credential is sent; fetches a key set without the access token; takes an ID token only where its `aud` names the client, and userinfo only where its `sub` is the ID token's; and leaves no file behind, its answer written once its own are gone; a provider the harness plays checks each, as the real one never errs so.
 - The front tells the app the libraries send from `198.51.100.30`: on loopback the sender would be the app's trusted proxy, and its source undetermined.
 - A check that fails is skipped as excused only where a known difference names its library, flow and title; a difference no check met fails the run.
-- A flow test runs only for a library that runs the flow first-class; the others skip it.
+- A flow test runs only for a library that runs the flow first-class; the others skip it. Spring runs no ID-JAG flow: it has no step to get one, as it reads no `token_type` but Bearer and DPoP, and an ID-JAG's is `N_A`.
 - The world keeps no file but its front's and the metadata document's, under `under` where given: the client certificate's are removed once read back. Where the app does not start, the front, the document's server and the tunnel are closed and the run's files removed before the failure is told.
 
 ## Depends on

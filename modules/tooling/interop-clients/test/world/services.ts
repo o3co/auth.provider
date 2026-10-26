@@ -2,13 +2,16 @@ import { generateKeyPairSync } from "node:crypto";
 import type { AreaScene, Started } from "@mod/conformance";
 import { type ClientScene, oauthScene } from "@mod/conformance-oauth";
 import { fronted, signing } from "./fronted.ts";
+import { type PlayedIdp, startPlayedIdp } from "./idp.ts";
 import type { WorldClient } from "./world.ts";
 
 /** The provider services meet (the `a2a` pattern's app): no user, session or login. */
 export interface ServicesWorld {
 	readonly issuer: string;
 	readonly ca: string;
-	readonly clients: Readonly<Record<"bearer" | "agents", WorldClient>>;
+	readonly clients: Readonly<Record<"bearer" | "agents" | "jagAgent", WorldClient>>;
+	/** The enterprise IdP the harness plays, whose ID-JAGs the provider takes (`profile = id-jag`). */
+	readonly idp: Pick<PlayedIdp, "issuer" | "ca" | "otherwise">;
 	/** The issuer whose JWT assertions the jwt-bearer grant trusts, with its private key as a JWK. */
 	readonly assertionIssuer: {
 		readonly issuer: string;
@@ -40,6 +43,22 @@ export async function startServicesWorld(
 	given: { readonly start?: (scene: AreaScene) => Promise<Started>; readonly under?: string } = {},
 ): Promise<ServicesWorld> {
 	const signer = generateKeyPairSync("ec", { namedCurve: "P-256" });
+	const idp = await startPlayedIdp(given.under);
+	// The client an ID-JAG names: confidential, as the profile asks, and allowed the grant.
+	const jagAgent = {
+		id: "jag-agent",
+		method: "client_secret_post",
+		secret: "jag-agent-secret-0123456789abcdef",
+	} as const;
+	const jagClient: ClientScene = {
+		id: jagAgent.id,
+		kind: "confidential",
+		method: jagAgent.method,
+		secret: jagAgent.secret,
+		grants: [bearerGrant],
+		scopes: ["read"],
+		defaultScopes: ["read"],
+	};
 	// RS256, the one algorithm golang.org/x/oauth2/jwt signs with.
 	const agentsSigner = generateKeyPairSync("rsa", { modulusLength: 2048 });
 	// The client a request naming none is taken for (RFC 7523 §3.1): public, no credential, this grant alone.
@@ -70,7 +89,7 @@ export async function startServicesWorld(
 			oauthScene({
 				issuer: origin,
 				keys: { signing: signing() },
-				clients: [client, agents],
+				clients: [client, agents, jagClient],
 				jwtBearer: {
 					issuers: [
 						{
@@ -85,16 +104,28 @@ export async function startServicesWorld(
 							client: agents.id,
 							conditions: { "subject-prefix": "agents/" },
 						},
+						{
+							issuer: idp.issuer,
+							alg: "ES256",
+							publicPem: idp.publicPem,
+							profile: "id-jag",
+						},
 					],
 				},
+				// An issuer taking the ID-JAG profile needs DPoP's proofs read.
+				dpop: true,
 				discovery: true,
 			}),
 		given,
-	);
+	).catch(async (failure: unknown) => {
+		await idp.stop();
+		throw failure;
+	});
 	return {
 		issuer: app.origin,
 		ca: app.ca,
-		clients: { bearer, agents: { id: agents.id, method: "none" } },
+		clients: { bearer, agents: { id: agents.id, method: "none" }, jagAgent },
+		idp: { issuer: idp.issuer, ca: idp.ca, otherwise: idp.otherwise },
 		clientlessIssuer: {
 			issuer: clientlessIssuer,
 			privateJwk: { ...agentsSigner.privateKey.export({ format: "jwk" }), alg: "RS256" },
@@ -106,6 +137,9 @@ export async function startServicesWorld(
 			// No kid: the provider holds the issuer's key as a PEM, by no kid, and an assertion naming one would find none.
 			privateJwk: { ...signer.privateKey.export({ format: "jwk" }), alg: "ES256" },
 		},
-		stop: () => app.stop(),
+		async stop() {
+			await app.stop();
+			await idp.stop();
+		},
 	};
 }
