@@ -230,6 +230,23 @@ it("listens and exposes the port where http is composed, and checks liveness whe
 	expect(await read(live, "README.md")).toContain("Its health check asks `/_healthcheck`");
 });
 
+it("installs the dependencies in a stage of their own, with pnpm through a pinned corepack, and starts under an init", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
+	const docker = await read(target, "Dockerfile");
+	const image = docker.match(/^FROM (\S+) AS base$/m)?.[1];
+	expect(docker.match(/^FROM .*$/gm)).toEqual([
+		`FROM ${image} AS base`,
+		"FROM base AS deps",
+		"FROM base AS runtime",
+	]);
+	expect(docker).toMatch(
+		/^RUN apk add --no-cache tini && npm install --global corepack@\d+\.\d+\.\d+ && corepack enable$/m,
+	);
+	expect(docker).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
+	expect(docker).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
+});
+
 it("builds on Node 24's latest, so a build takes its security fixes", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
