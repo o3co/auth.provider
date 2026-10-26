@@ -17,6 +17,17 @@ export function keptToken(jar: Cookies, request: HttpRequest): string | undefine
 /** A new token: 32 random bytes are 43 base64url characters. */
 export const newToken = (random: Random) => Buffer.from(random.bytes(32)).toString("base64url");
 
+/** How long a token and its cookie last. */
+export const tokenSeconds = 7200;
+
+/** A token for the request, the one it holds where valid, and the cookie that carries it. */
+export function issuing(jar: Cookies, random: Random) {
+	return (request: HttpRequest) => {
+		const token = keptToken(jar, request) ?? newToken(random);
+		return { token, cookie: jar.write(carried.cookie, token, tokenSeconds) };
+	};
+}
+
 /** Same-origin evidence or the double-submit token; an Origin or a Referer naming another origin is refused regardless. */
 export function checking(origin: string, secureCookies: boolean, jar: Cookies) {
 	return (request: HttpRequest): "passed" | "refused" => {

@@ -14,3 +14,18 @@ export interface OriginEvidence {
 }
 
 export const originEvidence = contract<OriginEvidence>("csrf.origin-evidence");
+
+/** A double-submit token for a form the server draws itself, which posts it in a field. */
+export interface FormTokens {
+	/**
+	 * The field to send it in, the token, and the cookie that pairs with it; a valid token the request
+	 * holds is kept, so a form open in another tab stays usable.
+	 */
+	issue(request: HttpRequest): {
+		readonly field: string;
+		readonly token: string;
+		readonly cookies: readonly string[];
+	};
+}
+
+export const formTokens = contract<FormTokens>("csrf.form-tokens");
