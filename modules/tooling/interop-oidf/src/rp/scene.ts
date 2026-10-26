@@ -43,7 +43,7 @@ export interface RpUser {
 
 /**
  * The provider as the suite's RP plan meets it, behind the front at `origin`: a federation login
- * through one OpenID Connect IdP, the suite's OP at `issuer`, reached through the CONNECT proxy at
+ * through one OpenID Connect IdP reading UserInfo, the suite's OP at `issuer`, reached through the CONNECT proxy at
  * `proxy`; the suite's subject linked to one local user; and a first-party client to probe a
  * browser's login with.
  */
@@ -83,6 +83,8 @@ export function rpScene(given: {
 				issuer: given.issuer,
 				clientId: given.client.id,
 				clientSecret: given.client.secret,
+				readUserinfo: true,
+				scopes: ["openid", "profile", "email"],
 			},
 		],
 		landing: given.returnTarget,
