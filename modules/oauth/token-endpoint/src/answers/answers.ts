@@ -74,10 +74,15 @@ export async function authenticateClient(
 	return { kind: "refused", response: refusedAuthenticationAnswer(authenticated) };
 }
 
-/** The answer to a refused authentication: two methods or malformed credentials `400`, any other `401` with its challenges. */
+/**
+ * The answer to a refused authentication: two methods or malformed credentials `400`, any other `401`
+ * with its challenges. Where an assertion is part of the two methods or the malformed credentials,
+ * `401 invalid_client` with the challenges of the methods tried (RFC 7521 §4.2.1).
+ */
 export function refusedAuthenticationAnswer(
 	refused: Extract<Authentication, { readonly kind: "refused" }>,
 ): HttpResponse {
+	if (refused.assertion) return challenged(oauthError(401, "invalid_client"), refused.challenges);
 	if (refused.reason === "multiple_methods") {
 		return oauthError(400, "invalid_request", "use one client authentication method");
 	}

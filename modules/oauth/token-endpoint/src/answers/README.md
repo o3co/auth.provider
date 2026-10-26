@@ -10,7 +10,7 @@ Internal module of `token-endpoint`: the answers the OAuth endpoints share, an e
 
 ## Offers
 - `oauthError`: an error response with the status, the code, an optional description, and the members `grants` lets a grant's refusal keep.
-- `authenticateClient`, for other OAuth endpoints too: two methods at once or malformed credentials are `400 invalid_request`, others `401 invalid_client`. It records a refusal on the `audit` it is handed through `clients`' `recordRefusedAuthentication`.
+- `authenticateClient`, for other OAuth endpoints too: two methods at once or malformed credentials are `400 invalid_request`, others `401 invalid_client`; where an assertion is part of the two methods or the malformed credentials (`clients` marks it), `401 invalid_client` with the challenges of the methods tried (RFC 7521 §4.2.1). It records a refusal on the `audit` it is handed through `clients`' `recordRefusedAuthentication`.
 - `refusedAuthenticationAnswer` (a refusal `clients` gives) → its answer. `challenged` (an answer, challenges) → the answer with them as its `WWW-Authenticate` (RFC 9110 §11.6.1), or as it is with none.
 
 ## Invariants
