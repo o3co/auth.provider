@@ -45,7 +45,7 @@ it("answers no for a client whose record holds no authorize section, as where au
 	expect(redirectsAt(bare, "https://app.example")).toBe(false);
 });
 
-it("registers https, http to localhost or loopback literals, and reverse-domain app schemes only", () => {
+it("registers https, http to localhost or loopback literals, and reverse-domain app schemes only [rfc9700-2.6-c] [oidc-core-3.1.2.1-w] [rfc9700-4.1.3-a]", () => {
 	for (const ok of [
 		"https://app.example/cb",
 		"http://localhost:8080/cb",
@@ -73,7 +73,7 @@ it("registers https, http to localhost or loopback literals, and reverse-domain 
 	expect(matches("http://localhost:8080/cb", "http://localhost:9999/cb")).toBe(false);
 });
 
-it("refuses to register redirect URIs with a fragment, userinfo, control characters or answer names", () => {
+it("refuses to register redirect URIs with a fragment, userinfo, control characters or answer names [rfc6749-3.1.2-a] [rfc6749-3.1.2-c]", () => {
 	expect(registrable("https://app.example/cb?x=1")).toBe(true);
 	for (const bad of [
 		"https://app.example/cb#f",
@@ -88,7 +88,7 @@ it("refuses to register redirect URIs with a fragment, userinfo, control charact
 	}
 });
 
-it("adds the answer's parameters to the redirect URI's own query, leaving out one without a value", () => {
+it("adds the answer's parameters to the redirect URI's own query, leaving out one without a value [rfc6749-3.1.2-b]", () => {
 	expect(answerTo("https://app.example/cb", { code: "c", state: undefined })).toBe(
 		"https://app.example/cb?code=c",
 	);
