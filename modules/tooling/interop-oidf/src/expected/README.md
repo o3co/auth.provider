@@ -7,4 +7,4 @@ Internal module of `interop-oidf`: whether the expected entries may go to the su
 
 ## Invariants
 - An entry names its test and configuration file without `*`, `?` or brackets, and its variant as an object; a failure names its block (empty for one outside any block), condition and kind.
-- Its class holds as `spec-checklist`'s `exceptionProblems` judges it; one test's entries share one class; none is written twice.
+- Its class holds as `spec-checklist`'s `exceptionProblems` judges it; one test's entries share one class; none is written twice. A test is its name, its variant and its configuration file, the variant's keys in any order, as the outcomes match it.

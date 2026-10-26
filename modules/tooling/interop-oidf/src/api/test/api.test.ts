@@ -51,6 +51,35 @@ describe("the suite's API, reached trusting its certificate alone", () => {
 			cut.close();
 		}
 	});
+	it("gives up on an answer that trickles in past its time, and where the deadline aborts", async () => {
+		const tls = await selfSigned("localhost", await mkdtemp(join(tmpdir(), "suite-")));
+		// A part of the JSON every 50ms, never the whole: the socket is never idle.
+		const drip = createHttpsServer(tls, (_req, res) => {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.write("[");
+			const timer = setInterval(() => res.write("0,"), 50);
+			res.on("close", () => clearInterval(timer));
+		});
+		await new Promise<void>((resolve) => drip.listen(0, "127.0.0.1", resolve));
+		const url = `https://localhost:${(drip.address() as AddressInfo).port}/api/plan`;
+		const settled = (answer: Promise<unknown>) =>
+			Promise.race([
+				answer.then(
+					() => "answered",
+					() => "refused",
+				),
+				new Promise((resolve) => setTimeout(() => resolve("pending"), 3_000)),
+			]);
+		try {
+			expect(await settled(getJson(url, tls.cert, { withinMs: 300 }))).toBe("refused");
+			expect(await settled(getJson(url, tls.cert, { signal: AbortSignal.timeout(300) }))).toBe(
+				"refused",
+			);
+		} finally {
+			drip.closeAllConnections();
+			drip.close();
+		}
+	});
 	it("writes the certificate its nginx answers with as PEM, the same certificate", async () => {
 		const { cert } = await selfSigned("suite.test", await mkdtemp(join(tmpdir(), "suite-")));
 		const raw = new X509Certificate(cert).raw;

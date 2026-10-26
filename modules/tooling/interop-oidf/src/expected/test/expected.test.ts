@@ -128,6 +128,24 @@ describe("an expected result the harness gives the suite", () => {
 		]);
 	});
 
+	it("is one test's however its variant's keys are ordered, as the outcomes are matched", () => {
+		const reordered = { client_registration: "static_client", server_metadata: "discovery" };
+		const shuffled = failure({ variant: reordered });
+		expect(expectedProblems([failure(), shuffled], "failure", known)).toEqual([
+			expect.stringContaining("written twice"),
+		]);
+		const otherClass = failure({
+			variant: reordered,
+			condition: "AnotherCondition",
+			class: "noncompliant",
+			item: "a-must-item",
+			adaptation: undefined,
+		});
+		expect(expectedProblems([failure(), otherClass], "failure", known)).toEqual([
+			expect.stringContaining("one class"),
+		]);
+	});
+
 	it("goes to the suite with the suite's own fields alone", () => {
 		expect(suiteEntries([failure()])).toEqual([
 			{
