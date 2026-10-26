@@ -21,12 +21,26 @@ import { ledgerAgainstText } from "./text.ts";
 const [command, ...args] = process.argv.slice(2);
 const say = (line: string) => process.stdout.write(`${line}\n`);
 
+/** Whether the checklist and the tests hold to their rules: a command that writes writes nothing where they do not. */
+function heldToRules(c: ReturnType<typeof readChecklist>, w: ReturnType<typeof workspaceTests>) {
+	const found = repoFindings(c, w);
+	for (const f of found) say(`${f.where}  ${f.detail}`);
+	if (found.length > 0) {
+		say(`spec-checklist: ${found.length} finding(s); nothing is written`);
+		process.exitCode = 1;
+	}
+	return found.length === 0;
+}
+
 if (command === "report") {
 	const c = readChecklist();
-	const files = reportFiles(c.specs, workspaceTests(root).tests, updatedByOf(c));
-	mkdirSync(reportDir, { recursive: true });
-	for (const [name, text] of files) writeFileSync(join(reportDir, name), text);
-	say(`spec-checklist: wrote ${files.size} files to docs/compliance`);
+	const w = workspaceTests(root);
+	if (heldToRules(c, w)) {
+		const files = reportFiles(c.specs, w.tests, updatedByOf(c));
+		mkdirSync(reportDir, { recursive: true });
+		for (const [name, text] of files) writeFileSync(join(reportDir, name), text);
+		say(`spec-checklist: wrote ${files.size} files to docs/compliance`);
+	}
 } else if (command === "summary") {
 	process.stdout.write(summaryTable(readChecklist().specs, workspaceTests(root).tests));
 } else if (command === "check") {
@@ -67,6 +81,7 @@ if (command === "report") {
 } else if (command === "plan" && args[0]) {
 	say(JSON.stringify(planOf(runsOf(root), args[0])));
 } else if (command === "compliance" && args[0]) {
+	if (!heldToRules(readChecklist(), workspaceTests(root))) process.exit();
 	const of = {
 		commit: commitOf(process.env),
 		run: process.env.GITHUB_RUN_ID ?? "local",

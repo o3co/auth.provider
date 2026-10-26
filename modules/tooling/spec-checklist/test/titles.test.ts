@@ -89,6 +89,18 @@ describe("titlesIn", () => {
 		});
 	});
 
+	it("reads a guarantee's ID as an item's, and names one malformed", () => {
+		const guaranteed = [
+			'it("held [guarantee-5-a]", () => {});',
+			'it("upper [guarantee-5-A]", () => {});',
+			'const loose = "guarantee-x";',
+		].join("\n");
+		expect(titlesIn(guaranteed, true)).toMatchObject({
+			titles: [{ title: "held [guarantee-5-a]", ids: ["guarantee-5-a"] }, { ids: [] }],
+			stray: ["guarantee-5-A", "guarantee-x"],
+		});
+	});
+
 	it("names an ID written like an item's but malformed, in a title or not", () => {
 		const malformed = [
 			'it("upper [rfc7009-2-A]", () => {});',
@@ -129,7 +141,8 @@ describe("titlesIn", () => {
 			"\t});",
 			"});",
 		].join("\n");
-		expect(titlesIn(nested, true).titles).toEqual([
+		// Fault marks are another test's: these titles carry none.
+		expect(titlesIn(nested, true).titles.map(({ faults: _f, malformed: _m, ...t }) => t)).toEqual([
 			{
 				title: "inner [rfc7009-2-a]",
 				ids: ["rfc7009-2-a"],

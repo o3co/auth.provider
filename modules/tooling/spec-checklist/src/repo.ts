@@ -6,22 +6,30 @@ import {
 	type Checklist,
 	checklistFindings,
 	type Finding,
+	guaranteeSpec,
 	parseDecisions,
 	parseItems,
 	parseLedger,
 	type Spec,
 } from "./checklist.ts";
 import { type Expected, type Run, runsPrinted } from "./evidence/runs.ts";
+import { guaranteeFindings, promisesIn } from "./guarantee/promises.ts";
+import { specOf } from "./ids.ts";
 import type { TestRef } from "./report.ts";
 import { titlesIn } from "./titles.ts";
 
 const self = "@mod/spec-checklist";
-export const checklistDir = join(import.meta.dirname, "..", "checklist");
+// Each may be named elsewhere, so a command can be run over a checklist and a place of a test's own.
+export const checklistDir =
+	process.env.SPEC_CHECKLIST_DIR ?? join(import.meta.dirname, "..", "checklist");
 export const repoRoot = join(import.meta.dirname, "..", "..", "..", "..");
-export const reportDir = join(repoRoot, "docs", "compliance");
+export const reportDir =
+	process.env.SPEC_CHECKLIST_REPORT_DIR ?? join(repoRoot, "docs", "compliance");
+/** The security model, whose promises the guarantee file is held to. */
+export const securityModel = join(repoRoot, "docs", "security-model.md");
 
 /** The checklist as its files hold it: each spec's items and ledger, and the decisions. */
-export function readChecklist(dir = checklistDir): Checklist {
+export function readChecklist(dir = checklistDir, model = securityModel): Checklist {
 	const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
 	const parsing: Finding[] = [];
 	const specs: Spec[] = [];
@@ -33,7 +41,21 @@ export function readChecklist(dir = checklistDir): Checklist {
 			? parseLedger(spec, readFileSync(join(dir, ledgerFile), "utf8"))
 			: undefined;
 		parsing.push(...items.findings, ...(ledger?.findings ?? []));
-		specs.push({ spec, title: items.title, items: items.items, ledger: ledger?.ledger });
+		const read: Spec = {
+			spec,
+			title: items.title,
+			items: items.items,
+			ledger: ledger?.ledger,
+			...(items.guarantee ? { guarantee: items.guarantee } : {}),
+		};
+		specs.push(read);
+		if (spec === guaranteeSpec) {
+			const promised = promisesIn(readFileSync(model, "utf8"));
+			parsing.push(
+				...promised.findings.map((detail) => ({ where: "docs/security-model.md", detail })),
+			);
+			parsing.push(...guaranteeFindings(read, promised.promises));
+		}
 	}
 	for (const f of files.filter((f) => f.endsWith(".ledger.md"))) {
 		if (!files.includes(f.replace(".ledger.md", ".md")))
@@ -53,6 +75,7 @@ export const holdsTests = (file: string) =>
 export function workspaceTests(root: string) {
 	const tests = new Map<string, TestRef[]>();
 	const stray: Finding[] = [];
+	const marks: Finding[] = [];
 	for (const p of readWorkspace(root).filter((p) => p.name !== self)) {
 		for (const file of p.files.filter((f) => /\.(ts|mjs)$/.test(f))) {
 			const read = titlesIn(readFileSync(join(p.dir, file), "utf8"), holdsTests(file));
@@ -61,15 +84,28 @@ export function workspaceTests(root: string) {
 					where: `${p.name} ${file}`,
 					detail: `${id}: an item ID outside the bracket of a test's title`,
 				});
-			for (const t of read.titles)
+			for (const t of read.titles) {
+				const where = `${p.name} ${file}`;
+				for (const m of t.malformed)
+					marks.push({ where, detail: `${t.title}: a malformed fault mark ${m}` });
+				if (t.faults.length > 0 && !t.ids.some((id) => specOf(id) === guaranteeSpec))
+					marks.push({ where, detail: `${t.title}: marks a fault and names no guarantee` });
 				for (const id of t.ids)
 					tests.set(id, [
 						...(tests.get(id) ?? []),
-						{ pkg: p.name, file, title: t.title, path: t.path, suite: t.suite },
+						{
+							pkg: p.name,
+							file,
+							title: t.title,
+							path: t.path,
+							suite: t.suite,
+							...(t.faults.length > 0 ? { faults: t.faults } : {}),
+						},
 					]);
+			}
 		}
 	}
-	return { tests, stray };
+	return { tests, stray, marks };
 }
 
 /** The items each item updates, turned round: an item, by the items that update it. */
@@ -81,7 +117,14 @@ export function updatedByOf(c: Checklist): Map<string, string[]> {
 }
 
 /** Every finding over the checklist and the workspace's tests. */
-export function repoFindings(c: Checklist, w: ReturnType<typeof workspaceTests>): Finding[] {
+export function repoFindings(
+	c: Checklist,
+	w: {
+		readonly tests: ReadonlyMap<string, readonly TestRef[]>;
+		readonly stray: readonly Finding[];
+		readonly marks?: readonly Finding[];
+	},
+): Finding[] {
 	const items = new Map(c.specs.flatMap((s) => s.items.map((i) => [i.id, i] as const)));
 	const named: Finding[] = [...w.tests].flatMap(([id, refs]) => {
 		const item = items.get(id);
@@ -89,9 +132,19 @@ export function repoFindings(c: Checklist, w: ReturnType<typeof workspaceTests>)
 		if (!item) return [{ where, detail: `${id}: names an item the checklist does not hold` }];
 		if (item.mark?.kind === "out-of-scope")
 			return [{ where, detail: `${id}: is out of scope, and a test names it` }];
-		return [];
+		// A mark binds to every guarantee its title names, whose faults line must hold it: one taken off
+		// the line, or the line taken away, leaves its tests a finding rather than quietly loosened.
+		if (item.spec !== guaranteeSpec) return [];
+		return refs.flatMap((r) =>
+			(r.faults ?? [])
+				.filter((f) => !((item.faults ?? []) as readonly string[]).includes(f))
+				.map((f) => ({
+					where: `${r.pkg} ${r.file}`,
+					detail: `${id}: ${r.title} marks the fault ${f}, which its faults line does not name`,
+				})),
+		);
 	});
-	return [...checklistFindings(c), ...w.stray, ...named];
+	return [...checklistFindings(c), ...w.stray, ...(w.marks ?? []), ...named];
 }
 
 const scriptsOf = (p: ReturnType<typeof readWorkspace>[number]) =>

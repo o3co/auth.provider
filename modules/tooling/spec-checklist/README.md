@@ -14,10 +14,11 @@
 
 ## Offers
 - `checklist/<spec>.md`: the items, under `## <section> <title>`, each `- **<id>** <MUST|MUST NOT|SHOULD|SHOULD NOT>: <the requirement, in our words>`, with at most one of `out-of-scope: <reason>`, `deviates: <decision>` (a SHOULD's), `noncompliant: <issue>` (a MUST's), and `updates: <ids>` (an earlier spec's items it updates, none weaker) and `role: <role>`, each on its own line indented by two spaces.
-- An item's ID is `<spec>-<section>-<letter>`, the spec `rfc<number>`, `oidc-core`, `oidc-discovery`, `oidc-rpinit` or `oidc-bcl`, the letters `a` to `z` then `aa` to `zz` within a section; it never changes once written.
+- An item's ID is `<spec>-<section>-<letter>`, the spec `rfc<number>`, `oidc-core`, `oidc-discovery`, `oidc-rpinit`, `oidc-bcl` or `guarantee`, the letters `a` to `z` then `aa` to `zz` within a section; it never changes once written.
 - An item's role is the role of the server's it binds: `as` (authorization server), `op` (OpenID Provider), `rs` (resource server at its own protected routes), `rp` (relying party to an upstream IdP) or `client` (client sending tokens or assertions out). It is its `role:` line's, else the file's head line `- role: <role>`, else an OpenID spec's `op` and an RFC's `as`.
 - An item's strength is its keyword's as the spec writes it; a MUST NOT or SHOULD NOT item states, in the affirmative, what must not happen.
 - `checklist/<spec>.ledger.md`: the spec's source URL, version and the SHA-256 of its plain text, then a row per keyword occurrence, `- <section> #<n> <keyword>: <ids>` or `: excluded <other-role: the role|client-only|rs-only|definition|iana|example|deployment|not-a-bearer-route: route|restates <id>|other: reason>`; `other-role` names a role the server does not take, such as a native app.
+- The `guarantee` spec: the provider's own promises, held to the security model (the `guarantee` card), not a ledger; its items MUST or MUST NOT, `noncompliant` alone, each with one `faults:` line at most.
 - `checklist/decisions.md`: the decisions a `deviates:` or an exception names, `- **D-<n>** <date> (<who>): <what>`.
 - A test names the items it checks in its title, as `[<id>]`; a `describe` names them for every test in it.
 - `pnpm --filter @mod/spec-checklist run report` writes the report to `docs/compliance`: a page per spec, each item with its role, and a README of fixed text; `run summary` prints the summary over every spec, by spec and by role, which is not kept; `run check` prints every finding; `run ledger <spec> <text file>` compares a ledger with the spec's plain text.
@@ -32,7 +33,8 @@
 - A test that names an item is known by where it is written: its suites' titles, outermost first, and its own, a suite's title that is no plain string left unknown.
 - An ID is taken only from a test's title, written in brackets: the first argument, a plain string, of a call of `it`, `test` or `describe` that takes the title, directly, through `.only`, `.skip`, `.concurrent` and the like, or as the function `.each`, `.for`, `.runIf` and `.skipIf` return (`.each` and `.for` given their table as a tagged template too); their own arguments and tables are no title.
 - Strings are read decoded, the rest of a source as written. Anything written like an ID (a spec's name, a dash and more) anywhere else in a workspace package's sources, or malformed, is a finding; so is an ID naming no item, or an out-of-scope item.
-- The report is held to the committed `docs/compliance`; a report that differs fails, naming the command.
+- The report is held to the committed `docs/compliance`; a report that differs fails, naming the command. `run report` and `run compliance` write nothing while a finding stands.
+- A title's fault marks (the `guarantee` card) bind to every guarantee it names, whose `faults` lines must name them.
 - `run ledger` holds the checklist to its rules first, and matches each place once: a place the ledger writes twice never matches. It reads plain text as RFCs print it: page heads and feet dropped, whitespace joined (a phrase split across lines or pages is one), a section from a numbered heading at a line's start (`Appendix A` as `A`), text before the first as `front`, the longer phrase first (`MUST NOT`, `NOT RECOMMENDED`).
 
 ## Data
@@ -44,4 +46,4 @@
 ## Vocabulary
 - item: one requirement the authorization server must meet, from one spec.
 - ledger: a spec version's keyword occurrences, each tied to items or excluded with its reason.
-- mapped: an item a test names; hole: an item in scope no test names.
+- mapped: an item a test names; hole: an item in scope no test names, or a guarantee's fault no test marks.

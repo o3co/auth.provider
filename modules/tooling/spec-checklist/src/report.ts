@@ -10,15 +10,28 @@ export interface TestRef {
 	readonly path: readonly (string | null)[];
 	/** Whether it is a suite's title, met by the tests inside it. */
 	readonly suite: boolean;
+	/** The faults its title marks; none where it marks none. */
+	readonly faults?: readonly string[];
 }
+
+/** The faults a guarantee names that no test naming it marks. */
+export const unmarkedFaults = (item: Item, refs: readonly TestRef[]) =>
+	(item.faults ?? []).filter((f) => !refs.some((r) => r.faults?.includes(f)));
 
 export type StaticStatus = "mapped" | "hole" | "out-of-scope" | "deviates" | "noncompliant";
 
-/** An item's status from the checklist and the tests alone: its mark, else whether a test names it. */
+/**
+ * An item's status from the checklist and the tests alone: its mark, else whether a test names it;
+ * a guarantee with faults is a hole while any of them has no test marked for it.
+ */
 export const staticStatus = (
 	item: Item,
 	tests: ReadonlyMap<string, readonly TestRef[]>,
-): StaticStatus => item.mark?.kind ?? ((tests.get(item.id)?.length ?? 0) > 0 ? "mapped" : "hole");
+): StaticStatus => {
+	const refs = tests.get(item.id) ?? [];
+	if (item.mark) return item.mark.kind;
+	return refs.length > 0 && unmarkedFaults(item, refs).length === 0 ? "mapped" : "hole";
+};
 
 const cell = (s: string) => s.replaceAll("|", "\\|");
 const generated =
@@ -123,6 +136,10 @@ export function reportFiles(
 						]
 					: []),
 				...(i.updates.length > 0 ? [`updates ${i.updates.join(", ")}`] : []),
+				...(i.faults ? [`faults: ${i.faults.join(", ")}`] : []),
+				...(i.faults && unmarkedFaults(i, tests.get(i.id) ?? []).length > 0
+					? [`no test for ${unmarkedFaults(i, tests.get(i.id) ?? []).join(", ")}`]
+					: []),
 				...((updatedBy.get(i.id)?.length ?? 0) > 0
 					? [`updated by ${updatedBy.get(i.id)?.join(", ")}`]
 					: []),
