@@ -64,6 +64,8 @@ function claimsAsked(
 /** Where the request stands for raising its authentication. */
 export interface Standing {
 	readonly acrs: readonly string[];
+	/** Whether an acr was asked at all: one asked voluntarily and not met gives the session's current acr. */
+	readonly wanted: boolean;
 	/** Whether the acr was asked as essential, so one not met is refused rather than passed over. */
 	readonly essential: boolean;
 	readonly amr: readonly string[];
@@ -88,6 +90,7 @@ export interface StepUp {
 		| {
 				readonly kind: "asked";
 				readonly acrs: readonly string[];
+				readonly wanted: boolean;
 				readonly essential: boolean;
 				readonly knownTime: boolean;
 		  }
@@ -115,16 +118,22 @@ export function stepUpWith({ acr: table, stepUpPage, reauths }: StepUpParts): St
 			const acrs = table.known(named ?? "");
 			const essential = claims.acr?.essential === true && claims.acr.values.length > 0;
 			if (essential && acrs.length === 0) return refusal("unmet_authentication_requirements");
-			return { kind: "asked", acrs, essential, knownTime: claims.knownTime };
+			const wanted = claims.acr !== undefined || params.has("acr_values");
+			return { kind: "asked", acrs, wanted, essential, knownTime: claims.knownTime };
 		},
-		async met({ acrs, essential, amr, authenticatedAt, none, taken, params, again }) {
+		async met({ acrs, wanted, essential, amr, authenticatedAt, none, taken, params, again }) {
 			// The first met in the order asked is the one the code carries.
 			const met = table.met(acrs, amr);
-			if (acrs.length === 0 || met !== undefined)
-				return { kind: "met", ...(met !== undefined ? { acr: met } : {}) };
+			if (met !== undefined) return { kind: "met", acr: met };
+			// Asked voluntarily and not met, the session's current acr instead (Core §5.5.1.1); none asked, none.
+			const current = () => {
+				const acr = wanted ? table.current(amr) : undefined;
+				return { kind: "met" as const, ...(acr !== undefined ? { acr } : {}) };
+			};
+			if (acrs.length === 0) return current();
 			// Asked voluntarily (Core §3.1.2.1), one not met is passed over where raising cannot, or did not, meet it.
 			const raises = stepUpPage !== undefined && !taken?.stepUp && !none;
-			if (!essential && !raises) return { kind: "met" };
+			if (!essential && !raises) return current();
 			if (none) return refusal("interaction_required");
 			if (!stepUpPage || taken?.stepUp) return refusal("unmet_authentication_requirements");
 			// The way back carries a newer login already proved, since raising keeps its time.

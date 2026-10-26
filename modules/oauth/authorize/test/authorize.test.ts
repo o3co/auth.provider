@@ -1269,7 +1269,7 @@ it("meets an acr by the amr sets its table names, and sends a session that falls
 	expect(`${raising.at?.origin}${raising.at?.pathname}`).toBe("https://as.example/mfa");
 });
 
-it("binds to the code the first acr met in the order asked, past any not met", async () => {
+it("binds to the code the first acr met in the order asked, past any not met, or else the session's current acr [oidc-core-5.5.1.1-c]", async () => {
 	const asked: IdTokenRequest[] = [];
 	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
@@ -1310,8 +1310,9 @@ it("binds to the code the first acr met in the order asked, past any not met", a
 		"urn:test:either",
 		"urn:test:one",
 		"urn:test:one",
-		// Voluntary and not met: the code goes on without an acr.
-		undefined,
+		// Voluntary and not met: the code carries the session's current acr, the first in the table it meets.
+		"urn:test:one",
+		// None asked: none carried.
 		undefined,
 	]);
 });
@@ -1367,7 +1368,7 @@ describe("authorize: one trip to raise the authentication", () => {
 	});
 });
 
-it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-a] [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a]", async () => {
+it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-a] [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a] [oidc-core-5.5.1.1-c]", async () => {
 	const asked: IdTokenRequest[] = [];
 	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
@@ -1416,11 +1417,11 @@ it("reads the acr a claims parameter asks for, refuses only an essential one unm
 	expect((await answer(of({ essential: true, values: ["urn:test:mfa"] })))?.get("error")).toBe(
 		"unmet_authentication_requirements",
 	);
-	// Not essential, or with no values: voluntary, so unmet goes on without one.
-	expect(
-		await acrOf((await answer(of({ values: ["urn:test:mfa"] })))?.get("code")),
-	).toBeUndefined();
-	expect(await acrOf((await answer(of(null, "userinfo")))?.get("code"))).toBeUndefined();
+	// Not essential, or with no values: voluntary, so unmet goes on with the session's current acr.
+	expect(await acrOf((await answer(of({ values: ["urn:test:mfa"] })))?.get("code"))).toBe(
+		"urn:test:pwd",
+	);
+	expect(await acrOf((await answer(of(null, "userinfo")))?.get("code"))).toBe("urn:test:pwd");
 	expect((await answer(JSON.stringify({ id_token: { email: null } })))?.has("code")).toBe(true);
 });
 
