@@ -374,9 +374,11 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
   - `expected` (`src/expected`): whether the expected entries may go to the suite.
   - `harness` (`src/harness`): one plan run end to end, reported as tests.
+  - `lifecycle` (`src/lifecycle`): what every plan run has, whichever side of the suite it plays.
   - `login` (`src/login`): the deployment's login page, as the suite's browser meets it.
   - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
   - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
+  - `report` (`src/report`): a plan's run, reported as vitest tests.
   - `results` (`src/results`): what each suite test of a plan proved.
   - `review` (`src/review`): the pages the suite's browser kept for a person to review.
   - `scene` (`src/scene`): the app the OP plans meet.

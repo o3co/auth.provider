@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SuiteStopFailed } from "../../suite/suite.ts";
-import { artifactsOf, cleared, keptThenStopped, stopAll } from "../harness.ts";
+import { artifactsOf, cleared, keptThenStopped, planDirs, stopAll } from "../lifecycle.ts";
 
 describe("a plan run's records and its stops", () => {
 	it("keeps each plan's records in a directory of its own under the one named", () => {
@@ -56,5 +56,16 @@ describe("a plan run's records and its stops", () => {
 		const stopFailed = await mkdtemp(join(tmpdir(), "interop-oidf-work-"));
 		await cleared(stopFailed, undefined, [new Error("the front did not stop")]);
 		expect(existsSync(stopFailed)).toBe(true);
+	});
+
+	it("makes a plan its own work directory, and its records under the one named or one of its own", async () => {
+		const named = await mkdtemp(join(tmpdir(), "records-"));
+		const under = await planDirs("basic", named);
+		expect(under.artifacts).toBe(join(named, "basic"));
+		expect((await stat(under.artifacts)).isDirectory()).toBe(true);
+		expect((await stat(under.work)).isDirectory()).toBe(true);
+		const own = await planDirs("basic", undefined);
+		expect(own.artifacts).toContain("interop-oidf-artifacts-basic-");
+		expect(own.work).not.toBe(under.work);
 	});
 });
