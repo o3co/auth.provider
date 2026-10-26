@@ -15,7 +15,7 @@ Preview: the ID-JAG profile follows draft-ietf-oauth-identity-assertion-authz-gr
 - When each is asked (the package).
 
 ## Offers
-- `idJagTyp`: `oauth-id-jag+jwt`.
+- `idJagTyp`: `oauth-id-jag+jwt`. `idJagProfile`: `urn:ietf:params:oauth:grant-profile:id-jag`, its name in the metadata.
 - `namesIdJag` (an assertion) → whether its header, read unverified, names that type, for sorting it before anything is verified; one that is no JWT names none.
 - `read` (the verified header and claims) → the client id, scope, resources and key thumbprint it names, or why it is refused.
 - `admit` (it, the request's client and binding) → admitted, or why not.
@@ -38,6 +38,8 @@ Preview: the ID-JAG profile follows draft-ietf-oauth-identity-assertion-authz-gr
 - A claim is read as the claims' own alone, never one an object inherits.
 - Presented by a confidential client alone (`the profile needs a confidential client`), the one its `client_id` names (`assertion is for another client`). With a `cnf`, the request proves that key by DPoP, a binding whose token type is DPoP, as `delegated` tells one; no other binding or key stands in (`the request does not prove the key the assertion names`). Without one, any binding the request proves, or none.
 - The scope asked is the request's where it names one, else the ID-JAG's. Its ceiling holds its scope and resources, each where it names them; what is about to be issued must lie within both.
+
+- The package owns the metadata item `authorization_grant_profiles_supported`: `[idJagProfile]` where an entry takes the profile, left out otherwise; it names no issuer (draft §9.4). A profile another grant takes comes into this item's value here, never as a second contribution, which boot refuses.
 
 ## Depends on
 - `client-allowance` (`parseScope`, a ceiling's form), `external-jwt` (`typOf`), `grants` (the client's and binding's types), `jose` (reading a header unverified)

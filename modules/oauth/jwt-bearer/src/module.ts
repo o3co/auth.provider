@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { type Ceiling, clientAllowance } from "@mod/client-allowance";
 import { clients, metadataSections } from "@mod/clients";
 import { type GrantInput, type GrantOutcome, grants, type Refused } from "@mod/grants";
-import { issuer } from "@mod/issuer";
+import { issuer, metadata } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
 import { senderBinding } from "@mod/sender-binding";
 import { revocations } from "@mod/subject-revocation";
@@ -25,7 +25,15 @@ import {
 	sentIssuerOf,
 	spentBy,
 } from "./delegated/delegated.ts";
-import { admit, asked as askedOf, type IdJag, namesIdJag, read, recheck } from "./id-jag/id-jag.ts";
+import {
+	admit,
+	asked as askedOf,
+	type IdJag,
+	idJagProfile,
+	namesIdJag,
+	read,
+	recheck,
+} from "./id-jag/id-jag.ts";
 import {
 	delegatedIn,
 	delegatedSetting,
@@ -95,6 +103,11 @@ export default defineModule(
 				[...linkedOf(c.section.issuers)].map(([issuer, upstream]) => ({ upstream, issuer })),
 			),
 		m.contribute(metadataSections).by(() => delegatedClient),
+		// The profiles taken, where an entry takes one; never which issuers (draft §9.4).
+		m.contribute(metadata).by((c) => ({
+			name: "authorization_grant_profiles_supported",
+			value: profiled(c.section) ? [idJagProfile] : undefined,
+		})),
 
 		m.contribute(grants).by(async (c) => {
 			const named = (await c.get(issuer)).url;

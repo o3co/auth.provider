@@ -6,6 +6,9 @@ import { decodeProtectedHeader } from "jose";
 /** The `typ` of an ID-JAG (draft-ietf-oauth-identity-assertion-authz-grant-04 §3.1), as `typOf` reads one. */
 export const idJagTyp = "oauth-id-jag+jwt";
 
+/** The profile's name in an authorization server's metadata (§7.2). */
+export const idJagProfile = "urn:ietf:params:oauth:grant-profile:id-jag";
+
 /** What a verified ID-JAG names: the client presenting it, and what its IdP allowed. */
 export interface IdJag {
 	readonly kind: "id-jag";

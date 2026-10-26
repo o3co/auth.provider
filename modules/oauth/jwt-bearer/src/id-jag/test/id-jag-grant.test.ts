@@ -8,6 +8,7 @@ import externalJwtModule from "@mod/external-jwt/module";
 import { type Grant, type GrantInput, grants, targetRules } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
+import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
@@ -206,6 +207,12 @@ const bindingKinds = (dpop: boolean) =>
 			: []),
 	]);
 
+/** The metadata items every module contributes, as the discovery document is made of them. */
+const published = contract<readonly MetadataItem[]>("test.id-jag-metadata");
+const reader = defineModule({ name: "test-metadata", takes: [metadata] }, (m) => [
+	m.provide(published).by((c) => c.collect(metadata)),
+]);
+
 const grantOf = contract<Grant>("test.id-jag-grant");
 const exposing = defineModule({ name: "test-grant", takes: [grants] }, (m) => [
 	m.provide(grantOf).by(async (c) => {
@@ -245,6 +252,7 @@ async function serve(
 			subjectRevocationStandIn,
 			jwtBearer,
 			exposing,
+			reader,
 			bindingKinds(options.dpop ?? true),
 			...fakes(
 				asked,
@@ -293,7 +301,9 @@ async function serve(
 				{ grant_type: grantType, assertion, ...more },
 				binding ? { binding } : {},
 			);
-	return { identify, handle, asked };
+	/** The value the discovery document gives a metadata item; none where it is left out. */
+	const published_ = (name: string) => app.get(published).find((i) => i.name === name)?.value;
+	return { identify, handle, asked, metadataOf: published_ };
 }
 
 /** Why boot is refused, by place. */
@@ -591,6 +601,17 @@ describe("an issuer taking the ID-JAG profile", () => {
 			"invalid_grant: assertion is for another client",
 		);
 		expect(s.asked.saved).toHaveLength(1);
+	});
+});
+
+describe("the ID-JAG profile in the metadata", () => {
+	const item = "authorization_grant_profiles_supported";
+
+	it("is named where an issuer takes it, its issuers never", async () => {
+		const s = await serve();
+		expect(s.metadataOf(item)).toEqual(["urn:ietf:params:oauth:grant-profile:id-jag"]);
+		expect(JSON.stringify(s.metadataOf(item))).not.toContain("example");
+		expect((await serve([plainEntry, agentsEntry])).metadataOf(item)).toBeUndefined();
 	});
 });
 
