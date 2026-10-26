@@ -1886,6 +1886,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../claims-selection
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
