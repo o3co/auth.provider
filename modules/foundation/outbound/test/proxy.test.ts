@@ -201,7 +201,7 @@ it("connects directly to a dotted entry's name and the names under it, and to no
 	expect(await underDot(".other.example.test")).toEqual({ proxied: 1, resolved: 0 });
 });
 
-it("checks a destination written as an address against that address, never the proxy's", async () => {
+it("checks a destination written as an address against that address, never the proxy's [oidc-core-16.17-a] [oidc-discovery-7.1-a]", async () => {
 	const out = outboundOver(
 		section.parse({ "allow-any-public": true, proxy: `http://127.0.0.1:${proxyPort}` }),
 		noResolving,
