@@ -1,7 +1,8 @@
+import { generateKeyPairSync } from "node:crypto";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
-import { clientsConfig, confidentialClient } from "@mod/clients/testing";
+import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import { usedIdTokens } from "@mod/exchange-id-tokens";
 import { exchangeIdTokensOver, type Issuers } from "@mod/exchange-id-tokens/testing";
 import externalJwtModule from "@mod/external-jwt/module";
@@ -59,6 +60,8 @@ const allowed = allowancesFor({
 	"default-scopes": ["read"],
 });
 
+/** Each name `exchange-id-tokens` was asked to keep as used, across the tests. */
+const usedSaved: string[] = [];
 /** Both records in memory, fresh for each composition. */
 const records = defineModule({ name: "records-in-memory", takes: [] }, (m) => {
 	const held =
@@ -72,15 +75,38 @@ const records = defineModule({ name: "records-in-memory", takes: [] }, (m) => {
 		m.provide(spentAssertions).by(() => ({ save: held() })),
 		m.provide(usedIdTokens).by(() => {
 			const save = held();
-			return { save: (kind: string, name: string) => save(`${kind}/${name}`) };
+			return {
+				save: (kind: string, name: string) => {
+					usedSaved.push(`${kind}/${name}`);
+					return save(`${kind}/${name}`);
+				},
+			};
 		}),
 		m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` })),
 	];
 });
 
+/** A trusted issuer whose `client` is the iOS app: a request naming none is taken for it. */
+const agents = {
+	issuer: "https://agents.example",
+	subject: "as-is",
+	keys: [
+		{
+			alg: "EdDSA",
+			"public-key": generateKeyPairSync("ed25519")
+				.publicKey.export({ format: "pem", type: "spki" })
+				.toString(),
+		},
+	],
+	conditions: { "subject-prefix": "org:acme/" },
+	client: "ios-app",
+};
+
 function assembly(
 	section: Partial<typeof settings> = settings,
 	delegated: readonly string[] = [appleIss, ...googleIss],
+	/** Whether the iOS app is a trusted issuer's client: public, with no credentials, this grant alone. */
+	bound = false,
 ) {
 	return {
 		modules: [
@@ -106,9 +132,19 @@ function assembly(
 			...kernelConfig(),
 			...httpConfig(),
 			...issuerConfig({ url: issuer }),
-			...clientsConfig(
-				["ios-app", "android-app"].map((id) => confidentialClient({ id, sections: allowed })),
-			),
+			...clientsConfig([
+				bound
+					? publicClient({
+							id: "ios-app",
+							sections: allowancesFor({
+								grants: [bearer],
+								scopes: ["read"],
+								"default-scopes": ["read"],
+							}),
+						})
+					: confidentialClient({ id: "ios-app", sections: allowed }),
+				confidentialClient({ id: "android-app", sections: allowed }),
+			]),
 			users: {
 				registered: [
 					testUser("alice", "pw", {
@@ -121,14 +157,14 @@ function assembly(
 				],
 			},
 			"exchange-id-tokens": section,
-			"jwt-bearer": { issuers: [], "delegated-issuers": delegated },
+			"jwt-bearer": { issuers: bound ? [agents] : [], "delegated-issuers": delegated },
 		},
 		runtime,
 	};
 }
 
-async function serve() {
-	const app = await assemble(assembly());
+async function serve(bound = false) {
+	const app = await assemble(assembly(settings, [appleIss, ...googleIss], bound));
 	const calls = app.get(grantCalls);
 	return {
 		app,
@@ -207,6 +243,19 @@ describe("jwt-bearer-id-tokens", () => {
 			"invalid_grant: untrusted signer",
 		);
 		expect(said(await s.bearer("ios-app", token))).toBe("issued");
+	});
+
+	it("refuses a trusted issuer's client an id_token its delegate names it in, asking the delegate nothing", async () => {
+		const s = await serve(true);
+		const before = usedSaved.length;
+		// Valid or not, the answer is the same: the delegate never checks it, nor uses it up.
+		for (const token of [await appleToken(), await appleToken({ exp: now / 1000 - 600 })]) {
+			expect(said(await s.bearer("ios-app", token))).toBe(
+				"invalid_grant: assertion is for another client",
+			);
+		}
+		expect(usedSaved.length).toBe(before);
+		expect(said(await s.bearer("android-app", await googleToken()))).toBe("issued");
 	});
 
 	it("delegates each issuer of the kinds taken, and refuses boot on one not named or named and not taken", async () => {
