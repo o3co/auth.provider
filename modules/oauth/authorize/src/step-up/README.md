@@ -13,7 +13,7 @@ Internal module of `authorize`: the acr a request asks for, and raising a sessio
 
 ## Invariants
 - `acr`'s table picks the known acr in the order asked, and the first the session's amr meets. Without `acr_values` or an `acr` in `claims` nothing is asked.
-- `claims` is parsed as JSON; its `id_token` and `userinfo` members are read for `acr` (OpenID Connect Core §5.5.1.1): `null`, or an object whose `essential` is a boolean, `value` a string and `values` a list of strings; another shape is `invalid_request`. Each value is one acr as written, known only where the table holds it whole (a value holding a blank names none). Each request is kept apart.
+- `claims` is parsed as JSON; its `id_token` and `userinfo` members are read for `acr` (OpenID Connect Core §5.5.1.1): `null`, or an object whose `essential` is a boolean, `value` a string and `values` a non-empty list of strings, not both; another shape is `invalid_request`. Each value is one acr as written, known only where the table holds it whole (a value holding a blank names none). Each request is kept apart.
 - An acr asked as essential, with values: the acr carried meets every essential request, one of the values all of them name, in the first's order; another request's voluntary values never stand in.
   - None known is `unmet_authentication_requirements`; none met is `interaction_required` under `prompt=none`, and `unmet_authentication_requirements` without a page or back from it unraised.
 - Asked by `acr_values`, or in `claims` without `essential`, an acr is voluntary (Core §3.1.2.1); the claims parameter's values stand in for `acr_values`.

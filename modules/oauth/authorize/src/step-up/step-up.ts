@@ -26,10 +26,12 @@ function acrOf(part: unknown): AcrClaim | undefined | "malformed" {
 	if (value !== undefined && typeof value !== "string") return "malformed";
 	if (
 		values !== undefined &&
-		!(Array.isArray(values) && values.every((v) => typeof v === "string"))
+		!(Array.isArray(values) && values.length > 0 && values.every((v) => typeof v === "string"))
 	) {
 		return "malformed";
 	}
+	// Both together leave which one is asked unclear.
+	if (value !== undefined && values !== undefined) return "malformed";
 	return {
 		values: [...(value === undefined ? [] : [value]), ...((values as string[] | undefined) ?? [])],
 		essential: essential === true,

@@ -1402,6 +1402,13 @@ it("reads the acr a claims parameter asks for, refuses only an essential one unm
 		"[]",
 		"not json",
 		JSON.stringify({ id_token: { acr: { values: "urn:test:pwd" } } }),
+		// An empty list names no acr, so it can neither be met nor stand for no constraint.
+		JSON.stringify({ id_token: { acr: { essential: true, values: [] } } }),
+		JSON.stringify({ userinfo: { acr: { values: [] } } }),
+		// value and values together leave which is asked unclear.
+		JSON.stringify({
+			id_token: { acr: { essential: true, value: "urn:test:mfa", values: ["urn:test:pwd"] } },
+		}),
 	]) {
 		expect((await answer(malformed))?.get("error"), malformed).toBe("invalid_request");
 	}
