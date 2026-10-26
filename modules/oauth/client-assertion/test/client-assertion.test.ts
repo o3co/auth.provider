@@ -120,6 +120,7 @@ async function boot({
 				registeredAs("app"),
 				registeredAs("app:twin"),
 				confidentialClient({ id: "post" }),
+				confidentialClient({ id: "basic", method: "client_secret_basic" }),
 				publicClient({ id: "pub" }),
 			]),
 		},
@@ -530,6 +531,96 @@ describe("private_key_jwt", () => {
 				reason: "malformed_credentials",
 				challenges: [],
 			});
+		}
+	});
+
+	it("answers each method with and without an assertion beside it, whatever the client_id beside them", async () => {
+		const { c } = await boot();
+		const basicHeader = `Basic ${Buffer.from(`basic:${clientSecret("basic")}`).toString("base64")}`;
+		/** The client_id: none, one, sent twice, or in JSON not a string. */
+		const shapes = ["absent", "one", "twice", "mistyped"] as const;
+		/** What a refusal two methods or malformed credentials gives: marked as the assertion's or not. */
+		const refusal = (
+			reason: "multiple_methods" | "malformed_credentials",
+			challenges: readonly string[] = [],
+			assertion = false,
+		) => ({ kind: "refused", reason, challenges, ...(assertion ? { assertion: true } : {}) });
+		const malformed = refusal("malformed_credentials");
+		const besideBasic = refusal("multiple_methods", ['Basic realm="client"'], true);
+		const besidePost = refusal("multiple_methods", [], true);
+		type Expected = string | ReturnType<typeof refusal>;
+		const cases: [string, string | undefined, Record<string, unknown>, boolean, Expected[]][] = [
+			// Each row: the method, its Authorization header, its body, an assertion beside it, then the
+			// outcome for each client_id shape in order.
+			["Basic", basicHeader, {}, false, ["basic", "basic", malformed, malformed]],
+			[
+				"post",
+				undefined,
+				{ client_secret: clientSecret("post") },
+				false,
+				[malformed, "post", malformed, malformed],
+			],
+			[
+				"none",
+				undefined,
+				{},
+				false,
+				[{ kind: "refused", reason: "no_credentials" } as never, "pub", malformed, malformed],
+			],
+			["Basic", basicHeader, {}, true, [besideBasic, besideBasic, besideBasic, besideBasic]],
+			[
+				"post",
+				undefined,
+				{ client_secret: clientSecret("post") },
+				true,
+				[besidePost, besidePost, besidePost, besidePost],
+			],
+			[
+				"the assertion alone",
+				undefined,
+				{},
+				true,
+				[
+					"app",
+					"app",
+					refusal("malformed_credentials", [], true),
+					refusal("malformed_credentials", [], true),
+				],
+			],
+		];
+		const idOf: Record<string, string> = { Basic: "basic", post: "post", none: "pub" };
+		for (const [name, header, body, withAssertion, expected] of cases) {
+			const id = withAssertion && name === "the assertion alone" ? "app" : (idOf[name] ?? "app");
+			for (const [at, shape] of shapes.entries()) {
+				// A fresh one each time: an assertion is taken once.
+				const assertion = withAssertion
+					? { client_assertion_type: assertionType, client_assertion: await sign(claims()) }
+					: {};
+				const ids = {
+					absent: {},
+					one: { client_id: id },
+					twice: { client_id: [id, id] },
+					mistyped: { client_id: 7 },
+				}[shape];
+				const headers = new Map(header ? [["authorization", header]] : []);
+				const fields = { ...body, ...assertion, ...ids };
+				const request =
+					shape === "mistyped"
+						? testRequest({ method: "POST", headers, json: fields })
+						: testRequest({
+								method: "POST",
+								headers,
+								form: new Map(Object.entries(fields).map(([k, v]) => [k, [v].flat().map(String)])),
+							});
+				const result = await c.authenticate(request);
+				const got = result.kind === "authenticated" ? result.client.id : result;
+				const want = expected[at];
+				const label = `${name}${withAssertion ? " beside an assertion" : ""}, client_id ${shape}`;
+				if (typeof want === "string") expect(got, label).toBe(want);
+				else expect(got, label).toMatchObject(want as object);
+				if (typeof want !== "string" && !("assertion" in (want as object)))
+					expect(got, label).not.toHaveProperty("assertion");
+			}
 		}
 	});
 

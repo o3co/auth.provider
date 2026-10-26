@@ -27,6 +27,9 @@ export interface Parts {
 
 // Read from the body only, a form or a JSON object; never the query, where an assertion would be logged.
 const field = (request: HttpRequest, name: string) => request.fields.single(name);
+/** Whether the body sends this name, as a string or of another type. */
+const sends = (request: HttpRequest, name: string) =>
+	request.fields.has(name) || request.mistyped?.has(name) === true;
 const singleFields = ["client_id", "client_assertion", "client_assertion_type"];
 const issuerOf = (assertion: string) => {
 	try {
@@ -56,7 +59,8 @@ export function assertionMethod(p: Parts): AuthMethod {
 		// Any assertion is this method's to judge (RFC 7521 §4.2.1), so one of a type not taken here
 		// is refused rather than left to another method.
 		claimed: (request) => {
-			if (!request.fields.has("client_assertion") && !request.fields.has("client_assertion_type")) {
+			// Sent at all, given twice or in JSON not a string, the request uses an assertion.
+			if (!sends(request, "client_assertion") && !sends(request, "client_assertion_type")) {
 				return undefined;
 			}
 			// Named by `client_id` when given, which the assertion's issuer must then match. The final
@@ -66,11 +70,8 @@ export function assertionMethod(p: Parts): AuthMethod {
 			);
 		},
 		// Half an assertion, or a part or the client id given twice or not as a string, is refused
-		// before any of it is judged or spent. A request carrying no part of one is not this method's:
-		// its client id is another method's to find malformed.
+		// before any of it is judged or spent.
 		malformed: (request) => {
-			const carried = (name: string) => request.fields.has(name) || request.mistyped?.has(name);
-			if (!carried("client_assertion") && !carried("client_assertion_type")) return false;
 			if (request.fields.repeated().some((name) => singleFields.includes(name))) return true;
 			if (singleFields.some((name) => request.mistyped?.has(name))) return true;
 			const typed = request.fields.has("client_assertion_type");
