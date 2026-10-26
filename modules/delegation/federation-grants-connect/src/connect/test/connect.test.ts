@@ -225,7 +225,7 @@ describe("the question and the decision", () => {
 });
 
 describe("the callback", () => {
-	it("hands the upstream the verifier of its challenge, its nonce, scopes and resource, and the issuer it said [rfc9700-2.1.1-h]", async () => {
+	it("hands the upstream the verifier of its challenge, its nonce, scopes and resource, and the issuer it said", async () => {
 		const resource = "https://api.example/";
 		const h = await connector({ resource });
 		const seen: DelegatedExchange[] = [];
