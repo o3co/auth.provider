@@ -197,16 +197,30 @@ describe("a logout the client starts", () => {
 		expect([again.status, again.json]).toEqual([200, { logged_out: true }]);
 	});
 
-	// Open redirect: only a return the hint's client registered, compared exactly, is followed.
-	it("never sends the browser to a return the client did not register, and still ends the session", async () => {
+	// Open redirect: only a return the hint's client registered, compared exactly, is taken; any other
+	// refuses the request, the session left as it was.
+	it("refuses a return the client did not register, never sending the browser to it, and leaves the session", async () => {
 		for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
 			const at = await signedIn();
-			const answer = await logout(at, "GET", {
-				id_token_hint: at.idToken,
-				post_logout_redirect_uri: asked,
-			});
-			expect([answer.status, answer.json]).toEqual([200, { logged_out: true }]);
-			expect(await stillSignedIn(at)).toBe(false);
+			for (const accept of ["application/json", "text/html"]) {
+				const answer = await logout(
+					at,
+					"GET",
+					{ id_token_hint: at.idToken, post_logout_redirect_uri: asked },
+					{ accept },
+				);
+				expect([asked, accept, answer.status, answer.json]).toEqual([
+					asked,
+					accept,
+					400,
+					{
+						error: "invalid_request",
+						error_description: "post_logout_redirect_uri is not registered for the client",
+					},
+				]);
+				expect(answer.headers.get("location")).toBeNull();
+			}
+			expect(await stillSignedIn(at)).toBe(true);
 		}
 	});
 
@@ -325,28 +339,19 @@ describe("telling the session's clients", () => {
 	});
 
 	// Open redirect and XSS through a return: a page with no return to follow has no script and moves nowhere.
-	it("gives a page with no script when there is no registered return to move on to", async () => {
-		for (const asked of [undefined, "https://other.example/after"]) {
-			const at = await signedIn();
-			const params = {
-				id_token_hint: at.idToken,
-				...(asked ? { post_logout_redirect_uri: asked } : {}),
-			};
-			const answer = await logout(at, "GET", params, { accept: "text/html" });
-			expect(answer.status, asked).toBe(200);
-			const page = pageOf(answer);
-			expect(page.frames.map((url) => url.origin + url.pathname)).toEqual([
-				"https://app.example/fc",
-			]);
-			expect([page.scripts, page.target, page.policy.has("script-src")], asked).toEqual([
-				[],
-				undefined,
-				false,
-			]);
-			expect(page.policy.get("default-src")).toEqual(["'none'"]);
-			if (asked) expect(answer.text).not.toContain("other.example");
-			expect(await stillSignedIn(at)).toBe(false);
-		}
+	it("gives a page with no script when there is no return to move on to", async () => {
+		const at = await signedIn();
+		const answer = await logout(at, "GET", { id_token_hint: at.idToken }, { accept: "text/html" });
+		expect(answer.status).toBe(200);
+		const page = pageOf(answer);
+		expect(page.frames.map((url) => url.origin + url.pathname)).toEqual(["https://app.example/fc"]);
+		expect([page.scripts, page.target, page.policy.has("script-src")]).toEqual([
+			[],
+			undefined,
+			false,
+		]);
+		expect(page.policy.get("default-src")).toEqual(["'none'"]);
+		expect(await stillSignedIn(at)).toBe(false);
 	});
 
 	it("posts each client of the session a logout token signed by the provider", async () => {
