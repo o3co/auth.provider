@@ -4,6 +4,7 @@ Internal module of `interop-oidf`: whether the expected entries may go to the su
 
 ## Offers
 - `expectedProblems` (why entries may not be taken) and `suiteEntries` (the entries in the suite's fields alone).
+- `expectedOf`: a plan's expected entries read from its files and judged against the checklist, the plan refused where any may not be taken.
 
 ## Invariants
 - An entry names its test and configuration file without `*`, `?` or brackets, and its variant as an object; a failure names its block (empty for one outside any block), condition and kind.

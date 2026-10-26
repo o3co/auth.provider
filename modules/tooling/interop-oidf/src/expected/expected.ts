@@ -1,9 +1,12 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
 	type Decision,
 	type ExceptionEntry,
 	exceptionProblems,
 	type Item,
 	type Ledger,
+	readChecklist,
 } from "@mod/spec-checklist";
 
 /** A result of the suite's the harness expects, as written in the package: the suite's fields and its class. */
@@ -95,4 +98,34 @@ export function suiteEntries(entries: readonly Expected[]): Record<string, unkno
 	return entries.map((e) =>
 		Object.fromEntries(suiteFields.flatMap((f) => (e[f] === undefined ? [] : [[f, e[f]]]))),
 	);
+}
+
+/**
+ * The expected entries of the plan `name`, read from `dir` (`<name>.failures.json` and
+ * `<name>.skips.json`) and judged against the checklist: the plan is refused, before the suite
+ * starts, where any may not be taken.
+ */
+export async function expectedOf(
+	dir: string,
+	name: string,
+): Promise<{ readonly failures: Expected[]; readonly skips: Expected[] }> {
+	const checklist = readChecklist();
+	const known = {
+		items: new Map(checklist.specs.flatMap((s) => s.items.map((i) => [i.id, i] as const))),
+		decisions: checklist.decisions,
+		ledgers: new Map(
+			checklist.specs.flatMap((s) => (s.ledger ? [[s.spec, s.ledger] as const] : [])),
+		),
+	};
+	const read = async (kind: string) =>
+		JSON.parse(await readFile(join(dir, `${name}.${kind}.json`), "utf8")) as Expected[];
+	const failures = await read("failures");
+	const skips = await read("skips");
+	const problems = [
+		...expectedProblems(failures, "failure", known),
+		...expectedProblems(skips, "skip", known),
+	];
+	if (problems.length > 0)
+		throw new Error(`the expected entries of ${name} may not be taken:\n${problems.join("\n")}`);
+	return { failures, skips };
 }
