@@ -8,6 +8,7 @@
 import { spawnSync } from "node:child_process";
 import {
 	cpSync,
+	existsSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
@@ -114,15 +115,21 @@ const walk = (dir: string): string[] =>
  * run unreported. The tag's tree is the tested commit's, so its checklist and tests are the ones read.
  */
 function recomputed(run: RunSeen, tested: string, dir: string) {
-	const read = spawnSync(
-		"pnpm",
-		["--silent", "--filter", "@mod/spec-checklist", "run", "compliance", dir, "--release"],
-		{
-			encoding: "utf8",
-			maxBuffer: 1 << 28,
-			env: { ...process.env, SPEC_EVIDENCE_COMMIT: tested, GITHUB_RUN_ID: String(run.id) },
-		},
-	);
+	const options = {
+		encoding: "utf8" as const,
+		maxBuffer: 1 << 28,
+		env: { ...process.env, SPEC_EVIDENCE_COMMIT: tested, GITHUB_RUN_ID: String(run.id) },
+	};
+	// A stand-in for this module's own tests, never taken in a GitHub Actions run.
+	const standIn =
+		process.env.GITHUB_ACTIONS === "true" ? undefined : process.env.RELEASE_EVIDENCE_COMPLIANCE;
+	const read = standIn
+		? spawnSync(standIn, [dir, "--release"], options)
+		: spawnSync(
+				"pnpm",
+				["--silent", "--filter", "@mod/spec-checklist", "run", "compliance", dir, "--release"],
+				options,
+			);
 	// What it tells, from the table it wrote beside the reports: the runs that did not report, the items that block.
 	let told = `${read.stderr ?? ""}`.trim().split("\n").slice(-3).join(" ");
 	try {
@@ -145,7 +152,8 @@ function recomputed(run: RunSeen, tested: string, dir: string) {
 	} catch {
 		// No table written: what it printed on standard error is told instead.
 	}
-	return { releasable: read.status === 0, told };
+	// Passed only where it ran and wrote its table: a filter matching nothing exits 0 too.
+	return { releasable: read.status === 0 && existsSync(join(dir, "compliance.json")), told };
 }
 
 /** A candidate's artifacts, as fetch brought them, unpacked; the commit its reports name; how its jobs ended. */

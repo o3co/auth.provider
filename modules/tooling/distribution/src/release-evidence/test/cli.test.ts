@@ -1,9 +1,16 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { zipOf } from "./zip.ts";
+import { unicodePath, type ZipFile, zipOf } from "./zip.ts";
 
 const here = join(import.meta.dirname, "..");
 const repository = "o3co/test";
@@ -85,7 +92,7 @@ describe("judge", () => {
 	/** What fetch would have brought: one run of the release branch's head, its artifacts' archives laid out. */
 	function brought(
 		head: string,
-		reports: readonly { name: string; data: string; mode?: number }[],
+		reports: readonly ZipFile[],
 		over: { head?: string; repository?: string; examined?: boolean } = {},
 	) {
 		const fetched = mkdtempSync(join(tmpdir(), "release-evidence-fetched-"));
@@ -160,6 +167,14 @@ describe("judge", () => {
 			[{ name: "r.json", data: "/etc/passwd", mode: 0o120777 }, "r.json is a link"],
 			[{ name: "../escape.json", data: report(head) }, '"../escape.json" would land outside'],
 			[{ name: "/abs.json", data: report(head) }, '"/abs.json" would land outside'],
+			[
+				{
+					name: "report.json",
+					data: report(head),
+					centralExtra: unicodePath("report.json", "../escape.json"),
+				},
+				"report.json is named otherwise",
+			],
 		] as const) {
 			const fetched = brought(head, [{ name: "ok.json", data: report(head) }, entry]);
 			const done = judged(dir, fetched);
@@ -184,5 +199,105 @@ describe("judge", () => {
 		const { dir, head } = released();
 		const done = judged(dir, brought(head, [{ name: "a.json", data: report("f".repeat(40)) }]));
 		expect(done.stderr).toMatch(/its reports name f+ as tested, but GitHub ran it on/);
+	});
+
+	it("never takes the compliance stand-in in a GitHub Actions run, nor a compliance that wrote no table", () => {
+		const { dir, head } = released();
+		const bin = mkdtempSync(join(tmpdir(), "release-evidence-compliance-"));
+		writeFileSync(join(bin, "c"), "#!/bin/sh\necho '{}' > \"$1/compliance.json\"\n");
+		chmodSync(join(bin, "c"), 0o755);
+		const done = judged(dir, brought(head, [{ name: "a.json", data: report(head) }]), {
+			RELEASE_EVIDENCE_COMPLIANCE: join(bin, "c"),
+			GITHUB_ACTIONS: "true",
+		});
+		expect([done.status, done.stderr]).toEqual([
+			1,
+			expect.stringContaining("no longer makes the release's compliance"),
+		]);
+	});
+
+	it("takes a release branch's run from GitHub's answers to its evidence kept, as the release runs fetch and judge", () => {
+		const { dir, head } = released();
+		const served = mkdtempSync(join(tmpdir(), "release-evidence-served-"));
+		writeFileSync(join(served, "1.zip"), zipOf([{ name: "compliance.json", data: "{}" }]));
+		writeFileSync(join(served, "2.zip"), zipOf([{ name: "a.json", data: report(head) }]));
+		const at = "2026-10-27T00:00:00Z";
+		const answers = {
+			runs: [
+				{
+					id: 7,
+					attempt: 1,
+					conclusion: "success",
+					event: "push",
+					path: ".github/workflows/ci.yml",
+					headSha: head,
+					headBranch: "release/1.0.1",
+					repository,
+					headRepository: repository,
+					createdAt: at,
+					url: "https://github.example/runs/7",
+				},
+			],
+			jobs: ["conformance", "release-check", "compliance"].map((name) => ({
+				name,
+				conclusion: "success",
+			})),
+			artifacts: [
+				{ id: 1, name: "compliance", expired: false, createdAt: at },
+				{ id: 2, name: "evidence-area-0-1", expired: false, createdAt: at },
+			],
+		};
+		const bin = mkdtempSync(join(tmpdir(), "release-evidence-gh-"));
+		writeFileSync(
+			join(bin, "gh"),
+			`#!${process.execPath}
+const fs = require("node:fs");
+const answers = ${JSON.stringify(answers)};
+const path = process.argv.find((a) => a.startsWith("repos/"));
+const zip = /artifacts\\/(\\d+)\\/zip$/.exec(path);
+if (zip) process.stdout.write(fs.readFileSync(${JSON.stringify(served)} + "/" + zip[1] + ".zip"));
+else for (const line of path.includes("/workflows/") ? answers.runs : path.includes("/jobs") ? answers.jobs : answers.artifacts) console.log(JSON.stringify(line));
+`,
+		);
+		chmodSync(join(bin, "gh"), 0o755);
+		const fetched = join(served, "fetched");
+		const fetching = node("fetch.ts", dir, [fetched], {
+			GITHUB_REPOSITORY: repository,
+			PATH: `${bin}:${process.env.PATH ?? ""}`,
+		});
+		expect([fetching.status, fetching.stderr]).toEqual([0, ""]);
+
+		const compliance = (status: number) => {
+			const stand = join(mkdtempSync(join(tmpdir(), "release-evidence-compliance-")), "c");
+			writeFileSync(stand, `#!/bin/sh\necho '{}' > "$1/compliance.json"\nexit ${status}\n`);
+			chmodSync(stand, 0o755);
+			return stand;
+		};
+		const refused = node("judge.ts", dir, [fetched, join(served, "refused")], {
+			GITHUB_REPOSITORY: repository,
+			GITHUB_REF_NAME: "v1.0.1",
+			RELEASE_EVIDENCE_COMPLIANCE: compliance(1),
+		});
+		expect([refused.status, existsSync(join(served, "refused", "manifest.json"))]).toEqual([
+			1,
+			false,
+		]);
+
+		const kept = join(served, "kept");
+		const taken = node("judge.ts", dir, [fetched, kept], {
+			GITHUB_REPOSITORY: repository,
+			GITHUB_REF_NAME: "v1.0.1",
+			RELEASE_EVIDENCE_COMPLIANCE: compliance(0),
+		});
+		expect([taken.status, taken.stderr]).toEqual([0, ""]);
+		expect(JSON.parse(readFileSync(join(kept, "manifest.json"), "utf8"))).toMatchObject({
+			tag: { name: "v1.0.1" },
+			run: { repository, id: 7, branch: "release/1.0.1", tested: { commit: head } },
+			artifacts: ["compliance", "evidence-area-0-1"],
+		});
+		expect(readFileSync(join(kept, "ci", "evidence-area-0-1", "a.json"), "utf8")).toBe(
+			report(head),
+		);
+		expect(existsSync(join(kept, "ci", "compliance", "compliance.json"))).toBe(true);
 	});
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { archiveProblems, entriesOf } from "../archive.ts";
-import { zipOf } from "./zip.ts";
+import { unicodePath, zipOf } from "./zip.ts";
 
 describe("entriesOf", () => {
 	it("reads each entry's name, and whether a Unix or macOS host made it a link", () => {
@@ -16,6 +16,27 @@ describe("entriesOf", () => {
 				{ name: "out", link: true },
 				{ name: "mac", link: true },
 				{ name: "dos", link: false },
+			],
+		});
+	});
+
+	it("tells an entry its local header or an extra field names otherwise than the directory", () => {
+		const zip = zipOf([
+			{ name: "fine.json", data: "{}" },
+			{ name: "local.json", data: "{}", localName: "../escaped.json" },
+			{
+				name: "central.json",
+				data: "{}",
+				centralExtra: unicodePath("central.json", "../escaped.json"),
+			},
+			{ name: "inner.json", data: "{}", localExtra: unicodePath("inner.json", "../escaped.json") },
+		]);
+		expect(entriesOf(zip)).toEqual({
+			entries: [
+				{ name: "fine.json", link: false },
+				{ name: "local.json", link: false, renamed: true },
+				{ name: "central.json", link: false, renamed: true },
+				{ name: "inner.json", link: false, renamed: true },
 			],
 		});
 	});
@@ -39,6 +60,7 @@ describe("archiveProblems", () => {
 		expect(
 			archiveProblems([
 				{ name: "out", link: true },
+				{ name: "report.json", link: false, renamed: true },
 				{ name: "../escape.json", link: false },
 				{ name: "a/../../escape.json", link: false },
 				{ name: "/etc/passwd", link: false },
@@ -48,6 +70,7 @@ describe("archiveProblems", () => {
 			]),
 		).toEqual([
 			"out is a link",
+			"report.json is named otherwise by its local header or an extra field",
 			'"../escape.json" would land outside the directory',
 			'"a/../../escape.json" would land outside the directory',
 			'"/etc/passwd" would land outside the directory',
