@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { getJson } from "../api/api.ts";
+import { requestJson } from "../api/api.ts";
 import { type Command, systemCommand } from "../commands/commands.ts";
 import { composeOverride, projectOf, suiteEnv } from "../compose/compose.ts";
 import { reclaimOrphans } from "../orphans/orphans.ts";
@@ -64,6 +64,12 @@ export interface Suite {
 	readonly certificate: string;
 	/** The suite's API, as a JSON GET from this machine. */
 	api(path: string): Promise<unknown>;
+	/** A request at the suite's API by any method it takes, a JSON body where given: its status as it comes, for the caller to judge, and its body. */
+	call(
+		method: "GET" | "POST" | "DELETE",
+		path: string,
+		body?: unknown,
+	): Promise<{ status: number; body: unknown }>;
 	stop(): Promise<void>;
 }
 
@@ -87,14 +93,14 @@ export async function startSuite(
 	tls: { readonly cert: string; readonly key: string },
 	options: {
 		readonly command?: Command;
-		/** The JSON GET the suite's API is asked by. */
-		readonly get?: typeof getJson;
+		/** The request the suite's API is asked by. */
+		readonly request?: typeof requestJson;
 		readonly signal?: AbortSignal;
 	} = {},
 ): Promise<Suite> {
 	const command = options.command ?? systemCommand;
 	const signal = options.signal;
-	const get = options.get ?? getJson;
+	const request = options.request ?? requestJson;
 	// Each request to the API is held to the plan's deadline besides its own time.
 	const asked = signal ? { signal } : {};
 	const source = join(dir, "suite");
@@ -189,7 +195,8 @@ export async function startSuite(
 		for (;;) {
 			signal?.throwIfAborted();
 			try {
-				if ((await get(`${suiteOrigin}/api/plan?length=1`, ca, asked)).status === 200) break;
+				if ((await request("GET", `${suiteOrigin}/api/plan?length=1`, ca, asked)).status === 200)
+					break;
 			} catch {}
 			if (Date.now() > deadline)
 				throw new Error(`the suite did not answer within ${readyWithinMs / 1000}s`);
@@ -202,11 +209,16 @@ export async function startSuite(
 			python: join(venv, "bin", "python"),
 			certificate,
 			api: async (path) => {
-				const answer = await get(`${suiteOrigin}/${path}`, trusted, asked);
+				const answer = await request("GET", `${suiteOrigin}/${path}`, trusted, asked);
 				if (answer.status !== 200)
 					throw new Error(`the suite answered ${answer.status} to ${path}`);
 				return answer.body;
 			},
+			call: (method, path, body) =>
+				request(method, `${suiteOrigin}/${path}`, trusted, {
+					...asked,
+					...(body === undefined ? {} : { body }),
+				}),
 			stop,
 		};
 	} catch (error) {

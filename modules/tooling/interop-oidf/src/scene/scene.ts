@@ -20,7 +20,7 @@ export interface SuiteUser {
 }
 
 /** What the harness asks of the app beyond the areas' scenes: one source's limits and the user's claims. */
-interface HarnessPart {
+export interface HarnessPart {
 	readonly user: SuiteUser;
 	/** The CONNECT proxy the app's outbound goes through to the suite, for its back-channel notices. */
 	readonly proxy?: string;
@@ -31,32 +31,42 @@ const harnessArea = area<HarnessPart>("interop-oidf");
 /** Requests from the one source a suite run comes from, per window: a whole plan's. */
 const perSource = 1000;
 
-onNew(harnessArea, (part) => ({
-	config: {
-		authorize: { requests: perSource },
-		"token-endpoint": { requests: perSource },
-		"token-control": { requests: perSource },
-		"rp-logout": { requests: perSource },
-		// The suite's host resolves to loopback, which outbound never reaches over https but by a proxy.
-		...(part.proxy === undefined ? {} : { outbound: { proxy: part.proxy } }),
-		"login-password": { attempts: 100, window: "1m" },
-		// The identity area's users, with the claims it has no field for.
-		users: {
-			registered: [
-				{
-					identifier: part.user.identifier,
-					"password-hash": scryptHash(part.user.password),
-					attributes: {
-						name: part.user.name,
-						email: part.user.email,
-						email_verified: true,
-						picture: part.user.picture,
-					},
+/**
+ * The acr the harness declares: one a password login meets, named by a URI, so discovery offers it
+ * and the suite asks for it in place of values the provider cannot know.
+ */
+const passwordAcr = "urn:o3co:interop-oidf:acr:password";
+
+/** The app's configuration beyond the areas' scenes: one source's limits, the user's claims, and the acr declared. */
+export const harnessConfig = (
+	part: HarnessPart,
+): Readonly<Record<string, Readonly<Record<string, unknown>>>> => ({
+	authorize: { requests: perSource },
+	"token-endpoint": { requests: perSource },
+	"token-control": { requests: perSource },
+	"rp-logout": { requests: perSource },
+	// The suite's host resolves to loopback, which outbound never reaches over https but by a proxy.
+	...(part.proxy === undefined ? {} : { outbound: { proxy: part.proxy } }),
+	"login-password": { attempts: 100, window: "1m" },
+	// The identity area's users, with the claims it has no field for.
+	users: {
+		registered: [
+			{
+				identifier: part.user.identifier,
+				"password-hash": scryptHash(part.user.password),
+				attributes: {
+					name: part.user.name,
+					email: part.user.email,
+					email_verified: true,
+					picture: part.user.picture,
 				},
-			],
-		},
+			},
+		],
 	},
-}));
+	acr: { values: { [passwordAcr]: [["pwd"]] } },
+});
+
+onNew(harnessArea, (part) => ({ config: harnessConfig(part) }));
 
 /** A client the suite's plans name, as their configuration does. */
 export interface SuiteClient {

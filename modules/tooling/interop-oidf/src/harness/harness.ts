@@ -1,25 +1,25 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { areaTarget } from "@mod/conformance";
 import { type FrontRequest, selfSigned, startFront } from "@mod/conformance-front";
 import { startTunnel } from "@mod/conformance-tunnel";
-import { readChecklist } from "@mod/spec-checklist";
-import { type Expected, expectedProblems, suiteEntries } from "../expected/expected.ts";
+import { expectedOf, suiteEntries } from "../expected/expected.ts";
+import {
+	cleared,
+	keptThenStopped,
+	planDirs,
+	planWithinMs,
+	stopAll,
+} from "../lifecycle/lifecycle.ts";
 import { loginPage } from "../login/login.ts";
 import { pkceShim } from "../pkce/pkce.ts";
-import { type ModuleRun, type Outcome, outcomesOf } from "../results/results.ts";
+import type { PlanRun } from "../report/report.ts";
+import { outcomesOf, testsOf } from "../results/results.ts";
 import { keepReviewPages } from "../review/review.ts";
 import { suiteScene } from "../scene/scene.ts";
-import {
-	hostForSuite,
-	type SuitePin,
-	SuiteStopFailed,
-	startSuite,
-	suiteOrigin,
-} from "../suite/suite.ts";
+import { hostForSuite, type SuitePin, startSuite, suiteOrigin } from "../suite/suite.ts";
 
 const packageDir = join(import.meta.dirname, "..", "..");
 
@@ -33,17 +33,11 @@ export interface PlanDefinition {
 	readonly logout?: "redirect" | "backchannel" | "frontchannel";
 }
 
-/** A plan as it ran: each suite test's outcome, the expected entries no test used, and the runner's own word. */
-export interface PlanRun {
-	readonly modules: readonly (ModuleRun & { readonly outcome: Outcome })[];
-	readonly unused: readonly Expected[];
-	readonly runner: { readonly code: number | null; readonly output: string };
-	/** Where the run's records are kept: the shim's additions, the export, the suite's log. */
-	readonly artifacts: string;
-}
-
 /** The pattern every OP plan meets: the one the design names, never one the environment chose. */
 export const pattern = "simple-web";
+
+/** An OP plan's title in the report: the suite's plan, its results adapted by the PKCE shim. */
+export const titleOf = (plan: PlanDefinition) => `OIDF (PKCE adaptation) ${plan.suitePlan}`;
 
 /**
  * The sender the app is told of: the suite's browser reaches the front from this machine's
@@ -51,70 +45,11 @@ export const pattern = "simple-web";
  */
 const suiteSender = "198.51.100.40";
 
-/** Where a plan keeps its records under the directory named: one of its own, so plans never mix theirs. */
-export const artifactsOf = (plan: string, named: string | undefined): string | undefined =>
-	named === undefined ? undefined : join(named, plan);
-
-/** A stop that keeps its records first and stops however keeping them went, the records' failure told. */
-export const keptThenStopped =
-	(keep: () => Promise<void>, stop: () => Promise<void>) => async (): Promise<void> => {
-		try {
-			await keep();
-		} finally {
-			await stop();
-		}
-	};
-
 /** The longest the suite's runner may run a plan. */
 const runWithinMs = 15 * 60_000;
 
-/** The longest a whole plan may take, its setup and its run, before its stops; they run past it by budgets of their own. */
-const planWithinMs = 25 * 60_000;
-
-/** Runs every stop, the last pushed first, though some fail; answers each failure, none swallowed. */
-export async function stopAll(stops: readonly (() => Promise<unknown>)[]): Promise<unknown[]> {
-	const problems: unknown[] = [];
-	for (const stop of [...stops].reverse()) {
-		await stop().catch((error: unknown) => problems.push(error));
-	}
-	return problems;
-}
-
-/**
- * Removes a plan's work directory where everything it started was stopped; keeps it where a stop
- * failed, the suite's start's own too, for it holds what stops that part. A failed removal joins
- * `problems`.
- */
-export async function cleared(work: string, failure: unknown, problems: unknown[]): Promise<void> {
-	if (problems.length > 0 || failure instanceof SuiteStopFailed) return;
-	await rm(work, { recursive: true, force: true }).catch((e: unknown) => problems.push(e));
-}
-
 const readJson = async <T>(file: string): Promise<T> =>
 	JSON.parse(await readFile(file, "utf8")) as T;
-
-/** The expected entries of a plan, refused before the suite starts where any may not be taken. */
-async function expectedOf(name: string) {
-	const checklist = readChecklist();
-	const known = {
-		items: new Map(checklist.specs.flatMap((s) => s.items.map((i) => [i.id, i] as const))),
-		decisions: checklist.decisions,
-		ledgers: new Map(
-			checklist.specs.flatMap((s) => (s.ledger ? [[s.spec, s.ledger] as const] : [])),
-		),
-	};
-	const failures = await readJson<Expected[]>(
-		join(packageDir, "expected", `${name}.failures.json`),
-	);
-	const skips = await readJson<Expected[]>(join(packageDir, "expected", `${name}.skips.json`));
-	const problems = [
-		...expectedProblems(failures, "failure", known),
-		...expectedProblems(skips, "skip", known),
-	];
-	if (problems.length > 0)
-		throw new Error(`the expected entries of ${name} may not be taken:\n${problems.join("\n")}`);
-	return { failures, skips };
-}
 
 /** What the runner's process said and how it ended, held to the plan's time. */
 function runner(
@@ -144,35 +79,6 @@ function runner(
 	});
 }
 
-/** Each test of the plan the suite ran, read back from its API: its result and its log. */
-async function testsOf(
-	api: (path: string) => Promise<unknown>,
-	planName: string,
-): Promise<ModuleRun[]> {
-	const listed = (await api("api/plan?length=100")) as {
-		readonly data: readonly {
-			readonly planName: string;
-			readonly modules: readonly {
-				readonly testModule: string;
-				readonly variant?: Record<string, string>;
-				readonly instances: readonly string[];
-			}[];
-		}[];
-	};
-	const plan = listed.data.find((p) => p.planName === planName);
-	if (plan === undefined) throw new Error(`the suite holds no plan ${planName}`);
-	return Promise.all(
-		plan.modules.map(async (m) => {
-			const instance = m.instances.at(-1);
-			const variant = m.variant ?? {};
-			if (instance === undefined) return { testModule: m.testModule, variant, log: [] };
-			const info = (await api(`api/info/${instance}`)) as { status: string; result: string };
-			const log = (await api(`api/log/${instance}`)) as ModuleRun["log"];
-			return { testModule: m.testModule, variant, instance, info, log };
-		}),
-	);
-}
-
 /**
  * Runs one OP plan of the suite at its pinned version against the pattern's app behind an https
  * front, with the login page and the PKCE shim, and reads each test's outcome back. Everything it
@@ -183,13 +89,9 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 	if (process.env.CONFORMANCE_PATTERN !== pattern) {
 		throw new Error(`the OP plans run on the pattern ${pattern}: its vitest configuration sets it`);
 	}
-	const expected = await expectedOf(plan.name);
+	const expected = await expectedOf(join(packageDir, "expected"), plan.name);
 	const pin = await readJson<SuitePin>(join(packageDir, "suite-pin.json"));
-	const work = await mkdtemp(join(tmpdir(), `interop-oidf-${plan.name}-`));
-	const artifacts =
-		artifactsOf(plan.name, process.env.OIDF_ARTIFACTS_DIR) ??
-		(await mkdtemp(join(tmpdir(), `interop-oidf-artifacts-${plan.name}-`)));
-	await mkdir(artifacts, { recursive: true });
+	const { work, artifacts } = await planDirs(plan.name, process.env.OIDF_ARTIFACTS_DIR);
 	const stops: (() => Promise<unknown>)[] = [];
 	// One deadline for the whole plan, its setup and its run; the stops run past it.
 	const deadline = AbortSignal.timeout(planWithinMs);
@@ -380,7 +282,11 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 			failures: expected.failures,
 			skips: expected.skips,
 		});
-		result = { ...judged, runner: said, artifacts };
+		result = {
+			...judged,
+			driver: { name: "the suite's own runner", code: said.code, log: "runner.log" },
+			artifacts,
+		};
 	} catch (error) {
 		failure = error;
 	}
