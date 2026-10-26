@@ -126,7 +126,7 @@ async function boot({
 		runtime,
 	};
 	const app = await assemble(input);
-	return { c: app.get(clients), down, input };
+	return { app, c: app.get(clients), down, input };
 }
 
 /** The claims of a good assertion, changed as given; a claim given as undefined is left out. */
@@ -198,6 +198,24 @@ describe("private_key_jwt", () => {
 		for (const algorithms of [[], ["HS256"], ["none"]]) {
 			expect(section.safeParse({ algorithms }).success, String(algorithms)).toBe(false);
 		}
+	});
+
+	it("warns at each start of every registered client accepting a loose audience, by its id", async () => {
+		const warned = () =>
+			recorded
+				.lines()
+				.filter((line) => line.event === "client-assertion.accept_loose_audience")
+				.map(({ level, fields }) => ({ level, fields }));
+		const before = warned().length;
+		const { app } = await boot({ loose: ["app:twin"] });
+		expect(warned()).toHaveLength(before);
+		await app.start();
+		expect(warned().slice(before)).toEqual([{ level: "warn", fields: { client: "app:twin" } }]);
+		await app.stop();
+		const strict = await boot();
+		await strict.app.start();
+		expect(warned()).toHaveLength(before + 1);
+		await strict.app.stop();
 	});
 
 	it("also takes the token endpoint's location, and lists, from a client accepting a loose audience, logging each", async () => {

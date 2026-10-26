@@ -1,15 +1,15 @@
-import { authMethods, metadataSections } from "@mod/clients";
+import { authMethods, clients, metadataSections } from "@mod/clients";
 import { externalJwt } from "@mod/external-jwt";
 import { issuer } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
-import { clientKeysIn, keysTakes } from "./keys/keys.ts";
+import { clientKeys, clientKeysIn, keysTakes } from "./keys/keys.ts";
 import { assertionMethod } from "./method.ts";
 import { section } from "./section.ts";
 import { spentAssertions } from "./store.ts";
 
-/** What the module takes: `clientKeysIn`'s, and what the method is built over. */
-const takes = [...keysTakes, tokenEndpointLocation, spentAssertions, externalJwt, issuer];
+/** What the module takes: `clientKeysIn`'s, what the method is built over, and the clients its start warns of. */
+const takes = [...keysTakes, tokenEndpointLocation, spentAssertions, externalJwt, issuer, clients];
 
 export default defineModule({ name: "client-assertion", section, takes }, (m) => [
 	m.contribute(metadataSections).by((c) => clientKeysIn(c)),
@@ -18,6 +18,16 @@ export default defineModule({ name: "client-assertion", section, takes }, (m) =>
 		if (url === undefined) {
 			return c.refuse("client-assertion", "the token endpoint's location needs a public origin");
 		}
+		// Told at each start, by client: an assertion such a client made for another authorization
+		// server that names this one's token endpoint can be used here.
+		const known = c.late(clients);
+		c.onStart(() => {
+			for (const client of known().registered()) {
+				if (client.section(clientKeys)["accept-loose-audience"]) {
+					c.log.warn("client-assertion.accept_loose_audience", { client: client.id });
+				}
+			}
+		});
 		return assertionMethod({
 			spent: await c.get(spentAssertions),
 			jwt: await c.get(externalJwt),

@@ -819,7 +819,7 @@ From `@mod/client-assertion`.
 |---|---|---|---|---|
 | `sections.client-assertion.keys` | list of map | `[]` |  | The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. |
 | `sections.client-assertion.jwks-uri` | string |  |  | Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot. |
-| `sections.client-assertion.accept-loose-audience` | boolean | `false` |  | Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client still changing what it sends; to be removed. |
+| `sections.client-assertion.accept-loose-audience` | boolean | `false` |  | Also takes, from this client, an assertion whose `aud` is the token endpoint's URL or a list holding the issuer's or the token endpoint's URL, as 0.18.5 did; each is logged. While set, an assertion the client made for another authorization server that names this one's token endpoint can be used here. For a client whose library names the token endpoint; a registered client that sets it is warned of at every start. |
 
 ### sections.client-secret
 
