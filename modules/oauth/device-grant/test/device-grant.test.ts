@@ -304,9 +304,12 @@ describe("device authorization", () => {
 		});
 	});
 
-	it("leaves where device authorization is asked for out of the metadata without a public origin", async () => {
+	it("names where device authorization is asked for on the issuer's origin where no public origin is written", async () => {
 		const { app } = await serve({}, [reader], {});
-		expect(app.get(published)).toContainEqual({ name: "device_authorization_endpoint" });
+		expect(app.get(published)).toContainEqual({
+			name: "device_authorization_endpoint",
+			value: `${origin}/oauth/device_authorization`,
+		});
 	});
 
 	it("draws a user code again when it meets one in use", async () => {

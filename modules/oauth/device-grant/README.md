@@ -17,7 +17,7 @@
   - `step_up_required` passes the requirement's name and answer on unread.
 - The `urn:ietf:params:oauth:grant-type:device_code` grant to `grants`: `authorization_pending`, `slow_down`, `access_denied`, `expired_token`, `invalid_grant`, or an access token.
 - Audit events to `audit`, from the verification interface, with the subject and the request's `source` when `request-source` determined it, never a user or device code: declared in `./audit-events`, listed in the audit event reference.
-- Contribution to `issuer`'s metadata: `device_authorization_endpoint`, absolute on `http`'s public origin, and left out without one.
+- Contribution to `issuer`'s metadata: `device_authorization_endpoint`, absolute on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
 - Store interfaces, which never see what a record holds: devices, by a name made from the device code (put, read, rewrite); user codes (the device's name, per code). Needs: no eviction, survives a crash, never rolled back by failover.
 - Operator section (bounds, default; a time with its unit, in whole seconds): `verification-uri` (required; https, by `url-setting`), `complete-uri` (false), `code-lifetime` (30s–1h, 10m), `interval` (1s–1m, 5s), `attempts` (1–100, 5) per `attempts-window` (1m–1d, 5m), `requests` (1–100000, 60) per `window` (1s–1d, 1m).
 - `./testing`: test configuration builders and the store contract test.
