@@ -7,7 +7,7 @@ import {
 	selectionRecords,
 } from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
-import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type Client, clients } from "@mod/clients";
@@ -18,7 +18,7 @@ import {
 	confidentialClient,
 	publicClient,
 } from "@mod/clients/testing";
-import { additions, codes, redemptionHooks } from "@mod/code-grant";
+import { additions, codes, redemptionHooks, sessionRedemptions } from "@mod/code-grant";
 import codeGrantModule from "@mod/code-grant/module";
 import { codeGrantConfig } from "@mod/code-grant/testing";
 import codeGrantStore from "@mod/code-grant-store/module";
@@ -67,7 +67,7 @@ import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { lineage } from "../src/contract.ts";
 import refreshModule from "../src/module.ts";
-import { toStored, toStoredRedemption } from "../src/record.ts";
+import { liveFamily, toStored, toStoredRedemption } from "../src/record.ts";
 import { section } from "../src/section.ts";
 import { refreshConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
@@ -141,12 +141,16 @@ function assembly(options: Options = {}) {
 		modules: [
 			http,
 			switchedModule(
-				tokensStandIn({
-					revocable: (options.revocation ?? "denylist") === "denylist",
-					...(options.accessLifetime ? { lifetimeSeconds: options.accessLifetime } : {}),
-				}),
+				switchedModule(
+					tokensStandIn({
+						revocable: (options.revocation ?? "denylist") === "denylist",
+						...(options.accessLifetime ? { lifetimeSeconds: options.accessLifetime } : {}),
+					}),
+					tokens,
+					down.tokens,
+				),
 				tokens,
-				down.tokens,
+				capturing,
 			),
 			issuerModule,
 			clientsModule,
@@ -170,6 +174,7 @@ function assembly(options: Options = {}) {
 			claimsSelectionModule,
 			selections.module,
 			judging,
+			meanwhile.module,
 			grantsSeen.module,
 			tiesSeen.module,
 			...(options.extra ?? []),
@@ -186,6 +191,7 @@ function assembly(options: Options = {}) {
 				confidentialClient({ id: "exchanger", sections: allowed([...both, exchangeType]) }),
 			]),
 			...codeGrantConfig(),
+			...claimsSelectionConfig({ mode: "on" }),
 			...refreshConfig({
 				lifetime: `${options.lifetime ?? 3600}s`,
 				"sweep-interval": "1s",
@@ -262,10 +268,8 @@ async function serve(options: Options = {}) {
 			session: session.id,
 			subject: "alice",
 		});
-		if (selection) {
-			const name = app.get(codes).redemptionOf(code);
-			await app.get(claimsSelections).keepForCode(name, selection, 600_000);
-		}
+		const redemption = app.get(codes).redemptionOf(code);
+		if (selection) await app.get(claimsSelections).keepForCode(redemption, selection, 600_000);
 		const exchange = async () =>
 			(
 				await grant("authorization_code", as, {
@@ -275,7 +279,7 @@ async function serve(options: Options = {}) {
 					...extra,
 				})
 			).body;
-		return Object.assign(await exchange(), { again: exchange });
+		return Object.assign(await exchange(), { again: exchange, redemption });
 	};
 	const refresh = (token: string | undefined, as = "app", extra: Record<string, string> = {}) =>
 		grant("refresh_token", as, { refresh_token: token ?? "", ...extra });
@@ -306,19 +310,66 @@ const judging = defineModule({ name: "judging", takes: [] }, (m) => [
 /** claims-selection's store in memory; a family's record fails to be written while `failFamilies`. */
 function selectionStores() {
 	const stand = claimsSelectionInMemory();
-	const state = { failFamilies: false, failTokens: false };
+	const state = {
+		failFamilies: false,
+		failTokens: false,
+		/** Runs before each read, with the name read. */
+		beforeRead: undefined as ((name: string) => void) | undefined,
+		/** Runs after each save, with the name saved. */
+		afterSave: undefined as ((name: string) => void) | undefined,
+	};
 	const module = defineModule({ name: "selection-stores", takes: [] }, (m) => [
-		m.provide(selectionRecords).by(() => ({
-			read: stand.records.read,
-			save: async (name: string, value: Parameters<typeof stand.records.save>[1], ms: number) => {
-				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
-				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
-				return stand.records.save(name, value, ms);
+		m.provide(selectionRecords).by((c) => {
+			stand.module.provides?.[0]?.create(c as never);
+			return {
+				read: async (name: string) => {
+					state.beforeRead?.(name);
+					return stand.records.read(name);
+				},
+				save: async (name: string, value: Parameters<typeof stand.records.save>[1], ms: number) => {
+					if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
+					if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
+					const saved = await stand.records.save(name, value, ms);
+					state.afterSave?.(name);
+					return saved;
+				},
+			};
+		}),
+	]);
+	return { module, state };
+}
+/** The access tokens issued, in order, as tokens issued them. */
+const issuedTokens: string[] = [];
+const capturing = {
+	// Over an empty target: the tokens handed in are frozen, so their own members cannot be swapped.
+	wrap: (inner: Tokens) =>
+		new Proxy({} as Tokens, {
+			get: (_target, prop) => {
+				if (prop !== "issue") {
+					const member = Reflect.get(inner, prop);
+					return typeof member === "function" ? member.bind(inner) : member;
+				}
+				return async (...args: Parameters<Tokens["issue"]>) => {
+					const out = await inner.issue(...args);
+					if (out.kind === "issued") issuedTokens.push(out.access.token);
+					return out;
+				};
+			},
+		}),
+} as never;
+/** Runs `during` once a code's token is issued, before the ID token, the additions and the hooks. */
+const meanwhile = (() => {
+	const state = { during: undefined as (() => void) | undefined };
+	const module = defineModule({ name: "meanwhile", takes: [] }, (m) => [
+		m.contribute(sessionRedemptions).by(() => ({
+			name: "meanwhile",
+			redeemed: async () => {
+				state.during?.();
 			},
 		})),
 	]);
 	return { module, state };
-}
+})();
 const selected: Selection = {
 	idToken: { names: [], constraints: [] },
 	userinfo: {
@@ -333,6 +384,12 @@ const idOf = async (s: Awaited<ReturnType<typeof serve>>, token: string | undefi
 	const checked = await s.app.get(tokens).verifyAccess(token ?? "");
 	if (checked.kind !== "valid") throw new Error("not a valid token");
 	return checked.id;
+};
+
+/** The family a redemption started, as its record names it; none where none was named. */
+const familyOf = async (s: Awaited<ReturnType<typeof serve>>, redemption: string) => {
+	const kept = (await s.stores.marks.records.read(redemption)) as { family?: string } | undefined;
+	return kept?.family;
 };
 
 describe("a code's selection through its family", () => {
@@ -369,22 +426,110 @@ describe("a code's selection through its family", () => {
 		).toBeUndefined();
 	});
 
-	it("voids the code, ending its family, when the family's selection cannot be kept", async () => {
+	it("voids the code, revoking its token and ending its family, when the family's selection cannot be kept", async () => {
 		const s = await serve();
 		s.selections.state.failFamilies = true;
+		issuedTokens.length = 0;
 		const answer = await s.redeem("app", {}, { selection: selected });
-		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
 		s.selections.state.failFamilies = false;
-		expect(await s.active(answer.access_token)).toBe(false);
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		expect(issuedTokens).toHaveLength(1);
+		expect(await s.active(issuedTokens[0])).toBe(false);
+		const family = await familyOf(s, answer.redemption);
+		expect(family).toEqual(expect.any(String));
+		expect(liveFamily(await s.stores.kept.records.read(family ?? ""))).toBeUndefined();
+		expect(await answer.again()).toMatchObject({ error: "invalid_grant" });
 	});
 
-	it("fails the round, leaving the refresh token usable, when a refreshed token's selection cannot be kept", async () => {
+	it("fails the round, revoking the token it issued and leaving the refresh token usable, when a refreshed token's selection cannot be kept", async () => {
 		const s = await serve();
 		const first = await s.redeem("app", {}, { selection: selected });
 		s.selections.state.failTokens = true;
+		issuedTokens.length = 0;
 		expect((await s.refresh(first.refresh_token)).status).toBe(503);
 		s.selections.state.failTokens = false;
-		expect((await s.refresh(first.refresh_token)).status).toBe(200);
+		expect(issuedTokens).toHaveLength(1);
+		expect(await s.active(issuedTokens[0])).toBe(false);
+		const again = await s.refresh(first.refresh_token);
+		expect(again.status).toBe(200);
+		expect(
+			await s.app.get(claimsSelections).forToken(await idOf(s, again.body.access_token)),
+		).toEqual(selected.userinfo);
+	});
+
+	it("never lets a family outlive its selection, however late the family is written after its selection", async () => {
+		const s = await serve({ lifetime: 600 });
+		// The family's record is written 130 seconds after its selection, past the two minutes' allowance.
+		s.selections.state.afterSave = (name) => {
+			if (name.startsWith("f.")) shift += 130_000;
+		};
+		const first = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.afterSave = undefined;
+		// Ten seconds before the family's end, which leaves its access token time.
+		shift += 600_000 - 130_000 - 10_000;
+		const live = await s.refresh(first.refresh_token);
+		expect(live.status).toBe(200);
+		expect(
+			await s.app.get(claimsSelections).forToken(await idOf(s, live.body.access_token)),
+		).toEqual(selected.userinfo);
+		// 725 seconds in: past the selection's end (600 and the 120 allowance), before the end a family
+		// written 130 seconds late would have had. The family ends with its selection, never after.
+		shift += 135_000;
+		expect((await s.refresh(live.body.refresh_token)).body.error).toBe("invalid_grant");
+	});
+});
+
+describe("a redemption whose selection runs out between its steps", () => {
+	afterEach(() => {
+		meanwhile.state.during = undefined;
+	});
+
+	it("refuses a code its pin found past its life, before any family or token selection is kept", async () => {
+		const s = await serve();
+		// A stall between the code's use and its pin, past the code's ten minutes and the selection's minute more.
+		s.selections.state.beforeRead = (name) => {
+			if (name.startsWith("c.")) shift += 11 * 60_000;
+		};
+		const answer = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.beforeRead = undefined;
+		expect(answer).toMatchObject({ error: "invalid_grant" });
+		expect(answer).not.toHaveProperty("access_token");
+		expect(await familyOf(s, answer.redemption)).toBeUndefined();
+	});
+
+	it("keeps the pinned selection for the family and the token once the code's own selection is gone", async () => {
+		const s = await serve();
+		// Pinned near the code's end, at 9.5 minutes; then past the code's selection (11 minutes), within the pin.
+		s.selections.state.beforeRead = (name) => {
+			if (name.startsWith("c.")) shift += 9.5 * 60_000;
+		};
+		meanwhile.state.during = () => {
+			shift += 2 * 60_000;
+		};
+		const first = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.beforeRead = undefined;
+		meanwhile.state.during = undefined;
+		expect(await s.app.get(claimsSelections).forCode(first.redemption)).toEqual(selected);
+		expect(first).toHaveProperty("access_token");
+		const read = s.app.get(claimsSelections);
+		expect(await read.forToken(await idOf(s, first.access_token))).toEqual(selected.userinfo);
+		const once = await s.refresh(first.refresh_token);
+		expect(await read.forToken(await idOf(s, once.body.access_token))).toEqual(selected.userinfo);
+	});
+
+	it("voids the code, revoking its token and ending its family, once the pin itself is gone", async () => {
+		const s = await serve();
+		// Between the token's issuing and the additions: past the pin's five minutes.
+		meanwhile.state.during = () => {
+			shift += 5 * 60_000 + 1000;
+		};
+		issuedTokens.length = 0;
+		const answer = await s.redeem("app", {}, { selection: selected });
+		meanwhile.state.during = undefined;
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		expect(await s.active(issuedTokens[0])).toBe(false);
+		const family = await familyOf(s, answer.redemption);
+		if (family) expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
 	});
 });
 

@@ -103,7 +103,7 @@ export function lineageOver(
 				...(beginning.acr ? { acr: beginning.acr } : {}),
 				...(binding ? { binding } : {}),
 			};
-			return found.found(found.name(), founded, access);
+			return found.found(found.name(), founded, access, found.endsAt());
 		},
 	};
 }

@@ -35,6 +35,8 @@ export function starting(
 			for (const dropped of pushedOut) await revoker.revokeFamily(dropped);
 			throw new Unavailable("refresh");
 		}
+		// One end, read before the selection is kept: kept from then, it outlives the family by the allowance.
+		const expiresAt = found.endsAt();
 		// The family keeps what its code's request asked beyond its scope; failing, the code is voided.
 		await selections.follow(redeemed.redemption, id, lifetimeMs + allowanceMs);
 		return found.found(
@@ -52,6 +54,7 @@ export function starting(
 				...(binding ? { binding } : {}),
 			},
 			redeemed.access,
+			expiresAt,
 		);
 	};
 }

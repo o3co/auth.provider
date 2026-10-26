@@ -129,8 +129,14 @@ export function refreshGrant(
 			if (judged.kind === "refused") return judged;
 			const issued = judged.access;
 			await revoker.recordAccess(parsed.id, issued);
-			// The family's selection, its names cut to what is allowed and agreed to now, kept for this token.
-			await selections.forRefreshed(parsed.id, client, family.subject, issued);
+			// The family's selection, its names cut to what is allowed and agreed to now, kept for this token;
+			// failing, the token is revoked and the round fails before the rotation, so it can be tried again.
+			try {
+				await selections.forRefreshed(parsed.id, client, family.subject, issued);
+			} catch (error) {
+				await revoker.revokeIssued(issued);
+				throw error;
+			}
 			// Rotates only from the secret checked here, however often the change runs again.
 			const written = await stores.families.update(parsed.id, (stored) =>
 				liveFamily(stored)?.current === family.current ? { value: toStored(rotated) } : undefined,
