@@ -1,8 +1,8 @@
 import { cookies } from "@mod/cookies";
 import { applying, marks, policies, type Site, site } from "@mod/http";
 import { contract, type Parts } from "@mod/kernel";
-import { checking, sameOriginOf } from "./check.ts";
-import { csrfChecked, csrfRefused, originEvidence } from "./contract.ts";
+import { carried, checking, issuing, sameOriginOf } from "./check.ts";
+import { csrfChecked, csrfRefused, formTokens, originEvidence } from "./contract.ts";
 
 /** The public origin both checks compare with, refused once without one. */
 const ours = contract<Site>("csrf.public-origin");
@@ -25,6 +25,15 @@ export const deciding = (m: Parts<undefined>, withoutOrigin: "refuse boot" | "re
 	m.provide(originEvidence).by(async (c) => {
 		const { origin, secureCookies } = await c.get(ours);
 		return { sameOrigin: origin === undefined ? () => false : sameOriginOf(origin, secureCookies) };
+	}),
+	m.provide(formTokens).by(async (c) => {
+		const issue = issuing(await c.get(cookies), c.random);
+		return {
+			issue: (request) => {
+				const { token, cookie } = issue(request);
+				return { field: carried.field, token, cookies: [cookie] };
+			},
+		};
 	}),
 	m.contribute(policies).by(async (c) => {
 		const { origin, secureCookies } = await c.get(ours);

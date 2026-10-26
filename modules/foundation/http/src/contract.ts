@@ -31,6 +31,8 @@ export interface Loads {
 	readonly frames?: readonly string[];
 	/** The text of each inline script it runs. */
 	readonly scripts?: readonly string[];
+	/** Where its forms post: to this origin alone (`self`); none where it says nothing. */
+	readonly forms?: "self";
 }
 
 export interface HttpResponse {

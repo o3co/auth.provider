@@ -420,6 +420,19 @@ describe("session entry", () => {
 		expect((await s.entryOf(handle)).kind).toBe("entered");
 	});
 
+	it("answers the handle a cookie opens from the cookie index alone, reading no session, and fails when the index cannot tell", async () => {
+		const { s, stores, withCookie, login } = await boot();
+		const cookie = await login();
+		const handle = await s.handleOf?.(withCookie(cookie));
+		expect(handle).toBeDefined();
+		// The session store is not read: a failing session read changes nothing.
+		stores.down.sessions.failNext("read");
+		expect(await s.handleOf?.(withCookie(cookie))).toBe(handle);
+		stores.down.sessions.restore();
+		stores.down.cookies.failNext("read");
+		await expect(s.handleOf?.(withCookie(cookie))).rejects.toSatisfy(isUnavailable);
+	});
+
 	it("looks up only a cookie shaped as a secret", async () => {
 		const { s, stores, withCookie, jar, login } = await boot();
 		stores.down.cookies.failNext("read");

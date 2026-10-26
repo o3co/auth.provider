@@ -194,6 +194,19 @@ describe("an answer that declares what it loads", () => {
 		expect(await policyOf("/none")).toBe(strict);
 	});
 
+	it("lets a page post its forms to this origin alone where it says so, nothing else widened", async () => {
+		const base = await serveWith([
+			page({ forms: "self" }),
+			{ ...page({ forms: "self", scripts: [script] }), path: "/moving" },
+		]);
+		const policyOf = async (path: string) =>
+			(await fetch(`${base}${path}`)).headers.get("content-security-policy");
+		const formOnly =
+			"default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+		expect(await policyOf("/page")).toBe(formOnly);
+		expect(await policyOf("/moving")).toBe(`${formOnly}; script-src ${hash}`);
+	});
+
 	it("takes its declaration over a policy of its own", async () => {
 		const base = await serveWith([
 			{

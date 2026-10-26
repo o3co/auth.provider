@@ -22,7 +22,7 @@
 - Cross-origin routes: a preflight is answered before the policies, and answers vary by `Origin`, naming the request's origin only when listed, never `*` and never with credentials; a route's own `access-control-*` headers pass as it wrote them.
 - A preflight from a listed origin, for a method a declared route takes, names the methods of the path's declared routes, the request headers the route takes, and a max age of 600 seconds.
 - Any other preflight on such a path gets `204` with nothing to read by.
-- `loads`: what a page declares it loads (the origins it frames, its inline scripts); its answer's policy allows those and nothing else, and a frame a policy cannot name makes the answer `500`.
+- `loads`: what a page declares it loads (the origins it frames, its inline scripts, and whether its forms post to this origin); its answer's policy allows those and nothing else, and a frame a policy cannot name makes the answer `500`.
 - Policies: `policy` makes one, unique as a value; `use` is a route's use of one with its options; `policies` takes one rule per policy, which passes the request on or answers it; a route's policies run in its order before its handler, and the first answer ends the request; what a route gives them is copied and frozen at boot.
 - `marks`: one per guarantee (`own-site`, `per-source`), a policy owner's claim that its policies keep it for the methods named, never a proof; every route's `changesState`, `crossSite` and `unlimited` are checked against them at boot (`guarantees`).
 - The request type, with its source as `request-source` decides it from the direct peer, the headers and this section's trusted proxies.

@@ -34,7 +34,7 @@ const fixed: Readonly<Record<string, string>> = Object.freeze({
 /** An origin a policy's host source can name: no IPv6 literal, no `_`, nothing after the port. */
 const framable = /^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?$/;
 
-/** A page's policy: its frames and scripts, and nothing else. Throws on a frame it cannot name. */
+/** A page's policy: its frames, its scripts and where its forms post, and nothing else. Throws on a frame it cannot name. */
 function pagePolicy(loads: Loads): string {
 	const frames = [...new Set(loads.frames)];
 	if (!frames.every((frame) => framable.test(frame))) throw new TypeError("unnamable frame");
@@ -44,7 +44,7 @@ function pagePolicy(loads: Loads): string {
 	return [
 		"default-src 'none'",
 		"base-uri 'none'",
-		"form-action 'none'",
+		loads.forms === "self" ? "form-action 'self'" : "form-action 'none'",
 		"frame-ancestors 'none'",
 		...(frames.length ? [`frame-src ${frames.join(" ")}`] : []),
 		...(scripts.length ? [`script-src ${scripts.join(" ")}`] : []),

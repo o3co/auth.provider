@@ -14,7 +14,7 @@ import {
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { carried, checking } from "../src/check.ts";
-import { csrfChecked, originEvidence } from "../src/contract.ts";
+import { csrfChecked, formTokens, originEvidence } from "../src/contract.ts";
 import csrfModule from "../src/module.ts";
 import { csrfStandIn } from "../src/testing.ts";
 
@@ -342,9 +342,53 @@ it("takes every handle its takes name, the module and its stand-in alike, at a p
 	}
 });
 
-it("leaves cookies untaken in its stand-in without a public origin, refusing unsafe requests as it does", async () => {
-	// The origin is http's setting, not csrf's: cookies is composed wherever csrf is, so its take stays named.
+it("takes cookies in its stand-in without a public origin too, for the form tokens it hands out", async () => {
+	// The policy refuses every unsafe request without an origin; the form tokens still need the cookie.
 	const config = { ...kernelConfig(), ...httpConfig() };
 	const unused = await takesUnused({ modules: [http, cookiesModule, csrfStandIn], config });
-	expect(unused.csrf).toEqual(["cookies"]);
+	expect(unused.csrf).toBeUndefined();
+});
+
+describe("a token for a form the server draws", () => {
+	for (const [name, module] of [
+		["the module", csrfModule],
+		["the stand-in", csrfStandIn],
+	] as const) {
+		it(`is handed out by ${name} with its cookie, a valid one the request holds kept, and passes the policy from a form`, async () => {
+			const app = await boot("https://as.example", [module, guarded]);
+			await app.start();
+			try {
+				const jar = app.get(cookies);
+				const issued = app.get(formTokens).issue(testRequest({ method: "GET", path: "/page" }));
+				expect(issued.field).toBe("csrf_token");
+				expect(issued.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+				expect(issued.cookies).toEqual([jar.write("csrf", issued.token, 7200)]);
+				const cookie = cookieOf(jar, issued.token);
+				const again = app
+					.get(formTokens)
+					.issue(
+						testRequest({ method: "GET", path: "/page", headers: new Map([["cookie", cookie]]) }),
+					);
+				expect(again.token).toBe(issued.token);
+				// A form posted from a page under no-referrer: Origin null, no Referer; the token carries it.
+				const base = `http://127.0.0.1:${app.get(listening).port()}/guarded`;
+				const form = (body: string) =>
+					fetch(base, {
+						method: "POST",
+						headers: {
+							"x-forwarded-proto": "https",
+							origin: "null",
+							cookie,
+							"content-type": "application/x-www-form-urlencoded",
+						},
+						body,
+					});
+				expect((await form(`csrf_token=${issued.token}`)).status).toBe(204);
+				expect((await form("")).status).toBe(403);
+				expect((await form(`csrf_token=${"x".repeat(43)}`)).status).toBe(403);
+			} finally {
+				await app.stop(1000);
+			}
+		});
+	}
 });
