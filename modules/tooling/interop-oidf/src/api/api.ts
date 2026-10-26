@@ -48,12 +48,26 @@ export function pinnedTo(pem: string) {
 			: new Error("the suite answered with another certificate than the one first read");
 }
 
-/** A JSON GET at the suite, trusting the certificate it was first read with alone. */
-export async function getJson(url: string, ca: string): Promise<{ status: number; body: unknown }> {
+/**
+ * A JSON GET at the suite, trusting the certificate it was first read with alone. The whole
+ * request, its answer's body read too, is held to `withinMs` and to `signal` (the plan's
+ * deadline): a socket's idle time alone would wait on an answer that trickles in forever.
+ */
+export async function getJson(
+	url: string,
+	ca: string,
+	options: { readonly withinMs?: number; readonly signal?: AbortSignal } = {},
+): Promise<{ status: number; body: unknown }> {
 	const { request } = await import("node:https");
 	const checkServerIdentity = pinnedTo(ca);
+	const withinMs = options.withinMs ?? 30_000;
+	const signal = AbortSignal.any([
+		AbortSignal.timeout(withinMs),
+		...(options.signal ? [options.signal] : []),
+	]);
+	signal.throwIfAborted();
 	return new Promise((resolve, reject) => {
-		const req = request(url, { ca, checkServerIdentity, timeout: 30_000 }, (res) => {
+		const req = request(url, { ca, checkServerIdentity }, (res) => {
 			// An answer cut off midway is refused, never left pending.
 			res.on("error", reject);
 			res.on("aborted", () => reject(new Error(`the suite cut its answer to ${url} off`)));
@@ -62,6 +76,7 @@ export async function getJson(url: string, ca: string): Promise<{ status: number
 				text += chunk;
 			});
 			res.on("end", () => {
+				signal.removeEventListener("abort", abort);
 				let body: unknown = text;
 				try {
 					body = JSON.parse(text);
@@ -69,8 +84,16 @@ export async function getJson(url: string, ca: string): Promise<{ status: number
 				resolve({ status: res.statusCode ?? 0, body });
 			});
 		});
-		req.on("timeout", () => req.destroy(new Error(`the suite did not answer ${url}`)));
-		req.on("error", reject);
+		const abort = () => {
+			const error = new Error(`the suite did not answer ${url} in time`, { cause: signal.reason });
+			req.destroy(error);
+			reject(error);
+		};
+		signal.addEventListener("abort", abort, { once: true });
+		req.on("error", (error) => {
+			signal.removeEventListener("abort", abort);
+			reject(error);
+		});
 		req.end();
 	});
 }

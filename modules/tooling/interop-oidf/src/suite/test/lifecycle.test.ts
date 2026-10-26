@@ -52,7 +52,8 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 		const { command, calls } = commands(
 			(cmd, args) =>
 				new Promise<string>((resolve, reject) => {
-					if (cmd === "git" && args[0] === "clone") {
+					if (cmd === "git" && args[0] === "-C") return resolve(`${pin.commit}\n`);
+					if (cmd === "docker" && args.includes("up")) {
 						const signal = calls.at(-1)?.signal;
 						signal?.addEventListener("abort", () => reject(new Error("aborted")));
 						return;
@@ -100,17 +101,39 @@ describe("the suite's start and stop, held to their time and leaving nothing beh
 	it("keeps what the containers wrote to their stderr in the suite's log, beside their stdout", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "suite-log-"));
 		const { command } = commands((cmd, args) => {
-			// The tag names another commit: the start fails, and its stop keeps the log.
-			if (cmd === "git" && args[0] === "-C") return "deadbeef\n";
+			if (cmd === "git" && args[0] === "-C") return `${pin.commit}\n`;
+			// The containers fail to come up: the start fails, and its stop keeps the log.
+			if (cmd === "docker" && args.includes("up")) throw new Error("server-1 exited");
 			if (cmd === "docker" && args.includes("logs"))
 				return { stdout: "server-1 | started\n", stderr: "server-1 | OutOfMemoryError\n" };
 			return "";
 		});
 		await expect(
 			startSuite(pin, join(dir, "suite"), host, join(dir, "suite.log"), tls, { command }),
-		).rejects.toThrow("not the pinned");
+		).rejects.toThrow("server-1 exited");
 		const log = await readFile(join(dir, "suite.log"), "utf8");
 		expect(log).toContain("server-1 | started\n");
 		expect(log).toContain("server-1 | OutOfMemoryError\n");
+	});
+
+	it("removes what it prepared, and asks nothing of Compose, where it fails before any container was started", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "suite-early-"));
+		const suiteDir = join(dir, "suite");
+		const { command, calls } = commands((cmd, args) => {
+			// The tag names another commit; and the daemon would fail any Compose command.
+			if (cmd === "git" && args[0] === "-C") return "deadbeef\n";
+			if (cmd === "docker" && args[0] === "compose") throw new Error("the daemon did not answer");
+			return "";
+		});
+		const error = await startSuite(pin, suiteDir, host, join(dir, "suite.log"), tls, {
+			command,
+		}).then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		expect(String(error)).toContain("not the pinned");
+		expect(error).not.toBeInstanceOf(SuiteStopFailed);
+		expect(calls.some((c) => c.cmd === "docker" && c.args[0] === "compose")).toBe(false);
+		expect(existsSync(suiteDir)).toBe(false);
 	});
 });
