@@ -1535,7 +1535,7 @@ describe("authorize: the claims a request names beyond its scope", () => {
 		expect(res.at?.searchParams.get("error")).toBe("invalid_request");
 	});
 
-	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode [oidc-core-5.5.1-b] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]", async () => {
+	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode [oidc-core-5.5.1-b]", async () => {
 		for (const mode of ["on", "off"] as const) {
 			const s = await serve({ claims: mode });
 			const cookie = await s.login();
