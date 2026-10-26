@@ -42,10 +42,20 @@ export function outcomesOf(
 		readonly configuration: string;
 		readonly failures: readonly Expected[];
 		readonly skips: readonly Expected[];
+		/** The tests the driver declared it does not run, each its test and variant. */
+		readonly notRun?: readonly {
+			readonly testModule: string;
+			readonly variant: Readonly<Record<string, string>>;
+		}[];
 	},
 ): {
 	readonly modules: readonly (ModuleRun & { readonly outcome: Outcome })[];
 	readonly unused: readonly Expected[];
+	/** The tests declared not run that no test of the plan answers: one removed or renamed in the suite, or a declaration mistyped. */
+	readonly strayNotRun: readonly {
+		readonly testModule: string;
+		readonly variant: Readonly<Record<string, string>>;
+	}[];
 } {
 	const used = new Set<Expected>();
 	const forTest = (run: ModuleRun, entries: readonly Expected[]) =>
@@ -55,7 +65,21 @@ export function outcomesOf(
 				e["configuration-filename"] === expected.configuration &&
 				isDeepStrictEqual(e.variant, run.variant),
 		);
+	const declaredNotRun = (run: ModuleRun) =>
+		(expected.notRun ?? []).some(
+			(n) => n.testModule === run.testModule && isDeepStrictEqual(n.variant, run.variant),
+		);
 	const outcome = (run: ModuleRun): Outcome => {
+		// A test its driver declared not run is excused only by a skip entry naming it, and only if it did not run.
+		if (declaredNotRun(run)) {
+			if (run.instance !== undefined || run.info !== undefined)
+				return { kind: "failed", why: ["declared not run, but it ran"] };
+			const skip = forTest(run, expected.skips)[0];
+			if (skip === undefined)
+				return { kind: "failed", why: ["declared not run, and no entry excuses it"] };
+			used.add(skip);
+			return { kind: "excused", class: skip.class };
+		}
 		if (run.info === undefined) return { kind: "failed", why: ["it never ran"] };
 		if (run.info.status !== "FINISHED")
 			return { kind: "failed", why: [`it ended ${run.info.status}`] };
@@ -95,7 +119,17 @@ export function outcomesOf(
 		return { kind: "failed", why: [`its result is ${run.info.result}`] };
 	};
 	const modules = runs.map((run) => ({ ...run, outcome: outcome(run) }));
-	return { modules, unused: [...expected.failures, ...expected.skips].filter((e) => !used.has(e)) };
+	const strayNotRun = (expected.notRun ?? []).filter(
+		(n) =>
+			!runs.some(
+				(run) => run.testModule === n.testModule && isDeepStrictEqual(run.variant, n.variant),
+			),
+	);
+	return {
+		modules,
+		unused: [...expected.failures, ...expected.skips].filter((e) => !used.has(e)),
+		strayNotRun,
+	};
 }
 
 /**
