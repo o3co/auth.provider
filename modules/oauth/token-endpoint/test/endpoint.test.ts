@@ -311,7 +311,7 @@ describe("the audience a request asks for", () => {
 });
 
 describe("token endpoint", () => {
-	it("issues client credentials tokens with basic and post [rfc6749-2.3.1-a] [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-3.3-a] [oidc-core-3.1.3.3-d]", async () => {
+	it("issues client credentials tokens with basic and post [rfc6749-2.3.1-a] [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-3.3-a]", async () => {
 		const post = await serve();
 		const basic = await post({ grant_type: "client_credentials", scope: "read write" }, "basic");
 		expect(basic.status).toBe(200);
