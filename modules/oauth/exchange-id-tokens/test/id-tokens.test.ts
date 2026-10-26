@@ -138,7 +138,7 @@ describe("exchange-id-tokens", () => {
 		}
 	});
 
-	it("lets the public client exchange only when the nonce is the digest of the key it proves by DPoP [rfc8693-2.2.1-c]", async () => {
+	it("lets the public client exchange only when the nonce is the digest of the key it proves by DPoP", async () => {
 		const s = await serve();
 		const jkt = "thumbprint-of-the-device-key";
 		const nonce = createHash("sha256").update(jkt, "ascii").digest("base64url");
