@@ -33,14 +33,14 @@ type client struct {
 }
 
 type instruction struct {
-	Flow                  string  `json:"flow"`
-	Issuer                string  `json:"issuer"`
-	CA                    string  `json:"ca"`
-	Client                client  `json:"client"`
-	RedirectURI           string  `json:"redirectUri"`
-	Scope                 string  `json:"scope"`
-	Resource              string  `json:"resource"`
-	PostLogoutRedirectURI string  `json:"postLogoutRedirectUri"`
+	Flow                  string `json:"flow"`
+	Issuer                string `json:"issuer"`
+	CA                    string `json:"ca"`
+	Client                client `json:"client"`
+	RedirectURI           string `json:"redirectUri"`
+	Scope                 string `json:"scope"`
+	Resource              string `json:"resource"`
+	PostLogoutRedirectURI string `json:"postLogoutRedirectUri"`
 	Backchannel           *struct {
 		Port int    `json:"port"`
 		Path string `json:"path"`
@@ -75,11 +75,25 @@ func random() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// trusting is an HTTP client whose TLS trusts the front's certificate alone.
+// trusting is an HTTP client whose TLS trusts the front's certificate alone, and that follows a
+// redirect only to https, as many as Go's default (10): one to plain http would send the request's
+// body and Authorization again in clear, past the endpoints discovered() checks.
 func trusting(pem string) *http.Client {
 	pool := x509.NewCertPool()
 	pool.AppendCertsFromPEM([]byte(pem))
-	return &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("refused a redirect to %s, not https", req.URL.Redacted())
+			}
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
+		},
+	}
 }
 
 type run struct {
