@@ -9,20 +9,28 @@ const jwkOf = (kid: string) => ({
 	kid,
 });
 
-/** A server publishing `metadata` at `metadataPath` alone and `keys` at `/keys`; every other path is 404. */
-async function publishing(metadataPath: string, issuer: string, keys: readonly object[]) {
+/** What a server answers at `/keys`: a status and a body as written. */
+type KeysAnswer = { readonly status: number; readonly body: string };
+
+/**
+ * A server publishing `metadata` at `metadataPath` alone, naming `/keys` as its key set unless
+ * `jwks` is false, and `keys` there (or `answer` as written); every other path is 404.
+ */
+async function publishing(
+	metadataPath: string,
+	issuer: string,
+	keys: readonly object[],
+	{ jwks = true, answer }: { jwks?: boolean; answer?: KeysAnswer } = {},
+) {
 	const server = createServer((req, res) => {
-		const body =
+		const metadata = jwks ? { issuer, jwks_uri: "https://as.example/keys" } : { issuer };
+		const written =
 			req.url === metadataPath
-				? { issuer, jwks_uri: "https://as.example/keys" }
+				? { status: 200, body: JSON.stringify(metadata) }
 				: req.url === "/keys"
-					? { keys }
-					: undefined;
-		if (!body) {
-			res.writeHead(404).end();
-			return;
-		}
-		res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+					? (answer ?? { status: 200, body: JSON.stringify({ keys }) })
+					: { status: 404, body: "" };
+		res.writeHead(written.status, { "content-type": "application/json" }).end(written.body);
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
@@ -77,5 +85,34 @@ describe("the instances of a deployment", () => {
 		expect(differences).toEqual([expect.stringMatching(/^instance 1 publishes the keys k1#/)]);
 		await a.stop();
 		await b.stop();
+	});
+
+	it("reads no keys where the metadata names no key set, or the set it names is empty", async () => {
+		const issuer = "https://as.example";
+		for (const [keys, jwks] of [
+			[[], true],
+			[[jwkOf("k1")], false],
+		] as const) {
+			const server = await publishing("/.well-known/openid-configuration", issuer, keys, { jwks });
+			expect(await identityOf(server.base, issuer)).toEqual({ issuer, keys: [] });
+			await server.stop();
+		}
+	});
+
+	it("refuses a key set its metadata names that cannot be read, rather than taking it as empty", async () => {
+		const issuer = "https://as.example";
+		for (const answer of [
+			{ status: 404, body: "" },
+			{ status: 500, body: JSON.stringify({ keys: [] }) },
+			{ status: 200, body: JSON.stringify({ key: [] }) },
+			{ status: 200, body: JSON.stringify({ keys: {} }) },
+			{ status: 200, body: "not json" },
+		]) {
+			const server = await publishing("/.well-known/openid-configuration", issuer, [], { answer });
+			await expect(identityOf(server.base, issuer), answer.body).rejects.toThrow(
+				/the key set https:\/\/as\.example\/keys/,
+			);
+			await server.stop();
+		}
 	});
 });

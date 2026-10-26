@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -109,5 +109,59 @@ child.stdout.once("data", () =>
 		const child = Number(await (await fetch(`${started.baseUrl}/child`)).text());
 		await started.stop();
 		process.kill(child, "SIGKILL");
+	});
+
+	/** A target that starts a child holding on past SIGTERM, writes its pid to `child`, and then `then`. */
+	const leaving = (then: string) => `
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const child = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)"], { stdio: ["ignore", "pipe", "ignore"] });
+child.stdout.once("data", () => {
+	writeFileSync("child", String(child.pid));
+	${then}
+});
+`;
+	/** Launches `source` as a group, and the pid of the child it wrote, once the launch has answered. */
+	const launching = async (source: string, timeoutMs: number) => {
+		const dir = await mkdtemp(join(tmpdir(), "conformance-group-"));
+		await writeFile(join(dir, "main.mjs"), source);
+		const port = await freePort();
+		const answered = await launch(
+			{
+				command: process.execPath,
+				args: ["main.mjs"],
+				cwd: dir,
+				env: { ...baseEnv(), PORT: String(port) },
+				port,
+				group: true,
+				stopGraceMs: 300,
+			},
+			timeoutMs,
+		).then(
+			(started) => ({ started }),
+			(error: unknown) => ({ error }),
+		);
+		const child = Number(await readFile(join(dir, "child"), "utf8"));
+		return { answered, child };
+	};
+
+	it("ends what the target started before answering that it refused, though the target ended first", async () => {
+		const { answered, child } = await launching(leaving("process.exit(1);"), 30_000);
+		try {
+			expect(answered).toMatchObject({ started: { kind: "refused" } });
+			expect(alive(child)).toBe(false);
+		} finally {
+			if (alive(child)) process.kill(child, "SIGKILL");
+		}
+	});
+
+	it("ends what the target started before throwing that it did not answer in time", async () => {
+		const { answered, child } = await launching(leaving("setInterval(() => {}, 1000);"), 1500);
+		try {
+			expect(answered).toMatchObject({ error: expect.any(Error) });
+			expect(alive(child)).toBe(false);
+		} finally {
+			if (alive(child)) process.kill(child, "SIGKILL");
+		}
 	});
 });

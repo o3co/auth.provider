@@ -29,14 +29,22 @@ export async function identityOf(baseUrl: string, issuer: string): Promise<Ident
 		(await asked(`${baseUrl}${path}/.well-known/openid-configuration`)) ??
 		(await asked(`${baseUrl}/.well-known/oauth-authorization-server${path}`));
 	if (!metadata || typeof metadata.issuer !== "string") return null;
-	const uri = typeof metadata.jwks_uri === "string" ? metadata.jwks_uri : undefined;
-	const set = uri ? await asked(`${baseUrl}${new URL(uri).pathname}`) : undefined;
-	const keys = Array.isArray(set?.keys)
-		? (set.keys as Record<string, unknown>[])
-				.map((k) => `${String(k.kid)}#${thumbprintOf(k)}`)
-				.sort()
-		: [];
-	return { issuer: metadata.issuer, keys };
+	const keys = metadata.jwks_uri === undefined ? [] : await keysAt(baseUrl, metadata.jwks_uri);
+	return {
+		issuer: metadata.issuer,
+		keys: keys.map((k) => `${String(k.kid)}#${thumbprintOf(k)}`).sort(),
+	};
+}
+
+async function keysAt(baseUrl: string, uri: unknown): Promise<Record<string, unknown>[]> {
+	if (typeof uri !== "string") throw new Error(`the key set ${String(uri)} is no URL`);
+	const answer = await fetch(`${baseUrl}${new URL(uri).pathname}`, {
+		signal: AbortSignal.timeout(5000),
+	});
+	if (!answer.ok) throw new Error(`the key set ${uri} answered ${answer.status}`);
+	const set = (await answer.json().catch(() => undefined)) as { keys?: unknown } | undefined;
+	if (!Array.isArray(set?.keys)) throw new Error(`the key set ${uri} holds no keys array`);
+	return set.keys as Record<string, unknown>[];
 }
 
 /** How the instances differ from the first: none where they are one deployment, each naming the same issuer and keys. */

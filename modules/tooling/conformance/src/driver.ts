@@ -140,7 +140,11 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 	const baseUrl = `http://127.0.0.1:${spec.port}`;
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		if (child.exitCode !== null || child.signalCode !== null) return { kind: "refused", output };
+		if (child.exitCode !== null || child.signalCode !== null) {
+			// What the target started may outlive it: the group is stopped before the refusal is told.
+			await stop();
+			return { kind: "refused", output };
+		}
 		try {
 			await fetch(baseUrl, { signal: AbortSignal.timeout(500) });
 			return {
@@ -154,7 +158,10 @@ export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started>
 		}
 	}
 	signal("SIGKILL");
-	throw new Error(`target did not answer in ${timeoutMs}ms:\n${output}`);
+	const gone = await endedWithin(spec.killWithinMs ?? killWithinMs);
+	throw new Error(
+		`target did not answer in ${timeoutMs}ms${gone ? "" : ", nor end after SIGKILL"}:\n${output}`,
+	);
 }
 
 export function baseEnv(): Record<string, string> {
