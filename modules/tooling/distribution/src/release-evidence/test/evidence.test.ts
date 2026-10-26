@@ -103,7 +103,8 @@ describe("the runs that may hold a release's evidence", () => {
 				run({ id: 8, headBranch: "release/1.0.01" }),
 				run({ id: 9, path: ".github/workflows/other.yml" }),
 				run({ id: 10, headRepository: "someone/fork" }),
-				run({ id: 11, repository: "someone/else", headRepository: "someone/else" }),
+				// Each repository field on its own, so neither check stands in for the other.
+				run({ id: 11, repository: "someone/else" }),
 			],
 			tag,
 			repository,
@@ -166,16 +167,26 @@ describe("the artifacts a run's evidence is taken from", () => {
 describe("the commit a run's reports name", () => {
 	const report = (commit: string, runId = "1") => ({ identity: { commit, run: runId } });
 
-	it("is the one commit the reports of that run name, another run's reports left out", () => {
-		expect(
-			testedCommitOf([report("m1"), report("m1"), report("x", "2"), { attempted: {} }], "1"),
-		).toBe("m1");
+	it("is the one commit the reports of that run name, files without an identity passed over", () => {
+		expect(testedCommitOf([report("m1"), report("m1"), { attempted: {} }], "1")).toEqual({
+			commit: "m1",
+		});
 	});
 
 	it("is none where they name none, or more than one", () => {
-		expect(testedCommitOf([], "1")).toBeUndefined();
-		expect(testedCommitOf([report("m1"), report("m2")], "1")).toBeUndefined();
-		expect(testedCommitOf([report("m1", "2")], "1")).toBeUndefined();
+		expect(testedCommitOf([], "1")).toEqual({ problem: "its reports name no commit tested" });
+		expect(testedCommitOf([report("m1"), report("m2")], "1")).toEqual({
+			problem: "its reports name more than one commit tested",
+		});
+	});
+
+	it("is none where any report names another run, beside a full set of its own", () => {
+		expect(testedCommitOf([report("m1"), report("m1", "2")], "1")).toEqual({
+			problem: "a report of its names run 2, not this one",
+		});
+		expect(testedCommitOf([report("m1", "2")], "1")).toEqual({
+			problem: "a report of its names run 2, not this one",
+		});
 	});
 });
 

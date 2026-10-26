@@ -133,15 +133,25 @@ export function artifactsOf(
 	return { take };
 }
 
-/** The one commit a run's reports name as tested; none where they name none, or more than one. */
-export function testedCommitOf(reports: readonly unknown[], run: string): string | undefined {
-	const commits = new Set(
-		reports.flatMap((r) => {
-			const identity = (r as { identity?: { commit?: unknown; run?: unknown } } | null)?.identity;
-			return identity?.run === run && typeof identity.commit === "string" ? [identity.commit] : [];
-		}),
-	);
-	return commits.size === 1 ? [...commits][0] : undefined;
+/** The one commit a run's reports name as tested; or why not, a report naming another run among the reasons. */
+export function testedCommitOf(
+	reports: readonly unknown[],
+	run: string,
+): { readonly commit: string } | { readonly problem: string } {
+	const identities = reports.flatMap((r) => {
+		const identity = (r as { identity?: { commit?: unknown; run?: unknown } } | null)?.identity;
+		return identity ? [identity] : [];
+	});
+	const foreign = identities.find((i) => i.run !== run);
+	if (foreign) return { problem: `a report of its names run ${String(foreign.run)}, not this one` };
+	const commits = new Set(identities.map((i) => i.commit));
+	const [commit] = commits;
+	if (commits.size !== 1 || typeof commit !== "string") {
+		return {
+			problem: `its reports name ${commits.size === 0 ? "no" : "more than one"} commit tested`,
+		};
+	}
+	return { commit };
 }
 
 /** The jobs CI runs on a release branch, and must pass there. */

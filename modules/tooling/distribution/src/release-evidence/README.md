@@ -18,11 +18,14 @@ Internal module of `distribution`: the evidence a release keeps, from the CI run
 ## Invariants
 - The tag names its version as `v<version>`; its commit is a merge of two parents, the first on main and the second the release branch's head, whose tree is the tag's; and its CI workflow restores no cache in a push to `release/<version>`. Any other tag stops the release. That the tag's tree is what was reviewed is no fact a tree holds: who may create a release tag is the boundary.
 - A candidate is a run GitHub states is of `.github/workflows/ci.yml`, for a `push`, at the release branch's head, on the branch `release/<version>` as written (never normalized), in this repository from this repository, and successful in its latest attempt. Candidates are examined in turn, the newest first: the first that will do is taken and no older one is examined; one that cannot be examined (an archive or a file that fails) is told and the next is examined.
-- A run's reports must name, as the one commit tested and as that run's, the commit GitHub ran it on: a report is never taken for what GitHub states.
+- A run's reports must name, as the one commit tested, the commit GitHub ran it on: a report is never taken for what GitHub states.
 - A run is taken only where its `conformance`, `release-check` and `compliance` jobs passed in its latest attempt.
 - Of a run's artifacts, each job's evidence is taken from its newest attempt (the number CI ends the name with) and the compliance table is the newest; only those taken are held to be there and unexpired, an older attempt's expiry stopping nothing.
 - Over the tag's tree, the evidence taken is read again by the release's compliance (`spec-checklist`'s `compliance --release`, as that run and the commit it tested), which must let the release go on: an artifact gone since CI passed leaves an expected run unreported, and stops it.
 - Fetching imports node's own modules alone and decides nothing; an answer it cannot have stops it, never read as no runs. Judging refuses to run holding a credential, and reads only what fetching brought and the checkout.
+- What fetching writes can be rewritten by any later step of the job, so its integrity rests on the job running only the tag's tree and its locked dependencies: the same boundary the release's other jobs rest on.
+- An artifact's archive is read from its directory before it is unpacked: a link, or a name that would land outside its directory, refuses the run; one unpacked anyway refuses it too.
+- Every report naming a run must name this one: a report of another run beside a full set refuses it.
 - The release workflow's evidence job is held, by a test reading it, to read permissions alone (contents, actions), the only job reading runs, with no credential kept in its checkout, the token given to fetching alone, before anything is installed, no install script run, judging after, an upload a re-run may write over, and publish needing it.
 - Every stop names the run, what is missing (no run, no release tag, compliance not passed, an artifact missing or expired, reports not the run's) and what to do.
 

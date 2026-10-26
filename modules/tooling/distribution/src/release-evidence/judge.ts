@@ -8,17 +8,18 @@
 import { spawnSync } from "node:child_process";
 import {
 	cpSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
 	rmSync,
-	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { cacheProblems } from "../workflow-caches/caches.ts";
+import { archiveProblems, entriesOf } from "./archive.ts";
 import {
 	type ArtifactSeen,
 	artifactsOf,
@@ -102,7 +103,9 @@ const work = mkdtempSync(join(tmpdir(), "release-evidence-"));
 const walk = (dir: string): string[] =>
 	readdirSync(dir).flatMap((entry) => {
 		const path = join(dir, entry);
-		return statSync(path).isDirectory() ? walk(path) : [path];
+		const kind = lstatSync(path);
+		if (kind.isSymbolicLink()) throw new Error(`${path}: a link was unpacked`);
+		return kind.isDirectory() ? walk(path) : [path];
 	});
 
 /**
@@ -153,13 +156,13 @@ function examined(run: RunSeen): Examined {
 	if ("problem" in chosen) return { run, problem: chosen.problem };
 	const dir = join(work, String(run.id));
 	for (const a of chosen.take) {
-		ran("unzip", [
-			"-q",
-			"-o",
-			join(fetched as string, "zips", `${a.id}.zip`),
-			"-d",
-			join(dir, a.name),
-		]);
+		const zip = join(fetched as string, "zips", `${a.id}.zip`);
+		const read = entriesOf(readFileSync(zip));
+		const problems = "problem" in read ? [read.problem] : archiveProblems(read.entries);
+		if (problems.length > 0)
+			return { run, problem: `its artifact ${a.name}: ${problems.join(", ")}` };
+		mkdirSync(join(dir, a.name), { recursive: true });
+		ran("unzip", ["-q", "-o", zip, "-d", join(dir, a.name)]);
 	}
 	const reports = walk(dir)
 		.filter((f) => f.endsWith(".json"))
@@ -171,12 +174,16 @@ function examined(run: RunSeen): Examined {
 			}
 		});
 	const tested = testedCommitOf(reports, String(run.id));
-	if (tested === undefined) return { run, problem: "its reports name no one commit tested" };
+	if ("problem" in tested) return { run, problem: tested.problem };
 	return {
 		run,
-		tested: { commit: tested },
+		tested,
 		jobs: Object.fromEntries(of.jobs.map((j) => [j.name, j.conclusion])),
-		recomputed: recomputed(run, tested, dir),
+		// Read again only for the commit GitHub ran it on: another is refused before.
+		recomputed:
+			tested.commit === tag.head
+				? recomputed(run, tested.commit, dir)
+				: { releasable: false, told: "not read: its reports name another commit" },
 		artifacts: chosen.take,
 	};
 }
