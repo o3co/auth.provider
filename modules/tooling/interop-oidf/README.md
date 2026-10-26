@@ -16,7 +16,7 @@
 - `suite-pin.json`: the suite's release tag, the commit the tag must name, and the Python packages its scripts run on, each at one version.
 - `plans/op.json`: the plans' configuration, which the harness fills at run time (origin, alias, secrets, user).
 - `expected/<plan>.failures.json` and `expected/<plan>.skips.json`: the suite's expected entries, each with its class.
-- `OIDF_ARTIFACTS_DIR`: where the runs keep their records, each plan in a directory of its own under it (the runner's output, the export, each suite test's result and log, every container's log, what the shim added); a directory of its own otherwise, named in a failure.
+- `OIDF_ARTIFACTS_DIR`: where the runs keep their records, each plan in a directory of its own under it (the runner's output, the export, each suite test's result and log, every container's log, what the shim added); where none is named, the plan script makes one and names it (a plan run any other way, a directory of its own, named in a failure).
 
 ## Invariants
 - The pattern is `simple-web`, set by the package's vitest configuration; a run on any other refuses to start.

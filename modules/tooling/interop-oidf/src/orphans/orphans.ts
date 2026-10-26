@@ -20,7 +20,8 @@ const alive = (pid: number) => {
 
 /**
  * Takes down the suites whose owner no longer runs, as a run killed before its stop leaves them, on
- * the suite's fixed ports: each container's log kept in `logs` where given, then its containers,
+ * the suite's fixed ports: each container's log, its stdout and its stderr, kept in `logs` where
+ * given and where it can be made, then its containers,
  * their volumes and their networks removed. Answers the projects taken down; any step that fails is
  * told after every one was tried.
  */
@@ -48,18 +49,32 @@ export async function reclaimOrphans(
 		orphans.set(project, [...(orphans.get(project) ?? []), { id, name }]);
 	}
 	const problems: unknown[] = [];
-	const tried = async (step: () => Promise<unknown>) => {
-		await step().catch((error: unknown) => problems.push(error));
-	};
-	if (logs !== undefined && orphans.size > 0) await mkdir(logs, { recursive: true });
+	/** Runs `step`, telling whether it went; a failure is kept for after every step was tried. */
+	const tried = (step: () => Promise<unknown>) =>
+		step().then(
+			() => true,
+			(error: unknown) => {
+				problems.push(error);
+				return false;
+			},
+		);
+	// A directory that cannot be made keeps no log, and the suites still go: they hold the fixed ports.
+	const kept =
+		logs !== undefined && orphans.size > 0 && (await tried(() => mkdir(logs, { recursive: true })))
+			? logs
+			: undefined;
 	for (const [project, containers] of orphans) {
 		for (const c of containers) {
-			if (logs === undefined) continue;
+			if (kept === undefined) continue;
 			await tried(async () => {
-				const { stdout: log } = await command("docker", ["logs", c.id], {
+				const { stdout, stderr = "" } = await command("docker", ["logs", c.id], {
 					timeoutMs: budgetMs.logs,
 				});
-				await writeFile(join(logs, `${project}-${c.name}.log`), log);
+				// A container without a tty writes its stderr to the command's.
+				await writeFile(
+					join(kept, `${project}-${c.name}.log`),
+					stderr === "" ? stdout : `${stdout}\n--- stderr ---\n${stderr}`,
+				);
 			});
 		}
 		await tried(() =>
