@@ -184,7 +184,7 @@ flowchart LR
 | `@mod/token-denylist` | feature | `@mod/kernel` |
 | `@mod/token-endpoint` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/rate-limit`, `@mod/request-source`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/token-exchange` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/tokens` |
-| `@mod/tokens` | feature | `@mod/added-claims`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/sender-binding`, `@mod/token-denylist` |
+| `@mod/tokens` | feature | `@mod/added-claims`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/sender-binding`, `@mod/token-denylist` |
 | `@mod/userinfo` | feature | `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/oidc`, `@mod/sender-binding`, `@mod/session`, `@mod/session-tokens`, `@mod/tokens` |
 | `@mod/verified-email` | feature | `@mod/client-credentials`, `@mod/kernel`, `@mod/subject-attributes`, `@mod/tokens`, `@mod/users` |
 
