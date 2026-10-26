@@ -25,6 +25,8 @@ export interface Codes {
 	issue(facts: CodeFacts): Promise<string>;
 	/** The name a code's redemption goes by, made from the code alone; never the code itself. */
 	redemptionOf(code: string): string;
+	/** How long a code lives once issued, as `code-lifetime` says. */
+	lifetimeMs(): number;
 	idTokenScope(): string | undefined;
 }
 
