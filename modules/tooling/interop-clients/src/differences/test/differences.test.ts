@@ -65,12 +65,13 @@ describe("the known differences", () => {
 		expect(differencesOf([third], "nimbus").unmet()).toEqual([]);
 	});
 
+	// A spec of the fixture's own, so no ID here reads as a real item's.
 	it("take an optional behaviour by its spec's ledger, refusing one whose check names an item the section binds", () => {
 		const ledgers = new Map([
 			[
-				"rfc7523",
+				"example-spec",
 				{
-					source: "https://example.org/rfc7523.txt",
+					source: "https://example.org/example-spec.txt",
 					version: "1",
 					sha256: "0".repeat(64),
 					rows: [
@@ -78,7 +79,7 @@ describe("the known differences", () => {
 							section: "3",
 							ordinal: 1,
 							keyword: "MUST" as const,
-							to: { kind: "items" as const, ids: ["rfc7523-3-i"] },
+							to: { kind: "items" as const, ids: ["example-spec-3-i"] },
 						},
 					],
 				},
@@ -89,10 +90,10 @@ describe("the known differences", () => {
 			flow: "client-credentials",
 			check: "gets a token, its assertion naming the token endpoint",
 			class: "optional",
-			spec: "rfc7523",
+			spec: "example-spec",
 			section: "3",
 			reason:
-				"the provider takes no token endpoint as an assertion's audience, which RFC 7523 §3 leaves to the client",
+				"the provider takes no token endpoint as an assertion's audience, which the spec's section 3 leaves to the client",
 		};
 		const withLedgers = { ...known, ledgers };
 		expect(
@@ -100,10 +101,10 @@ describe("the known differences", () => {
 		).toEqual([optional]);
 		const bound = {
 			...optional,
-			check: "gets a token, its assertion naming the token endpoint [rfc7523-3-i]",
+			check: "gets a token, its assertion naming the token endpoint [example-spec-3-i]",
 		};
 		expect(() =>
 			differencesIn(JSON.stringify({ differences: [bound] }), withLedgers, registry),
-		).toThrow("its test names rfc7523-3-i, which section 3's MUST names");
+		).toThrow("its test names example-spec-3-i, which section 3's MUST names");
 	});
 });
