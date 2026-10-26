@@ -438,6 +438,23 @@ export function tokensContract(
 			expect(issued.expiresIn).toBe(120);
 		});
 
+		it("refuses, as its own rule, a token its cap leaves less than a second, and issues one a second", async () => {
+			const place = await open({ revocable: true });
+			for (const ahead of [-10_000, 0, 999]) {
+				expect(
+					await place.tokens.issue({ grant, grantType: "test" }, { notAfter: place.now() + ahead }),
+					String(ahead),
+				).toEqual({
+					kind: "refused",
+					policy: "tokens",
+					reason: "no_lifetime_left",
+					description: "expired",
+				});
+			}
+			const issued = await issueFor(place.tokens, grant, { notAfter: place.now() + 1000 });
+			expect(issued.expiresIn).toBe(1);
+		});
+
 		it("revokes a token, and only that one, directly or by its reference", async () => {
 			const place = await open({ revocable: true });
 			expect(place.tokens.revocable()).toBe(true);
@@ -599,22 +616,27 @@ export function tokensStandIn(
 					const id = tokenId(c.random);
 					const token = `stand-in.${id}`;
 					const binding = limits?.binding;
-					issued.set(token, {
-						grant: keptGrant(grant, iat),
-						id,
-						issuedAt: iat * 1000,
-						expiresAt: exp * 1000,
-						...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
-					});
 					return {
-						token,
-						id,
-						expiresAt: exp * 1000,
-						expiresIn: exp - iat,
-						tokenType: binding?.tokenType ?? "Bearer",
-						...(grant.claims
-							? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) }
-							: {}),
+						access: {
+							token,
+							id,
+							expiresAt: exp * 1000,
+							expiresIn: exp - iat,
+							tokenType: binding?.tokenType ?? "Bearer",
+							...(grant.claims
+								? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) }
+								: {}),
+						},
+						// Kept only once handed out, so a token refused leaves nothing.
+						keep: () => {
+							issued.set(token, {
+								grant: keptGrant(grant, iat),
+								id,
+								issuedAt: iat * 1000,
+								expiresAt: exp * 1000,
+								...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
+							});
+						},
 					};
 				};
 				const stand: Tokens = {

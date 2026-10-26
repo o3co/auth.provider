@@ -354,10 +354,14 @@ it("writes one audience as a string and more as a list, an empty scope not at al
 	expect(claimsOf(two.token)).toMatchObject({ aud: ["a", "b"], scope: "read" });
 });
 
-it("issues a token already at its end when the cap has passed, answering none left", async () => {
+it("refuses a token whose cap has passed, handing none out", async () => {
 	const t = await boot({ revocation: "unsupported" });
-	const issued = await issueFor(t, grant, { notAfter: now - 10_000 });
-	expect([issued.expiresIn, issued.expiresAt]).toEqual([0, Math.floor(now / 1000) * 1000]);
+	expect(await t.issue({ grant, grantType: "test" }, { notAfter: now - 10_000 })).toEqual({
+		kind: "refused",
+		policy: "tokens",
+		reason: "no_lifetime_left",
+		description: "expired",
+	});
 });
 
 it("refuses a token another issuer stamped, and one bound by two members", async () => {
@@ -455,13 +459,19 @@ describe("the lifetime answered, after the signing", () => {
 		expect(claimsOf(late.token)).toMatchObject({ iat: start / 1000, exp: start / 1000 + 60 });
 	});
 
-	it("answers none left for a token its signing outlasts, and what is left, rounded up, for one it does not", async () => {
+	it("refuses a token its signing leaves less than a second, and answers what is left, rounded up, for one it does not", async () => {
 		const t = await slow();
 		const capped = { notAfter: start + 2000 };
+		for (const ms of [3000, 2000, 1500]) {
+			now = start;
+			signing.ms = ms;
+			expect(await t.issue({ grant, grantType: "test" }, capped), String(ms)).toMatchObject({
+				kind: "refused",
+				policy: "tokens",
+				reason: "no_lifetime_left",
+			});
+		}
 		for (const [ms, left] of [
-			[3000, 0],
-			[2000, 0],
-			[1500, 1],
 			[1000, 1],
 			[0, 2],
 		] as const) {

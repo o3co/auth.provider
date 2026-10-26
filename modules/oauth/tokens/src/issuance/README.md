@@ -16,8 +16,9 @@ Internal module of `tokens`: the judgment `admits` and `issue` share, and the is
 
 ## Invariants
 - The order policies are asked in: tokens' own rule first (an authentication time over 300 s ahead of the clock), then the issuance policies in name order, each asked the grant as its caller verified it; any answer but allowed refuses. All of them answer within `issuance-timeout` together: past it the issuance is unavailable, and the signal each policy is given aborts.
-- `admits` makes the same judgment without issuing; a policy that cannot tell is unavailable. `issue` takes one frozen copy of the request and its limits before anything waits: every policy reads it and the issuing signs it, so neither a policy nor a caller changing its own objects meanwhile changes what is signed.
-- A token's expires-in is what is left once it is signed, rounded up to whole seconds: none where its end has come, its cap passed or its signing slow. Whether to hand out such a token is the issuing side's.
+- `admits` makes the same judgment without issuing, but for the lifetime, which only `issue`'s limits and signing fix; a policy that cannot tell is unavailable. `issue` takes one frozen copy of the request and its limits before anything waits: every policy reads it and the issuing signs it, so neither a policy nor a caller changing its own objects meanwhile changes what is signed.
+- A token with less than a second left once signed, its end come, its cap passed or its signing slow, is refused as tokens' own rule: policy `tokens`, reason `no_lifetime_left`, the client's word `expired`, which `token-endpoint` answers `invalid_grant` whatever the grant. Any other answers its expires-in: what is left once signed, rounded up to whole seconds, at least 1.
+- What an issuing keeps of a token (`IssueAccess`' `keep`) is kept only once the token is handed out, so one refused leaves no trace. tokens keeps nothing: a token is signed and handed back, no store, ledger or record written. The stand-in keeps what it issued.
 
 ## Depends on
 - `added-claims` (the claims a grant adds, checked), `kernel` (freezing, unavailable), and the package's contract and limits.

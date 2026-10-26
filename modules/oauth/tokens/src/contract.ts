@@ -35,6 +35,7 @@ export interface IssuedAccess {
 	readonly id: string;
 	/** Epoch ms. */
 	readonly expiresAt: number;
+	/** Whole seconds left once signed, rounded up: at least 1, as `issue` refuses a token with less. */
 	readonly expiresIn: number;
 	readonly tokenType: string;
 	/** The names of the claims the grant added, in name order; none where it added none. */
@@ -103,7 +104,10 @@ export interface IssuanceRefused {
 export type Issued = { readonly kind: "issued"; readonly access: IssuedAccess } | IssuanceRefused;
 export type Admitted = { readonly kind: "allowed" } | IssuanceRefused;
 
-/** `notAfter` (epoch ms) caps the expiry; `lifetimeSeconds` (1–86400) replaces the section's lifetime. */
+/**
+ * `notAfter` (epoch ms) caps the expiry, a token it leaves less than a second refused by `issue`;
+ * `lifetimeSeconds` (1–86400) replaces the section's lifetime.
+ */
 export interface IssueLimits {
 	readonly notAfter?: number;
 	readonly binding?: Binding;
@@ -119,9 +123,17 @@ export interface Tokens extends TokenValidity<AccessCheck> {
 	 * check made at build time stays true.
 	 */
 	accessTokenLifetimeSeconds(): number;
-	/** Whether an access token may be issued for the request; the same judgment `issue` makes. */
+	/**
+	 * Whether an access token may be issued for the request; the same judgment `issue` makes, but for
+	 * the lifetime, which only `issue`'s limits and signing fix.
+	 */
 	admits(request: IssuanceRequest): Promise<Admitted>;
-	/** Issues once every policy, its own first, allows it; throws Unavailable when one cannot tell. */
+	/**
+	 * Issues once every policy, its own first, allows it; throws Unavailable when one cannot tell.
+	 * Refuses, as its own rule, a token with less than a second left once signed, its cap passed or
+	 * its signing slow: policy `tokens`, reason `no_lifetime_left`, the client's word `expired`. Such
+	 * a token is handed to no one, and nothing of it is kept.
+	 */
 	issue(request: IssuanceRequest, limits?: IssueLimits): Promise<Issued>;
 	verifyAccess(token: string): Promise<AccessCheck>;
 	revokeReferenced(reference: string): Promise<Revocation>;

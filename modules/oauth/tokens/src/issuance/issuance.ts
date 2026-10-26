@@ -64,11 +64,22 @@ export function judging(
 	};
 }
 
-/** The issuing `issue` does once the judgment allows it, without asking the policies itself. */
+/**
+ * The issuing `issue` does once the judgment allows it, without asking the policies itself: the
+ * token signed, and what keeps it, done only once it is handed out.
+ */
 export type IssueAccess = (
 	grant: IssuanceRequest["grant"],
 	limits?: IssueLimits,
-) => Promise<IssuedAccess>;
+) => Promise<{ readonly access: IssuedAccess; readonly keep?: () => void }>;
+
+/** tokens' own refusal of a token with less than a second left once signed. */
+const noLifetimeLeft = {
+	kind: "refused",
+	policy: "tokens",
+	reason: "no_lifetime_left",
+	description: "expired",
+} as const;
 
 /**
  * The request with the claims its grant adds checked and copied, before anything else reads them;
@@ -104,14 +115,14 @@ export function issuing(
 			const taken = deepFreeze(structuredClone({ request: checkedRequest(request), limits }));
 			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
-			const access = await issueAccess(taken.request.grant, taken.limits);
-			// What is left once signed, rounded up, so a token signed at once answers its whole lifetime;
-			// none where its end has come, its cap passed or its signing slow.
+			const { access, keep } = await issueAccess(taken.request.grant, taken.limits);
+			// Less than a second left once signed, its end come, its cap passed or its signing slow: handed
+			// to no one, and nothing of it kept.
 			const leftMs = access.expiresAt - now();
-			return {
-				kind: "issued",
-				access: { ...access, expiresIn: Math.max(0, Math.ceil(leftMs / 1000)) },
-			};
+			if (leftMs < 1000) return noLifetimeLeft;
+			keep?.();
+			// Rounded up, so a token signed at once answers its whole lifetime.
+			return { kind: "issued", access: { ...access, expiresIn: Math.ceil(leftMs / 1000) } };
 		},
 	};
 }
