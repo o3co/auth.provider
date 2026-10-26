@@ -14,6 +14,7 @@ reportRun("a plan as the harness reports it", {
 		{ testModule: "oidcc-prompt-login", variant: {}, log: [], outcome: { kind: "review" } },
 	],
 	unused: [],
+	strayNotRun: [],
 	driver: { name: "the suite's own runner", code: 0, log: "runner.log" },
 	artifacts: "/records/basic",
 });

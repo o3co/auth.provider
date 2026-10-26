@@ -320,6 +320,35 @@ describe("itemStatuses", () => {
 			excused: { adaptation: 1 },
 		});
 	});
+
+	it("counts a test excused as optional apart, never as passed nor failed, its item left unverified", () => {
+		const optional: EvidenceReport = {
+			identity: identity("unit"),
+			errors: 0,
+			tests: [
+				{
+					file: "modules/x/x/test/x.test.ts",
+					names: ["a [rfc9999-4-a]"],
+					state: "skipped",
+					note: "excused: optional",
+				},
+			],
+		};
+		const [a] = itemStatuses(
+			items.slice(0, 1),
+			tests,
+			[optional],
+			{ ...expected, entries: ["unit"] },
+			pkgDirs,
+		);
+		expect(a).toMatchObject({
+			id: "rfc9999-4-a",
+			status: "unverified",
+			passed: 0,
+			failed: 0,
+			excused: { optional: 1 },
+		});
+	});
 });
 
 describe("the runs a package prints", () => {

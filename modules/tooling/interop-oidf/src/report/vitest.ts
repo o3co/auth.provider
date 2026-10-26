@@ -26,6 +26,9 @@ export function reportRun(title: string, run: PlanRun): void {
 		it("uses every expected entry", () => {
 			expect(run.unused.map((e) => `${e["test-name"]} ${e.condition ?? "(skip)"}`)).toEqual([]);
 		});
+		it("declares not run only tests the plan has", () => {
+			expect(run.strayNotRun.map((n) => titleOf(n.testModule, n.variant))).toEqual([]);
+		});
 		it(`is passed by ${run.driver.name}`, () => {
 			expect(run.driver.code, `see ${run.artifacts}/${run.driver.log}`).toBe(0);
 		});
