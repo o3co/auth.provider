@@ -230,21 +230,24 @@ it("listens and exposes the port where http is composed, and checks liveness whe
 	expect(await read(live, "README.md")).toContain("Its health check asks `/_healthcheck`");
 });
 
-it("installs the dependencies in a stage of their own, with pnpm through a pinned corepack, and starts under an init", async () => {
+it("installs the dependencies in a stage of their own, with pnpm through a pinned corepack the image leaves behind", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
 	const docker = await read(target, "Dockerfile");
 	const image = docker.match(/^FROM (\S+) AS base$/m)?.[1];
+	// The image the app runs in starts from Node's own, not from the stage holding the tools that install.
 	expect(docker.match(/^FROM .*$/gm)).toEqual([
 		`FROM ${image} AS base`,
 		"FROM base AS deps",
-		"FROM base AS runtime",
+		`FROM ${image} AS runtime`,
 	]);
-	expect(docker).toMatch(
-		/^RUN apk add --no-cache tini && npm install --global corepack@\d+\.\d+\.\d+ && corepack enable$/m,
-	);
-	expect(docker).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
-	expect(docker).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
+	expect(docker).toMatch(/^RUN npm install --global corepack@\d+\.\d+\.\d+ && corepack enable$/m);
+	const runtime = docker.slice(docker.indexOf(`FROM ${image} AS runtime`));
+	// An init as process 1 passes signals on and reaps what node leaves behind; no corepack, nor pnpm.
+	expect(runtime).toMatch(/^RUN apk add --no-cache tini$/m);
+	expect(runtime).not.toMatch(/corepack|pnpm/);
+	expect(runtime).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
+	expect(runtime).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
 });
 
 it("builds on Node 24's latest, so a build takes its security fixes", async () => {

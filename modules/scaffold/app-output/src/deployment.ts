@@ -255,15 +255,18 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["nod
 	return `# syntax=docker/dockerfile:1
 # Node 24's latest, so a build takes its security fixes; corepack pinned; pnpm is the manifest's packageManager.
 FROM ${nodeImage} AS base
-# An init as process 1 passes signals on and reaps what node leaves behind.
-RUN apk add --no-cache tini && npm install --global corepack@${corepack} && corepack enable
+RUN npm install --global corepack@${corepack} && corepack enable
 WORKDIR /app
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yam[l] ./
 ${installed(beside)}
 
-FROM base AS runtime
+# The image the app runs in starts from Node's own: the tools that install stay in the stages before.
+FROM ${nodeImage} AS runtime
+# An init as process 1 passes signals on and reaps what node leaves behind.
+RUN apk add --no-cache tini
+WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
