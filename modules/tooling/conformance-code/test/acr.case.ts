@@ -148,7 +148,7 @@ describe("acr: raising a session with a second factor", () => {
 		return location ? new URL(location, issuer) : undefined;
 	};
 
-	it("answers interaction_required without asking, sends a short session once to raise it, and offers the second-factor acr", async () => {
+	it("answers interaction_required without asking, sends a short session once to raise it, and offers the second-factor acr [oidc-core-3.1.2.1-k] [oidc-core-3.1.2.3-c] [oidc-core-3.1.2.3-d]", async () => {
 		const b = browser(() => s.at.base);
 		expect((await b.login("bob")).status).toBe(200);
 		const quiet = await ask(b, request({ acr_values: "urn:t:otp", prompt: "none" }));
