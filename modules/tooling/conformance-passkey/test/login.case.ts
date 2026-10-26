@@ -176,7 +176,7 @@ describe("H. passkey login at the token endpoint", () => {
 	);
 	const c = calls(() => s.at.base);
 
-	it("gives the client its tokens for a registered passkey, with a passkey's amr; the refresh token rotates and the client can revoke [rfc6749-5.1-a] [rfc7009-2-b] [rfc7662-2.2-a] [rfc7662-2.2-b] [rfc7662-2.2-c] [rfc7662-4-d]", async () => {
+	it("gives the client its tokens for a registered passkey, with a passkey's amr and login time that a refresh keeps, and lets the client revoke [rfc6749-5.1-a] [rfc7009-2-b] [rfc7662-2.2-a] [rfc7662-2.2-b] [rfc7662-2.2-c] [rfc7662-4-d]", async () => {
 		const { authenticator } = await c.register("alice");
 		const first = await c.login("app", await c.assertion(authenticator), { scope: "read write" });
 		expect(first.status).toBe(200);
