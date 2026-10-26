@@ -1,6 +1,6 @@
 # OpenID conformance suite: the pages a person reviewed
 
-The OpenID Foundation's conformance suite leaves twelve tests for a person to review. This page records, for each release, what a person saw on each page and whether it showed what the test expects. The review procedure, `docs/oidf-review-procedure.md` in the repository, says how to get the pages and how to judge them.
+The OpenID Foundation's conformance suite leaves some tests for a person to review; the review procedure lists them by plan. This page records, for each release, what a person saw on each page and whether it showed what the test expects. The review procedure, `docs/oidf-review-procedure.md` in the repository, says how to get the pages and how to judge them.
 
 Unlike the other pages here, this page is written by hand; the compliance report does not generate it.
 

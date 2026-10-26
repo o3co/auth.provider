@@ -6,7 +6,14 @@ This page says how to look at those pages and how to record what you saw. Record
 
 ## When to review
 
-Review the pages once for each release, on a run of the release's commit. Twelve tests ask for a review: four in the Basic plan and eight in the RP-Initiated Logout plan.
+Review the pages once for each release, on a run of the release's commit. The plans that ask for a review, and how many tests each asks it for:
+
+| Plan | Tests asking for a review |
+|---|---|
+| `basic` | 4 |
+| `rp-initiated-logout` | 8 |
+
+The other plans ask for none. The relying party plan, `rp`, asks for none either: the suite ends each of its tests on the requests the provider makes, or does not make, as a relying party. Its records' `review/` holds the provider's own answer to each test's callback, kept for looking into a failed run; there is nothing there to judge.
 
 ## Get the pages
 

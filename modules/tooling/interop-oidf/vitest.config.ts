@@ -6,6 +6,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		include: ["runs/*.test.ts"],
+		// The relying party plan meets another pattern: vitest.rp.config.ts runs it.
+		exclude: ["runs/rp.test.ts"],
 		reporters: ["default", evidenceReporter()],
 		fileParallelism: false,
 		testTimeout: 30_000,

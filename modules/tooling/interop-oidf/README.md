@@ -1,35 +1,37 @@
 # interop-oidf
 
 ## Responsibilities
-- Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
+- Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front; and its relying party plan, the provider's federation login as the suite's OP's client, on the `sso-federated` pattern's app.
 - Reports each suite test as a vitest test, its result excused only by an expected entry the checklist lets it take.
 - Its internal modules for the suite: `suite` starts and stops it, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time.
-- Its internal modules for the provider: `scene` is the app's scene, `login` is the login page, `pkce` gives PKCE to requests that carry none.
+- Its internal modules for the provider: `scene` is the app's scene, `login` is the login page, `pkce` gives PKCE to requests that carry none; `rp` is the app as a relying party, the harness's browser and its checks of a sign-in.
 - Its internal modules for the results: `expected` judges the expected entries, `results` reads each test's outcome, `review` reads the pages the suite left for a person's review, `report` reports a plan's run as tests.
-- Its internal modules for a run: `lifecycle` holds what every plan run has (its directories, its deadline, its stops), `harness` runs a plan.
+- Its internal modules for a run: `lifecycle` holds what every plan run has (its directories, its deadline, its stops), `harness` runs an OP plan, `drive` drives a relying party plan's tests over the suite's API, `client-plan` runs a relying party plan.
 
 ## Not here
 - The front itself (`conformance-front`), the app's start (`conformance`), and what an exception may be (`spec-checklist`'s `exceptionProblems`).
-- A certification: the shim changes the requests, so a result is "OIDF (PKCE adaptation)", never a certified pass.
+- A certification: the shim changes the requests, so a result is "OIDF (PKCE adaptation)", never a certified pass. The relying party plan, whose requests nothing changes, reports as "OIDF <its plan>", run by the harness, not the suite's runner, so no certified pass either.
 
 ## Offers
 - `pnpm --filter @mod/interop-oidf run plan [<plan>...]`: runs the plans named, every plan where none is, each in a vitest of its own named by its evidence run (`SPEC_EVIDENCE_RUN`) (Docker, `git`, `openssl` and Python 3.9 or later on the path).
 - `plans/logout.json`: the logout plans' configuration, with the browser's steps through the provider's logout and the suite's overrides for the logouts the provider answers itself.
 - `run evidence-runs`: the runs the package's evidence comes from, as JSON: `{ entry: "@mod/interop-oidf#<plan>", kind: "oidf-plan", matrix: "<plan>", gate: true }`, one per plan: a gate run, so a release stops on each of its tests that failed, whatever items it names.
 - `suite-pin.json`: the suite's release tag, the commit the tag must name, and the Python packages its scripts run on, each at one version.
+- `clientPlans` in `src/plans.ts`: the relying party plan, its variant, and each of its tests declared run or not run; `runs/rp.test.ts`, the app's side of each test run beside the suite's word, under the checklist items they show together.
 - `plans/op.json`: the plans' configuration, which the harness fills at run time (origin, alias, secrets, user).
 - `expected/<plan>.failures.json` and `expected/<plan>.skips.json`: the suite's expected entries, each with its class.
 - `OIDF_ARTIFACTS_DIR`: where the runs keep their records, each plan in a directory of its own under it (the runner's output, the export, each suite test's result and log, every container's log, what the shim added, and in `review/` the pages the suite left for a person's review with their `index.json`); where none is named, the plan script makes one and names it (a plan run any other way, a directory of its own, named in a failure).
 
 ## Invariants
-- The pattern is `simple-web`, set by the package's vitest configuration; a run on any other refuses to start.
+- The pattern is `simple-web`, set by the package's vitest configuration, and `sso-federated` for the relying party plan, set by `vitest.rp.config.ts`; a run on any other refuses to start.
 - An expected entry names its test, variant and configuration file, and a failure's block and condition, without a wildcard; a test's entries share one class; each holds as the checklist judges it. Any that does not refuses the run before the suite starts.
 - A failure or warning is excused only by an entry matching it exactly; a suite test excused is skipped as `excused: <class>`, one the suite leaves for a person's review as `review: …`; neither is passed.
-- A suite test that never ran or did not finish fails; so does an entry no test used, and a plan the suite's runner fails.
+- A suite test that never ran or did not finish fails, but a relying party test its plan declares not run and a skip entry excuses; so does an entry no test used, and a plan the suite's runner (or the harness, for the relying party plan) fails.
+- A relying party test's items pass only where the suite passed it and the app's side holds too: a refused test's login never opened, a passed one opened for the user the suite's subject is linked to.
 - The suite's tag must name the pinned commit. Everything a run starts is stopped and its directories removed, however it ends.
 - The plans run one at a time: the suite takes fixed ports. Its containers carry the process that owns them; a suite whose owner is gone (a run cancelled or killed before its stops) is taken down, its logs kept, at the next start and when the plan script's run of a plan ends, which then fails.
 - A logout plan's clients register the suite's post-logout redirect and that plan's own channel alone (the RP-initiated plan serves neither channel). The back channel reaches the suite through `conformance-tunnel`, set as the app's `outbound.proxy`: the suite's host resolves to loopback, which outbound never reaches over https directly. The app trusts the suite's certificate, the harness's own, by `trustedCertificates`, its checks of names unchanged.
 - The app is told one sender, a documentation address, for every request the suite makes: on a desktop the suite reaches the front from loopback, the app's trusted proxy.
 
 ## Depends on
-- `conformance` (the pattern's app), `conformance-code` (the code flow's scene), `conformance-front` (the https front), `conformance-tunnel` (the app's way to the suite's back channel), `spec-checklist` (the checklist and the exception rule), `vitest`.
+- `conformance` (the pattern's app), `conformance-code` (the code flow's scene), `conformance-front` (the https front), `conformance-federation` (the relying party's federation scene), `conformance-oauth` (its probe client), `conformance-tunnel` (the app's way to the suite), `spec-checklist` (the checklist and the exception rule), `vitest`.

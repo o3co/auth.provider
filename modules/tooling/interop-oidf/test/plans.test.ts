@@ -1,6 +1,6 @@
 import { rmdirSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { evidenceRuns, planCommands, plans, recordsOf } from "../src/plans.ts";
+import { clientPlans, evidenceRuns, planCommands, plans, recordsOf } from "../src/plans.ts";
 
 describe("the plans the package runs, one evidence run each", () => {
 	it("starts one vitest for each plan named, on that plan's file, naming its run", () => {
@@ -17,8 +17,13 @@ describe("the plans the package runs, one evidence run each", () => {
 		]);
 	});
 
-	it("runs every plan where none is named", () => {
-		expect(planCommands([]).map((c) => c.run)).toEqual(Object.keys(plans));
+	it("runs every plan where none is named, the relying party's on its own pattern's configuration", () => {
+		const all = [...Object.keys(plans), ...Object.keys(clientPlans)];
+		expect(planCommands([]).map((c) => c.run)).toEqual(all);
+		expect(planCommands(["basic", "rp"]).map((c) => c.args.join(" "))).toEqual([
+			"exec vitest run --config vitest.config.ts runs/basic.test.ts",
+			"exec vitest run --config vitest.rp.config.ts runs/rp.test.ts",
+		]);
 	});
 
 	it("refuses a plan it does not hold, naming the ones it does", () => {
@@ -27,7 +32,7 @@ describe("the plans the package runs, one evidence run each", () => {
 
 	it("declares each plan a gate run, whose failed tests stop a release whatever items they name", () => {
 		expect(evidenceRuns).toEqual(
-			Object.keys(plans).map((name) => ({
+			[...Object.keys(plans), ...Object.keys(clientPlans)].map((name) => ({
 				entry: `@mod/interop-oidf#${name}`,
 				kind: "oidf-plan",
 				matrix: name,
