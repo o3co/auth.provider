@@ -943,22 +943,24 @@ describe("token-exchange: the lifetime asked", () => {
 		expect(lifetimeOf(await s.exchange("app", subject))).toBe(3600);
 	});
 
-	it("refuses an expires_in that is not a positive whole number of seconds, before the tokens", async () => {
+	it("refuses an expires_in that is not a whole number of seconds from two, before the tokens", async () => {
 		const s = await serve();
 		const subject = subjectOf((await s.issue()).token);
 		const malformed = [
 			"invalid_request",
-			"expires_in must be a positive whole number of seconds in ASCII digits",
+			"expires_in must be a whole number of seconds from 2, in ASCII digits",
 		];
-		for (const value of ["abc", "0", "-60", "1.5", "1e3", " 60", "+60", "12345678901"]) {
+		// One second, its iat cut to the second, would leave a token less than a second.
+		for (const value of ["abc", "0", "1", "-60", "1.5", "1e3", " 60", "+60", "12345678901"]) {
 			expect(said(await s.exchange("app", { ...subject, expires_in: value }))).toEqual(malformed);
 		}
 		const forged = subjectOf("forged");
 		expect(said(await s.exchange("app", { ...forged, expires_in: "0" }))).toEqual(malformed);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "2" }))).toBe(2);
 	});
 
-	it("refuses a cap that is not a whole number of seconds within a day, names no unit, or goes by its name in seconds, at boot", async () => {
-		for (const cap of ["0s", "86401s", "1500ms", "600x", 600, "600"]) {
+	it("refuses a cap that is not a whole number of seconds from two to a day, names no unit, or goes by its name in seconds, at boot", async () => {
+		for (const cap of ["0s", "1s", "86401s", "1500ms", "600x", 600, "600"]) {
 			await expect(serve({ settings: { "max-lifetime": cap } })).rejects.toThrow(BootRefused);
 		}
 		await expect(serve({ settings: { "max-lifetime-seconds": 600 } })).rejects.toThrow(BootRefused);

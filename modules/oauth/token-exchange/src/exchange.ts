@@ -48,14 +48,16 @@ const isRefusal = (value: object): value is Refusal => "kind" in value && value.
 
 /** A presented token must outlive the exchange by this much, or it is refused as expired. */
 const expiryMarginMs = 1000;
-/** A lifetime asked in `expires_in`: 1 to 10 ASCII digits, above zero. */
+/** A lifetime asked in `expires_in`: 1 to 10 ASCII digits, from 2. */
 const lifetimeShape = /^[0-9]{1,10}$/;
+/** The shortest lifetime `tokens` issues: one second, its iat cut to the second, leaves less than one. */
+const minLifetimeSeconds = 2;
 
-/** `expires_in` in seconds; none when left out or empty, NaN when malformed. */
+/** `expires_in` in seconds; none when left out or empty, NaN when malformed or under two. */
 const askedLifetime = (value: string | undefined): number | undefined => {
 	if (value === undefined || value === "") return undefined;
 	const seconds = lifetimeShape.test(value) ? Number(value) : 0;
-	return seconds > 0 ? seconds : Number.NaN;
+	return seconds >= minLifetimeSeconds ? seconds : Number.NaN;
 };
 
 const depthOf = (actor: Actor | undefined): number => (actor ? 1 + depthOf(actor.actor) : 0);
@@ -236,7 +238,7 @@ export function exchangeGrant(parts: Parts): Grant {
 			}
 			const asked = askedLifetime(param("expires_in"));
 			if (Number.isNaN(asked)) {
-				return refused("expires_in must be a positive whole number of seconds in ASCII digits");
+				return refused("expires_in must be a whole number of seconds from 2, in ASCII digits");
 			}
 			const requested = param("requested_token_type");
 			if (requested !== undefined && requested !== accessTokenType) {

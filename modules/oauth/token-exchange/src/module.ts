@@ -18,10 +18,11 @@ const section = z.strictObject({
 		.describe("The longest chain of actors an exchanged token may carry."),
 	"max-lifetime": setting
 		.duration("s")
-		.pipe(z.number().int().min(1).max(86_400))
+		// From two seconds, the shortest lifetime `tokens` issues.
+		.pipe(z.number().int().min(2).max(86_400))
 		.optional()
 		.describe(
-			"The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime.",
+			"The longest lifetime an exchange may ask for, from 2s to 1d, even past `tokens`' lifetime.",
 		),
 });
 
