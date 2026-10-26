@@ -16,7 +16,7 @@ Internal module of `http`: the security headers every answer carries, and a page
 - HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy: no-referrer` and the cross-origin ones.
 - A route's own values of them, its policy included, are replaced.
 - Only `loads` widens a page's policy.
-- A page's policy allows the frames and scripts it declares and nothing else.
+- A page's policy allows the frames and scripts it declares, and forms posted to this origin where it declares them, and nothing else; its forms post nowhere otherwise.
 - A frame a policy cannot name makes the answer `500`.
 
 ## Depends on
