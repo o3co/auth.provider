@@ -10,36 +10,41 @@ permissions:
 
 jobs:
   # Before anything is published: the evidence of the CI run that tested what this tag publishes,
-  # the release pull request's run whose tested tree is the tag's (distribution's
-  # `release:evidence`), or the release stopped with what is missing and what to do. Reading another
-  # run's artifacts takes `actions: read`, given to this job alone. The workspace is installed, as the
-  # evidence is read again by the release's compliance (spec-checklist's) before it is taken.
+  # the push of the release branch's head the tag's commit merged, of the tag's tree (distribution's
+  # `release-evidence`), or the release stopped with what is missing and what to do. Reading another
+  # run's artifacts takes `actions: read`, given to this job alone. Fetching holds the token and runs
+  # before anything is installed; judging, which installs the workspace to read the evidence again
+  # through the release's compliance (spec-checklist's), holds none.
   evidence:
     name: Evidence of the tested tree
     runs-on: ubuntu-latest
-    # `pull-requests: read` finds the pull request the tag's commit merged; `actions: read`, its runs and their artifacts.
+    # `actions: read`: the release branch's runs and their artifacts.
     permissions:
       contents: read
       actions: read
-      pull-requests: read
     # Later jobs take the artifact by this id, never by a name another job could make again.
     outputs:
       evidence: ${{ steps.kept.outputs.artifact-id }}
     steps:
-      # The token goes to the collector alone, never left in the checkout's git configuration.
+      # No credential left in the checkout's git configuration; main's history, which the tag's first
+      # parent must be on.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      # No lifecycle script runs in a job that holds the token.
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: The CI run that tested the tag's tree
+      # The token is this step's alone, and nothing installed runs beside it.
+      - name: Fetch the release branch's runs
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node modules/tooling/distribution/src/release-evidence/collect.ts "$RUNNER_TEMP/evidence"
+        run: node modules/tooling/distribution/src/release-evidence/fetch.ts "$RUNNER_TEMP/fetched"
+      # No lifecycle script runs; and no step after this one holds the token.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Judge them, holding no credential
+        run: node modules/tooling/distribution/src/release-evidence/judge.ts "$RUNNER_TEMP/fetched" "$RUNNER_TEMP/evidence"
       - name: Keep it for the publish job
         id: kept
         uses: actions/upload-artifact@v4

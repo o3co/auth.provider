@@ -6,19 +6,25 @@ import {
 	type Examined,
 	firstTaken,
 	type RunSeen,
-	releasePullOf,
+	type TagSeen,
+	tagOf,
 	testedCommitOf,
+	versionOf,
 } from "../evidence.ts";
 
 const head = "h".repeat(40);
+const repository = "o3co/auth.provider";
+const tag = { commit: "c".repeat(40), tree: "t".repeat(40), head, branch: "release/1.0.1" };
 const run = (over: Partial<RunSeen>): RunSeen => ({
 	id: 1,
 	attempt: 1,
 	conclusion: "success",
-	event: "pull_request",
+	event: "push",
+	path: ".github/workflows/ci.yml",
 	headSha: head,
-	headBranch: "release/1.0",
-	baseRefs: ["main"],
+	headBranch: "release/1.0.1",
+	repository,
+	headRepository: repository,
 	createdAt: "2026-10-26T01:00:00Z",
 	url: "https://github.example/runs/1",
 	...over,
@@ -30,28 +36,58 @@ const artifact = (name: string, over: Partial<ArtifactSeen> = {}): ArtifactSeen 
 	createdAt: "2026-10-26T01:00:00Z",
 	...over,
 });
-const tag = { commit: "c".repeat(40), tree: "t".repeat(40), head };
-const pull = { number: 5, head, branch: "release/1.0" };
 
-describe("the runs that may hold a release's evidence", () => {
-	it("is the pull request to main the tag's merge commit merged", () => {
-		const seen = (number: number, mergeCommit: string, base: string) => ({
-			number,
-			mergeCommit,
-			base,
-			head,
-			branch: "release/1.0",
-		});
-		expect(
-			releasePullOf(
-				[seen(4, "other", "main"), seen(5, tag.commit, "main"), seen(6, tag.commit, "develop")],
-				tag.commit,
-			),
-		).toEqual(pull);
-		expect(releasePullOf([seen(4, "other", "main")], tag.commit)).toBeUndefined();
+describe("the tag a release may publish", () => {
+	const seen = (over: Partial<TagSeen> = {}): TagSeen => ({
+		name: "v1.0.1",
+		commit: tag.commit,
+		tree: tag.tree,
+		parents: ["m".repeat(40), head],
+		headTree: tag.tree,
+		firstParentOnMain: true,
+		cacheProblems: [],
+		...over,
 	});
 
-	it("takes CI's successful runs of that pull request, its head and branch, the newest first", () => {
+	it("is a merge of the release branch's head into main, of that head's tree, naming the branch by its version as written", () => {
+		expect(tagOf(seen())).toEqual({ tag });
+		expect(versionOf("v1.0.1")).toBe("1.0.1");
+		expect(versionOf("1.0.1")).toBeUndefined();
+	});
+
+	it("is no commit of one parent or of three", () => {
+		expect(tagOf(seen({ parents: [head] }))).toEqual({
+			problems: [expect.stringMatching(/has 1 parents: tag the merge commit/)],
+		});
+		expect(tagOf(seen({ parents: ["a", "b", "c"] }))).toEqual({
+			problems: [expect.stringMatching(/has 3 parents/)],
+		});
+	});
+
+	it("is no merge whose tree differs from the head CI tested, nor one whose first parent is not on main", () => {
+		expect(tagOf(seen({ headTree: "o".repeat(40) }))).toEqual({
+			problems: [expect.stringMatching(/main held changes the branch did not/)],
+		});
+		expect(tagOf(seen({ firstParentOnMain: false }))).toEqual({
+			problems: [expect.stringMatching(/first parent .* is not on main/)],
+		});
+	});
+
+	it("is none whose CI workflow would restore a cache in a push of its release branch", () => {
+		expect(tagOf(seen({ cacheProblems: ["job a: it restores a cache"] }))).toEqual({
+			problems: ["the tag's CI workflow job a: it restores a cache"],
+		});
+	});
+
+	it("is none whose name is no version", () => {
+		expect(tagOf(seen({ name: "release-1" }))).toEqual({
+			problems: [expect.stringMatching(/names no version/)],
+		});
+	});
+});
+
+describe("the runs that may hold a release's evidence", () => {
+	it("are CI's successful pushes of the release branch's head, in this repository, as GitHub states them, the newest first", () => {
 		const older = run({ id: 1, createdAt: "2026-10-25T01:00:00Z" });
 		const newer = run({ id: 2, attempt: 2, createdAt: "2026-10-26T01:00:00Z" });
 		const found = candidatesOf(
@@ -59,16 +95,20 @@ describe("the runs that may hold a release's evidence", () => {
 				older,
 				newer,
 				run({ id: 3, conclusion: "failure" }),
-				run({ id: 4, baseRefs: ["develop"] }),
-				run({ id: 5, event: "push" }),
+				run({ id: 4, event: "pull_request" }),
+				run({ id: 5, event: "workflow_dispatch" }),
 				run({ id: 6, headSha: "x".repeat(40) }),
 				run({ id: 7, headBranch: "develop" }),
-				// Once the pull request is merged, its runs may list none.
-				run({ id: 8, baseRefs: [], createdAt: "2026-10-24T01:00:00Z" }),
+				// A branch that names the version otherwise is not the tag's, though semver reads it alike.
+				run({ id: 8, headBranch: "release/1.0.01" }),
+				run({ id: 9, path: ".github/workflows/other.yml" }),
+				run({ id: 10, headRepository: "someone/fork" }),
+				run({ id: 11, repository: "someone/else", headRepository: "someone/else" }),
 			],
-			pull,
+			tag,
+			repository,
 		);
-		expect(found.map((r) => r.id)).toEqual([2, 1, 8]);
+		expect(found.map((r) => r.id)).toEqual([2, 1]);
 	});
 });
 
@@ -80,6 +120,7 @@ describe("the artifacts a run's evidence is taken from", () => {
 			artifact("compliance", { id: 10, createdAt: "2026-10-26T01:00:00Z" }),
 			artifact("compliance", { id: 11, createdAt: "2026-10-26T02:00:00Z" }),
 			artifact("conformance-output-full"),
+			artifact("legacy-build"),
 		];
 		expect(artifactsOf(listed)).toEqual({
 			take: [
@@ -106,19 +147,13 @@ describe("the artifacts a run's evidence is taken from", () => {
 		});
 		expect(
 			artifactsOf([...listed, artifact("evidence-area-0-3", { id: 5, expired: true })]),
-		).toEqual({
-			problem: "evidence-area-0-3 has expired",
-		});
+		).toEqual({ problem: "evidence-area-0-3 has expired" });
 	});
 
-	it("names an expired or missing one, and what to run again", () => {
-		const expired = artifactsOf([
-			artifact("evidence-area-0-1", { expired: true }),
-			artifact("compliance"),
-		]);
-		expect(expired).toEqual({
-			problem: "evidence-area-0-1 has expired",
-		});
+	it("names an expired or missing one", () => {
+		expect(
+			artifactsOf([artifact("evidence-area-0-1", { expired: true }), artifact("compliance")]),
+		).toEqual({ problem: "evidence-area-0-1 has expired" });
 		expect(artifactsOf([artifact("evidence-area-0-1")])).toEqual({
 			problem: expect.stringMatching(/no compliance artifact/),
 		});
@@ -128,25 +163,26 @@ describe("the artifacts a run's evidence is taken from", () => {
 	});
 });
 
-describe("the commit a run tested", () => {
+describe("the commit a run's reports name", () => {
 	const report = (commit: string, runId = "1") => ({ identity: { commit, run: runId } });
 
-	it("is the one commit the run's reports name", () => {
+	it("is the one commit the reports of that run name, another run's reports left out", () => {
 		expect(
 			testedCommitOf([report("m1"), report("m1"), report("x", "2"), { attempted: {} }], "1"),
 		).toBe("m1");
 	});
 
-	it("is none where the reports name no commit, or more than one", () => {
+	it("is none where they name none, or more than one", () => {
 		expect(testedCommitOf([], "1")).toBeUndefined();
 		expect(testedCommitOf([report("m1"), report("m2")], "1")).toBeUndefined();
+		expect(testedCommitOf([report("m1", "2")], "1")).toBeUndefined();
 	});
 });
 
 describe("whether the release may go on with a run's evidence", () => {
 	const taken = {
 		run: run({ id: 7 }),
-		tested: { commit: "m", tree: tag.tree },
+		tested: { commit: head },
 		jobs: { conformance: "success", "release-check": "success", compliance: "success" },
 		recomputed: { releasable: true, told: "" },
 		artifacts: [artifact("compliance")],
@@ -161,11 +197,15 @@ describe("whether the release may go on with a run's evidence", () => {
 			return f;
 		};
 
-	it("takes the newest run that tested the tag's tree with its compliance passed", () => {
-		const moved = { ...taken, run: run({ id: 8 }), tested: { commit: "n", tree: "other" } };
-		expect(firstTaken(tag, [moved.run, taken.run], by({ 8: moved, 7: taken }))).toEqual({
-			kind: "taken",
-			...taken,
+	it("takes the newest run whose reports name the commit GitHub ran it on, its compliance passed", () => {
+		expect(firstTaken(tag, [taken.run], by({ 7: taken }))).toEqual({ kind: "taken", ...taken });
+	});
+
+	it("refuses a run whose reports name another commit than the one GitHub ran it on", () => {
+		const forged = { ...taken, run: run({ id: 8 }), tested: { commit: "f".repeat(40) } };
+		expect(firstTaken(tag, [forged.run], by({ 8: forged }))).toEqual({
+			kind: "stopped",
+			problems: [expect.stringMatching(/its reports name f+ as tested, but GitHub ran it on h+/)],
 		});
 	});
 
@@ -187,44 +227,27 @@ describe("whether the release may go on with a run's evidence", () => {
 
 	it("tells a candidate that could not be examined, and goes on to the next", () => {
 		const failing = run({ id: 9 });
-		const result = firstTaken(
-			tag,
-			[failing, taken.run],
-			by({
-				9: () => {
-					throw new Error("unzip failed");
-				},
-				7: taken,
-			}),
-		);
-		expect(result.kind).toBe("taken");
-		const stopped = firstTaken(
-			tag,
-			[failing],
-			by({
-				9: () => {
-					throw new Error("unzip failed");
-				},
-			}),
-		);
-		expect(stopped).toEqual({
+		const throwing = () => {
+			throw new Error("unzip failed");
+		};
+		expect(firstTaken(tag, [failing, taken.run], by({ 9: throwing, 7: taken })).kind).toBe("taken");
+		expect(firstTaken(tag, [failing], by({ 9: throwing }))).toEqual({
 			kind: "stopped",
 			problems: [expect.stringMatching(/runs\/1: could not be examined \(unzip failed\)/)],
 		});
 	});
 
-	it("takes a run only where the jobs a release pull request runs passed, never a run that skipped them", () => {
-		// A pull request to develop from the same head and branch skips the release's jobs.
-		const toDevelop = {
+	it("takes a run only where the release's jobs passed, never one that skipped them", () => {
+		const skipped = {
 			...taken,
 			run: run({ id: 11 }),
 			jobs: { ...taken.jobs, "release-check": "skipped", conformance: "skipped" },
 		};
-		expect(firstTaken(tag, [toDevelop.run], by({ 11: toDevelop }))).toEqual({
+		expect(firstTaken(tag, [skipped.run], by({ 11: skipped }))).toEqual({
 			kind: "stopped",
 			problems: [
 				expect.stringMatching(
-					/its conformance job ended skipped, its release-check job ended skipped: .*release pull request/,
+					/its conformance job ended skipped, its release-check job ended skipped: .*release branch's run/,
 				),
 			],
 		});
@@ -233,7 +256,6 @@ describe("whether the release may go on with a run's evidence", () => {
 	});
 
 	it("takes a run only where its kept evidence, read again, still makes the release's compliance", () => {
-		// An artifact removed after CI passed leaves an expected run unreported.
 		const thinned = {
 			...taken,
 			run: run({ id: 13 }),
@@ -251,15 +273,13 @@ describe("whether the release may go on with a run's evidence", () => {
 
 	it("stops, naming what is missing and what to do, where no run will do", () => {
 		const none = firstTaken(tag, [], by({}));
-		expect(none.kind).toBe("stopped");
 		expect(none.kind === "stopped" && none.problems[0]).toMatch(
-			/no successful CI run of a pull request to main tested .*re-run/,
+			/no successful CI run of a push of release\/1\.0\.1 at h+.*push that branch, or re-run its CI/,
 		);
 		const stopped = firstTaken(
 			tag,
-			[run({ id: 8 }), run({ id: 9 }), run({ id: 10 })],
+			[run({ id: 9 }), run({ id: 10 })],
 			by({
-				8: { ...taken, run: run({ id: 8 }), tested: { commit: "n", tree: "other" } },
 				9: { ...taken, run: run({ id: 9 }), jobs: { ...taken.jobs, compliance: "failure" } },
 				10: { run: run({ id: 10 }), problem: "evidence-area-0-1 has expired" },
 			}),
@@ -267,7 +287,6 @@ describe("whether the release may go on with a run's evidence", () => {
 		expect(stopped).toEqual({
 			kind: "stopped",
 			problems: [
-				expect.stringMatching(/tested tree other, but the tag's tree is t+: main moved/),
 				expect.stringMatching(/its compliance job ended failure/),
 				expect.stringMatching(/evidence-area-0-1 has expired/),
 			],
