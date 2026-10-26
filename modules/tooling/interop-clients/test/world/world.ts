@@ -1,9 +1,13 @@
-import { generateKeyPairSync } from "node:crypto";
-import type { AreaScene, Started } from "@mod/conformance";
+import { generateKeyPairSync, X509Certificate } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type AreaScene, freePort, type Started } from "@mod/conformance";
 import { codeScene } from "@mod/conformance-code";
 import { browserAt } from "@mod/conformance-code/testing";
 import { deviceArea } from "@mod/conformance-device";
 import { exchangeArea } from "@mod/conformance-exchange";
+import { selfSigned } from "@mod/conformance-front";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { fronted, sender, signing } from "./fronted.ts";
 
@@ -23,8 +27,19 @@ export interface World {
 	/** The front's certificate, as PEM, which every adapter trusts and nothing else. */
 	readonly ca: string;
 	readonly clients: Readonly<
-		Record<"basic" | "post" | "public" | "assertion" | "device", WorldClient>
+		Record<
+			"basic" | "post" | "public" | "assertion" | "device" | "mtls" | "backchannel",
+			WorldClient
+		>
 	>;
+	/** The `mtls` client's certificate and key, as PEM, and its thumbprint (`x5t#S256`). */
+	readonly clientCertificate: {
+		readonly cert: string;
+		readonly key: string;
+		readonly thumbprint: string;
+	};
+	/** Where the `backchannel` client is told a session ended: the port and path its receiver listens at. */
+	readonly backchannel: { readonly port: number; readonly path: string };
 	readonly redirectUri: string;
 	/** Where a logout the code clients start may send the browser back. */
 	readonly postLogoutRedirectUri: string;
@@ -57,6 +72,7 @@ const otherAudience = "https://other-api.example";
 const postLogoutRedirectUri = "https://rp.example/logged-out";
 const deviceGrant = "urn:ietf:params:oauth:grant-type:device_code";
 const exchangeGrant = "urn:ietf:params:oauth:grant-type:token-exchange";
+const certificateHeader = "x-client-certificate";
 // A secret with the characters RFC 6749 §2.3.1 form-encodes before Basic, where libraries part ways.
 const awkward = "s3cret+with%odd:chars and space";
 
@@ -102,6 +118,16 @@ export async function startWorld(
 	given: { readonly start?: (scene: AreaScene) => Promise<Started>; readonly under?: string } = {},
 ): Promise<World> {
 	const authorizations: URL[] = [];
+	// The client certificate's files are read back as PEM and gone before anything else starts.
+	const certificateDir = await mkdtemp(join(given.under ?? tmpdir(), "interop-client-cert-"));
+	const certificate = await selfSigned("client.example", certificateDir).finally(() =>
+		rm(certificateDir, { recursive: true, force: true }),
+	);
+	const thumbprint = Buffer.from(
+		await crypto.subtle.digest("SHA-256", new X509Certificate(certificate.cert).raw),
+	).toString("base64url");
+	const backchannel = { port: await freePort(), path: "/backchannel" };
+	const receiver = `http://127.0.0.1:${backchannel.port}`;
 	const key = assertionKey();
 	const clients = {
 		basic: { id: "basic", method: "client_secret_basic", secret: awkward },
@@ -113,7 +139,31 @@ export async function startWorld(
 			method: "client_secret_post",
 			secret: "device-secret-0123456789abcdef",
 		},
+		mtls: { id: "mtls", method: "client_secret_post", secret: "mtls-secret-0123456789abcdef" },
+		backchannel: {
+			id: "backchannel",
+			method: "client_secret_basic",
+			secret: "backchannel-secret-0123456789abcdef",
+		},
 	} as const;
+	const byMtls: ClientScene = {
+		id: clients.mtls.id,
+		kind: "confidential",
+		method: "client_secret_post",
+		secret: clients.mtls.secret,
+		grants: ["client_credentials"],
+		scopes: ["read"],
+		defaultScopes: ["read"],
+		audiences: [resource],
+	};
+	const byBackchannel: ClientScene = {
+		...client(clients.backchannel.id, clients.backchannel.method, clients.backchannel.secret),
+		logout: {
+			postLogoutRedirectUris: [postLogoutRedirectUri],
+			backchannelLogoutUri: `${receiver}${backchannel.path}`,
+			backchannelLogoutSessionRequired: true,
+		},
+	};
 	const byCode = [clients.basic, clients.post, clients.public].map((c) =>
 		client(c.id, c.method, "secret" in c ? c.secret : undefined),
 	);
@@ -137,30 +187,39 @@ export async function startWorld(
 		// The audience the harness's introspecting client may see too.
 		audiences: [resource],
 	};
-	const app = await fronted((origin) => {
-		const scene = codeScene({
-			issuer: origin,
-			keys: { signing: signing() },
-			users: [{ identifier: user.username, password: user.password }],
-			clients: [...byCode, byAssertion, byDevice],
-			discovery: true,
-			userinfo: true,
-			refresh: {},
-			resourceIndicators: true,
-			introspection: true,
-			revocation: true,
-			dpop: true,
-			logout: { allowed: [] },
-		});
-		return {
-			...scene,
-			parts: {
-				...scene.parts,
-				[exchangeArea.name]: {},
-				[deviceArea.name]: { verificationUri: `${origin}/device` },
-			},
-		};
-	}, given);
+	const app = await fronted(
+		(origin) => {
+			const scene = codeScene({
+				issuer: origin,
+				keys: { signing: signing() },
+				users: [{ identifier: user.username, password: user.password }],
+				clients: [...byCode, byAssertion, byDevice, byMtls, byBackchannel],
+				discovery: true,
+				userinfo: true,
+				refresh: {},
+				resourceIndicators: true,
+				introspection: true,
+				revocation: true,
+				dpop: true,
+				// Only the back-channel receiver's origin is reached, over plain http at loopback.
+				logout: { allowed: [receiver] },
+				// Any certificate the front forwards binds; the front is the one proxy, at loopback.
+				mtls: {
+					header: { dialect: "pem", name: certificateHeader },
+					trustedProxies: ["127.0.0.1"],
+				},
+			});
+			return {
+				...scene,
+				parts: {
+					...scene.parts,
+					[exchangeArea.name]: {},
+					[deviceArea.name]: { verificationUri: `${origin}/device` },
+				},
+			};
+		},
+		{ ...given, clientCertificateHeader: certificateHeader },
+	);
 	const base = app.base();
 	const front = { origin: app.origin };
 	return {
@@ -169,6 +228,8 @@ export async function startWorld(
 		clients,
 		redirectUri,
 		postLogoutRedirectUri,
+		clientCertificate: { cert: certificate.cert, key: certificate.key, thumbprint },
+		backchannel,
 		resource,
 		seen: { authorizations, tokenRequests: app.tokenRequests },
 		async introspect(token: string) {
