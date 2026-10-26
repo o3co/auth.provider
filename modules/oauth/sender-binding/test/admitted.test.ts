@@ -96,7 +96,7 @@ const refusal = (status: number, challenge: string, error?: string) => ({
 	headers: { "www-authenticate": challenge },
 });
 
-it("challenges every scheme, with no error, when no token is presented in a scheme it knows", async () => {
+it("challenges every scheme, with no error, when no token is presented in a scheme it knows [rfc6750-3.1-d] [rfc9449-7.2-b]", async () => {
 	expect(await presenting({})).toEqual(refusal(401, "Bearer, DPoP"));
 	expect(await presenting({ authorization: "Basic YTpi" })).toEqual(refusal(401, "Bearer, DPoP"));
 	// A scheme with no credential after it presents no token either.
@@ -115,7 +115,7 @@ it("answers a malformed Authorization as an invalid request", async () => {
 	expect(await presenting({ authorization: "Bearer plain,x" })).toEqual(invalid);
 });
 
-it("admits a valid unbound token as Bearer, in any case of the scheme, without reading bindings", async () => {
+it("admits a valid unbound token as Bearer, in any case of the scheme, without reading bindings [rfc6750-2.1-a]", async () => {
 	expect(await presenting({ authorization: "bearer plain", "x-proof": "bad" })).toEqual({
 		kind: "admitted",
 		access: issued.plain,
@@ -123,7 +123,7 @@ it("admits a valid unbound token as Bearer, in any case of the scheme, without r
 	expect(reads).toEqual([]);
 });
 
-it("refuses a token that is not valid, challenging the scheme it was presented in", async () => {
+it("refuses a token that is not valid, challenging the scheme it was presented in [rfc6750-3-b] [rfc6750-3-f] [rfc6750-3.1-b] [rfc9449-7.1-c]", async () => {
 	expect(await presenting({ authorization: "Bearer forged" })).toEqual(
 		refusal(401, 'Bearer error="invalid_token"', "invalid_token"),
 	);
@@ -132,7 +132,7 @@ it("refuses a token that is not valid, challenging the scheme it was presented i
 	);
 });
 
-it("refuses a token presented in another scheme than its type, challenging its own", async () => {
+it("refuses a token presented in another scheme than its type, challenging its own [rfc9449-7.2-a]", async () => {
 	expect(await presenting({ authorization: "Bearer keyed", "x-proof": "k1" })).toEqual(
 		refusal(401, 'DPoP error="invalid_token"', "invalid_token"),
 	);
@@ -163,7 +163,7 @@ it("admits a bound token whose holder proves the same binding at the resource", 
 	});
 });
 
-it("refuses a bound token when the request proves no binding or another key", async () => {
+it("refuses a bound token when the request proves no binding or another key [rfc9449-4.3-l] [rfc9449-7.1-a]", async () => {
 	const refused = refusal(401, 'DPoP error="invalid_token"', "invalid_token");
 	expect(await presenting({ authorization: "DPoP keyed" })).toEqual(refused);
 	expect(await presenting({ authorization: "DPoP keyed", "x-proof": "k2" })).toEqual(refused);

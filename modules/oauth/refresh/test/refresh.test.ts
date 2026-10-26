@@ -492,7 +492,7 @@ describe("refresh tokens", () => {
 		}
 	});
 
-	it("narrow scope for one access token, never widen it, and keep the original grant for the family", async () => {
+	it("narrow scope for one access token, never widen it, and keep the original grant for the family [rfc6749-6-a] [rfc6749-6-e]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		const narrowed = await s.refresh(token, "app", { scope: "read" });
@@ -514,7 +514,7 @@ describe("refresh tokens", () => {
 		expect([empty.status, empty.body.scope]).toEqual([200, "read write"]);
 	});
 
-	it("refuse another client without spending the token", async () => {
+	it("refuse another client without spending the token [rfc6749-6-c] [rfc6749-10.4-b] [rfc6749-10.4-c]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		expect((await s.refresh(token, "other")).body.error).toBe("invalid_grant");
@@ -563,7 +563,7 @@ describe("refresh tokens", () => {
 		expect((await s.refresh(first.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
-	it("refuse a token with anything after it, without spending the token", async () => {
+	it("refuse a token with anything after it, without spending the token [rfc6749-6-d]", async () => {
 		const s = await serve();
 		const first = await s.redeem();
 		expect((await s.refresh(`${first.refresh_token}x`)).body.error).toBe("invalid_grant");
@@ -632,7 +632,7 @@ describe("refresh tokens", () => {
 		);
 	});
 
-	it("are revoked with their family by the issuing client only", async () => {
+	it("are revoked with their family by the issuing client only [rfc7009-2-a] [rfc7009-2.1-c]", async () => {
 		const s = await serve();
 		const first = await s.redeem();
 		const token = first.refresh_token ?? "";
@@ -665,7 +665,7 @@ describe("refresh tokens", () => {
 		).toBe("invalid_grant");
 	});
 
-	it("take a spent token as a reuse before looking at its binding", async () => {
+	it("take a spent token as a reuse before looking at its binding [rfc9700-2.2.2-a]", async () => {
 		const s = await serve();
 		const { refresh_token: first = "" } = await s.redeem("pub", { bind: "k1" });
 		const next = await s.refresh(first, "pub", { bind: "k1" });
@@ -675,7 +675,7 @@ describe("refresh tokens", () => {
 		);
 	});
 
-	it("bind a public client's family to its binding and ask the same binding after", async () => {
+	it("bind a public client's family to its binding and ask the same binding after [rfc9700-2.2.2-a]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem("pub", { bind: "k1" });
 		expect((await s.refresh(token, "pub")).body.error).toBe("invalid_grant");
@@ -689,7 +689,7 @@ describe("refresh tokens", () => {
 		expect((await s.refresh(confidential.refresh_token)).status).toBe(200);
 	});
 
-	it("revoke what an expired family issued when its refresh token is revoked", async () => {
+	it("revoke what an expired family issued when its refresh token is revoked [rfc7009-2.1-c]", async () => {
 		const s = await serve({ lifetime: 2 });
 		const first = await s.redeem();
 		shift += 200_000;

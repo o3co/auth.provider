@@ -79,7 +79,7 @@ describe("exchange-id-tokens", () => {
 		expect(said(await s.exchange("ios-app", token))).toEqual(["issued"]);
 	});
 
-	it("lets only the client whose audience and party it names exchange it", async () => {
+	it("lets only the client whose audience and party it names exchange it [rfc8693-2.1-g] [rfc8693-2.2.2-b]", async () => {
 		const s = await serve();
 		const notThisClient = ["invalid_request", "subject_token does not name this client"];
 		expect(said(await s.exchange("web-backend", await apple.sign(appleClaims())))).toEqual(
@@ -100,7 +100,7 @@ describe("exchange-id-tokens", () => {
 		}
 	});
 
-	it("refuses another issuer, another algorithm, an unknown key, and an id_token without iat, too old or from the future", async () => {
+	it("refuses another issuer, another algorithm, an unknown key, and an id_token without iat, too old or from the future [rfc8693-2.1-g] [rfc8693-2.2.2-b]", async () => {
 		const s = await serve();
 		for (const token of [
 			await apple.sign(appleClaims({ iss: "https://idp.example" })),
@@ -138,7 +138,7 @@ describe("exchange-id-tokens", () => {
 		}
 	});
 
-	it("lets the public client exchange only when the nonce is the digest of the key it proves by DPoP", async () => {
+	it("lets the public client exchange only when the nonce is the digest of the key it proves by DPoP [rfc8693-2.2.1-c]", async () => {
 		const s = await serve();
 		const jkt = "thumbprint-of-the-device-key";
 		const nonce = createHash("sha256").update(jkt, "ascii").digest("base64url");

@@ -305,7 +305,7 @@ const request = (extra: Record<string, string> = {}) => ({
 });
 
 describe("authorize: trust in the redirect URI", () => {
-	it("answers locally until the client and an exactly registered redirect URI are known", async () => {
+	it("answers locally until the client and an exactly registered redirect URI are known [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		for (const params of [
@@ -325,7 +325,7 @@ describe("authorize: trust in the redirect URI", () => {
 		expect(loopback.at?.origin).toBe("http://127.0.0.1:9555");
 	});
 
-	it("sends every other refusal back with state and iss", async () => {
+	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const cases: [Record<string, string> | string, string][] = [
@@ -379,7 +379,7 @@ it("refuses a client not allowed the code grant with the token endpoint's words 
 });
 
 describe("authorize: session and consent", () => {
-	it("sends a request without a session to the login page, with the way back from the public origin", async () => {
+	it("sends a request without a session to the login page, with the way back from the public origin [rfc6749-3.1-a]", async () => {
 		const { authorize } = await serve();
 		const res = await authorize(request());
 		expect(res.status).toBe(302);
@@ -616,7 +616,7 @@ describe("authorize: the audience a request asks for", () => {
 		expect(await audienceFor(s, "https://two")).toEqual(["https://api"]);
 	});
 
-	it("sends a parameter the rule reads, sent twice, back as the rule says, and any other as invalid_request", async () => {
+	it("sends a parameter the rule reads, sent twice, back as the rule says, and any other as invalid_request [rfc6749-3.1-f]", async () => {
 		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
@@ -671,7 +671,7 @@ describe("authorize: the code grant", () => {
 	const codeOf = async (s: Awaited<ReturnType<typeof serve>>, cookie: string) =>
 		(await s.authorize(request(), cookie)).at?.searchParams.get("code") ?? "";
 
-	it("exchanges a code once, and revokes what it gave when the code comes again", async () => {
+	it("exchanges a code once, and revokes what it gave when the code comes again [rfc6749-4.1.2-d] [rfc6749-4.1.2-e] [rfc6749-3.3-b] [rfc6749-5.1-a] [rfc7636-4.6-a]", async () => {
 		const s = await serve();
 		const code = await codeOf(s, await s.login());
 		const first = await s.token({ code, redirect_uri: callback, code_verifier: verifier });
@@ -687,7 +687,7 @@ describe("authorize: the code grant", () => {
 		});
 	});
 
-	it("uses up a code on a wrong verifier, client or redirect URI, but not on a malformed request", async () => {
+	it("uses up a code on a wrong verifier, client or redirect URI, but not on a malformed request [rfc7636-4.6-b] [rfc7636-4.5-a] [rfc7636-4.4-a] [rfc9700-2.1.1-a] [rfc6749-4.1.3-c] [rfc6749-4.1.3-e]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const malformed = await codeOf(s, cookie);
@@ -711,7 +711,7 @@ describe("authorize: the code grant", () => {
 		}
 	});
 
-	it("refuses a code after its time, or after its session ended", async () => {
+	it("refuses a code after its time, or after its session ended [rfc6749-4.1.2-b] [rfc6749-4.1.3-d]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const late = await codeOf(s, cookie);
@@ -754,7 +754,7 @@ describe("authorize: the code grant", () => {
 describe("authorize: what the reviews asked to pin down", () => {
 	const codeFrom = (res: { at?: URL | undefined }) => res.at?.searchParams.get("code") ?? "";
 
-	it("answers locally with OAuth codes, and treats only loopback IP literals as loopback", async () => {
+	it("answers locally with OAuth codes, and treats only loopback IP literals as loopback [rfc6749-4.1.2.1-a] [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-a] [rfc6749-3.1-f] [rfc9700-4.1.3-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const local = async (params: Record<string, string> | string) => {
@@ -780,7 +780,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect(v6.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("refuses or accepts each parameter as the rules say", async () => {
+	it("refuses or accepts each parameter as the rules say [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const error = async (extra: Record<string, string>) =>
@@ -908,7 +908,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		await expect(serve({ revocable: false })).rejects.toThrow();
 	});
 
-	it("lets a public client redeem, and a loopback redirect redeem with its own port only", async () => {
+	it("lets a public client redeem, and a loopback redirect redeem with its own port only [rfc6749-4.1.3-e]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const code = codeFrom(
@@ -941,7 +941,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		).toBe(200);
 	});
 
-	it("does not use up a code when the request lacks it parts, and answers every refusal alike", async () => {
+	it("does not use up a code when the request lacks it parts, and answers every refusal alike [rfc6749-4.1.3-e]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const code = codeFrom(await s.authorize(request(), cookie));
@@ -952,7 +952,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect(replay.body).toEqual({ error: "invalid_grant", error_description: "invalid code" });
 	});
 
-	it("leaves no usable token when two redeem at once, or another client presents a used code", async () => {
+	it("leaves no usable token when two redeem at once, or another client presents a used code [rfc6749-4.1.2-e]", async () => {
 		const s = await serve();
 		const t = s.app.get(tokens);
 		const cookie = await s.login();
@@ -973,7 +973,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect((await t.verifyAccess(String(first.body.access_token))).kind).toBe("invalid");
 	});
 
-	it("retries a revocation that failed, until the reused code's token is revoked", async () => {
+	it("retries a revocation that failed, until the reused code's token is revoked [rfc6749-4.1.2-e]", async () => {
 		const s = await serve({ codeGrant: { "sweep-interval": "1s" } });
 		const t = s.app.get(tokens);
 		const cookie = await s.login();
@@ -1022,7 +1022,7 @@ it("revokes a code's token when its session logs out later", async () => {
 	});
 });
 
-it("adds an ID token through code-grant when the scope holds the maker's, with the code's facts", async () => {
+it("adds an ID token through code-grant when the scope holds the maker's, with the code's facts [oidc-core-3.1.3.3-c] [oidc-core-3.1.3.2-f]", async () => {
 	const asked: IdTokenRequest[] = [];
 	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
@@ -1506,7 +1506,7 @@ it("offers a contributed acr unless the operator's table names the same acr", as
 	expect(met.at?.searchParams.has("code")).toBe(true);
 });
 
-it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer", async () => {
+it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer [rfc9207-2.3-c] [rfc9700-2.1.1-c] [rfc9700-2.1.1-d] [rfc8414-2-b] [rfc8414-2-g] [oidc-discovery-3-d] [oidc-discovery-3-v]", async () => {
 	const published = contract<readonly MetadataItem[]>("published");
 	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 		m.provide(published).by((c) => c.collect(metadata)),
@@ -1591,7 +1591,7 @@ describe("authorize: openid in the request", () => {
 		).toBe(false);
 	});
 
-	it("refuses a request that does not name openid itself with invalid_scope, sent back", async () => {
+	it("refuses a request that does not name openid itself with invalid_scope, sent back [oidc-core-3.1.2.2-a]", async () => {
 		const { authorize, login } = await serve(required);
 		const cookie = await login();
 		const refused = [false, "invalid_scope", "s1", issuer];
@@ -1608,7 +1608,7 @@ describe("authorize: openid in the request", () => {
 		]);
 	});
 
-	it("keeps the refusal of a scope left out with no default, and records it", async () => {
+	it("keeps the refusal of a scope left out with no default, and records it [rfc6749-3.3-b]", async () => {
 		const { authorize, login, events } = await serve(required);
 		const res = await authorize(request({ client_id: "nodefault" }), await login());
 		expect(res.at?.searchParams.get("error")).toBe("invalid_scope");
@@ -1662,7 +1662,7 @@ describe("authorize: audit events", () => {
 		]);
 	});
 
-	it("takes an empty scope as left out, and records it; a scope of whitespace alone is malformed, unrecorded", async () => {
+	it("takes an empty scope as left out, and records it; a scope of whitespace alone is malformed, unrecorded [rfc6749-3.1-d] [rfc6749-3.3-b]", async () => {
 		const { authorize, login, events } = await serve();
 		const cookie = await login();
 		const answer = (res: { at: URL | undefined }) =>

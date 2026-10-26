@@ -242,7 +242,7 @@ describe("the audience a request asks for", () => {
 		expect(handled).toEqual(["echo", "other"]);
 	});
 
-	it("answers a parameter the rule reads sent twice as the rule says, and any other as a malformed request", async () => {
+	it("answers a parameter the rule reads sent twice as the rule says, and any other as a malformed request [rfc6749-3.2-d]", async () => {
 		const twice = new URLSearchParams([
 			["grant_type", "client_credentials"],
 			["resource", "https://two"],
@@ -311,7 +311,7 @@ describe("the audience a request asks for", () => {
 });
 
 describe("token endpoint", () => {
-	it("issues client credentials tokens with basic and post", async () => {
+	it("issues client credentials tokens with basic and post [rfc6749-2.3.1-a] [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-3.3-a]", async () => {
 		const post = await serve();
 		const basic = await post({ grant_type: "client_credentials", scope: "read write" }, "basic");
 		expect(basic.status).toBe(200);
@@ -335,7 +335,7 @@ describe("token endpoint", () => {
 		expect(viaPost.body).toMatchObject({ scope: "read" });
 	});
 
-	it("issues a client's default scopes when none is asked, none when it has none, and refuses a client with no default", async () => {
+	it("issues a client's default scopes when none is asked, none when it has none, and refuses a client with no default [rfc6749-3.3-b]", async () => {
 		const post = await serve();
 		const noscope = await post({ grant_type: "client_credentials" }, "noscope");
 		expect(noscope.status).toBe(200);
@@ -347,7 +347,7 @@ describe("token endpoint", () => {
 		);
 	});
 
-	it("lets a listed origin's page send a body's type and its DPoP proof, and read the nonce, the challenge and the wait", async () => {
+	it("lets a listed origin's page send a body's type and its DPoP proof, and read the nonce, the challenge and the wait [oidc-discovery-3-aj]", async () => {
 		const post = await serve([], { peer: { "cors-origins": ["https://app.example"] } });
 		const origin = "https://app.example";
 		const preflight = await fetch(post.url, {
@@ -372,7 +372,7 @@ describe("token endpoint", () => {
 		).toEqual(expect.arrayContaining(["dpop-nonce", "www-authenticate", "retry-after"]));
 	});
 
-	it("limits requests per source before any client is authenticated", async () => {
+	it("limits requests per source before any client is authenticated [rfc6749-2.3.1-c]", async () => {
 		const post = await serve([], { settings: { requests: 2, window: "2m" } });
 		const wrong = () => post({ grant_type: "client_credentials" }, "basic", { secret: "wrong" });
 		expect([(await wrong()).status, (await wrong()).status]).toEqual([401, 401]);
@@ -402,7 +402,7 @@ describe("token endpoint", () => {
 		]);
 	});
 
-	it("answers each refusal with its OAuth error", async () => {
+	it("answers each refusal with its OAuth error [rfc6749-5.2-b] [rfc6749-3.2.1-a] [rfc6749-4.4-a] [rfc6749-4.4.2-a]", async () => {
 		const post = await serve();
 		const cc = { grant_type: "client_credentials" };
 		const wrong = await post(cc, "basic", { secret: "nope" });
@@ -979,7 +979,7 @@ describe("token endpoint", () => {
 		}
 	});
 
-	it("answers a grant's error with its status and members, never letting members replace the error", async () => {
+	it("answers a grant's error with its status and members, never letting members replace the error [rfc6749-5.2-d]", async () => {
 		const owned = defineModule({ name: "owned", takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
@@ -1040,7 +1040,7 @@ describe("token endpoint", () => {
 		expect(await challenge({ ...echo, status: "400" }, "echo")).toEqual([400, null]);
 	});
 
-	it("drops what a grant's error may not carry: a success's or the error's members, an error_uri that is not a printable URI, a status but 400 or 401", async () => {
+	it("drops what a grant's error may not carry: a success's or the error's members, an error_uri that is not a printable URI, a status but 400 or 401 [rfc6749-5.2-e] [rfc6749-5.2-a]", async () => {
 		const loose = defineModule({ name: "loose", takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
@@ -1141,7 +1141,7 @@ describe("token endpoint", () => {
 		expect((await post({}, "basic")).body.error_description).toBe("grant_type is required");
 	});
 
-	it("gives a grant that takes both bodies each one's values, a form's as single strings", async () => {
+	it("gives a grant that takes both bodies each one's values, a form's as single strings [rfc6749-3.2-d]", async () => {
 		const both = defineModule({ name: "both", takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",

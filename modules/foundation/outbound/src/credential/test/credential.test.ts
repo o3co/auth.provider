@@ -44,7 +44,7 @@ it("sends a credential as the request's Authorization, to a named plain-loopback
 	expect(seen.at(-1)?.authorization).toBe(secret);
 });
 
-it("refuses a credential beside an Authorization header of any case, or one that is no single line, telling neither value", async () => {
+it("refuses a credential beside an Authorization header of any case, or one that is no single line, telling neither value [rfc6750-2-a]", async () => {
 	const before = seen.length;
 	const url = `http://127.0.0.1:${port}/`;
 	for (const request of [

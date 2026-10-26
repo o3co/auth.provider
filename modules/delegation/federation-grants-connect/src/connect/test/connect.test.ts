@@ -225,7 +225,7 @@ describe("the question and the decision", () => {
 });
 
 describe("the callback", () => {
-	it("hands the upstream the verifier of its challenge, its nonce, scopes and resource, and the issuer it said", async () => {
+	it("hands the upstream the verifier of its challenge, its nonce, scopes and resource, and the issuer it said [rfc9700-2.1.1-h]", async () => {
 		const resource = "https://api.example/";
 		const h = await connector({ resource });
 		const seen: DelegatedExchange[] = [];
@@ -281,7 +281,7 @@ describe("the callback", () => {
 		expect(errorOf(h, await h.callback(flow.state, flow.browser))).toBe("grant_not_authorizable");
 	});
 
-	it("asks the upstream nothing for another browser, and spends a state once even while it is used", async () => {
+	it("asks the upstream nothing for another browser, and spends a state once even while it is used [rfc9700-4.2.4-b]", async () => {
 		const h = await connector();
 		let exchanges = 0;
 		let release: () => void = () => undefined;

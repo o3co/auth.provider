@@ -101,7 +101,7 @@ async function assembled(...args: Parameters<typeof assembly>) {
 }
 
 describe("tokens", () => {
-	it("issues access tokens that verify until they expire", async () => {
+	it("issues access tokens that verify until they expire [rfc6750-5.2-f]", async () => {
 		const t = await boot({
 			"access-token-lifetime": "1m",
 			revocation: "unsupported",

@@ -123,7 +123,7 @@ describe("mtls", () => {
 		expect(app.get(kindNames)).toEqual(["mtls"]);
 	});
 
-	it("binds a token to a self-signed certificate's thumbprint, as a bearer token", async () => {
+	it("binds a token to a self-signed certificate's thumbprint, as a bearer token [rfc8705-3.1-b] [rfc8705-3.1-c]", async () => {
 		const { bindingOf } = await boot({ mode: "self-signed" });
 		const own = await issue({ cn: "client" });
 		expect(await bindingOf(own)).toEqual({
