@@ -99,11 +99,12 @@ describe("acr: a table without second factors", () => {
 	});
 
 	it.skipIf(areaTarget().differs("voluntary-acr"))(
-		"issues a code with no acr when none asked by acr_values is known: they are voluntary [oidc-core-15.1-g]",
+		"issues a code with the session's current acr when none asked by acr_values is known: they are voluntary [oidc-core-15.1-g] [oidc-core-5.5.1.1-c]",
 		async () => {
 			const unknown = await b.authorize(request({ acr_values: "urn:t:none" }));
 			const code = unknown.at?.searchParams.get("code") ?? "";
-			expect((await claimsOf(base, code)).acr).toBeUndefined();
+			// The first in the table the session meets.
+			expect((await claimsOf(base, code)).acr).toBe("urn:t:pwd");
 		},
 	);
 
@@ -129,7 +130,7 @@ describe("acr: a table without second factors", () => {
 	});
 
 	it.skipIf(areaTarget().differs("claims-acr"))(
-		"reads the acr a claims parameter asks for: an essential one met is carried, unmet refused; one not essential is voluntary [oidc-core-5.5.1.1-a] [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a]",
+		"reads the acr a claims parameter asks for: an essential one met is carried, unmet refused; one not essential is voluntary [oidc-core-5.5.1.1-a] [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a] [oidc-core-5.5.1.1-c]",
 		async () => {
 			const of = (acr: unknown) => JSON.stringify({ id_token: { acr } });
 			const met = await b.authorize(
@@ -141,7 +142,24 @@ describe("acr: a table without second factors", () => {
 			);
 			expect(unknown.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
 			const loose = await b.authorize(request({ claims: of({ values: ["urn:t:none"] }) }));
-			expect((await claimsOf(base, loose.at?.searchParams.get("code") ?? "")).acr).toBeUndefined();
+			expect((await claimsOf(base, loose.at?.searchParams.get("code") ?? "")).acr).toBe(
+				"urn:t:pwd",
+			);
+			// A voluntary request beside an essential one never meets it in its place.
+			const mixed = await b.authorize(
+				request({
+					claims: JSON.stringify({
+						id_token: { acr: { essential: true, value: "urn:t:none" } },
+						userinfo: { acr: { value: "urn:t:pwd" } },
+					}),
+				}),
+			);
+			expect(mixed.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+			// A value is one acr as written: one holding a blank names none of the table.
+			const spaced = await b.authorize(
+				request({ claims: of({ essential: true, value: "urn:t:none urn:t:pwd" }) }),
+			);
+			expect(spaced.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
 			const bare = await b.authorize(
 				request({ claims: JSON.stringify({ userinfo: { acr: null } }) }),
 			);
