@@ -12,6 +12,8 @@ on:
   # other job that builds or tests is gated on the event.
   schedule:
     - cron: '17 3 * * *'
+  # A manual run: every job a pull request runs, and the interop jobs (see `interop-due`).
+  workflow_dispatch:
 
 # Least privilege for GITHUB_TOKEN: every job only checks out and reads this
 # repository. release.yml declares its own permissions.
@@ -306,7 +308,6 @@ jobs:
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
       patterns: ${{ steps.plan.outputs.patterns }}
-      libraries: ${{ steps.plan.outputs.libraries }}
       sha: ${{ steps.plan.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -324,11 +325,9 @@ jobs:
           set -euo pipefail
           areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
           patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
-          libraries=$(pnpm --silent --filter @mod/spec-checklist run plan library)
           {
             echo "areas=$areas"
             echo "patterns=$patterns"
-            echo "libraries=$libraries"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
@@ -481,18 +480,70 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # Whether the interop jobs run, what they run and on which commit. They run on a pull request to
+  # main, on the release branches, on the daily run (develop) and by hand, and before a merge to
+  # develop where the pull request touches what they test with: the harnesses, the shared front and
+  # tunnel, the conformance driver, the checklist, and the pins they hold (the suite's in
+  # interop-oidf, the libraries' in interop-clients). Not on a push to develop.
+  interop-due:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-latest
+    outputs:
+      oidf: ${{ steps.due.outputs.oidf }}
+      clients: ${{ steps.due.outputs.clients }}
+      oidf-plans: ${{ steps.plan.outputs.oidf-plans }}
+      libraries: ${{ steps.plan.outputs.libraries }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The daily run tests develop; a pull request's diff needs its base.
+          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          fetch-depth: 0
+      - id: due
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != pull_request ] || [ "$BASE" = main ]; then
+            echo "oidf=true" >> "$GITHUB_OUTPUT"
+            echo "clients=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "origin/$BASE...HEAD")
+          touches() { grep -qE "$1" <<<"$changed" && echo true || echo false; }
+          shared='^modules/tooling/(conformance-front|conformance-tunnel|spec-checklist)/'
+          echo "oidf=$(touches "^modules/tooling/(interop-oidf|conformance)/|$shared")" >> "$GITHUB_OUTPUT"
+          echo "clients=$(touches "^modules/tooling/interop-clients/|$shared")" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "oidf-plans=$(pnpm --silent --filter @mod/spec-checklist run plan oidf-plan)"
+            echo "libraries=$(pnpm --silent --filter @mod/spec-checklist run plan library)"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
   # One client library: its adapter, built from the library's registry, runs each flow it runs
   # first-class against the provider (interop-clients). On a pull request to main, the release
   # branches and the daily run on develop; not on develop's every-five-merges run.
   interop-clients:
-    needs: conformance-plan
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && !(github.event_name == 'push' && github.ref == 'refs/heads/develop') }}
+    needs: interop-due
+    if: ${{ !cancelled() && needs.interop-due.outputs.clients == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        library: ${{ fromJSON(needs.conformance-plan.outputs.libraries) }}
+        library: ${{ fromJSON(needs.interop-due.outputs.libraries) }}
     steps:
       # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
       - name: Mark this attempt
@@ -507,8 +558,8 @@ jobs:
             > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
         with:
-          # The commit the plan fixed: on the daily run, develop as the plan found it.
-          ref: ${{ needs.conformance-plan.outputs.sha }}
+          # The commit interop-due fixed: on the daily run, develop as it found it.
+          ref: ${{ needs.interop-due.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -552,6 +603,83 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # One plan of the OpenID Foundation's conformance suite against the provider (interop-oidf): the
+  # suite at its pinned version in Docker, the simple-web pattern's app behind the harness's https
+  # front. Its result is "OIDF (PKCE adaptation)", never a certification.
+  interop-oidf:
+    needs: interop-due
+    if: ${{ !cancelled() && needs.interop-due.outputs.oidf == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plan: ${{ fromJSON(needs.interop-due.outputs.oidf-plans) }}
+    steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: oidf-plan
+          MATRIX: ${{ matrix.plan }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.interop-due.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # The suite's scripts run on a Python of their own, made from this one.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @mod/interop-oidf run plan "${{ matrix.plan }}"
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
+          OIDF_ARTIFACTS_DIR: ${{ runner.temp }}/oidf
+      # The harness stops the suite however a run ends; this stops one a killed run left.
+      - name: Stop any suite left running
+        if: always()
+        run: |
+          for project in $(docker compose ls --all --quiet --filter name=o3co-oidf); do
+            docker compose -p "$project" down --volumes --remove-orphans || true
+          done
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-oidf-plan-${{ matrix.plan }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      # The runner's output, the suite's export and logs, each test's log, the front's log, what the shim
+      # added, and the pages the suite left for a person's review: kept on every run, a passing one too,
+      # for the review a release needs.
+      - name: Keep the run's records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oidf-records-${{ matrix.plan }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oidf
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The check required of a release: every area and every pattern passed.
   conformance:
     needs: [conformance-due, conformance-plan, conformance-area, conformance-pattern]
@@ -562,6 +690,28 @@ jobs:
         run: |
           for result in "${{ needs.conformance-plan.result }}" "${{ needs.conformance-area.result }}" "${{ needs.conformance-pattern.result }}"; do
             [ "$result" = success ] || { echo "a conformance job ended $result"; exit 1; }
+          done
+
+  # The check required of a release: every interop job that was due passed (the OIDF suite's plans,
+  # the client libraries). A job that was due and was skipped or cancelled fails it.
+  interop:
+    needs: [interop-due, interop-oidf, interop-clients]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every interop job that was due passed
+        env:
+          DUE: ${{ needs.interop-due.result }}
+          OIDF_DUE: ${{ needs.interop-due.outputs.oidf }}
+          OIDF: ${{ needs.interop-oidf.result }}
+          CLIENTS_DUE: ${{ needs.interop-due.outputs.clients }}
+          CLIENTS: ${{ needs.interop-clients.result }}
+        run: |
+          [ "$DUE" = success ] || { echo "interop-due ended $DUE"; exit 1; }
+          # Each interop job beside whether it was due: a job a later change adds goes here too.
+          for job in "oidf $OIDF_DUE $OIDF" "clients $CLIENTS_DUE $CLIENTS"; do
+            read -r name due result <<<"$job"
+            if [ "$due" = true ] && [ "$result" != success ]; then echo "interop-$name was due and ended $result"; exit 1; fi
           done
 
   # On a pull request to main and on the release branches: what a release would publish.
@@ -630,14 +780,14 @@ jobs:
   # and on the release branches it fails where an expected run did not report or an item is
   # failed, incomplete or unverified, and elsewhere it only tells.
   compliance:
-    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, interop-clients, release-check]
+    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, interop-due, interop-oidf, interop-clients, release-check]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # The commit the conformance jobs tested, where they ran; else the event's.
-          ref: ${{ needs.conformance-plan.outputs.sha || '' }}
+          # The commit the conformance and interop jobs tested, where they ran; else the event's.
+          ref: ${{ needs.conformance-plan.outputs.sha || needs.interop-due.outputs.sha || '' }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
