@@ -87,7 +87,7 @@ describe("idp-github", () => {
 		);
 	});
 
-	it("asks GitHub to authorize with PKCE, and its own endpoints unless told others [oidc-core-3.1.2.1-y] [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", () => {
+	it("asks GitHub to authorize with PKCE, and its own endpoints unless told others [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", () => {
 		const { upstream } = open({});
 		const url = new URL(upstream.authorizationUrl(start));
 		expect(`${url.origin}${url.pathname}`).toBe("https://github.com/login/oauth/authorize");
