@@ -1,9 +1,10 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { areaTarget, auditEvents, type Scripted, type Started } from "@mod/conformance";
+import { areaTarget, auditEvents, fakeHttp, type Scripted, type Started } from "@mod/conformance";
 import { selfSigned, startFront } from "@mod/conformance-front";
+import type { ClientScene } from "@mod/conformance-oauth";
 import { startTunnel } from "@mod/conformance-tunnel";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { federationScene, type IdpScene, readsUserinfo } from "../src/main.ts";
@@ -62,6 +63,9 @@ let corp: Awaited<ReturnType<typeof fakeUpstream>>;
 let spare: Awaited<ReturnType<typeof fakeUpstream>>;
 let running: Started;
 let base = "";
+/** The tunnel's proxy and the fronts' certificates, for a scene of its own. */
+let proxyAt = "";
+let trustedAt = "";
 const stops: (() => Promise<unknown>)[] = [];
 /** An https front for the fake at `upstream()`, named `host`, its certificate made for it. */
 async function frontFor(host: string, upstream: () => string) {
@@ -98,6 +102,8 @@ beforeAll(async () => {
 	stops.push(() => tunnel.stop());
 	const trusted = join(dir, "trusted.pem");
 	await writeFile(trusted, `${corpFront.cert}\n${spareFront.cert}`);
+	proxyAt = `http://127.0.0.1:${tunnel.port}`;
+	trustedAt = trusted;
 	running = await areaTarget().start(
 		sceneOf(
 			[
@@ -192,3 +198,119 @@ describe.runIf(able)("federation: reading the upstream's UserInfo", () => {
 		}
 	});
 });
+
+/** A client asking for the profile and email a login's attributes give, as the scope table releases them. */
+const profileClient: ClientScene = {
+	id: "profile-app",
+	kind: "confidential",
+	method: "client_secret_post",
+	secret: "profile-app-secret-0123456789abcdef",
+	grants: ["authorization_code"],
+	scopes: ["openid", "profile", "email"],
+	redirectUris: ["https://app.example/cb"],
+	firstParty: true,
+};
+
+describe.runIf(able)(
+	"federation: an upstream's UserInfo, where the ledger cannot look users up by subject",
+	() => {
+		let ledgerApp: Started;
+		let ledgerBase = "";
+		beforeAll(async () => {
+			// The ledger finds alice by her upstream identity alone: with no lookup by subject, a
+			// session's login attributes are what the deployment releases for her.
+			const ledger = await fakeHttp((asked) => {
+				if (asked.path !== "/ledger/upstream") return { status: 401, text: "" };
+				const said = JSON.parse(asked.body) as { idp?: string; subject?: string };
+				return said.idp === "corp" && said.subject === "u-alice"
+					? { json: { id: "s-alice" } }
+					: { status: 404, json: { error: "not_found" } };
+			});
+			stops.push(() => ledger.stop());
+			ledgerApp = await areaTarget().start(
+				federationScene({
+					origin,
+					keys,
+					idps: [reading("corp", corp.issuer)],
+					landing,
+					returnTargets: ["https://app.example/back"],
+					users: [],
+					ledger: {
+						verifyUrl: `${ledger.base}/ledger/authenticate`,
+						credential: randomBytes(32).toString("hex"),
+						upstreamUrl: `${ledger.base}/ledger/upstream`,
+					},
+					clients: [profileClient],
+					proxy: proxyAt,
+				}),
+				{ trustedCertificates: [trustedAt] },
+			);
+			const app = ledgerApp;
+			if (app.kind !== "running") throw new Error(`refused:\n${app.output}`);
+			stops.push(() => app.stop());
+			ledgerBase = app.baseUrl;
+		});
+
+		/** The claims of the ID token the profile client gets, silently, for the browser's login. */
+		async function releasedTo(b: Browser) {
+			const verifier = "v".repeat(43);
+			const asked = new URLSearchParams({
+				response_type: "code",
+				client_id: profileClient.id,
+				redirect_uri: "https://app.example/cb",
+				scope: "openid profile email",
+				state: "s",
+				prompt: "none",
+				code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+				code_challenge_method: "S256",
+			});
+			const answered = await b.get(`/oauth/authorize?${asked}`);
+			const code = new URL(answered.location).searchParams.get("code") ?? "";
+			const token = await fetch(`${ledgerBase}/oauth/token`, {
+				method: "POST",
+				headers: { "x-forwarded-proto": "https", "x-forwarded-for": "198.51.100.40" },
+				body: new URLSearchParams({
+					grant_type: "authorization_code",
+					code,
+					redirect_uri: "https://app.example/cb",
+					code_verifier: verifier,
+					client_id: profileClient.id,
+					client_secret: profileClient.secret ?? "",
+				}),
+			});
+			const idToken = String(((await token.json()) as Record<string, unknown>).id_token ?? "");
+			return JSON.parse(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString()) as Record<
+				string,
+				unknown
+			>;
+		}
+
+		it("releases what UserInfo adds to the id_token's profile, the id_token's own claims and no verification untouched", async () => {
+			const b = openBrowser(() => ledgerBase, origin);
+			const started = await b.get("/session/oauth/federation/corp");
+			const query = corp.authorize(started.location, {
+				subject: "u-alice",
+				claims: { email: "alice@token.example" },
+			});
+			corp.answerUserinfo({
+				json: {
+					sub: "u-alice",
+					name: "Alice Info",
+					email: "alice@info.example",
+					email_verified: true,
+					picture: "https://pictures.example/alice.png",
+				},
+			});
+			const back = await b.get(`/session/oauth/federation/corp/callback?${query}`);
+			expect([back.status, back.location]).toEqual([302, landing]);
+			const claims = await releasedTo(b);
+			expect(claims).toMatchObject({
+				sub: "s-alice",
+				name: "Alice Info",
+				email: "alice@token.example",
+				picture: "https://pictures.example/alice.png",
+			});
+			expect(claims.email_verified).toBeUndefined();
+		});
+	},
+);

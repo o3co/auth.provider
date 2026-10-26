@@ -1,6 +1,11 @@
 import { type AreaScene, area, sceneOf } from "@mod/conformance";
 import { codeArea } from "@mod/conformance-code";
-import { identityArea, type RevocationScene, type UserScene } from "@mod/conformance-identity";
+import {
+	identityArea,
+	type LedgerScene,
+	type RevocationScene,
+	type UserScene,
+} from "@mod/conformance-identity";
 import { type KeysPart, keysArea } from "@mod/conformance-keys";
 import { type ClientScene, oauthArea } from "@mod/conformance-oauth";
 
@@ -77,6 +82,8 @@ export interface FederationPart {
 	readonly linkStepUpPage?: string;
 	/** A CONNECT proxy outbound reaches its upstreams through, for an upstream on https at loopback. */
 	readonly proxy?: string;
+	/** The user ledger's URLs, which outbound also reaches: this part's outbound section is the one kept. */
+	readonly ledgerUrls?: readonly string[];
 }
 
 export const federationArea = area<FederationPart>("federation");
@@ -85,6 +92,8 @@ export const federationArea = area<FederationPart>("federation");
 export interface FederationScene extends FederationPart {
 	readonly keys?: KeysPart;
 	readonly users: readonly UserScene[];
+	/** Users answered from a ledger over HTTP, beside or instead of `users`. */
+	readonly ledger?: LedgerScene;
 	/** Clients that run the code flow, so a scene can ask whether a browser is logged in. */
 	readonly clients?: readonly ClientScene[];
 	readonly userinfo?: boolean;
@@ -100,6 +109,7 @@ export function federationScene(scene: FederationScene): AreaScene {
 			origin: scene.origin,
 			users: scene.users,
 			login: { returnTargets: scene.returnTargets },
+			...(scene.ledger ? { ledger: scene.ledger } : {}),
 			...(scene.revocations ? { revocations: scene.revocations } : {}),
 			...(scene.recentAuthenticationSeconds
 				? { recentAuthenticationSeconds: scene.recentAuthenticationSeconds }
@@ -126,6 +136,14 @@ export function federationScene(scene: FederationScene): AreaScene {
 			...(scene.links ? { links: true } : {}),
 			...(scene.linkStepUpPage ? { linkStepUpPage: scene.linkStepUpPage } : {}),
 			...(scene.proxy ? { proxy: scene.proxy } : {}),
+			...(scene.ledger
+				? {
+						ledgerUrls: [
+							scene.ledger.verifyUrl,
+							...(scene.ledger.upstreamUrl ? [scene.ledger.upstreamUrl] : []),
+						],
+					}
+				: {}),
 		}),
 	);
 }

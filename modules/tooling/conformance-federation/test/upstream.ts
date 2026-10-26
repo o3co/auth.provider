@@ -13,6 +13,8 @@ export interface Authorized {
 	readonly nonce?: string;
 	/** When the user logged in, in epoch seconds, as `auth_time` says. */
 	readonly authTime?: number;
+	/** Claims the id_token carries besides the ones it always does. */
+	readonly claims?: Readonly<Record<string, unknown>>;
 	/** What its token endpoint says of the tokens, where a scene sets it; with a refresh token unless told not to. */
 	readonly tokens?: {
 		readonly accessToken?: string;
@@ -142,6 +144,7 @@ export async function fakeUpstream(
 			? ["ES256", "up-ec", ec.privateKey]
 			: ["RS256", "up-1", granted.forged ? forger.privateKey : signing.privateKey];
 		const idToken = await new SignJWT({
+			...granted.claims,
 			nonce: granted.nonce ?? granted.asked,
 			...(granted.authTime === undefined ? {} : { auth_time: granted.authTime }),
 		})

@@ -4,7 +4,7 @@
 - Owns the conformance scenes of the federation area: logging a browser in through an upstream OpenID Connect IdP, Google, Apple, or GitHub's OAuth, the audit events of those logins, and a start while the store fails.
 - Owns the scenes of a federation login meeting a client's `prompt=login` or max age only as the upstream says when the user logged in.
 - Owns the scenes of handing a login's upstream tokens to receiving clients (only once a login a gate holds opens), refreshing them, and logging out of an upstream.
-- Owns the scenes of an OpenID Connect IdP reading its upstream's UserInfo: on https alone, through fronts and a CONNECT proxy, its subject held to the id_token's, and a UserInfo refusing, down, slow, too large or untrusted opening no session.
+- Owns the scenes of an OpenID Connect IdP reading its upstream's UserInfo: on https alone, through fronts and a CONNECT proxy, its subject held to the id_token's, a UserInfo refusing, down, slow, too large or untrusted opening no session, and, where a ledger cannot look users up by subject, the claims UserInfo adds released to clients.
 - Owns the scenes of a federation login a gate holds: going on at the held page, or answered with the gate's answer where none is set.
 - Owns the scenes of federation grants, from a client's intent through the user's connection to the upstream token, its refresh and its end.
 - Sets up the federation area's part (the IdPs, the landing, the held page, the return targets, federation grants' page, connections and lodging limit, and a link's step-up page) on each of the legacy and new targets; on the new, the grants' page goes to `federation-grants-connect`, composed with the grants, and the step-up page to `federation-link`.
