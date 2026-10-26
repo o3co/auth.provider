@@ -66,8 +66,11 @@ export function assertionMethod(p: Parts): AuthMethod {
 			);
 		},
 		// Half an assertion, or a part or the client id given twice or not as a string, is refused
-		// before any of it is judged or spent.
+		// before any of it is judged or spent. A request carrying no part of one is not this method's:
+		// its client id is another method's to find malformed.
 		malformed: (request) => {
+			const carried = (name: string) => request.fields.has(name) || request.mistyped?.has(name);
+			if (!carried("client_assertion") && !carried("client_assertion_type")) return false;
 			if (request.fields.repeated().some((name) => singleFields.includes(name))) return true;
 			if (singleFields.some((name) => request.mistyped?.has(name))) return true;
 			const typed = request.fields.has("client_assertion_type");

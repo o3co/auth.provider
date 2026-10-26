@@ -502,6 +502,37 @@ describe("private_key_jwt", () => {
 		});
 	});
 
+	it("marks two methods beside an assertion that is no string in JSON, challenging for Basic", async () => {
+		const { c } = await boot();
+		const basic = `Basic ${Buffer.from(`post:${clientSecret("post")}`).toString("base64")}`;
+		const request = testRequest({
+			method: "POST",
+			headers: new Map([["authorization", basic]]),
+			json: { client_id: "post", client_secret: clientSecret("post"), client_assertion: 7 },
+		});
+		expect(await c.authenticate(request)).toEqual({
+			kind: "refused",
+			reason: "multiple_methods",
+			assertion: true,
+			challenges: ['Basic realm="client"'],
+		});
+	});
+
+	it("leaves unmarked a client id given twice or as no string with no assertion, malformed as another method finds it", async () => {
+		const { c } = await boot();
+		const secret = clientSecret("post");
+		for (const request of [
+			asked({ client_id: ["post", "post"], client_secret: secret }),
+			posted({ client_id: 7, client_secret: secret }),
+		]) {
+			expect(await c.authenticate(request)).toEqual({
+				kind: "refused",
+				reason: "malformed_credentials",
+				challenges: [],
+			});
+		}
+	});
+
 	it("takes an assertion from a JSON body as from a form", async () => {
 		const { c } = await boot();
 		const json = async (extra: Record<string, unknown> = {}) =>

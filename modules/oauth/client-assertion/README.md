@@ -24,7 +24,7 @@
 ## Invariants
 - The three values are read from the body only, a form or a JSON object; never from the query.
 - A request carrying `client_assertion` or `client_assertion_type` is this method's alone (RFC 7521 §4.2.1). The method says it authenticates by an assertion, so a refusal for its malformed credentials, or for another method beside it, is marked as the assertion's (`clients`).
-- Only one of the two, an empty `client_assertion`, or either part or `client_id` given twice or, in JSON, not as a string is malformed credentials, before anything is judged or spent.
+- Only one of the two, an empty `client_assertion`, or either part or `client_id` given twice or, in JSON, not as a string is malformed credentials, before anything is judged or spent; only for a request carrying a part of an assertion (sent, given twice, or not as a string), as a `client_id` alone is another method's to find malformed.
 - An assertion type other than `urn:ietf:params:oauth:client-assertion-type:jwt-bearer` is refused, never left to another method.
 - `client_id`, when given, names the client; otherwise the assertion's `iss` does.
 - `iss` and `sub` are the client's id.
