@@ -27,6 +27,7 @@ export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 		},
 		close: async () => ({ kind: "closed", cookies: [] }),
 		closeRequest: async () => ({ kind: "closed", cookies: [] }),
+		handleOf: async () => undefined,
 		entryOf: async () => ({ kind: "absent" }),
 		recent: () => false,
 		...parts,
@@ -460,6 +461,26 @@ export function sessionsContract(
 			}
 		});
 
+		it("answers the handle a request's cookie opens, and none for a cookie that opens nothing", async (context) => {
+			const place = await open();
+			const { handleOf } = place.sessions;
+			if (handleOf === undefined) return context.skip("this implementation offers no handleOf yet");
+			const done = await place.sessions.complete(place.request(), facts(place));
+			expect(await handleOf(place.request(done.cookies))).toBe(done.session.id);
+			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
+			expect(await handleOf(place.request(raised?.cookies))).toBe(done.session.id);
+			const once = raised?.cookies[0] as string;
+			const forged = once.replace(/=[^;]*/, `=${"A".repeat(43)}`);
+			// No cookie, one the raise retired, a forged one, and one sent twice: none opens a session.
+			for (const cookies of [undefined, done.cookies, [forged], [once, once]])
+				expect(await handleOf(place.request(cookies))).toBeUndefined();
+			// It reads no session: the participants were not called, and the session still enters.
+			expect(place.closed).toEqual([]);
+			expect((await place.sessions.enter(place.request(raised?.cookies)))?.id).toBe(
+				done.session.id,
+			);
+		});
+
 		it("closes the session a request's cookie points to, and destroys the cookie", async () => {
 			const place = await open();
 			const done = await place.sessions.complete(place.request(), facts(place));
@@ -798,6 +819,7 @@ export const sessionStandIn = defineModule(
 						raised: true,
 					};
 				},
+				handleOf: async (request) => handleIn(request),
 				closeRequest: async (request) => {
 					const handle = handleIn(request);
 					const carried = jar.lookup(request, "session").kind !== "absent";

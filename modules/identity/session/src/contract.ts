@@ -76,6 +76,13 @@ export interface Sessions {
 		  }
 		| undefined
 	>;
+	/**
+	 * The handle of the session the request's cookie opens, read from the cookie's index alone: no
+	 * session record is read or changed, so it says nothing of whether the session lives or is
+	 * authenticated. None for no cookie, one sent twice, a forged one or one retired; an index that
+	 * cannot be read is Unavailable.
+	 */
+	handleOf?(request: HttpRequest): Promise<string | undefined>;
 	closeRequest(request: HttpRequest): Promise<CloseOutcome>;
 	close(id: string, request?: HttpRequest): Promise<CloseOutcome>;
 	/**
