@@ -1676,6 +1676,9 @@ importers:
 
   modules/oauth/oidc:
     dependencies:
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../claims-selection
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { claimsSelections } from "@mod/claims-selection";
 import type { IdTokenRequest } from "@mod/code-grant";
 import type { Assembly } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
@@ -8,7 +9,16 @@ import usersModule from "@mod/users/module";
 import { testUser, usersConfig } from "@mod/users/testing";
 import { describe, expect, it } from "vitest";
 import oidc from "../src/module.ts";
-import { booted, composed, loginOf, makers, published, sessionsOf, unanswering } from "./parts.ts";
+import {
+	booted,
+	composed,
+	hooks,
+	loginOf,
+	makers,
+	published,
+	sessionsOf,
+	unanswering,
+} from "./parts.ts";
 
 const now = 1_800_000_000_000;
 const runtime = quietRuntime({ clock: { now: () => now } });
@@ -204,6 +214,65 @@ describe("the released claims an ID token carries", () => {
 			"sid",
 			"sub",
 		]);
+	});
+});
+
+describe("the claims a code's selection asks of the ID token", () => {
+	const alice = { subject: "s-alice", clientId: "app", amr: ["pwd"], session: "h" };
+	const registered = testUser("alice", "pw", {
+		subject: "s-alice",
+		attributes: { [userAttribute.name]: "Alice", [userAttribute.email]: "alice@example.com" },
+	});
+	const served = async () => {
+		const app = await booted({
+			runtime,
+			config: usersConfig([registered]),
+			sessionsAs: sessionsOf({ h: loginOf("s-alice", "users") }),
+		});
+		const [hook] = app.get(hooks);
+		if (!hook) throw new Error("no hook");
+		return { maker: makerOf(app), selections: app.get(claimsSelections), hook };
+	};
+
+	it("carries the names pinned for the ID token, held to their constraints, and never userinfo's", async () => {
+		const { maker, selections, hook } = await served();
+		await selections.keepForCode(
+			"r-1",
+			{
+				idToken: {
+					names: [{ name: "name", scope: "profile" }],
+					constraints: [{ name: "email", value: "bob@example.com" }],
+				},
+				userinfo: { names: [{ name: "email", scope: "email" }], constraints: [] },
+			},
+			600_000,
+		);
+		await hook.pin("r-1");
+		const { payload } = decoded(
+			await maker.make(request({ ...alice, scope: ["openid", "email"], redemption: "r-1" })),
+		);
+		expect(payload).toMatchObject({ name: "Alice" });
+		// email comes from the scope, but the ID token's constraint holds it back.
+		expect(payload).not.toHaveProperty("email");
+	});
+
+	it("carries the scope's claims alone for a code pinned without a selection, or a request naming no redemption", async () => {
+		const { maker, hook } = await served();
+		await hook.pin("r-2");
+		for (const more of [{ redemption: "r-2" }, {}]) {
+			const { payload } = decoded(
+				await maker.make(request({ ...alice, scope: ["openid", "email"], ...more })),
+			);
+			expect(payload).toMatchObject({ email: "alice@example.com" });
+			expect(payload).not.toHaveProperty("name");
+		}
+	});
+
+	it("makes no ID token for a redemption whose pin is gone", async () => {
+		const { maker } = await served();
+		await expect(
+			maker.make(request({ ...alice, scope: ["openid", "email"], redemption: "r-3" })),
+		).rejects.toThrow();
 	});
 });
 
