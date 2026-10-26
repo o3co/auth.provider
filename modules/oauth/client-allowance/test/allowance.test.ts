@@ -122,7 +122,7 @@ describe("scope parameter", () => {
 		}
 	});
 
-	it("issues the defaults for an empty scope, as for none", () => {
+	it("issues the defaults for an empty scope, as for none [rfc6749-3.3-b]", () => {
 		const client = holding({ scopes: ["read", "write"], "default-scopes": ["read"] });
 		for (const requested of ["", undefined]) {
 			expect(allowedIssuance(client, requested, "https://as")).toEqual({
