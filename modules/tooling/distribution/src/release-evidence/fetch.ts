@@ -11,7 +11,8 @@ import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const directory = process.argv[2];
-const repository = process.env.GITHUB_REPOSITORY;
+// The repository whose CI tested the release: this one, or the one a security release was tested in.
+const repository = process.env.EVIDENCE_REPOSITORY || process.env.GITHUB_REPOSITORY;
 if (!directory || !repository) {
 	console.error(
 		"release-evidence fetch: name the directory to fetch into, with GITHUB_REPOSITORY set",

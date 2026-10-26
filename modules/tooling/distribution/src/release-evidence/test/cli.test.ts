@@ -9,14 +9,27 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { unicodePath, type ZipFile, zipOf } from "./zip.ts";
+
+// Each test runs git and node a few times over, slow on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 const here = join(import.meta.dirname, "..");
 const repository = "o3co/test";
 
 /** A repository whose HEAD merges release/1.0.1 into main, as a release's tag commit does. */
-function released(merge = true) {
+/** How the release's tag is written: annotated with the lines given, lightweight, on another commit, or not at all. */
+type Tagged = {
+	readonly lines?: readonly string[];
+	readonly lightweight?: boolean;
+	readonly on?: string;
+	readonly none?: boolean;
+	/** A message this long, past what a process's output is read to. */
+	readonly long?: boolean;
+};
+
+function released(merge = true, declared = false, tagged: Tagged = {}) {
 	const dir = mkdtempSync(join(tmpdir(), "release-evidence-cli-"));
 	const git = (...args: string[]) =>
 		execFileSync(
@@ -39,6 +52,15 @@ function released(merge = true) {
 	git("checkout", "-q", "main");
 	if (merge) git("merge", "-q", "--no-ff", "release/1.0.1", "-m", "Merge release/1.0.1");
 	git("update-ref", "refs/remotes/origin/main", merge ? "HEAD^1" : "HEAD");
+	const lines = tagged.lines ?? (declared ? ["Release-Evidence: security"] : []);
+	const on = tagged.on ?? "HEAD";
+	if (tagged.lightweight) git("tag", "v1.0.1", on);
+	else if (tagged.long) {
+		const message = join(dir, "..", `${dir.split("/").pop()}-message`);
+		writeFileSync(message, `v1.0.1\n\n${"x".repeat(2 << 20)}\nRelease-Evidence: security\n`);
+		git("tag", "-a", "v1.0.1", "-F", message, on);
+	} else if (!tagged.none)
+		git("tag", "-a", "v1.0.1", "-m", "v1.0.1", ...lines.flatMap((l) => ["-m", l]), on);
 	return { dir, head: merge ? git("rev-parse", "HEAD^2") : "" };
 }
 
@@ -70,6 +92,23 @@ describe("fetch", () => {
 		expect(existsSync(join(out, "fetched.json"))).toBe(false);
 	});
 
+	it("asks after the repository it is given to read, the security repository's included", () => {
+		const { dir } = released();
+		const bin = mkdtempSync(join(tmpdir(), "release-evidence-gh-"));
+		const asked = join(bin, "asked");
+		writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${asked}\nexit 0\n`);
+		chmodSync(join(bin, "gh"), 0o755);
+		const done = node("fetch.ts", dir, [join(dir, "f3")], {
+			GITHUB_REPOSITORY: repository,
+			EVIDENCE_REPOSITORY: "o3co/secure",
+			PATH: `${bin}:${process.env.PATH ?? ""}`,
+		});
+		expect(done.status).toBe(0);
+		expect(readFileSync(asked, "utf8")).toContain(
+			"repos/o3co/secure/actions/workflows/ci.yml/runs",
+		);
+	});
+
 	it("writes no runs where GitHub answers none, and asks nothing of a tag that merged nothing", () => {
 		const { dir } = released();
 		const empty = node("fetch.ts", dir, [join(dir, "f1")], {
@@ -93,7 +132,7 @@ describe("judge", () => {
 	function brought(
 		head: string,
 		reports: readonly ZipFile[],
-		over: { head?: string; repository?: string; examined?: boolean } = {},
+		over: { head?: string; repository?: string; examined?: boolean; runs?: "none" | "failed" } = {},
 	) {
 		const fetched = mkdtempSync(join(tmpdir(), "release-evidence-fetched-"));
 		mkdirSync(join(fetched, "zips"));
@@ -107,8 +146,8 @@ describe("judge", () => {
 			path: ".github/workflows/ci.yml",
 			headSha: head,
 			headBranch: "release/1.0.1",
-			repository,
-			headRepository: repository,
+			repository: over.repository ?? repository,
+			headRepository: over.repository ?? repository,
 			createdAt: "2026-10-27T00:00:00Z",
 			url: "https://github.example/runs/7",
 		};
@@ -122,7 +161,12 @@ describe("judge", () => {
 			JSON.stringify({
 				repository: over.repository ?? repository,
 				head: over.head ?? head,
-				runs: [run],
+				runs:
+					over.runs === "none"
+						? []
+						: over.runs === "failed"
+							? [{ ...run, conclusion: "failure" }]
+							: [run],
 				examined: over.examined === false ? {} : { "7": { jobs, artifacts } },
 			}),
 		);
@@ -153,6 +197,114 @@ describe("judge", () => {
 			const done = judged(dir, brought(head, [], over));
 			expect([done.status, done.stderr]).toEqual([1, expect.stringContaining("fetch asked after")]);
 		}
+	});
+
+	/** A stand-in for the release's compliance, letting the release go on. */
+	const passing = () => {
+		const bin = mkdtempSync(join(tmpdir(), "release-evidence-compliance-"));
+		writeFileSync(join(bin, "compliance"), "#!/bin/sh\necho '{}' > \"$1/compliance.json\"\n");
+		chmodSync(join(bin, "compliance"), 0o755);
+		return join(bin, "compliance");
+	};
+	const routeOf = (output: string) => readFileSync(output, "utf8");
+
+	it("hands the release to the security repository where its tag declares one, whatever ran here, and never else", () => {
+		const declared = released(true, true);
+		for (const [n, over] of [{ runs: "none" }, {}, { runs: "failed" }].entries()) {
+			const output = join(declared.dir, "..", `${Date.now()}-${n}-output`);
+			const done = judged(
+				declared.dir,
+				brought(declared.head, [], over as { runs?: "none" | "failed" }),
+				{
+					GITHUB_OUTPUT: output,
+				},
+			);
+			expect([done.status, routeOf(output)]).toEqual([0, "route=security\n"]);
+		}
+		const plain = released();
+		for (const runs of ["none", "failed"] as const) {
+			const done = judged(plain.dir, brought(plain.head, [], { runs }));
+			expect([done.status, done.stderr]).toEqual([
+				1,
+				expect.stringContaining("no successful CI run"),
+			]);
+		}
+	});
+
+	it("reads the tag as pushed, refusing one it cannot read, of another commit, or declaring another value", () => {
+		for (const [tagged, told, more] of [
+			[{ none: true }, "cannot be read in this checkout", {}],
+			[{ long: true }, "message of the tag v1.0.1 cannot be read", {}],
+			[{ on: "HEAD^1" }, "are not one commit", {}],
+			[{}, "are not one commit", { GITHUB_SHA: "0".repeat(40) }],
+			[
+				{ lines: ["Release-Evidence: public"] },
+				"declares Release-Evidence otherwise than security",
+				{},
+			],
+			[
+				{ lines: ["Release-Evidence: security", "release-evidence: SECURITY"] },
+				"declares Release-Evidence otherwise than security",
+				{},
+			],
+		] as const) {
+			const { dir, head } = released(true, false, tagged);
+			const done = judged(dir, brought(head, [], { runs: "none" }), more);
+			expect([done.status, done.stderr], told).toEqual([1, expect.stringContaining(told)]);
+		}
+	});
+
+	it("reads a lightweight tag as declaring nothing", () => {
+		const { dir, head } = released(true, false, { lightweight: true });
+		const done = judged(dir, brought(head, [], { runs: "none" }));
+		expect([done.status, done.stderr]).toEqual([
+			1,
+			expect.stringContaining("no successful CI run"),
+		]);
+	});
+
+	it("takes no run of the security repository for a tag that declares no security release", () => {
+		const { dir, head } = released();
+		const done = judged(dir, brought(head, [], { repository: "o3co/secure" }), {
+			EVIDENCE_REPOSITORY: "o3co/secure",
+		});
+		expect([done.status, done.stderr]).toEqual([
+			1,
+			expect.stringContaining("declares no security release"),
+		]);
+	});
+
+	it("takes a run whose evidence makes the release's compliance, telling the route it came by", () => {
+		const reports = (head: string) => [{ name: "a.json", data: report(head) }];
+		const plain = released();
+		const output = join(plain.dir, "..", `${Date.now()}-public`);
+		const fetched = brought(plain.head, reports(plain.head));
+		const taken = judged(plain.dir, fetched, {
+			GITHUB_OUTPUT: output,
+			RELEASE_EVIDENCE_COMPLIANCE: passing(),
+		});
+		expect([taken.status, routeOf(output)]).toEqual([0, "route=public\n"]);
+		const manifest = JSON.parse(readFileSync(join(fetched, "out", "manifest.json"), "utf8"));
+		expect(manifest.run).toMatchObject({ repository, id: 7, branch: "release/1.0.1" });
+
+		const declared = released(true, true);
+		const secure = join(declared.dir, "..", `${Date.now()}-security`);
+		const fromSecurity = judged(
+			declared.dir,
+			brought(declared.head, reports(declared.head), { repository: "o3co/secure" }),
+			{
+				EVIDENCE_REPOSITORY: "o3co/secure",
+				GITHUB_OUTPUT: secure,
+				RELEASE_EVIDENCE_COMPLIANCE: passing(),
+			},
+		);
+		expect([fromSecurity.status, routeOf(secure)]).toEqual([0, "route=security\n"]);
+	});
+
+	it("judges the repository it is given, refusing what fetch brought of another", () => {
+		const { dir, head } = released();
+		const done = judged(dir, brought(head, []), { EVIDENCE_REPOSITORY: "o3co/secure" });
+		expect([done.status, done.stderr]).toEqual([1, expect.stringContaining("in o3co/test, not")]);
 	});
 
 	it("refuses a run fetch brought nothing of", () => {

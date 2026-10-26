@@ -7,6 +7,7 @@
  */
 import { spawnSync } from "node:child_process";
 import {
+	appendFileSync,
 	cpSync,
 	existsSync,
 	lstatSync,
@@ -33,7 +34,7 @@ import {
 } from "./evidence.ts";
 
 const [fetched, directory] = process.argv.slice(2);
-const repository = process.env.GITHUB_REPOSITORY;
+const repository = process.env.EVIDENCE_REPOSITORY || process.env.GITHUB_REPOSITORY;
 const tagName = process.env.GITHUB_REF_NAME;
 const stop = (problems: readonly string[]): never => {
 	for (const problem of problems) console.error(`release-evidence: ${problem}`);
@@ -97,6 +98,47 @@ const tag = (found as Extract<typeof found, { tag: unknown }>).tag;
 if (brought.repository !== repository || brought.head !== tag.head) {
 	stop([
 		`fetch asked after ${brought.head} in ${brought.repository}, not ${tag.head} in ${repository}`,
+	]);
+}
+
+/** Tells the workflow which repository's run the release takes, where it reads the step's outputs. */
+const route = (to: "public" | "security") => {
+	if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `route=${to}\n`);
+};
+// A security release is the owner's word, in the message of the tag only the owner may make; it is
+// never read from what CI ran, or did not run, here.
+// The tag as pushed, fetched again after the checkout wrote it as a lightweight one: unread, or not
+// of the commit checked out and the event's, nothing is judged.
+const tagRef = `refs/tags/${tagName}`;
+const kind = git("cat-file", "-t", tagRef);
+if (!kind.ok) stop([`the tag ${tagName} cannot be read in this checkout`]);
+const sha = process.env.GITHUB_SHA;
+if (
+	git("rev-parse", `${tagRef}^{commit}`).out !== commit ||
+	(sha !== undefined && sha !== commit)
+) {
+	stop([`the tag ${tagName}, the commit checked out and the event's are not one commit`]);
+}
+const body = kind.out === "tag" ? git("cat-file", "tag", tagRef) : { ok: true, out: "" };
+if (!body.ok) stop([`the message of the tag ${tagName} cannot be read in this checkout`]);
+const declarations = body.out
+	.split("\n")
+	.map((line) => /^\s*release-evidence\s*:(.*)$/i.exec(line)?.[1]?.trim())
+	.filter((value) => value !== undefined);
+if (declarations.some((value) => value !== "security")) {
+	stop([`${tagName} declares Release-Evidence otherwise than security; nothing is judged`]);
+}
+const declared = declarations.length > 0;
+if (repository === process.env.GITHUB_REPOSITORY && declared) {
+	route("security");
+	console.log(
+		`release-evidence: ${tagName} declares a security release; the security repository's run is judged`,
+	);
+	process.exit(0);
+}
+if (repository !== process.env.GITHUB_REPOSITORY && !declared) {
+	stop([
+		`${tagName} declares no security release (Release-Evidence: security in its message), so no run of ${repository} is taken`,
 	]);
 }
 
@@ -217,6 +259,7 @@ try {
 			artifacts: verdict.artifacts.map((a) => a.name),
 		};
 		writeFileSync(join(at, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+		route(repository === process.env.GITHUB_REPOSITORY ? "public" : "security");
 		console.log(
 			`release-evidence: ${verdict.artifacts.length} artifacts of ${verdict.run.url}, which tested ${tag.head} on ${tag.branch}, of the tag's tree ${tag.tree}`,
 		);

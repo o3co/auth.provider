@@ -22,9 +22,11 @@ jobs:
     permissions:
       contents: read
       actions: read
-    # Later jobs take the artifact by this id, never by a name another job could make again.
+    # Later jobs take the artifact by this id, never by a name another job could make again; `route`
+    # says whether this repository's run was taken (public) or the tag declares a security release (security).
     outputs:
       evidence: ${{ steps.kept.outputs.artifact-id }}
+      route: ${{ steps.judge.outputs.route }}
     steps:
       # No credential left in the checkout's git configuration; main's history, which the tag's first
       # parent must be on.
@@ -32,6 +34,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # The tag as pushed, its message where a security release is declared: the checkout writes it
+      # again as a lightweight tag. Read without a credential, as this repository is public.
+      - name: The tag as pushed
+        run: git fetch --no-tags --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@v4
         with:
@@ -43,6 +49,79 @@ jobs:
         run: node modules/tooling/distribution/src/release-evidence/fetch.ts "$RUNNER_TEMP/fetched"
       # No lifecycle script runs; and no step after this one holds the token.
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      # Where the tag declares a security release (Release-Evidence: security in its message), it
+      # hands the release to the security repository's run; no run here, or its absence, decides that.
+      - name: Judge them, holding no credential
+        id: judge
+        run: node modules/tooling/distribution/src/release-evidence/judge.ts "$RUNNER_TEMP/fetched" "$RUNNER_TEMP/evidence"
+      - name: Keep it for the publish job
+        id: kept
+        if: steps.judge.outputs.route == 'public'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 90
+          # A re-run of all jobs writes over the one an earlier attempt kept: an artifact's name is the run's.
+          overwrite: true
+
+  # A security fix is tested in the security repository before it is made public, so its CI run is
+  # there (docs/releasing.md, "A security release"). Only where the tag declares a security release: the
+  # environment's reviewer approves the run, and the App, installed on that repository alone, gives
+  # a token that reads its runs, used by fetching alone and revoked before anything is installed.
+  evidence-security:
+    name: Evidence of the tested tree, from the security repository
+    needs: evidence
+    if: ${{ needs.evidence.result == 'success' && needs.evidence.outputs.route == 'security' }}
+    runs-on: ubuntu-latest
+    environment: security-evidence
+    permissions:
+      contents: read
+    outputs:
+      evidence: ${{ steps.kept.outputs.artifact-id }}
+    env:
+      # Fixed here, never taken from the tag or an input.
+      EVIDENCE_REPOSITORY: o3co/auth.provider-security
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # The tag as pushed, its message where a security release is declared: the checkout writes it
+      # again as a lightweight tag. Read without a credential, as this repository is public.
+      - name: The tag as pushed
+        run: git fetch --no-tags --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: A token reading the security repository's runs
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.SECURITY_EVIDENCE_APP_ID }}
+          private-key: ${{ secrets.SECURITY_EVIDENCE_APP_KEY }}
+          owner: o3co
+          repositories: auth.provider-security
+          permission-actions: read
+      # Revoked as fetching ends, whether it passed or not.
+      - name: Fetch the release branch's runs there
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'gh api --method DELETE /installation/token >/dev/null 2>&1 || true' EXIT
+          node modules/tooling/distribution/src/release-evidence/fetch.ts "$RUNNER_TEMP/fetched"
+      - name: The token is revoked
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        shell: bash
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/installation/repositories)
+          if [ "$code" != 401 ]; then echo "::error::the token still answers ($code)"; exit 1; fi
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Judge them, holding no credential
         run: node modules/tooling/distribution/src/release-evidence/judge.ts "$RUNNER_TEMP/fetched" "$RUNNER_TEMP/evidence"
       - name: Keep it for the publish job
@@ -53,7 +132,6 @@ jobs:
           path: ${{ runner.temp }}/evidence
           if-no-files-found: error
           retention-days: 90
-          # A re-run of all jobs writes over the one an earlier attempt kept: an artifact's name is the run's.
           overwrite: true
 
   # The checks and the pack, where nothing can publish: they run the workspace's code and what the
@@ -211,7 +289,15 @@ jobs:
   # the release packed runs here.
   publish:
     name: Publish to npm
-    needs: [evidence, pack, sbom]
+    needs: [evidence, evidence-security, pack, sbom]
+    # Written out, as a skipped evidence-security would otherwise skip every release: the pack and the
+    # lists made, and exactly one route's evidence taken.
+    if: >-
+      ${{ !cancelled()
+          && needs.pack.result == 'success' && needs.sbom.result == 'success'
+          && needs.evidence.result == 'success'
+          && ((needs.evidence.outputs.route == 'public' && needs.evidence-security.result == 'skipped')
+           || (needs.evidence.outputs.route == 'security' && needs.evidence-security.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -290,7 +376,7 @@ jobs:
       - name: Take the evidence of the tested tree
         uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ needs.evidence.outputs.evidence }}
+          artifact-ids: ${{ needs.evidence.outputs.route == 'public' && needs.evidence.outputs.evidence || needs.evidence-security.outputs.evidence }}
           path: ${{ runner.temp }}/release-evidence
           merge-multiple: true
       - name: Take the release run's own evidence
@@ -375,7 +461,8 @@ jobs:
   api-docs:
     name: API site
     needs: publish
-    if: ${{ !contains(github.ref_name, '-') }}
+    # Written out, as publish's own needs hold a job a release skips.
+    if: ${{ !cancelled() && needs.publish.result == 'success' && !contains(github.ref_name, '-') }}
     permissions:
       contents: write
     uses: ./.github/workflows/api-docs.yml
