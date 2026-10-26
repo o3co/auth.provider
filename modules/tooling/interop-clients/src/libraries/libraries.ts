@@ -13,6 +13,7 @@ export const flows = [
 	"device",
 	"logout",
 	"jwt-bearer",
+	"jwt-bearer-no-client",
 	"token-exchange",
 	"mtls",
 	"backchannel-logout",
@@ -74,6 +75,7 @@ export const libraries: readonly Library[] = [
 			"client-credentials",
 			"client-credentials-secret",
 			"revocation",
+			"jwt-bearer-no-client",
 		],
 		// A virtual environment of its own, kept with the package's caches, every package installed by
 		// the hash requirements.txt pins.
@@ -106,6 +108,7 @@ export const libraries: readonly Library[] = [
 			"client-credentials-secret",
 			"public-device",
 			"backchannel-logout",
+			"jwt-bearer-no-client",
 		],
 		// The module and its toolchain pinned by go.mod, every module's hash by go.sum.
 		build: [["go", "build", "-C", join("adapters", "go"), "-o", join("bin", "go-adapter"), "."]],
