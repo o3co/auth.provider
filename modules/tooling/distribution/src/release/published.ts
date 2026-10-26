@@ -1,5 +1,5 @@
 /** Whether what is already published at this version is what this run packed, before anything more is published. */
-import type { Packed } from "./seal.ts";
+import type { Packed } from "../packed/packed.ts";
 
 /** What the registry answered for a name at this version: not there, there with an integrity, or no answer read. */
 export type Lookup =

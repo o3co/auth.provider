@@ -56,6 +56,34 @@ export async function settled(c: Container, answered: () => Promise<boolean>, ms
 }
 
 /**
+ * The `docker run` arguments of an install from the tarballs in the base stage, as `user` (the
+ * runner's own `uid:gid`), its home and corepack's under the mounted cache: what it writes into the
+ * mounted directories is the runner's, removed by the runner with no privilege.
+ */
+export const installArguments = (p: {
+	readonly mounts: readonly string[];
+	readonly base: string;
+	readonly user: string;
+}) => [
+	...p.mounts.flatMap((mount) => ["-v", mount]),
+	"--user",
+	p.user,
+	"-e",
+	"HOME=/cache/home",
+	"-e",
+	"COREPACK_HOME=/cache/corepack",
+	"-e",
+	"COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
+	p.base,
+	"pnpm",
+	"install",
+	"--prod",
+	"--no-frozen-lockfile",
+	"--store-dir",
+	"/cache/store",
+];
+
+/**
  * Builds and runs apps' images, tagged `run`. The registry has no tarball of an unreleased version,
  * so each Dockerfile's `deps` stage is replaced by the same install, `--prod` in the Dockerfile's
  * own `base` stage, from the tarballs in `dir`; every other stage is built as written.
@@ -81,22 +109,12 @@ export function images(
 		copyFileSync(join(app, "package.json"), join(deps, "package.json"));
 		writeFileSync(join(deps, "pnpm-workspace.yaml"), overridesFile(inContainer));
 		const cache = join(scratch, "image-cache");
+		// Made here, the runner's: Docker makes a missing directory it mounts as root.
+		mkdirSync(join(cache, "home"), { recursive: true });
 		const mounts = [`${deps}:/app`, `${tarballs.dir}:/tarballs:ro`, `${cache}:/cache`];
+		const user = `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`;
 		await withContainer({ run, purpose: `install-${name}`, within: buildWithin }, (c) =>
-			c.run([
-				...mounts.flatMap((mount) => ["-v", mount]),
-				"-e",
-				"COREPACK_HOME=/cache/corepack",
-				"-e",
-				"COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
-				base,
-				"pnpm",
-				"install",
-				"--prod",
-				"--no-frozen-lockfile",
-				"--store-dir",
-				"/cache/store",
-			]),
+			c.run(installArguments({ mounts, base, user })),
 		);
 		const image = `${run}:${name}`;
 		await docker(
