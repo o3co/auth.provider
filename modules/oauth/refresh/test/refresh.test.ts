@@ -675,7 +675,7 @@ describe("refresh tokens", () => {
 		);
 	});
 
-	it("bind a public client's family to its binding and ask the same binding after [rfc9700-2.2.2-a]", async () => {
+	it("bind a public client's family to its binding and ask the same binding after", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem("pub", { bind: "k1" });
 		expect((await s.refresh(token, "pub")).body.error).toBe("invalid_grant");
