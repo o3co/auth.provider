@@ -141,6 +141,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `clientless` (`src/clientless`): a grant naming no client (RFC 7523 §3.1), where an entry's `client` is the client its verified assertion identifies, and the binding of entries and their clients.
   - `conditions` (`src/conditions`): the conditions an issuer holds an assertion's verified claims to, and whether claims meet them.
   - `delegated` (`src/delegated`): an assertion of a delegated issuer, which another module checks by its own rules (`delegatedAssertions`).
+  - `id-jag` (`src/id-jag`): the ID-JAG profile's rules (Identity Assertion JWT Authorization Grant), read off a verified assertion and held against the request.
   - `issuers` (`src/issuers`): the trusted issuers, each entry of the section's `issuers`, and the signers and ledgers each is read with.
   - `policy` (`src/policy`): what a trusted issuer's own policy makes of the section's, for verifying its assertions, keeping them used and issuing their tokens.
 - `@mod/jwt-bearer-id-tokens` (feature, `modules/oauth/jwt-bearer-id-tokens`): Ties `jwt-bearer` and `exchange-id-tokens` together: Apple's and Google's id_tokens, sent as JWT bearer assertions, are checked and taken once by `exchange-id-tokens`' rules, for the apps already sent out that send them so.
@@ -367,7 +368,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `differences` (`src/differences`): the differences accepted between a library and the provider.
   - `libraries` (`src/libraries`): the client libraries the harness runs.
   - `pins` (`src/pins`): the SHA-256 of each jar an adapter is built from.
-- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config, on the `simple-web` pattern's app behind an https front.
+- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front.
   - `api` (`src/api`): the suite's API, reached trusting its certificate alone.
   - `commands` (`src/commands`): a command a plan runs, held to its time.
   - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
@@ -377,6 +378,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
   - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
   - `results` (`src/results`): what each suite test of a plan proved.
+  - `review` (`src/review`): the pages the suite's browser kept for a person to review.
   - `scene` (`src/scene`): the app the OP plans meet.
   - `suite` (`src/suite`): the suite at its pinned version, started and stopped.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.

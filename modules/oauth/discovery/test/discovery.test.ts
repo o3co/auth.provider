@@ -48,7 +48,7 @@ async function serve(extra: Module[], url = "https://as.example", corsOrigins: s
 	};
 }
 
-it("serves one document at both well-known names, the configured issuer first and each contributed member", async () => {
+it("serves one document at both well-known names, the configured issuer first and each contributed member [oidc-discovery-3-a] [oidc-discovery-4-a] [oidc-discovery-4.1-a] [oidc-discovery-4.3-a] [rfc8414-2-a] [rfc8414-3.1-a] [rfc8414-3.3-a]", async () => {
 	const get = await serve([
 		item("b_supported", ["x"]),
 		item("a_endpoint", "https://as.example/a"),
@@ -74,7 +74,7 @@ it("serves one document at both well-known names, the configured issuer first an
 	expect((await get("/.well-known/openid-configuration/x")).status).toBe(404);
 });
 
-it("answers for an issuer with a path where RFC 8414 inserts the well-known name and where OpenID appends it, and not at the root", async () => {
+it("answers for an issuer with a path where RFC 8414 inserts the well-known name and where OpenID appends it, and not at the root [oidc-discovery-4-a] [oidc-discovery-4.3-a] [rfc8414-3-a] [rfc8414-3.1-a] [rfc8414-3.3-a]", async () => {
 	const get = await serve([], "https://as.example/tenant/a");
 	for (const path of [
 		"/.well-known/oauth-authorization-server/tenant/a",
@@ -108,7 +108,7 @@ it("refuses to start when two modules contribute one member", async () => {
 	).toBe(true);
 });
 
-it("lets a listed origin's page read the document at each of its names, and no other origin's", async () => {
+it("lets a listed origin's page read the document at each of its names, and no other origin's [oidc-discovery-4-d]", async () => {
 	const get = await serve([], "https://as.example", ["https://app.example"]);
 	for (const path of [
 		"/.well-known/openid-configuration",

@@ -4,7 +4,13 @@ import { DestinationRefused, type Outbound, type OutboundResponse } from "@mod/o
 import { configuredUrl } from "@mod/url-setting/testing";
 import { SignJWT } from "jose";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Algorithm, KeySource, Policy, Reason } from "../src/contract.ts";
+import {
+	type Algorithm,
+	type KeySource,
+	type Policy,
+	type Reason,
+	typOf,
+} from "../src/contract.ts";
 import { testSigner } from "../src/testing.ts";
 import { externalJwtOver } from "../src/verifier.ts";
 
@@ -117,6 +123,21 @@ describe("headers and keys", () => {
 		);
 		for (const typ of ["application/jwt", "jwt", "JWT"]) {
 			expect((await verifier.verify(await signer.sign(fresh(), { typ }))).kind, typ).toBe("valid");
+		}
+	});
+
+	it("reads a header's type as it compares one, for a caller to sort tokens by before verifying", async () => {
+		expect(typOf({ typ: "application/OAuth-ID-JAG+JWT" })).toBe("oauth-id-jag+jwt");
+		expect(typOf({ typ: "oauth-id-jag+jwt" })).toBe("oauth-id-jag+jwt");
+		expect(typOf({ typ: "JWT" })).toBe("jwt");
+		for (const header of [{}, { typ: 1 }, { typ: ["JWT"] }, { typ: null }])
+			expect(typOf(header), JSON.stringify(header)).toBeUndefined();
+		// One reading for both: a type typOf tells apart, a policy naming it tells apart the same way.
+		const signer = await testSigner("ES256");
+		const verifier = verifierOf({ inline: [signer.jwk] }, { ...policy, typ: "at+jwt" });
+		for (const typ of ["at+jwt", "AT+JWT", "application/at+jwt", "jwt", "application/jwt"]) {
+			const valid = (await verifier.verify(await signer.sign(fresh(), { typ }))).kind === "valid";
+			expect(valid, typ).toBe(typOf({ typ }) === typOf({ typ: "at+jwt" }));
 		}
 	});
 

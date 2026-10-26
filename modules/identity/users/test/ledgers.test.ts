@@ -181,7 +181,7 @@ describe("users ledgers", () => {
 		await expect(u.verify("alice", "correct horse")).rejects.toSatisfy(isUnavailable);
 	});
 
-	it("refuses a malformed answer, or the user of another subject, as unavailable", async () => {
+	it("refuses a malformed answer, or the user of another subject, as unavailable [oidc-core-2-c]", async () => {
 		const user = (subject: unknown, attributes: unknown = {}) => ({
 			kind: "user",
 			user: { subject, attributes },

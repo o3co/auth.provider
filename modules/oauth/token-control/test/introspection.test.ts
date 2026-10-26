@@ -8,7 +8,7 @@ import { section } from "../src/section.ts";
 import { serve } from "./serve.ts";
 
 describe("introspection", () => {
-	it("tells a resource server sharing the audience about an active token", async () => {
+	it("tells a resource server sharing the audience about an active token [rfc7662-2.2-a]", async () => {
 		const s = await serve();
 		const answer = await s.post("/oauth/introspect", "api", { token: await s.issue() });
 		expect(answer.status).toBe(200);
@@ -38,7 +38,7 @@ describe("introspection", () => {
 		expect(bearer.json.cnf).toBeUndefined();
 	});
 
-	it("answers inactive for tokens the caller may not see, broken tokens and nothing more", async () => {
+	it("answers inactive for tokens the caller may not see, broken tokens and nothing more [rfc7662-2.2-b] [rfc7662-2.2-c] [rfc7662-4-f] [rfc7662-5-a]", async () => {
 		const s = await serve();
 		const token = await s.issue();
 		const inactive = { active: false };
@@ -49,7 +49,7 @@ describe("introspection", () => {
 		expect(await answer("api", "garbage"), "no token at all").toEqual(inactive);
 	});
 
-	it("refuses public clients, missing tokens, repeated parameters and bad client credentials, recording only the credentials' refusal", async () => {
+	it("refuses public clients, missing tokens, repeated parameters and bad client credentials, recording only the credentials' refusal [rfc7662-2.1-a] [rfc7662-2.1-d]", async () => {
 		const s = await serve();
 		const token = await s.issue();
 		expect((await s.post("/oauth/introspect", undefined, { token, client_id: "pub" })).status).toBe(
@@ -77,7 +77,7 @@ describe("introspection", () => {
 		]);
 	});
 
-	it("answers 503 when a condition on access tokens cannot tell, never inactive, recording and warning so", async () => {
+	it("answers 503 when a condition on access tokens cannot tell, never inactive, recording and warning so [rfc7662-4-a]", async () => {
 		const down = unavailableSwitch<AccessCondition>();
 		const condition = defineModule({ name: "condition", takes: [] }, (m) => [
 			m
@@ -104,7 +104,7 @@ describe("introspection", () => {
 });
 
 describe("rate limit", () => {
-	it("limits requests per source on each route apart, before any client is authenticated", async () => {
+	it("limits requests per source on each route apart, before any client is authenticated [rfc7009-5-a] [rfc6749-2.3.1-c]", async () => {
 		const s = await serve({ limit: { requests: 2, window: "1m" } });
 		const wrong = { token: await s.issue(), client_id: "api", client_secret: "wrong" };
 		for (let i = 0; i < 2; i++) {

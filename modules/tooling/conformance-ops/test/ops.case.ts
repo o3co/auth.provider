@@ -334,7 +334,7 @@ describe("Q. the operations routes and request counting", () => {
 		parts: { ...limited.parts, ...sceneOf(opsArea.part({})).parts },
 	});
 
-	it("answers without credentials, and leaves the token endpoint's limit as it was", async () => {
+	it("answers without credentials, and leaves the token endpoint's limit as it was [rfc6749-2.3.1-c]", async () => {
 		// token-endpoint's default: 60 requests per source in a 60 s window, counted in fixed windows,
 		// so a window turning over inside this scene could fail it or let it pass wrongly.
 		const tokenLimit = 60;

@@ -168,7 +168,7 @@ async function serve(options: Options = {}) {
 }
 
 describe("session-grant", () => {
-	it("issues an access token for the session's subject to a confidential or a public client", async () => {
+	it("issues an access token for the session's subject to a confidential or a public client [rfc6749-3.3-a] [rfc6749-3.3-b]", async () => {
 		const s = await serve();
 		for (const client of ["app", "spa"]) {
 			const outcome = await s.call(client);
@@ -207,7 +207,7 @@ describe("session-grant", () => {
 		});
 	});
 
-	it("gives the scope asked within the client's allowance, and no scope outside it", async () => {
+	it("gives the scope asked within the client's allowance, and no scope outside it [rfc6749-10.3-c]", async () => {
 		const s = await serve();
 		expect((await s.issued(await s.call("app", { scope: "read write" }))).grant.scope).toEqual([
 			"read",
