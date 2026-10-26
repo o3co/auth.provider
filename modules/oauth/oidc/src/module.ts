@@ -56,8 +56,7 @@ export default defineModule(
 				scope: openid,
 				make: async (r) => {
 					// The redemption's pinned selection; one whose pin is gone fails, never released unconstrained.
-					const selection =
-						r.redemption === undefined ? undefined : await selections.forCode(r.redemption);
+					const selection = await selections.forCode(r.redemption);
 					const claims = await released.of(r.subject, r.scope, r.session, selection?.idToken);
 					const iat = Math.floor(c.clock.now() / 1000);
 					return signer.sign(
