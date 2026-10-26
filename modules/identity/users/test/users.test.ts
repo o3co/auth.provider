@@ -121,7 +121,7 @@ it("matches identifiers exactly", async () => {
 	expect((await u.verify("Zoe\u0308", "p")).kind).toBe("none");
 });
 
-it("refuses to start on identifiers a person could mistake, or a shared subject", async () => {
+it("refuses to start on identifiers a person could mistake, or a shared subject [oidc-core-5.7-a]", async () => {
 	for (const pair of [
 		["Alice", "alice"],
 		["Zo\u00eb", "Zoe\u0308"],
@@ -155,7 +155,7 @@ it("refuses to start on an empty identifier or subject, or a plain password, nam
 	]);
 });
 
-it("refuses to start on a subject that is not 1 to 255 ASCII characters, the identifier standing in where it is left out", async () => {
+it("refuses to start on a subject that is not 1 to 255 ASCII characters, the identifier standing in where it is left out [oidc-core-2-c]", async () => {
 	const where = async (registered: unknown[]) =>
 		((await boot(registered).catch((error) => error)) as BootRefused).refusals.map((r) => r.where);
 	for (const user of [

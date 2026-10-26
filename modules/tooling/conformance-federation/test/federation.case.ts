@@ -68,7 +68,7 @@ describe("federation", () => {
 		expect(await b.session()).toBe(true);
 	});
 
-	it("refuses an id_token the upstream did not sign", async () => {
+	it("refuses an id_token the upstream did not sign [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-16.3-a]", async () => {
 		const b = browser();
 		const query = await authorized(b, "u-alice", true);
 		const back = await b.get(`${start}/callback?${query}`);
@@ -76,7 +76,7 @@ describe("federation", () => {
 		expect(await b.session()).toBe(false);
 	});
 
-	it("refuses an answer naming another issuer before its code is used", async () => {
+	it("refuses an answer naming another issuer before its code is used [rfc9700-4.4.2.1-a] [rfc9700-2.1-e] [rfc9700-2.1-f]", async () => {
 		const b = browser();
 		const query = await authorized(b, "u-alice");
 		const code = query.get("code") ?? "";
@@ -95,7 +95,7 @@ describe("federation", () => {
 		expect(await b.session()).toBe(false);
 	});
 
-	it("spends a transaction only with its own state, and only once", async () => {
+	it("spends a transaction only with its own state, and only once [oidc-core-3.1.2.7-a] [oidc-core-3.1.3.7-l] [rfc9700-4.2.4-b]", async () => {
 		const b = browser();
 		const query = await authorized(b, "u-alice");
 		const wrong = new URLSearchParams(query);
@@ -107,7 +107,7 @@ describe("federation", () => {
 		expect((await b.get(`${start}/callback?${query}`, kept)).status).toBe(400);
 	});
 
-	it("refuses a callback that carries no transaction", async () => {
+	it("refuses a callback that carries no transaction [oidc-core-3.1.2.7-a] [rfc9700-2.1-d]", async () => {
 		const b = browser();
 		const query = await authorized(b, "u-alice");
 		const stranger = browser();
@@ -115,7 +115,7 @@ describe("federation", () => {
 		expect(await stranger.session()).toBe(false);
 	});
 
-	it("answers an upstream's refusal with 400", async () => {
+	it("answers an upstream's refusal with 400 [oidc-core-3.1.2.7-a]", async () => {
 		const b = browser();
 		const query = await authorized(b, "u-alice");
 		const refused = new URLSearchParams({
@@ -127,7 +127,7 @@ describe("federation", () => {
 		expect(await b.session()).toBe(false);
 	});
 
-	it("refuses a start that would return anywhere but a listed target", async () => {
+	it("refuses a start that would return anywhere but a listed target [rfc9700-4.1.3-b] [rfc9700-2.1-b]", async () => {
 		const b = browser();
 		const elsewhere = encodeURIComponent("https://evil.example/");
 		expect((await b.get(`${start}?redirect_to=${elsewhere}`)).status).toBe(400);

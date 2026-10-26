@@ -93,7 +93,7 @@ const posted = (b: Browser, form: URLSearchParams, idp = "apple", kept?: string)
 	b.post(`${startOf(idp)}/callback`, form, appleSite, kept);
 
 describe("federation through Apple", () => {
-	it("logs a browser in by the answer Apple posts, paying with the fixed secret", async () => {
+	it("logs a browser in by the answer Apple posts, paying with the fixed secret [oidc-core-3.1.2.1-y]", async () => {
 		const b = browser();
 		const { form, asked } = await authorized(b, { subject: "000123.alice" });
 		expect(asked.get("response_mode")).toBe("form_post");
@@ -124,7 +124,7 @@ describe("federation through Apple", () => {
 		expect((await posted(b, form)).status).toBe(302);
 	});
 
-	it("refuses an answer naming another issuer before its code is used", async () => {
+	it("refuses an answer naming another issuer before its code is used [rfc9700-4.4.2.1-a] [rfc9700-2.1-e] [rfc9700-2.1-f]", async () => {
 		const b = browser();
 		const { form } = await authorized(b, { subject: "000123.alice" });
 		form.set("iss", "https://evil.example");
@@ -133,7 +133,7 @@ describe("federation through Apple", () => {
 		expect(await b.session()).toBe(false);
 	});
 
-	it("refuses an id_token Apple did not sign, and one for another login", async () => {
+	it("refuses an id_token Apple did not sign, and one for another login [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-16.3-a] [oidc-core-3.1.3.7-k] [oidc-core-2-v] [rfc9700-4.5.3.2-a]", async () => {
 		const cases: Record<string, AppleAuthorized> = {
 			forged: { subject: "000123.alice", forged: true },
 			"another nonce": { subject: "000123.alice", nonce: "not-this-login" },

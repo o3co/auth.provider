@@ -81,7 +81,7 @@ function composition() {
 	};
 }
 
-it("serves GET and POST, with or without a body, refusing a token whose session ended, never stored", async () => {
+it("serves GET and POST, with or without a body, refusing a token whose session ended, never stored [oidc-core-5.3-a] [rfc6750-3.1-b]", async () => {
 	const { url } = await serve();
 	const sent = { authorization: "Bearer t", "x-forwarded-proto": "https" };
 	const requests: [string, RequestInit][] = [
@@ -130,7 +130,7 @@ it("leaves an error that is not an inability to tell to http, neither 503 nor lo
 	expect(logged.lines().filter((l) => l.event === "userinfo.unavailable")).toEqual([]);
 });
 
-it("lets a listed origin's page send its token, its DPoP proof and a body's type, and read the challenge, the nonce and the wait", async () => {
+it("lets a listed origin's page send its token, its DPoP proof and a body's type, and read the challenge, the nonce and the wait [oidc-core-5.3-c]", async () => {
 	const { url } = await serve();
 	const res = await fetch(url, {
 		method: "OPTIONS",
@@ -156,7 +156,7 @@ it("lets a listed origin's page send its token, its DPoP proof and a body's type
 	);
 });
 
-it("names itself in the issuer's metadata", async () => {
+it("names itself in the issuer's metadata [oidc-discovery-3-h]", async () => {
 	const { app } = await serve();
 	expect(app.get(items)).toContainEqual({
 		name: "userinfo_endpoint",

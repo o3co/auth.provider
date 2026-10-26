@@ -88,7 +88,7 @@ function decode(jwt: string): { header: Record<string, unknown>; claims: Record<
 }
 
 describe("C. client credentials", () => {
-	it("issues a signed access token to a client authenticated with basic", async () => {
+	it("issues a signed access token to a client authenticated with basic [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-2.3.1-a] [oidc-core-10.1-c]", async () => {
 		const res = await token({ ...cc, scope: "read write" }, ["basic", secretOf("basic")]);
 		expect(res.status).toBe(200);
 		expect(res.headers.get("cache-control")).toContain("no-store");
@@ -115,13 +115,13 @@ describe("C. client credentials", () => {
 		);
 	});
 
-	it("issues to a client authenticated with post and grants the default scopes when none is asked", async () => {
+	it("issues to a client authenticated with post and grants the default scopes when none is asked [rfc6749-3.3-a] [rfc6749-3.3-b]", async () => {
 		const res = await token({ ...cc, client_id: "post", client_secret: secretOf("post") });
 		expect(res.status).toBe(200);
 		expect(res.body.scope).toBe("read");
 	});
 
-	it("refuses wrong, unknown and missing client credentials with invalid_client", async () => {
+	it("refuses wrong, unknown and missing client credentials with invalid_client [rfc6749-5.2-b] [rfc6749-3.2.1-a] [rfc6749-4.4.2-a]", async () => {
 		const wrong = await token(cc, ["basic", "nope"]);
 		expect([wrong.status, wrong.body.error]).toEqual([401, "invalid_client"]);
 		expect(wrong.headers.get("www-authenticate")).toMatch(/^Basic/);
@@ -138,14 +138,14 @@ describe("C. client credentials", () => {
 		expect([res.status, res.body.error]).toEqual([400, "unauthorized_client"]);
 	});
 
-	it("refuses scopes outside the client's allowance and a missing scope without defaults", async () => {
+	it("refuses scopes outside the client's allowance and a missing scope without defaults [rfc6749-3.3-b]", async () => {
 		const outside = await token({ ...cc, scope: "admin" }, ["basic", secretOf("basic")]);
 		expect([outside.status, outside.body.error]).toEqual([400, "invalid_scope"]);
 		const missing = await token(cc, ["nodefault", secretOf("nodefault")]);
 		expect([missing.status, missing.body.error]).toEqual([400, "invalid_scope"]);
 	});
 
-	it("refuses an unsupported, missing or repeated grant_type", async () => {
+	it("refuses an unsupported, missing or repeated grant_type [rfc6749-5.2-a] [rfc6749-5.2-f] [rfc6749-3.2-d]", async () => {
 		const auth: [string, string] = ["basic", secretOf("basic")];
 		const unsupported = await token({ grant_type: "urn:example:nothing" }, auth);
 		expect([unsupported.status, unsupported.body.error]).toEqual([400, "unsupported_grant_type"]);
@@ -165,7 +165,7 @@ describe("C. client credentials", () => {
 });
 
 describe("C. client credentials: a secret kept as a bcrypt hash", () => {
-	it("authenticates the client by basic and by post, and refuses a wrong secret", async () => {
+	it("authenticates the client by basic and by post, and refuses a wrong secret [rfc6749-2.3.1-a] [rfc6749-3.2.1-a]", async () => {
 		const basic = "bcrypt-client_secret_basic";
 		const post = "bcrypt-client_secret_post";
 		const byBasic = await token(cc, [basic, bcryptSecret]);
@@ -227,7 +227,7 @@ describe("C. client credentials: defaults", () => {
 		expect(res.body.scope).toBe("read");
 	});
 
-	it("issues no scope for an explicitly empty default and refuses when no default is set", async () => {
+	it("issues no scope for an explicitly empty default and refuses when no default is set [rfc6749-3.3-b]", async () => {
 		const empty = await token(cc, ["emptydefault", secretOf("emptydefault")]);
 		expect([empty.status, empty.body.scope]).toEqual([200, undefined]);
 		const unset = await token(cc, ["nodefault", secretOf("nodefault")]);
@@ -239,7 +239,7 @@ describe("C. client credentials: answers the owner decided", () => {
 	const driver = areaTarget();
 
 	it.skipIf(driver.differs("public-client-for-client-credentials"))(
-		"refuses a public client as unauthorized",
+		"refuses a public client as unauthorized [rfc6749-4.4-a]",
 		async () => {
 			const res = await token({ ...cc, client_id: "pub" });
 			expect([res.status, res.body.error]).toEqual([400, "unauthorized_client"]);
@@ -247,7 +247,7 @@ describe("C. client credentials: answers the owner decided", () => {
 	);
 
 	it.skipIf(driver.differs("two-client-auth-methods"))(
-		"refuses credentials sent with two methods at once",
+		"refuses credentials sent with two methods at once [rfc6749-2.3-b]",
 		async () => {
 			const res = await token({ ...cc, client_id: "basic", client_secret: secretOf("basic") }, [
 				"basic",

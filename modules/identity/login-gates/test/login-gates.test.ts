@@ -228,7 +228,7 @@ it("answers whether the declared ways of logging in can prove every one of a set
 const path = (name: string, at: string) =>
 	defineModule({ name, takes: [] }, (m) => [m.contribute(returnPaths).by(() => ({ path: at }))]);
 
-it("lets a login return only to a listed target exactly, or a contributed path on the public origin", async () => {
+it("lets a login return only to a listed target exactly, or a contributed path on the public origin [rfc9700-4.1.3-b]", async () => {
 	const l = await boot([path("authorize", "/oauth/authorize"), path("device", "/device")], {
 		"return-targets": ["https://app.example/"],
 	});
@@ -268,7 +268,7 @@ it("lets a login return only to a listed target exactly, or a contributed path o
 	expect((await boot([])).returnAllowed("https://app.example/")).toBe(false);
 });
 
-it("lets a login return one name segment below a path contributed so, and nowhere deeper or around it", async () => {
+it("lets a login return one name segment below a path contributed so, and nowhere deeper or around it [rfc9700-4.1.3-b]", async () => {
 	const below = defineModule({ name: "federation", takes: [] }, (m) => [
 		m.contribute(returnPaths).by(() => ({ path: "/session/oauth/federation", segment: true })),
 	]);

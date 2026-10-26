@@ -78,7 +78,7 @@ it("leaves the sender undetermined when a trusted proxy gives no usable address"
 	).toBe("http");
 });
 
-it("takes the client's certificate only from a trusted peer, and only where the operator names the header", () => {
+it("takes the client's certificate only from a trusted peer, and only where the operator names the header [rfc8705-3-a] [rfc8705-3-e]", () => {
 	expect(sourceOf(trusted, "10.0.0.1", sent).clientCertificate).toMatchObject({ leaf: der });
 	expect(sourceOf(trusted, "203.0.113.9", sent).clientCertificate).toBeUndefined();
 	expect(sourceOf(proxies(["10.0.0.1"]), "10.0.0.1", sent).clientCertificate).toBeUndefined();

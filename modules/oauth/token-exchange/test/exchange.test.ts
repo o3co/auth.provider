@@ -290,7 +290,7 @@ const tieModule = (
 	]);
 
 describe("token-exchange", () => {
-	it("issues an access token for the subject, narrowed to the scope asked, with no actor", async () => {
+	it("issues an access token for the subject, narrowed to the scope asked, with no actor [rfc8693-2.2.1-a] [rfc8693-2.2.1-b]", async () => {
 		const s = await serve();
 		const outcome = await s.exchange("app", {
 			...subjectOf((await s.issue()).token),
@@ -332,7 +332,7 @@ describe("token-exchange", () => {
 		expect((await s.exchange("gate", subject)).kind).toBe("issued");
 	});
 
-	it("asks for the audience when the subject token holds two, and takes a resource only when it is that audience", async () => {
+	it("asks for the audience when the subject token holds two, and takes a resource only when it is that audience [rfc8693-2.2.2-c]", async () => {
 		const s = await serve();
 		const subject = subjectOf((await s.issue({ audience: [api, admin] })).token);
 		expect(said(await s.exchange("app", subject))).toEqual([
@@ -397,7 +397,7 @@ describe("token-exchange", () => {
 });
 
 describe("token-exchange: refusals", () => {
-	it("answers each request or token it cannot meet with its own refusal", async () => {
+	it("answers each request or token it cannot meet with its own refusal [rfc8693-2.1-e] [rfc8693-2.2.2-b]", async () => {
 		const s = await serve({
 			verifier: outside(() => ({ ...outsideAnswer, expiresAt: now + 500 })),
 		});
@@ -548,7 +548,7 @@ describe("token-exchange: a verifier's answer", () => {
 		expect(tied.sessionOf.get(recorded.id)).toBeUndefined();
 	});
 
-	it("reads an answer that says invalid as invalid, whatever else it holds", async () => {
+	it("reads an answer that says invalid as invalid, whatever else it holds [rfc8693-2.2.2-b]", async () => {
 		const s = await serve({ verifier: outside(() => ({ ...outsideAnswer, kind: "invalid" })) });
 		expect(said(await s.exchange("app", subjectOf("outside", outsideType)))).toEqual([
 			"invalid_request",
@@ -910,7 +910,7 @@ describe("token-exchange: the lifetime asked", () => {
 	const lifetimeOf = (outcome: GrantOutcome) =>
 		outcome.kind === "issued" ? outcome.body.expires_in : said(outcome);
 
-	it("issues for a shorter expires_in, and for the usual lifetime when it is left out or empty", async () => {
+	it("issues for a shorter expires_in, and for the usual lifetime when it is left out or empty [rfc8693-2.2.1-d]", async () => {
 		const s = await serve();
 		const subject = subjectOf((await s.issue()).token);
 		const shorter = await s.exchange("app", { ...subject, expires_in: "60" });
@@ -1014,7 +1014,7 @@ describe("token-exchange: what any verifier may answer", () => {
 		]);
 	});
 
-	it("takes the scope and audience of a foreign token from the client's allowance alone", async () => {
+	it("takes the scope and audience of a foreign token from the client's allowance alone [rfc8693-2.2.2-c]", async () => {
 		const { verifier } = answering({ kind: "foreign", clients: ["app"] });
 		const s = await serve({ verifier });
 		const grant = (await s.issued(await s.exchange("app", { ...outsider, scope: "write" }))).grant;

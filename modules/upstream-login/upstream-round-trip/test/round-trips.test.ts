@@ -40,7 +40,7 @@ function place(store?: RoundTripStore) {
 const bytesOf = (text: string) => Buffer.from(text, "base64url").length;
 
 describe("an upstream round trip", () => {
-	it("makes a 256-bit cookie, state, nonce and verifier, the challenge the verifier's S256", async () => {
+	it("makes a 256-bit cookie, state, nonce and verifier, the challenge the verifier's S256 [oidc-core-3.1.2.1-z] [rfc9700-2.1.1-g] [rfc9700-2.1.1-h]", async () => {
 		const { trips, back } = place();
 		const begun = await trips.begin({ name: "fed.corp", carried: { at: 1 }, lifetimeMs: 60_000 });
 		const id = /__Host-fed\.corp=([^;]+)/.exec(begun.cookie)?.[1] ?? "";
@@ -70,7 +70,7 @@ describe("an upstream round trip", () => {
 		await expect(begun).rejects.toSatisfy(isUnavailable);
 	});
 
-	it("is taken once, only by its own name with its own state, and spends nothing otherwise", async () => {
+	it("is taken once, only by its own name with its own state, and spends nothing otherwise [oidc-core-3.1.3.7-l] [rfc9700-2.1.1-g] [rfc9700-4.2.4-b] [rfc9700-4.4.2-a]", async () => {
 		const { trips, back } = place();
 		const begun = await trips.begin({ name: "fed.corp", carried: null, lifetimeMs: 60_000 });
 		const request = back(begun.cookie);
@@ -149,7 +149,7 @@ describe("an upstream round trip", () => {
 		expect(await other.trips.current(other.back(kept.cookie), "a")).toBeUndefined();
 	});
 
-	it("is taken by one of two callbacks at once, never both", async () => {
+	it("is taken by one of two callbacks at once, never both [oidc-core-3.1.3.7-l] [rfc9700-4.2.4-b]", async () => {
 		const { trips, back } = place();
 		const begun = await trips.begin({ name: "a", carried: null, lifetimeMs: 60_000 });
 		const both = await Promise.all([
