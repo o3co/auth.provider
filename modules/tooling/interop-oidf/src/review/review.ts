@@ -59,9 +59,9 @@ export function reviewPages(runs: readonly ModuleRun[]): ReviewPage[] {
 }
 
 /**
- * Keeps in `dir` each page as a file of its own, and `index.json`: every page in order, what the
- * suite asks of it and its file (none where there is no page). What an earlier run kept there goes
- * first, so no page is taken for this run's; nothing is made where there is no page to keep.
+ * Replaces `dir` with this run's pages: what an earlier run kept there is removed, then each page is
+ * kept as a file of its own, with `index.json` naming every page in order, what the suite asks of it
+ * and its file (none where there is no page). Where there is no page to keep, `dir` is left absent.
  */
 export async function keepPages(dir: string, pages: readonly ReviewPage[]): Promise<void> {
 	await rm(dir, { recursive: true, force: true });
