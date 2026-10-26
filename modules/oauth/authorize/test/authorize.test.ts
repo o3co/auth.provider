@@ -4,7 +4,12 @@ import acrModule from "@mod/acr/module";
 import { acrConfig } from "@mod/acr/testing";
 import type { AuditEvent } from "@mod/audit";
 import { auditStandIn } from "@mod/audit/testing";
-import { claimScopes, claimsSelections, selectionRecords } from "@mod/claims-selection";
+import {
+	claimScopes,
+	claimsSelections,
+	type SelectionRecords,
+	selectionRecords,
+} from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
 import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
@@ -1521,43 +1526,43 @@ describe("authorize: the claims a request names beyond its scope", () => {
 	it("keeps nothing for a request without openid, or one naming no table claim", async () => {
 		const s = await serve();
 		const cookie = await s.login();
-		const claims = claimsOf({ userinfo: { name: null } });
-		const plain = await s.authorize(request({ scope: "read", claims }), cookie);
-		expect(await selectionOf(s, plain.at?.searchParams.get("code"))).toBeUndefined();
-		const other = await s.authorize(asking(claimsOf({ userinfo: { nickname: null } })), cookie);
-		expect(await selectionOf(s, other.at?.searchParams.get("code"))).toBeUndefined();
+		const plain = request({ scope: "read", claims: claimsOf({ userinfo: { name: null } }) });
+		const other = asking(claimsOf({ userinfo: { nickname: null } }));
+		for (const asked of [plain, other]) {
+			const code = (await s.authorize(asked, cookie)).at?.searchParams.get("code");
+			expect(await selectionOf(s, code)).toBeUndefined();
+		}
 	});
 
-	it("refuses a claim it keeps asked in a shape it does not take, as invalid_request", async () => {
+	it("refuses a claim it keeps asked in a shape it does not take, as invalid_request, reading no name without openid", async () => {
 		const s = await serve();
 		const cookie = await s.login();
-		const res = await s.authorize(asking(claimsOf({ userinfo: { name: { values: [] } } })), cookie);
+		const shapeless = claimsOf({ userinfo: { name: { values: [] } } });
+		const res = await s.authorize(asking(shapeless), cookie);
 		expect(res.at?.searchParams.get("error")).toBe("invalid_request");
+		// Without openid, the names are never read, so their shape is never judged.
+		const plain = await s.authorize(request({ scope: "read", claims: shapeless }), cookie);
+		expect(plain.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode [oidc-core-5.5.1-b]", async () => {
+	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode, before an acr it cannot know [oidc-core-5.5.1-b]", async () => {
+		type Served = Awaited<ReturnType<typeof serve>>;
+		const error = async (s: Served, claims: Record<string, unknown>, cookie: string) =>
+			(await s.authorize(asking(claimsOf(claims)), cookie)).at?.searchParams.get("error");
+		const unknown = { essential: true, value: "urn:test:unknown" };
 		for (const mode of ["on", "off"] as const) {
 			const s = await serve({ claims: mode });
 			const cookie = await s.login();
 			for (const at of ["id_token", "userinfo"]) {
-				const other = await s.authorize(
-					asking(claimsOf({ [at]: { sub: { value: "bob" } } })),
-					cookie,
-				);
-				expect(other.at?.searchParams.get("error"), `${mode} ${at}`).toBe("login_required");
-				const named = await s.authorize(
-					asking(claimsOf({ [at]: { sub: { values: ["bob", "alice"] } } })),
-					cookie,
-				);
-				expect(named.at?.searchParams.has("code"), `${mode} ${at}`).toBe(true);
+				expect(await error(s, { [at]: { sub: { value: "bob" } } }, cookie)).toBe("login_required");
+				expect(await error(s, { [at]: { sub: { values: ["bob", "alice"] } } }, cookie)).toBeNull();
 			}
-			const both = claimsOf({
-				id_token: { sub: { value: "alice" } },
-				userinfo: { sub: { value: "bob" } },
-			});
-			expect((await s.authorize(asking(both), cookie)).at?.searchParams.get("error")).toBe(
-				"login_required",
-			);
+			// The sub checked first: an essential acr it cannot know is refused only once the sub is met.
+			const acr = (sub: string) => ({ id_token: { sub: { value: sub }, acr: unknown } });
+			expect(await error(s, acr("bob"), cookie)).toBe("login_required");
+			expect(await error(s, acr("alice"), cookie)).toBe("unmet_authentication_requirements");
+			const both = { id_token: { sub: { value: "alice" } }, userinfo: { sub: { value: "bob" } } };
+			expect(await error(s, both, cookie)).toBe("login_required");
 			await stop();
 		}
 	});
@@ -1582,15 +1587,9 @@ describe("authorize: the claims a request names beyond its scope", () => {
 	});
 
 	it("answers temporarily_unavailable where the code's selection cannot be kept", async () => {
-		const stand = claimsSelectionInMemory();
-		const failing = defineModule({ name: "failing-selections", takes: [] }, (m) => [
-			m.provide(selectionRecords).by(() => ({
-				read: stand.records.read,
-				save: async () => {
-					throw new Unavailable("selections");
-				},
-			})),
-		]);
+		const down = unavailableSwitch<SelectionRecords>("selections");
+		down.unavailable("save");
+		const failing = switchedModule(claimsSelectionInMemory().module, selectionRecords, down);
 		const s = await serve({ selectionStore: failing });
 		const cookie = await s.login();
 		const res = await s.authorize(asking(claimsOf({ userinfo: { name: null } })), cookie);

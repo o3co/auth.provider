@@ -75,8 +75,6 @@ export function flowWith(parts: FlowParts): Flow {
 	const { issuer, self, sessions: entered, codes: issued, clock, loginPage } = parts;
 	const { reauths, stepUp, consent, openidRequired, tokens: issuance, target: targetOf } = parts;
 	const { selections } = parts;
-	// The names a claims request asks are read only while selections are taken.
-	const scopeOf = selections.mode === "on" ? selections.scopeOf : undefined;
 	const urlWith = (params: Iterable<readonly [string, string]>) =>
 		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
 
@@ -86,13 +84,19 @@ export function flowWith(parts: FlowParts): Flow {
 		const checked = checkRequest(client, one, params);
 		if (checked.kind !== "checked") return checked;
 		const { challenge, nonce, prompt } = checked;
-		const claimsText = one("claims");
-		const claims = claimsText === undefined ? noClaims : claimsAsked(claimsText, scopeOf);
-		if (claims === "malformed") return refusal("invalid_request", "claims is malformed");
-		const asked = stepUp.asked(one, params, claims);
-		if (asked.kind !== "asked") return asked;
 		const allowed = checkScope(client, one("scope"), issuer, openidRequired);
 		if (allowed.kind !== "allowed") return allowed;
+		// The names a claims request asks are read only for OpenID Connect, while selections are taken.
+		const naming = selections.mode === "on" && allowed.scope.includes("openid");
+		const claimsText = one("claims");
+		const claims =
+			claimsText === undefined
+				? noClaims
+				: claimsAsked(claimsText, naming ? selections.scopeOf : undefined);
+		if (claims === "malformed") return refusal("invalid_request", "claims is malformed");
+		const asked = stepUp.asked(one, params, claims);
+		// A sub asked is checked first, once the session is known: an acr refusal waits for it.
+		if (asked.kind !== "asked" && claims.subs.length === 0) return asked;
 
 		const without = (...names: string[]) => {
 			const kept = new Map(params);
@@ -106,7 +110,7 @@ export function flowWith(parts: FlowParts): Flow {
 		const need = {
 			login: prompt.has("login"),
 			maxAgeMs: checked.maxAgeMs,
-			knownTime: asked.knownTime,
+			knownTime: claims.knownTime,
 		};
 		const toLogin = async (): Promise<Decision> => {
 			if (prompt.has("none")) return refusal("login_required");
@@ -137,6 +141,7 @@ export function flowWith(parts: FlowParts): Flow {
 		if (!claims.subs.every((values) => values.includes(session.context.subject))) {
 			return refusal("login_required");
 		}
+		if (asked.kind !== "asked") return asked;
 		const raised = await stepUp.met({
 			acrs: asked.acrs,
 			wanted: asked.wanted,
@@ -174,10 +179,9 @@ export function flowWith(parts: FlowParts): Flow {
 		// What an OpenID Connect request asks beyond its scope, cut to what is allowed and agreed to.
 		const { idToken, userinfo } = claims.selection;
 		const asksMore = [idToken, userinfo].some((t) => t.names.length + t.constraints.length > 0);
-		const selection =
-			asksMore && allowed.scope.includes("openid")
-				? await selections.select(client, subject, claims.selection)
-				: undefined;
+		const selection = asksMore
+			? await selections.select(client, subject, claims.selection)
+			: undefined;
 		const code = await issued.issue({
 			clientId: client.id,
 			redirectUri,
