@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { claimsSelections } from "@mod/claims-selection";
+import { claimsSelectionConfig } from "@mod/claims-selection/testing";
 import type { IdTokenRequest } from "@mod/code-grant";
 import type { Assembly } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
@@ -31,6 +32,7 @@ const request = (more: Partial<IdTokenRequest> = {}): IdTokenRequest => ({
 	amr: [],
 	scope: ["openid"],
 	session: "s",
+	redemption: "r-test",
 	...more,
 });
 
@@ -226,7 +228,7 @@ describe("the claims a code's selection asks of the ID token", () => {
 	const served = async () => {
 		const app = await booted({
 			runtime,
-			config: usersConfig([registered]),
+			config: { ...usersConfig([registered]), ...claimsSelectionConfig({ mode: "on" }) },
 			sessionsAs: sessionsOf({ h: loginOf("s-alice", "users") }),
 		});
 		const [hook] = app.get(hooks);
@@ -256,16 +258,14 @@ describe("the claims a code's selection asks of the ID token", () => {
 		expect(payload).not.toHaveProperty("email");
 	});
 
-	it("carries the scope's claims alone for a code pinned without a selection, or a request naming no redemption", async () => {
+	it("carries the scope's claims alone for a code pinned without a selection", async () => {
 		const { maker, hook } = await served();
 		await hook.pin("r-2");
-		for (const more of [{ redemption: "r-2" }, {}]) {
-			const { payload } = decoded(
-				await maker.make(request({ ...alice, scope: ["openid", "email"], ...more })),
-			);
-			expect(payload).toMatchObject({ email: "alice@example.com" });
-			expect(payload).not.toHaveProperty("name");
-		}
+		const { payload } = decoded(
+			await maker.make(request({ ...alice, scope: ["openid", "email"], redemption: "r-2" })),
+		);
+		expect(payload).toMatchObject({ email: "alice@example.com" });
+		expect(payload).not.toHaveProperty("name");
 	});
 
 	it("makes no ID token for a redemption whose pin is gone", async () => {

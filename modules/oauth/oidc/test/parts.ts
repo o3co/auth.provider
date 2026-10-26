@@ -103,8 +103,8 @@ export const composed = (p: {
 		...keysConfig(),
 		...issuerConfig({ url: "https://as.example" }),
 		...usersConfig([]),
-		// On, so a test can keep the selection a redemption pins.
-		...claimsSelectionConfig({ mode: "on" }),
+		// Off unless a test keeps a selection: an ID token's redemption then reads no pin.
+		...claimsSelectionConfig({ mode: "off" }),
 		...p.config,
 	},
 	runtime: p.runtime,
