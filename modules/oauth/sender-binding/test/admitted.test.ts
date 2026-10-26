@@ -163,7 +163,7 @@ it("admits a bound token whose holder proves the same binding at the resource", 
 	});
 });
 
-it("refuses a bound token when the request proves no binding or another key [rfc9449-4.3-l] [rfc9449-7.1-a]", async () => {
+it("refuses a bound token when the request proves no binding or another key", async () => {
 	const refused = refusal(401, 'DPoP error="invalid_token"', "invalid_token");
 	expect(await presenting({ authorization: "DPoP keyed" })).toEqual(refused);
 	expect(await presenting({ authorization: "DPoP keyed", "x-proof": "k2" })).toEqual(refused);

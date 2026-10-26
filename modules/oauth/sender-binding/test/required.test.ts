@@ -52,7 +52,7 @@ describe("what a client asks of the binding its token requests show", async () =
 		]);
 	});
 
-	it("refuses a request with no binding from a client that requires one [rfc9449-5.2-a]", () => {
+	it("refuses a request with no binding from a client that requires one", () => {
 		expect(refusalOf(holding({ required: true }), undefined)).toBe("required");
 		expect(refusalOf(holding({ required: true }), bound("x5t"))).toBe(undefined);
 		expect(refusalOf(holding({ required: true, kinds: ["dpop"] }), undefined)).toBe("required");
@@ -68,7 +68,7 @@ describe("what a client asks of the binding its token requests show", async () =
 });
 
 describe("the client metadata section", () => {
-	it("holds a registered client's requirement, read by name, and requires nothing unwritten [rfc9449-5.2-a]", async () => {
+	it("holds a registered client's requirement, read by name, and requires nothing unwritten", async () => {
 		const found = async (section: Readonly<Record<string, unknown>>) => {
 			const app = await boot(section);
 			const client = await app.get(clients).find("c");
