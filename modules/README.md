@@ -82,6 +82,7 @@ What each module contains is described by that module's contract card (each modu
 | Wiring subject-revocation's store interface to records | wiring | subject-revocation-store |
 | Wiring consent's store interfaces to records | wiring | consent-store |
 | Wiring session-tokens' store interfaces to records' keyed sets, records and deferred work | wiring | session-tokens-store |
+| Wiring claims-selection's store interface to records | wiring | claims-selection-store |
 | Wiring mfa's store interface to records | wiring | mfa-store |
 | Wiring mfa-flows' store interface to records | wiring | mfa-flows-store |
 | Wiring users' store interfaces to records | wiring | users-store |
@@ -168,6 +169,10 @@ What each module contains is described by that module's contract card (each modu
 | scope, audience, actor | vocabulary | tokens |
 | Records of access tokens issued per session, cleaning them up when the session closes, the link between an access token and its session | contract | session-tokens |
 | Recording each access token issued from a session, as `grants`' session issuances tell of it | contribution | session-tokens |
+| The claim names a `claims` request releases beyond its scope, by allowance and consent, and their value constraints, kept for the code, the redemption, the refresh family and each access token | contract | claims-selection |
+| Judging consent for a selection's names | extension point kind | claims-selection |
+| Pinning a redemption's selection and keeping it for the redeemed token, as `code-grant`'s redemption hooks tell of it | contribution | claims-selection |
+| Carrying a token's constraints to a token exchanged from it, as `grants`' token ties | contribution | claims-selection |
 | A logout a client starts, its returns, the front-channel page and back-channel notices, the clients of each session (client metadata fields, routes, data) | contract / setting / data | rp-logout |
 | Ending the upstream session before a logout a client starts returns | extension point kind | rp-logout |
 | Sending a client's logout on to the session's upstream | contribution | rp-logout-federation |
