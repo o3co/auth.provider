@@ -41,7 +41,8 @@ const description = z.looseObject({
 	token_endpoint: z.url(),
 	jwks_uri: z.url(),
 	end_session_endpoint: z.url().optional(),
-	userinfo_endpoint: z.url().optional(),
+	// Read only where the operator reads UserInfo: what a description says of it is no matter otherwise.
+	userinfo_endpoint: z.unknown().optional(),
 	authorization_response_iss_parameter_supported: z.boolean().optional(),
 });
 /** The upstream's amr in its checked id_token, beyond what upstream-client reads. */
@@ -107,7 +108,9 @@ async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: rea
 		if (refused !== undefined) throw mismatch(refused);
 	}
 	// UserInfo only where the operator reads it: a description naming it is no matter otherwise.
-	const userinfo = s["read-userinfo"] ? described.userinfo_endpoint : undefined;
+	const named = described.userinfo_endpoint;
+	const userinfo =
+		s["read-userinfo"] && typeof named === "string" && URL.canParse(named) ? named : undefined;
 	if (s["read-userinfo"]) {
 		const narrowed = narrowerOf(hosts, s.issuer);
 		const refused = describedUserinfoRefusal(userinfo, hosts, narrowed, refusals);

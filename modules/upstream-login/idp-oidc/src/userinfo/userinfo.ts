@@ -13,7 +13,7 @@ export function describedUserinfoRefusal(
 	narrowed: Narrower,
 	refusals: OutboundRefusals,
 ): string | undefined {
-	if (url === undefined) return "the description names no userinfo_endpoint";
+	if (url === undefined) return "the description names no userinfo_endpoint that is a URL";
 	if (!withinHosts(url, hosts)) {
 		return "the description's userinfo_endpoint is on a host the operator did not name";
 	}

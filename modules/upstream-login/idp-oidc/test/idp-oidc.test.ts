@@ -1360,6 +1360,16 @@ describe("idp-oidc", () => {
 			return { ...opened_, asked };
 		};
 
+		it("boots without reading UserInfo whatever the description says of it, as before", async () => {
+			for (const userinfo_endpoint of [null, "", "not a url", 7, "http://elsewhere.example/u"]) {
+				const { upstream } = await open({ description: { userinfo_endpoint } });
+				expect(upstream.issuer, String(userinfo_endpoint)).toBe(issuer);
+			}
+			await expect(
+				open({ settings: { "read-userinfo": true }, description: { userinfo_endpoint: null } }),
+			).rejects.toThrow(UpstreamMismatch);
+		});
+
 		it("asks nothing of UserInfo by default, whatever the description names", async () => {
 			const { upstream, asked } = await withUserinfo(
 				() => json({ sub: "u-alice", name: "Info" }),
