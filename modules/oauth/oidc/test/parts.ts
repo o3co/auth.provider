@@ -1,6 +1,6 @@
 import { selectionConsents } from "@mod/claims-selection";
 import claimsSelection from "@mod/claims-selection/module";
-import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import { type IdTokenMaker, idTokens, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
@@ -103,6 +103,8 @@ export const composed = (p: {
 		...keysConfig(),
 		...issuerConfig({ url: "https://as.example" }),
 		...usersConfig([]),
+		// On, so a test can keep the selection a redemption pins.
+		...claimsSelectionConfig({ mode: "on" }),
 		...p.config,
 	},
 	runtime: p.runtime,
