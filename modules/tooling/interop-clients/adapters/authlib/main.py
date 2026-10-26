@@ -10,7 +10,7 @@ import tempfile
 import traceback
 from urllib.parse import urljoin, urlsplit
 
-from authlib.integrations.requests_client import OAuth2Session, OAuthError
+from authlib.integrations.requests_client import AssertionSession, OAuth2Session, OAuthError
 from authlib.jose import JsonWebKey, jwt
 from authlib.oauth2.rfc7523 import PrivateKeyJWT
 from authlib.oidc.core import CodeIDToken
@@ -173,6 +173,27 @@ class Run:
         )
         return {"accessToken": token["access_token"], "tokenType": token.get("token_type")}
 
+    def jwt_bearer_no_client(self):
+        """The jwt-bearer grant as Authlib's AssertionSession sends it: an assertion of the issuer's, its
+        `aud` the token endpoint, and no client authentication (RFC 7523 §3.1)."""
+        issuer = self.given["assertionIssuer"]
+        endpoint = self.metadata["token_endpoint"]
+        session = AssertionSession(
+            token_endpoint=endpoint,
+            issuer=issuer["issuer"],
+            subject=self.given["subject"],
+            audience=endpoint,
+            grant_type=AssertionSession.JWT_BEARER_GRANT_TYPE,
+            claims={"jti": secrets.token_urlsafe(24)},
+            scope=self.given.get("scope"),
+            key=issuer["privatePem"],
+            header={"alg": "RS256"},
+        )
+        session.verify = self.ca
+        session.hooks["response"].append(https_redirects_only)
+        token = session.refresh_token()
+        return {"accessToken": token["access_token"], "tokenType": token.get("token_type")}
+
     def revocation(self):
         session = self.session()
         token, _ = self.sign_in(session)
@@ -198,6 +219,7 @@ def answer(given, ca):
             "client-credentials": run.client_credentials,
             "client-credentials-secret": run.client_credentials,
             "revocation": run.revocation,
+            "jwt-bearer-no-client": run.jwt_bearer_no_client,
         }
         flow = flows.get(given["flow"])
         if flow is None:

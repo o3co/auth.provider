@@ -5,7 +5,7 @@ import { excusable, library, runs, unmetOf } from "./library.ts";
 import { type ServicesWorld, startServicesWorld } from "./world/services.ts";
 
 /** The flows of this file: those of services, which need no user. */
-const here: Flow[] = ["jwt-bearer"];
+const here: Flow[] = ["jwt-bearer", "jwt-bearer-no-client"];
 
 let world: ServicesWorld;
 beforeAll(async () => {
@@ -47,6 +47,33 @@ describe(`${library.name}: an assertion for a token`, () => {
 				});
 				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
 				expect(String(result.accessToken)).not.toBe("");
+			}),
+	);
+});
+
+describe(`${library.name}: an assertion for a token, naming no client`, () => {
+	it.runIf(runs("jwt-bearer-no-client"))(
+		"gets a token by the jwt-bearer grant with no client authentication, for the client its issuer's entry names",
+		(context) =>
+			excusable(context, "jwt-bearer-no-client", async () => {
+				const result = await run("jwt-bearer-no-client", {
+					client: world.clients.agents,
+					assertionIssuer: world.clientlessIssuer,
+					subject: `${world.clientlessIssuer.subjectPrefix}ci`,
+					scope: "read",
+					metadata: "oauth-authorization-server",
+				});
+				expect(String(result.tokenType).toLowerCase()).toBe("bearer");
+				// Issued to the client the issuer's entry names, though the request named none (RFC 9068 §2.2).
+				const [, payload = ""] = String(result.accessToken).split(".");
+				const claims = JSON.parse(Buffer.from(payload, "base64url").toString()) as Record<
+					string,
+					unknown
+				>;
+				expect([claims.client_id, claims.sub]).toEqual([
+					world.clients.agents.id,
+					`${world.clientlessIssuer.subjectPrefix}ci`,
+				]);
 			}),
 	);
 });
