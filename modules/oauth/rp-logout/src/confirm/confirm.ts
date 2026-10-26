@@ -1,9 +1,16 @@
-import type { FormTokens } from "@mod/csrf";
+import { audit } from "@mod/audit";
+import { clients } from "@mod/clients";
+import { type FormTokens, formTokens } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Loads, noStore } from "@mod/http";
-import { isUnavailable, type Log } from "@mod/kernel";
-import type { Keys } from "@mod/keys";
+import { endpointOrigin, issuer } from "@mod/issuer";
+import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
+import { type Keys, keys } from "@mod/keys";
+import { sessions } from "@mod/session";
 import { type ClosingParts, closingOver } from "../closing/closing.ts";
+import type { UpstreamEnd } from "../contract.ts";
 import { frontChannelPage, loggedOutPage } from "../page/page.ts";
+import type { Settings } from "../section.ts";
+import { sessionClients } from "../store.ts";
 
 /** Where a person confirms a logout a client started without a hint. */
 export const confirmPath = "/oauth/logout/confirm";
@@ -130,4 +137,36 @@ export function confirmOver(p: ConfirmParts) {
 			}
 		};
 	return { show: guarded(show), take: guarded(take) };
+}
+
+/** What `confirmFrom` takes from the composition. */
+export const confirmTakes = [
+	sessions,
+	keys,
+	formTokens,
+	clients,
+	sessionClients,
+	audit,
+	issuer,
+] as const;
+
+/** The routes' handlers, from the composition's contracts. */
+export async function confirmFrom(c: BuildContext<Settings>, upstream: UpstreamEnd | undefined) {
+	const named = await c.get(issuer);
+	const issuerUrl = named.url;
+	// The endpoint's origin, as the metadata names the logout's.
+	const origin = endpointOrigin(named);
+	return confirmOver({
+		sessions: await c.get(sessions),
+		keys: await c.get(keys),
+		forms: await c.get(formTokens),
+		clients: await c.get(clients),
+		sessionClients: await c.get(sessionClients),
+		upstream,
+		audit: await c.get(audit),
+		issuer: issuerUrl,
+		confirmUrl: `${origin}${confirmPath}`,
+		now: c.clock.now,
+		log: c.log,
+	});
 }

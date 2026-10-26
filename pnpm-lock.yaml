@@ -1989,6 +1989,9 @@ importers:
       '@mod/claims-selection':
         specifier: workspace:*
         version: link:../claims-selection
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

@@ -1,7 +1,7 @@
 # rp-logout
 
 ## Responsibilities
-- Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), the front-channel page (`page`) and back-channel notices (`notices`).
+- Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), a person's confirmation where no hint names the session (`confirm`), the close both share (`closing`), the pages it ends on (`page`) and back-channel notices (`notices`).
 - Keeps which clients redeemed a code in each session, and the notices not yet delivered.
 - Apart from `logout` (the browser's own logout): these need hints, keys, outbound requests and client records that the browser's logout does not.
 
@@ -10,6 +10,7 @@
 
 ## Offers
 - Routes `GET` and `POST /oauth/logout` (`ending`), both declared to take requests from other sites, and the GET to change state (no HEAD).
+- Routes `GET` and `POST /oauth/logout/confirm` (`confirm`): the GET changes nothing and is counted with the logout's requests; the POST takes a form under `csrf`'s policy and counts no source, closing only the requester's own session.
 - Extension point `upstreamEnds`: at most one; two or more refuse boot.
 - Client metadata section `rp-logout` (`registration`).
 - Contribution to `code-grant`'s session redemptions (`redemptions`): keeps the client until the session ends, and at least `remember-for`.
@@ -41,7 +42,7 @@
 - A client gone or without a back-channel URL settles it.
 
 ## Depends on
-- `audit`, `clients`, `code-grant`, `http`, `issuer`, `kernel`, `keys`, `oidc`, `outbound`, `outbound-policy`, `rate-limit`, `redirect-uris`, `request-source` (the source), `session`, `session-participants`
+- `audit`, `clients`, `code-grant`, `csrf`, `http`, `issuer`, `kernel`, `keys`, `oidc`, `outbound`, `outbound-policy`, `rate-limit`, `redirect-uris`, `request-source` (the source), `session`, `session-participants`
 
 ## Vocabulary
 - notice: one client to tell that a session closed, until it is given up.

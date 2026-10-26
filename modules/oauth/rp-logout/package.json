@@ -32,6 +32,7 @@
 	},
 	"devDependencies": {
 		"@mod/claims-selection": "workspace:*",
+		"@mod/cookies": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session-requirements": "workspace:*",

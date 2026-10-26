@@ -5,6 +5,8 @@ import { type Clients, clients, metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
 import { sessionRedemptions } from "@mod/code-grant";
+import cookiesModule from "@mod/cookies/module";
+import { csrfStandIn } from "@mod/csrf/testing";
 import { type HttpResponse, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
@@ -148,6 +150,8 @@ export async function harness(
 				? switchedModule(clientsModule, clients, options.clientRecordsDown)
 				: clientsModule,
 			redirectsSection,
+			cookiesModule,
+			csrfStandIn,
 			options.sessionsModule ?? sessionStandIn,
 			sessionRequirements,
 			sessionParticipants,
@@ -230,9 +234,36 @@ export async function harness(
 			text: typeof body === "string" ? body : undefined,
 		};
 	};
+	/** A request to the confirmation's routes, as `call` makes one to the logout's. */
+	const confirming = async (
+		method: "GET" | "POST",
+		fields: Record<string, string>,
+		headers: Record<string, string> = {},
+	) => {
+		const route = seen.routes.find(
+			(r) => r.path === "/oauth/logout/confirm" && r.method === method,
+		);
+		const values = new Map(Object.entries(fields).map(([k, v]) => [k, [v]]));
+		const response = await route?.handle(
+			testRequest({
+				method,
+				path: "/oauth/logout/confirm",
+				headers: new Map(Object.entries(headers)),
+				...(method === "GET" ? { query: values } : { form: values }),
+			}),
+		);
+		return {
+			status: response?.status,
+			headers: response?.headers ?? {},
+			cookies: response?.cookies ?? [],
+			loads: response?.loads,
+			text: typeof response?.body === "string" ? response.body : undefined,
+		};
+	};
 	return {
 		app,
 		stores,
+		confirming,
 		events: recorded.events,
 		logs: logged.lines,
 		sent,
