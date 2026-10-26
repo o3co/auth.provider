@@ -40,8 +40,10 @@ export function differencesIn(text: string, known: Known, harness: Harness): Dif
 		const flow = harness.flows.includes(d.flow)
 			? []
 			: [`${at}: names the flow ${d.flow}, which the harness does not have`];
-		// The items the excused check names, written in its title as the checklist reads titles.
-		const tested = [...(d.check ?? "").matchAll(/\[([^\]\s]+)\]/g)].map((m) => m[1] ?? "");
+		// The items the excused check names, written in its title as the checklist reads titles; a
+		// check that is no string names none, and is told above with the rest.
+		const check = typeof d.check === "string" ? d.check : "";
+		const tested = [...check.matchAll(/\[([^\]\s]+)\]/g)].map((m) => m[1] ?? "");
 		return [
 			...narrow,
 			...run,
