@@ -340,6 +340,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `packed` (`src/packed`): a packed tarball read for what it is, its name, version and integrity.
   - `release` (`src/release`): Packs the release, the index sealed in between, into the tarballs it publishes.
   - `release-check` (`src/release-check`): Checks the release as an operator meets it: apps made by the packed `create-auth-provider`, installed from the tarballs, type-checked, and booted in their image; an app assembled by hand from them; and a package outside the release composed beside them (`outside-scene`).
+  - `carried` (`src/release-check/carried`): which package managers an app's image holds.
   - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
   - `given` (`src/release-check/given`): which tarballs the release check holds to.
   - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
