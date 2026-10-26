@@ -23,6 +23,8 @@ export interface Codes {
 	 * the client contradict.
 	 */
 	issue(facts: CodeFacts): Promise<string>;
+	/** The name a code's redemption goes by, made from the code alone; never the code itself. */
+	redemptionOf(code: string): string;
 	idTokenScope(): string | undefined;
 }
 
@@ -46,6 +48,8 @@ export interface IdTokenRequest {
 	readonly scope: readonly string[];
 	/** The session's handle, which never lets anyone into it. */
 	readonly session: string;
+	/** The redemption's name, as `redemptionOf` gives it; a redemption always tells it. */
+	readonly redemption?: string;
 }
 
 export interface IdTokenMaker {
@@ -94,6 +98,20 @@ export interface Addition {
 	/** Ends what `issue` gave for a redemption; safe to repeat, and from several hosts at once. */
 	revoke?(redemption: string): Promise<void>;
 }
+
+/** Told of each redemption: pinned once the code is used up, then told what it gave. */
+export interface RedemptionHook {
+	readonly name: string;
+	/** Before the code's token is issued; a failure voids the code, and nothing is issued. */
+	pin(redemption: string): Promise<void>;
+	/** After the additions; a failure voids the code, revoking its token and what the additions gave. */
+	redeemed(redeemed: Redeemed): Promise<void>;
+}
+
+export const redemptionHooks = extensionPoint<RedemptionHook>("code-grant.redemption-hooks", {
+	multiplicity: "keyed",
+	keyOf: (hook) => hook.name,
+});
 
 export const additions = extensionPoint<Addition>("code-grant.additions", {
 	multiplicity: "keyed",

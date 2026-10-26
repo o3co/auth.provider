@@ -8,7 +8,7 @@
 - Owns the scenes of the audit events of consent and code redemption.
 - Owns the scenes of a password login meeting a client's demand for a fresh login (internal module `fresh-login`).
 - Owns the scenes of what a subject's revocation by the ledger ends.
-- Sets up the code flow area's parts (consent step, refresh, acr table, session grant, metadata document clients, logout with the back-channel origins allowed) on each of the legacy and new targets.
+- Sets up the code flow area's parts (consent step, refresh, acr table, session grant, metadata document clients, logout with the back-channel origins allowed, beside the documents' hosts where both are on) on each of the legacy and new targets.
 - A code flow part can leave out the consent step.
 - If a second-factor part is present, the code flow set-up also includes the acr bridge.
 
@@ -21,7 +21,7 @@
 - Test tools (`./testing`): a logged-in browser, requests to the authorization endpoint, and `succeeded` (a set-up's answer read only when it succeeded, else the scene fails naming what answered, its status and its body's start)
 
 ## Invariants
-- The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of the acr asked `acr`, those of refusing an unverified email `verified-email`, and those of a subject the ledger revokes `revocation`; the rest are the package's.
+- The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of the acr asked `acr`, those of refusing an unverified email `verified-email`, those of a subject the ledger revokes `revocation`, and those of clients whose id is the URL of their metadata document `documents`; the rest are the package's.
 - The legacy set-up, and the needs the legacy system cannot provide and the differences it answers differently, live only in `src/legacy.ts`.
 - The code flow needs access tokens that can be revoked after they are issued (`tokens` is set to denylist).
 - Touches only the HTTP interface and boot refusals.

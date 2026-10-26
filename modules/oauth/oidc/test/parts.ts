@@ -1,4 +1,7 @@
-import { type IdTokenMaker, idTokens } from "@mod/code-grant";
+import { selectionConsents } from "@mod/claims-selection";
+import claimsSelection from "@mod/claims-selection/module";
+import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { type IdTokenMaker, idTokens, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
@@ -58,6 +61,11 @@ export const loginOf = (subject: string, source: string): AuthContext => ({
 });
 
 export const makers = contract<readonly IdTokenMaker[]>("makers");
+export const hooks = contract<readonly RedemptionHook[]>("hooks");
+/** A judge of consent that agrees to every scope, so a test selects by the client's allowance alone. */
+const agreeing = defineModule({ name: "agreeing", takes: [] }, (m) => [
+	m.contribute(selectionConsents).by(() => ({ consented: async () => true })),
+]);
 export const published = contract<readonly MetadataItem[]>("published");
 
 /**
@@ -79,9 +87,13 @@ export const composed = (p: {
 		secretHashModule,
 		p.sessionsAs ?? sessionsOf(),
 		subjectAttributes,
+		claimsSelection,
+		claimsSelectionInMemory().module,
+		agreeing,
 		oidc,
-		defineModule({ name: "reader", takes: [idTokens, metadata] }, (m) => [
+		defineModule({ name: "reader", takes: [idTokens, metadata, redemptionHooks] }, (m) => [
 			m.provide(makers).by((c) => c.collect(idTokens)),
+			m.provide(hooks).by((c) => c.collect(redemptionHooks)),
 			m.provide(published).by((c) => c.collect(metadata)),
 		]),
 	],
@@ -91,6 +103,8 @@ export const composed = (p: {
 		...keysConfig(),
 		...issuerConfig({ url: "https://as.example" }),
 		...usersConfig([]),
+		// On, so a test can keep the selection a redemption pins.
+		...claimsSelectionConfig({ mode: "on" }),
 		...p.config,
 	},
 	runtime: p.runtime,

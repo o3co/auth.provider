@@ -1,3 +1,4 @@
+import type { Target } from "@mod/claims-selection";
 import { contract } from "@mod/kernel";
 
 /** A released claim's value: a string, a boolean, or a list of strings. */
@@ -13,7 +14,11 @@ export interface ReleasedClaims {
 		subject: string,
 		scope: readonly string[],
 		handle?: string,
+		/** The claims a request names beyond its scope, and the constraints on all it releases. */
+		asked?: Target,
 	): Promise<Readonly<Record<string, Claim>>>;
+	/** The scope a table claim belongs to; none for a claim outside the table. */
+	scopeOf(claim: string): string | undefined;
 }
 
 export const releasedClaims = contract<ReleasedClaims>("oidc.claims");

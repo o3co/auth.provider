@@ -50,7 +50,7 @@ describe("the world", () => {
 		expect(readdirSync(under)).toEqual([]);
 	});
 
-	it("keeps no file but its front's while it runs, and none once stopped", async () => {
+	it("keeps no file but its front's and the metadata document's while it runs, and none once stopped", async () => {
 		const under = mkdtempSync(join(tmpdir(), "interop-world-"));
 		const running = async (): Promise<Started> => ({
 			kind: "running",
@@ -61,7 +61,11 @@ describe("the world", () => {
 			const world = await startWorld({ start: running, under });
 			try {
 				expect(readdirSync(tmp)).toEqual([]);
-				expect(readdirSync(under)).toHaveLength(1);
+				expect(
+					readdirSync(under)
+						.map((d) => d.replace(/-[^-]+$/, ""))
+						.sort(),
+				).toEqual(["interop-clients", "interop-documents"]);
 			} finally {
 				await world.stop();
 			}

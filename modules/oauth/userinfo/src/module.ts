@@ -1,3 +1,4 @@
+import { claimsSelections } from "@mod/claims-selection";
 import { type Route, routes } from "@mod/http";
 import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { type BuildContext, defineModule, isUnavailable } from "@mod/kernel";
@@ -19,10 +20,12 @@ const cors = {
 /** The handler, answering a check or claims that cannot tell as `503`, never as a refusal. */
 async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 	const userinfo = userinfoOver({
+		now: c.clock.now,
 		senderBinding: await c.get(senderBinding),
 		tokens: await c.get(tokens),
 		sessionTokens: await c.get(sessionTokens),
 		sessions: await c.get(sessions),
+		selections: await c.get(claimsSelections),
 		claims: await c.get(releasedClaims),
 	});
 	return async (request) => {
@@ -38,7 +41,15 @@ async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 }
 
 /** What its routes and its metadata take. */
-const moduleTakes = [senderBinding, tokens, sessionTokens, sessions, releasedClaims, issuer];
+const moduleTakes = [
+	senderBinding,
+	tokens,
+	sessionTokens,
+	sessions,
+	claimsSelections,
+	releasedClaims,
+	issuer,
+];
 
 export default defineModule({ name: "userinfo", replicaSafe: true, takes: moduleTakes }, (m) => [
 	...(["GET", "POST"] as const).map((method) =>

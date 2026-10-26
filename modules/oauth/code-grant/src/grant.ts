@@ -9,6 +9,7 @@ import {
 	type IdTokenMaker,
 	type IdTokenRequest,
 	type Redeemed,
+	type RedemptionHook,
 	type SessionRedemption,
 } from "./contract.ts";
 import type { ChangedCode, CodeStore, VoidList } from "./store.ts";
@@ -44,7 +45,7 @@ const lasting = (record: CodeRecord, expiresAt: number, now: number): ChangedCod
 });
 
 /** What the ID token maker is told about a redeemed code. */
-const idTokenRequest = (record: CodeRecord, clientId: string): IdTokenRequest => ({
+const idTokenRequest = (record: CodeRecord, clientId: string, name: string): IdTokenRequest => ({
 	subject: record.subject,
 	clientId,
 	...(record.nonce !== undefined ? { nonce: record.nonce } : {}),
@@ -54,6 +55,7 @@ const idTokenRequest = (record: CodeRecord, clientId: string): IdTokenRequest =>
 	...(record.acr !== undefined ? { acr: record.acr } : {}),
 	scope: record.scope,
 	session: record.session,
+	redemption: name,
 });
 
 const accessOf = (record: CodeRecord, clientId: string): AccessGrant => ({
@@ -122,8 +124,9 @@ export function codeGrant(parts: {
 	readonly idToken: IdTokenMaker | undefined;
 	readonly additions: readonly Addition[];
 	readonly redemptions: readonly SessionRedemption[];
+	readonly hooks: readonly RedemptionHook[];
 }): Grant {
-	const { store, sessions, settle, now, idToken, additions, redemptions } = parts;
+	const { store, sessions, settle, now, idToken, additions, redemptions, hooks } = parts;
 	/** Whether the code's session enters at use: not closed, ended or short of a requirement. */
 	const enters = async (session: string) => (await sessions.entryOf(session)).kind === "entered";
 	return {
@@ -169,6 +172,15 @@ export function codeGrant(parts: {
 			// Asked again on what was used up: a look before use that missed the code asked nothing.
 			const again = target(record.audience, (audience) => record.audience.includes(audience));
 			if (again.kind === "error") return again;
+			// Pinned once used up and before issuing, so a hook holds what it needs through the redemption.
+			for (const hook of hooks) {
+				try {
+					await hook.pin(name);
+				} catch (error) {
+					await settle(name);
+					throw error;
+				}
+			}
 			// The token ends no later than its session, as a refreshed one ends with its family.
 			const allowed = await issue(accessOf(record, client.id), {
 				session: record.session,
@@ -204,7 +216,8 @@ export function codeGrant(parts: {
 				return refused;
 			}
 			const maker = idToken && record.scope.includes(idToken.scope) ? idToken : undefined;
-			const id = maker && (await voidIfFails(() => maker.make(idTokenRequest(record, client.id))));
+			const id =
+				maker && (await voidIfFails(() => maker.make(idTokenRequest(record, client.id, name))));
 			const { token: _, ...access } = issued;
 			const redeemed: Redeemed = {
 				redemption: name,
@@ -225,6 +238,7 @@ export function codeGrant(parts: {
 				const value = await voidIfFails(() => addition.issue(redeemed));
 				if (value !== undefined) added[addition.field] = value;
 			}
+			for (const hook of hooks) await voidIfFails(() => hook.redeemed(redeemed));
 			return {
 				kind: "issued",
 				body: {
