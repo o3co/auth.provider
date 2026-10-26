@@ -1,8 +1,9 @@
+import { randomBytes } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
-import { type Assembly, assemble, defineModule, kernelConfig } from "@mod/kernel";
+import { type Assembly, assemble, defineModule, kernelConfig, type Random } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
@@ -32,11 +33,11 @@ import { revokedInMemory } from "./revoked.ts";
  * What both runs share: a clock the contract moves, a binding kind the composition knows, and a
  * subject check answering revoked for the subjects the contract revoked.
  */
-function around() {
+function around(random?: Random) {
 	let now = 1_800_000_000_000;
 	const revoked = new Set<string>();
 	const known = { member: "one", tokenType: "ONE" };
-	const runtime = quietRuntime({ clock: { now: () => now } });
+	const runtime = quietRuntime({ clock: { now: () => now }, ...(random ? { random } : {}) });
 	const module = defineModule({ name: "around", takes: [] }, (m) => [
 		m.contribute(senderBindings).by(() => ({ ...known, read: async () => ({ kind: "absent" }) })),
 		m.contribute(subjectChecks).by(() => ({
@@ -145,6 +146,34 @@ it("the stand-in tells who a token was issued to for the allowance past its expi
 	expect(await stand.tokens.issuedToOf(issued.token)).toEqual({ kind: "issued", issuedTo: "c" });
 	stand.advance(1);
 	expect(await stand.tokens.issuedToOf(issued.token)).toEqual({ kind: "invalid" });
+});
+
+it("the stand-in keeps nothing of a token it refuses for want of a second left", async () => {
+	// The bytes each id is drawn from, so the name of a token refused can be asked for.
+	const drawn: Uint8Array[] = [];
+	const { runtime, module, place } = around({
+		bytes: (length) => {
+			const bytes = new Uint8Array(randomBytes(length));
+			drawn.push(bytes);
+			return bytes;
+		},
+	});
+	const app = await assemble({
+		modules: [tokensStandIn(), module],
+		config: kernelConfig(),
+		runtime,
+	});
+	const stand = place(app);
+	const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
+	const lastName = () => `stand-in.${Buffer.from(drawn.at(-1) ?? []).toString("base64url")}`;
+	expect(
+		await stand.tokens.issue({ grant, grantType: "test" }, { notAfter: stand.now() + 999 }),
+	).toMatchObject({ kind: "refused", reason: "no_lifetime_left" });
+	expect(await stand.tokens.issuedToOf(lastName())).toEqual({ kind: "invalid" });
+	// One issued is kept by the name its id makes.
+	const issued = await issueFor(stand.tokens, grant, { notAfter: stand.now() + 1000 });
+	expect(issued.token).toBe(lastName());
+	expect(await stand.tokens.issuedToOf(issued.token)).toEqual({ kind: "issued", issuedTo: "c" });
 });
 
 it("the stand-in takes all it names, revocable or not", async () => {

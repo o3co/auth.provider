@@ -246,7 +246,7 @@ describe("jwt-bearer", () => {
 		expect(errorOf(await s.grant(signed))).toBe("invalid_grant");
 	});
 
-	it("refuses as expired an assertion with less than a second left when its jti would be used up, or a token with less once issued", async () => {
+	it("refuses as expired an assertion with less than a second left when its jti would be used up, and is refused a token with less once signed", async () => {
 		/** How long each asking of the issuance policies takes: before the jti is used up, then in issuing. */
 		let waits: number[] = [];
 		const waiting = defineModule({ name: "test-policy", takes: [] }, (m) => [
@@ -276,7 +276,7 @@ describe("jwt-bearer", () => {
 			waits = [119_500];
 			expect(saidOf(await s.grant(await assertion(base)))).toBe("invalid_grant: expired");
 			expect(saved.length).toBe(before);
-			// A second left then, but issuing takes it: the token is handed to no one, the jti used up.
+			// A second left then, but issuing takes it: tokens refuses the token, the jti used up.
 			clock.at = now;
 			waits = [0, 119_500];
 			expect(saidOf(await s.grant(await assertion(base)))).toBe("invalid_grant: expired");

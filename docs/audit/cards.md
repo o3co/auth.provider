@@ -180,6 +180,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `route` (`src/route`): the handler of `POST /oauth/token`, from the request to the answer, and what a grant issues through.
 - `@mod/token-exchange` (feature, `modules/oauth/token-exchange`): Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
 - `@mod/tokens` (feature, `modules/oauth/tokens`): Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
+  - `issuance` (`src/issuance`): the judgment `admits` and `issue` share, and the issuing `issue` does over it.
 - `@mod/userinfo` (feature, `modules/oauth/userinfo`): Serves OIDC's userinfo: admits the access token a request presents, checks the session it was issued in, and answers `sub` and the claims `oidc` releases for its scope.
 - `@mod/verified-email` (feature, `modules/oauth/verified-email`): Contributes the issuance policy `verified-email`: no access token for a subject whose email users has not stated verified.
 
