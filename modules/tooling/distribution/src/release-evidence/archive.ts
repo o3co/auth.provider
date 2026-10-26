@@ -1,7 +1,8 @@
 /** What a ZIP archive holds, read from its central directory before anything is unpacked. */
 export interface Entry {
 	readonly name: string;
-	readonly link: boolean;
+	/** A file or a directory, as MS-DOS (host 0) or Unix (host 3) mark one; anything else is `other`. */
+	readonly kind: "file" | "directory" | "other";
 	/** Its local header names it otherwise, or an extra field (Info-ZIP's Unicode Path) would. */
 	readonly renamed?: boolean;
 }
@@ -48,18 +49,29 @@ export function entriesOf(
 			zip.subarray(local + 30, localName).toString("utf8") !== name ||
 			renames(zip.subarray(at + 46 + nameLength, at + 46 + nameLength + extraLength)) ||
 			renames(zip.subarray(localName, localName + zip.readUInt16LE(local + 28)));
-		// Unix (3) and macOS (19) keep the file's mode in the high half of the external attributes.
-		const link = (host === 3 || host === 19) && (mode & 0o170000) === 0o120000;
-		entries.push({ name, link, ...(renamed ? { renamed } : {}) });
+		// Taken alone: what CI's own archives hold. Unix keeps the mode in the attributes' high half.
+		const type = mode & 0o170000;
+		const kind =
+			host === 0
+				? name.endsWith("/")
+					? "directory"
+					: "file"
+				: host === 3 && type === 0o100000
+					? "file"
+					: host === 3 && type === 0o040000
+						? "directory"
+						: "other";
+		entries.push({ name, kind, ...(renamed ? { renamed } : {}) });
 		at += 46 + skip;
 	}
 	return { entries };
 }
 
-/** Each entry that would land outside the directory it is unpacked into, or that is a link. */
+/** Each entry that is no plain file or directory, or is named otherwise, or would land outside its directory. */
 export function archiveProblems(entries: readonly Entry[]): string[] {
 	return entries.flatMap((e) => {
-		if (e.link) return [`${e.name} is a link`];
+		if (e.kind === "other")
+			return [`${e.name} is neither a file nor a directory as this check takes them`];
 		if (e.renamed) return [`${e.name} is named otherwise by its local header or an extra field`];
 		const parts = e.name.split("/");
 		return e.name === "" ||

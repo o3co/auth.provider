@@ -3,21 +3,34 @@ import { archiveProblems, entriesOf } from "../archive.ts";
 import { unicodePath, zipOf } from "./zip.ts";
 
 describe("entriesOf", () => {
-	it("reads each entry's name, and whether a Unix or macOS host made it a link", () => {
+	it("takes as files and directories only what MS-DOS and Unix mark so, as CI's archives hold them", () => {
 		const zip = zipOf([
 			{ name: "a/report.json", data: "{}" },
-			{ name: "out", data: "/etc/passwd", mode: 0o120777 },
-			{ name: "mac", data: "/etc", mode: 0o120755, host: 19 },
-			{ name: "dos", data: "x", mode: 0o120777, host: 0 },
+			{ name: "a/", data: "", mode: 0o040755 },
+			{ name: "dos.json", data: "{}", host: 0, mode: 0 },
+			{ name: "dos/", data: "", host: 0, mode: 0 },
 		]);
 		expect(entriesOf(zip)).toEqual({
 			entries: [
-				{ name: "a/report.json", link: false },
-				{ name: "out", link: true },
-				{ name: "mac", link: true },
-				{ name: "dos", link: false },
+				{ name: "a/report.json", kind: "file" },
+				{ name: "a/", kind: "directory" },
+				{ name: "dos.json", kind: "file" },
+				{ name: "dos/", kind: "directory" },
 			],
 		});
+	});
+
+	it("takes as other a link, a device or any mode it does not know, and every other host", () => {
+		const others = zipOf([
+			{ name: "link", data: "/etc/passwd", mode: 0o120777 },
+			{ name: "fifo", data: "", mode: 0o010644 },
+			{ name: "bare", data: "{}", mode: 0 },
+			{ name: "beos", data: "/etc", mode: 0o120777, host: 16 },
+			{ name: "atheos", data: "/etc", mode: 0o120777, host: 30 },
+			{ name: "mac", data: "{}", mode: 0o100644, host: 19 },
+		]);
+		const read = entriesOf(others);
+		expect("entries" in read && read.entries.map((e) => e.kind)).toEqual(Array(6).fill("other"));
 	});
 
 	it("tells an entry its local header or an extra field names otherwise than the directory", () => {
@@ -33,10 +46,10 @@ describe("entriesOf", () => {
 		]);
 		expect(entriesOf(zip)).toEqual({
 			entries: [
-				{ name: "fine.json", link: false },
-				{ name: "local.json", link: false, renamed: true },
-				{ name: "central.json", link: false, renamed: true },
-				{ name: "inner.json", link: false, renamed: true },
+				{ name: "fine.json", kind: "file" },
+				{ name: "local.json", kind: "file", renamed: true },
+				{ name: "central.json", kind: "file", renamed: true },
+				{ name: "inner.json", kind: "file", renamed: true },
 			],
 		});
 	});
@@ -50,8 +63,8 @@ describe("archiveProblems", () => {
 	it("passes entries that land inside the directory", () => {
 		expect(
 			archiveProblems([
-				{ name: "a/b.json", link: false },
-				{ name: "c.json", link: false },
+				{ name: "a/b.json", kind: "file" },
+				{ name: "c.json", kind: "file" },
 			]),
 		).toEqual([]);
 	});
@@ -59,17 +72,17 @@ describe("archiveProblems", () => {
 	it("refuses a link, and a name that would land outside the directory", () => {
 		expect(
 			archiveProblems([
-				{ name: "out", link: true },
-				{ name: "report.json", link: false, renamed: true },
-				{ name: "../escape.json", link: false },
-				{ name: "a/../../escape.json", link: false },
-				{ name: "/etc/passwd", link: false },
-				{ name: "C:/x.json", link: false },
-				{ name: "a\\..\\b.json", link: false },
-				{ name: "", link: false },
+				{ name: "out", kind: "other" },
+				{ name: "report.json", kind: "file", renamed: true },
+				{ name: "../escape.json", kind: "file" },
+				{ name: "a/../../escape.json", kind: "file" },
+				{ name: "/etc/passwd", kind: "file" },
+				{ name: "C:/x.json", kind: "file" },
+				{ name: "a\\..\\b.json", kind: "file" },
+				{ name: "", kind: "file" },
 			]),
 		).toEqual([
-			"out is a link",
+			"out is neither a file nor a directory as this check takes them",
 			"report.json is named otherwise by its local header or an extra field",
 			'"../escape.json" would land outside the directory',
 			'"a/../../escape.json" would land outside the directory',

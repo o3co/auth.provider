@@ -164,7 +164,14 @@ describe("judge", () => {
 	it("refuses an archive holding a link or a name that lands outside, before unpacking it", () => {
 		const { dir, head } = released();
 		for (const [entry, told] of [
-			[{ name: "r.json", data: "/etc/passwd", mode: 0o120777 }, "r.json is a link"],
+			[
+				{ name: "r.json", data: "/etc/passwd", mode: 0o120777 },
+				"r.json is neither a file nor a directory",
+			],
+			[
+				{ name: "b.json", data: "/etc", mode: 0o120777, host: 16 },
+				"b.json is neither a file nor a directory",
+			],
 			[{ name: "../escape.json", data: report(head) }, '"../escape.json" would land outside'],
 			[{ name: "/abs.json", data: report(head) }, '"/abs.json" would land outside'],
 			[

@@ -105,7 +105,8 @@ const walk = (dir: string): string[] =>
 	readdirSync(dir).flatMap((entry) => {
 		const path = join(dir, entry);
 		const kind = lstatSync(path);
-		if (kind.isSymbolicLink()) throw new Error(`${path}: a link was unpacked`);
+		if (!kind.isFile() && !kind.isDirectory())
+			throw new Error(`${path}: no plain file was unpacked`);
 		return kind.isDirectory() ? walk(path) : [path];
 	});
 
