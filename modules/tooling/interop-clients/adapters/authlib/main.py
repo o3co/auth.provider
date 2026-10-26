@@ -43,14 +43,11 @@ def https_redirects_only(response, *args, **kwargs):
 
 
 class Run:
-    def __init__(self, given):
+    def __init__(self, given, ca):
         self.given = given
         self.client = given["client"]
-        # The one certificate trusted: requests' verify takes a bundle of it alone.
-        bundle = tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False)
-        bundle.write(given["ca"])
-        bundle.close()
-        self.ca = bundle.name
+        # The one certificate trusted, as a bundle file of it alone, which requests' verify takes.
+        self.ca = ca
         self.metadata = self.discovered()
 
     def discovered(self):
@@ -102,12 +99,19 @@ class Run:
             code_verifier=verifier,
             **self.resource(),
         )
-        keys = JsonWebKey.import_key_set(session.get(self.metadata["jwks_uri"]).json())
+        # The keys are public: fetched without the access token, which their host has no use for.
+        keys = JsonWebKey.import_key_set(
+            session.get(self.metadata["jwks_uri"], withhold_token=True).json()
+        )
         claims = jwt.decode(
             token["id_token"],
             keys,
             claims_cls=CodeIDToken,
-            claims_options={"iss": {"essential": True, "value": self.given["issuer"]}},
+            # Its audience names this client: `client_id` alone holds `azp` to it, not `aud`.
+            claims_options={
+                "iss": {"essential": True, "value": self.given["issuer"]},
+                "aud": {"essential": True, "value": self.client["id"]},
+            },
             claims_params={"nonce": nonce, "client_id": self.client["id"]},
         )
         claims.validate(leeway=60)
@@ -174,10 +178,10 @@ class Run:
         return {"before": before.get("active"), "after": after.get("active")}
 
 
-def main():
-    given = json.loads(sys.stdin.readline())
+def answer(given, ca):
+    """The flow's result or error, as the dialog writes it."""
     try:
-        run = Run(given)
+        run = Run(given, ca)
         flows = {
             "login": run.login,
             "public-login": run.login,
@@ -190,15 +194,29 @@ def main():
         flow = flows.get(given["flow"])
         if flow is None:
             raise Refused("unsupported", "no flow " + given["flow"])
-        write({"result": flow()})
+        return {"result": flow()}
     except Refused as refused:
-        write({"error": {"type": refused.kind, "message": str(refused)}})
+        return {"error": {"type": refused.kind, "message": str(refused)}}
     except OAuthError as error:
-        write({"error": {"type": error.error or "OAuthError", "message": str(error)}})
+        return {"error": {"type": error.error or "OAuthError", "message": str(error)}}
     except Exception as error:  # noqa: BLE001 - every other failure is reported as the library raised it
         # Where it was raised goes to the error stream, the dialog's diagnostics.
         traceback.print_exc()
-        write({"error": {"type": type(error).__name__, "message": str(error)}})
+        return {"error": {"type": type(error).__name__, "message": str(error)}}
+
+
+def main():
+    given = json.loads(sys.stdin.readline())
+    bundle = tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False)
+    try:
+        bundle.write(given["ca"])
+        bundle.close()
+        outcome = answer(given, bundle.name)
+    finally:
+        # Gone before the answer is written: the driver stops the process once it reads it, and
+        # os._exit runs no finalizer.
+        os.unlink(bundle.name)
+    write(outcome)
     sys.stdout.flush()
     os._exit(0)
 

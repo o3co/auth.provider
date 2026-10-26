@@ -1,3 +1,5 @@
+import { generateKeyPairSync, randomBytes, sign as signWith } from "node:crypto";
+import { mkdtempSync, readdirSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { createServer as createPlainServer, type Server as PlainServer } from "node:http";
 import { createServer, type Server } from "node:https";
@@ -194,6 +196,146 @@ describe(`${library.name}: a discovery that names plain http`, () => {
 			});
 		},
 	);
+});
+
+/**
+ * A provider the harness plays itself, for what the real one never does: an ID token for another
+ * audience. It records each key set request's Authorization, as a key set's host would see it.
+ */
+describe(`${library.name}: a provider the harness plays`, () => {
+	let server: Server;
+	let origin = "";
+	let cert = "";
+	// RS256, as the provider signs, which each adapter is set to take.
+	const key = generateKeyPairSync("rsa", { modulusLength: 2048 });
+	const jwk = {
+		...key.publicKey.export({ format: "jwk" }),
+		kid: "played",
+		alg: "RS256",
+		use: "sig",
+	};
+	/** Each key set request's Authorization header, empty where it sent none. */
+	const keySetAsked: string[] = [];
+	/** The audience the next ID token names, for the client it was asked for. */
+	let audienceOf = (client: string): string[] => [client];
+	let nonce = "";
+	let client = "";
+	const encoded = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+	const idToken = () => {
+		const now = Math.floor(Date.now() / 1000);
+		const head = encoded({ alg: "RS256", kid: jwk.kid, typ: "JWT" });
+		const body = encoded({
+			iss: origin,
+			sub: "alice",
+			aud: audienceOf(client),
+			azp: client,
+			nonce,
+			iat: now,
+			exp: now + 300,
+		});
+		const signature = signWith("sha256", Buffer.from(`${head}.${body}`), key.privateKey);
+		return `${head}.${body}.${signature.toString("base64url")}`;
+	};
+	beforeAll(async () => {
+		const tls = await selfSigned("127.0.0.1", await mkdtemp(join(tmpdir(), "interop-played-")));
+		cert = tls.cert;
+		server = createServer(tls, (req, res) => {
+			const json = (status: number, value: unknown) => {
+				res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+				res.end(JSON.stringify(value));
+			};
+			if (req.url === "/.well-known/openid-configuration")
+				return json(200, {
+					issuer: origin,
+					authorization_endpoint: `${origin}/authorize`,
+					token_endpoint: `${origin}/token`,
+					userinfo_endpoint: `${origin}/userinfo`,
+					jwks_uri: `${origin}/jwks`,
+					response_types_supported: ["code"],
+					subject_types_supported: ["public"],
+					id_token_signing_alg_values_supported: ["RS256"],
+					token_endpoint_auth_methods_supported: ["client_secret_basic"],
+				});
+			if (req.url === "/jwks") {
+				keySetAsked.push(req.headers.authorization ?? "");
+				return json(200, { keys: [jwk] });
+			}
+			if (req.url === "/token") {
+				req.resume();
+				return req.on("end", () =>
+					json(200, {
+						access_token: randomBytes(16).toString("base64url"),
+						token_type: "Bearer",
+						expires_in: 300,
+						scope: "openid",
+						id_token: idToken(),
+					}),
+				);
+			}
+			if (req.url === "/userinfo") return json(200, { sub: "alice" });
+			return json(404, {});
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		origin = `https://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	});
+	afterAll(async () => {
+		await new Promise((resolve) => server?.close(resolve));
+	});
+
+	/** The login flow against the played provider, the adapter's temporary files under `tmp`. */
+	async function signIn(tmp: string, issuer = origin) {
+		const adapter = library.adapter();
+		client = world.clients.basic.id;
+		const dialog = await converse(
+			{ ...adapter, env: { ...adapter.env, TMPDIR: tmp } },
+			{
+				flow: "login",
+				issuer,
+				ca: cert,
+				client: world.clients.basic,
+				redirectUri: world.redirectUri,
+			},
+			async (ask) => {
+				if (ask.ask !== "browse") throw new Error(`asked ${ask.ask}`);
+				const asked = new URL(String(ask.url));
+				nonce = asked.searchParams.get("nonce") ?? "";
+				const back = new URL(world.redirectUri);
+				back.searchParams.set("code", "played-code");
+				back.searchParams.set("state", asked.searchParams.get("state") ?? "");
+				return { location: back.href };
+			},
+			30_000,
+		);
+		return dialog.outcome;
+	}
+	const freshTmp = () => mkdtempSync(join(tmpdir(), "interop-adapter-tmp-"));
+
+	it.runIf(runs("login"))(
+		"signs in, fetching the provider's keys with no access token, and leaves no file behind",
+		async () => {
+			audienceOf = (c) => [c];
+			keySetAsked.length = 0;
+			const tmp = freshTmp();
+			expect(await signIn(tmp)).toMatchObject({ kind: "result" });
+			expect(keySetAsked.length).toBeGreaterThan(0);
+			expect(keySetAsked).toEqual(keySetAsked.map(() => ""));
+			expect(readdirSync(tmp)).toEqual([]);
+		},
+	);
+
+	it.runIf(runs("login"))(
+		"refuses an ID token for another audience, though its azp names the client",
+		async () => {
+			audienceOf = () => ["someone-else"];
+			expect(await signIn(freshTmp())).toMatchObject({ kind: "error" });
+		},
+	);
+
+	it.runIf(runs("login"))("leaves no file behind where its discovery fails", async () => {
+		const tmp = freshTmp();
+		expect(await signIn(tmp, `${origin}/nowhere`)).toMatchObject({ kind: "error" });
+		expect(readdirSync(tmp)).toEqual([]);
+	});
 });
 
 describe(`${library.name}: a token for one resource server`, () => {
