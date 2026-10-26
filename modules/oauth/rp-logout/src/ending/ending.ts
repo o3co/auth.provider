@@ -34,6 +34,10 @@ const refused = (error: string, description: string) =>
 	jsonAnswer(400, { error, error_description: description });
 const unverified = refused("invalid_token", "id_token_hint verification failed");
 const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
+const mismatched = refused(
+	"invalid_request",
+	"client_id is not the client the id_token_hint was issued to",
+);
 const unregistered = refused(
 	"invalid_request",
 	"post_logout_redirect_uri is not registered for the client",
@@ -156,6 +160,9 @@ export function endingOver(p: EndingParts) {
 		}
 		if (checked.kind === "invalid") return unverified;
 		if (p.now() - checked.issuedAt > confirmAfterMs) return unverified;
+		// A client_id beside the hint names the client the token was issued to, or the request is refused.
+		const named = values.single("client_id");
+		if (named && named !== checked.client) return mismatched;
 		const state = values.single("state") || undefined;
 		const back = await returnOf(checked.client, values.single("post_logout_redirect_uri"));
 		if (back === false) return unregistered;

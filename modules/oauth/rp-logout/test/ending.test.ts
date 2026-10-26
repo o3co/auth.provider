@@ -162,6 +162,40 @@ describe("the logout a client starts", () => {
 		expect(sent.headers).toMatchObject(noCache);
 	});
 
+	it("refuses a client_id that is not the one the hint was issued to, and closes nothing", async () => {
+		const h = await serve();
+		const refused = [
+			["another client", "other", {}],
+			["a hint naming no one client", "app", { aud: ["app", "api"], azp: undefined }],
+		] as const;
+		for (const [name, clientId, over] of refused) {
+			const { session } = await h.login();
+			const hint = await h.hintFor(session.id, over);
+			for (const method of ["GET", "POST"] as const) {
+				const out = await h.call(method, { id_token_hint: hint, client_id: clientId });
+				expect([name, method, out.status, out.json]).toEqual([
+					name,
+					method,
+					400,
+					{
+						error: "invalid_request",
+						error_description: "client_id is not the client the id_token_hint was issued to",
+					},
+				]);
+			}
+			expect([name, await h.stillOpen(session.id)]).toEqual([name, true]);
+		}
+		expect(h.events).toEqual([]);
+		// The client the hint was issued to, named as client_id too, logs out.
+		const { session } = await h.login();
+		const named = await h.call("GET", {
+			id_token_hint: await h.hintFor(session.id),
+			client_id: "app",
+		});
+		expect([named.status, named.json]).toEqual([200, { logged_out: true }]);
+		expect(await h.stillOpen(session.id)).toBe(false);
+	});
+
 	it("refuses a return the hint's client did not register, and closes nothing", async () => {
 		const h = await serve();
 		const refused = [
