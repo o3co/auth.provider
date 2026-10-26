@@ -57,14 +57,17 @@ export default defineModule({ name: "acr", section, takes: [acrEntries, logins] 
 					: []),
 			]);
 		}
+		/** The first of these acr, in their order, whose one set the amr hold whole. */
+		const firstMet = (names: readonly string[], amr: readonly string[]) => {
+			const held = new Set(amr);
+			const meets = (name: string) =>
+				Object.hasOwn(table, name) && table[name]?.some((set) => set.every((a) => held.has(a)));
+			return names.find(meets);
+		};
 		return {
 			known: (asked) => asked.split(" ").filter((name) => Object.hasOwn(table, name)),
-			met: (known, amr) => {
-				const held = new Set(amr);
-				const meets = (name: string) =>
-					Object.hasOwn(table, name) && table[name]?.some((set) => set.every((a) => held.has(a)));
-				return known.find(meets);
-			},
+			met: firstMet,
+			current: (amr) => firstMet(Object.keys(table), amr),
 		};
 	}),
 	m.contribute(metadata).by(async (c) => {

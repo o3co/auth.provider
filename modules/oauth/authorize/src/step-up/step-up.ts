@@ -6,8 +6,42 @@ import type { Settings } from "../section.ts";
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
-/** A claims parameter is judged for acr, asked through acr_values, and an essential auth_time; the rest is ignored. */
-function claimsAsked(text: string): "malformed" | "acr" | { readonly knownTime: boolean } {
+/** The acr a claims parameter asks for (OpenID Connect Core §5.5.1.1): its values, and whether they are essential. */
+interface AcrClaim {
+	readonly values: readonly string[];
+	readonly essential: boolean;
+}
+
+/**
+ * The acr a request member of a claims parameter asks for: none where it names none; `null` asks
+ * for one with nothing more; `value` or `values` name the acr; malformed for any other shape.
+ */
+function acrOf(part: unknown): AcrClaim | undefined | "malformed" {
+	if (!isObject(part) || !Object.hasOwn(part, "acr")) return undefined;
+	const asked = part.acr;
+	if (asked === null) return { values: [], essential: false };
+	if (!isObject(asked)) return "malformed";
+	const { essential, value, values } = asked;
+	if (essential !== undefined && typeof essential !== "boolean") return "malformed";
+	if (value !== undefined && typeof value !== "string") return "malformed";
+	if (
+		values !== undefined &&
+		!(Array.isArray(values) && values.length > 0 && values.every((v) => typeof v === "string"))
+	) {
+		return "malformed";
+	}
+	// Both together leave which one is asked unclear.
+	if (value !== undefined && values !== undefined) return "malformed";
+	return {
+		values: [...(value === undefined ? [] : [value]), ...((values as string[] | undefined) ?? [])],
+		essential: essential === true,
+	};
+}
+
+/** A claims parameter is judged for acr and an essential auth_time; the other claims it names are not read here. */
+function claimsAsked(
+	text: string,
+): "malformed" | { readonly knownTime: boolean; readonly acr: readonly AcrClaim[] } {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(text);
@@ -15,15 +49,21 @@ function claimsAsked(text: string): "malformed" | "acr" | { readonly knownTime: 
 		return "malformed";
 	}
 	if (!isObject(parsed)) return "malformed";
-	const asks = (part: unknown) => isObject(part) && Object.hasOwn(part, "acr");
-	if (asks(parsed.id_token) || asks(parsed.userinfo)) return "acr";
+	const asked = [acrOf(parsed.id_token), acrOf(parsed.userinfo)];
+	if (asked.includes("malformed")) return "malformed";
+	// Each request kept apart: an essential one is never met by another's voluntary values.
+	const acr = asked.filter((part): part is AcrClaim => part !== undefined && part !== "malformed");
 	const authTime = isObject(parsed.id_token) ? parsed.id_token.auth_time : undefined;
-	return { knownTime: isObject(authTime) && authTime.essential === true };
+	return { knownTime: isObject(authTime) && authTime.essential === true, acr };
 }
 
 /** Where the request stands for raising its authentication. */
 export interface Standing {
 	readonly acrs: readonly string[];
+	/** Whether an acr was asked at all: one asked voluntarily and not met gives the session's current acr. */
+	readonly wanted: boolean;
+	/** Whether the acr was asked as essential, so one not met is refused rather than passed over. */
+	readonly essential: boolean;
 	readonly amr: readonly string[];
 	readonly authenticatedAt: number;
 	/** Whether `prompt=none` was asked. */
@@ -35,14 +75,21 @@ export interface Standing {
 
 export interface StepUp {
 	/**
-	 * The acr asked that `acr` knows, in the asked order, and whether an essential `auth_time` asks for
-	 * a known authentication time; a refusal when it knows none, or `claims` asks for acr.
+	 * The acr asked that `acr` knows, in the asked order, whether they are essential, and whether an
+	 * essential `auth_time` asks for a known authentication time; a refusal for a malformed `claims`,
+	 * or an essential acr `acr` knows none of.
 	 */
 	asked(
 		one: (name: string) => string | undefined,
 		params: ReadonlyMap<string, string>,
 	):
-		| { readonly kind: "asked"; readonly acrs: readonly string[]; readonly knownTime: boolean }
+		| {
+				readonly kind: "asked";
+				readonly acrs: readonly string[];
+				readonly wanted: boolean;
+				readonly essential: boolean;
+				readonly knownTime: boolean;
+		  }
 		| Decision;
 	/** The acr the code carries, or a refusal, or the step-up page. */
 	met(standing: Standing): Promise<{ readonly kind: "met"; readonly acr?: string } | Decision>;
@@ -58,21 +105,45 @@ export interface StepUpParts {
 export function stepUpWith({ acr: table, stepUpPage, reauths }: StepUpParts): StepUp {
 	return {
 		asked(one, params) {
-			const acrs = table.known(one("acr_values") ?? "");
-			if (params.has("acr_values") && acrs.length === 0) {
-				return refusal("unmet_authentication_requirements");
-			}
 			const claimsText = one("claims");
-			const claims = claimsText === undefined ? { knownTime: false } : claimsAsked(claimsText);
+			const claims =
+				claimsText === undefined ? { knownTime: false, acr: [] } : claimsAsked(claimsText);
 			if (claims === "malformed") return refusal("invalid_request", "claims is not a JSON object");
-			if (claims === "acr") return refusal("invalid_request", "request acr through acr_values");
-			return { kind: "asked", acrs, knownTime: claims.knownTime };
+			const { knownTime } = claims;
+			// A claims value is one acr as written: known only where the table holds it whole.
+			const known = (value: string) => {
+				const named = table.known(value);
+				return named.length === 1 && named[0] === value;
+			};
+			const essentials = claims.acr.filter((asked) => asked.essential && asked.values.length > 0);
+			const [first, ...others] = essentials;
+			if (first !== undefined) {
+				// The acr carried meets every essential request: those all of them name, in the first's order.
+				const acrs = first.values.filter(
+					(value) => known(value) && others.every((other) => other.values.includes(value)),
+				);
+				if (acrs.length === 0) return refusal("unmet_authentication_requirements");
+				return { kind: "asked", acrs, wanted: true, essential: true, knownTime };
+			}
+			// Voluntary: the claims parameter's acr values stand in for acr_values, which ask the same.
+			const values = claims.acr.flatMap((asked) => asked.values);
+			const acrs = values.length > 0 ? values.filter(known) : table.known(one("acr_values") ?? "");
+			const wanted = claims.acr.length > 0 || params.has("acr_values");
+			return { kind: "asked", acrs, wanted, essential: false, knownTime };
 		},
-		async met({ acrs, amr, authenticatedAt, none, taken, params, again }) {
+		async met({ acrs, wanted, essential, amr, authenticatedAt, none, taken, params, again }) {
 			// The first met in the order asked is the one the code carries.
 			const met = table.met(acrs, amr);
-			if (acrs.length === 0 || met !== undefined)
-				return { kind: "met", ...(met !== undefined ? { acr: met } : {}) };
+			if (met !== undefined) return { kind: "met", acr: met };
+			// Asked voluntarily and not met, the session's current acr instead (Core §5.5.1.1); none asked, none.
+			const current = () => {
+				const acr = wanted ? table.current(amr) : undefined;
+				return { kind: "met" as const, ...(acr !== undefined ? { acr } : {}) };
+			};
+			if (acrs.length === 0) return current();
+			// Asked voluntarily (Core §3.1.2.1), one not met is passed over where raising cannot, or did not, meet it.
+			const raises = stepUpPage !== undefined && !taken?.stepUp && !none;
+			if (!essential && !raises) return current();
 			if (none) return refusal("interaction_required");
 			if (!stepUpPage || taken?.stepUp) return refusal("unmet_authentication_requirements");
 			// The way back carries a newer login already proved, since raising keeps its time.

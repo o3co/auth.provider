@@ -12,8 +12,8 @@ import {
 	stepUp,
 } from "@mod/conformance-second-factor/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type CodeScene, codeScene } from "../src/main.ts";
-import { backChannel, browserAt, succeeded } from "../src/testing.ts";
+import { type CodeScene, codeScene } from "../../main.ts";
+import { backChannel, browserAt, succeeded } from "../../testing.ts";
 
 const callback = "https://app.example/cb";
 const pair = generateKeyPairSync("ed25519");
@@ -92,13 +92,21 @@ describe("acr: a table without second factors", () => {
 	});
 	const b = browserAt(() => base, issuer, { username: "alice", password });
 
-	it("answers unmet when no acr asked is in the table, and passes over the unknown ones", async () => {
-		const unknown = await b.authorize(request({ acr_values: "urn:t:none" }));
-		expect(unknown.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+	it("passes over the acr asked that the table does not know", async () => {
 		const mixed = await b.authorize(request({ acr_values: "urn:t:none urn:t:pwd" }));
 		const code = mixed.at?.searchParams.get("code") ?? "";
 		expect((await claimsOf(base, code)).acr).toBe("urn:t:pwd");
 	});
+
+	it.skipIf(areaTarget().differs("voluntary-acr"))(
+		"issues a code with the session's current acr when none asked by acr_values is known: they are voluntary [oidc-core-15.1-g] [oidc-core-5.5.1.1-c]",
+		async () => {
+			const unknown = await b.authorize(request({ acr_values: "urn:t:none" }));
+			const code = unknown.at?.searchParams.get("code") ?? "";
+			// The first in the table the session meets.
+			expect((await claimsOf(base, code)).acr).toBe("urn:t:pwd");
+		},
+	);
 
 	it("puts in the ID token the first acr met in the order asked, and none when none was asked", async () => {
 		for (const [asked, met] of [
@@ -112,17 +120,54 @@ describe("acr: a table without second factors", () => {
 		expect((await claimsOf(base, plain.at?.searchParams.get("code") ?? "")).acr).toBeUndefined();
 	});
 
-	it("refuses a claims parameter that asks for acr or is no object, and ignores other claims", async () => {
-		const asked = JSON.stringify({ id_token: { acr: { essential: true, values: ["urn:t:pwd"] } } });
-		for (const claims of [asked, JSON.stringify({ userinfo: { acr: null } }), "not json"]) {
-			const res = await b.authorize(request({ claims }));
-			expect(res.at?.searchParams.get("error")).toBe("invalid_request");
-		}
+	it("refuses a claims parameter that is no object, and ignores the claims it names but acr", async () => {
+		const res = await b.authorize(request({ claims: "not json" }));
+		expect(res.at?.searchParams.get("error")).toBe("invalid_request");
 		const other = await b.authorize(
 			request({ claims: JSON.stringify({ id_token: { email: null } }) }),
 		);
 		expect(other.at?.searchParams.has("code")).toBe(true);
 	});
+
+	it.skipIf(areaTarget().differs("claims-acr"))(
+		"reads the acr a claims parameter asks for: an essential one met is carried, unmet refused; one not essential is voluntary [oidc-core-5.5.1.1-a] [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a] [oidc-core-5.5.1.1-c]",
+		async () => {
+			const of = (acr: unknown) => JSON.stringify({ id_token: { acr } });
+			const met = await b.authorize(
+				request({ claims: of({ essential: true, values: ["urn:t:pwd"] }) }),
+			);
+			expect((await claimsOf(base, met.at?.searchParams.get("code") ?? "")).acr).toBe("urn:t:pwd");
+			const unknown = await b.authorize(
+				request({ claims: of({ essential: true, value: "urn:t:none" }) }),
+			);
+			expect(unknown.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+			const loose = await b.authorize(request({ claims: of({ values: ["urn:t:none"] }) }));
+			expect((await claimsOf(base, loose.at?.searchParams.get("code") ?? "")).acr).toBe(
+				"urn:t:pwd",
+			);
+			// A voluntary request beside an essential one never meets it in its place.
+			const mixed = await b.authorize(
+				request({
+					claims: JSON.stringify({
+						id_token: { acr: { essential: true, value: "urn:t:none" } },
+						userinfo: { acr: { value: "urn:t:pwd" } },
+					}),
+				}),
+			);
+			expect(mixed.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+			// A value is one acr as written: one holding a blank names none of the table.
+			const spaced = await b.authorize(
+				request({ claims: of({ essential: true, value: "urn:t:none urn:t:pwd" }) }),
+			);
+			expect(spaced.at?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+			const bare = await b.authorize(
+				request({ claims: JSON.stringify({ userinfo: { acr: null } }) }),
+			);
+			expect(bare.at?.searchParams.has("code")).toBe(true);
+			const shapeless = await b.authorize(request({ claims: of({ values: "urn:t:pwd" }) }));
+			expect(shapeless.at?.searchParams.get("error")).toBe("invalid_request");
+		},
+	);
 });
 
 describe("acr: raising a session with a second factor", () => {
@@ -148,21 +193,42 @@ describe("acr: raising a session with a second factor", () => {
 		return location ? new URL(location, issuer) : undefined;
 	};
 
-	it("answers interaction_required without asking, sends a short session once to raise it, and offers the second-factor acr", async () => {
+	it("sends a short session once to raise it, and offers the second-factor acr", async () => {
 		const b = browser(() => s.at.base);
 		expect((await b.login("bob")).status).toBe(200);
-		const quiet = await ask(b, request({ acr_values: "urn:t:otp", prompt: "none" }));
-		expect(quiet?.searchParams.get("error")).toBe("interaction_required");
 		const sent = await ask(b, request({ acr_values: "urn:t:none urn:t:otp" }));
 		expect(sent?.pathname).toBe(stepUpPage);
 		expect(sent?.searchParams.get("acr_values")).toBe("urn:t:otp");
 		const back = new URL(sent?.searchParams.get("redirect_to") ?? "", issuer);
 		expect(back.pathname).toBe("/oauth/authorize");
-		const unraised = await ask(b, back.search.slice(1));
-		expect(unraised?.searchParams.get("error")).toBe("unmet_authentication_requirements");
 		const offered = await ask(b, request({ acr_values: secondFactorAcr }));
 		expect(offered?.pathname).toBe(stepUpPage);
 	});
+
+	it.skipIf(areaTarget().differs("voluntary-acr"))(
+		"goes on without a voluntary acr under prompt=none or back unraised, and holds an essential one [oidc-core-15.1-g]",
+		async () => {
+			const b = browser(() => s.at.base);
+			expect((await b.login("bob")).status).toBe(200);
+			const quiet = await ask(b, request({ acr_values: "urn:t:otp", prompt: "none" }));
+			expect(quiet?.searchParams.has("code")).toBe(true);
+			const sent = await ask(b, request({ acr_values: "urn:t:otp" }));
+			const back = new URL(sent?.searchParams.get("redirect_to") ?? "", issuer);
+			const unraised = await ask(b, back.search.slice(1));
+			const code = unraised?.searchParams.get("code") ?? "";
+			expect((await claimsOf(s.at.base, code)).acr).toBeUndefined();
+			if (areaTarget().differs("claims-acr")) return;
+			const essential = JSON.stringify({
+				id_token: { acr: { essential: true, value: "urn:t:otp" } },
+			});
+			const held = await ask(b, request({ claims: essential, prompt: "none" }));
+			expect(held?.searchParams.get("error")).toBe("interaction_required");
+			const trip = await ask(b, request({ claims: essential }));
+			const heldBack = new URL(trip?.searchParams.get("redirect_to") ?? "", issuer);
+			const refused = await ask(b, heldBack.search.slice(1));
+			expect(refused?.searchParams.get("error")).toBe("unmet_authentication_requirements");
+		},
+	);
 
 	it("issues a code with the acr once the session is raised by a step-up", async () => {
 		const { secret, codes } = await s.enrol("cara");

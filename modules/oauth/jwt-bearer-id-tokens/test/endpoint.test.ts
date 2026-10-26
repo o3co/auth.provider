@@ -11,7 +11,7 @@ import {
 } from "@mod/clients/testing";
 import dpop from "@mod/dpop/module";
 import dpopStore from "@mod/dpop-store/module";
-import { usedIdTokens } from "@mod/exchange-id-tokens";
+import { type IdTokenChecks, idTokenChecks, usedIdTokens } from "@mod/exchange-id-tokens";
 import { exchangeIdTokensOver, type Issuers } from "@mod/exchange-id-tokens/testing";
 import exchangeIdTokensStore from "@mod/exchange-id-tokens-store/module";
 import externalJwtModule from "@mod/external-jwt/module";
@@ -115,11 +115,62 @@ function watchedTokens() {
 	return { module, revoked, issued };
 }
 
+/** exchange-id-tokens, each check and each use of an id_token its contract was asked counted. */
+function watchedChecks() {
+	const asked = { checks: 0, consumes: 0 };
+	const over = exchangeIdTokensOver(issuers);
+	const module: Module = {
+		...over,
+		provides: (over.provides ?? []).map((part) =>
+			part.contract !== idTokenChecks
+				? part
+				: {
+						contract: part.contract,
+						create: async (context: Parameters<typeof part.create>[0]) => {
+							const real = (await part.create(context)) as IdTokenChecks;
+							return {
+								...real,
+								check: (token: string) => {
+									asked.checks += 1;
+									return real.check(token);
+								},
+								consume: (token: string) => {
+									asked.consumes += 1;
+									return real.consume(token);
+								},
+							};
+						},
+					},
+		),
+	};
+	return { module, asked };
+}
+
+/** A trusted issuer whose `client` is the bound phone: a request naming no client is taken for it. */
+const agents = {
+	issuer: "https://agents.example",
+	subject: "as-is",
+	keys: [
+		{
+			alg: "EdDSA",
+			"public-key": generateKeyPairSync("ed25519")
+				.publicKey.export({ format: "pem", type: "spki" })
+				.toString(),
+		},
+	],
+	conditions: { "subject-prefix": "org:acme/" },
+	client: "bound-phone",
+};
+
 interface Served {
 	readonly app: Awaited<ReturnType<typeof assemble>>;
 	readonly store: SimulatedStore;
+	/** Where the endpoint listens. */
+	readonly base: string;
 	readonly revoked: readonly string[];
 	readonly issued: { readonly count: number };
+	/** How often the id_tokens' contract was asked to check one, and to use one up. */
+	readonly asked: { readonly checks: number; readonly consumes: number };
 	bearer(
 		client: string,
 		idToken: string,
@@ -132,7 +183,14 @@ interface Served {
 }
 
 /** One instance of the deployment; a second on another's store shares its records. */
-async function serve(settings: { maxAge?: string; on?: Served } = {}): Promise<Served> {
+async function serve(
+	settings: {
+		maxAge?: string;
+		on?: Served;
+		/** Whether the bound phone, a trusted issuer's client, is registered beside the others. */
+		bound?: true;
+	} = {},
+): Promise<Served> {
 	const store = settings.on?.store ?? simulatedStore();
 	const shared = settings.on;
 	// The store the simulated one provides, by its own handle: a feature names no capability.
@@ -143,6 +201,7 @@ async function serve(settings: { maxAge?: string; on?: Served } = {}): Promise<S
 			])
 		: store.module;
 	const watched = watchedTokens();
+	const checks = watchedChecks();
 	const app = await assemble({
 		modules: [
 			http,
@@ -167,7 +226,7 @@ async function serve(settings: { maxAge?: string; on?: Served } = {}): Promise<S
 			outboundModule,
 			externalJwtModule,
 			tokenExchange,
-			exchangeIdTokensOver(issuers),
+			checks.module,
 			exchangeIdTokensStore,
 			jwtBearer,
 			jwtBearerStore,
@@ -187,6 +246,14 @@ async function serve(settings: { maxAge?: string; on?: Served } = {}): Promise<S
 					id: "old-phone",
 					sections: { ...allowed, "jwt-bearer": { "accept-unbound": true } },
 				}),
+				...(settings.bound
+					? [
+							publicClient({
+								id: "bound-phone",
+								sections: allowancesFor({ grants: [bearer], scopes: ["read"] }),
+							}),
+						]
+					: []),
 			]),
 			users: {
 				registered: [
@@ -203,10 +270,11 @@ async function serve(settings: { maxAge?: string; on?: Served } = {}): Promise<S
 						app: { audiences: ["com.example.app"] },
 						phone: { audiences: ["com.example.phone"] },
 						"old-phone": { audiences: ["com.example.old"] },
+						...(settings.bound ? { "bound-phone": { audiences: ["com.example.bound"] } } : {}),
 					},
 				},
 			},
-			"jwt-bearer": { issuers: [], "delegated-issuers": [appleIss] },
+			"jwt-bearer": { issuers: settings.bound ? [agents] : [], "delegated-issuers": [appleIss] },
 		},
 		runtime,
 	});
@@ -228,8 +296,10 @@ async function serve(settings: { maxAge?: string; on?: Served } = {}): Promise<S
 	return {
 		app,
 		store,
+		base,
 		revoked: watched.revoked,
 		issued: watched.issued,
+		asked: checks.asked,
 		bearer: (client, idToken, headers = {}) =>
 			post({ grant_type: bearer, assertion: idToken, ...credentials(client) }, headers),
 		exchange: (client, idToken) =>
@@ -302,6 +372,35 @@ describe("the JWT bearer grant over the whole token endpoint, for id_tokens", ()
 			"400 invalid_grant: assertion is for another client",
 		);
 		expect(said(await s.bearer("app", token))).toBe("200 Bearer");
+	});
+
+	it("refuses a trusted issuer's client an id_token its delegate names it in, asking the delegate nothing", async () => {
+		const s = await serve({ bound: true });
+		// Valid or expired, named by its client_id: the delegate neither checks it nor uses it up.
+		for (const token of [
+			await idToken("com.example.bound"),
+			await idToken("com.example.bound", { exp: nowS() - 600 }),
+		]) {
+			expect(said(await s.bearer("bound-phone", token))).toBe(
+				"400 invalid_grant: assertion is for another client",
+			);
+		}
+		// Naming no client, a delegated issuer's id_token identifies none.
+		const res = await fetch(`${s.base}/oauth/token`, {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({
+				grant_type: bearer,
+				assertion: await idToken("com.example.bound"),
+			}),
+		});
+		expect([res.status, await res.json()]).toEqual([
+			400,
+			{ error: "invalid_grant", error_description: "untrusted signer" },
+		]);
+		expect(s.asked).toEqual({ checks: 0, consumes: 0 });
+		expect(said(await s.bearer("app", await idToken("com.example.app")))).toBe("200 Bearer");
+		expect(s.asked).toEqual({ checks: 1, consumes: 1 });
 	});
 
 	describe("one id_token sent to both grants at once", () => {

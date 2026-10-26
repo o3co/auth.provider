@@ -49,6 +49,9 @@ onLegacy(codeArea, {
 		"return-keeps-its-demand",
 		// An acr no way of logging in can meet is dropped at boot, and answered as one not known.
 		"unmeetable-acr-entry",
+		// Ours passes over an acr asked by acr_values and not met, and reads the acr a claims parameter asks for.
+		"voluntary-acr",
+		"claims-acr",
 		// Ours issues a session grant only to a request with same-origin evidence for its own origin.
 		"session-grant-same-origin-only",
 		"session-grant-needs-origin-evidence",

@@ -138,6 +138,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/issuer` (feature, `modules/oauth/issuer`): Owns this provider's canonical name, the issuer: the configured URL, never derived from a request, the same for every module that names it.
 - `@mod/jwt-bearer` (feature, `modules/oauth/jwt-bearer`): Contributes the grant by JWT assertion.
   - `assertion` (`src/assertion`): checking a JWT assertion, all but its single use.
+  - `clientless` (`src/clientless`): a grant naming no client (RFC 7523 §3.1), where an entry's `client` is the client its verified assertion identifies, and the binding of entries and their clients.
   - `conditions` (`src/conditions`): the conditions an issuer holds an assertion's verified claims to, and whether claims meet them.
   - `delegated` (`src/delegated`): an assertion of a delegated issuer, which another module checks by its own rules (`delegatedAssertions`).
   - `issuers` (`src/issuers`): the trusted issuers, each entry of the section's `issuers`, and the signers and ledgers each is read with.
@@ -310,6 +311,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `relay` (`src/relay`): a relay between an app and Redis that causes a fault at a known point and shows that it happened.
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
+  - `acr` (`src/acr`): the scenes of the acr a client asks for.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.
@@ -365,6 +367,18 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `differences` (`src/differences`): the differences accepted between a library and the provider.
   - `libraries` (`src/libraries`): the client libraries the harness runs.
   - `pins` (`src/pins`): the SHA-256 of each jar an adapter is built from.
+- `@mod/interop-oidf` (verification, `modules/tooling/interop-oidf`): Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config, on the `simple-web` pattern's app behind an https front.
+  - `api` (`src/api`): the suite's API, reached trusting its certificate alone.
+  - `commands` (`src/commands`): a command a plan runs, held to its time.
+  - `compose` (`src/compose`): how the suite's containers are composed beside the suite's own compose file.
+  - `expected` (`src/expected`): whether the expected entries may go to the suite.
+  - `harness` (`src/harness`): one plan run end to end, reported as tests.
+  - `login` (`src/login`): the deployment's login page, as the suite's browser meets it.
+  - `orphans` (`src/orphans`): the suites a run killed before its stops leaves, found and taken down.
+  - `pkce` (`src/pkce`): the PKCE the suite's OIDC tests do not send, given as a client gives it.
+  - `results` (`src/results`): what each suite test of a plan proved.
+  - `scene` (`src/scene`): the app the OP plans meet.
+  - `suite` (`src/suite`): the suite at its pinned version, started and stopped.
 - `@mod/ledger-fakes` (verification, `modules/tooling/ledger-fakes`): Plays the operator's HTTP ledgers for tests and conformance scenes: the user ledger, and the witness ledgers of mfa and passkeys, each speaking the wire as `ledger-wire` words it.
 - `@mod/references` (assembly, `modules/tooling/references`): Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), and the audit index's generated parts, the cards and the dependencies (internal module `audit-index`).
   - `attack-surface` (`src/attack-surface`): the attack surface reference, what reaches the provider from outside and what it reaches out to.

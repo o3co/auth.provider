@@ -172,6 +172,7 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 										}),
 								...(i.conditions ? { conditions: i.conditions } : {}),
 								...(i.ceiling ? { ceiling: i.ceiling } : {}),
+								...(i.client ? { client: i.client } : {}),
 							})),
 						},
 					}

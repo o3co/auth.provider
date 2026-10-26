@@ -21,7 +21,7 @@
 - Test tools (`./testing`): a logged-in browser, requests to the authorization endpoint, and `succeeded` (a set-up's answer read only when it succeeded, else the scene fails naming what answered, its status and its body's start)
 
 ## Invariants
-- The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of refusing an unverified email `verified-email`, and those of a subject the ledger revokes `revocation`; the rest are the package's.
+- The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of the acr asked `acr`, those of refusing an unverified email `verified-email`, and those of a subject the ledger revokes `revocation`; the rest are the package's.
 - The legacy set-up, and the needs the legacy system cannot provide and the differences it answers differently, live only in `src/legacy.ts`.
 - The code flow needs access tokens that can be revoked after they are issued (`tokens` is set to denylist).
 - Touches only the HTTP interface and boot refusals.
