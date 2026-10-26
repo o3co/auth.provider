@@ -548,7 +548,7 @@ describe("token-exchange: a verifier's answer", () => {
 		expect(tied.sessionOf.get(recorded.id)).toBeUndefined();
 	});
 
-	it("reads an answer that says invalid as invalid, whatever else it holds [rfc8693-2.1-g] [rfc8693-2.2.2-b]", async () => {
+	it("reads an answer that says invalid as invalid, whatever else it holds [rfc8693-2.2.2-b]", async () => {
 		const s = await serve({ verifier: outside(() => ({ ...outsideAnswer, kind: "invalid" })) });
 		expect(said(await s.exchange("app", subjectOf("outside", outsideType)))).toEqual([
 			"invalid_request",
@@ -895,7 +895,7 @@ describe("token-exchange: how the issued token ends", () => {
 		expect(blind.revoked).toEqual([]);
 	});
 
-	it("checks the tokens again right before issuing [rfc8693-2.1-g]", async () => {
+	it("checks the tokens again right before issuing", async () => {
 		const s = await serve({
 			verifier: outside((call) => (call === 1 ? outsideAnswer : { kind: "invalid" })),
 		});
