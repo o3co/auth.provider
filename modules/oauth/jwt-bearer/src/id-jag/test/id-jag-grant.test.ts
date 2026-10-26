@@ -277,7 +277,7 @@ async function serve(
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig(),
+			...httpConfig({ "public-origin": new URL(issuer).origin }),
 			...issuerConfig({ url: issuer }),
 			...clientsConfig([
 				publicClient({ id: "agents", sections: jwtOnly }),

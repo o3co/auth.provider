@@ -88,7 +88,10 @@ const spentOn = (aheadMs = 0) =>
 		}),
 	]);
 
-/** The grant's assembly; `located` is where the token endpoint answers, null for no public origin. */
+/**
+ * The grant's assembly; `located` is where the token endpoint answers, null for none at all, and
+ * `publicOrigin` whether `http`'s public origin is written, the issuer's.
+ */
 function assembly(
 	storeAheadMs = 0,
 	named = issuer,
@@ -96,6 +99,7 @@ function assembly(
 	issuers: readonly Record<string, unknown>[] = trustedUpstream,
 	out: Module = outboundModule,
 	extra: readonly Module[] = [],
+	publicOrigin = true,
 ) {
 	const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
 		m.provide(tokenEndpointLocation).by(() => ({ url: located ?? undefined })),
@@ -120,7 +124,7 @@ function assembly(
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig(),
+			...httpConfig(publicOrigin ? { "public-origin": new URL(named).origin } : {}),
 			...issuerConfig({ url: named }),
 			...clientsConfig([
 				confidentialClient({
@@ -502,6 +506,17 @@ describe("jwt-bearer", () => {
 		expect(await serve(undefined, issuer, null).catch((error) => error)).toBeInstanceOf(
 			BootRefused,
 		);
+		// The token endpoint has a location on the issuer's origin wherever it is composed: the public
+		// origin, not the location, is what boot asks for.
+		const located = `${issuer}/oauth/token`;
+		const unplaced = await serve(undefined, issuer, located, undefined, undefined, [], false).catch(
+			(error) => error,
+		);
+		expect(unplaced).toMatchObject({
+			refusals: [
+				{ where: "jwt-bearer", reason: "the token endpoint's location needs a public origin" },
+			],
+		});
 	});
 
 	it("refuses assertions from strangers, for others, expired, too long-lived or missing claims [rfc7523-2.1-a] [rfc7523-3-e] [rfc7521-5.2-d] [rfc7523-3-h] [rfc7521-5.2-g] [rfc7523-3-n] [rfc7521-5.2-k] [rfc7523-3-t] [rfc7521-5.2-m] [rfc7523-3.1-b] [rfc7521-4.1.1-a]", async () => {

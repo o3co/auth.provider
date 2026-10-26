@@ -41,4 +41,4 @@
 - Spent assertions, through the store interface (a wiring keeps them) or an issuer's ledger, by name as the invariants say. The lifetime is a relative value, as the store judges it by its own clock: until `policy`'s time. Only well-formed `jti` strings (without lone surrogates) are accepted.
 
 ## Depends on
-- `kernel`, `grants`, `client-allowance`, `clients`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `outbound-policy`, `keys`, `subject-revocation`, `sender-binding` (where an entry takes the ID-JAG profile), and `users`, through its internal modules `assertion` and `delegated`
+- `kernel`, `http` (the public origin), `grants`, `client-allowance`, `clients`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `outbound-policy`, `keys`, `subject-revocation`, `sender-binding` (where an entry takes the ID-JAG profile), and `users`, through its internal modules `assertion` and `delegated`

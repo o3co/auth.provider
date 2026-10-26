@@ -162,7 +162,7 @@ function assembly(
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig(),
+			...httpConfig({ "public-origin": new URL(issuer).origin }),
 			...issuerConfig({ url: issuer }),
 			...clientsConfig([
 				confidentialClient({ id: "app", sections: allowed }),
