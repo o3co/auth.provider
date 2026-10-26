@@ -36,6 +36,27 @@ describe("the known differences", () => {
 		expect(() => differencesIn("{}", known, registry)).toThrow("no list of differences");
 	});
 
+	it("tell a check that is no string with the rest, every entry's problems together", () => {
+		expect(() =>
+			differencesIn(
+				JSON.stringify({
+					differences: [
+						{ ...third, check: 42 },
+						{ ...third, check: false },
+					],
+				}),
+				known,
+				registry,
+			),
+		).toThrow(
+			[
+				"known differences:",
+				'difference 0 (authlib login "42"): names no library, flow, check or reason',
+				'difference 1 (authlib login "false"): names no library, flow, check or reason',
+			].join("\n"),
+		);
+	});
+
 	it("name only libraries the harness runs, so none is left out of every run unseen", () => {
 		expect(() =>
 			differencesIn(
