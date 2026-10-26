@@ -11,6 +11,7 @@ import { type Expected, expectedProblems, suiteEntries } from "../expected/expec
 import { loginPage } from "../login/login.ts";
 import { pkceShim } from "../pkce/pkce.ts";
 import { type ModuleRun, type Outcome, outcomesOf } from "../results/results.ts";
+import { keepReviewPages } from "../review/review.ts";
 import { suiteScene } from "../scene/scene.ts";
 import {
 	hostForSuite,
@@ -372,6 +373,8 @@ export async function runPlan(plan: PlanDefinition): Promise<PlanRun> {
 		const planName = plan.suitePlan.split("[")[0] ?? plan.suitePlan;
 		const tests = await testsOf(suite.api, planName);
 		await writeFile(join(artifacts, "tests.json"), JSON.stringify(tests, null, 2));
+		// The pages a person must look at, kept apart: the suite holds them only while it runs.
+		await keepReviewPages(join(artifacts, "review"), tests);
 		const judged = outcomesOf(tests, {
 			configuration,
 			failures: expected.failures,
