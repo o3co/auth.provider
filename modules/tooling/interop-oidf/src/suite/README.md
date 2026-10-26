@@ -10,7 +10,7 @@ Internal module of `interop-oidf`: the suite at its pinned version, started and 
 - The tag must name the pinned commit, or the start fails.
 - The suite's public origins are the harness's own (`BASE_URL`, `BASE_MTLS_URL`), never the runner's environment's: vitest sets `BASE_URL` to `/`.
 - The suite must answer within 360 seconds, as long as its own runner waits; an answer cut off midway is tried again, never waited on.
-- Each request to its API, while it starts and after, is held to the plan's deadline besides its own time.
+- Each request to its API, while it starts and after, is held to the plan's deadline besides its own time. `api` is a GET that takes only a 200; `call` sends any method the API takes and answers the status as it comes, for the caller to judge.
 - Its nginx answers with the harness's certificate, mounted read only: the image's own names `localhost` alone, so no client that checks names could reach the suite by its host. The harness trusts that certificate alone, by its fingerprint.
 - Stopping keeps every container's state and log first, the commands' stderr beside their stdout, then takes the containers and their volumes down and removes the directory.
 - A failed start stops what it started, its log kept too; one that fails before Compose was asked for a container removes what it prepared alone.
