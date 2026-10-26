@@ -10,7 +10,8 @@
 		"release-check": "node src/release-check/check.ts",
 		"release-pack": "node src/release/pack.ts",
 		"release-published": "node src/release/check-published.ts",
-		"release-evidence": "node src/release-evidence/collect.ts",
+		"release-evidence-fetch": "node src/release-evidence/fetch.ts",
+		"release-evidence-judge": "node src/release-evidence/judge.ts",
 		"release-sbom": "node src/release-sbom/make.ts",
 		"release-listed": "node src/release-listed/listed.ts"
 	},

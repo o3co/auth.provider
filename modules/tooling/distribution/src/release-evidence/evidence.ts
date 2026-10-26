@@ -1,14 +1,16 @@
 /** Which CI run's evidence a release keeps: the run that tested the tag's tree, or why none will do. */
 
-/** A CI run as the Actions API lists it, with the base branches of its pull requests (none, once one is merged). */
+/** A CI run as the Actions API lists it: what it ran, on which commit, branch and repository, is GitHub's word. */
 export interface RunSeen {
 	readonly id: number;
 	readonly attempt: number;
 	readonly conclusion: string | null;
 	readonly event: string;
+	readonly path: string;
 	readonly headSha: string;
 	readonly headBranch: string;
-	readonly baseRefs: readonly string[];
+	readonly repository: string;
+	readonly headRepository: string;
 	readonly createdAt: string;
 	readonly url: string;
 }
@@ -21,11 +23,11 @@ export interface ArtifactSeen {
 	readonly createdAt: string;
 }
 
-/** What a candidate run was found to be: what it tested and how its jobs ended (its latest attempt's, by name), or why it cannot be read. */
+/** What a candidate run was found to be: the commit its reports name, how its jobs ended (its latest attempt's, by name), or why it cannot be read. */
 export type Examined =
 	| {
 			readonly run: RunSeen;
-			readonly tested: { readonly commit: string; readonly tree: string };
+			readonly tested: { readonly commit: string };
 			readonly jobs: Readonly<Record<string, string | null | undefined>>;
 			/** The release's compliance read again over the evidence kept: whether it lets the release go on, and what it told. */
 			readonly recomputed: { readonly releasable: boolean; readonly told: string };
@@ -33,48 +35,67 @@ export type Examined =
 	  }
 	| { readonly run: RunSeen; readonly problem: string };
 
-/** The tag: its commit and tree, and the release pull request's head, the merge commit's second parent. */
+/** The tag as its checkout holds it, with what restores a cache in its CI workflow in a push to its release branch. */
+export interface TagSeen {
+	readonly name: string;
+	readonly commit: string;
+	readonly tree: string;
+	readonly parents: readonly string[];
+	readonly headTree: string | undefined;
+	readonly firstParentOnMain: boolean;
+	readonly cacheProblems: readonly string[];
+}
+
+/** The tag, once it will do: its commit and tree, the release branch's head CI tested, and that branch. */
 export interface Tag {
 	readonly commit: string;
 	readonly tree: string;
 	readonly head: string;
-}
-
-const rerun = (run: RunSeen) =>
-	`re-run all jobs of ${run.url}, then re-run the failed jobs of this release`;
-
-/** The release pull request: its number, and the head and branch it was merged from. */
-export interface ReleasePull {
-	readonly number: number;
-	readonly head: string;
 	readonly branch: string;
 }
 
-/** The pull request to main that the tag's commit merged, among the pull requests the API lists for that commit. */
-export function releasePullOf(
-	pulls: readonly {
-		readonly number: number;
-		readonly mergeCommit: string | null;
-		readonly base: string;
-		readonly head: string;
-		readonly branch: string;
-	}[],
-	commit: string,
-): ReleasePull | undefined {
-	const merged = pulls.find((p) => p.mergeCommit === commit && p.base === "main");
-	return merged && { number: merged.number, head: merged.head, branch: merged.branch };
+/** The version a tag names: its name without the one `v` it starts with, read as written. */
+export const versionOf = (name: string): string | undefined =>
+	/^v[^/]+$/.test(name) ? name.slice(1) : undefined;
+
+/**
+ * The tag, where it is a release's (a merge of the release branch's head, of its tree, into main, its CI
+ * restoring no cache), else each reason it is not. Who may create a release tag is the boundary of review.
+ */
+export function tagOf(seen: TagSeen): { readonly tag: Tag } | { readonly problems: string[] } {
+	const problems: string[] = [];
+	const version = versionOf(seen.name);
+	if (version === undefined) problems.push(`the tag ${seen.name} names no version (v<version>)`);
+	const [first, head, ...more] = seen.parents;
+	if (first === undefined || head === undefined || more.length > 0) {
+		problems.push(
+			`the tag's commit ${seen.commit} has ${seen.parents.length} parents: tag the merge commit of the release branch into main`,
+		);
+	} else {
+		if (seen.headTree !== seen.tree) {
+			problems.push(
+				`the tag's tree ${seen.tree} is not the tree of ${head}, the release branch's head it merged: main held changes the branch did not, so what CI tested is not what the tag publishes`,
+			);
+		}
+		if (!seen.firstParentOnMain) problems.push(`the tag's first parent ${first} is not on main`);
+	}
+	for (const p of seen.cacheProblems) problems.push(`the tag's CI workflow ${p}`);
+	if (problems.length > 0 || version === undefined || head === undefined) return { problems };
+	return { tag: { commit: seen.commit, tree: seen.tree, head, branch: `release/${version}` } };
 }
 
-/** CI's successful runs of the release pull request, from its head and branch, the newest first. */
-export function candidatesOf(runs: readonly RunSeen[], pull: ReleasePull): RunSeen[] {
+/** CI's successful pushes of the release branch's head (its name as written) in this repository, the newest first. */
+export function candidatesOf(runs: readonly RunSeen[], tag: Tag, repository: string): RunSeen[] {
 	return runs
 		.filter(
 			(r) =>
 				r.conclusion === "success" &&
-				r.event === "pull_request" &&
-				r.headSha === pull.head &&
-				r.headBranch === pull.branch &&
-				(r.baseRefs.length === 0 || r.baseRefs.includes("main")),
+				r.event === "push" &&
+				r.path === ".github/workflows/ci.yml" &&
+				r.headSha === tag.head &&
+				r.headBranch === tag.branch &&
+				r.repository === repository &&
+				r.headRepository === repository,
 		)
 		.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.attempt - a.attempt);
 }
@@ -112,30 +133,43 @@ export function artifactsOf(
 	return { take };
 }
 
-/** The one commit a run's reports name as tested; none where they name none, or more than one. */
-export function testedCommitOf(reports: readonly unknown[], run: string): string | undefined {
-	const commits = new Set(
-		reports.flatMap((r) => {
-			const identity = (r as { identity?: { commit?: unknown; run?: unknown } } | null)?.identity;
-			return identity?.run === run && typeof identity.commit === "string" ? [identity.commit] : [];
-		}),
-	);
-	return commits.size === 1 ? [...commits][0] : undefined;
+/** The one commit a run's reports name as tested; or why not, a report naming another run among the reasons. */
+export function testedCommitOf(
+	reports: readonly unknown[],
+	run: string,
+): { readonly commit: string } | { readonly problem: string } {
+	const identities = reports.flatMap((r) => {
+		const identity = (r as { identity?: { commit?: unknown; run?: unknown } } | null)?.identity;
+		return identity ? [identity] : [];
+	});
+	const foreign = identities.find((i) => i.run !== run);
+	if (foreign) return { problem: `a report of its names run ${String(foreign.run)}, not this one` };
+	const commits = new Set(identities.map((i) => i.commit));
+	const [commit] = commits;
+	if (commits.size !== 1 || typeof commit !== "string") {
+		return {
+			problem: `its reports name ${commits.size === 0 ? "no" : "more than one"} commit tested`,
+		};
+	}
+	return { commit };
 }
 
-/** The jobs CI runs on a pull request to main alone, and must pass there: a run that skipped them is no release pull request's. */
+/** The jobs CI runs on a release branch, and must pass there. */
 export const releaseJobs = ["conformance", "release-check", "compliance"] as const;
+
+const rerun = (run: RunSeen) =>
+	`re-run all jobs of ${run.url}, then re-run the failed jobs of this release`;
 
 /** Why a run examined will not do, with what to do; none where it will. */
 function refusalOf(tag: Tag, e: Examined): string | undefined {
 	if ("problem" in e) return `${e.run.url}: ${e.problem}; ${rerun(e.run)}`;
-	if (e.tested.tree !== tag.tree) {
-		return `${e.run.url} tested tree ${e.tested.tree}, but the tag's tree is ${tag.tree}: main moved after it ran, so what it tested is not what the tag publishes; see "When the release finds no evidence" in docs/releasing.md`;
+	if (e.tested.commit !== tag.head) {
+		return `${e.run.url}: its reports name ${e.tested.commit} as tested, but GitHub ran it on ${tag.head}; the reports are not that run's`;
 	}
 	const unpassed = releaseJobs.filter((job) => e.jobs[job] !== "success");
 	if (unpassed.length > 0) {
 		const ended = unpassed.map((job) => `its ${job} job ended ${e.jobs[job] ?? "without running"}`);
-		return `${e.run.url}: ${ended.join(", ")}: a release pull request's run runs and passes ${releaseJobs.join(", ")}; ${rerun(e.run)}`;
+		return `${e.run.url}: ${ended.join(", ")}: a release branch's run runs and passes ${releaseJobs.join(", ")}; ${rerun(e.run)}`;
 	}
 	if (!e.recomputed.releasable) {
 		return `${e.run.url}: the evidence it kept no longer makes the release's compliance (${e.recomputed.told}); ${rerun(e.run)}`;
@@ -158,7 +192,7 @@ export function firstTaken(
 		return {
 			kind: "stopped",
 			problems: [
-				`no successful CI run of a pull request to main tested ${tag.head}, the release pull request's head: re-run that pull request's CI, then re-run the failed jobs of this release`,
+				`no successful CI run of a push of ${tag.branch} at ${tag.head}, the release branch's head the tag merged: push that branch, or re-run its CI, then re-run the failed jobs of this release`,
 			],
 		};
 	}

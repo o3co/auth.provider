@@ -356,6 +356,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `release-sbom` (`src/release-sbom`): the release's lists of what it ships (SBOMs), made from the tarballs it publishes.
   - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
   - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
+  - `workflow-caches` (`src/workflow-caches`): CI's and the release's workflows held to restoring no cache in a run a release takes evidence from.
 - `@mod/guard` (verification, `modules/tooling/guard`): Checks the workspace's invariants, each reported by its id, place and what went over:
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
   - `change-record` (`src/change-record`): a change record's machine rows, what two commits of the workspace differ in.
