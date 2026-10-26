@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { type Item, type Role, roles } from "../checklist.ts";
-import { classOf, itemId } from "../ids.ts";
+import { guaranteeSpec, type Item, type Role, roles } from "../checklist.ts";
+import { classOf, itemId, specOf } from "../ids.ts";
 import type { TestRef } from "../report.ts";
 import type { EvidenceReport } from "./reporter.ts";
 
@@ -112,6 +112,10 @@ export interface ItemStatus {
 	readonly evidence: readonly Evidence[];
 	/** The failures of its tests' files and runs that no test owns, with the reports that gave them. */
 	readonly failures: readonly Failure[];
+	/** A guarantee's faults no test naming it marks; for a guarantee with faults alone. */
+	readonly holes?: readonly string[];
+	/** Each marked test of a guarantee's faults not passed in a run of its file, as `<entry>: <file> > <title>: <failed|skipped|pending|no result>`. */
+	readonly columns?: readonly string[];
 }
 
 /** A job's mark that it was attempted, written before it can fail: the run, the attempt, and the runs it makes. */
@@ -327,17 +331,50 @@ export function itemStatuses(
 		const refusedSkip = failures.some((f) =>
 			f.reason.endsWith("skipped in a run that takes no skip"),
 		);
+		// A guarantee's faults are columns: each needs a marked test, and every one passed in every run of its file.
+		const faults = i.faults ?? [];
+		const holes = faults.filter((fault) => !refs.some((r) => r.faults?.includes(fault)));
+		const columns = refs
+			.filter((r) => faults.length > 0 && (r.faults?.length ?? 0) > 0)
+			.flatMap((ref) => {
+				const path = join(pkgDirs.get(ref.pkg) ?? ref.pkg, ref.file);
+				const meets = (names: readonly string[]) =>
+					(ref.suite ? names.length > ref.path.length : names.length === ref.path.length) &&
+					ref.path.every((s, k) => s === null || titleMatches(s, names[k] ?? ""));
+				return entriesOfFile(ref.pkg, ref.file, expected)
+					.filter((e) => present.has(e))
+					.flatMap((e) => {
+						const results = reports
+							.filter((r) => r.identity.entry === e)
+							.flatMap((r) => r.tests.filter((t) => t.file === path && meets(t.names)))
+							.map((t) => t.state);
+						const short =
+							results.length === 0
+								? "no result"
+								: (["failed", "skipped", "pending"] as const).find((st) => results.includes(st));
+						return short ? [`${e}: ${ref.file} > ${ref.title}: ${short}`] : [];
+					});
+			});
+		const columnFailed = columns.some((c) => c.endsWith(": failed"));
 		const status: RunStatus =
 			i.mark?.kind ??
-			(refs.length === 0
-				? "hole"
-				: s.failed > 0 || broken || refusedSkip
+			(faults.length > 0
+				? s.failed > 0 || broken || refusedSkip || columnFailed
 					? "failed"
-					: missing.length > 0 || unrun.length > 0
-						? "incomplete"
-						: s.passed > 0
-							? "passed"
-							: "unverified");
+					: holes.length > 0
+						? "hole"
+						: missing.length > 0 || unrun.length > 0 || columns.length > 0
+							? "incomplete"
+							: "passed"
+				: refs.length === 0
+					? "hole"
+					: s.failed > 0 || broken || refusedSkip
+						? "failed"
+						: missing.length > 0 || unrun.length > 0
+							? "incomplete"
+							: s.passed > 0
+								? "passed"
+								: "unverified");
 		const provenance = [...(evidence.get(i.id)?.values() ?? [])];
 		return {
 			id: i.id,
@@ -349,9 +386,18 @@ export function itemStatuses(
 			unrun,
 			evidence: provenance,
 			failures,
+			...(faults.length > 0 ? { holes, columns } : {}),
 		};
 	});
 }
+
+/**
+ * Whether an item stops a release: failed, incomplete or unverified; a guarantee also a hole or
+ * noncompliant, so no promise ships unheld. Another spec's hole and mark stop nothing.
+ */
+export const blocksRelease = (s: ItemStatus) =>
+	["failed", "incomplete", "unverified"].includes(s.status) ||
+	(specOf(s.id) === guaranteeSpec && (s.status === "hole" || s.status === "noncompliant"));
 
 const order: readonly RunStatus[] = [
 	"passed",
@@ -382,6 +428,21 @@ export function checkpoint(statuses: readonly ItemStatus[]) {
 	);
 	return { ...countsOf(statuses), byRole };
 }
+
+/** Each guarantee's faults with no marked test, and each marked test not passed: what keeps its columns short. */
+const faultLines = (statuses: readonly ItemStatus[]) => {
+	const short = statuses.filter((s) => (s.holes?.length ?? 0) + (s.columns?.length ?? 0) > 0);
+	if (short.length === 0) return [];
+	return [
+		"## Guarantees' faults short of a pass",
+		"",
+		...short.flatMap((s) => [
+			...(s.holes?.length ? [`- ${s.id}: no test marks ${s.holes.join(", ")}`] : []),
+			...(s.columns ?? []).map((c) => `- ${s.id}: ${c}`),
+		]),
+		"",
+	];
+};
 
 /** The run's compliance table, as Markdown. */
 export function complianceTable(
@@ -422,5 +483,6 @@ export function complianceTable(
 					.join(", ")} |`,
 		),
 		"",
+		...faultLines(statuses),
 	].join("\n");
 }

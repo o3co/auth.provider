@@ -5,6 +5,7 @@ import type { EvidenceReport } from "./reporter.ts";
 import {
 	type Attempted,
 	attemptsOf,
+	blocksRelease,
 	checkpoint,
 	complianceTable,
 	gateFailures,
@@ -70,9 +71,7 @@ export function complianceOf(
 		),
 	);
 	writeFileSync(join(dir, "compliance.md"), table);
-	const blocking = statuses.filter((s) =>
-		["failed", "incomplete", "unverified"].includes(s.status),
-	);
+	const blocking = statuses.filter(blocksRelease);
 	return {
 		table,
 		releasable: blocking.length === 0 && missingRuns.length === 0 && stopped.length === 0,
