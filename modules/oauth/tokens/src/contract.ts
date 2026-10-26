@@ -106,7 +106,7 @@ export type Admitted = { readonly kind: "allowed" } | IssuanceRefused;
 
 /**
  * `notAfter` (epoch ms) caps the expiry, a token it leaves less than a second refused by `issue`;
- * `lifetimeSeconds` (1–86400) replaces the section's lifetime.
+ * `lifetimeSeconds` (2–86400) replaces the section's lifetime.
  */
 export interface IssueLimits {
 	readonly notAfter?: number;
@@ -119,7 +119,7 @@ export interface Tokens extends TokenValidity<AccessCheck> {
 	revocable(): boolean;
 	/**
 	 * The access-token lifetime that `issue` applies where the grant gives no `lifetimeSeconds`, in
-	 * whole seconds from 1 to 86400. It is fixed when `tokens` is built and never changes after, so a
+	 * whole seconds from 2 to 86400. It is fixed when `tokens` is built and never changes after, so a
 	 * check made at build time stays true.
 	 */
 	accessTokenLifetimeSeconds(): number;

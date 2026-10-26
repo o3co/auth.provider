@@ -405,16 +405,17 @@ export function tokensContract(
 			}
 		});
 
-		it("issues for the lifetime the issuing side asks, up to a day, and refuses any other as its mistake", async () => {
+		it("issues for the lifetime the issuing side asks, two seconds to a day, and refuses any other as its mistake", async () => {
 			const place = await open({ revocable: true });
 			const longer = await issueFor(place.tokens, grant, { lifetimeSeconds: 86_400 });
 			expect(longer.expiresIn).toBe(86_400);
+			expect((await issueFor(place.tokens, grant, { lifetimeSeconds: 2 })).expiresIn).toBe(2);
 			const capped = await issueFor(place.tokens, grant, {
 				lifetimeSeconds: 86_400,
 				notAfter: place.now() + 120_000,
 			});
 			expect(capped.expiresIn).toBe(120);
-			for (const lifetimeSeconds of [0, 86_401, 1.5, Number.NaN]) {
+			for (const lifetimeSeconds of [0, 1, 86_401, 1.5, Number.NaN]) {
 				await expect(
 					issueFor(place.tokens, grant, { lifetimeSeconds }),
 					String(lifetimeSeconds),

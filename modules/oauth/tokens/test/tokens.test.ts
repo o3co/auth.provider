@@ -398,16 +398,17 @@ it("answers unsupported to any revocation where revocation is not configured, a 
 it("reads the access token's lifetime with its unit, in whole seconds, an hour unless set", () => {
 	const lifetimeOf = (settings: object) =>
 		section.safeParse({ revocation: "unsupported", ...settings }).data?.["access-token-lifetime"];
-	expect([{}, { "access-token-lifetime": "2h" }].map(lifetimeOf)).toEqual([
-		defaultLifetimeSeconds,
-		7200,
-	]);
+	expect(
+		[{}, { "access-token-lifetime": "2h" }, { "access-token-lifetime": "2s" }].map(lifetimeOf),
+	).toEqual([defaultLifetimeSeconds, 7200, 2]);
+	// A second's lifetime, its iat cut to the second, leaves less than a second once signed: never issued.
 	const refused = [
 		{ "access-token-lifetime-seconds": 60 },
 		{ "access-token-lifetime": 3600 },
 		{ "access-token-lifetime": "1500ms" },
+		{ "access-token-lifetime": "1s" },
 	];
-	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
+	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined, undefined]);
 });
 
 it("takes all it names under either revocation, the denylist only where it keeps one", async () => {
