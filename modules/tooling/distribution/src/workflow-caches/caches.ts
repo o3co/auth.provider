@@ -98,6 +98,10 @@ const known: Readonly<
 		refs: ["3bb12739c298aeb8a4eeaf626c5b8d85266b0e65"],
 		rules: [],
 	},
+	"actions/create-github-app-token": {
+		refs: ["64ab729a6294000f5aa4a4bc0b73d1f32bc45510"],
+		rules: [],
+	},
 };
 
 /** Each problem in the workflow at `path` (from the repository's root) and the workflows of this tree it calls. */

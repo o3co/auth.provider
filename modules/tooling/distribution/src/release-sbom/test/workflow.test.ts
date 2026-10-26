@@ -154,7 +154,7 @@ it("takes each artifact by the id the job that made it gave, never by a name ano
 			[
 				"needs.pack.outputs.tarballs",
 				"needs.sbom.outputs.lists",
-				"needs.evidence.outputs.evidence",
+				"needs.evidence.outputs.route == 'public' && needs.evidence.outputs.evidence || needs.evidence-security.outputs.evidence",
 				"needs.pack.outputs.run",
 			],
 		],
@@ -202,9 +202,12 @@ it("publishes in the order the pack wrote, the index's bundle after every bundle
 it("skips no job of the release, nor a step that holds it, but by success", () => {
 	const plain = (cond: unknown) =>
 		cond === undefined || cond === "success()" || cond === "${{ success() }}";
-	for (const name of ["evidence", "pack", "sbom", "publish"]) {
+	for (const name of ["evidence", "pack", "sbom"]) {
 		expect((jobs[name] as Job & { if?: unknown }).if, name).toSatisfy(plain);
 	}
+	// Publish names its route's evidence itself (release-evidence's test evaluates it); the pack and the lists, as success.
+	const publish = String((jobs.publish as Job & { if?: unknown }).if);
+	expect(publish).toContain("needs.pack.result == 'success' && needs.sbom.result == 'success'");
 	const held = [
 		[jobs.pack, runs("pnpm release:check")],
 		[jobs.pack, runs("check-tarball-license.sh")],
