@@ -5,7 +5,7 @@
 - Reports each suite test as a vitest test, its result excused only by an expected entry the checklist lets it take.
 - Its internal modules for the suite: `suite` starts and stops it, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time.
 - Its internal modules for the provider: `scene` is the app's scene, `login` is the login page, `pkce` gives PKCE to requests that carry none.
-- Its internal modules for the results: `expected` judges the expected entries, `results` reads each test's outcome, `review` reads the pages the suite left for a person's review.
+- Its internal modules for the results: `expected` judges the expected entries, `results` reads each test's outcome, `review` reads the pages the suite left for a person's review, `report` reports a plan's run as tests.
 - Its internal modules for a run: `lifecycle` holds what every plan run has (its directories, its deadline, its stops), `harness` runs a plan.
 
 ## Not here
