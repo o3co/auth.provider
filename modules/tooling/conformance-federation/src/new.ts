@@ -84,6 +84,7 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 		...(part.keepsUpstreamTokens ? ["@mod/federation-tokens"] : []),
 		...(part.grants ? ["@mod/federation-grants", "@mod/federation-grants-connect"] : []),
 	],
+	...(part.without ? { without: part.without } : {}),
 	store: "volatile",
 	config: {
 		federation: {
