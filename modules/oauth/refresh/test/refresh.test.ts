@@ -1,5 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
+import {
+	claimsSelections,
+	type Selection,
+	selectionConsents,
+	selectionRecords,
+} from "@mod/claims-selection";
+import claimsSelectionModule from "@mod/claims-selection/module";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type Client, clients } from "@mod/clients";
@@ -10,7 +18,7 @@ import {
 	confidentialClient,
 	publicClient,
 } from "@mod/clients/testing";
-import { additions, codes } from "@mod/code-grant";
+import { additions, codes, redemptionHooks } from "@mod/code-grant";
 import codeGrantModule from "@mod/code-grant/module";
 import { codeGrantConfig } from "@mod/code-grant/testing";
 import codeGrantStore from "@mod/code-grant-store/module";
@@ -28,6 +36,7 @@ import {
 	isUnavailable,
 	kernelConfig,
 	type Module,
+	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
@@ -125,6 +134,7 @@ function assembly(options: Options = {}) {
 	const simulated = simulatedStore();
 	const audited = auditStandIn();
 	const stores = memoryStores(options.caps);
+	const selections = selectionStores();
 	const down = { tokens: unavailableSwitch<Tokens>("tokens") };
 	const both = ["authorization_code", "refresh_token"];
 	const input = {
@@ -157,6 +167,9 @@ function assembly(options: Options = {}) {
 			codeGrantStore,
 			refreshModule,
 			stores.module,
+			claimsSelectionModule,
+			selections.module,
+			judging,
 			grantsSeen.module,
 			tiesSeen.module,
 			...(options.extra ?? []),
@@ -181,11 +194,11 @@ function assembly(options: Options = {}) {
 		},
 		runtime,
 	};
-	return { input, audited, stores, down };
+	return { input, audited, stores, down, selections };
 }
 
 async function serve(options: Options = {}) {
-	const { input, audited, stores, down } = assembly(options);
+	const { input, audited, stores, down, selections } = assembly(options);
 	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
@@ -236,10 +249,11 @@ async function serve(options: Options = {}) {
 	const redeem = async (
 		as = "app",
 		extra: Record<string, string> = {},
-		facts: { readonly acr?: string } = {},
+		facts: { readonly acr?: string; readonly selection?: Selection } = {},
 	) => {
+		const { selection, ...kept } = facts;
 		const code = await app.get(codes).issue({
-			...facts,
+			...kept,
 			clientId: as,
 			redirectUri: "https://app.example/cb",
 			challenge,
@@ -248,6 +262,10 @@ async function serve(options: Options = {}) {
 			session: session.id,
 			subject: "alice",
 		});
+		if (selection) {
+			const name = app.get(codes).redemptionOf(code);
+			await app.get(claimsSelections).keepForCode(name, selection, 600_000);
+		}
 		const exchange = async () =>
 			(
 				await grant("authorization_code", as, {
@@ -274,8 +292,101 @@ async function serve(options: Options = {}) {
 		refresh,
 		active,
 		audited: audited.events,
+		selections,
 	};
 }
+
+/** The scopes the subject agreed to, which a test may change. */
+const agreed = new Set(["read", "write"]);
+const judging = defineModule({ name: "judging", takes: [] }, (m) => [
+	m.contribute(selectionConsents).by(() => ({
+		consented: async (_c: Client, _s: string, scope: string) => agreed.has(scope),
+	})),
+]);
+/** claims-selection's store in memory; a family's record fails to be written while `failFamilies`. */
+function selectionStores() {
+	const stand = claimsSelectionInMemory();
+	const state = { failFamilies: false, failTokens: false };
+	const module = defineModule({ name: "selection-stores", takes: [] }, (m) => [
+		m.provide(selectionRecords).by(() => ({
+			read: stand.records.read,
+			save: async (name: string, value: Parameters<typeof stand.records.save>[1], ms: number) => {
+				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
+				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
+				return stand.records.save(name, value, ms);
+			},
+		})),
+	]);
+	return { module, state };
+}
+const selected: Selection = {
+	idToken: { names: [], constraints: [] },
+	userinfo: {
+		names: [
+			{ name: "name", scope: "read" },
+			{ name: "email", scope: "write" },
+		],
+		constraints: [{ name: "email", value: "a@example.com" }],
+	},
+};
+const idOf = async (s: Awaited<ReturnType<typeof serve>>, token: string | undefined) => {
+	const checked = await s.app.get(tokens).verifyAccess(token ?? "");
+	if (checked.kind !== "valid") throw new Error("not a valid token");
+	return checked.id;
+};
+
+describe("a code's selection through its family", () => {
+	afterEach(() => {
+		agreed.clear();
+		for (const scope of ["read", "write"]) agreed.add(scope);
+	});
+
+	it("keeps for each refreshed token the family's selection, its names cut to what is agreed to now", async () => {
+		const s = await serve();
+		const first = await s.redeem("app", {}, { selection: selected });
+		const read = s.app.get(claimsSelections);
+		expect(await read.forToken(await idOf(s, first.access_token))).toEqual(selected.userinfo);
+		const once = await s.refresh(first.refresh_token);
+		expect(await read.forToken(await idOf(s, once.body.access_token))).toEqual(selected.userinfo);
+		agreed.delete("write");
+		const twice = await s.refresh(once.body.refresh_token);
+		expect(await read.forToken(await idOf(s, twice.body.access_token))).toEqual({
+			names: [{ name: "name", scope: "read" }],
+			constraints: selected.userinfo.constraints,
+		});
+		// Agreed to again: the family's selection was never cut, so the name comes back.
+		agreed.add("write");
+		const thrice = await s.refresh(twice.body.refresh_token);
+		expect(await read.forToken(await idOf(s, thrice.body.access_token))).toEqual(selected.userinfo);
+	});
+
+	it("keeps nothing for the tokens of a family whose code had no selection", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const once = await s.refresh(first.refresh_token);
+		expect(
+			await s.app.get(claimsSelections).forToken(await idOf(s, once.body.access_token)),
+		).toBeUndefined();
+	});
+
+	it("voids the code, ending its family, when the family's selection cannot be kept", async () => {
+		const s = await serve();
+		s.selections.state.failFamilies = true;
+		const answer = await s.redeem("app", {}, { selection: selected });
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		s.selections.state.failFamilies = false;
+		expect(await s.active(answer.access_token)).toBe(false);
+	});
+
+	it("fails the round, leaving the refresh token usable, when a refreshed token's selection cannot be kept", async () => {
+		const s = await serve();
+		const first = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.failTokens = true;
+		expect((await s.refresh(first.refresh_token)).status).toBe(503);
+		s.selections.state.failTokens = false;
+		expect((await s.refresh(first.refresh_token)).status).toBe(200);
+	});
+});
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
 const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
@@ -722,16 +833,20 @@ describe("refresh tokens", () => {
 			})),
 		]);
 		const added = collecting("added", additions);
-		const s = await serve({ extra: [spy, added.module] });
+		const hooked = collecting("hooked", redemptionHooks);
+		const s = await serve({ extra: [spy, added.module, hooked.module] });
 		const addition = s.app.get(added.seen).find((a) => a.field === "refresh_token");
+		const pins = s.app.get(hooked.seen);
 		const { token: _, ...issued } = await issuedAccess(s.app.get(tokens), {
 			subject: "alice",
 			issuedTo: "app",
 			audience: ["https://api"],
 			scope: ["read"],
 		});
-		const start = (redemption: string, unknown?: true) =>
-			addition?.issue({
+		// Pinned first, as code-grant pins every redemption before the additions run.
+		const start = async (redemption: string, unknown?: true) => {
+			for (const hook of pins) await hook.pin(redemption);
+			return addition?.issue({
 				...(unknown ? { authenticatedAtUnknown: unknown } : {}),
 				redemption,
 				client: {
@@ -749,6 +864,7 @@ describe("refresh tokens", () => {
 				amr: ["pwd"],
 				access: issued,
 			});
+		};
 		return { s, redemptions, addition, start };
 	};
 

@@ -1,3 +1,4 @@
+import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Redeemed } from "@mod/code-grant";
 import { type BuildContext, type Log, Unavailable } from "@mod/kernel";
@@ -13,6 +14,7 @@ export function starting(
 	found: ReturnType<typeof founding>,
 	lifetimeMs: number,
 	log: Log,
+	selections: Pick<ClaimsSelections, "follow">,
 ) {
 	return async (redeemed: Redeemed) => {
 		if (!clientAllowance.allowsGrant(redeemed.client, refreshGrantType)) return undefined;
@@ -33,6 +35,8 @@ export function starting(
 			for (const dropped of pushedOut) await revoker.revokeFamily(dropped);
 			throw new Unavailable("refresh");
 		}
+		// The family keeps what its code's request asked beyond its scope; failing, the code is voided.
+		await selections.follow(redeemed.redemption, id, lifetimeMs + allowanceMs);
 		return found.found(
 			id,
 			{
@@ -87,6 +91,6 @@ export async function additionOver(c: BuildContext<Settings>) {
 	return {
 		field: "refresh_token",
 		revoke: takingBack(stores, revoker, lifetimeMs),
-		issue: starting(stores, revoker, found, lifetimeMs, c.log),
+		issue: starting(stores, revoker, found, lifetimeMs, c.log, await c.get(claimsSelections)),
 	};
 }

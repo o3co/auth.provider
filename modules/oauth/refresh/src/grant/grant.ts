@@ -1,4 +1,5 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
+import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Grant, GrantOutcome } from "@mod/grants";
 import { issuer } from "@mod/issuer";
@@ -54,6 +55,7 @@ export function refreshGrant(
 	issuer: string,
 	now: () => number,
 	recorder: Pick<Audit, "record">,
+	selections: Pick<ClaimsSelections, "forRefreshed">,
 ): Grant {
 	const recorded = declaredAudit(recorder, events);
 	/** Ends the family a reuse showed, and records it. */
@@ -127,6 +129,8 @@ export function refreshGrant(
 			if (judged.kind === "refused") return judged;
 			const issued = judged.access;
 			await revoker.recordAccess(parsed.id, issued);
+			// The family's selection, its names cut to what is allowed and agreed to now, kept for this token.
+			await selections.forRefreshed(parsed.id, client, family.subject, issued);
 			// Rotates only from the secret checked here, however often the change runs again.
 			const written = await stores.families.update(parsed.id, (stored) =>
 				liveFamily(stored)?.current === family.current ? { value: toStored(rotated) } : undefined,
@@ -153,7 +157,7 @@ export function refreshGrant(
 }
 
 /** What `grantOver` takes beside `settlingIn`'s. */
-export const grantTakes = [sessions, subjectRevocation, issuer, audit];
+export const grantTakes = [sessions, subjectRevocation, issuer, audit, claimsSelections];
 
 /** The refresh_token grant over the contracts the assembly gives; it sweeps the families to settle. */
 export async function grantOver(c: BuildContext<Settings>) {
@@ -169,5 +173,6 @@ export async function grantOver(c: BuildContext<Settings>) {
 		issuerUrl,
 		c.clock.now,
 		await c.get(audit),
+		await c.get(claimsSelections),
 	);
 }
