@@ -30,8 +30,14 @@ const suiteFields = [
 /** Characters the runner's matching reads as a pattern. */
 const wildcard = /[*?[\]]/;
 
+/** A variant with its keys in one order: the outcomes match a variant whatever order it is written in. */
+const canonical = (variant: unknown) =>
+	typeof variant === "object" && variant !== null
+		? Object.fromEntries(Object.entries(variant).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+		: variant;
+
 const testOf = (e: Expected) =>
-	JSON.stringify([e["test-name"], e.variant, e["configuration-filename"]]);
+	JSON.stringify([e["test-name"], canonical(e.variant), e["configuration-filename"]]);
 
 /**
  * Why the entries may not go to the suite: each names its test, variant and configuration file
@@ -71,7 +77,9 @@ export function expectedProblems(
 			continue;
 		}
 		problems.push(...exceptionProblems(e, known).map((p) => `${at}: ${p}`));
-		const key = JSON.stringify(suiteFields.map((f) => e[f] ?? null));
+		const key = JSON.stringify(
+			suiteFields.map((f) => (f === "variant" ? canonical(e.variant) : (e[f] ?? null))),
+		);
 		if (seen.has(key)) problems.push(`${at}: written twice`);
 		seen.add(key);
 		const other = classes.get(testOf(e));
