@@ -715,6 +715,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
