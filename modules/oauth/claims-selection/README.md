@@ -22,7 +22,7 @@
 - Operator section: `mode`, `off`, `draining` or `on` (default `off`), offered as `claimsSelections.mode`.
 
 ## Invariants
-- A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; `value` or a non-empty `values` of up to 16, never both; 4 KiB whole. Another is a `TypeError`.
+- A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; exactly one of `value` and a non-empty `values` of up to 16; 4 KiB whole. Another is a `TypeError`.
 - Without a judge of consent, no name is agreed to.
 - `off` touches no store: nothing is pinned, kept or read, and none is held back. `draining` keeps no new selection but pins, reads and holds back what was kept. A selection is kept for a code only while `on`; otherwise it is a `TypeError`.
 - A pin copies the code's selection, or marks it none, and holds it five minutes; the redemption's other reads use only the pin. A pin gone fails the read, never answering none.

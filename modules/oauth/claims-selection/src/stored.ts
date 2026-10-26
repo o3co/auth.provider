@@ -14,7 +14,8 @@ const constraint = z
 		value: scalar.optional(),
 		values: z.array(scalar).min(1).max(selectionLimits.values).optional(),
 	})
-	.refine((c) => c.value === undefined || c.values === undefined);
+	// Exactly one: with neither, it would hold back its claim whatever the claim holds.
+	.refine((c) => (c.value === undefined) !== (c.values === undefined));
 const target = z.strictObject({
 	names: z.array(z.strictObject({ name: z.string(), scope: z.string() })),
 	constraints: z.array(constraint),

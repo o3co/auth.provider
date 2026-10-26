@@ -135,6 +135,9 @@ it("refuses a selection past its bounds, or with a value no scalar", async () =>
 		{ values: Array.from({ length: selectionLimits.values + 1 }, (_, i) => `v${i}`) },
 		{ values: [] },
 		{ value: "a", values: ["b"] },
+		// Neither: a constraint that names no value would hold back the claim it names whatever it holds.
+		{},
+		{ essential: true },
 		{ value: ["a"] },
 		{ value: { a: 1 } },
 		{ value: null },
