@@ -1,5 +1,5 @@
 import { generateKeyPairSync, X509Certificate } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AreaScene, freePort, type Started } from "@mod/conformance";
@@ -126,9 +126,10 @@ export async function startWorld(
 	given: { readonly start?: (scene: AreaScene) => Promise<Started>; readonly under?: string } = {},
 ): Promise<World> {
 	const authorizations: URL[] = [];
-	const certificate = await selfSigned(
-		"client.example",
-		await mkdtemp(join(tmpdir(), "interop-client-cert-")),
+	// The client certificate's files are read back as PEM and gone before anything else starts.
+	const certificateDir = await mkdtemp(join(given.under ?? tmpdir(), "interop-client-cert-"));
+	const certificate = await selfSigned("client.example", certificateDir).finally(() =>
+		rm(certificateDir, { recursive: true, force: true }),
 	);
 	const thumbprint = Buffer.from(
 		await crypto.subtle.digest("SHA-256", new X509Certificate(certificate.cert).raw),
