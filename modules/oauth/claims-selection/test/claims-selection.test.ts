@@ -354,6 +354,11 @@ it("keeps reading, pinning and holding back what is kept when draining, but keep
 	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow(TypeError);
 });
 
+it("is on in the section a test gives it, unless the test says otherwise", () => {
+	expect(claimsSelectionConfig()).toEqual({ "claims-selection": { mode: "on" } });
+	expect(claimsSelectionConfig({ mode: "off" })).toEqual({ "claims-selection": { mode: "off" } });
+});
+
 it("reads its mode as an operator writes it, on by default, and refuses another value", async () => {
 	const stores = claimsSelectionInMemory();
 	const app = await assemble({

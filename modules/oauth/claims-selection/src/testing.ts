@@ -84,7 +84,7 @@ export function claimsSelectionInMemory() {
 	return { module, records, overwrite, names: () => [...entries.keys()].filter((k) => live(k)) };
 }
 
-/** claims-selection's section, as a configuration gives it. */
+/** claims-selection's section, as a configuration gives it: `on` unless `settings` says otherwise. */
 export function claimsSelectionConfig(settings: Partial<Settings> = {}) {
-	return { "claims-selection": { ...settings } };
+	return { "claims-selection": { mode: "on", ...settings } };
 }
