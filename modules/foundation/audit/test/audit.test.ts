@@ -188,7 +188,7 @@ it("reads the losses as a frozen count per named receiver", async () => {
 	expect((await boot("none")).lost()).toEqual({});
 });
 
-it("writes one log line per event, with the attributes' names and never their values", async () => {
+it("writes one log line per event, with the attributes' names and never their values [guarantee-8-b]", async () => {
 	const a = await boot(["log"]);
 	a.record({ kind: "k", subject: "s", attributes: { method: "secret-ish", result: "x" } });
 	await settled();
