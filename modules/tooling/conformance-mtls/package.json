@@ -15,7 +15,7 @@
 		"@mod/conformance-keys": "workspace:*",
 		"@mod/conformance-legacy": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
-		"asn1js": "3.1.0",
+		"asn1js": "4.0.0",
 		"pkijs": "3.4.1"
 	},
 	"devDependencies": {
