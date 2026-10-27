@@ -2,6 +2,7 @@ import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Redeemed } from "@mod/code-grant";
 import { type BuildContext, type Log, Unavailable } from "@mod/kernel";
+import { type Sessions, sessions } from "@mod/session";
 import { type FamilyRevocation, refreshGrantType } from "../contract.ts";
 import { allowanceMs, fromStoredRedemption, toStoredRedemption } from "../record.ts";
 import type { Settings } from "../section.ts";
@@ -15,6 +16,7 @@ export function starting(
 	lifetimeMs: number,
 	log: Log,
 	selections: Pick<ClaimsSelections, "follow">,
+	entered: Pick<Sessions, "entryOf">,
 ) {
 	return async (redeemed: Redeemed) => {
 		if (!clientAllowance.allowsGrant(redeemed.client, refreshGrantType)) return undefined;
@@ -38,6 +40,11 @@ export function starting(
 		if (pushedOut.length > 0) {
 			log.error("refresh.session_list_pushed_out", { count: pushedOut.length });
 			for (const dropped of pushedOut) await revoker.revokeFamily(dropped);
+			throw new Unavailable("refresh");
+		}
+		// A close that came before the list held it found nothing to revoke: the family ends here instead.
+		if ((await entered.entryOf(redeemed.session)).kind !== "entered") {
+			await revoker.revokeFamily(id);
 			throw new Unavailable("refresh");
 		}
 		return found.found(
@@ -95,7 +102,15 @@ export async function additionOver(c: BuildContext<Settings>) {
 	return {
 		field: "refresh_token",
 		revoke: takingBack(stores, revoker, lifetimeMs),
-		issue: starting(stores, revoker, found, lifetimeMs, c.log, await c.get(claimsSelections)),
+		issue: starting(
+			stores,
+			revoker,
+			found,
+			lifetimeMs,
+			c.log,
+			await c.get(claimsSelections),
+			await c.get(sessions),
+		),
 	};
 }
 

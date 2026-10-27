@@ -309,8 +309,8 @@ function selectionStores() {
 		failTokens: false,
 		/** Runs before each read, with the name read. */
 		beforeRead: undefined as ((name: string) => void) | undefined,
-		/** Runs after each save, with the name saved. */
-		afterSave: undefined as ((name: string) => void) | undefined,
+		/** Runs after each save, with the name saved; the save answers once it has. */
+		afterSave: undefined as ((name: string) => void | Promise<void>) | undefined,
 	};
 	const { module } = claimsSelectionInMemory({
 		around: (records) => ({
@@ -322,7 +322,7 @@ function selectionStores() {
 				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
 				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
 				const saved = await records.save(name, value, ms);
-				state.afterSave?.(name);
+				await state.afterSave?.(name);
 				return saved;
 			},
 		}),
@@ -430,6 +430,19 @@ describe("a code's selection through its family", () => {
 		expect(family).toEqual(expect.any(String));
 		expect(liveFamily(await s.stores.kept.records.read(family ?? ""))).toBeUndefined();
 		expect(await answer.again()).toMatchObject({ error: "invalid_grant" });
+	});
+
+	it("ends a family whose session closes while its selection is kept, before its session lists it, giving no refresh token", async () => {
+		const s = await serve();
+		s.selections.state.afterSave = async (name) => {
+			if (name.startsWith("f.")) await s.app.get(sessions).close(s.session.id);
+		};
+		const answer = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.afterSave = undefined;
+		expect(answer.refresh_token).toBeUndefined();
+		const family = (await familyOf(s, answer.redemption)) ?? "";
+		expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
+		expect(await s.active(answer.access_token)).toBe(false);
 	});
 
 	it("lists no family under its session whose selection cannot be kept", async () => {
@@ -1480,13 +1493,15 @@ describe("a family's revocation, asked by another module", () => {
 
 	it("refuses an id refresh never names a family by, writing nothing", async () => {
 		const s = await serve();
+		// 16 bytes in base64url end in A, Q, g or w: any other last letter is no name refresh makes.
 		for (const id of [
 			"",
 			"x",
+			"a".repeat(22),
 			"a".repeat(23),
 			"a".repeat(21),
 			`${"a".repeat(21)}=`,
-			`${"a".repeat(21)}/`,
+			`${"a".repeat(20)}/A`,
 		]) {
 			await expect(s.app.get(familyRevocation).revoke(id), id).rejects.toThrow(TypeError);
 			expect(await s.stores.kept.records.read(id)).toBeUndefined();
