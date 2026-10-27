@@ -91,11 +91,10 @@ export function flowWith(parts: FlowParts): Flow {
 		const oidc = allowed.scope.includes("openid");
 		const naming = oidc && selections.mode === "on";
 		const claimsText = one("claims");
-		const read =
+		const claims =
 			claimsText === undefined
 				? noClaims
-				: claimsAsked(claimsText, naming ? selections.scopeOf : undefined);
-		const claims = read === "malformed" || oidc ? read : { ...read, subs: [] };
+				: claimsAsked(claimsText, naming ? selections.scopeOf : undefined, oidc);
 		if (claims === "malformed") return refusal("invalid_request", "claims is malformed");
 		const asked = stepUp.asked(one, params, claims);
 		// A sub asked is checked first, once the session is known: an acr refusal waits for it.
