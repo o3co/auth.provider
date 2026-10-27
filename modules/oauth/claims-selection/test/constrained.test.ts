@@ -266,6 +266,22 @@ describe("the families whose selection holds constraints", () => {
 		expect(p.listed().sort()).toEqual(["fam-late", "fam-new"]);
 	});
 
+	it("hands on a listed family whose selection is kept as any value, null among them, never taking one for a failed read", async () => {
+		const p = parts();
+		await p.memory.records.create("f.fam-null", null as unknown as StoredSelection, day);
+		await p.memory.deferred.add("fam-null");
+		await p.sweep();
+		expect(p.listed()).toEqual(["fam-null"]);
+		const handed: string[] = [];
+		expect(
+			await p.selections.constrainedFamilies(async (id) => {
+				handed.push(id);
+			}),
+		).toEqual({ handled: 1, expired: 0, failed: { shards: 0, reads: 0, handles: 0, removals: 0 } });
+		expect(handed).toEqual(["fam-null"]);
+		expect(p.listed()).toEqual([]);
+	});
+
 	it("lists, hands and sweeps nothing when off, touching no store", async () => {
 		const p = parts("off");
 		Object.assign(p.faults, { save: failing, read: failing, add: failing, done: failing });

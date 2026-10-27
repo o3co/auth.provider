@@ -22,11 +22,14 @@ export function constrainedOver(parts: {
 		const run = { handled: 0, expired: 0, failed };
 		if (off) return run;
 		const each = await list.each(async (familyId) => {
-			const kept = await readFamily(familyId).catch(() => {
+			// A read that fails is told apart from what it read: any record but none is handed on.
+			let kept: StoredSelection | undefined;
+			try {
+				kept = await readFamily(familyId);
+			} catch {
 				failed.reads++;
-				return null;
-			});
-			if (kept === null) return;
+				return;
+			}
 			if (kept !== undefined && !(await succeeded(handle(familyId)))) {
 				failed.handles++;
 				return;

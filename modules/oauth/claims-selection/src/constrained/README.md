@@ -14,6 +14,7 @@ Internal module of `claims-selection`: the run over the families whose kept sele
 
 ## Invariants
 - A family is listed only after its selection is written, so a listed family without one has run out: neither the run nor the sweep unlists a family whose selection is still kept.
+- A family whose record reads as anything but none, whatever its value, is handed on; only a read that fails is counted as one.
 - What fails stays listed and is counted by kind: a part of the list that cannot be read (`shards`), a selection that cannot be read (`reads`), a handling (`handles`), an unlisting (`removals`); a later run finishes it.
 - The sweep never revokes, and warns `claims-selection.sweep_failed` with the count alone where it could not read; it bounds nothing, so a full list is refused at `follow`.
 - Off, neither touches a store.
