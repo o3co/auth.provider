@@ -371,7 +371,9 @@ it("refuses to start without a mode, naming the key and the choice to make, and 
 	expect(BootRefused.is(refused) && refused.refusals).toEqual([
 		{
 			where: "claims-selection.mode",
-			reason: expect.stringContaining("`off` while any host runs a release before 0.19"),
+			reason: expect.stringMatching(
+				/`off` while any host runs a release before 0\.19.*`draining` once every host runs 0\.19, then `on` once every host is draining/,
+			),
 		},
 	]);
 	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
