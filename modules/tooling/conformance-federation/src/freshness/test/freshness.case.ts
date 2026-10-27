@@ -126,11 +126,20 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
 
-		it("meets prompt=login in one trip through an upstream whose clock is a little behind, within its allowance [guarantee-2-c]", async () => {
+		it("meets prompt=login in one trip through an upstream whose clock is a little behind, within its allowance, and never with a login past it [guarantee-2-c]", async () => {
 			const b = browser();
 			expect((await federated(b, { subject: "u-alice", authTime: seconds() - 3600 })).status).toBe(
 				302,
 			);
+			// A minute before the demand is past the allowance, the IdP's clock-skew of 30 seconds by default.
+			const past = (await authorize(b, { prompt: "login" })).location;
+			const behind = sentToLogIn(past);
+			await federated(b, { subject: "u-alice", authTime: seconds() - 60 }, behind, handedOn(past));
+			const refused = new URL((await b.get(behind.slice(origin.length))).location);
+			expect([refused.searchParams.get("error"), refused.searchParams.has("code")]).toEqual([
+				"login_required",
+				false,
+			]);
 			const sent = (await authorize(b, { prompt: "login" })).location;
 			const back = sentToLogIn(sent);
 			// The login page hands on what it was told; the upstream's clock says ten seconds before our start.
