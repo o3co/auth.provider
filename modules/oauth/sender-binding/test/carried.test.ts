@@ -3,7 +3,7 @@ import { carried } from "../src/contract.ts";
 
 const bound = (member: string, confirmation: string) => ({ member, confirmation, tokenType: "T" });
 
-it("refuses a held binding the request does not prove, so it cannot be washed off", () => {
+it("refuses a held binding the request does not prove, so it cannot be washed off [guarantee-6-b]", () => {
 	expect(carried([bound("jkt", "k1")], undefined)).toEqual({ kind: "refused" });
 	expect(carried([bound("jkt", "k1")], bound("jkt", "k2"))).toEqual({ kind: "refused" });
 	expect(carried([bound("jkt", "k1")], bound("x5t#S256", "k1"))).toEqual({ kind: "refused" });
@@ -18,7 +18,7 @@ it("refuses two different held bindings, whichever one the request proves", () =
 	expect(carried([subject, actor], actor)).toEqual({ kind: "refused" });
 });
 
-it("carries the binding the request proves to the new token", () => {
+it("carries the binding the request proves to the new token [guarantee-6-b]", () => {
 	expect(carried([bound("jkt", "k1"), bound("jkt", "k1")], bound("jkt", "k1"))).toEqual({
 		kind: "carry",
 		binding: bound("jkt", "k1"),
