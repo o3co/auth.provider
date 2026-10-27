@@ -119,6 +119,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `flow` (`src/flow`): the steps a request goes through once its redirect URI is trusted, up to its code.
   - `route` (`src/route`): the endpoint's requests and answers.
   - `step-up` (`src/step-up`): the acr a request asks for, and raising a session's authentication to meet it.
+- `@mod/claims-revocation` (feature, `modules/oauth/claims-revocation`): Revokes, before a deployment goes back to a release before 0.19, every refresh family whose kept selection holds constraints, which such a release would refresh without them. Bridges `claims-selection` (the families listed) and `refresh` (their revocation).
 - `@mod/claims-selection` (feature, `modules/oauth/claims-selection`): Decides which claim names a `claims` request parameter may release (OpenID Connect Core §5.5), by the client's allowance and the subject's consent, and keeps that selection and its value constraints for the code, the refresh family and each access token they give.
   - `constrained` (`src/constrained`): the run over the families whose kept selection holds constraints, and the sweep of their list.
 - `@mod/client-allowance` (feature, `modules/oauth/client-allowance`): Decides what a client may be issued and may see: its grants, scopes and audiences.

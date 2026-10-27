@@ -1,0 +1,44 @@
+{
+	"name": "@mod/claims-revocation",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"joins": [
+		"@mod/claims-selection",
+		"@mod/refresh"
+	],
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/claims-selection": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/refresh": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/client-allowance": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/code-grant": "workspace:*",
+		"@mod/code-grant-store": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/refresh-store": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/session-participants": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
+		"@mod/session-tokens": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/token-control": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"@mod/token-exchange": "workspace:*",
+		"@mod/tokens": "workspace:*",
+		"vitest": "5.0.5"
+	}
+}
