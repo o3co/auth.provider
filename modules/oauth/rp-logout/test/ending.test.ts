@@ -632,7 +632,7 @@ it("leaves out the frame of a client a source names whose front channel is at no
 	]);
 });
 
-it("limits its requests per source, a GET and a POST together, by the section's window", async () => {
+it("limits its requests per source, a GET and a POST together, by the section's window [guarantee-10-a]", async () => {
 	const window = (h: Awaited<ReturnType<typeof serve>>, method: string) =>
 		h.routes.find((r) => r.path === "/oauth/logout" && r.method === method)?.uses;
 	const given = await serve({ settings: { requests: 5, window: "10s" } });
