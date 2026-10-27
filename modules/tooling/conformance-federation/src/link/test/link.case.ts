@@ -94,14 +94,14 @@ describe("federation: linking an upstream identity to the account logged in", ()
 		expect([started.status, started.body?.error]).toEqual([401, "login_required"]);
 	});
 
-	it("refuses a link started from another site, without going upstream", async () => {
+	it("refuses a link started from another site, without going upstream [guarantee-9-a]", async () => {
 		const alice = await loggedIn("alice");
 		const started = await alice.navigate(`${start}?link=1`, { "sec-fetch-site": "cross-site" });
 		expect([started.status, started.body?.error]).toEqual([403, "link_requires_trusted_origin"]);
 	});
 
 	it.skipIf(areaTarget().differs("link-start-origin"))(
-		"refuses a link started where the browser does not say it came from this origin",
+		"refuses a link started where the browser does not say it came from this origin [guarantee-9-a]",
 		async () => {
 			const alice = await loggedIn("alice");
 			for (const headers of [{ "sec-fetch-site": "none" }, { referer: `${origin}/account` }]) {

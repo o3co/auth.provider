@@ -105,7 +105,7 @@ function handedOn(location: string) {
 describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 	"federation logins meeting a client's demand for a fresh login",
 	() => {
-		it("meets prompt=login only with a login the upstream says came after the demand, never one it says is older [oidc-core-3.1.2.3-b] [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m]", async () => {
+		it("meets prompt=login only with a login the upstream says came after the demand, never one it says is older [oidc-core-3.1.2.3-b] [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m] [guarantee-2-c]", async () => {
 			const b = browser();
 			const hourAgo = { subject: "u-alice", authTime: seconds() - 3600 };
 			expect((await federated(b, hourAgo)).status).toBe(302);
@@ -126,7 +126,7 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
 
-		it("meets prompt=login in one trip through an upstream whose clock is a little behind, within its allowance", async () => {
+		it("meets prompt=login in one trip through an upstream whose clock is a little behind, within its allowance [guarantee-2-c]", async () => {
 			const b = browser();
 			expect((await federated(b, { subject: "u-alice", authTime: seconds() - 3600 })).status).toBe(
 				302,
@@ -162,7 +162,7 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
 
-		it("meets a max age only with a login the upstream says when it made [oidc-core-3.1.3.7-n]", async () => {
+		it("meets a max age only with a login the upstream says when it made [oidc-core-3.1.3.7-n] [guarantee-2-b] [guarantee-2-c]", async () => {
 			const b = browser();
 			const back = sentToLogIn((await authorize(b, { max_age: "600" })).location);
 			const silent = await federated(b, { subject: "u-alice" }, back);
