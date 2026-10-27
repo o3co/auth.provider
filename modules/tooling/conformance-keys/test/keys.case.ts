@@ -106,7 +106,7 @@ describe("O. refusals about keys", () => {
 		await refusal({ keys: {} });
 	});
 
-	it("refuses a short shared secret without printing it", async () => {
+	it("refuses a short shared secret without printing it [guarantee-8-a]", async () => {
 		const secretHex = `5ec7e7${randomBytes(28).toString("hex")}`;
 		const output = await refusal({ keys: { signing: { kid: "h", alg: "HS256", secretHex } } });
 		expect(output).not.toContain(secretHex);
@@ -127,7 +127,7 @@ describe("O. refusals about keys", () => {
 		await refusal({ keys: { signing: eddsa("k"), unknownSetting: true } });
 	});
 
-	it("never prints private key material when refusing", async () => {
+	it("never prints private key material when refusing [guarantee-8-a]", async () => {
 		const signing = eddsa("dup");
 		const output = await refusal({
 			keys: { signing, previous: [previous("dup", "2099-01-01T00:00:00Z")] },
