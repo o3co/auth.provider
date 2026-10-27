@@ -1,11 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
-import {
-	claimsSelections,
-	type Selection,
-	selectionConsents,
-	selectionRecords,
-} from "@mod/claims-selection";
+import { claimsSelections, type Selection, selectionConsents } from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
 import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
@@ -309,7 +304,6 @@ const judging = defineModule({ name: "judging", takes: [] }, (m) => [
 ]);
 /** claims-selection's store in memory; a family's record fails to be written while `failFamilies`. */
 function selectionStores() {
-	const stand = claimsSelectionInMemory();
 	const state = {
 		failFamilies: false,
 		failTokens: false,
@@ -318,24 +312,21 @@ function selectionStores() {
 		/** Runs after each save, with the name saved. */
 		afterSave: undefined as ((name: string) => void) | undefined,
 	};
-	const module = defineModule({ name: "selection-stores", takes: [] }, (m) => [
-		m.provide(selectionRecords).by((c) => {
-			stand.module.provides?.[0]?.create(c as never);
-			return {
-				read: async (name: string) => {
-					state.beforeRead?.(name);
-					return stand.records.read(name);
-				},
-				save: async (name: string, value: Parameters<typeof stand.records.save>[1], ms: number) => {
-					if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
-					if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
-					const saved = await stand.records.save(name, value, ms);
-					state.afterSave?.(name);
-					return saved;
-				},
-			};
+	const { module } = claimsSelectionInMemory({
+		around: (records) => ({
+			read: async (name) => {
+				state.beforeRead?.(name);
+				return records.read(name);
+			},
+			save: async (name, value, ms) => {
+				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
+				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
+				const saved = await records.save(name, value, ms);
+				state.afterSave?.(name);
+				return saved;
+			},
 		}),
-	]);
+	});
 	return { module, state };
 }
 /** The access tokens issued, in order, as tokens issued them. */
