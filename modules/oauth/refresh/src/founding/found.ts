@@ -6,6 +6,8 @@ import type { Revoker, Stores } from "../settle/settle.ts";
 
 export type Random = (n: number) => Uint8Array;
 export const text = (random: Random, n: number) => Buffer.from(random(n)).toString("base64url");
+/** A family's name, as `name` makes it: 16 bytes in base64url. */
+export const isFamilyName = (id: string) => /^[A-Za-z0-9_-]{22}$/.test(id);
 
 /** What a new family holds besides its secret and its end. */
 export type Founded = Omit<Family, "format" | "current" | "expiresAt">;

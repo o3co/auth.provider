@@ -9,11 +9,12 @@ Internal module of `refresh`: how a family begins, from a code's redemption or a
 - Rotating a family's token (`grant`). The stores and revocation (`settle`). What `lineage` answers.
 
 ## Offers
-- `additionOver` (the build context) → `code-grant`'s addition; `foundingIn` (the build context) → the founding of families, for the addition and `lineage`'s `start`; `founding`, `text` and `Random`, the family's names and secrets.
+- `additionOver` (the build context) → `code-grant`'s addition; `foundingIn` (the build context) → the founding of families, for the addition and `lineage`'s `start`; `founding`, `text`, `isFamilyName` and `Random`, the family's names and secrets; `revocationOver` (the build context) → `familyRevocation`, refusing an id of another form.
 
 ## Invariants
 - A family starts only for a client allowed the refresh grant; a binding is attached to a public client's family, and to a confidential one's where set, only when it starts.
 - A redemption is written before its family's record, under the redemption's name: a code that comes again finds its family and revokes it, or has already marked that none may start.
+- From a redemption, the family's selection is kept (`follow`) before its session lists it: a selection that cannot be kept fails the start with nothing listed, never pushing another family out.
 - A family dropped from its session's list ends at once, and its start fails as unavailable.
 
 ## Depends on
