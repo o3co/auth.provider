@@ -145,6 +145,75 @@ describe("revocation", () => {
 	});
 });
 
+describe("introspection, revocation and the token endpoint: secrets kept out of refusals", () => {
+	/** An answer whole, its status, headers and body, as text a secret could be found in. */
+	async function answered(path: string, form: Record<string, string>) {
+		const res = await fetch(`${base}${path}`, {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams(form),
+		});
+		const headers = [...res.headers].map(([name, value]) => `${name}: ${value}`).join("\n");
+		return { status: res.status, text: `${headers}\n${await res.text()}` };
+	}
+
+	it("answers no client's secret, no other client's token and no part of the signing key in a refusal [guarantee-8-d]", async () => {
+		const others = await issue("other");
+		const key = pair.privateKey.export({ format: "jwk" });
+		const secrets: Record<string, string> = {
+			...Object.fromEntries(
+				["app", "other", "resource", "stranger"].map((id) => [`${id}'s secret`, secretOf(id)]),
+			),
+			"other's token": others,
+			"the signing key": String(key.d),
+			"the signing key's PEM": pair.privateKey
+				.export({ format: "pem", type: "pkcs8" })
+				.toString()
+				.split("\n")[1] as string,
+		};
+		const wrong = { client_id: "app", client_secret: secretOf("other") };
+		const refusals: Record<string, [string, Record<string, string>]> = {
+			"a wrong secret at the token endpoint": [
+				"/oauth/token",
+				{ grant_type: "client_credentials", ...wrong },
+			],
+			"an unknown client at the token endpoint": [
+				"/oauth/token",
+				{ grant_type: "client_credentials", client_id: "nobody", client_secret: secretOf("app") },
+			],
+			"a token sent as a code": [
+				"/oauth/token",
+				{ grant_type: "authorization_code", code: others, ...as("app") },
+			],
+			"a scope the client is not allowed": [
+				"/oauth/token",
+				{ grant_type: "client_credentials", scope: "admin", ...as("app") },
+			],
+			"a grant the client is not allowed": [
+				"/oauth/token",
+				{ grant_type: "client_credentials", ...as("resource") },
+			],
+			"introspection with a wrong secret": ["/oauth/introspect", { token: others, ...wrong }],
+			"introspection by a public client": ["/oauth/introspect", { token: others, ...as("pub") }],
+			"revocation with a wrong secret": ["/oauth/revoke", { token: others, ...wrong }],
+			"revocation without a token": ["/oauth/revoke", as("app")],
+		};
+		// The legacy build does not refuse an introspection without a token.
+		if (!areaTarget().differs("introspection-without-token")) {
+			refusals["introspection without a token"] = ["/oauth/introspect", as("resource")];
+		}
+		for (const [name, [path, form]] of Object.entries(refusals)) {
+			const { status, text } = await answered(path, form);
+			expect(status, name).toBeGreaterThanOrEqual(400);
+			const shown = Object.entries(secrets).filter(([, value]) => text.includes(value));
+			expect(
+				shown.map(([what]) => what),
+				name,
+			).toEqual([]);
+		}
+	});
+});
+
 describe.runIf(areaTarget().can(auditEvents.need))("revocation: audit events", () => {
 	it("records a revocation by the issuing client, and nothing for another client's attempt", async () => {
 		const token = await issue();
