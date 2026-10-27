@@ -1544,14 +1544,16 @@ describe("authorize: the claims a request names beyond its scope", () => {
 		expect(plain.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode, before an acr it cannot know [oidc-core-5.5.1-b]", async () => {
+	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode, before an acr it cannot know, and reads no sub without openid [oidc-core-5.5.1-b]", async () => {
 		type Served = Awaited<ReturnType<typeof serve>>;
 		const error = async (s: Served, claims: Record<string, unknown>, cookie: string) =>
 			(await s.authorize(asking(claimsOf(claims)), cookie)).at?.searchParams.get("error");
 		const unknown = { essential: true, value: "urn:test:unknown" };
-		for (const mode of ["on", "off"] as const) {
+		for (const mode of ["on", "off", "draining"] as const) {
 			const s = await serve({ claims: mode });
 			const cookie = await s.login();
+			const oauth = { scope: "read", claims: claimsOf({ id_token: { sub: { value: "bob" } } }) };
+			expect((await s.authorize(request(oauth), cookie)).at?.searchParams.has("code")).toBe(true);
 			for (const at of ["id_token", "userinfo"]) {
 				expect(await error(s, { [at]: { sub: { value: "bob" } } }, cookie)).toBe("login_required");
 				expect(await error(s, { [at]: { sub: { values: ["bob", "alice"] } } }, cookie)).toBeNull();

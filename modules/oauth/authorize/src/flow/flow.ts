@@ -86,13 +86,16 @@ export function flowWith(parts: FlowParts): Flow {
 		const { challenge, nonce, prompt } = checked;
 		const allowed = checkScope(client, one("scope"), issuer, openidRequired);
 		if (allowed.kind !== "allowed") return allowed;
-		// The names a claims request asks are read only for OpenID Connect, while selections are taken.
-		const naming = selections.mode === "on" && allowed.scope.includes("openid");
+		// The names and the sub a claims request asks are OpenID Connect's alone, the names read only while
+		// selections are taken and the sub whatever the mode; an acr or auth_time asked holds for any request.
+		const oidc = allowed.scope.includes("openid");
+		const naming = oidc && selections.mode === "on";
 		const claimsText = one("claims");
-		const claims =
+		const read =
 			claimsText === undefined
 				? noClaims
 				: claimsAsked(claimsText, naming ? selections.scopeOf : undefined);
+		const claims = read === "malformed" || oidc ? read : { ...read, subs: [] };
 		if (claims === "malformed") return refusal("invalid_request", "claims is malformed");
 		const asked = stepUp.asked(one, params, claims);
 		// A sub asked is checked first, once the session is known: an acr refusal waits for it.

@@ -40,7 +40,7 @@
 - A request carrying a re-authentication record that is not its own (spent, unknown, or made for other parameters, a demand taken out of it included) is refused with `login_required`.
 - The login page is told the `prompt=login` and `max_age` a request asked, beside `redirect_to`, to hand to a login it starts elsewhere (an upstream's), so that login is new too.
 
-- A `claims` `sub` value other than the session's subject is `login_required`. While `claims-selection` is `on`, names asked beyond an OpenID Connect scope are kept for the code before it goes out, else `temporarily_unavailable`.
+- OpenID Connect's alone: a `claims` `sub` not the session's subject is `login_required`, in any mode; while `claims-selection` is `on`, names asked beyond the scope are kept for the code first, else `temporarily_unavailable`.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `url-setting`, `clients`, `client-documents`, `redirect-uris`, `reauth`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `claims-selection`, `rate-limit`, `audit`
