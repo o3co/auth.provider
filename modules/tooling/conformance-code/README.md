@@ -8,6 +8,7 @@
 - Owns the scenes of the audit events of consent and code redemption.
 - Owns the scenes of a password login meeting a client's demand for a fresh login (internal module `fresh-login`).
 - Owns the scenes of what a subject's revocation by the ledger ends.
+- Owns the scenes of the code flow's answers, its refusals, discovery and userinfo's among them, carrying no client's secret, no user's password or token, and no part of the signing key.
 - Sets up the code flow area's parts (consent step, refresh, acr table, session grant, metadata document clients, logout with the back-channel origins allowed, beside the documents' hosts where both are on) on each of the legacy and new targets.
 - A code flow part can leave out the consent step.
 - If a second-factor part is present, the code flow set-up also includes the acr bridge.
