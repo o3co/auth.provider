@@ -1,0 +1,36 @@
+{{subjects}}
+const revocation = app.get({{contract}});
+// Run only once every instance is draining and the authorizations, codes and exchanges begun before
+// have run out: then every refresh family whose selection holds constraints is listed, and each is
+// revoked. A family's id is never written out; what fails stays listed, so a run again takes it.
+let run: { kind?: unknown; revoked?: unknown; expired?: unknown; failed?: Record<string, unknown> };
+try {
+	run = await revocation.run();
+} catch (error) {
+	await app.stop().catch(() => undefined);
+	end(
+		isUnavailable(error)
+			? "failed: unavailable: run revoke-constrained-families again"
+			: "failed: the run stopped on an unexpected error",
+		1,
+	);
+}
+// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+await app.stop().catch(() => undefined);
+if (run.kind === "not-draining")
+	end("not draining: set claims-selection.mode = draining on every instance first", 2);
+const counted = (n: unknown) => (Number.isSafeInteger(n) && (n as number) >= 0 ? (n as number) : undefined);
+const failed = ["shards", "reads", "revocations", "removals"].map((kind) => [kind, counted(run.failed?.[kind])] as const);
+const revoked = counted(run.revoked);
+const expired = counted(run.expired);
+if (run.kind !== "run" || revoked === undefined || expired === undefined || failed.some(([, n]) => n === undefined))
+	end("failed: an answer this script does not know", 1);
+tell(1, `revoked ${revoked} expired ${expired} failed ${failed.map(([kind, n]) => `${kind} ${n}`).join(" ")}\n`);
+// 0 means only that every family listed was revoked: going back still waits for the access tokens.
+const none = failed.every(([, n]) => n === 0);
+end(
+	none
+		? "wait the longest access token lifetime and two minutes more before going back"
+		: "run revoke-constrained-families again",
+	none ? 0 : 1,
+);
