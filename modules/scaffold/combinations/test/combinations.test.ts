@@ -86,20 +86,27 @@ it("has every bridge and wiring name only modules the workspace has", () => {
 });
 
 // How full is derived is tried on a fixture; here, that the workspace's own declarations make it.
-it("composes the workspace's full template: each axis's default, no owner it replaces, and no feature that opts in", () => {
+it("composes the workspace's full template: each axis's default, no owner it replaces, and no feature that opts in but a bridge joining what it composes", () => {
 	const composed = full();
 	expect(composed).toEqual(
 		expect.arrayContaining(["@mod/redis", "@mod/audit-http", "@mod/log-stdout"]),
 	);
 	expect(composed).not.toContain("@mod/store");
 	expect(optIns()).toEqual(expect.arrayContaining(["@mod/dpop", "@mod/mtls", "@mod/device-grant"]));
-	// A feature that opts in comes only where a composed module needs it to run.
+	// A feature that opts in comes only where a composed module needs it to run, or, a bridge, where
+	// all it joins is composed.
 	const needed = (name: string) =>
 		composed.some((other) => {
 			const manifest = manifests.find((m) => m.name === other);
 			return Object.keys(manifest?.dependencies ?? {}).includes(name);
 		});
-	expect(composed.filter((name) => optIns().includes(name) && !needed(name))).toEqual([]);
+	const joined = (name: string) => {
+		const joins: string[] = manifests.find((m) => m.name === name)?.joins ?? [];
+		return joins.length > 0 && joins.every((other) => composed.includes(other));
+	};
+	expect(
+		composed.filter((name) => optIns().includes(name) && !needed(name) && !joined(name)),
+	).toEqual([]);
 	expect(full(["@mod/dpop"])).toContain("@mod/dpop");
 	// A bridge that opts in comes with what it joins: the witness's keeper with the witness.
 	expect(full(["@mod/mfa-witness-http"])).toContain("@mod/mfa-witnessing");
