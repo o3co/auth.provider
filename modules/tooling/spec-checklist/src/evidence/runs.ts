@@ -342,16 +342,21 @@ export function itemStatuses(
 					(ref.suite ? names.length > ref.path.length : names.length === ref.path.length) &&
 					ref.path.every((s, k) => s === null || titleMatches(s, names[k] ?? ""));
 				return entriesOfFile(ref.pkg, ref.file, expected)
-					.filter((e) => present.has(e))
+					.filter((e) => expected.entries.includes(e))
 					.flatMap((e) => {
-						const results = reports
-							.filter((r) => r.identity.entry === e)
-							.flatMap((r) => r.tests.filter((t) => t.file === path && meets(t.names)))
-							.map((t) => t.state);
+						const holding = reports.filter(
+							(r) => r.identity.entry === e && r.tests.some((t) => t.file === path),
+						);
+						const shorts = holding.flatMap((r) => {
+							const results = r.tests.filter((t) => t.file === path && meets(t.names));
+							return results.length === 0 ? ["no result"] : results.map((t) => t.state);
+						});
 						const short =
-							results.length === 0
+							holding.length === 0
 								? "no result"
-								: (["failed", "skipped", "pending"] as const).find((st) => results.includes(st));
+								: (["failed", "skipped", "pending", "no result"] as const).find((st) =>
+										shorts.includes(st),
+									);
 						return short ? [`${e}: ${ref.file} > ${ref.title}: ${short}`] : [];
 					});
 			});
