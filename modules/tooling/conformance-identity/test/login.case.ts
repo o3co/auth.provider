@@ -120,7 +120,7 @@ describe("password login", () => {
 		expect(sessionCookie(wrong.cookies)).toBeUndefined();
 	});
 
-	it("refuses a login without same-origin evidence or token, and from a foreign origin", async () => {
+	it("refuses a login without same-origin evidence or token, and from a foreign origin [guarantee-9-a]", async () => {
 		const from = nextSender();
 		expect((await login(right, from, { origin: "" })).status).toBe(403);
 		expect((await login(right, from, { origin: "https://evil.example" })).status).toBe(403);
@@ -144,7 +144,7 @@ describe("password login", () => {
 		);
 	});
 
-	it("limits attempts per sender, counting successes too [rfc6749-10.10-d]", async () => {
+	it("limits attempts per sender, counting successes too [rfc6749-10.10-d] [guarantee-10-a]", async () => {
 		const from = nextSender();
 		for (let i = 0; i < 3; i++) await login(right, from);
 		expect((await login(right, from)).status).toBe(429);
@@ -186,7 +186,7 @@ describe("password login", () => {
 		}
 	});
 
-	it("takes the double-submit token from a JSON body", async () => {
+	it("takes the double-submit token from a JSON body [guarantee-9-a]", async () => {
 		const from = nextSender();
 		const https = { "x-forwarded-proto": "https", "x-forwarded-host": new URL(issuer).host };
 		const issued = await fetch(`${base}/session/csrf`, { headers: https });
@@ -341,7 +341,7 @@ describe.runIf(areaTarget().can(auditEvents.need))("password login: audit events
 });
 
 describe("logout", () => {
-	it("needs CSRF evidence, then ends the session", async () => {
+	it("needs CSRF evidence, then ends the session [guarantee-9-a]", async () => {
 		const from = nextSender();
 		const cookie = sessionCookie((await login(right, from)).cookies) ?? "";
 		expect((await post("/session/logout", {}, from, { cookie, origin: "" })).status).toBe(403);
