@@ -308,6 +308,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `ask` (`src/ask`): Redis at hand, for the topology and the scenes that check a node themselves.
   - `audit` (`src/audit`): the events a running target sends, for the scenes that read them.
   - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
+  - `deployment` (`src/deployment`): a fault scene's app as a deployment runs it, on a Redis topology.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
   - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
   - `patterns` (`src/patterns`): running every pattern's areas on its app.
