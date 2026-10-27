@@ -3,22 +3,26 @@ import { type Redeemed, type RedemptionHook, redemptionHooks } from "@mod/code-g
 import { type TokenTie, tokenTies } from "@mod/grants";
 import {
 	assemble,
+	BootRefused,
 	contract,
 	defineModule,
 	isUnavailable,
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { afterEach, expect, it } from "vitest";
 import {
+	claimScopes,
 	claimsSelections,
+	constrainedFamilyList,
 	type Selection,
 	type SelectionConsent,
 	selectionConsents,
 	selectionLimits,
 	selectionRecords,
 	type Target,
+	withinLimits,
 } from "../src/contract.ts";
 import claimsSelectionModule from "../src/module.ts";
 import { claimsSelectionConfig, claimsSelectionInMemory } from "../src/testing.ts";
@@ -309,15 +313,12 @@ it("fails a read of a record it cannot read as unavailable, never taking it for 
 });
 
 /** A store that fails every call, to show a mode that never touches it. */
+const touched = async (): Promise<never> => {
+	throw new Error("touched");
+};
 const untouchable = defineModule({ name: "untouchable-stores", takes: [] }, (m) => [
-	m.provide(selectionRecords).by(() => ({
-		save: async () => {
-			throw new Error("touched");
-		},
-		read: async () => {
-			throw new Error("touched");
-		},
-	})),
+	m.provide(selectionRecords).by(() => ({ save: touched, read: touched })),
+	m.provide(constrainedFamilyList).by(() => ({ add: touched, done: touched, each: touched })),
 ]);
 
 it("touches no store when off: nothing pinned, kept or read, and refuses to keep a code's selection", async () => {
@@ -352,22 +353,80 @@ it("keeps reading, pinning and holding back what is kept when draining, but keep
 	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow(TypeError);
 });
 
-it("reads its mode as an operator writes it, off by default, and refuses another value", async () => {
+it("is on in the section a test gives it, unless the test says otherwise", () => {
+	expect(claimsSelectionConfig()).toEqual({ "claims-selection": { mode: "on" } });
+	expect(claimsSelectionConfig({ mode: "off" })).toEqual({ "claims-selection": { mode: "off" } });
+});
+
+it("refuses to start without a mode, naming the key and the choice to make, and refuses another value", async () => {
 	const stores = claimsSelectionInMemory();
-	const app = await assemble({
+	const unset = assemble({
 		modules: [claimsSelectionModule, stores.module],
 		config: kernelConfig(),
 		runtime,
 	});
-	expect(app.get(claimsSelections).mode).toBe("off");
+	const refused = await unset.catch((error: unknown) => error);
+	expect(BootRefused.is(refused) && refused.refusals).toEqual([
+		{
+			where: "claims-selection.mode",
+			reason: expect.stringMatching(
+				/`off` while any host runs a release before 0\.19.*`draining` once every host runs 0\.19, then `on` once every host is draining/,
+			),
+		},
+	]);
 	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
+});
+
+it("warns at start while it takes no claims requests, naming the mode", async () => {
+	for (const mode of ["off", "draining", "on"] as const) {
+		const logged = recordingLog();
+		await assemble({
+			modules: [claimsSelectionModule, claimsSelectionInMemory().module],
+			config: { ...kernelConfig(), ...claimsSelectionConfig({ mode }) },
+			runtime: quietRuntime({ log: logged.log }),
+		});
+		const warned = logged.lines().filter((line) => line.event === "claims-selection.not_taking");
+		expect(warned, mode).toEqual(
+			mode === "on" ? [] : [expect.objectContaining({ level: "warn", fields: { mode } })],
+		);
+	}
+});
+
+/** A table of claim scopes, as the module releasing claims contributes it. */
+const scoping = (table: Record<string, string>, name = "scoping") =>
+	defineModule({ name, takes: [] }, (m) => [
+		m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => table[claim] })),
+	]);
+
+it("names a claim's scope as the contributed table does, none without one, and refuses to start with two", async () => {
+	const s = await serve([scoping({ name: "profile" })]);
+	expect(s.selections.scopeOf("name")).toBe("profile");
+	expect(s.selections.scopeOf("email")).toBeUndefined();
+	await stop();
+	expect((await serve([])).selections.scopeOf("name")).toBeUndefined();
+	await stop();
+	const twice = serve([scoping({}), scoping({}, "second-scoping")]);
+	await expect(twice).rejects.toMatchObject({
+		refusals: [expect.objectContaining({ reason: "more than one table of claim scopes" })],
+	});
+});
+
+it("offers the bounds check a selection is held to", () => {
+	const fits: Selection = {
+		idToken: none,
+		userinfo: { names: [name], constraints: [{ name: "name", value: "A" }] },
+	};
+	expect(withinLimits(fits)).toBe(true);
+	expect(
+		withinLimits({ ...fits, userinfo: { names: [], constraints: [{ name: "name", values: [] }] } }),
+	).toBe(false);
 });
 
 it("takes all its module names", async () => {
 	const stores = claimsSelectionInMemory();
 	const input = {
 		modules: [claimsSelectionModule, stores.module, judging(new Set())],
-		config: kernelConfig(),
+		config: { ...kernelConfig(), ...claimsSelectionConfig() },
 		runtime,
 	};
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.

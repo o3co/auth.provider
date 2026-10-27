@@ -58,19 +58,5 @@
 		"class": "optional",
 		"spec": "oidc-core",
 		"section": "5.4"
-	},
-	{
-		"test-name": "oidcc-claims-essential",
-		"variant": {
-			"client_auth_type": "client_secret_basic",
-			"response_type": "code",
-			"response_mode": "default"
-		},
-		"configuration-filename": "op.json",
-		"current-block": "",
-		"condition": "EnsureUserInfoContainsName",
-		"expected-result": "warning",
-		"class": "deviates",
-		"item": "oidc-core-5.5-a"
 	}
 ]

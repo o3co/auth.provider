@@ -28,14 +28,24 @@ export interface Selection {
 	readonly userinfo: Target;
 }
 
-/** The bounds a selection keeps within: longer strings, more values or a larger whole are refused. */
-export const selectionLimits = { valueLength: 256, values: 16, bytes: 4096 } as const;
-
 /** An access token as a selection is kept for it. */
 export interface Issued {
 	readonly id: string;
 	/** Epoch ms. */
 	readonly expiresAt: number;
+}
+
+/** What a run over the constrained families did: those handed and unlisted, those whose selection ran out, and what failed. */
+export interface ConstrainedRun {
+	readonly handled: number;
+	readonly expired: number;
+	readonly failed: {
+		/** Parts of the list that could not be read. */
+		readonly shards: number;
+		readonly reads: number;
+		readonly handles: number;
+		readonly removals: number;
+	};
 }
 
 /**
@@ -46,6 +56,8 @@ export type SelectionMode = "off" | "draining" | "on";
 
 export interface ClaimsSelections {
 	readonly mode: SelectionMode;
+	/** The scope a claim belongs to, as the module releasing claims tells it; none where none does. */
+	scopeOf(claim: string): string | undefined;
 	/** The names the client is allowed and the subject agreed to, by their scopes; the constraints as they are. */
 	select(client: Client, subject: string, asked: Selection): Promise<Selection>;
 	/** Keeps a code's selection by its redemption's name, for the code's lifetime and a minute more; only while `on`. */
@@ -58,6 +70,11 @@ export interface ClaimsSelections {
 	follow(redemption: string, familyId: string, lifetimeMs: number): Promise<void>;
 	/** Keeps for a refreshed token its family's target, the names cut to what is allowed and agreed to now. */
 	forRefreshed(familyId: string, client: Client, subject: string, access: Issued): Promise<void>;
+	/**
+	 * Hands each family whose kept selection holds constraints to `handle`, unlisting it once handled,
+	 * and unlists without it one whose selection ran out; what fails stays listed, to run again.
+	 */
+	constrainedFamilies(handle: (familyId: string) => Promise<void>): Promise<ConstrainedRun>;
 }
 
 export const claimsSelections = contract<ClaimsSelections>("claims-selection");
@@ -71,4 +88,15 @@ export const selectionConsents = extensionPoint<SelectionConsent>("claims-select
 	multiplicity: "many",
 });
 
+/** Which scope each claim belongs to, from the module that releases claims. */
+export interface ClaimScopes {
+	scopeOf(claim: string): string | undefined;
+}
+
+export const claimScopes = extensionPoint<ClaimScopes>("claims-selection.claim-scopes", {
+	multiplicity: "many",
+});
+
+export { selectionLimits } from "./limits.ts";
 export * from "./store.ts";
+export { withinLimits } from "./stored.ts";

@@ -1,4 +1,4 @@
-import type { Target } from "@mod/claims-selection";
+import { claimsSelections, type Target } from "@mod/claims-selection";
 import { defineModule, isUnavailable, type Module } from "@mod/kernel";
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { type AuthContext, type Sessions, sessions } from "@mod/session";
@@ -213,8 +213,8 @@ describe("claims asked by name, and their constraints", () => {
 	const of = async (scope: readonly string[], asked: Target) =>
 		(await boot(full)).get(releasedClaims).of("s-alice", scope, undefined, asked);
 
-	it("names each table claim's scope, and none for a claim outside the table", async () => {
-		const claims = (await boot(full)).get(releasedClaims);
+	it("tells claims-selection each table claim's scope, and none for a claim outside the table", async () => {
+		const claims = (await boot(full)).get(claimsSelections);
 		expect(["name", "picture", "email", "email_verified", "groups"].map(claims.scopeOf)).toEqual([
 			"profile",
 			"profile",

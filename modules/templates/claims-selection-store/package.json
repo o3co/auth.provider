@@ -12,6 +12,7 @@
 		"@mod/claims-selection": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/records": "workspace:*",
-		"@mod/store": "workspace:*"
+		"@mod/store": "workspace:*",
+		"zod": "4.6.7"
 	}
 }

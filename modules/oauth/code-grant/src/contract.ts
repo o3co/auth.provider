@@ -25,6 +25,8 @@ export interface Codes {
 	issue(facts: CodeFacts): Promise<string>;
 	/** The name a code's redemption goes by, made from the code alone; never the code itself. */
 	redemptionOf(code: string): string;
+	/** How long a code lives once issued, as `code-lifetime` says. */
+	lifetimeMs(): number;
 	idTokenScope(): string | undefined;
 }
 
@@ -48,8 +50,8 @@ export interface IdTokenRequest {
 	readonly scope: readonly string[];
 	/** The session's handle, which never lets anyone into it. */
 	readonly session: string;
-	/** The redemption's name, as `redemptionOf` gives it; a redemption always tells it. */
-	readonly redemption?: string;
+	/** The redemption's name, as `redemptionOf` gives it. */
+	readonly redemption: string;
 }
 
 export interface IdTokenMaker {

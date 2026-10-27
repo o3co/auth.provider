@@ -76,6 +76,7 @@ export default defineModule({ name: "code-grant", section, takes }, (m) => [
 				return code;
 			},
 			redemptionOf: (code) => store.nameOf(code),
+			lifetimeMs: () => c.section["code-lifetime"] * 1000,
 			idTokenScope: () => (makers.length === 1 ? makers[0]?.scope : undefined),
 		};
 	}),

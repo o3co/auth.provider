@@ -1,6 +1,7 @@
 import { Unavailable } from "@mod/kernel";
 import { z } from "zod";
-import { type Selection, selectionLimits, type Target } from "./contract.ts";
+import type { Selection, Target } from "./contract.ts";
+import { selectionLimits } from "./limits.ts";
 import type { StoredSelection } from "./store.ts";
 
 const scalar = z.union([
