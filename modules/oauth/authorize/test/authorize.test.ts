@@ -15,7 +15,6 @@ import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-sele
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
-import { clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import { codes, type IdTokenRequest, idTokens } from "@mod/code-grant";
