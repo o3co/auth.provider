@@ -101,7 +101,7 @@ describe("assemble", () => {
 		]);
 	});
 
-	it("reports every section issue by path, never the value: a needed key not set as required, any other in the schema's words", async () => {
+	it("reports every section issue by path, never the value: a needed key not set as required, any other in the schema's words [guarantee-8-a]", async () => {
 		const m = defineModule({
 			name: "m",
 			section: z.strictObject({ secret: z.string().min(32), n: z.number(), e: z.enum(["a"]) }),
@@ -140,7 +140,7 @@ describe("assemble", () => {
 		}
 	});
 
-	it("refuses a value configuration cannot hold by its key path, inside lists too", async () => {
+	it("refuses a value configuration cannot hold by its key path, inside lists too [guarantee-8-a]", async () => {
 		const m = defineModule({ name: "m", section: z.strictObject({ a: z.unknown() }), takes: [] });
 		const deep = { a: { list: [1, { at: new Date(0) }], n: Number.POSITIVE_INFINITY } };
 		const refusals = await refusalsOf(assemble({ modules: [m], config: { ...single, m: deep } }));

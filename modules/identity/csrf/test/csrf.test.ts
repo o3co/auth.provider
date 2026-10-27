@@ -45,7 +45,7 @@ const checkOf = (app: Assembly) => {
 const token = "t".repeat(43);
 
 describe("the check", () => {
-	it("passes on same-origin evidence or a matching token, and refuses any foreign evidence", async () => {
+	it("passes on same-origin evidence or a matching token, and refuses any foreign evidence [guarantee-9-a]", async () => {
 		const app = await boot();
 		const check = checkOf(app);
 		const named = (value: string) => cookieOf(app.get(cookies), value);
@@ -104,7 +104,7 @@ describe("the check", () => {
 		expect(at([{ origin: "https://as.example" }], "http"), "plain http").toBe("refused");
 	});
 
-	it("reads the field token from a JSON body only as a string", async () => {
+	it("reads the field token from a JSON body only as a string [guarantee-9-a]", async () => {
 		const app = await boot();
 		const check = checkOf(app);
 		const cookie = cookieOf(app.get(cookies), token);
@@ -195,7 +195,7 @@ describe("without a public origin", () => {
 		).rejects.toMatchObject({ name: "BootRefused", refusals: [{ where: "csrf" }] });
 	});
 
-	it("starts the stand-in, which then refuses every unsafe request", async () => {
+	it("starts the stand-in, which then refuses every unsafe request [guarantee-9-a]", async () => {
 		const app = await boot("", [csrfStandIn, guarded]);
 		await app.start();
 		try {
@@ -224,7 +224,7 @@ describe.each([
 	["the module", csrfModule],
 	["the stand-in", csrfStandIn],
 ])("the contract, as %s keeps it", (_, module) => {
-	it("offers the policy to routes: a GET passes, any other method only on evidence or the token", async () => {
+	it("offers the policy to routes: a GET passes, any other method only on evidence or the token [guarantee-9-a]", async () => {
 		const app = await boot("https://as.example", [module, guarded]);
 		await app.start();
 		try {

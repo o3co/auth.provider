@@ -390,7 +390,7 @@ describe("a route's unavailable answer", () => {
 		]);
 	});
 
-	it("still answers what the route declares when noting throws, logging the failure by kind only", async () => {
+	it("still answers what the route declares when noting throws, logging the failure by kind only [guarantee-8-b]", async () => {
 		const { base, lines } = await serveDown(() => {
 			throw new TypeError("secret=xyz");
 		});
@@ -618,7 +618,7 @@ it("listens only on the address it is given", async () => {
 	expect(reached).toBe("refused");
 });
 
-it("logs a failure by its kind only, never its message", async () => {
+it("logs a failure by its kind only, never its message [guarantee-8-b]", async () => {
 	const recorded = recordingLog();
 	const runtime = quietRuntime({ ...quiet, log: recorded.log });
 	const boom = () => {

@@ -1,7 +1,7 @@
 # conformance-keys
 
 ## Responsibilities
-- Owns the conformance scenes of the keys area: publishing the public key set, and boot refusals for key configuration.
+- Owns the conformance scenes of the keys area: publishing the public key set, with no private part of a key and no shared secret in its answers, and boot refusals for key configuration.
 - Sets up the keys area's parts (signing key, previous key) on each of the legacy and new targets.
 
 ## Not here

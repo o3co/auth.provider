@@ -154,7 +154,7 @@ describe.runIf(areaTarget().can("device-grant"))("the device authorization grant
 		expect((await poll(code)).body.error).toBe("access_denied");
 	});
 
-	it("asks the verification interface for a session and same-origin evidence", async () => {
+	it("asks the verification interface for a session and same-origin evidence [guarantee-9-a]", async () => {
 		const { user_code: user = "" } = (await authorize()).body;
 		const none = await verify("", { action: "lookup", user_code: user });
 		expect([none.status, none.body.error]).toEqual([401, "login_required"]);

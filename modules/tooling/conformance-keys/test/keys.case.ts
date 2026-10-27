@@ -99,6 +99,52 @@ describe("A. key set", () => {
 		expect(res.status).toBe(404);
 		expect(res.headers.get("cache-control")).toBe("no-store");
 	});
+
+	/** The key set's answers to GET and HEAD whole, headers and bodies, from a deployment signing with `signing`. */
+	const answers = async (signing: SigningScene) => {
+		if (running?.kind === "running") await running.stop();
+		const base = await serve({ keys: { signing } });
+		const texts = await Promise.all(
+			["GET", "HEAD"].map(async (method) => {
+				const res = await fetch(`${base}${jwksPath}`, { method });
+				return `${[...res.headers].join("\n")}\n${await res.text()}`;
+			}),
+		);
+		return texts.join("\n");
+	};
+
+	it("answers no private part of an RSA, EC or Ed25519 key at the key set [guarantee-8-d]", async () => {
+		const pairs = [
+			["RS256", generateKeyPairSync("rsa", { modulusLength: 2048 })],
+			["ES256", generateKeyPairSync("ec", { namedCurve: "P-256" })],
+			["EdDSA", generateKeyPairSync("ed25519")],
+		] as const;
+		for (const [alg, pair] of pairs) {
+			const privatePem = pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+			const publicPem = pair.publicKey.export({ format: "pem", type: "spki" }).toString();
+			const text = await answers({ kid: alg, alg, privatePem, publicPem });
+			const jwk = { ...pair.privateKey.export({ format: "jwk" }) } as Record<string, unknown>;
+			const parts = privateMembers.flatMap((m): [string, string][] => {
+				const value = jwk[m];
+				return typeof value === "string" ? [[m, value]] : [];
+			});
+			const lines = privatePem.split("\n").filter((line) => line && !line.startsWith("-----"));
+			const pem = lines.map((line, i): [string, string] => [`PEM line ${i + 1}`, line]);
+			const shown = [...parts, ...pem].filter(([, value]) => text.includes(value));
+			expect(parts.length, alg).toBeGreaterThan(0);
+			expect(
+				shown.map(([what]) => what),
+				alg,
+			).toEqual([]);
+		}
+	});
+
+	it("answers no shared secret at the key set when signing with one [guarantee-8-d]", async () => {
+		const secretHex = randomBytes(32).toString("hex");
+		const text = await answers({ kid: "h", alg: "HS256", secretHex });
+		const forms = [secretHex, Buffer.from(secretHex, "hex").toString("base64url")];
+		expect(forms.filter((form) => text.includes(form))).toEqual([]);
+	});
 });
 
 describe("O. refusals about keys", () => {
@@ -106,7 +152,7 @@ describe("O. refusals about keys", () => {
 		await refusal({ keys: {} });
 	});
 
-	it("refuses a short shared secret without printing it", async () => {
+	it("refuses a short shared secret without printing it [guarantee-8-a]", async () => {
 		const secretHex = `5ec7e7${randomBytes(28).toString("hex")}`;
 		const output = await refusal({ keys: { signing: { kid: "h", alg: "HS256", secretHex } } });
 		expect(output).not.toContain(secretHex);
@@ -127,7 +173,7 @@ describe("O. refusals about keys", () => {
 		await refusal({ keys: { signing: eddsa("k"), unknownSetting: true } });
 	});
 
-	it("never prints private key material when refusing", async () => {
+	it("never prints private key material when refusing [guarantee-8-a]", async () => {
 		const signing = eddsa("dup");
 		const output = await refusal({
 			keys: { signing, previous: [previous("dup", "2099-01-01T00:00:00Z")] },

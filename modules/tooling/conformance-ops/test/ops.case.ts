@@ -260,7 +260,7 @@ describe("Q. metrics", () => {
 		for (const s of series) expect([...methods, "other"]).toContain(s.labels.method);
 	});
 
-	it("puts no secret and no user's value sent in a request into the scrape", async () => {
+	it("puts no secret and no user's value sent in a request into the scrape [guarantee-8-d]", async () => {
 		const secret = `s${randomBytes(12).toString("hex")}`;
 		const user = `u${randomBytes(6).toString("hex")}@example.com`;
 		await fetch(
@@ -283,7 +283,7 @@ describe.runIf(driver.can(scrapePathSetting))("O. refusals about the operations 
 		started = undefined;
 	});
 
-	it("refuses a scrape path that does not start with /, without printing it", async () => {
+	it("refuses a scrape path that does not start with /, without printing it [guarantee-8-a]", async () => {
 		started = await driver.start(
 			sceneOf(keysArea.part({ signing: signing() }), opsArea.part({ scrapePath: "zq9-scrape" })),
 		);
@@ -334,7 +334,7 @@ describe("Q. the operations routes and request counting", () => {
 		parts: { ...limited.parts, ...sceneOf(opsArea.part({})).parts },
 	});
 
-	it("answers without credentials, and leaves the token endpoint's limit as it was [rfc6749-2.3.1-c]", async () => {
+	it("answers without credentials, and leaves the token endpoint's limit as it was [rfc6749-2.3.1-c] [guarantee-10-a]", async () => {
 		// token-endpoint's default: 60 requests per source in a 60 s window, counted in fixed windows,
 		// so a window turning over inside this scene could fail it or let it pass wrongly.
 		const tokenLimit = 60;

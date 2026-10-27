@@ -357,7 +357,7 @@ describe("device authorization", () => {
 		);
 	});
 
-	it("limits device authorization requests per source", async () => {
+	it("limits device authorization requests per source [guarantee-10-a]", async () => {
 		const s = await serve({ requests: 2 });
 		expect([(await s.authorize()).status, (await s.authorize()).status]).toEqual([200, 200]);
 		const limited = await s.authorize();

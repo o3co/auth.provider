@@ -79,7 +79,7 @@ const logInAgain = async () => {
 };
 
 describe("password logins meeting a client's demand for a fresh login", () => {
-	it("meets prompt=login only with a login after the demand, refusing a return without one [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m] [oidc-core-3.1.2.3-a] [oidc-core-3.1.2.3-b]", async () => {
+	it("meets prompt=login only with a login after the demand, refusing a return without one [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m] [oidc-core-3.1.2.3-a] [oidc-core-3.1.2.3-b] [guarantee-2-a]", async () => {
 		await browser.login();
 		const stale = await sentToLogIn({ prompt: "login" });
 		expect(await errorOf(stale)).toBe("login_required");
@@ -90,7 +90,7 @@ describe("password logins meeting a client's demand for a fresh login", () => {
 
 	// The legacy build counts a login in the same second as within max_age=0, and asks no new one.
 	it.skipIf(areaTarget().differs("max-age-zero-asks-a-new-login"))(
-		"meets max_age=0 only with a login after the demand, refusing a return without one [oidc-core-3.1.2.1-r] [oidc-core-15.1-f]",
+		"meets max_age=0 only with a login after the demand, refusing a return without one [oidc-core-3.1.2.1-r] [oidc-core-15.1-f] [guarantee-2-b]",
 		async () => {
 			await browser.login();
 			const stale = await sentToLogIn({ max_age: "0" });
@@ -103,7 +103,7 @@ describe("password logins meeting a client's demand for a fresh login", () => {
 
 	// The legacy build keeps no record of the demand, so a return without it is a request like any other.
 	it.skipIf(areaTarget().differs("return-keeps-its-demand"))(
-		"refuses a return whose demand was taken out of it, its re-authentication kept",
+		"refuses a return whose demand was taken out of it, its re-authentication kept [guarantee-2-a]",
 		async () => {
 			await browser.login();
 			const back = await sentToLogIn({ prompt: "login" });

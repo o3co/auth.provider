@@ -15,7 +15,7 @@ const said = (p: Pkg) =>
 const declaring = (p: Pkg, card: string) => ({ ...p, card: `# ${p.name}\n\n${card}\n` });
 
 describe("G26 the network is reached through outbound, or as a package declares", () => {
-	it("refuses shipped code that connects, serves or fetches without a declaration", () => {
+	it("refuses shipped code that connects, serves or fetches without a declaration [guarantee-7-a]", () => {
 		const p = pkg("@t/reach", {
 			"src/a.ts": 'import { request } from "node:https";\nexport const a = request;\n',
 			"src/b.ts": 'import * as net from "node:net";\nexport const b = net;\n',
@@ -30,7 +30,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
-	it("reads a class's extends and an instantiation as values, and type arguments and implements not", () => {
+	it("reads a class's extends and an instantiation as values, and type arguments and implements not [guarantee-7-a]", () => {
 		const p = pkg("@t/heritage", {
 			"src/a.ts": "export const Socket = class extends WebSocket {};\n",
 			"src/b.ts": "export const List = class extends Array<WebSocket> {};\n",
@@ -50,7 +50,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		expect(said(p)).toEqual([]);
 	});
 
-	it("reads a module's default taken by name as the module whole, as a default is, and one taken as a type as nothing", () => {
+	it("reads a module's default taken by name as the module whole, as a default is, and one taken as a type as nothing [guarantee-7-a]", () => {
 		const p = pkg("@t/named-default", {
 			"src/a.ts": 'import { default as fetch } from "node-fetch";\nexport const a = fetch;\n',
 			"src/b.ts": 'import { default as cp } from "node:child_process";\nexport const b = cp;\n',
@@ -66,7 +66,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
-	it("reads a global named by a shorthand property, and a require in parentheses, as any other read", () => {
+	it("reads a global named by a shorthand property, and a require in parentheses, as any other read [guarantee-7-a]", () => {
 		const p = pkg("@t/forms", {
 			"src/a.ts": "export const a = { fetch };\n",
 			"src/b.ts": 'export const b = (require)("node:https");\n',
@@ -74,7 +74,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		expect(said(p)).toEqual(["src/a.ts fetch", "src/b.ts node:https"]);
 	});
 
-	it("refuses the network reached by a dynamic import, a global's property, a resolver or a process", () => {
+	it("refuses the network reached by a dynamic import, a global's property, a resolver or a process [guarantee-7-a]", () => {
 		const p = pkg("@t/around", {
 			"src/a.ts": 'export const a = async () => (await import("node:https")).request;\n',
 			"src/b.ts": "export const b = (name: string) => import(name);\n",
@@ -119,7 +119,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		expect(said(tool)).toEqual([]);
 	});
 
-	it("takes what a declared word covers, stated on the card, and nothing past it", () => {
+	it("takes what a declared word covers, stated on the card, and nothing past it [guarantee-7-a]", () => {
 		const files = {
 			"src/a.ts": 'import { connect } from "node:tls";\nexport const a = connect;\n',
 		};
@@ -139,7 +139,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
-	it("refuses a module imported whole past what its words name, as the whole reaches each of its names", () => {
+	it("refuses a module imported whole past what its words name, as the whole reaches each of its names [guarantee-7-a]", () => {
 		const files = {
 			"src/a.ts":
 				'import * as http from "node:http";\nexport const a = (url: string) => http.request(url);\n',
@@ -153,7 +153,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		).toEqual(["src/a.ts node:http", "src/b.ts node:http", "src/c.ts node:http"]);
 	});
 
-	it("refuses a word it does not know, and takes several words in a list", () => {
+	it("refuses a word it does not know, and takes several words in a list [guarantee-7-a]", () => {
 		const files = {
 			"src/a.ts":
 				'import { connect } from "node:net";\nimport Mail from "nodemailer/lib/smtp-connection";\nexport const a = [connect, Mail];\n',
@@ -199,7 +199,7 @@ describe("G27 a package that talks to a server the deployment provides states th
 });
 
 describe("a re-export", () => {
-	it("reaches what it re-exports, named or whole", () => {
+	it("reaches what it re-exports, named or whole [guarantee-7-a]", () => {
 		const p = pkg("@t/re-export", {
 			"src/a.ts": 'export { request } from "node:https";\n',
 			"src/b.ts": 'export * from "node:net";\n',

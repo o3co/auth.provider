@@ -107,7 +107,7 @@ describe("federation grants: refusals", () => {
 		expect((await t.grantCall(id, "token")).status).toBe(200);
 	});
 
-	it("refuses the answer to the question without evidence of the provider's origin", async () => {
+	it("refuses the answer to the question without evidence of the provider's origin [guarantee-9-a]", async () => {
 		const lodged = await t.lodge();
 		const b = await t.loggedIn();
 		const { challenge } = await t.open(b, lodged.body.connect_uri);

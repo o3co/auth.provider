@@ -2,6 +2,7 @@
 
 ## Responsibilities
 - Owns the conformance scenes of the OAuth endpoints area: client credentials, introspection and revocation, jwt-bearer (in the internal module `jwt-bearer`), DPoP, the metadata document, tokens refused to users whose email is not verified, the audit events of issuing and revoking tokens.
+- Owns the scenes of the token, introspection and revocation endpoints' refusals carrying no client's secret, no other client's token and no part of the signing key.
 - Owns the scenes of cross-origin requests to the token and revocation endpoints, the metadata documents and the key set (the key set's here, as the keys area cannot compose identity's origins without a cycle).
 - Sets up the OAuth area's parts (issuer, clients, a client's binding requirement, introspection, revocation, trusted issuers and their profile, DPoP, the metadata document, requiring a verified email) on each of the legacy and new targets.
 - The set-up of clients that receive the code flow (clients with a redirect URI) also lives here.

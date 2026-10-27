@@ -104,7 +104,7 @@ describe("introspection", () => {
 });
 
 describe("rate limit", () => {
-	it("limits requests per source on each route apart, before any client is authenticated [rfc7009-5-a] [rfc6749-2.3.1-c]", async () => {
+	it("limits requests per source on each route apart, before any client is authenticated [rfc7009-5-a] [rfc6749-2.3.1-c] [guarantee-10-a]", async () => {
 		const s = await serve({ limit: { requests: 2, window: "1m" } });
 		const wrong = { token: await s.issue(), client_id: "api", client_secret: "wrong" };
 		for (let i = 0; i < 2; i++) {

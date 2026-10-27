@@ -281,7 +281,7 @@ describe("token exchange of tokens no session holds", () => {
 		});
 	});
 
-	describe("token exchange: a binding washed off", () => {
+	describe("token exchange: a binding washed off [guarantee-6-b]", () => {
 		it("refuses a DPoP-bound subject token without a proof, or with another key's [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const bound = await own("gateway", {}, holder);
 			expect(bound.token_type).toBe("DPoP");

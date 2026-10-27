@@ -372,7 +372,7 @@ describe("token endpoint", () => {
 		).toEqual(expect.arrayContaining(["dpop-nonce", "www-authenticate", "retry-after"]));
 	});
 
-	it("limits requests per source before any client is authenticated [rfc6749-2.3.1-c]", async () => {
+	it("limits requests per source before any client is authenticated [rfc6749-2.3.1-c] [guarantee-10-a]", async () => {
 		const post = await serve([], { settings: { requests: 2, window: "2m" } });
 		const wrong = () => post({ grant_type: "client_credentials" }, "basic", { secret: "wrong" });
 		expect([(await wrong()).status, (await wrong()).status]).toEqual([401, 401]);
@@ -657,7 +657,7 @@ describe("token endpoint", () => {
 		expect(JSON.stringify(events)).not.toMatch(/secret|nope|foo/);
 	});
 
-	it("never records a proxy's address as the source: the limit answers an undetermined sender first", async () => {
+	it("never records a proxy's address as the source: the limit answers an undetermined sender first [guarantee-10-a]", async () => {
 		const post = await serve([], { peer: { "trusted-proxies": ["127.0.0.1"] } });
 		const res = await post({ grant_type: "client_credentials" }, "basic");
 		expect([res.status, events]).toEqual([503, []]);

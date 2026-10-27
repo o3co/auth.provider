@@ -176,7 +176,7 @@ describe.runIf(areaTarget().can(httpLedger))("password login: a user ledger over
 	});
 
 	it.runIf(areaTarget().can(ledgerBesideUsers))(
-		"refuses to start with users in the settings beside the ledger, never showing the credential",
+		"refuses to start with users in the settings beside the ledger, never showing the credential [guarantee-8-a]",
 		async () => {
 			const both = await areaTarget().start(
 				sceneWith({ verifyUrl: `${fake.base}/ledger/authenticate`, credential }, [

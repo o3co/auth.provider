@@ -297,7 +297,7 @@ describe.runIf(areaTarget().can(auditEvents.need))("G. second factor: audit even
 	const subject = expect.stringMatching(/./);
 	const source = "198.51.100.30";
 
-	it("records a binding, a refused and a verified proof, never a code or a secret", async () => {
+	it("records a binding, a refused and a verified proof, never a code or a secret [guarantee-8-c]", async () => {
 		const bound = await during(() => s.enrol("mia"));
 		const { secret, codes, proved } = bound.result;
 		const binding = { kind: "account-email", purpose: "enroll", source };

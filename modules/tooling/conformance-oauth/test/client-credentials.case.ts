@@ -180,7 +180,7 @@ describe("C. client credentials: a secret kept as a bcrypt hash", () => {
 });
 
 describe.runIf(areaTarget().can(auditEvents.need))("C. client credentials: audit events", () => {
-	it("records an issuance and a refused grant with the client and the grant type, and a refused client by its reason alone, never the token or secret", async () => {
+	it("records an issuance and a refused grant with the client and the grant type, and a refused client by its reason alone, never the token or secret [guarantee-8-c]", async () => {
 		const trail = auditEvents.of(running);
 		const issued = await trail.during(() => token(cc, ["basic", secretOf("basic")]));
 		const refused = await trail.during(() => token(cc, ["nogrant", secretOf("nogrant")]));

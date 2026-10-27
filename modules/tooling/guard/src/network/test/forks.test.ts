@@ -79,7 +79,7 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		expect(said(starting({ [starter]: split }, undefined, `@t/split${Math.random()}`))).toEqual([]);
 	});
 
-	it("refuses a process started by a file forks does not name, or in a package not declaring outbound", () => {
+	it("refuses a process started by a file forks does not name, or in a package not declaring outbound [guarantee-7-a]", () => {
 		expect(said(starting({}, { forks: {} }))).toEqual([
 			`${starter} node:child_process (forks does not name it)`,
 		]);
@@ -89,7 +89,7 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		);
 	});
 
-	it("refuses another name or form of node:child_process, and fork used otherwise than in one call", () => {
+	it("refuses another name or form of node:child_process, and fork used otherwise than in one call [guarantee-7-a]", () => {
 		const refused = (change: (t: string) => string) =>
 			said(starting({ [starter]: launch(change) }, undefined, `@t/s${Math.random()}`));
 		const imported = "imports from node:child_process fork by its name alone";
@@ -106,7 +106,7 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		]);
 	});
 
-	it("refuses a helper not named as join(import.meta.dirname, its file), or not a plain file beside the starter", () => {
+	it("refuses a helper not named as join(import.meta.dirname, its file), or not a plain file beside the starter [guarantee-7-a]", () => {
 		const refused = (files: Record<string, string>, manifest?: Record<string, unknown>) =>
 			said(starting(files, manifest, `@t/h${Math.random()}`));
 		const named = 'names the helper as join(import.meta.dirname, "helper.mjs")';
@@ -137,7 +137,7 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		]);
 	});
 
-	it("refuses a symlink for the helper", () => {
+	it("refuses a symlink for the helper [guarantee-7-a]", () => {
 		const p = starting({}, undefined, "@t/linked");
 		const target = join(p.dir, "src/resolver/real.mjs");
 		writeFileSync(target, dnsOnly);
@@ -149,7 +149,7 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		);
 	});
 
-	it("refuses options other than the launch form", () => {
+	it("refuses options other than the launch form [guarantee-7-a]", () => {
 		const refused = (change: (t: string) => string) =>
 			said(starting({ [starter]: launch(change) }, undefined, `@t/o${Math.random()}`));
 		const form = "starts it in the launch form";
@@ -174,7 +174,7 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		}
 	});
 
-	it("refuses a starter loading node:child_process again, or shadowing fork, join or process", () => {
+	it("refuses a starter loading node:child_process again, or shadowing fork, join or process [guarantee-7-a]", () => {
 		const refused = (change: (t: string) => string) =>
 			said(starting({ [starter]: launch(change) }, undefined, `@t/b${Math.random()}`));
 		const again = `${starter} node:child_process (loads node:child_process by the import alone)`;
@@ -221,7 +221,7 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		expect(refused((t) => `${t}export { fork as start };\n`)).toEqual([once]);
 	});
 
-	it("refuses forks naming more than one starter, or a helper that is no .mjs file", () => {
+	it("refuses forks naming more than one starter, or a helper that is no .mjs file [guarantee-7-a]", () => {
 		const two = { forks: { [starter]: helper, "src/resolver/other.ts": "src/resolver/other.mjs" } };
 		expect(
 			said(
@@ -248,7 +248,7 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		);
 	});
 
-	it("refuses a helper importing anything but node:dns/promises' lookup, or reaching the network otherwise", () => {
+	it("refuses a helper importing anything but node:dns/promises' lookup, or reaching the network otherwise [guarantee-7-a]", () => {
 		const refused = (text: string) =>
 			said(starting({ [helper]: text }, undefined, `@t/d${Math.random()}`));
 		const alone = "imports node:dns/promises' lookup alone";
@@ -284,7 +284,7 @@ describe("G26: what else a starter and its helpers may hold", () => {
 	const refused = (change: (t: string) => string) =>
 		said(starting({ [starter]: launch(change) }, undefined, `@t/c${Math.random()}`));
 
-	it("refuses child_process reached another way, by its bare name or a re-export", () => {
+	it("refuses child_process reached another way, by its bare name or a re-export [guarantee-7-a]", () => {
 		const imported = `${starter} node:child_process (imports from node:child_process fork by its name alone)`;
 		expect(
 			refused((t) => `import { spawn } from "child_process";\n${t}export const s = spawn;\n`),
@@ -308,7 +308,7 @@ describe("G26: what else a starter and its helpers may hold", () => {
 		).toEqual([]);
 	});
 
-	it("still refuses a module loaded by a name known at run time alone", () => {
+	it("still refuses a module loaded by a name known at run time alone [guarantee-7-a]", () => {
 		expect(
 			refused((t) => `${t}export const any = (name: string) => import(name);\n`),
 		).toContainEqual(
@@ -316,7 +316,7 @@ describe("G26: what else a starter and its helpers may hold", () => {
 		);
 	});
 
-	it("reports a helper that is no plain .mjs file without reading it, never stopping", () => {
+	it("reports a helper that is no plain .mjs file without reading it, never stopping [guarantee-7-a]", () => {
 		for (const named of ["src/resolver/README.md", "src/resolver", "src/resolver/missing.mjs"]) {
 			const p = starting({}, { forks: { [starter]: named } }, `@t/n${Math.random()}`);
 			let found: string[] = [];
@@ -347,7 +347,7 @@ describe("G26: a starter as it is shipped", () => {
 	const refused = (change: (t: string) => string) =>
 		said(starting({ [starter]: launch(change) }, undefined, `@t/d${Math.random()}`));
 
-	it("refuses require called through parentheses, and counts a read of fork in a class's extends", () => {
+	it("refuses require called through parentheses, and counts a read of fork in a class's extends [guarantee-7-a]", () => {
 		expect(
 			refused(
 				(t) =>
@@ -364,7 +364,7 @@ describe("G26: a starter as it is shipped", () => {
 		).toEqual([`${starter} node:child_process (uses fork in one call alone)`]);
 	});
 
-	it("refuses a starter that is a link, whose helper is the one beside the file it links to", () => {
+	it("refuses a starter that is a link, whose helper is the one beside the file it links to [guarantee-7-a]", () => {
 		const p = starting({}, undefined, "@t/linked-starter");
 		const real = join(p.dir, "src/resolver/real.ts");
 		renameSync(join(p.dir, starter), real);
@@ -372,14 +372,14 @@ describe("G26: a starter as it is shipped", () => {
 		expect(said(p)).toContainEqual(`${starter} node:child_process (is a plain file, never a link)`);
 	});
 
-	it("refuses forks naming a starter that is no shipped source", () => {
+	it("refuses forks naming a starter that is no shipped source [guarantee-7-a]", () => {
 		const p = starting({}, { forks: { "src/missing.ts": helper } }, "@t/no-starter");
 		expect(said(p)).toContainEqual("src/missing.ts (forks names it, but it is no shipped source)");
 	});
 });
 
 describe("G26: a declared starter, checked whatever it reaches", () => {
-	it("refuses a starter that only re-exports fork, or reaches node:child_process not at all", () => {
+	it("refuses a starter that only re-exports fork, or reaches node:child_process not at all [guarantee-7-a]", () => {
 		const imported = `${starter} node:child_process (imports from node:child_process fork by its name alone)`;
 		const reexported = said(
 			starting(

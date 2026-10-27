@@ -27,7 +27,7 @@ const setUp = () => {
 const params = (pairs: Record<string, string>) => new Map(Object.entries(pairs));
 
 describe("re-authentication records", () => {
-	it("names a record by 32 random bytes and takes it once, for the request it was made for", async () => {
+	it("names a record by 32 random bytes and takes it once, for the request it was made for [guarantee-2-a]", async () => {
 		const { reauths } = setUp();
 		const asked = params({ client_id: "app", prompt: "login" });
 		const name = await reauths.remember(asked, 5);
@@ -43,7 +43,7 @@ describe("re-authentication records", () => {
 		expect(await reauths.take(name, same)).toBeDefined();
 	});
 
-	it("takes nothing for another request, and spends the record all the same", async () => {
+	it("takes nothing for another request, and spends the record all the same [guarantee-2-a]", async () => {
 		const { reauths } = setUp();
 		const asked = params({ a: "1" });
 		const name = await reauths.remember(asked, 5);
@@ -79,7 +79,7 @@ describe("re-authentication records", () => {
 		expect(reauths).toBeDefined();
 	});
 
-	it("counts a login fresh at the record's moment or later, and an unknown time never", async () => {
+	it("counts a login fresh at the record's moment or later, and an unknown time never [guarantee-2-a] [guarantee-2-b]", async () => {
 		const { reauths, advance } = setUp();
 		const taken = { format: 1, at: 2_000, request: "r" } as const;
 		const login = { login: true, maxAgeMs: undefined, knownTime: false };
