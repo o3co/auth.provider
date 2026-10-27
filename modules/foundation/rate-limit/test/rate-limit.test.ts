@@ -573,7 +573,7 @@ const limitedAnswer = async (res: Response) => [
 ];
 
 describe("the policies for routes", () => {
-	it("limits attempts per IPv4 address and per IPv6 /64, answering 429 with the wait", async () => {
+	it("limits attempts per IPv4 address and per IPv6 /64, answering 429 with the wait [guarantee-10-a]", async () => {
 		const { from, statuses } = await serving();
 		expect(await statuses("/attempts", "198.51.100.1", 2)).toEqual([204, 204]);
 		expect(await limitedAnswer(await from("/attempts", "198.51.100.1"))).toEqual([
@@ -591,7 +591,7 @@ describe("the policies for routes", () => {
 		expect(await statuses("/attempts", "2001:db8:0:1::1", 1)).toEqual([204]);
 	});
 
-	it("refuses a source it cannot tell with 503, logged as a deployment error", async () => {
+	it("refuses a source it cannot tell with 503, logged as a deployment error [guarantee-10-a]", async () => {
 		const { from, recorded } = await serving();
 		for (const path of ["/attempts", "/requests"]) {
 			const unknown = await from(path);
@@ -617,7 +617,7 @@ describe("the policies for routes", () => {
 		expect(await statuses("/attempts", "198.51.100.4", 2)).toEqual([204, 429]);
 	});
 
-	it("limits requests per source apart from attempts, answering 429 with the wait", async () => {
+	it("limits requests per source apart from attempts, answering 429 with the wait [guarantee-10-a]", async () => {
 		const { from, statuses } = await serving();
 		expect(await statuses("/requests", "198.51.100.1", 2)).toEqual([204, 204]);
 		expect(await limitedAnswer(await from("/requests", "198.51.100.1"))).toEqual([
