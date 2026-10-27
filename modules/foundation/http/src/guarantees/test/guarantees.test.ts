@@ -123,7 +123,7 @@ describe("a route's declared guarantees", () => {
 		]);
 	});
 
-	it("asks a GET to say whether it changes state, and refuses a POST said to change none [guarantee-9-b] [guarantee-10-b]", async () => {
+	it("asks a GET to say whether it changes state, and refuses a POST said to change none", async () => {
 		const booting = serveWith(
 			owner([
 				{ method: "GET", path: "/unsaid", unlimited: "counted by the handler", handle: answered },
