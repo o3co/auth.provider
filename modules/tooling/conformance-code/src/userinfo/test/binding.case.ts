@@ -102,7 +102,7 @@ describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", ()
 		expect([answer.status, Object.keys(answer.body)]).toEqual([200, ["sub"]]);
 	});
 
-	it("refuses the token presented as a Bearer token, challenging for DPoP [rfc9449-7.2-a]", async () => {
+	it("refuses the token presented as a Bearer token, challenging for DPoP [rfc9449-7.2-a] [guarantee-6-a]", async () => {
 		const answer = await userinfo({ authorization: `Bearer ${await boundToken()}` });
 		expect(answer.status).toBe(401);
 		expect(answer.challenge).toMatch(/^DPoP/);

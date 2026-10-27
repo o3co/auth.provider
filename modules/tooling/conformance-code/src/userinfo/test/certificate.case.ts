@@ -95,7 +95,7 @@ describe("OpenID Connect userinfo: a token bound to the client's certificate (mT
 		expect([answer.status, Object.keys(answer.body)]).toEqual([200, ["sub"]]);
 	});
 
-	it("refuses the token with another certificate, or with none [rfc8705-3-b]", async () => {
+	it("refuses the token with another certificate, or with none [rfc8705-3-b] [guarantee-6-a]", async () => {
 		const own = await issue({ cn: "client" });
 		const token = await boundTo(own);
 		for (const [name, certificate] of [

@@ -113,7 +113,7 @@ describe.runIf(areaTarget().can("dpop"))("refresh: binding a public client's fam
 		);
 	});
 
-	it("asks the binding a family started with, after taking a spent token as a reuse [rfc9449-5-c] [rfc9449-5-d] [rfc9700-2.2.2-a]", async () => {
+	it("asks the binding a family started with, after taking a spent token as a reuse [rfc9449-5-c] [rfc9449-5-d] [rfc9700-2.2.2-a] [guarantee-6-b]", async () => {
 		const { refresh_token: first = "" } = await redeem(holder);
 		expect((await refresh(first)).body.error).toBe("invalid_grant");
 		expect((await refresh(first, thief)).body.error).toBe("invalid_grant");

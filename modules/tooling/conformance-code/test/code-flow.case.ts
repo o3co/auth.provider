@@ -266,7 +266,7 @@ describe("OpenID Connect: an ID token with the code", () => {
 	});
 
 	it.runIf(areaTarget().can(auditEvents.need))(
-		"records the exchange of a code, and the refusal of a used one, never the code",
+		"records the exchange of a code, and the refusal of a used one, never the code [guarantee-8-c]",
 		async () => {
 			const res = await browser.authorize(request());
 			const code = res.at?.searchParams.get("code") ?? "";

@@ -184,7 +184,7 @@ describe("session grant: refusals", () => {
 	});
 
 	it.skipIf(areaTarget().differs("session-grant-same-origin-only"))(
-		"refuses a request from another origin as unauthorized",
+		"refuses a request from another origin as unauthorized [guarantee-9-a]",
 		async () => {
 			const res = await sessionGrant({ ...asBff, origin: "https://elsewhere.example" });
 			expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);
@@ -192,7 +192,7 @@ describe("session grant: refusals", () => {
 	);
 
 	it.skipIf(areaTarget().differs("session-grant-needs-origin-evidence"))(
-		"refuses a request without same-origin evidence as unauthorized",
+		"refuses a request without same-origin evidence as unauthorized [guarantee-9-a]",
 		async () => {
 			const res = await sessionGrant({ ...asBff, origin: null });
 			expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);

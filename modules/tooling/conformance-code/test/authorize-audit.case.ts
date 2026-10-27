@@ -70,7 +70,7 @@ const authorizing = (events: readonly SentEvent[]) =>
 	events.filter((event) => event.kind.startsWith("authorize."));
 
 describe.runIf(areaTarget().can(auditEvents.need))("authorization endpoint: audit events", () => {
-	it("records a code given with the subject and the client, never the code", async () => {
+	it("records a code given with the subject and the client, never the code [guarantee-8-c]", async () => {
 		await browser.login();
 		const given = await auditEvents.of(running).during(() => browser.authorize(request()));
 		const code = given.result.at?.searchParams.get("code") ?? "";
