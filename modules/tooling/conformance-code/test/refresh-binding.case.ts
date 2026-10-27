@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, type KeyObject, randomUUID } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
-import { exportJWK, SignJWT } from "jose";
+import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type CodeScene, codeScene } from "../src/main.ts";
 import { backChannel, browserAt } from "../src/testing.ts";
@@ -101,6 +101,11 @@ async function redeem(key?: { publicKey: KeyObject; privateKey: KeyObject }) {
 }
 const refresh = (refreshToken: string, key?: { publicKey: KeyObject; privateKey: KeyObject }) =>
 	token({ grant_type: "refresh_token", refresh_token: refreshToken }, key);
+const claimsOf = (jwt: string | undefined) =>
+	JSON.parse(Buffer.from((jwt ?? "").split(".")[1] ?? "", "base64url").toString()) as Record<
+		string,
+		unknown
+	>;
 
 describe.runIf(areaTarget().can("dpop"))("refresh: binding a public client's family", () => {
 	it("never binds a family after it started, so a stolen token cannot lock its holder out [rfc9700-2.2.2-a]", async () => {
@@ -113,7 +118,7 @@ describe.runIf(areaTarget().can("dpop"))("refresh: binding a public client's fam
 		);
 	});
 
-	it("asks the binding a family started with, after taking a spent token as a reuse [rfc9449-5-c] [rfc9449-5-d] [rfc9700-2.2.2-a] [guarantee-6-b]", async () => {
+	it("asks the binding a family started with, after taking a spent token as a reuse [rfc9449-5-c] [rfc9449-5-d] [rfc9700-2.2.2-a]", async () => {
 		const { refresh_token: first = "" } = await redeem(holder);
 		expect((await refresh(first)).body.error).toBe("invalid_grant");
 		expect((await refresh(first, thief)).body.error).toBe("invalid_grant");
@@ -121,5 +126,19 @@ describe.runIf(areaTarget().can("dpop"))("refresh: binding a public client's fam
 		expect(next.status).toBe(200);
 		expect((await refresh(first, thief)).body.error).toBe("invalid_grant");
 		expect((await refresh(next.body.refresh_token ?? "", holder)).body.error).toBe("invalid_grant");
+	});
+
+	it("binds each refresh's tokens to the key the family started with, refusing the next token without its proof [guarantee-6-b]", async () => {
+		const thumbprint = await calculateJwkThumbprint(await exportJWK(holder.publicKey));
+		let current = (await redeem(holder)).refresh_token ?? "";
+		for (const round of ["first refresh", "second refresh"]) {
+			const next = await refresh(current, holder);
+			expect([next.status, next.body.token_type], round).toEqual([200, "DPoP"]);
+			expect(claimsOf(next.body.access_token).cnf, round).toEqual({ jkt: thumbprint });
+			current = next.body.refresh_token ?? "";
+			// Refused before any reuse: a refusal for the binding spends nothing, so the holder goes on.
+			expect((await refresh(current)).body.error, round).toBe("invalid_grant");
+			expect((await refresh(current, thief)).body.error, round).toBe("invalid_grant");
+		}
 	});
 });

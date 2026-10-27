@@ -23,8 +23,9 @@ const client = (id: string): ClientScene => ({
 });
 const app = client("app");
 const other = client("other");
-const alice = { username: "alice", password: "alice's horse battery staple" };
-const bob = { username: "bob", password: "bob's battery staple horse" };
+// Secrets of letters, digits and dashes alone, which no URL or HTML escaping changes.
+const alice = { username: "alice", password: "alice-horse-battery-staple-4f1c" };
+const bob = { username: "bob", password: "bob-battery-staple-horse-9d2e" };
 
 let running: Started;
 let base = "";
@@ -104,6 +105,11 @@ describe("authorization code: secrets kept out of answers", () => {
 	it("answers no client's secret, no user's password or token, and no part of the signing key at discovery, the key set, authorize's refusals, the token endpoint's and userinfo's [guarantee-8-d]", async () => {
 		const mine = await issued(alice, app);
 		const theirs = await issued(bob, other);
+		// A code still to redeem, which the token endpoint reads past the check for a used one.
+		const waiting =
+			(await browserAt(() => base, issuer, bob).authorize(request(other))).at?.searchParams.get(
+				"code",
+			) ?? "";
 		const key = pair.privateKey.export({ format: "jwk" });
 		const secrets: Record<string, string> = {
 			"app's secret": app.secret ?? "",
@@ -112,6 +118,7 @@ describe("authorization code: secrets kept out of answers", () => {
 			"bob's password": bob.password,
 			"alice's code": mine.code,
 			"bob's code": theirs.code,
+			"bob's code still to redeem": waiting,
 			"the signing key": String(key.d),
 			...Object.fromEntries(
 				privatePem
@@ -138,10 +145,13 @@ describe("authorization code: secrets kept out of answers", () => {
 			password: alice.password,
 			login_hint: theirs.tokens.access_token ?? "",
 		};
-		const authorize = async (params: Record<string, string>) => {
-			const res = await mine.browser.authorize(params);
-			return { status: res.status, text: `${res.at?.href ?? ""}\n${res.text}` };
-		};
+		const authorize = async (params: Record<string, string>) =>
+			whole(
+				await fetch(`${base}/oauth/authorize?${new URLSearchParams(params)}`, {
+					redirect: "manual",
+					headers: mine.browser.headers({ cookie: await mine.browser.login() }),
+				}),
+			);
 		const userinfo = async (bearer?: string) =>
 			whole(
 				await fetch(`${base}/oauth/userinfo`, {
@@ -171,7 +181,7 @@ describe("authorization code: secrets kept out of answers", () => {
 				whole(
 					await token(app, {
 						grant_type: "authorization_code",
-						code: theirs.code,
+						code: waiting,
 						redirect_uri: callback,
 						code_verifier: verifier,
 					}),
