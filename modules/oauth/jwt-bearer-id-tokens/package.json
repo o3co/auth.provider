@@ -40,7 +40,7 @@
 		"@mod/tokens": "workspace:*",
 		"@mod/tokens-store": "workspace:*",
 		"@mod/users": "workspace:*",
-		"jose": "6.2.12",
+		"jose": "6.2.13",
 		"vitest": "5.0.5"
 	}
 }

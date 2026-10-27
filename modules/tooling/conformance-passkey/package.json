@@ -24,6 +24,6 @@
 		"@mod/conformance-second-factor": "workspace:*",
 		"@mod/spec-checklist": "workspace:*",
 		"@mod/webauthn": "workspace:*",
-		"jose": "6.2.12"
+		"jose": "6.2.13"
 	}
 }
