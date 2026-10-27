@@ -22,3 +22,20 @@ export const selectionRecordsNeeds = {
 	survivesCrash: true,
 	survivesFailover: true,
 } as const;
+
+/**
+ * The families whose kept selection holds constraints, listed until done, so that going back to a
+ * release before 0.19 finds every one. Every call throws Unavailable when the place cannot tell.
+ */
+export interface ConstrainedFamilyList {
+	/** Lists a family, once however often; a full place refuses it as unavailable. */
+	add(familyId: string): Promise<void>;
+	done(familyId: string): Promise<void>;
+	/** Hands each listed family to `handle`; a part that cannot be read, or a family whose handling fails, stays and is counted. */
+	each(handle: (familyId: string) => Promise<void>): Promise<{ readonly failed: number }>;
+}
+
+/** Its needs are the records': a family dropped from it would be missed. */
+export const constrainedFamilyList = contract<ConstrainedFamilyList>(
+	"claims-selection.constrained-families",
+);

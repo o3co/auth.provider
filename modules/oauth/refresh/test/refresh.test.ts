@@ -1,11 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
-import {
-	claimsSelections,
-	type Selection,
-	selectionConsents,
-	selectionRecords,
-} from "@mod/claims-selection";
+import { claimsSelections, type Selection, selectionConsents } from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
 import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
@@ -65,7 +60,7 @@ import {
 } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lineage } from "../src/contract.ts";
+import { familyRevocation, lineage } from "../src/contract.ts";
 import refreshModule from "../src/module.ts";
 import { liveFamily, toStored, toStoredRedemption } from "../src/record.ts";
 import { section } from "../src/section.ts";
@@ -309,33 +304,29 @@ const judging = defineModule({ name: "judging", takes: [] }, (m) => [
 ]);
 /** claims-selection's store in memory; a family's record fails to be written while `failFamilies`. */
 function selectionStores() {
-	const stand = claimsSelectionInMemory();
 	const state = {
 		failFamilies: false,
 		failTokens: false,
 		/** Runs before each read, with the name read. */
 		beforeRead: undefined as ((name: string) => void) | undefined,
-		/** Runs after each save, with the name saved. */
-		afterSave: undefined as ((name: string) => void) | undefined,
+		/** Runs after each save, with the name saved; the save answers once it has. */
+		afterSave: undefined as ((name: string) => void | Promise<void>) | undefined,
 	};
-	const module = defineModule({ name: "selection-stores", takes: [] }, (m) => [
-		m.provide(selectionRecords).by((c) => {
-			stand.module.provides?.[0]?.create(c as never);
-			return {
-				read: async (name: string) => {
-					state.beforeRead?.(name);
-					return stand.records.read(name);
-				},
-				save: async (name: string, value: Parameters<typeof stand.records.save>[1], ms: number) => {
-					if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
-					if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
-					const saved = await stand.records.save(name, value, ms);
-					state.afterSave?.(name);
-					return saved;
-				},
-			};
+	const { module } = claimsSelectionInMemory({
+		around: (records) => ({
+			read: async (name) => {
+				state.beforeRead?.(name);
+				return records.read(name);
+			},
+			save: async (name, value, ms) => {
+				if (state.failFamilies && name.startsWith("f.")) throw new Unavailable("selections");
+				if (state.failTokens && name.startsWith("t.")) throw new Unavailable("selections");
+				const saved = await records.save(name, value, ms);
+				await state.afterSave?.(name);
+				return saved;
+			},
 		}),
-	]);
+	});
 	return { module, state };
 }
 /** The access tokens issued, in order, as tokens issued them. */
@@ -439,6 +430,43 @@ describe("a code's selection through its family", () => {
 		expect(family).toEqual(expect.any(String));
 		expect(liveFamily(await s.stores.kept.records.read(family ?? ""))).toBeUndefined();
 		expect(await answer.again()).toMatchObject({ error: "invalid_grant" });
+	});
+
+	it("ends a family whose session closes while its selection is kept, before its session lists it, giving no refresh token", async () => {
+		const s = await serve();
+		s.selections.state.afterSave = async (name) => {
+			if (name.startsWith("f.")) await s.app.get(sessions).close(s.session.id);
+		};
+		const answer = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.afterSave = undefined;
+		expect(answer.refresh_token).toBeUndefined();
+		const family = (await familyOf(s, answer.redemption)) ?? "";
+		expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
+		expect(await s.active(answer.access_token)).toBe(false);
+	});
+
+	it("lists no family under its session whose selection cannot be kept", async () => {
+		const s = await serve();
+		s.selections.state.failFamilies = true;
+		const answer = await s.redeem("app", {}, { selection: selected });
+		s.selections.state.failFamilies = false;
+		expect(answer).toMatchObject({ error: "temporarily_unavailable" });
+		const family = await familyOf(s, answer.redemption);
+		const listed = (await s.stores.bySession.members(s.session.id)).map((m) => m.member);
+		expect(listed).not.toContain(family);
+	});
+
+	it("never pushes a session's families out of its list, however often a new family's selection cannot be kept", async () => {
+		const s = await serve({ caps: { sessionFamilies: 2, issuedAccess: 1000 } });
+		const kept = [await s.redeem(), await s.redeem()];
+		s.selections.state.failFamilies = true;
+		for (let i = 0; i < 3; i++) {
+			expect(await s.redeem("app", {}, { selection: selected })).toMatchObject({
+				error: "temporarily_unavailable",
+			});
+		}
+		s.selections.state.failFamilies = false;
+		for (const family of kept) expect((await s.refresh(family.refresh_token)).status).toBe(200);
 	});
 
 	it("fails the round, revoking the token it issued and leaving the refresh token usable, when a refreshed token's selection cannot be kept", async () => {
@@ -1449,4 +1477,34 @@ it("takes all its module names, its confidential clients' families bound or not"
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 		expect((await takesUnused(input))["refresh"], String(bindConfidential)).toBeUndefined();
 	}
+});
+
+describe("a family's revocation, asked by another module", () => {
+	it("ends the family and the access tokens it issued, and takes the same id again as done", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const family = (await familyOf(s, first.redemption)) ?? "";
+		await s.app.get(familyRevocation).revoke(family);
+		await s.app.get(familyRevocation).revoke(family);
+		expect(await s.refresh(first.refresh_token)).toMatchObject({ status: 400 });
+		expect(await s.active(first.access_token)).toBe(false);
+		expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
+	});
+
+	it("refuses an id refresh never names a family by, writing nothing", async () => {
+		const s = await serve();
+		// 16 bytes in base64url end in A, Q, g or w: any other last letter is no name refresh makes.
+		for (const id of [
+			"",
+			"x",
+			"a".repeat(22),
+			"a".repeat(23),
+			"a".repeat(21),
+			`${"a".repeat(21)}=`,
+			`${"a".repeat(20)}/A`,
+		]) {
+			await expect(s.app.get(familyRevocation).revoke(id), id).rejects.toThrow(TypeError);
+			expect(await s.stores.kept.records.read(id)).toBeUndefined();
+		}
+	});
 });

@@ -2,11 +2,12 @@ import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Redeemed } from "@mod/code-grant";
 import { type BuildContext, type Log, Unavailable } from "@mod/kernel";
-import { refreshGrantType } from "../contract.ts";
+import { type Sessions, sessions } from "@mod/session";
+import { type FamilyRevocation, refreshGrantType } from "../contract.ts";
 import { allowanceMs, fromStoredRedemption, toStoredRedemption } from "../record.ts";
 import type { Settings } from "../section.ts";
 import { type Revoker, type Stores, settlingIn } from "../settle/settle.ts";
-import { founding } from "./found.ts";
+import { founding, isFamilyName } from "./found.ts";
 
 export function starting(
 	stores: Stores,
@@ -15,18 +16,24 @@ export function starting(
 	lifetimeMs: number,
 	log: Log,
 	selections: Pick<ClaimsSelections, "follow">,
+	entered: Pick<Sessions, "entryOf">,
 ) {
 	return async (redeemed: Redeemed) => {
 		if (!clientAllowance.allowsGrant(redeemed.client, refreshGrantType)) return undefined;
 		const id = found.name();
 		const binding = found.bindingFor(redeemed.client, redeemed.binding);
-		// Both writes come before the family's record. Named for its redemption: a code that comes
+		// The writes below come before the family's record. Named for its redemption: a code that comes
 		// again finds it, or has already marked that none may start.
 		const named = toStoredRedemption({ format: 1, family: id });
 		const redemptionMs = lifetimeMs + allowanceMs;
 		if ((await stores.redemptions.save(redeemed.redemption, named, redemptionMs)) !== "created") {
 			throw new Unavailable("refresh");
 		}
+		// One end, read before the selection is kept: kept from then, it outlives the family by the allowance.
+		const expiresAt = found.endsAt();
+		// The family keeps what its code's request asked beyond its scope; failing, the code is voided
+		// before its session lists it, so a failure never pushes another family out of the list.
+		await selections.follow(redeemed.redemption, id, lifetimeMs + allowanceMs);
 		// Listed under its session: a close that comes meanwhile finds and revokes it.
 		const { pushedOut } = await stores.sessionFamilies.add(redeemed.session, id, lifetimeMs);
 		// A family dropped from its session's list would outlive the session: it ends instead.
@@ -35,10 +42,11 @@ export function starting(
 			for (const dropped of pushedOut) await revoker.revokeFamily(dropped);
 			throw new Unavailable("refresh");
 		}
-		// One end, read before the selection is kept: kept from then, it outlives the family by the allowance.
-		const expiresAt = found.endsAt();
-		// The family keeps what its code's request asked beyond its scope; failing, the code is voided.
-		await selections.follow(redeemed.redemption, id, lifetimeMs + allowanceMs);
+		// A close that came before the list held it found nothing to revoke: the family ends here instead.
+		if ((await entered.entryOf(redeemed.session)).kind !== "entered") {
+			await revoker.revokeFamily(id);
+			throw new Unavailable("refresh");
+		}
 		return found.found(
 			id,
 			{
@@ -94,6 +102,25 @@ export async function additionOver(c: BuildContext<Settings>) {
 	return {
 		field: "refresh_token",
 		revoke: takingBack(stores, revoker, lifetimeMs),
-		issue: starting(stores, revoker, found, lifetimeMs, c.log, await c.get(claimsSelections)),
+		issue: starting(
+			stores,
+			revoker,
+			found,
+			lifetimeMs,
+			c.log,
+			await c.get(claimsSelections),
+			await c.get(sessions),
+		),
+	};
+}
+
+/** The revocation another module asks of a family by the id `follow` was given. */
+export async function revocationOver(c: BuildContext<Settings>): Promise<FamilyRevocation> {
+	const { revoker } = await settlingIn(c);
+	return {
+		revoke: async (familyId) => {
+			if (!isFamilyName(familyId)) throw new TypeError("refresh: not a family's id");
+			await revoker.revokeFamily(familyId);
+		},
 	};
 }

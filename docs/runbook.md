@@ -9,6 +9,7 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 - [Rotating the signing key](#rotating-the-signing-key)
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
+- [The claims parameter, through an upgrade and back](#the-claims-parameter-through-an-upgrade-and-back)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
@@ -145,6 +146,29 @@ Only a value a `previous` key sealed is sealed again; one `next` sealed is newer
 - `create-auth-provider` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-auth-provider <target> --add <feature>`) and carry your configuration over.
 - A boot that refuses exits with status 78 and prints each refusal on stderr, by setting path and never by value. Fix every refusal it lists; they are reported together.
 - **From 0.18, upgrade every instance before looking for second factors left without their claim.** A 0.18 instance writes a WebAuthn second factor and its claim apart, so while one runs, or a request it took is still under way, it can leave a factor without its claim. Look once none is left: see [Second factors left without their claim](#second-factors-left-without-their-claim).
+
+## The claims parameter, through an upgrade and back
+
+`claims-selection.mode` has no default: every deployment that composes `code-grant` sets it (U-0.19-59 in the [migration guide](migration.md)).
+
+**Upgrading from 0.18 one instance at a time.** Take each step only once every instance has taken the one before.
+
+1. Upgrade every instance to 0.19 with `claims-selection.mode = off`. A 0.18 instance cannot hold what a request's `value` or `values` hold back.
+2. Set `draining` on every instance. An instance `off` beside one `on` would redeem codes and answer userinfo without the constraints the other kept. While `draining`, the `claims` parameter is not taken, as in 0.18.
+3. Set `on` on every instance.
+
+**Going back to 0.18.** A 0.18 instance would refresh a family without the constraints its selection holds, so those families are revoked first. Take the steps in order, each from the end of the one before.
+
+1. **T0.** Set `draining` on every instance, and see every instance run so. No new selection is kept from here.
+2. **T1.** Let the authorization requests running at T0 end: T0 plus the request deadline your hosts enforce, or, with none, once every instance has been restarted after T0.
+3. **T2.** Wait one code lifetime (`code-grant.code-lifetime`) after T1: no code kept with a selection is redeemed after it.
+4. **T3.** Let the token requests running at T2 end, as at T1. No constrained family starts after it.
+5. **Revoke.** Run `pnpm run revoke-constrained-families` in the app, with its configuration. It builds the app without serving anything, revokes every refresh family whose selection holds constraints, with the access tokens it issued, refreshed or exchanged, and prints only counts. Run it until it exits 0. It exits 1 where something failed (what failed stays listed, so the next run takes it), 2 where the instance is not draining, and 78 on a refused boot.
+6. **T4.** Wait the longest access token lifetime and two minutes more: a constrained access token with no family runs out by itself. Then set `off` on every instance, and go back.
+
+Exit 0 means only that every family listed was revoked once T0 to T3 were taken: it is no leave to go back before T4. ID tokens already given keep what they carry.
+
+**Sizing the list of constrained families** (`claims-selection-store.constrained-shards` and `constrained-per-shard`). It holds about the families with a constrained selection started in one family lifetime: size it at that rate times `refresh.lifetime`, doubled for shards filling unevenly. Past a full shard (`records.full` in the log), a family with a constrained selection does not start and its code is voided; others are unaffected. Raise `constrained-per-shard` to recover. Never change `constrained-shards` while the list holds any: the list would lose what it holds, and a revocation would miss it. An hourly sweep drops families whose selection ran out; `claims-selection.sweep_failed` (warn) says it could not read a part of it.
 
 ## Revoking a user from the ledger
 

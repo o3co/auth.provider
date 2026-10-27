@@ -126,13 +126,15 @@ function targetOf(
 
 /**
  * A claims parameter (OpenID Connect Core §5.5) read once: the acr, an essential auth_time and the
- * `sub` values each member asks, and, given the scope of each claim, the claims named beyond the
- * scope with their constraints. Malformed where it is no JSON object, a member it reads is of no
- * shape §5.5.1 gives, or what it names is past the bounds a selection keeps.
+ * `sub` values each member asks, for OpenID Connect alone (`openid`), and, given the scope of each
+ * claim, the claims named beyond the scope with their constraints. Malformed where it is no JSON
+ * object, a member it reads is of no shape §5.5.1 gives, or what it names is past the bounds a
+ * selection keeps; a member it does not read is never judged.
  */
 export function claimsAsked(
 	text: string,
 	scopeOf?: (claim: string) => string | undefined,
+	openid = true,
 ): ClaimsRequest | typeof malformed {
 	let parsed: unknown;
 	try {
@@ -144,7 +146,7 @@ export function claimsAsked(
 	const parts = [parsed.id_token, parsed.userinfo].map((part) => (isObject(part) ? part : {}));
 	const [idToken = {}, userinfo = {}] = parts;
 	const asked = parts.map(acrOf);
-	const subs = parts.map(subOf);
+	const subs = openid ? parts.map(subOf) : [];
 	if (asked.includes(malformed) || subs.includes(malformed)) return malformed;
 	const targets = scopeOf ? [targetOf(idToken, scopeOf), targetOf(userinfo, scopeOf)] : [];
 	if (targets.includes(malformed)) return malformed;

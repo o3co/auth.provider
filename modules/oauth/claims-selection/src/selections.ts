@@ -2,7 +2,8 @@ import { clientAllowance } from "@mod/client-allowance";
 import type { Client } from "@mod/clients";
 import type { RedemptionHook } from "@mod/code-grant";
 import type { TokenTie } from "@mod/grants";
-import { Unavailable } from "@mod/kernel";
+import { type Log, Unavailable } from "@mod/kernel";
+import { constrainedOver } from "./constrained/constrained.ts";
 import type {
 	ClaimScopes,
 	ClaimsSelections,
@@ -12,7 +13,7 @@ import type {
 	SelectionMode,
 	Target,
 } from "./contract.ts";
-import type { SelectionRecords, StoredSelection } from "./store.ts";
+import type { ConstrainedFamilyList, SelectionRecords, StoredSelection } from "./store.ts";
 import { holds, read, stored, withinLimits } from "./stored.ts";
 
 /** A code's selection outlives the code by this much, so a code still alive finds it. */
@@ -31,6 +32,8 @@ const nameOf = {
 
 export function selectionsWith(parts: {
 	readonly records: SelectionRecords;
+	readonly list: ConstrainedFamilyList;
+	readonly log: Pick<Log, "warn">;
 	/** Whoever judges consent; with none, no name is agreed to. */
 	readonly consent: SelectionConsent | undefined;
 	/** The table of claim scopes; with none, no claim has a scope. */
@@ -38,7 +41,7 @@ export function selectionsWith(parts: {
 	readonly mode: SelectionMode;
 	readonly now: () => number;
 }) {
-	const { records, consent, scopes, mode, now } = parts;
+	const { records, list, log, consent, scopes, mode, now } = parts;
 	/** Off, no store is touched: nothing was kept, so nothing is read, pinned or held back. */
 	const off = mode === "off";
 	/** Keeps a record once; a name already holding one keeps the first. */
@@ -79,6 +82,12 @@ export function selectionsWith(parts: {
 		const kept = await records.read(nameOf.token(tokenId));
 		return kept === undefined ? undefined : read.target(kept);
 	};
+	const { constrainedFamilies, sweep } = constrainedOver({
+		list,
+		log,
+		off,
+		readFamily: (familyId) => records.read(nameOf.family(familyId)),
+	});
 	const selections: ClaimsSelections = {
 		mode,
 		scopeOf: (claim) => scopes?.scopeOf(claim),
@@ -108,7 +117,10 @@ export function selectionsWith(parts: {
 			const selection = await pinned(redemption);
 			if (!selection || !holds(selection.userinfo)) return;
 			await save(nameOf.family(familyId), stored.target(selection.userinfo), lifetimeMs);
+			// Listed only once its selection is written: a listed family without one has run out.
+			if (selection.userinfo.constraints.length > 0) await list.add(familyId);
 		},
+		constrainedFamilies,
 		forRefreshed: async (familyId, client, subject, access) => {
 			if (off) return;
 			const kept = await records.read(nameOf.family(familyId));
@@ -148,5 +160,5 @@ export function selectionsWith(parts: {
 			};
 		},
 	};
-	return { selections, hook, tie };
+	return { selections, hook, tie, sweep };
 }

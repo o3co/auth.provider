@@ -10,6 +10,26 @@ const of = (members: Record<string, unknown>, withScopes = true) =>
 	claimsAsked(JSON.stringify(members), withScopes ? scopeOf : undefined);
 
 describe("claims-request", () => {
+	it("reads no sub but for OpenID Connect, judging none it does not read, and the acr and auth_time either way", () => {
+		const text = JSON.stringify({
+			id_token: {
+				sub: { value: 7 },
+				acr: { essential: true, values: ["gold"] },
+				auth_time: { essential: true },
+			},
+		});
+		expect(claimsAsked(text)).toBe("malformed");
+		expect(claimsAsked(text, undefined, false)).toEqual({
+			knownTime: true,
+			acr: [{ essential: true, values: ["gold"] }],
+			subs: [],
+			selection: {
+				idToken: { names: [], constraints: [] },
+				userinfo: { names: [], constraints: [] },
+			},
+		});
+	});
+
 	it("refuses a claim it keeps asked in a shape it does not take", () => {
 		const long = "x".repeat(257);
 		for (const asked of [
