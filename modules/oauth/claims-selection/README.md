@@ -19,7 +19,7 @@
 - Extension points, two of either refusing boot: the judge of consent, `consented(client, subject, scope)`; the table of claim scopes, `scopeOf(claim)`, from the module releasing claims.
 - Contribution to `code-grant`'s redemption hooks: the pin, and a redeemed code's token kept the pinned userinfo target.
 - Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
-- Store interface, wired by the assembly: records by name, each kept once for its lifetime. Operator section: `mode`, `off`, `draining` or `on` (default `on`), offered as `claimsSelections.mode`; `off` and `draining` warn at start (`claims-selection.not_taking`, with the mode).
+- Store interface, wired by the assembly: records by name, each kept once for its lifetime. Operator section: `mode`, `off`, `draining` or `on`, required: unset, boot is refused naming the choice; offered as `claimsSelections.mode`; `off` and `draining` warn at start (`claims-selection.not_taking`, with the mode).
 
 ## Invariants
 - A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; exactly one of `value` and a non-empty `values` of up to 16; 4 KiB whole. Another is a `TypeError`.

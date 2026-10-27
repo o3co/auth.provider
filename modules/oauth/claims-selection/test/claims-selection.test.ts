@@ -3,6 +3,7 @@ import { type Redeemed, type RedemptionHook, redemptionHooks } from "@mod/code-g
 import { type TokenTie, tokenTies } from "@mod/grants";
 import {
 	assemble,
+	BootRefused,
 	contract,
 	defineModule,
 	isUnavailable,
@@ -359,14 +360,20 @@ it("is on in the section a test gives it, unless the test says otherwise", () =>
 	expect(claimsSelectionConfig({ mode: "off" })).toEqual({ "claims-selection": { mode: "off" } });
 });
 
-it("reads its mode as an operator writes it, on by default, and refuses another value", async () => {
+it("refuses to start without a mode, naming the key and the choice to make, and refuses another value", async () => {
 	const stores = claimsSelectionInMemory();
-	const app = await assemble({
+	const unset = assemble({
 		modules: [claimsSelectionModule, stores.module],
 		config: kernelConfig(),
 		runtime,
 	});
-	expect(app.get(claimsSelections).mode).toBe("on");
+	const refused = await unset.catch((error: unknown) => error);
+	expect(BootRefused.is(refused) && refused.refusals).toEqual([
+		{
+			where: "claims-selection.mode",
+			reason: expect.stringContaining("`off` while any host runs a release before 0.19"),
+		},
+	]);
 	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
 });
 
@@ -419,7 +426,7 @@ it("takes all its module names", async () => {
 	const stores = claimsSelectionInMemory();
 	const input = {
 		modules: [claimsSelectionModule, stores.module, judging(new Set())],
-		config: kernelConfig(),
+		config: { ...kernelConfig(), ...claimsSelectionConfig() },
 		runtime,
 	};
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
