@@ -29,7 +29,7 @@
 
 - **guarantee-2-a** MUST: a request with `prompt=login` is met only by an authentication made for it, by `reauth`'s record, which `authorize` makes for the request and takes once.
 - **guarantee-2-b** MUST: a request with `max_age` is met only by an authentication within it, and an authentication time `session` does not know never counts as fresh.
-- **guarantee-2-c** MUST: through an upstream, a login counts as fresh only where the upstream reports it within its fresh login allowance of the demand, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default).
+- **guarantee-2-c** MUST: through an upstream, a login counts as fresh only where the time the upstream reports for it is within its fresh login allowance, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default): for `prompt=login`, no further back than the allowance before the demand, compared in whole seconds; for `max_age`, where `auth_time + allowance + max_age >= now`, compared to the millisecond.
 
 ## 3 A dependency that cannot answer never grants anything.
 
@@ -58,7 +58,7 @@
 
 ## 4 A subject's revocation boundary refuses everything made before it.
 
-- **guarantee-4-a** MUST NOT: once a subject's boundary is written, a read from any instance lets through what was made before it; a revocation that cannot finish never answers done. It does not hold where `tokens.subject-check = none` or `federation-grants.keep-on-subject-revocation` is chosen, and a split confirmation is held by guarantee-5-a, the store's one path.
+- **guarantee-4-a** MUST NOT: once a subject's boundary is written, a read from any instance lets through what was made before it; a revocation that cannot finish never answers done. Two exceptions alone: where `tokens.subject-check = none` is chosen, an access token lives until it expires; where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations, an established federation grant answers only to the `delegations` boundary. Everything else made before the boundary is still refused. A split confirmation is held by guarantee-5-a, the store's one path.
   faults: Lr, Lx, F, C, K, H2
 
 ## 5 What is used once is used once, on any number of instances.
@@ -81,6 +81,8 @@
   faults: Lr, Lx, F, C, K, H2
 - **guarantee-5-i** MUST: a login lockout's count holds across a crash and a failover, each attempt counted once, the same on every instance.
   faults: Lr, F, C, K, H2
+- **guarantee-5-j** MUST: an id_token is exchanged once, whether by the token exchange or as a JWT bearer assertion.
+  faults: Lr, Lx, F, C, K, H2
 
 ## 6 A token bound to a key or a certificate is never used as a bearer token.
 
@@ -105,5 +107,5 @@
 
 ## 10 A `POST` taken before authentication is limited per source.
 
-- **guarantee-10-a** MUST: a `POST` taken before authentication is limited per source, but where its route declares why it counts no source.
+- **guarantee-10-a** MUST: a `POST` taken before authentication is limited per source, but where its route declares why it counts no source, and, where `rate-limit.fail-mode = open`, while a request limit's store cannot count; an attempt limit refuses then too.
 - **guarantee-10-b** MUST NOT: the provider boots with such a route that declares neither a policy marked `per-source` nor why it counts no source.
