@@ -6,7 +6,7 @@ Internal module of `authorize`: the acr a request asks for, and raising a sessio
 - Judges `acr_values` and `claims`, decides the acr the code carries, and sends a session that falls short to the step-up page once.
 
 ## Not here
-- The acr table and which amr meets an acr (`acr`). Raising the session (the step-up page and `session`). Keeping the round trip's record (`reauth`).
+- Parsing `claims` (`claims-request`). The acr table and which amr meets an acr (`acr`). Raising the session (the step-up page and `session`). Keeping the round trip's record (`reauth`).
 
 ## Offers
 - `stepUpOver` (the build context, `reauth`'s records) → `stepUpWith` (`acr`'s table, the package's `step-up-page`, `reauth`'s records) → asked (single values, parameters → the known acr asked and whether a known authentication time is needed / a refusal), met (acr asked, the session's amr and authentication time, `prompt=none`, the taken record, the request → the met acr / a refusal / the step-up page).

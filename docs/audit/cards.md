@@ -113,12 +113,15 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/acr` (feature, `modules/oauth/acr`): Holds the acr table: the operator's, and the entries modules offer by themselves.
 - `@mod/authorize` (feature, `modules/oauth/authorize`): Provides the authorization endpoint, decides whether to issue a code, and has `code-grant` issue the code. Adds `issuer`'s URL to the redirect as `iss`.
   - `checks` (`src/checks`): the form of an authorization request, and the scope it may get.
+  - `claims-request` (`src/claims-request`): reading the `claims` request parameter (OpenID Connect Core §5.5).
   - `client-metadata` (`src/client-metadata`): what it contributes for clients' metadata.
   - `consent-decision` (`src/consent-decision`): whether a request needs the user's consent before its code.
   - `flow` (`src/flow`): the steps a request goes through once its redirect URI is trusted, up to its code.
   - `route` (`src/route`): the endpoint's requests and answers.
   - `step-up` (`src/step-up`): the acr a request asks for, and raising a session's authentication to meet it.
+- `@mod/claims-revocation` (feature, `modules/oauth/claims-revocation`): Revokes, before a deployment goes back to a release before 0.19, every refresh family whose kept selection holds constraints, which such a release would refresh without them. Bridges `claims-selection` (the families listed) and `refresh` (their revocation).
 - `@mod/claims-selection` (feature, `modules/oauth/claims-selection`): Decides which claim names a `claims` request parameter may release (OpenID Connect Core §5.5), by the client's allowance and the subject's consent, and keeps that selection and its value constraints for the code, the refresh family and each access token they give.
+  - `constrained` (`src/constrained`): the run over the families whose kept selection holds constraints, and the sweep of their list.
 - `@mod/client-allowance` (feature, `modules/oauth/client-allowance`): Decides what a client may be issued and may see: its grants, scopes and audiences.
 - `@mod/client-assertion` (feature, `modules/oauth/client-assertion`): Contributes `private_key_jwt` (RFC 7523) to `clients`: the client signs a JWT with one of its keys, used once.
   - `keys` (`src/keys`): the client metadata section that holds a client's keys for its assertions, and whether it is taken with a loose audience.
@@ -308,6 +311,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `ask` (`src/ask`): Redis at hand, for the topology and the scenes that check a node themselves.
   - `audit` (`src/audit`): the events a running target sends, for the scenes that read them.
   - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
+  - `deployment` (`src/deployment`): a fault scene's app as a deployment runs it, on a Redis topology.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
   - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
   - `patterns` (`src/patterns`): running every pattern's areas on its app.
@@ -316,6 +320,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
   - `acr` (`src/acr`): the scenes of the acr a client asks for.
+  - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.

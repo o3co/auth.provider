@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type Checklist, checklistFindings, parseItems } from "../src/checklist.ts";
+import { type Checklist, checklistFindings, parseItems, parseLedger } from "../src/checklist.ts";
 import { faultNames } from "../src/guarantee/faults.ts";
 import { guaranteeFindings, promisesIn } from "../src/guarantee/promises.ts";
 import { repoFindings } from "../src/repo.ts";
@@ -20,7 +20,7 @@ const everyPromise = () =>
 	promisesIn(model)
 		.promises.map((p) => `## ${p.number} ${p.title}\n\n- **guarantee-${p.number}-a** MUST: kept.\n`)
 		.join("\n");
-const checklistOf = (text: string): Checklist => {
+const checklistOf = (text: string, ledger?: string): Checklist => {
 	const parsed = parseItems("guarantee", text);
 	return {
 		specs: [
@@ -28,7 +28,7 @@ const checklistOf = (text: string): Checklist => {
 				spec: "guarantee",
 				title: parsed.title,
 				items: parsed.items,
-				ledger: undefined,
+				ledger: ledger === undefined ? undefined : parseLedger("guarantee", ledger).ledger,
 				...(parsed.guarantee ? { guarantee: parsed.guarantee } : {}),
 			},
 		],
@@ -76,6 +76,23 @@ describe("the security model's promises", () => {
 			expect(broken(from, to), to).not.toEqual([]);
 		}
 		expect(promisesIn("## Promises across modules\n\nNone yet.\n").findings).not.toEqual([]);
+		for (const after of ["11.", "-", "   11.", "11)"]) {
+			expect(promisesIn(`${model}\n${after}\n`).findings, after).not.toEqual([]);
+		}
+	});
+
+	it("reads a title to its line's last bold mark, a code span holding ** included, and nothing after it", () => {
+		const titled = model.replace(
+			"7. **Every request to another server goes through `outbound`.**",
+			"7. **Every request goes through `out**bound`.**  ",
+		);
+		expect(promisesIn(titled).findings).toEqual([]);
+		expect(promisesIn(titled).promises[6]?.title).toBe("Every request goes through `out**bound`.");
+		const trailing = model.replace(
+			"1. **Closing a session closes every path for the tokens issued from it.**",
+			"1. **Closing a session closes every path for the tokens issued from it.** extra",
+		);
+		expect(promisesIn(trailing).findings).not.toEqual([]);
 	});
 });
 
@@ -107,20 +124,22 @@ describe("a guarantee file", () => {
 	});
 
 	it("takes MUST and MUST NOT alone, noncompliant alone, and no updates or role", () => {
-		for (const [line, mark] of [
-			["SHOULD: x.", ""],
-			["MUST: x.", "  deviates: D-1"],
-			["MUST: x.", "  out-of-scope: no."],
-			["MUST: x.", "  updates: rfc6749-4.1-a"],
-			["MUST: x.", "  role: op"],
+		const whole = file(everyPromise());
+		expect(checklistFindings(checklistOf(whole))).toEqual([]);
+		for (const [line, mark, finding] of [
+			["SHOULD: x.", "", "a guarantee is a MUST or a MUST NOT"],
+			["MUST: x.", "  deviates: D-1", "a guarantee takes noncompliant alone, not deviates"],
+			["MUST: x.", "  out-of-scope: no.", "a guarantee takes noncompliant alone, not out-of-scope"],
+			["MUST: x.", "  updates: rfc6749-4.1-a", "a guarantee takes no updates line"],
+			["MUST: x.", "  role: op", "a guarantee takes no role line"],
 		]) {
 			const c = checklistOf(
-				file(`${everyPromise()}\n## 3 ${promised(3)}\n`).replace(
-					"**guarantee-3-a** MUST: kept.",
-					`**guarantee-3-a** ${line}\n${mark}`,
-				),
+				whole.replace("**guarantee-3-a** MUST: kept.", `**guarantee-3-a** ${line}\n${mark}`),
 			);
-			expect(checklistFindings(c), `${line} ${mark}`).not.toEqual([]);
+			expect(
+				checklistFindings(c).map((f) => f.detail),
+				`${line} ${mark}`,
+			).toContainEqual(`guarantee-3-a: ${finding}`);
 		}
 		const noncompliant = file(everyPromise()).replace(
 			"**guarantee-3-a** MUST: kept.",
@@ -131,6 +150,16 @@ describe("a guarantee file", () => {
 
 	it("needs one source, one meaning for each fault and none for another, and no ledger", () => {
 		expect(checklistFindings(checklistOf(file(everyPromise())))).toEqual([]);
+		const ledger = [
+			"- source: https://example.org/guarantee",
+			"- version: 1",
+			`- sha256: ${"0".repeat(64)}`,
+			...promisesIn(model).promises.map((p) => `- ${p.number} #1 MUST: guarantee-${p.number}-a`),
+		].join("\n");
+		expect(parseLedger("guarantee", ledger).findings).toEqual([]);
+		expect(checklistFindings(checklistOf(file(everyPromise()), ledger))).toEqual([
+			expect.objectContaining({ where: "checklist/guarantee.ledger.md" }),
+		]);
 		for (const head of [
 			meanings,
 			`${source}\n${source}\n${meanings}`,

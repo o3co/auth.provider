@@ -8,7 +8,13 @@
 export interface RunContext {
 	readonly event_name: string;
 	readonly ref?: string;
+	readonly ref_name?: string;
 	readonly base_ref: string;
+	/** The jobs a job needs, how each ended and what it gave; and whether the run was cancelled. */
+	readonly needs?: Readonly<
+		Record<string, { readonly result: string; readonly outputs?: Readonly<Record<string, string>> }>
+	>;
+	readonly cancelled?: boolean;
 }
 
 export type Value = string | number | boolean | null;
@@ -146,6 +152,7 @@ export function evaluate(source: string, context: RunContext): Value | Unknown {
 	const github: Record<string, Value | undefined> = {
 		event_name: context.event_name,
 		ref: context.ref,
+		ref_name: context.ref_name,
 		base_ref: context.base_ref,
 	};
 	const texts =
@@ -226,6 +233,13 @@ export function evaluate(source: string, context: RunContext): Value | Unknown {
 			const f = Object.hasOwn(functions, word.toLowerCase())
 				? functions[word.toLowerCase()]
 				: undefined;
+			if (
+				word.toLowerCase() === "cancelled" &&
+				args.length === 0 &&
+				context.cancelled !== undefined
+			) {
+				return context.cancelled;
+			}
 			if (f === undefined)
 				return { unknown: `${word}() is not decided by the run's github context` };
 			const known = args.find(isUnknown);
@@ -243,6 +257,20 @@ export function evaluate(source: string, context: RunContext): Value | Unknown {
 			github[name] !== undefined
 		) {
 			return github[name] as Value;
+		}
+		const job =
+			scope === "needs" &&
+			name !== undefined &&
+			context.needs !== undefined &&
+			Object.hasOwn(context.needs, name)
+				? context.needs[name]
+				: undefined;
+		if (job !== undefined && rest.length === 1 && rest[0] === "result") return job.result;
+		if (job !== undefined && rest.length === 2 && rest[0] === "outputs") {
+			const out = rest[1] as string;
+			return job.outputs !== undefined && Object.hasOwn(job.outputs, out)
+				? (job.outputs[out] as string)
+				: null;
 		}
 		return { unknown: `${word} is not read here` };
 	};

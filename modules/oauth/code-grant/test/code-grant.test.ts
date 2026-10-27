@@ -924,6 +924,13 @@ it("tells each contribution the session and client a code was redeemed in", asyn
 	expect(noted).toEqual([[s.session.id, "app"]]);
 });
 
+it("tells how long a code lives, as code-lifetime says", async () => {
+	expect((await serve()).app.get(codes).lifetimeMs()).toBe(600_000);
+	await stop();
+	const short = await serve({ codeGrant: { "code-lifetime": "30s", "sweep-interval": "1s" } });
+	expect(short.app.get(codes).lifetimeMs()).toBe(30_000);
+});
+
 it("names a code's redemption as its record is named, from the code alone", async () => {
 	const s = await serve();
 	const code = await s.issue();

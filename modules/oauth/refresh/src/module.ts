@@ -4,8 +4,8 @@ import { defineModule } from "@mod/kernel";
 import { participants } from "@mod/session-participants";
 import { revocableKinds } from "@mod/token-control";
 import { accessConditions } from "@mod/tokens";
-import { lineage } from "./contract.ts";
-import { additionOver } from "./founding/founding.ts";
+import { familyRevocation, lineage } from "./contract.ts";
+import { additionOver, revocationOver } from "./founding/founding.ts";
 import { grantOver, grantTakes } from "./grant/grant.ts";
 import { conditionOver, families, familyTie, lineageIn } from "./lineage/lineage.ts";
 import { section } from "./section.ts";
@@ -19,6 +19,7 @@ export default defineModule(
 		m.contribute(additions).by(additionOver),
 		m.provide(families).by(lineageIn),
 		m.provide(lineage).by((c) => c.get(families)),
+		m.provide(familyRevocation).by(revocationOver),
 		m.contribute(tokenTies).by(async (c) => familyTie(await c.get(families))),
 		m.contribute(accessConditions).by(conditionOver),
 		m.contribute(revocableKinds).by(revocableOver),

@@ -86,6 +86,8 @@ export interface FederationPart {
 	readonly proxy?: string;
 	/** The user ledger's URLs, which outbound also reaches: this part's outbound section is the one kept. */
 	readonly ledgerUrls?: readonly string[];
+	/** Modules the scene is about the absence of: a pattern composing one cannot hold it. */
+	readonly without?: readonly string[];
 }
 
 export const federationArea = area<FederationPart>("federation");
@@ -138,6 +140,7 @@ export function federationScene(scene: FederationScene): AreaScene {
 			...(scene.links ? { links: true } : {}),
 			...(scene.linkStepUpPage ? { linkStepUpPage: scene.linkStepUpPage } : {}),
 			...(scene.proxy ? { proxy: scene.proxy } : {}),
+			...(scene.without ? { without: scene.without } : {}),
 			...(scene.ledger
 				? {
 						ledgerUrls: [

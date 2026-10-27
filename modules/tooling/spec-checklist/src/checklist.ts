@@ -216,7 +216,7 @@ export function parseItems(spec: string, text: string) {
 	return { title, items: items as Item[], findings, ...(guarantee ? { guarantee } : {}) };
 }
 
-/** The guarantee file's own rules: one source naming the promises, a meaning for each fault and no other, MUST alone, noncompliant alone. */
+/** The guarantee file's own rules: one source naming the promises and no ledger, a meaning for each fault and no other, MUST alone, noncompliant alone. */
 function guaranteeRules(s: Spec): Finding[] {
 	const where = `checklist/${s.spec}.md`;
 	const findings: Finding[] = [];
@@ -225,6 +225,11 @@ function guaranteeRules(s: Spec): Finding[] {
 		findings.push({
 			where,
 			detail: `needs one source line, ${promisesSource}; has ${sources.join(", ") || "none"}`,
+		});
+	if (s.ledger)
+		findings.push({
+			where: `checklist/${s.spec}.ledger.md`,
+			detail: "a guarantee is held to the security model, and takes no ledger",
 		});
 	const meanings = s.guarantee?.meanings ?? [];
 	for (const name of faultNames) {

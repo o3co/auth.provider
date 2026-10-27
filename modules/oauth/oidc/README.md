@@ -11,9 +11,9 @@
 
 ## Offers
 - `releasedClaims.of` (subject, scope words, optionally the session's handle and what a request asks beyond its scope → the released claims; never `sub`)
-- `releasedClaims.scopeOf` (a table claim → its scope; none outside the table)
 - `idTokenHints.check` (an ID token given back as a hint → its subject, session, client and issue time / sessionless / invalid)
 - A contribution to `code-grant`'s ID token makers
+- A contribution to `claims-selection`'s table of claim scopes: each table claim's scope, none outside the table
 - `issuer`'s metadata items: `scopes_supported` (`openid` and the table's scopes), `claims_supported` (`sub` and the table's claims), `subject_types_supported` (`public` only), `id_token_signing_alg_values_supported` (the algorithm `keys` signs with)
 - Operator section: `id-token-lifetime` (a duration written with a unit, `1m`–`1d` in whole seconds; default `1h`)
 

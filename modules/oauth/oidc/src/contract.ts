@@ -17,8 +17,6 @@ export interface ReleasedClaims {
 		/** The claims a request names beyond its scope, and the constraints on all it releases. */
 		asked?: Target,
 	): Promise<Readonly<Record<string, Claim>>>;
-	/** The scope a table claim belongs to; none for a claim outside the table. */
-	scopeOf(claim: string): string | undefined;
 }
 
 export const releasedClaims = contract<ReleasedClaims>("oidc.claims");

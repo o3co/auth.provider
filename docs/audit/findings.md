@@ -6,16 +6,16 @@ How a finding, from a review or an audit, is kept until it is fixed, and what ea
 
 A finding not yet fixed shows nowhere public: not its text, nor the pull request that fixes it, the modules or contracts it changes, or its tests, any of which can tell where the hole is (`SECURITY.md`).
 
-- The fix is made in the security advisory's temporary private fork, as a private pull request, its change record kept private too.
-- GitHub runs no Actions in a temporary private fork, so the checks that hold the guarantees are run again on the fix's branch on a private machine, and their evidence (the commands, the environment, the commit, the results) kept in its change record: the whole test suite, the conformance areas and patterns, the checklists' compliance, the guard and the release check.
-- The fix is made public with the release that carries it, and the advisory with that release.
+- The fix is made in a private repository that mirrors this one, its change record kept private too.
+- CI runs the checks that hold the guarantees there, with this repository's own workflow, on the fix's release branch: the whole test suite, the conformance areas and patterns, the checklists' compliance, the guard and the release check. The release takes that run as its evidence, by the same rules as a run here, and the change record names it.
+- The fix's source is public from the moment its tag is pushed, and the release workflow publishes the version from it (`docs/releasing.md`, "A security release"). The advisory follows once the version is on npm, or two hours after the tag where it is not.
 - Once released, the change record is reviewed, then published with the advisory or in a pull request after the release. CI's run on the published commits is added to it; where it differs from the private run, a fix follows at once.
 
 A pull request's description holds a change record in public only for a finding already fixed, or for a change that fixes no finding.
 
 ## The ledger
 
-One line a finding, kept in a private security advisory's draft and in a private list:
+One line a finding, kept in a private security advisory's draft and in a private repository of its own, apart from the code's:
 
 | Column | What it holds |
 |---|---|

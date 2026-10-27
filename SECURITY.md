@@ -43,9 +43,9 @@ Which versions get fixes is [Supported versions](#supported-versions), as it sta
 
 A fix is made and checked in private, and made public with the version that carries it:
 
-1. The fix is made in the advisory's temporary private fork, as a private pull request, with its change record ([findings and fixes](docs/audit/findings.md)).
-2. GitHub runs no Actions there, so the checks that hold the guarantees are run on the fix's branch on a private machine, and their evidence is kept with the change record: the tests, the conformance scenes, the checklists' compliance, the guard and the release check.
-3. The fix is made public with the version that carries it, and the advisory is published with that version.
-4. After the release, the change record is reviewed and published, with CI's run on the published commits added to it.
+1. The fix is made in a private repository that mirrors this one, with its change record ([findings and fixes](docs/audit/findings.md)).
+2. CI runs there with this repository's own workflow, on the fix's release branch: the tests, the conformance scenes, the checklists' compliance, the guard and the release check. The release takes that run as its evidence, held to the same rules as a run here, and names it in the evidence it attaches.
+3. The fix's source is public from the moment the version's tag is pushed, and the release workflow publishes the version from it. The advisory is published once the version is on npm; where it is not within two hours of the tag, the advisory is published then, with the versions affected and any workaround, and updated daily until the fixed version is out.
+4. After the release, CI runs again on the published commits, and the change record is reviewed and published with that run added to it.
 
 The advisory and the changelog name the kind of hole closed, the versions affected and the version that fixes it.

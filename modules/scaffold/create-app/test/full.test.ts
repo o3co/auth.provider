@@ -52,13 +52,21 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 		start: "node --env-file-if-exists=.env src/main.ts",
 		reseal: "node --env-file-if-exists=.env src/reseal.ts",
 		"unclaimed-factors": "node --env-file-if-exists=.env src/unclaimed-factors.ts",
+		...(modules.includes("@mod/claims-revocation")
+			? {
+					"revoke-constrained-families":
+						"node --env-file-if-exists=.env src/revoke-constrained-families.ts",
+				}
+			: {}),
 	});
 	const composed = modules.map(manifest);
 	const owners = composed.flatMap((m) => m.replaces ?? m.adapts ?? []);
 	expect(owners.length).toBeGreaterThan(0);
 	expect(new Set(owners).size).toBe(owners.length);
 	for (const m of composed) {
-		expect(m.optIn, m.name).not.toBe(true);
+		// Only a bridge opts in and still comes, where all it joins is composed.
+		const joined = (m.joins ?? []).length > 0 && (m.joins ?? []).every((j) => modules.includes(j));
+		if (!joined) expect(m.optIn, m.name).not.toBe(true);
 		if (m.replaces) expect(modules, m.name).not.toContain(m.replaces);
 	}
 	// The guide lists what the template leaves out, to add.

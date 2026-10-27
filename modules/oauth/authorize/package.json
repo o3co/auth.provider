@@ -12,6 +12,7 @@
 	"dependencies": {
 		"@mod/acr": "workspace:*",
 		"@mod/audit": "workspace:*",
+		"@mod/claims-selection": "workspace:*",
 		"@mod/client-allowance": "workspace:*",
 		"@mod/client-documents": "workspace:*",
 		"@mod/clients": "workspace:*",

@@ -144,6 +144,45 @@ describe("a guarantee's faults, each a column", () => {
 		}
 	});
 
+	it("names each marked test of a fault run expected that reported nothing, as no result", () => {
+		const status = statusOf([lr, f, plain], [ran(pkg, [[plain, "passed"]])]);
+		expect(status.status).toBe("incomplete");
+		expect(status.missing).toEqual([faultRun]);
+		expect(status.columns).toEqual([
+			`${faultRun}: src/a.faults.case.ts > ${lr.title}: no result`,
+			`${faultRun}: src/a.faults.case.ts > ${f.title}: no result`,
+		]);
+	});
+
+	it("judges each report holding a column's file apart, so one report's pass never hides another's gap, a failure first", () => {
+		const other = ref("other {fault:F} [guarantee-5-a]", ["F"]);
+		const both = (second: [TestRef, State][]) =>
+			statusOf(
+				[lr, f, plain],
+				[
+					ran(faultRun, [
+						[lr, "passed"],
+						[f, "passed"],
+					]),
+					ran(faultRun, second),
+					ran(pkg, [[plain, "passed"]]),
+				],
+			);
+		// The second report holds the file, but not lr's result.
+		const gap = both([[f, "passed"]]);
+		expect(gap.status).toBe("incomplete");
+		expect(gap.columns).toEqual([`${faultRun}: src/a.faults.case.ts > ${lr.title}: no result`]);
+		const failed = both([
+			[f, "failed"],
+			[other, "passed"],
+		]);
+		expect(failed.status).toBe("failed");
+		expect(failed.columns).toEqual([
+			`${faultRun}: src/a.faults.case.ts > ${lr.title}: no result`,
+			`${faultRun}: src/a.faults.case.ts > ${f.title}: failed`,
+		]);
+	});
+
 	it("is failed or incomplete where every column passed but another test naming the item failed or did not run", () => {
 		const fault = ran(faultRun, [
 			[lr, "passed"],
