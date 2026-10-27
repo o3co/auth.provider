@@ -87,6 +87,26 @@ const advance = (ms: number) => {
 	clock.now += ms;
 };
 
+/** A point a run is held at until the test opens it: `arrived` once the run reached it. */
+const gate = () => {
+	let open = () => {};
+	let arrive = () => {};
+	const opened = new Promise<void>((resolve) => {
+		open = resolve;
+	});
+	const arrived = new Promise<void>((resolve) => {
+		arrive = resolve;
+	});
+	return {
+		arrived,
+		open: () => open(),
+		reached: async () => {
+			arrive();
+			await opened;
+		},
+	};
+};
+
 const failing = () => {
 	throw new Unavailable("test");
 };
@@ -220,6 +240,30 @@ describe("the families whose selection holds constraints", () => {
 				fields: { count: 2 },
 			}),
 		);
+	});
+
+	it("never unlists a family listed while a sweep runs, nor one whose listing a whole sweep runs before", async () => {
+		const p = parts();
+		await p.pinned("r-1", constrained);
+		await p.selections.follow("r-1", "fam-old", 1000);
+		advance(1000);
+		// The sweep held at the run-out family's selection, while another is founded and listed.
+		const held = gate();
+		p.faults.read = async (name) => {
+			if (name === "f.fam-old") await held.reached();
+		};
+		const sweeping = p.sweep();
+		await held.arrived;
+		await p.selections.follow("r-1", "fam-new", day);
+		held.open();
+		await sweeping;
+		p.faults.read = undefined;
+		expect(p.listed()).toEqual(["fam-new"]);
+		// A whole sweep between a family's selection and its listing finds it neither listed nor run out.
+		p.faults.add = (id) => (id === "fam-late" ? p.sweep() : undefined);
+		await p.selections.follow("r-1", "fam-late", day);
+		p.faults.add = undefined;
+		expect(p.listed().sort()).toEqual(["fam-late", "fam-new"]);
 	});
 
 	it("lists, hands and sweeps nothing when off, touching no store", async () => {
