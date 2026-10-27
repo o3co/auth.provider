@@ -98,7 +98,7 @@ describe("a route's declared guarantees", () => {
 		expect((await fetch(`${base}/read`)).status).toBe(204);
 	});
 
-	it("counts a policy only by the mark of its own value, never by its name", async () => {
+	it("counts a policy only by the mark of its own value, never by its name [guarantee-9-b]", async () => {
 		const named = policy("test.site");
 		const module = defineModule({ name: "named", takes: [] }, (m) => [
 			m.contribute(policies).by(() => applying(named, () => "pass")),
@@ -123,7 +123,7 @@ describe("a route's declared guarantees", () => {
 		]);
 	});
 
-	it("asks a GET to say whether it changes state, and refuses a POST said to change none", async () => {
+	it("asks a GET to say whether it changes state, and refuses a POST said to change none [guarantee-9-b] [guarantee-10-b]", async () => {
 		const booting = serveWith(
 			owner([
 				{ method: "GET", path: "/unsaid", unlimited: "counted by the handler", handle: answered },
@@ -136,7 +136,7 @@ describe("a route's declared guarantees", () => {
 		]);
 	});
 
-	it("takes a mark only for the methods it names: a state-changing GET needs a reason", async () => {
+	it("takes a mark only for the methods it names: a state-changing GET needs a reason [guarantee-9-b]", async () => {
 		const get = (uses: readonly PolicyUse[], more: Partial<Route>): Route => ({
 			method: "GET",
 			path: "/start",
@@ -156,7 +156,7 @@ describe("a route's declared guarantees", () => {
 		expect((await fetch(`${base}/start`)).status).toBe(204);
 	});
 
-	it("refuses a mark and a reason together, an empty reason, and a reason where nothing changes", async () => {
+	it("refuses a mark and a reason together, an empty reason, and a reason where nothing changes [guarantee-9-b]", async () => {
 		const booting = serveWith(
 			owner([
 				post("/both", [use(site), use(limit, open)], { unlimited: "counted elsewhere" }),
@@ -183,7 +183,7 @@ describe("a route's declared guarantees", () => {
 		]);
 	});
 
-	it("checks a route that declares nothing as well: a GET must say, and any other must keep both or say why", async () => {
+	it("checks a route that declares nothing as well: a GET must say, and any other must keep both or say why [guarantee-9-b] [guarantee-10-b]", async () => {
 		const booting = serveWith(
 			owner([{ method: "GET", path: "/silent", handle: answered }, post("/bare", [])]),
 		);
