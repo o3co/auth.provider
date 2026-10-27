@@ -315,7 +315,7 @@ describe("H. passkey login: the options' limit", () => {
 	const s = running(sceneFor([], { requests: 3, windowSeconds: 600 }));
 	const c = calls(() => s.at.base);
 
-	it("answers 429 once a source has asked for options past the limit", async () => {
+	it("answers 429 once a source has asked for options past the limit [guarantee-10-a]", async () => {
 		for (let i = 0; i < 3; i++) expect((await c.options()).status).toBe(200);
 		expect((await c.options()).status).toBe(429);
 	});
@@ -339,7 +339,7 @@ describe("H. passkey login: a small options limit", () => {
 		};
 	};
 
-	it("answers rate_limited with a wait within the window past the limit, to that source's options alone", async () => {
+	it("answers rate_limited with a wait within the window past the limit, to that source's options alone [guarantee-10-a]", async () => {
 		const { authenticator } = await c.register("ines");
 		for (let i = 0; i < 2; i++)
 			expect((await optionsFrom(backChannel["x-forwarded-for"])).status).toBe(200);
