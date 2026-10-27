@@ -15,6 +15,7 @@ import { afterEach, expect, it } from "vitest";
 import {
 	claimScopes,
 	claimsSelections,
+	constrainedFamilyList,
 	type Selection,
 	type SelectionConsent,
 	selectionConsents,
@@ -312,15 +313,12 @@ it("fails a read of a record it cannot read as unavailable, never taking it for 
 });
 
 /** A store that fails every call, to show a mode that never touches it. */
+const touched = async (): Promise<never> => {
+	throw new Error("touched");
+};
 const untouchable = defineModule({ name: "untouchable-stores", takes: [] }, (m) => [
-	m.provide(selectionRecords).by(() => ({
-		save: async () => {
-			throw new Error("touched");
-		},
-		read: async () => {
-			throw new Error("touched");
-		},
-	})),
+	m.provide(selectionRecords).by(() => ({ save: touched, read: touched })),
+	m.provide(constrainedFamilyList).by(() => ({ add: touched, done: touched, each: touched })),
 ]);
 
 it("touches no store when off: nothing pinned, kept or read, and refuses to keep a code's selection", async () => {

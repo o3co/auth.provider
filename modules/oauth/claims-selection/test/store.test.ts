@@ -3,7 +3,11 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { expect, it } from "vitest";
 import { type StoredSelection, selectionRecords } from "../src/store.ts";
-import { claimsSelectionInMemory, selectionRecordsContract } from "../src/testing.ts";
+import {
+	claimsSelectionInMemory,
+	constrainedFamilyListContract,
+	selectionRecordsContract,
+} from "../src/testing.ts";
 
 selectionRecordsContract("records stand-in", async () => {
 	let now = 0;
@@ -56,3 +60,7 @@ it("hands the composition its records through what a test wraps them in, on the 
 	now = 1000;
 	expect(await app.get(selectionRecords).read("c.one")).toBeUndefined();
 });
+
+constrainedFamilyListContract("in-memory stand-in", async () => ({
+	list: claimsSelectionInMemory().list,
+}));

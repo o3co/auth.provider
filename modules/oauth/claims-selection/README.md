@@ -13,13 +13,13 @@
   - `keepForCode`, by the redemption's name, for the code's lifetime and a minute more.
   - `forCode`: the selection pinned to a redemption; none for a code without one.
   - `forToken`: the userinfo target kept for an access token; none for a token without one.
-  - `follow`: the pinned userinfo target kept for the family founded from a redemption.
+  - `follow`: the pinned userinfo target kept for the family founded from a redemption, and the family listed after it where the target holds constraints; a list full or failing fails the family's start.
   - `forRefreshed`: a refreshed token kept its family's target, its names cut to what is allowed and agreed to now.
+  - `constrainedFamilies(handle)`: each listed family handed on and unlisted, counted by what befell it (internal module `constrained`, which also sweeps the list hourly).
 - `selectionLimits`, `withinLimits` (whether a selection keeps within them) and the types `Selection`, `Target`, `Named`, `Constraint` and `Scalar`.
 - Extension points, two of either refusing boot: the judge of consent, `consented(client, subject, scope)`; the table of claim scopes, `scopeOf(claim)`, from the module releasing claims.
-- Contribution to `code-grant`'s redemption hooks: the pin, and a redeemed code's token kept the pinned userinfo target.
-- Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
-- Store interface, wired by the assembly: records by name, each kept once for its lifetime. Operator section: `mode`, `off`, `draining` or `on`, required: unset, boot is refused naming the choice; offered as `claimsSelections.mode`; `off` and `draining` warn at start (`claims-selection.not_taking`, with the mode).
+- Contributions: to `code-grant`'s redemption hooks, the pin, and a redeemed code's token kept the pinned userinfo target; to `grants`' token ties, a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
+- Store interfaces, wired by the assembly: records by name, each kept once for its lifetime; the list of families whose selection holds constraints, each listed once until done. Operator section: `mode`, `off`, `draining` or `on`, required: unset, boot is refused naming the choice; offered as `claimsSelections.mode`; `off` and `draining` warn at start (`claims-selection.not_taking`, with the mode).
 
 ## Invariants
 - A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; exactly one of `value` and a non-empty `values` of up to 16; 4 KiB whole. Another is a `TypeError`.
@@ -32,8 +32,8 @@
 - Writes and reads that fail throw to the caller.
 
 ## Data
-- Records: a code's selection for the code's lifetime and a minute; a pin for five minutes; a family's target until the family's end; a token's target until the token's end and two minutes, for clock drift between hosts.
-- Needs: no eviction, a crash survived, no rollback on failover; a lost record would let a constrained claim go out unconstrained.
+- Records: a code's selection for the code's lifetime and a minute; a pin for five minutes; a family's target until the family's end; a token's target until the token's end and two minutes, for clock drift between hosts. The constrained families' list, each until it is handled or its selection runs out.
+- Needs, the list's as the records': no eviction, a crash survived, no rollback on failover; a lost record would let a constrained claim go out unconstrained, a lost listing a family be missed going back.
 
 ## Depends on
 - `kernel`, `clients`, `client-allowance`, `code-grant`, `grants`

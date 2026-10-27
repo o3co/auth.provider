@@ -120,6 +120,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `route` (`src/route`): the endpoint's requests and answers.
   - `step-up` (`src/step-up`): the acr a request asks for, and raising a session's authentication to meet it.
 - `@mod/claims-selection` (feature, `modules/oauth/claims-selection`): Decides which claim names a `claims` request parameter may release (OpenID Connect Core §5.5), by the client's allowance and the subject's consent, and keeps that selection and its value constraints for the code, the refresh family and each access token they give.
+  - `constrained` (`src/constrained`): the run over the families whose kept selection holds constraints, and the sweep of their list.
 - `@mod/client-allowance` (feature, `modules/oauth/client-allowance`): Decides what a client may be issued and may see: its grants, scopes and audiences.
 - `@mod/client-assertion` (feature, `modules/oauth/client-assertion`): Contributes `private_key_jwt` (RFC 7523) to `clients`: the client signs a JWT with one of its keys, used once.
   - `keys` (`src/keys`): the client metadata section that holds a client's keys for its assertions, and whether it is taken with a loose audience.
