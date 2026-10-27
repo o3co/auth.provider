@@ -193,7 +193,8 @@ perl.stdout.once("data", (pids) =>
 			if (started.kind !== "running" || !started.kill) throw new Error("not started as a group");
 			const [holder = 0] = (await (await fetch(started.baseUrl)).text()).split(" ").map(Number);
 			try {
-				await expect(started[end](), end).resolves.not.toThrow();
+				// Ended in time, or it throws that the group did not end.
+				await (end === "stop" ? started.stop() : started.kill());
 			} finally {
 				process.kill(holder, "SIGKILL");
 			}
