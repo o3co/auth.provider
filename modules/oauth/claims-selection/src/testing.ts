@@ -55,8 +55,13 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 	});
 }
 
-/** claims-selection's store in memory, on the composition's clock, for tests that compose the module. */
-export function claimsSelectionInMemory() {
+/**
+ * claims-selection's store in memory, on the composition's clock, for tests that compose the module;
+ * `around` wraps the records the composition is given, as a test that fails or watches them does.
+ */
+export function claimsSelectionInMemory(
+	options: { readonly around?: (records: SelectionRecords) => SelectionRecords } = {},
+) {
 	let now = () => 0;
 	const entries = new Map<string, { readonly value: StoredSelection; readonly ends: number }>();
 	const live = (name: string) => {
@@ -74,7 +79,7 @@ export function claimsSelectionInMemory() {
 	const module = defineModule({ name: "claims-selection-stores", takes: [] }, (m) => [
 		m.provide(selectionRecords).by((c: { readonly clock: Clock }) => {
 			now = c.clock.now;
-			return records;
+			return options.around ? options.around(records) : records;
 		}),
 	]);
 	/** Writes a record over whatever the name holds, as a broken or foreign writer might. */
