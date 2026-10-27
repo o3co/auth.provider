@@ -38,7 +38,7 @@ afterAll(async () => {
 	if (running?.kind === "running") await running.stop();
 });
 
-it("limits requests to the token endpoint per source, before the client is authenticated [rfc6749-2.3.1-c]", async () => {
+it("limits requests to the token endpoint per source, before the client is authenticated [rfc6749-2.3.1-c] [guarantee-10-a]", async () => {
 	const post = () =>
 		fetch(`${base}/oauth/token`, {
 			method: "POST",
