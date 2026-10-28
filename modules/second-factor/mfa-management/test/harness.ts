@@ -54,7 +54,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code", replicaSafe: true, takes: [] }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -76,7 +76,7 @@ const code = defineModule({ name: "kind-code", replicaSafe: true, takes: [] }, (
 	})),
 ]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
-const backup = defineModule({ name: "kind-backup", replicaSafe: true, takes: [] }, (m) => [
+const backup = defineModule({ name: "kind-backup", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
