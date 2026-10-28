@@ -9,7 +9,6 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 - [Rotating the signing key](#rotating-the-signing-key)
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
-- [The claims parameter, through an upgrade](#the-claims-parameter-through-an-upgrade)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
@@ -146,16 +145,6 @@ Only a value a `previous` key sealed is sealed again; one `next` sealed is newer
 - `create-auth-provider` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-auth-provider <target> --add <feature>`) and carry your configuration over.
 - A boot that refuses exits with status 78 and prints each refusal on stderr, by setting path and never by value. Fix every refusal it lists; they are reported together.
 - **From 0.18, upgrade every instance before looking for second factors left without their claim.** A 0.18 instance writes a WebAuthn second factor and its claim apart, so while one runs, or a request it took is still under way, it can leave a factor without its claim. Look once none is left: see [Second factors left without their claim](#second-factors-left-without-their-claim).
-
-## The claims parameter, through an upgrade
-
-`claims-selection.mode` has no default: every deployment that composes `code-grant` sets it (U-0.19-59 in the [migration guide](migration.md)).
-
-**Upgrading from 0.18 one instance at a time.** Take each step only once every instance has taken the one before.
-
-1. Upgrade every instance to 0.19 with `claims-selection.mode = off`. A 0.18 instance cannot hold what a request's `value` or `values` hold back.
-2. Set `draining` on every instance. An instance `off` beside one `on` would redeem codes and answer userinfo without the constraints the other kept. While `draining`, the `claims` parameter is not taken, as in 0.18.
-3. Set `on` on every instance.
 
 ## Revoking a user from the ledger
 
