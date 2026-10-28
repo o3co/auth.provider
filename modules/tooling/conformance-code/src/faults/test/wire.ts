@@ -26,6 +26,8 @@ export const codeKept = storeWrite({
 	space: "code-grant-store.codes",
 	operations: ["putIfAbsent"],
 });
+/** A read of a code's record, which a redemption waits on first. */
+export const codeRead = storeRead({ prefix, space: "code-grant-store.codes" });
 /** The read of the browser's session behind its cookie, which an authorization waits on first. */
 export const cookieRead = storeRead({ prefix, space: "session-store.cookies" });
 
