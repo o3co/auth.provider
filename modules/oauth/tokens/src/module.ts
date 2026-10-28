@@ -10,6 +10,7 @@ import {
 	type AccessGrant,
 	type Actor,
 	accessConditions,
+	audienceAdditions,
 	issuancePolicies,
 	subjectChecks,
 	type Tokens,
@@ -49,6 +50,8 @@ const claimsShape = z.object({
 	amr: z.array(z.string()).optional(),
 	auth_time: z.number().optional(),
 	acr: z.string().min(1).optional(),
+	// How many of the last `aud` values the issuer added: never all of them.
+	aud_added: z.number().int().positive().optional(),
 });
 
 type Claims = z.infer<typeof claimsShape>;
@@ -63,12 +66,17 @@ type Checked =
 	| { readonly kind: "checked"; readonly access: Valid; readonly issuedAt: number }
 	| Invalid;
 
-/** A kept grant as claims; the added ones, `act`, `amr`, `auth_time` and `acr` only when given. */
-const grantClaims = (grant: AccessGrant) => ({
+/**
+ * A kept grant as claims, with the audiences added past its own, counted in `aud_added`; the added
+ * claims, `act`, `amr`, `auth_time` and `acr` only when given.
+ */
+const grantClaims = (grant: AccessGrant, added: readonly string[]) => ({
 	// None can stand for a name below: a grant adds no reserved name.
 	...grant.claims,
 	sub: grant.subject,
-	aud: grant.audience.length === 1 ? grant.audience[0] : grant.audience,
+	...(added.length > 0
+		? { aud: [...grant.audience, ...added], aud_added: added.length }
+		: { aud: grant.audience.length === 1 ? grant.audience[0] : grant.audience }),
 	client_id: grant.issuedTo,
 	...(grant.scope.length > 0 ? { scope: grant.scope.join(" ") } : {}),
 	...(grant.actor ? { act: actOf(grant.actor) } : {}),
@@ -79,12 +87,16 @@ const grantClaims = (grant: AccessGrant) => ({
 	...(grant.acr === undefined ? {} : { acr: grant.acr }),
 });
 
-/** The grant read back from verified claims, and the claims its grant added. */
-const grantOf = (claims: Claims, added: AddedClaims | undefined): AccessGrant =>
+/** The grant read back from verified claims, its audience as `audienceOf` split it, and the claims its grant added. */
+const grantOf = (
+	claims: Claims,
+	audience: readonly string[],
+	added: AddedClaims | undefined,
+): AccessGrant =>
 	Object.freeze({
 		subject: claims.sub,
 		issuedTo: claims.client_id,
-		audience: Object.freeze(typeof claims.aud === "string" ? [claims.aud] : claims.aud),
+		audience: Object.freeze([...audience]),
 		scope: Object.freeze(claims.scope ? claims.scope.split(" ") : []),
 		...(claims.act ? { actor: actorOf(claims.act) } : {}),
 		...(claims.amr ? { amr: Object.freeze(claims.amr) } : {}),
@@ -92,6 +104,15 @@ const grantOf = (claims: Claims, added: AddedClaims | undefined): AccessGrant =>
 		...(claims.acr === undefined ? {} : { acr: claims.acr }),
 		...(added ? { claims: added } : {}),
 	});
+
+/** `aud` split into the grant's audience and what the issuer added past it; none where `aud_added` would leave the grant none. */
+const audienceOf = (claims: Claims) => {
+	const all = typeof claims.aud === "string" ? [claims.aud] : claims.aud;
+	const added = claims.aud_added ?? 0;
+	if (added === 0) return { grant: all, added: [] };
+	if (typeof claims.aud === "string" || added >= all.length) return undefined;
+	return { grant: all.slice(0, all.length - added), added: all.slice(all.length - added) };
+};
 
 /** The added claims of a verified payload, copied as an issue copies them; undefined for a token none of tokens' issued. */
 const addedOf = (payload: Readonly<Record<string, unknown>>) => {
@@ -119,6 +140,7 @@ export default defineModule(
 			accessConditions,
 			issuer,
 			issuancePolicies,
+			audienceAdditions,
 			...(denylisted(s) ? [revokedTokens] : []),
 		],
 	},
@@ -154,6 +176,16 @@ export default defineModule(
 			);
 			const iss = (await c.get(issuer)).url;
 			const lifetime = c.section["access-token-lifetime"];
+			const additions = await c.collect(audienceAdditions);
+			/** The audiences the additions answer for a grant, each once, none its own. */
+			const addedFor = (grant: AccessGrant) => {
+				const answered = additions.flatMap((a) => [...a.added(grant)]);
+				for (const value of answered) {
+					if (typeof value !== "string" || value === "")
+						throw new TypeError("tokens: an added audience is not a non-empty string");
+				}
+				return [...new Set(answered)].filter((value) => !grant.audience.includes(value));
+			};
 
 			/** Verifies everything but revocation; `allowanceMs` keeps a just-expired token valid. */
 			const check = async (token: string, allowanceMs = 0): Promise<Checked> => {
@@ -168,6 +200,8 @@ export default defineModule(
 				const parsed = claimsShape.safeParse(verified.claims);
 				if (!parsed.success) return { kind: "invalid", reason: "shape" };
 				const claims = parsed.data;
+				const audience = audienceOf(claims);
+				if (!audience) return { kind: "invalid", reason: "shape" };
 				if (claims.iss !== iss) return { kind: "invalid", reason: "issuer" };
 				if (claims.exp * 1000 + allowanceMs <= c.clock.now())
 					return { kind: "invalid", reason: "expired" };
@@ -192,7 +226,10 @@ export default defineModule(
 						expiresAt: claims.exp * 1000,
 						tokenType,
 						...(binding ? { binding: { ...binding, tokenType } } : {}),
-						grant: grantOf(claims, extra.added),
+						...(audience.added.length > 0
+							? { addedAudience: Object.freeze([...audience.added]) }
+							: {}),
+						grant: grantOf(claims, audience.grant, extra.added),
 					},
 				};
 			};
@@ -204,9 +241,10 @@ export default defineModule(
 			const issueAccess: IssueAccess = async (grant, limits) => {
 				const lifetimeSeconds = lifetimeOf(limits?.lifetimeSeconds, lifetime);
 				const { iat, exp } = expiryOf(c.clock.now(), lifetimeSeconds, limits?.notAfter);
+				const kept = keptGrant(grant, iat);
 				const claims = {
 					iss,
-					...grantClaims(keptGrant(grant, iat)),
+					...grantClaims(kept, addedFor(kept)),
 					iat,
 					exp,
 					jti: tokenId(c.random),

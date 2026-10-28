@@ -16,7 +16,7 @@
 - Verification → the id, the grant (its added claims frozen), the token type (Bearer, or the bound kind's) and the binding; the validity check `sender-binding` admits a request at a resource by.
 - Issued-to, for the revoking side to check the owner: answered for revoked tokens and within the allowance past expiry too; never for authorization.
 - Revocation, directly or by a reference to an issued token (its shape is `tokens`' own), within the allowance past expiry; or unsupported, which `revocable` tells.
-- Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked. A policy reads session-built state late (`c.late`), else boot cycles.
+- Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked; audience additions (a grant → audiences the token is for besides its own). A policy reads session-built state late (`c.late`), else boot cycles.
 - `token-denylist`'s store interface for revoked tokens and its needs, passed on: a store wiring wires `tokens` and implements it.
 - `jwks_uri` among `issuer`'s metadata: `keys`' key set path on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
 - The access-token lifetime `issue` applies where a grant gives no lifetime, in seconds, through `accessTokenLifetimeSeconds`, so a grant with a lifetime ceiling can read it at build time and refuse boot above it. It is fixed once `tokens` is built.
@@ -32,6 +32,7 @@
 - Added claims are the grant's statement: signed with the rest, a resource cannot tell them from the provider's, so composing a grant trusts it with its tokens' content.
 - An added claim follows `added-claims`' rules, its shape, reserved names and limits; one outside them is the grant's maker's mistake (TypeError at `issue` and `admits`, a 500 with no audit), and a token read back with one is refused as `shape`.
 - A token over 16 KiB, or an actor chain over 16, is neither issued (TypeError) nor read.
+- An addition's audiences go in `aud` after the grant's, none of its own again; `aud_added` counts how many of the last `aud` values the issuer added. Read back, the grant's audience is the rest and the added ones a valid check's `addedAudience`, so a token issued again from a grant read back carries none not given anew. An `aud_added` not a positive whole number, or leaving the grant none, is refused as `shape`. A resource tells a token is for it by `aud` alone, never `aud_added`.
 - An access token ends after its lifetime from its issue, capped at the expiry cap given. What `issue` answers of what is left, and its refusal of a token with less than a second, are `issuance`'s.
 
 ## Depends on
