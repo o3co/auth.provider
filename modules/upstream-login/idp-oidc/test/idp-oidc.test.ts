@@ -191,7 +191,7 @@ async function open(world: World = {}) {
 	});
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound", takes: [] }, (m) => [
+			defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(outbound).by(() => stub.outbound),
 			]),
 			externalJwtModule,
@@ -1356,13 +1356,13 @@ describe("idp-oidc", () => {
 		const recorded = recordingLog();
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "outbound", takes: [] }, (m) => [
+				defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 					m.provide(outbound).by(() => stub.outbound),
 					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpOidc,
-				defineModule({ name: "types", takes: [idpTypes] }, (m) => [
+				defineModule({ name: "types", replicaSafe: true, takes: [idpTypes] }, (m) => [
 					m.provide(types).by((c) => c.collect(idpTypes)),
 				]),
 			],
