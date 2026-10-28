@@ -5,7 +5,7 @@
 - Owns the scenes of a code by mail as a second factor (binding by the long code, a login let in by six digits, a wrong code refused).
 - Owns the scenes of a user's own release of the lockout (released after a recovery code, refused without one, refused while the account was not revoked after the first counted failure, a fixed hold naming when its factors may be bound again).
 - Owns the scene of a login a second factor holds when the ledger revokes its subject (its transaction answers `login_required`, and the right code opens no session).
-- Owns the fault scenes of the second-factor area, on a Redis topology and a deployment of their own, each after a control with no fault: a recovery code used once (internal module `recovery-code-once`), with what they share (`faults`).
+- Owns the fault scenes of the second-factor area, on a Redis topology and a deployment of their own, each after a control with no fault: a recovery code used once (internal module `recovery-code-once`), a subject's fence refusing a change to her second factors her revocation overtook (`fence`), with what they share (`faults`).
 - Sets up the second-factor area's parts (optional or required, a code by mail, and the lockout's numbers) on each of the legacy and new targets.
 - Runs the conformance base's fake SMTP relay for its mail scenes, each run.
 - Tells both targets where the fake SMTP relay listens.
