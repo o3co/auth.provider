@@ -1430,7 +1430,7 @@ describe("idp-oidc", () => {
 			expect(asked()).toEqual([]);
 		});
 
-		it("asks UserInfo by GET with the access token as a Bearer credential, completing the id_token's profile [oidc-core-5.3.1-a]", async () => {
+		it("asks UserInfo by GET with the access token as a Bearer credential in no body, completing the id_token's profile [oidc-core-5.3.1-a] [rfc6750-2.2-c]", async () => {
 			const { upstream, asked } = await withUserinfo(
 				() =>
 					json({
