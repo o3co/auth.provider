@@ -30,7 +30,7 @@ function runtime() {
 }
 
 const emitter = (made: () => readonly Instrument[]) =>
-	defineModule({ name: "emitter", takes: [] }, (m) =>
+	defineModule({ name: "emitter", replicaSafe: false, takes: [] }, (m) =>
 		made().map((i) => m.contribute(instruments).by(() => i)),
 	);
 
