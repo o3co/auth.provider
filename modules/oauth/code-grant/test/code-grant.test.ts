@@ -1181,6 +1181,7 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 });
 
 // Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
 it("makes each code of 32 fresh random bytes, nothing of its challenge, and gives the challenge out nowhere [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc7636-4.4-b]", async () => {
 	const s = await serve();
 	const code = await s.issue();
