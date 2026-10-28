@@ -351,7 +351,7 @@ describe("authorize: trust in the redirect URI", () => {
 		expect(loopback.at?.origin).toBe("http://127.0.0.1:9555");
 	});
 
-	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d]", async () => {
+	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d] [oidc-core-3.1.2.2-b] [oidc-core-3.1.2.2-i]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const cases: [Record<string, string> | string, string][] = [
@@ -806,7 +806,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect(v6.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("refuses or accepts each parameter as the rules say [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a] [rfc6749-10.14-a]", async () => {
+	it("refuses or accepts each parameter as the rules say [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a] [oidc-core-3.1.2.2-b] [rfc6749-10.14-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const error = async (extra: Record<string, string>) =>
@@ -1735,7 +1735,7 @@ describe("authorize: openid in the request", () => {
 		).toBe(false);
 	});
 
-	it("refuses a request that does not name openid itself with invalid_scope, sent back [oidc-core-3.1.2.2-a]", async () => {
+	it("refuses a request that does not name openid itself with invalid_scope, sent back [oidc-core-3.1.2.2-a] [oidc-core-3.1.2.2-c]", async () => {
 		const { authorize, login } = await serve(required);
 		const cookie = await login();
 		const refused = [false, "invalid_scope", "s1", issuer];
