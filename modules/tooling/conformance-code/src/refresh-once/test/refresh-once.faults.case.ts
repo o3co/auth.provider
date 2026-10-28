@@ -14,7 +14,7 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { codeAt, faultScene, on, redeemAt, refreshAt, said } from "../../faults/test/faults.ts";
-import { isStoreOperation, onFamilies, rotationFrom } from "../../faults/test/wire.ts";
+import { familyRead, isStoreOperation, rotationFrom, sessionRead } from "../../faults/test/wire.ts";
 
 const scene = faultScene({ refresh: {} });
 const refused = [400, "invalid_grant"];
@@ -112,7 +112,7 @@ describe("a refresh token rotated once under faults", () => {
 		});
 	});
 
-	it("never takes a family's record confirmed on a server other than the one that answered it [guarantee-5-b] {fault:Fs}", async () => {
+	it("never rotates a family whose session's entry is confirmed on a server other than the one that answered it [guarantee-5-b] {fault:Fs}", async () => {
 		await on({ name: "refresh-once-fs", scene, replicas: 3 }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
@@ -134,10 +134,21 @@ describe("a refresh token rotated once under faults", () => {
 			const wait = await confirmed;
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
 			const sent = a.relay.executions(anything).slice(from);
-			// The first call on the family's record ran on the new primary, on a connection to it ...
-			const first = sent.find((e) => e.at < wait.at && onFamilies(e.command));
-			expect(first && runIdOf(first.reply)).toBe(newId);
-			expect(first && upstreamOf(first.connection)).toEqual(moved.upstream());
+			// The family's record was read on the new primary, then the session's entry, whose read is
+			// confirmed: it ran on the new primary, on a connection to it ...
+			const family = sent.find((e) => e.at < wait.at && familyRead.request(e.command));
+			expect(family && runIdOf(family.reply)).toBe(newId);
+			// This refresh's: the first entry read on the family read's connection after it.
+			const entry = sent.find(
+				(e) =>
+					family !== undefined &&
+					e.connection === family.connection &&
+					e.at > family.at &&
+					e.at < wait.at &&
+					sessionRead.request(e.command),
+			);
+			expect(entry && runIdOf(entry.reply)).toBe(newId);
+			expect(entry && upstreamOf(entry.connection)).toEqual(moved.upstream());
 			// ... and its confirmation passed on the old one, on a connection still to it.
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
 			const info = sent.findLast(
