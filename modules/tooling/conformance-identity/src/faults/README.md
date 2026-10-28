@@ -5,10 +5,10 @@ Internal module of `conformance-identity`: what the area's fault scenes share in
 ## Responsibilities
 - Gives password login's scene on the Redis store, one user, with what a scene adds, and runs a scene on a deployment of its own on that scene unless it names another.
 - Sends a password login to an instance, as its proxy forwards it from a source, and reads its answer: status, error and the session cookie it set.
-- Names the writes a login makes as the relay matches them: its attempt's count under the route's name and its source in `rate-limit.attempts`, and any request about an identifier's lockout in `rate-limit.lockouts`, its read or a write.
+- Names the writes a login makes as the relay matches them: its attempt's count under the route's name and its source in `rate-limit.attempts`, any request about an identifier's lockout in `rate-limit.lockouts`, its read or a write; and the writes that open a session, its record in `session-store.sessions` and its cookie's index in `session-store.cookies`.
 
 ## Offers
-- `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `nextSource`, `loginAt`, `said`, `attemptFrom`, `identifierLockout`, and the scene's `issuer`, `prefix` and user `alice`.
+- `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `nextSource`, `loginAt`, `said`, `attemptFrom`, `identifierLockout`, `sessionRecord`, `cookieIndexed`, and the scene's `issuer`, `prefix` and user `alice`.
 
 ## Invariants
 - Each source is one of its own, so a match on its count never takes another scene's.
