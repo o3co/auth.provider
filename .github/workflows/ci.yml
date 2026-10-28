@@ -732,7 +732,9 @@ jobs:
   # main, on the release branches, on the daily run (develop) and by hand, and before a merge to
   # develop where the pull request touches what they test with: the harnesses, the shared front and
   # tunnel, the conformance driver, the checklist, and the pins they hold (the suite's in
-  # interop-oidf, the libraries' in interop-clients). Not on a push to develop.
+  # interop-oidf, the libraries' in interop-clients). A pull request to develop that touches only
+  # the relying party's side (idp-oidc, federation, upstream-client, the federation scenes) runs the
+  # suite's relying party plan alone. Not on a push to develop.
   interop-due:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
@@ -757,6 +759,7 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" != pull_request ] || [ "$BASE" = main ]; then
             echo "oidf=true" >> "$GITHUB_OUTPUT"
+            echo "oidf-scope=all" >> "$GITHUB_OUTPUT"
             echo "clients=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -764,7 +767,11 @@ jobs:
           changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD")
           touches() { grep -qE "$1" <<<"$changed" && echo true || echo false; }
           shared='^modules/tooling/(conformance-front|conformance-tunnel|spec-checklist)/'
-          echo "oidf=$(touches "^modules/tooling/(interop-oidf|conformance)/|$shared")" >> "$GITHUB_OUTPUT"
+          all=$(touches "^modules/tooling/(interop-oidf|conformance)/|$shared")
+          rp=$(touches '^modules/upstream-login/(idp-oidc|federation|upstream-client)/|^modules/tooling/conformance-federation/')
+          if [ "$all" = true ]; then scope=all; elif [ "$rp" = true ]; then scope=rp; else scope=none; fi
+          echo "oidf=$([ "$scope" != none ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "oidf-scope=$scope" >> "$GITHUB_OUTPUT"
           echo "clients=$(touches "^modules/tooling/interop-clients/|$shared")" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -773,10 +780,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - id: plan
         shell: bash
+        env:
+          SCOPE: ${{ steps.due.outputs.oidf-scope }}
         run: |
           set -euo pipefail
+          plans=$(pnpm --silent --filter @mod/spec-checklist run plan oidf-plan)
+          if [ "$SCOPE" = rp ]; then plans=$(jq -c '[.[] | select(. == "rp")]' <<<"$plans"); fi
           {
-            echo "oidf-plans=$(pnpm --silent --filter @mod/spec-checklist run plan oidf-plan)"
+            echo "oidf-plans=$plans"
             echo "libraries=$(pnpm --silent --filter @mod/spec-checklist run plan library)"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
