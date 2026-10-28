@@ -10,7 +10,7 @@ Internal module of `conformance-code`: the fault scenes of an authorization code
   - an instance's clock moved forward and back, its lifetime on Redis's clock (`Ta`, where this host can move an instance's clock, never skipped in a fault run).
 
 ## Invariants
-- None issued under `H2` let go together, both uses refused as a code that comes again, is a loss of liveness RFC 6749 §4.1.2 allows, not a breach of safety: the code is never redeemed twice.
+- None issued under `H2` let go together, both uses refused as a code that comes again, is a loss of liveness, not a breach of safety: a code used more than once is to be denied (RFC 6749 §4.1.2), and it is never redeemed twice.
 
 ## Depends on
 - `faults`; `conformance` (the relay's matches and the fault run)
