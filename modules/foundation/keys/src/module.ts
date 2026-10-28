@@ -17,10 +17,12 @@ export default defineModule({ name: "keys", section, takes: [] }, (m) => [
 		return read;
 	}),
 	m.provide(keys).by(async (c) => ({
-		...signer(await c.get(ring), c.clock.now),
+		...signer(await c.get(ring), c.clock.now, c.log),
 		keySetPath: () => keySetPath,
 	})),
-	m.provide(accessTokenSigning).by(async (c) => accessSigner(await c.get(ring), c.clock.now)),
+	m
+		.provide(accessTokenSigning)
+		.by(async (c) => accessSigner(await c.get(ring), c.clock.now, c.log)),
 	m.contribute(routes).by(async (c) => {
 		const current = await c.get(ring);
 		return {

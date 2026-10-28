@@ -14,7 +14,7 @@ Internal module of `keys`: the provider's own key ring, read at boot, signing an
 ## Invariants
 - The next key verifies and is published but never signs; a previous key verifies until its `expires-at`.
 - A `kid` is unique in the ring; a token's `kid` names the key that verifies it, after its `typ`.
-- Claims holding a null, at any depth, are never signed: the refusal names their key paths, never their values.
+- Claims holding a null, at any depth, are never signed: the refusal, and the error `keys.null_claims` logged with it, name their key paths, never their values.
 
 ## Depends on
 - None (`keys`' contract)

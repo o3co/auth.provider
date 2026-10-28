@@ -1,3 +1,4 @@
+import type { Log } from "@mod/kernel";
 import {
 	CompactSign,
 	compactVerify,
@@ -52,7 +53,7 @@ function nullClaims(value: unknown, at = "", found: string[] = []): string[] {
 	return found;
 }
 
-function ringSigner(ring: Ring, now: () => number): RingSigner {
+function ringSigner(ring: Ring, now: () => number, log: Log): RingSigner {
 	// An HS256 secret verifies its own tokens; an asymmetric signing key verifies through its public half.
 	const verifiers =
 		ring.signing.alg === "HS256" ? [ring.signing, ...ring.publicKeys] : ring.publicKeys;
@@ -62,7 +63,11 @@ function ringSigner(ring: Ring, now: () => number): RingSigner {
 			// No claim is written as null (OpenID Connect Core §13.3): one with no value is left out.
 			// Read back from what is signed: NaN, Infinity, undefined in a list and a toJSON's null are null there too.
 			const nulls = nullClaims(JSON.parse(JSON.stringify(claims)));
-			if (nulls.length > 0) throw new TypeError(`keys: claims are null: ${nulls.join(" ")}`);
+			if (nulls.length > 0) {
+				// The caller's failure is logged by its kind alone; this names the claims, never their values.
+				log.error("keys.null_claims", { claims: nulls.join(" ") });
+				throw new TypeError(`keys: claims are null: ${nulls.join(" ")}`);
+			}
 			return new CompactSign(encoder.encode(JSON.stringify(claims)))
 				.setProtectedHeader({ alg: ring.signing.alg, typ, kid: ring.signing.kid })
 				.sign(ring.signing.key);
@@ -96,8 +101,8 @@ const refusingAccessTokens = (typ: string) => {
 	}
 };
 
-export function signer(ring: Ring, now: () => number): Omit<Keys, "keySetPath"> {
-	const { sign, verify } = ringSigner(ring, now);
+export function signer(ring: Ring, now: () => number, log: Log): Omit<Keys, "keySetPath"> {
+	const { sign, verify } = ringSigner(ring, now, log);
 	return {
 		sign: async (claims, typ) => {
 			refusingAccessTokens(typ);
@@ -113,8 +118,8 @@ export function signer(ring: Ring, now: () => number): Omit<Keys, "keySetPath"> 
 }
 
 /** Access tokens, signed and verified as `at+jwt` alone. */
-export function accessSigner(ring: Ring, now: () => number): AccessTokenSigning {
-	const { sign, verify } = ringSigner(ring, now);
+export function accessSigner(ring: Ring, now: () => number, log: Log): AccessTokenSigning {
+	const { sign, verify } = ringSigner(ring, now, log);
 	return {
 		sign: (claims) => sign(claims, "at+jwt"),
 		verify: (token) => verify(token, "at+jwt"),
