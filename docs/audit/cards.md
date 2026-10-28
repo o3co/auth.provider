@@ -117,6 +117,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `client-metadata` (`src/client-metadata`): what it contributes for clients' metadata.
   - `consent-decision` (`src/consent-decision`): whether a request needs the user's consent before its code.
   - `flow` (`src/flow`): the steps a request goes through once its redirect URI is trusted, up to its code.
+  - `hint` (`src/hint`): reading the `id_token_hint` request parameter (OpenID Connect Core §3.1.2.1).
   - `route` (`src/route`): the endpoint's requests and answers.
   - `step-up` (`src/step-up`): the acr a request asks for, and raising a session's authentication to meet it.
 - `@mod/claims-selection` (feature, `modules/oauth/claims-selection`): Decides which claim names a `claims` request parameter may release (OpenID Connect Core §5.5), by the client's allowance and the subject's consent, and keeps that selection and its value constraints for the code, the refresh family and each access token they give.

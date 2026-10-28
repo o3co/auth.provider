@@ -39,7 +39,10 @@ beforeAll(async () => {
 				},
 			},
 			clients: [app],
-			users: [{ identifier: "alice", password: "correct horse battery" }],
+			users: [
+				{ identifier: "alice", password: "correct horse battery" },
+				{ identifier: "bob", password: "battery staple horse" },
+			],
 			refresh: {},
 			discovery: true,
 			userinfo: true,
@@ -58,15 +61,17 @@ const browser = browserAt(() => base, issuer, {
 	username: "alice",
 	password: "correct horse battery",
 });
+/** Another person's browser, signed in as bob. */
+const bobs = browserAt(() => base, issuer, { username: "bob", password: "battery staple horse" });
 const claimsOf = (jwt: string | undefined) =>
 	JSON.parse(Buffer.from((jwt ?? "").split(".")[1] ?? "", "base64url").toString()) as Record<
 		string,
 		unknown
 	>;
 /** A fresh login's authorization response to an OpenID request with these parameters, and the tokens its code gives. */
-async function signedIn(extra: Record<string, string> = {}) {
-	browser.forget();
-	const res = await browser.authorize({
+async function signedIn(extra: Record<string, string> = {}, as = browser) {
+	as.forget();
+	const res = await as.authorize({
 		response_type: "code",
 		client_id: app.id,
 		redirect_uri: callback,
@@ -93,6 +98,18 @@ async function signedIn(extra: Record<string, string> = {}) {
 	)) as Record<string, string>;
 	return { at: res.at, tokens };
 }
+
+/** An OpenID request from the app's browser with these parameters added. */
+const asked = (extra: Record<string, string>) => ({
+	response_type: "code",
+	client_id: app.id,
+	redirect_uri: callback,
+	state: "s2",
+	scope: "openid read",
+	code_challenge: challenge,
+	code_challenge_method: "S256",
+	...extra,
+});
 
 describe("OpenID Connect: the ID token", () => {
 	it("carries auth_time where max_age, or auth_time as an essential claim, was asked [oidc-core-3.1.2.1-s] [oidc-core-2-h]", async () => {
@@ -184,6 +201,48 @@ describe("OpenID Connect: the ID token", () => {
 			expect(words, name).toEqual(expect.arrayContaining(["openid", "read"]));
 		}
 	});
+
+	// The legacy build reads no id_token_hint at authorization, and gives a code for whoever is signed in.
+	it.skipIf(areaTarget().differs("authorize-reads-id-token-hint"))(
+		"issues a code under an id_token_hint only for the End-User it names: a code for the one signed in, prompt=none or not, and login_required for another, who has a session here [oidc-core-3.1.2.1-u] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]",
+		async () => {
+			const own = (await signedIn()).tokens.id_token ?? "";
+			const others = (await signedIn({}, bobs)).tokens.id_token ?? "";
+			for (const prompt of [{}, { prompt: "none" }]) {
+				const mine = await browser.authorize(asked({ id_token_hint: own, ...prompt }));
+				expect(mine.at?.searchParams.has("code"), JSON.stringify(prompt)).toBe(true);
+				const theirs = await browser.authorize(asked({ id_token_hint: others, ...prompt }));
+				expect(
+					[theirs.at?.searchParams.get("error"), theirs.at?.searchParams.has("code")],
+					JSON.stringify(prompt),
+				).toEqual(["login_required", false]);
+			}
+		},
+	);
+
+	// The legacy build reads no id_token_hint at authorization, so one it did not issue gets a code too.
+	it.skipIf(areaTarget().differs("authorize-reads-id-token-hint"))(
+		"refuses an id_token_hint it did not issue as invalid_request, sent back with state and iss [oidc-core-3.1.2.2-f]",
+		async () => {
+			await signedIn();
+			const forged = await browser.authorize(asked({ id_token_hint: "e30.e30.c2ln" }));
+			expect(["error", "state", "iss"].map((name) => forged.at?.searchParams.get(name))).toEqual([
+				"invalid_request",
+				"s2",
+				issuer,
+			]);
+		},
+	);
+
+	// The legacy build refuses select_account as a prompt word it does not know (invalid_request).
+	it.skipIf(areaTarget().differs("select-account-refused"))(
+		"refuses prompt=select_account as account_selection_required, with no page to choose an account by [oidc-core-3.1.2.1-q]",
+		async () => {
+			await signedIn();
+			const res = await browser.authorize(asked({ prompt: "select_account" }));
+			expect(res.at?.searchParams.get("error")).toBe("account_selection_required");
+		},
+	);
 
 	it("answers no CORS request at the authorization endpoint, a listed origin's included [oidc-discovery-3-ak] [rfc9700-2.6-e]", async () => {
 		const query = new URLSearchParams({ response_type: "code", client_id: app.id });
