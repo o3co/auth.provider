@@ -76,6 +76,9 @@ function undeclaredLinks(
 export default defineModule(
 	{
 		name: "users",
+		// Safe on many instances given the same registered users on each (deployment-guarantees, Several
+		// instances); the rest it keeps is behind the store's interfaces or an outside ledger.
+		replicaSafe: true,
 		section,
 		takes: [secretCheckers, contactStore, ledgers, linkStore, upstreamNames],
 	},

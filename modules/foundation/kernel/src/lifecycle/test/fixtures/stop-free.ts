@@ -1,7 +1,7 @@
 // A host stopping an assembly whose stop hook never ends: the stop holds nothing, so the process ends on its own.
 import { assemble, contract, defineModule, kernelConfig } from "../../../contract.ts";
 
-const holding = defineModule({ name: "holding", takes: [] }, (m) => [
+const holding = defineModule({ name: "holding", replicaSafe: true, takes: [] }, (m) => [
 	m.provide(contract<void>("held")).by((c) => {
 		c.onStop(() => new Promise<void>(() => {}));
 	}),

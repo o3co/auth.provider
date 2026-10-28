@@ -22,6 +22,7 @@ const takes = [handoff, ...idpsTakes, ...loginTakes, ...roundTripTakes];
 export default defineModule(
 	{
 		name: "federation",
+		replicaSafe: true,
 		section,
 		refusedInProduction: heldPageRefused,
 		takes,

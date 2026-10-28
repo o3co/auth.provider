@@ -151,7 +151,7 @@ export async function opened(
 	const { endpoints, offersIss } = s.discovery
 		? await discovered(s, reach, hosts)
 		: { endpoints: given(s), offersIss: false };
-	const requireIss = s["require-iss"] || offersIss;
+	const requireIss = !s["accept-missing-iss"] || offersIss;
 	if (!requireIss) at.log.warn("idp-oidc.iss_not_required", { idp: at.idp });
 	const skewMs = s["clock-skew"] * 1000;
 	const client = s["client-id"];

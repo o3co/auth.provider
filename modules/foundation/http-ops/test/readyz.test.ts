@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 const probeModule = (probe: Probe) =>
-	defineModule({ name: `probe-${probe.name}`, takes: [] }, (m) => [
+	defineModule({ name: `probe-${probe.name}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(probes).by(() => probe),
 	]);
 

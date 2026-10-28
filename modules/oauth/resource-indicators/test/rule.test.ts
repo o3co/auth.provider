@@ -6,7 +6,7 @@ import resourceIndicators from "../src/module.ts";
 
 /** The rules composed, as token-endpoint collects them. */
 const composed = contract<readonly TargetRule[]>("test.composed-rules");
-const probe = defineModule({ name: "probe", takes: [targetRules] }, (m) => [
+const probe = defineModule({ name: "probe", replicaSafe: true, takes: [targetRules] }, (m) => [
 	m.provide(composed).by((c) => c.collect(targetRules)),
 ]);
 let rule: TargetRule;

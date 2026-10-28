@@ -9,7 +9,7 @@ const kinds = contract<readonly FactorKind[]>("kinds");
 const composition = (random?: Random) => ({
 	modules: [
 		recoveryModule,
-		defineModule({ name: "reader", takes: [factorKinds] }, (m) => [
+		defineModule({ name: "reader", replicaSafe: true, takes: [factorKinds] }, (m) => [
 			m.provide(kinds).by((c) => c.collect(factorKinds)),
 		]),
 	],

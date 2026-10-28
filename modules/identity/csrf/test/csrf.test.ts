@@ -172,7 +172,7 @@ describe("the route", () => {
 	});
 });
 
-const guarded = defineModule({ name: "guarded", takes: [] }, (m) =>
+const guarded = defineModule({ name: "guarded", replicaSafe: false, takes: [] }, (m) =>
 	(["GET", "POST", "DELETE"] as const).map((method) =>
 		m.contribute(routes).by(() => ({
 			method,
@@ -265,7 +265,7 @@ describe.each([
 
 	it("marks the policy own-site for every method but GET", async () => {
 		const declared = (method: "GET" | "POST" | "PUT" | "DELETE") =>
-			defineModule({ name: "declared", takes: [] }, (m) => [
+			defineModule({ name: "declared", replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(routes).by(() => ({
 					method,
 					path: "/declared",

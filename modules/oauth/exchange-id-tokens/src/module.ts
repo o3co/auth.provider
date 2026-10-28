@@ -14,6 +14,7 @@ export const exchangeIdTokensOver = (issuers: Issuers) =>
 	defineModule(
 		{
 			name: "exchange-id-tokens",
+			replicaSafe: true,
 			section,
 			// The verifiers are contributed, not collected, so they are not named.
 			takes: [clients, externalJwt, users, revocations, usedIdTokens, idTokenChecks],

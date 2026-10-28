@@ -119,11 +119,11 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 			"userinfo-endpoint": endpoint
 				.optional()
 				.describe("Where UserInfo is read, without discovery; only with read-userinfo."),
-			"require-iss": z
+			"accept-missing-iss": z
 				.boolean()
 				.prefault(false)
 				.describe(
-					"Asks every callback for `iss`, even where the issuer's description does not offer it.",
+					"Takes a callback without `iss` where the issuer's description does not offer it, for an IdP that never sends it; warned of at every start.",
 				),
 			"clock-skew": setting
 				.duration("s")

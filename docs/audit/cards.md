@@ -340,7 +340,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `session-closing` (`src/session-closing`): the fault scenes of a closing session closed, every path for its tokens with it (`guarantee-1-a`).
   - `space-lists` (`src/space-lists`): the scenes of the space-delimited lists the code flow writes and reads.
   - `store-rows` (`src/store-rows`): the fault scenes of a store that cannot write, by a code redeemed, and of a Redis set to evict keys (`guarantee-3-j`, `guarantee-3-k`).
-  - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a code while a dependency its decision waits on cannot answer (`guarantee-3-b`).
+  - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a code (`guarantee-3-b`) or a refresh token (`guarantee-3-c`) while a dependency its decision waits on cannot answer.
   - `userinfo` (`src/userinfo`): the scenes of OpenID Connect's userinfo.
   - `verified-email` (`src/verified-email`): the scenes of refusing a token to a user whose email is not verified.
 - `@mod/conformance-device` (verification, `modules/tooling/conformance-device`): Owns the conformance scenes of the device area: device authorization, the verification interface and polling (RFC 8628), refusing an approval by a user whose email is not verified, and the audit events of the verification interface.
@@ -350,6 +350,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a device code while the store cannot answer (`guarantee-3-e`).
 - `@mod/conformance-exchange` (verification, `modules/tooling/conformance-exchange`): Owns the conformance scenes of the exchange area: Token Exchange (RFC 8693), its success with and without an actor, the lifetime asked, and its refusals, among them a subject whose email is not verified.
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `id-token-once` (`src/id-token-once`): the fault scenes of an Apple id_token taken once, whether by the token exchange or as a JWT bearer assertion, in exchange-id-tokens' one record (`guarantee-5-j`).
   - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, the exchange of a token given before it (`guarantee-4-e`), the boundary written through the ledger's route.
 - `@mod/conformance-federation` (verification, `modules/tooling/conformance-federation`): Owns the conformance scenes of the federation area: logging a browser in through an upstream OpenID Connect IdP, Google, Apple, or GitHub's OAuth, the audit events of those logins, and a start while the store fails.
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).

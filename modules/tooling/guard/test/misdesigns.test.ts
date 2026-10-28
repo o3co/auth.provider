@@ -82,11 +82,11 @@ describe("static-analysis specimens: misdesigns the guard stops", () => {
 });
 
 describe("static-analysis specimens: misdesigns the guard does not detect", () => {
-	// The boot check refuses only a module that declares itself unsafe on several instances, and takes
-	// one that declares nothing as safe: modules/foundation/kernel/test/assemble.test.ts ("refuses
-	// replica-unsafe modules only when deployed on multiple replicas", "takes a module that says nothing
-	// of replicas as safe on multiple instances"). A false declaration of safety passes it too. Human
-	// review required; no automated detection demonstrated.
+	// The boot check refuses a module that declares itself unsafe on several instances, or declares
+	// nothing of them, and never reads what a module keeps: a false declaration of safety passes it, as
+	// modules/foundation/kernel/src/deployment/test/deployment.test.ts shows ("boots a module keeping a
+	// used id in its own process that falsely declares itself safe, and two instances take it twice").
+	// Human review required; no automated detection demonstrated.
 	it("guard does not detect a feature that keeps one-use state in memory", () => {
 		const remembering = feature(
 			"@mis/once-in-memory",

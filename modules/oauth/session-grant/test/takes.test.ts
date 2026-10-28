@@ -10,7 +10,7 @@ import sessionGrant from "../src/module.ts";
 
 it("takes all its module names", async () => {
 	const collected = contract<unknown>("test.grants");
-	const beside = defineModule({ name: "beside", takes: [grants] }, (m) => [
+	const beside = defineModule({ name: "beside", replicaSafe: true, takes: [grants] }, (m) => [
 		m.provide(originEvidence).by(() => ({}) as never),
 		m.provide(sessions).by(() => ({}) as never),
 		m.provide(tokens).by(() => ({}) as never),

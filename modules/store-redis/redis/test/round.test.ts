@@ -19,7 +19,7 @@ afterEach(async () => {
 	app = undefined;
 });
 
-const replicated = defineModule({ name: "replicated-owner", takes: [] }, (m) => [
+const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
 ]);
 
@@ -34,7 +34,7 @@ function primary() {
 async function boot(port: number, replication?: "replicas" | "none") {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
-	const asker = defineModule({ name: "asker", takes: [] }, (m) => [
+	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(contract<object>("asker")).by((c) => {
 			context = c;
 			return {};

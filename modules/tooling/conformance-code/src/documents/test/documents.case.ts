@@ -34,7 +34,7 @@ const scene = codeScene({
 	],
 	users: [user],
 	discovery: true,
-	documents: { deny: ["denied.example"], scopes: ["openid"] },
+	documents: { anyHost: true, deny: ["denied.example"], scopes: ["openid"] },
 });
 
 let running: Started;
