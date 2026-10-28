@@ -58,6 +58,8 @@ const origin = "https://as.example";
 let now = 1_800_000_000_000;
 /** Bytes the next draws of a user code take (16 at a time; the device code takes 32), so a test can make two codes meet. */
 const draws: Uint8Array[] = [];
+/** Every draw of 32 bytes the composition made, as base64url, so a test can tell what a device code was made from. */
+const drawn: string[] = [];
 const logged = recordingLog();
 /** The warnings logged after `from`, a count of lines taken before. */
 const warnedSince = (from: number) =>
@@ -69,11 +71,18 @@ const warnedSince = (from: number) =>
 const runtime = quietRuntime({
 	log: logged.log,
 	clock: { now: () => now },
-	random: { bytes: (n) => (n === 16 && draws.shift()) || new Uint8Array(randomBytes(n)) },
+	random: {
+		bytes: (n) => {
+			const bytes = (n === 16 && draws.shift()) || new Uint8Array(randomBytes(n));
+			if (n === 32) drawn.push(Buffer.from(bytes).toString("base64url"));
+			return bytes;
+		},
+	},
 });
 let stop = async () => {};
 afterEach(() => {
 	draws.length = 0;
+	drawn.length = 0;
 	return stop();
 });
 const allowed = (grants: string[]) =>
@@ -347,6 +356,13 @@ describe("device authorization", () => {
 		const crowded = await s.authorize();
 		draws.length = 0;
 		expect([crowded.status, crowded.body.error]).toEqual([503, "temporarily_unavailable"]);
+	});
+
+	it("makes each device code of 32 fresh random bytes [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
+		const s = await serve();
+		const codes = [(await s.authorize()).body.device_code, (await s.authorize()).body.device_code];
+		for (const code of codes) expect(drawn).toContain(code);
+		expect(codes[0]).not.toBe(codes[1]);
 	});
 
 	it("answers the page's address with the code filled in only when asked to", async () => {
