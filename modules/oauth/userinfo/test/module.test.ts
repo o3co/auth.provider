@@ -36,7 +36,8 @@ const parts = defineModule({ name: "parts", takes: [metadata, audienceAdditions]
 					access: {
 						kind: "valid",
 						id: "t",
-						grant: { subject: "ann", scope: ["openid"] },
+						grant: { subject: "ann", audience: ["app"], scope: ["openid"] },
+						addedAudience: [issuerUrl],
 						tokenType: "Bearer",
 					},
 				}),

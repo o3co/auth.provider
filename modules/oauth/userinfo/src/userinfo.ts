@@ -9,6 +9,8 @@ import type { Tokens } from "@mod/tokens";
 export interface UserinfoParts {
 	/** Epoch ms, `kernel`'s clock. */
 	readonly now: () => number;
+	/** The issuer's URL: userinfo is its resource, so a token must be for it. */
+	readonly issuer: string;
 	readonly senderBinding: Pick<SenderBindings, "admitted">;
 	readonly tokens: Pick<Tokens, "verifyAccess">;
 	readonly sessionTokens: Pick<SessionTokens, "sessionOf">;
@@ -34,7 +36,7 @@ export function userinfoOver(p: UserinfoParts) {
 			const { status, error, headers } = admission;
 			return answer(status, error === undefined ? {} : { error }, headers);
 		}
-		const { id, grant, tokenType, expiresAt } = admission.access;
+		const { id, grant, tokenType, expiresAt, addedAudience } = admission.access;
 		// OIDC Core §5.3 serves a token issued for openid; any other is short of scope (RFC 6750 §3.1).
 		if (!grant.scope.includes("openid")) {
 			return answer(
@@ -42,6 +44,10 @@ export function userinfoOver(p: UserinfoParts) {
 				{ error: "insufficient_scope" },
 				challengeOf(tokenType, "insufficient_scope"),
 			);
+		}
+		// A token not for the issuer, whose resource this is, is refused (RFC 9700 §2.3).
+		if (![...grant.audience, ...(addedAudience ?? [])].includes(p.issuer)) {
+			return answer(401, { error: "invalid_token" }, challengeOf(tokenType, "invalid_token"));
 		}
 		const bound = await p.sessionTokens.sessionOf(id);
 		// A token issued in no session (client credentials, say) is answered its subject only.

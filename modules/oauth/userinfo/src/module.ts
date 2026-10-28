@@ -21,6 +21,7 @@ const cors = {
 async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 	const userinfo = userinfoOver({
 		now: c.clock.now,
+		issuer: (await c.get(issuer)).url,
 		senderBinding: await c.get(senderBinding),
 		tokens: await c.get(tokens),
 		sessionTokens: await c.get(sessionTokens),
