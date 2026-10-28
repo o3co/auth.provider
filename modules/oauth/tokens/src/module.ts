@@ -5,13 +5,11 @@ import { accessTokenSigning, keys } from "@mod/keys";
 import { senderBinding } from "@mod/sender-binding";
 import { denylistAllowanceMs, denylistOver, revokedTokens } from "@mod/token-denylist";
 import { z } from "zod";
-import { addedFor, audienceOf } from "./audience/audience.ts";
 import {
 	type AccessCheck,
 	type AccessGrant,
 	type Actor,
 	accessConditions,
-	audienceAdditions,
 	issuancePolicies,
 	subjectChecks,
 	type Tokens,
@@ -51,8 +49,6 @@ const claimsShape = z.object({
 	amr: z.array(z.string()).optional(),
 	auth_time: z.number().optional(),
 	acr: z.string().min(1).optional(),
-	// How many of the last `aud` values the issuer added: never all of them.
-	aud_added: z.number().int().positive().optional(),
 });
 
 type Claims = z.infer<typeof claimsShape>;
@@ -67,17 +63,12 @@ type Checked =
 	| { readonly kind: "checked"; readonly access: Valid; readonly issuedAt: number }
 	| Invalid;
 
-/**
- * A kept grant as claims, with the audiences added past its own, counted in `aud_added`; the added
- * claims, `act`, `amr`, `auth_time` and `acr` only when given.
- */
-const grantClaims = (grant: AccessGrant, added: readonly string[]) => ({
+/** A kept grant as claims; the added ones, `act`, `amr`, `auth_time` and `acr` only when given. */
+const grantClaims = (grant: AccessGrant) => ({
 	// None can stand for a name below: a grant adds no reserved name.
 	...grant.claims,
 	sub: grant.subject,
-	...(added.length > 0
-		? { aud: [...grant.audience, ...added], aud_added: added.length }
-		: { aud: grant.audience.length === 1 ? grant.audience[0] : grant.audience }),
+	aud: grant.audience.length === 1 ? grant.audience[0] : grant.audience,
 	client_id: grant.issuedTo,
 	...(grant.scope.length > 0 ? { scope: grant.scope.join(" ") } : {}),
 	...(grant.actor ? { act: actOf(grant.actor) } : {}),
@@ -88,16 +79,12 @@ const grantClaims = (grant: AccessGrant, added: readonly string[]) => ({
 	...(grant.acr === undefined ? {} : { acr: grant.acr }),
 });
 
-/** The grant read back from verified claims, its audience as `audienceOf` split it, and the claims its grant added. */
-const grantOf = (
-	claims: Claims,
-	audience: readonly string[],
-	added: AddedClaims | undefined,
-): AccessGrant =>
+/** The grant read back from verified claims, and the claims its grant added. */
+const grantOf = (claims: Claims, added: AddedClaims | undefined): AccessGrant =>
 	Object.freeze({
 		subject: claims.sub,
 		issuedTo: claims.client_id,
-		audience: Object.freeze([...audience]),
+		audience: Object.freeze(typeof claims.aud === "string" ? [claims.aud] : claims.aud),
 		scope: Object.freeze(claims.scope ? claims.scope.split(" ") : []),
 		...(claims.act ? { actor: actorOf(claims.act) } : {}),
 		...(claims.amr ? { amr: Object.freeze(claims.amr) } : {}),
@@ -132,7 +119,6 @@ export default defineModule(
 			accessConditions,
 			issuer,
 			issuancePolicies,
-			audienceAdditions,
 			...(denylisted(s) ? [revokedTokens] : []),
 		],
 	},
@@ -168,8 +154,6 @@ export default defineModule(
 			);
 			const iss = (await c.get(issuer)).url;
 			const lifetime = c.section["access-token-lifetime"];
-			const additions = await c.collect(audienceAdditions);
-			const addedTo = (grant: AccessGrant) => addedFor(additions, grant);
 
 			/** Verifies everything but revocation; `allowanceMs` keeps a just-expired token valid. */
 			const check = async (token: string, allowanceMs = 0): Promise<Checked> => {
@@ -184,8 +168,6 @@ export default defineModule(
 				const parsed = claimsShape.safeParse(verified.claims);
 				if (!parsed.success) return { kind: "invalid", reason: "shape" };
 				const claims = parsed.data;
-				const audience = audienceOf(claims);
-				if (!audience) return { kind: "invalid", reason: "shape" };
 				if (claims.iss !== iss) return { kind: "invalid", reason: "issuer" };
 				if (claims.exp * 1000 + allowanceMs <= c.clock.now())
 					return { kind: "invalid", reason: "expired" };
@@ -210,10 +192,7 @@ export default defineModule(
 						expiresAt: claims.exp * 1000,
 						tokenType,
 						...(binding ? { binding: { ...binding, tokenType } } : {}),
-						...(audience.added.length > 0
-							? { addedAudience: Object.freeze([...audience.added]) }
-							: {}),
-						grant: grantOf(claims, audience.grant, extra.added),
+						grant: grantOf(claims, extra.added),
 					},
 				};
 			};
@@ -225,10 +204,9 @@ export default defineModule(
 			const issueAccess: IssueAccess = async (grant, limits) => {
 				const lifetimeSeconds = lifetimeOf(limits?.lifetimeSeconds, lifetime);
 				const { iat, exp } = expiryOf(c.clock.now(), lifetimeSeconds, limits?.notAfter);
-				const kept = keptGrant(grant, iat);
 				const claims = {
 					iss,
-					...grantClaims(kept, addedTo(kept)),
+					...grantClaims(keptGrant(grant, iat)),
 					iat,
 					exp,
 					jti: tokenId(c.random),
