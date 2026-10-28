@@ -1,5 +1,6 @@
 import type { Client } from "@mod/clients";
 import { clientSection } from "@mod/consent";
+import type { Session } from "@mod/session";
 import { describe, expect, it } from "vitest";
 import { consentDecisionWith } from "../consent-decision.ts";
 
@@ -36,7 +37,7 @@ describe("consent-decision", () => {
 		]);
 	});
 
-	it("refuses a client that is not first-party while consent cannot ask, reading no prompt, and serves a first-party one [oidc-core-3.1.2.1-o]", () => {
+	it("refuses a client that is not first-party while consent cannot ask, reading no prompt, and serves a first-party one, prompt=consent too [oidc-core-3.1.2.1-o]", async () => {
 		const decision = consentDecisionWith({
 			consents: { asking: false, ask: async () => "", covers: async () => true },
 		});
@@ -47,5 +48,15 @@ describe("consent-decision", () => {
 			description: "client is not authorized for the authorization endpoint",
 		});
 		expect(decision.served(clientOf("app", true))).toBeUndefined();
+		// A first-party client needs no consent, so prompt=consent asks nothing it cannot obtain.
+		const prompt = new Set(["consent"]);
+		const decided = decision.decide(
+			clientOf("app", true),
+			{} as Session,
+			["read"],
+			prompt,
+			() => "",
+		);
+		expect(await decided).toBeUndefined();
 	});
 });
