@@ -317,8 +317,8 @@ it("has no section: a configuration that writes one is refused at boot", async (
 	});
 	const refused = await written.catch((error: unknown) => error);
 	// The refusal names the section, so an operator sees which key to take out.
-	expect(BootRefused.is(refused) && refused.refusals.map((r) => r.where)).toEqual([
-		expect.stringMatching(/^claims-selection/),
+	expect(BootRefused.is(refused) && refused.refusals).toEqual([
+		{ where: "claims-selection", reason: "module without a section" },
 	]);
 });
 
