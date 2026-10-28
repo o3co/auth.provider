@@ -17,7 +17,6 @@
 - `verifiesUnder`: whether a JWK may verify, under an algorithm or any of `verifyAlgorithms`, typed as `VerifyAlgorithm`; `isVerifyAlgorithm` tells one from any other name.
 - `publicMembers`: a JWK rebuilt from its type's public members alone, without reading it.
 - `isCanonicalJws`: whether a compact JWS is written in its one form; `verify` answers any other as `malformed`. `secretBytes` (exactly or at least n): the setting of a secret's bytes every module takes, strict base64 of at least 8 byte values, never a `REPLACE-` sample; a refusal never names the value.
-- `mediaTypeOf`: a JOSE `typ` as RFC 7515 compares it, its type alone, without parameters, space, case or `application/`; the one reading every module sorts tokens by.
 - `bearerToken` (at least n): the setting of a bearer token sent to an outside party, an RFC 6750 b64token of at least n bytes and 8 byte values of key material however read (as written, hex or base64), never a `REPLACE-` sample; a refusal never names the value.
 - Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a `secret`, its bytes the HMAC key as `secret-encoding` reads them: `hex`, `base64` or `utf8`, the text's own; unset, hex where the value is whole bytes of hex, else base64), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`).
 - Test configuration builders (`./testing`), with a new Ed25519 signing key unless a test sets one.

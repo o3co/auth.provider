@@ -20,6 +20,15 @@ export const prefix = "store";
 export const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const pem = (k: KeyObject, type: "pkcs8" | "spki") => k.export({ format: "pem", type }).toString();
 const provider = generateKeyPairSync("ed25519");
+/** The provider's signing key, which every scene signs its tokens with. */
+const keys = {
+	signing: {
+		kid: "faults",
+		alg: "EdDSA",
+		privatePem: pem(provider.privateKey, "pkcs8"),
+		publicPem: pem(provider.publicKey, "spki"),
+	},
+} as const;
 const trusted = generateKeyPairSync("ed25519");
 export const app: ClientScene = {
 	id: "app",
@@ -35,14 +44,7 @@ export const app: ClientScene = {
 export const faultScene = (): AreaScene =>
 	oauthScene({
 		issuer,
-		keys: {
-			signing: {
-				kid: "faults",
-				alg: "EdDSA",
-				privatePem: pem(provider.privateKey, "pkcs8"),
-				publicPem: pem(provider.publicKey, "spki"),
-			},
-		},
+		keys,
 		clients: [app],
 		jwtBearer: {
 			issuers: [{ issuer: upstream, alg: "EdDSA", publicPem: pem(trusted.publicKey, "spki") }],
@@ -80,13 +82,14 @@ export interface Answer {
 	readonly body: Readonly<Record<string, unknown>>;
 }
 
-/** A form posted to the instance's token endpoint, and its answer. */
-async function tokenAt(
+/** A form posted to the instance's endpoint at `path`, and its answer. */
+async function postedAt(
 	i: Instance,
+	path: string,
 	form: Record<string, string>,
 	headers: Record<string, string> = {},
 ): Promise<Answer> {
-	const res = await fetch(`${i.baseUrl}/oauth/token`, {
+	const res = await fetch(`${i.baseUrl}${path}`, {
 		method: "POST",
 		headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
 		body: new URLSearchParams(form),
@@ -98,6 +101,10 @@ async function tokenAt(
 	} catch {}
 	return { status: res.status, body };
 }
+
+/** A form posted to the instance's token endpoint, and its answer. */
+const tokenAt = (i: Instance, form: Record<string, string>, headers: Record<string, string> = {}) =>
+	postedAt(i, "/oauth/token", form, headers);
 
 /** The assertion sent to the instance's token endpoint by `app`. */
 export const grantAt = (i: Instance, a: Assertion): Promise<Answer> =>
@@ -138,14 +145,7 @@ export const keyed: ClientScene = {
 export const keyedScene = (): AreaScene =>
 	oauthScene({
 		issuer,
-		keys: {
-			signing: {
-				kid: "faults",
-				alg: "EdDSA",
-				privatePem: pem(provider.privateKey, "pkcs8"),
-				publicPem: pem(provider.publicKey, "spki"),
-			},
-		},
+		keys,
 		clients: [keyed],
 		storeFaults: true,
 	});
@@ -198,14 +198,7 @@ export const holding: ClientScene = {
 export const dpopScene = (): AreaScene =>
 	oauthScene({
 		issuer,
-		keys: {
-			signing: {
-				kid: "faults",
-				alg: "EdDSA",
-				privatePem: pem(provider.privateKey, "pkcs8"),
-				publicPem: pem(provider.publicKey, "spki"),
-			},
-		},
+		keys,
 		clients: [holding],
 		dpop: true,
 		storeFaults: true,
@@ -249,5 +242,65 @@ export const proofSpendOf = (p: Proof): Match =>
 		prefix,
 		space: "dpop-store.spent",
 		partition: `${p.jkt}.${p.jti}`,
+		operations: ["putIfAbsent"],
+	});
+
+/** The client that is issued tokens for a resource, and revokes them and introspects them, allowed that resource. */
+export const owner: ClientScene = {
+	id: "owner",
+	kind: "confidential",
+	method: "client_secret_post",
+	secret: "owner-secret-0123456789abcdef",
+	grants: ["client_credentials"],
+	scopes: ["read"],
+	defaultScopes: ["read"],
+	audiences: ["https://api.example"],
+};
+
+/** Client credentials with revocation and introspection on the Redis store, for one client. */
+export const revocationScene = (): AreaScene =>
+	oauthScene({
+		issuer,
+		keys,
+		clients: [owner],
+		introspection: true,
+		revocation: true,
+		storeFaults: true,
+	});
+
+const asOwner = { client_id: owner.id, client_secret: owner.secret ?? "" };
+
+/** An access token the instance issues to the owner. */
+export async function issuedAt(i: Instance): Promise<string> {
+	const answer = await tokenAt(i, { grant_type: "client_credentials", ...asOwner });
+	const token = answer.body.access_token;
+	if (typeof token !== "string") throw new Error(`no access token: ${answer.status}`);
+	return token;
+}
+
+/** The owner's revocation of the token at the instance. */
+export const revokedAt = (i: Instance, token: string): Promise<Answer> =>
+	postedAt(i, "/oauth/revoke", { token, ...asOwner });
+
+/** Whether the instance's introspection takes the token as active. */
+export async function activeAt(i: Instance, token: string): Promise<boolean> {
+	const answer = await postedAt(i, "/oauth/introspect", { token, ...asOwner });
+	if (answer.status !== 200) throw new Error(`introspection answered ${answer.status}`);
+	return answer.body.active === true;
+}
+
+/** The `jti` of an access token issued as a JWT. */
+const jtiOf = (token: string) => {
+	const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
+	if (typeof claims.jti !== "string") throw new Error("the access token names no jti");
+	return claims.jti as string;
+};
+
+/** The write that revokes the token: its `jti` kept in the revoked list. */
+export const revocationOf = (token: string): Match =>
+	storeWrite({
+		prefix,
+		space: "tokens-store.revoked",
+		partition: jtiOf(token),
 		operations: ["putIfAbsent"],
 	});

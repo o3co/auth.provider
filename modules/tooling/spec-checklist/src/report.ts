@@ -96,7 +96,7 @@ export function summaryTable(
 }
 
 /**
- * The compliance report: a page of each spec's items, and a README that says how to read them. The
+ * The checklist report: a page of each spec's items, and a README that says how to read them. The
  * summary over every spec is printed, not kept, so a change to one spec touches its page alone.
  */
 export function reportFiles(
@@ -108,7 +108,7 @@ export function reportFiles(
 	files.set(
 		"README.md",
 		[
-			"# Specification compliance",
+			"# Specification checklist",
 			"",
 			generated,
 			"",

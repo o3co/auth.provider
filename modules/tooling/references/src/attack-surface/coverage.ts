@@ -103,11 +103,6 @@ export const coverage: Coverage = {
 				"`none`: no TLS, so the relay's authentication and the mail go in the clear, to a loopback relay only",
 		},
 		{
-			key: "userinfo.issuer-audience",
-			weakens:
-				"`off` and `adding`: userinfo takes an openid access token whose aud does not name the issuer",
-		},
-		{
 			key: "outbound.allow-any-public",
 			weakens: "any public host is reached by name, not only those `outbound.allow` lists",
 		},
@@ -201,10 +196,6 @@ export const coverage: Coverage = {
 		},
 		{ key: "jti-ledger-http.issuer", why: "the `iss` the ledger answers for, not where it is" },
 		{ key: "signer-keys-http.issuer", why: "the `iss` the ledger answers for, not where it is" },
-		{
-			key: "userinfo.issuer-audience",
-			why: "whether an openid token names this issuer in its aud and userinfo requires it, not a place",
-		},
 		{
 			key: "federation.idps.<name>.discovery",
 			why: "whether the issuer's discovery is read; the issuer is the destination",

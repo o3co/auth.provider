@@ -360,7 +360,7 @@ describe("consent: the page", () => {
 });
 
 describe("consent: the answer", () => {
-	it("records the grant on acceptance and sends the user on; a resend gets the same answer, the other decision none", async () => {
+	it("records the grant on acceptance and sends the user on by 303; a resend gets the same answer, the other decision none [rfc9700-2.1-c]", async () => {
 		const { pendingFor, given } = await serve();
 		const alice = await pendingFor("alice");
 		const accepted = await alice.answer("accept");
@@ -370,7 +370,7 @@ describe("consent: the answer", () => {
 		expect((await alice.answer("deny")).status).toBe(400);
 	});
 
-	it("sends a refusal on without granting anything", async () => {
+	it("sends a refusal on by 303 without granting anything [rfc9700-2.1-c]", async () => {
 		const { pendingFor, given } = await serve();
 		const denied = await (await pendingFor("alice")).answer("deny");
 		expect([denied.status, denied.location]).toEqual([303, asked.onDeny]);
@@ -405,7 +405,7 @@ describe("consent: the answer", () => {
 		]);
 	});
 
-	it("keeps the challenge when the answer is refused for CSRF or a bad decision", async () => {
+	it("keeps the challenge when the answer is refused for CSRF or a bad decision [oidc-core-3.1.2.3-e] [rfc6749-10.12-a]", async () => {
 		const { pendingFor } = await serve();
 		const alice = await pendingFor("alice");
 		expect((await alice.answer("accept", { origin: "https://evil.example" })).status).toBe(403);
@@ -429,7 +429,7 @@ describe("consent: the answer", () => {
 		expect(await given.granted("app", "alice")).toEqual(["read", "write"]);
 	});
 
-	it("answers only the session that parked the challenge", async () => {
+	it("answers only the session that parked the challenge [rfc6749-10.12-a]", async () => {
 		const { sessionFor, pendingFor, call } = await serve();
 		const alice = await pendingFor("alice");
 		const { challenge } = alice;

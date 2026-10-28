@@ -238,7 +238,7 @@ The image uses Node 24, installs production dependencies only and runs as a non-
 
 Replace the in-memory store with Redis, or with your own adapter that meets the store contract. The Redis adapter needs Redis 7.0 or later as a single primary; cluster mode is refused. The app checks the server's settings at startup. Read the [Redis requirements](docs/runbook.md#redis) for persistence, replication and managed services.
 
-Set `kernel.deployment` to `single` or `multi`. With `multi`, the app refuses to start with modules that cannot run across instances, such as the in-memory store and the logging-only mailer.
+Read [what each shape of deployment is guaranteed](docs/deployment-guarantees.md), and what is left to it, before choosing one. Set `kernel.deployment` to `single` or `multi`. Which modules `multi` refuses at startup is [promise 5 of the security model](docs/security-model.md#promises-across-modules); read it before running several instances, above all for your own modules.
 
 Put the app behind a TLS-terminating proxy and set `http.trusted-proxies`. The proxy must remove any forwarded or client-certificate headers that clients send before it sets its own. Read the [deployment requirements](docs/runbook.md#before-you-deploy) and the [security model](docs/security-model.md) before you expose the service.
 

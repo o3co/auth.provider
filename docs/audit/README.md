@@ -33,6 +33,7 @@ What an audit of a release reads, from its tag. Each entry names a file by its p
 ## Operation
 
 - `docs/runbook.md`: what the deployment must provide before it runs, and how it is run.
+- `docs/deployment-guarantees.md`: what each shape of deployment can count on, which of it a test shows, what is left to the deployment, and what is not shown yet.
 - `docs/migration.md`: moving from the earlier system.
 - `docs/releasing.md`: how a release is cut, and what it checks before it publishes anything.
 

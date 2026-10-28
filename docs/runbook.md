@@ -24,7 +24,7 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 
 ## Before you deploy
 
-The app relies on the deployment for these. Each is required, not advice.
+The app relies on the deployment for these. Each is required, not advice. What each shape of deployment is guaranteed, and what is left to it, is in [Guarantees by deployment](deployment-guarantees.md).
 
 1. **The proxy in front strips and sets forwarded headers.** It removes any `X-Forwarded-For`, forwarded scheme or client-certificate header a client sent, and sets its own. The app trusts them from `http.trusted-proxies` alone, so a proxy that passes a client's own lets the client choose its source address and certificate.
 2. **Outbound through a proxy leaves address checks to the proxy.** With `outbound.proxy` set, the app checks a destination's name, and an address written in its URL, but never resolves a proxied name: the proxy must refuse private, loopback, link-local and metadata addresses itself, and Azure's platform address `168.63.129.16`. Boot warns of this.
@@ -101,7 +101,7 @@ Rate limits fail closed by default (`rate-limit.fail-mode = closed`), so an outa
 
 Each instance walks every federation grant kept every `federation-grants.sweep-interval` (default `1h`), erasing the credentials of grants past their end or ended by their subject's revocation that no request reads. A pass reads every grant record kept (each lives its lifetime and 30 days more) and, for each grant holding credentials, the subject's revocation boundary once or twice; every instance makes its own passes. Lengthen the interval where there are many grants or many instances.
 
-Set `kernel.deployment = multi` when more than one instance runs. Boot then refuses any module that keeps state in the process, such as the in-memory `store` and the logging-only `mail`. A pattern created with an in-memory store says in its README that it runs as one instance.
+Set `kernel.deployment = multi` when more than one instance runs. Which modules boot then refuses is [promise 5 of the security model](security-model.md#promises-across-modules); read it for your own modules. A pattern created with an in-memory store says in its README that it runs as one instance.
 
 ## Rotating the signing key
 

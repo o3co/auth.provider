@@ -128,7 +128,7 @@ A module can gain internal modules with their own cards to keep reading scope ma
 A public split should follow a real responsibility boundary.
 
 The kernel checks the application being assembled.
-Missing providers, conflicting contributions, invalid configuration and, in a multi-instance deployment, unsafe modules refuse boot.
+Missing providers, conflicting contributions and invalid configuration refuse boot; which modules a multi-instance deployment refuses is [promise 5 of the security model](docs/security-model.md#promises-across-modules).
 Refusals are collected by assembly stage and reported by key path, without values.
 The application serves nothing while boot is refused.
 

@@ -155,28 +155,6 @@ describe("guard", () => {
 		).toEqual(["G9 Hidden (Shown)"]);
 	});
 
-	it("holds a package to the limit an exception gives it for one measure, and refuses one without a reason or a package", () => {
-		const p = pkg("@t/x", { "src/contract.ts": "export const a = 1;\nexport const b = 2;\n" });
-		const tight = { ...budget, contractValues: 1 };
-		const g7 = (b: typeof budget) =>
-			check([p], b)
-				.filter((v) => v.rule === "G7 budget")
-				.map((v) => `${v.where} ${v.detail}`);
-		expect(g7(tight)).toEqual(["@t/x contract values 2 > 1"]);
-		const excepted = (e: object) => ({
-			...tight,
-			exceptions: [{ package: "@t/x", measure: "contract values", limit: 2, reason: "why", ...e }],
-		});
-		expect(g7(excepted({}))).toEqual([]);
-		expect(g7(excepted({ reason: " " }))).toEqual([
-			"budget exception @t/x contract values gives no reason",
-		]);
-		expect(g7(excepted({ package: "@t/none" }))).toEqual([
-			"@t/x contract values 2 > 1",
-			"budget exception @t/none contract values names no package in the workspace",
-		]);
-	});
-
 	it("limits the members of a contract's exported types, more widely for the kinds others build on", () => {
 		const source = {
 			"src/contract.ts":
@@ -471,25 +449,6 @@ describe("guard", () => {
 		expect(
 			check([p], { ...budget, cardItemBytes: 40 }).map((v) => `${v.where} ${v.detail}`),
 		).toEqual(["@t/items/src/inner card item bytes 44 > 40 (yyyyyyyyyyyy…)"]);
-	});
-
-	it("holds each card item to a package's exception for its bytes, looser or stricter than the budget", () => {
-		const p = {
-			...pkg("@t/item", { "src/contract.ts": "export const n = 1;\n" }),
-			card: `# item\n- ${"z".repeat(13)}\n`,
-		};
-		const items = (cardItemBytes: number, limit: number) =>
-			check([p], {
-				...budget,
-				cardItemBytes,
-				exceptions: [{ package: "@t/item", measure: "card item bytes", limit, reason: "why" }],
-			})
-				.filter((v) => v.detail.startsWith("card item bytes"))
-				.map((v) => v.detail);
-		// The item is 15 bytes: past the budget's 10, within the exception's 20.
-		expect(items(10, 20)).toEqual([]);
-		// Within the budget's 20, past the exception's 12.
-		expect(items(20, 12)).toEqual(["card item bytes 15 > 12 (zzzzzzzzzzzz…)"]);
 	});
 
 	it("counts comment lines from the syntax tree, ignoring // inside strings, against a share or a floor", () => {

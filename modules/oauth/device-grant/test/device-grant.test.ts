@@ -58,6 +58,8 @@ const origin = "https://as.example";
 let now = 1_800_000_000_000;
 /** Bytes the next draws of a user code take (16 at a time; the device code takes 32), so a test can make two codes meet. */
 const draws: Uint8Array[] = [];
+/** Every draw of 32 bytes the composition made, as base64url, so a test can tell what a device code was made from. */
+const drawn: string[] = [];
 const logged = recordingLog();
 /** The warnings logged after `from`, a count of lines taken before. */
 const warnedSince = (from: number) =>
@@ -69,11 +71,18 @@ const warnedSince = (from: number) =>
 const runtime = quietRuntime({
 	log: logged.log,
 	clock: { now: () => now },
-	random: { bytes: (n) => (n === 16 && draws.shift()) || new Uint8Array(randomBytes(n)) },
+	random: {
+		bytes: (n) => {
+			const bytes = (n === 16 && draws.shift()) || new Uint8Array(randomBytes(n));
+			if (n === 32) drawn.push(Buffer.from(bytes).toString("base64url"));
+			return bytes;
+		},
+	},
 });
 let stop = async () => {};
 afterEach(() => {
 	draws.length = 0;
+	drawn.length = 0;
 	return stop();
 });
 const allowed = (grants: string[]) =>
@@ -176,10 +185,18 @@ async function serve(...given: Parameters<typeof assembly>) {
 			},
 			body,
 		});
+		const text = await res.text();
 		return {
 			status: res.status,
 			headers: res.headers,
-			body: (await res.json().catch(() => ({}))) as Record<string, string>,
+			text,
+			body: (() => {
+				try {
+					return JSON.parse(text) as Record<string, string>;
+				} catch {
+					return {} as Record<string, string>;
+				}
+			})(),
 		};
 	};
 	const post = (path: string, form: Record<string, string> | string[][], headers = {}) =>
@@ -238,7 +255,7 @@ async function serve(...given: Parameters<typeof assembly>) {
 }
 
 describe("device authorization", () => {
-	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d]", async () => {
+	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d] [rfc8628-5.1-a]", async () => {
 		const s = await serve();
 		const given = await s.authorize();
 		expect(given.status).toBe(200);
@@ -269,6 +286,63 @@ describe("device authorization", () => {
 				attributes: { source: "198.51.100.1", reason: "bad_credentials" },
 			},
 		]);
+	});
+
+	it("refuses a request that names no client and authenticates none [rfc8628-3.1-a]", async () => {
+		const s = await serve();
+		for (const form of [{}, { scope: "read" }]) {
+			const asked = await s.post("/oauth/device_authorization", form);
+			expect([asked.status, asked.body.error], JSON.stringify(form)).toEqual([
+				401,
+				"invalid_client",
+			]);
+		}
+	});
+
+	it("reads a parameter sent empty as one not sent, and passes over one it does not know [rfc8628-3.1-b] [rfc8628-3.1-c]", async () => {
+		const s = await serve();
+		for (const form of [
+			{ scope: "" },
+			{ resource: "" },
+			{ scope: "", resource: "" },
+			{ ui_locales: "fr" },
+			{ x_vendor: "1" },
+		]) {
+			const asked = await s.authorize("tv", form);
+			expect(asked.status, JSON.stringify(form)).toBe(200);
+		}
+		// Each empty one is read as not sent, through to the token: the client's default scope, the issuer's audience.
+		const cookie = await s.login();
+		const issuedFor = async (form: Record<string, string>) => {
+			const { code, user } = await s.started("tv", form);
+			await s.verify(cookie, { action: "approve", user_code: user });
+			now += 5_000;
+			const issued = (await s.poll(code)) as Record<string, string>;
+			const checked = await s.app.get(tokens).verifyAccess(String(issued.access_token));
+			if (checked.kind !== "valid") throw new Error(checked.reason);
+			return checked.grant;
+		};
+		const unsent = await issuedFor({});
+		expect(unsent).toMatchObject({ scope: ["read"], audience: [origin] });
+		for (const form of [{ scope: "" }, { resource: "" }, { scope: "", resource: "" }]) {
+			const grant = await issuedFor(form);
+			expect([grant.scope, grant.audience], JSON.stringify(form)).toEqual([
+				unsent.scope,
+				unsent.audience,
+			]);
+		}
+	});
+
+	it("writes each parameter of its answer once, the page's address with the code in too [rfc8628-3.1-e]", async () => {
+		for (const settings of [{}, { "complete-uri": true }]) {
+			const given = await (await serve(settings)).authorize();
+			expect(given.status).toBe(200);
+			// Read from the raw body, since parsing would keep one of two.
+			const names = [...given.text.matchAll(/"([^"\\]+)":/g)].map((match) => match[1]);
+			expect(names, JSON.stringify(settings)).toEqual([...new Set(names)]);
+			expect(names.length, JSON.stringify(settings)).toBe(Object.keys(given.body).length);
+			if ("complete-uri" in settings) expect(names).toContain("verification_uri_complete");
+		}
 	});
 
 	it("answers an assertion beside another method invalid_client, as the token endpoint does, and two other methods invalid_request", async () => {
@@ -347,6 +421,15 @@ describe("device authorization", () => {
 		const crowded = await s.authorize();
 		draws.length = 0;
 		expect([crowded.status, crowded.body.error]).toEqual([503, "temporarily_unavailable"]);
+	});
+
+	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+	// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
+	it("makes each device code of 32 fresh random bytes [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc8628-5.2-a]", async () => {
+		const s = await serve();
+		const codes = [(await s.authorize()).body.device_code, (await s.authorize()).body.device_code];
+		for (const code of codes) expect(drawn).toContain(code);
+		expect(codes[0]).not.toBe(codes[1]);
 	});
 
 	it("answers the page's address with the code filled in only when asked to", async () => {
@@ -859,7 +942,7 @@ describe("verification", () => {
 		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
 	});
 
-	it("counts every decision a subject tries, so codes cannot be guessed", async () => {
+	it("counts every decision a subject tries, so codes cannot be guessed: by default 8 letters of 20, living 10 minutes, 5 tries a subject each window [rfc8628-5.1-a]", async () => {
 		const s = await serve({ attempts: 2 });
 		const cookie = await s.login();
 		for (let i = 0; i < 2; i++) {

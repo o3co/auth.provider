@@ -66,7 +66,7 @@ it("refuses a plain-http public origin unless it is accepted explicitly, and the
 	expect(app.get(site).secureCookies).toBe(false);
 });
 
-it("refuses the plain-http public origin it accepts in a production deployment", async () => {
+it("refuses the plain-http public origin it accepts in a production deployment, so the endpoints named on it are https [oidc-core-1.2-a] [rfc7009-2-d] [rfc7662-2-a]", async () => {
 	const plain = { "public-origin": "http://as.example", "insecure-origin": true };
 	const refused = await boot(plain).catch((error: BootRefused) => error.refusals);
 	expect(refused).toEqual([

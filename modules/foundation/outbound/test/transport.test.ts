@@ -5,6 +5,7 @@ import {
 	type ServerResponse,
 	setGlobalProxyFromEnv,
 } from "node:http";
+import { createServer as createTlsServer } from "node:https";
 import {
 	type AddressInfo,
 	createServer as createRawServer,
@@ -17,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
 import { type Lookup, type Resolver, send } from "../src/transport.ts";
+import { authority, destination } from "./fixtures/certificates.ts";
 
 // A connection to `rerouted.from` reaches a local server instead, and is recorded: a private address
 // the transport checked is dialed, and nothing is sent anywhere else.
@@ -683,6 +685,31 @@ describe("outbound", () => {
 		// A TLS handshake record, naming the host, never plain text.
 		expect(hello[0]?.[0]).toBe(0x16);
 		expect(hello[0]?.includes("svc.test")).toBe(true);
+	});
+
+	it("checks the server's certificate on a direct connection: its name the host checked, by an authority trusted [oidc-discovery-7.1-d]", async () => {
+		const tls = createTlsServer(destination, (_req, res) => res.end("{}"));
+		await new Promise<void>((done) => tls.listen(0, "127.0.0.1", done));
+		const at = (tls.address() as AddressInfo).port;
+		// Loopback lets 127.0.0.1 pass the address check, so the handshake reaches the server.
+		const toward = (host: string) => ({
+			url: new URL(`https://${host}:${at}/`),
+			host,
+			port: at,
+			plain: false,
+			loopback: true,
+			internal: false,
+		});
+		const limits = { maxBytes: 1000, timeoutMs: 2000 };
+		const reach = (host: string, trust: { ca?: string } = { ca: authority }) =>
+			failure(
+				send(toward(host), {}, limits, async () => ["127.0.0.1"], anyPublic, undefined, trust),
+			);
+		expect(await reach("idp.example.test")).toBe("answered");
+		// A certificate for another name, or one no trusted authority issued, ends the connection.
+		expect(await reach("other.example.test")).toBe("unavailable: unreachable");
+		expect(await reach("idp.example.test", {})).toBe("unavailable: unreachable");
+		tls.close();
 	});
 
 	it("goes direct even where the process sends requests through a proxy", async () => {
