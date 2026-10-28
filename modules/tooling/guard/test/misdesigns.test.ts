@@ -6,87 +6,125 @@ import { budget, pkg } from "./workspace.ts";
 // A fixture with exports has its contract surface built by the type checker, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
 
-// Each case is one misdesign of a module whose shape is otherwise sound: the rule that stops it, or
-// none, where a review, a boot check or a conformance scene is the gate. docs/gates.md names them.
+// Static-analysis specimens: packages written for the guard to read, never composed. Each is a sound
+// workspace but for one module's misdesign, and the whole workspace's violations are checked.
 const kernel = pkg(
 	"@mis/kernel",
 	{
-		"src/contract.ts":
-			"export const defineModule = (d: object, f: () => unknown[]) => ({ d, f });\n",
+		"src/contract.ts": [
+			"export interface Contract<T> { readonly label: string; readonly _t?: T }",
+			"export const contract = <T>(label: string): Contract<T> => ({ label });",
+			"export const defineModule = (d: object, parts: (m: unknown) => unknown[]) => ({ d, parts });",
+		].join("\n"),
 	},
 	{ exports: { ".": "./src/contract.ts" } },
 	"foundation",
 );
-/** A feature whose module is `module`, depending on the kernel alone. */
-const feature = (name: string, module: string, kind = "feature") =>
+/** A module named `name` of `kind`, providing its contract by `by`, with `before` above its definition. */
+const feature = (name: string, by = "() => ({})", before = "", kind = "feature") =>
 	pkg(
 		name,
-		{ "src/contract.ts": "export const used = 1;\n", "src/module.ts": module },
+		{
+			"src/contract.ts": `import { contract } from "@mis/kernel";\nexport const offered = contract<object>("${name}");\n`,
+			"src/module.ts": [
+				'import { defineModule } from "@mis/kernel";',
+				'import { offered } from "./contract.ts";',
+				before,
+				`export default defineModule({ name: "${name}", takes: [] }, (m: any) => [m.provide(offered).by(${by})]);`,
+			].join("\n"),
+		},
 		{
 			exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
 			dependencies: { "@mis/kernel": "*" },
 		},
 		kind,
 	);
-/** Every rule the whole check raises on a module's misdesign, among a workspace otherwise sound. */
+const sound: readonly Pkg[] = [
+	kernel,
+	feature("@mis/tokens", "() => ({ issue: () => 'a token' })"),
+];
+/** The rules the whole workspace raises with `misdesigned` in it. */
 const raised = (misdesigned: Pkg) =>
-	[
-		...new Set(
-			check([kernel, misdesigned], budget)
-				.filter((v) => v.where.startsWith(misdesigned.name))
-				.map((v) => v.rule.split(" ")[0]),
-		),
-	].sort();
-const module = (body: string) =>
-	`import { defineModule } from "@mis/kernel";\nexport default defineModule({ name: "m" }, () => [${body}]);\n`;
+	[...new Set(check([...sound, misdesigned], budget).map((v) => v.rule.split(" ")[0]))].sort();
 
-describe("misdesigns the guard stops", () => {
-	it("G26 stops a feature reaching another server itself, past outbound's policy", () => {
-		const reaching = feature("@mis/fetches", module('() => fetch("https://upstream.example")'));
+describe("static-analysis specimens: misdesigns the guard stops", () => {
+	it("raises nothing for the sound workspace the specimens are put in", () => {
+		expect(check([...sound, feature("@mis/plain")], budget)).toEqual([]);
+	});
+
+	it("G26 stops a feature that reaches another server directly", () => {
+		const reaching = feature(
+			"@mis/fetches",
+			'() => ({ ask: () => fetch("https://upstream.example") })',
+		);
 		expect(raised(reaching)).toEqual(["G26"]);
 	});
 
-	it("G13 stops a feature reading the host's clock, past the kernel's", () => {
-		expect(raised(feature("@mis/clock", module("() => Date.now()")))).toEqual(["G13"]);
+	it("G13 stops a feature that reads the host's clock", () => {
+		expect(raised(feature("@mis/clock", "() => ({ now: () => Date.now() })"))).toEqual(["G13"]);
 	});
 
-	it("G23 stops a feature drawing its own randomness, past the kernel's", () => {
-		expect(raised(feature("@mis/random", module("() => Math.random()")))).toEqual(["G23"]);
+	it("G23 stops a feature that draws its own randomness", () => {
+		expect(raised(feature("@mis/random", "() => ({ draw: () => Math.random() })"))).toEqual([
+			"G23",
+		]);
 	});
 
-	it("G15 stops a wiring that decides, as a feature would", () => {
-		const deciding = feature("@mis/wiring", module("(x: number) => (x > 0 ? 1 : 2)"), "wiring");
+	it("G15 stops a wiring that branches", () => {
+		const deciding = feature(
+			"@mis/wiring",
+			"() => ({ pick: (x: number) => (x > 0 ? 1 : 2) })",
+			"",
+			"wiring",
+		);
 		expect(raised(deciding)).toEqual(["G15"]);
 	});
 });
 
-// The guard reads how code is laid out, never what it means: each misdesign below keeps every rule.
-// A review stops it, and a conformance scene where docs/gates.md names one; once the guard stops it,
-// turn its test over.
-describe("misdesigns the guard passes, a review's to stop", () => {
-	it("passes a feature that keeps what is used once in its own process, though a second instance would use it again: a review's to stop; turn this test over once the guard stops it", () => {
+describe("static-analysis specimens: misdesigns the guard does not detect", () => {
+	// The boot check refuses only a module that declares itself unsafe on several instances, and takes
+	// one that declares nothing as safe: modules/foundation/kernel/test/assemble.test.ts ("refuses
+	// replica-unsafe modules only when deployed on multiple replicas", "takes a module that says nothing
+	// of replicas as safe on multiple instances"). A false declaration of safety passes it too. Human
+	// review required; no automated detection demonstrated.
+	it("guard does not detect a feature that keeps one-use state in memory", () => {
 		const remembering = feature(
 			"@mis/once-in-memory",
-			`const spent = new Set<string>();\n${module("(id: string) => (spent.has(id) ? false : (spent.add(id), true))")}`,
+			"() => ({ use: (id: string) => (spent.has(id) ? false : (spent.add(id), true)) })",
+			"const spent = new Set<string>();",
 		);
 		expect(raised(remembering)).toEqual([]);
 	});
 
-	it("passes a feature that grants where what it waits on cannot answer: a review's to stop; turn this test over once the guard stops it", () => {
+	// The fault scenes catch a grant while the store cannot answer only on the routes they cover, such
+	// as modules/tooling/conformance-oauth/src/token-unavailable/test/token-unavailable.faults.case.ts
+	// and modules/tooling/conformance-code/src/authorize-unavailable/test/authorize-unavailable.faults.case.ts.
+	it("guard does not detect a feature that grants where what it waits on cannot answer", () => {
 		const open = feature(
 			"@mis/fail-open",
-			module("async (ask: () => Promise<boolean>) => ask().catch(() => true)"),
+			"() => ({ allowed: (ask: () => Promise<boolean>) => ask().catch(() => true) })",
 		);
 		expect(raised(open)).toEqual([]);
 	});
 
-	it("passes a feature that writes a token into a log line: a review's to stop; turn this test over once the guard stops it", () => {
+	// No scene reads a running server's log lines. Human review required; no automated detection demonstrated.
+	it("guard does not detect a feature that writes a token into a log line", () => {
 		const telling = feature(
 			"@mis/logs-token",
-			module(
-				'(log: { info(e: string, f: object): void }, token: string) => log.info("issued", { token })',
-			),
+			'() => ({ told: (log: { info(e: string, f: object): void }, token: string) => log.info("issued", { token }) })',
 		);
 		expect(raised(telling)).toEqual([]);
+	});
+
+	// Its dependencies and its shape are sound: the guard reads how code is laid out, not whose job it
+	// does (CONCEPT.md, "Refuse mistakes mechanically": neither the guard nor the kernel can decide
+	// whether a contract assigns responsibility well). Human review required; no automated detection
+	// demonstrated.
+	it("guard does not detect a feature that does another feature's job, its dependencies sound", () => {
+		const duplicating = feature(
+			"@mis/own-tokens",
+			"() => ({ issue: (subject: string) => subject + '.self-made-token' })",
+		);
+		expect(raised(duplicating)).toEqual([]);
 	});
 });
