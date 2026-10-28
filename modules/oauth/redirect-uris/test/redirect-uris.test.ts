@@ -97,6 +97,12 @@ it("adds the answer's parameters to the redirect URI's own query, leaving out on
 	);
 });
 
+it("writes the answer's values as UTF-8, percent-escaped [rfc6749-B-a]", () => {
+	expect(answerTo("https://app.example/cb", { state: "é 東/&=" })).toBe(
+		"https://app.example/cb?state=%C3%A9+%E6%9D%B1%2F%26%3D",
+	);
+});
+
 describe("redirect-uris: the copy client-documents collects", () => {
 	const from = { id: "https://app.example/c", host: "app.example" };
 	it("copies redirect_uris under the section's own key, as given, for the schema to check", async () => {
