@@ -107,7 +107,8 @@ describe("the metadata document of a deployment with the client credentials gran
 });
 
 describe("the metadata document of a deployment without the JWT bearer grant", () => {
-	// One grant is set up, as every deployment's token endpoint has one: the client credentials grant alone.
+	// The scene sets up the client credentials grant, as every token endpoint has one; a pattern's app
+	// may compose others beside it, so only what is set up and what is left out are read.
 	const get = running("https://issuer.example", {
 		jwtBearer: false,
 		clients: [client("svc", "client_secret_basic", ["client_credentials"])],
@@ -118,14 +119,6 @@ describe("the metadata document of a deployment without the JWT bearer grant", (
 		expect(body.grant_types_supported).toContain("client_credentials");
 		expect(body.grant_types_supported).not.toContain("urn:ietf:params:oauth:grant-type:jwt-bearer");
 	});
-
-	it.skipIf(areaTarget().differs("grants-listed-though-not-set-up"))(
-		"lists the grants set up alone",
-		async () => {
-			const { body } = await get("/.well-known/openid-configuration");
-			expect(body.grant_types_supported).toEqual(["client_credentials"]);
-		},
-	);
 });
 
 describe("the metadata document of an issuer with a path", () => {

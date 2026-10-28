@@ -338,6 +338,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `revocation` (`src/revocation`): the scenes of a subject the ledger revokes over HTTP.
   - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, the session and tokens made before it (`guarantee-4-a`), the boundary written through the ledger's route.
   - `session-closing` (`src/session-closing`): the fault scenes of a closing session closed, every path for its tokens with it (`guarantee-1-a`).
+  - `space-lists` (`src/space-lists`): the scenes of the space-delimited lists the code flow writes and reads.
   - `store-rows` (`src/store-rows`): the fault scenes of a store that cannot write, by a code redeemed, and of a Redis set to evict keys (`guarantee-3-j`, `guarantee-3-k`).
   - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a code while a dependency its decision waits on cannot answer (`guarantee-3-b`).
   - `userinfo` (`src/userinfo`): the scenes of OpenID Connect's userinfo.
@@ -347,11 +348,15 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, a device code approved before it (`guarantee-4-b`), the boundary written through the ledger's route.
 - `@mod/conformance-exchange` (verification, `modules/tooling/conformance-exchange`): Owns the conformance scenes of the exchange area: Token Exchange (RFC 8693), its success with and without an actor, the lifetime asked, and its refusals, among them a subject whose email is not verified.
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, the exchange of a token given before it (`guarantee-4-e`), the boundary written through the ledger's route.
 - `@mod/conformance-federation` (verification, `modules/tooling/conformance-federation`): Owns the conformance scenes of the federation area: logging a browser in through an upstream OpenID Connect IdP, Google, Apple, or GitHub's OAuth, the audit events of those logins, and a start while the store fails.
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `freshness` (`src/freshness`): the scenes of a federation login meeting a client's demand for a fresh login.
   - `grants` (`src/grants`): the scenes of federation grants.
   - `held` (`src/held`): the scenes of a federation login that a gate holds.
   - `link` (`src/link`): the scenes of linking an upstream identity to the account logged in.
+  - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, a federation grant established before it, and of the exception where grants keep on subject revocation (`guarantee-4-c`), the boundary written through the ledger's route.
 - `@mod/conformance-front` (verification, `modules/tooling/conformance-front`): Puts an https front before a running app, as a deployment's proxy is, for a harness whose outside party (a conformance suite, a client library) reaches the app over https.
 - `@mod/conformance-identity` (verification, `modules/tooling/conformance-identity`): Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.
   - `attempts-unavailable` (`src/attempts-unavailable`): the fault scenes of password login's attempt limit letting no attempt by while the store cannot count (`guarantee-3-i`).
@@ -378,6 +383,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-recipes` (verification, `modules/tooling/conformance-recipes`): Keeps each recipe in the documents from going stale: a recipe's scene generates the app with the recipe's own command, starts it, and makes the recipe's requests over HTTP, as a user of the provider would.
 - `@mod/conformance-second-factor` (verification, `modules/tooling/conformance-second-factor`): Owns the conformance scenes of the second-factor area: second factor at login (by a form or a JSON body), enrollment, naming factors, step-up, lockout, a recovery code that lets in one login only when two use it at once, store failure, the audit events they record.
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `fence` (`src/fence`): the fault scenes of a subject's fence refusing, from another instance, a change to her second factors that her revocation overtook (`guarantee-4-d`), the revocation sent through the ledger's route.
   - `recovery-code-once` (`src/recovery-code-once`): the fault scenes of a recovery code used once (`guarantee-5-g`).
 - `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
