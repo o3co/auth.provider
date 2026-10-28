@@ -19,6 +19,7 @@ export {
 	on,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	successes,

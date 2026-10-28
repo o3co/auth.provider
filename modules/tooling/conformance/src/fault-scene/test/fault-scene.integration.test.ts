@@ -8,6 +8,7 @@ import {
 	on,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	successes,
 } from "../fault-scene.ts";
@@ -49,4 +50,42 @@ describe("a fault scene's deployment", () => {
 			await ready(a);
 		});
 	});
+
+	it("waits, after the primary slept, until it takes writes again", async () => {
+		await on({ name: "fault-scene-recovered", scene }, async (d) => {
+			const primary = d.topology.primary();
+			const { asleep, awake } = d.topology.sleep(primary, 5);
+			await asleep;
+			await awake;
+			await recovered(d);
+			// Recovered, a write is taken: no NOREPLICAS for want of good replicas.
+			expect(await primary.ask("SET", "fault-scene-recovered", "1")).toEqual({
+				kind: "simple",
+				text: "OK",
+			});
+		});
+	});
+
+	it("fails past its bound naming what it waited on, while no replica acknowledges", async () => {
+		await on({ name: "fault-scene-unrecovered", scene }, async (d) => {
+			const replicas = d.topology.replicas();
+			for (const r of replicas) d.topology.pause(r, true);
+			try {
+				// Their last acknowledgements age past the topology's max lag (2 s): none is good.
+				const end = performance.now() + 10_000;
+				for (;;) {
+					const info = await d.topology.primary().ask("INFO", "replication");
+					const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
+					if (/min_slaves_good_slaves:0\b/.test(text)) break;
+					if (performance.now() > end) throw new Error("the paused replicas stayed good");
+					await new Promise((resolve) => setTimeout(resolve, 100));
+				}
+				await expect(recovered(d)).rejects.toThrow(
+					/not recovered within 30 s: .*min_slaves_good_slaves 0 of the 1 min-replicas-to-write asks/,
+				);
+			} finally {
+				for (const r of replicas) d.topology.pause(r, false);
+			}
+		});
+	}, 120_000);
 });

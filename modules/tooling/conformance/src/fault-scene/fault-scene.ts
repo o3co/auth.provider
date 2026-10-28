@@ -153,6 +153,38 @@ export async function writable(d: Deployed): Promise<void> {
 	}
 }
 
+/**
+ * Until the topology has recovered from a fault, within 30 s: the primary has every replica the
+ * topology names online, and as many good replicas as its `min-replicas-to-write` asks, so it takes
+ * writes again, which an instance's readiness does not show. A scene calls it in its recovery alone,
+ * never while it holds the primary unwritable on purpose. Past the bound it fails naming what it
+ * waited on.
+ */
+export async function recovered(d: Deployed): Promise<void> {
+	const end = performance.now() + 30_000;
+	const primary = d.topology.primary();
+	const asked = await primary.ask("CONFIG", "GET", "min-replicas-to-write");
+	const value = asked.kind === "array" ? asked.items?.[1] : undefined;
+	if (value?.kind !== "bulk") {
+		throw new Error(`the primary did not answer min-replicas-to-write: ${JSON.stringify(asked)}`);
+	}
+	const toWrite = Number(value.data?.toString() ?? "");
+	const named = d.topology.replicas().length;
+	for (;;) {
+		const info = await primary.ask("INFO", "replication");
+		const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
+		const online = text.split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length;
+		const good = Number(/min_slaves_good_slaves:(\d+)/.exec(text)?.[1] ?? 0);
+		if (online >= named && good >= toWrite) return;
+		if (performance.now() > end) {
+			throw new Error(
+				`not recovered within 30 s: ${online} of ${named} replicas online, min_slaves_good_slaves ${good} of the ${toWrite} min-replicas-to-write asks`,
+			);
+		}
+		await pause(100);
+	}
+}
+
 /** Points every instance's relay at the primary where it answers now, as a crash may move it. */
 export function repointed(d: Deployed): void {
 	for (const i of d.instances) {
