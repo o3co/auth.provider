@@ -77,7 +77,7 @@ export function checkScope(
 	openidRequired: boolean,
 ) {
 	// Offline access is not offered, so nothing permits it: the request goes on without the word
-	// (OpenID Connect Core §11), whatever the client and whether or not it names openid. A request that
+	// (OpenID Connect Core §11), whatever the client and whether or not the authorization request names openid. A request that
 	// named it alone asked nothing else, and is refused rather than given the client's default.
 	const named = clientAllowance.parseScope(scope);
 	const kept = named?.filter((word) => word !== offline);
