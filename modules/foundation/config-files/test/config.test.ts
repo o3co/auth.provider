@@ -82,7 +82,13 @@ describe("loadConfig", () => {
 
 	it("refuses unreadable and malformed files without quoting them", async () => {
 		const unreadable = await refusalsOf(loadConfig({ files: ["/nonexistent.conf"], env: {} }));
-		expect(unreadable.map((r) => r.where)).toEqual(["/nonexistent.conf"]);
+		expect(unreadable).toEqual([
+			{
+				where: "/nonexistent.conf",
+				reason:
+					"cannot read the configuration file: create it, or leave it out of the files the app reads",
+			},
+		]);
 		const [file] = await files("a = 1\nb = { secret-value");
 		const located = await refusalsOf(loadConfig({ files: [file as string], env: {} }));
 		expect(located).toEqual([
