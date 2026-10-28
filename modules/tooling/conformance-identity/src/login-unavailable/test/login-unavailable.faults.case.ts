@@ -14,16 +14,8 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	type Answer,
-	attemptFrom,
-	cookieIndexed,
-	loginAt,
-	nextSource,
-	on,
-	said,
-	sessionRecord,
-} from "../../faults/test/faults.ts";
+import { type Answer, loginAt, nextSource, on, said } from "../../faults/test/faults.ts";
+import { attemptFrom, cookieIndexed, sessionRecord } from "../../faults/test/wire.ts";
 
 // Each fault comes once the attempt is counted and the login holds its first session write: earlier,
 // the attempt limit refuses first (attempts-unavailable's scenes), and the session is never reached.
@@ -130,7 +122,8 @@ describe("password login opening no session while the store cannot answer", () =
 			// No session was indexed under a cookie from the first cut to the answer: the index is the write
 			// that makes a session reachable. Cuts 20 ms apart cannot stop a command getting through on a
 			// connection just opened, and records' resend of the record may land so and write it; the
-			// record alone opens no session.
+			// record alone opens no session. The index itself may get through, rarely, and the login then
+			// succeed: that is the fault not taking, not the guarantee broken.
 			expect(successes(a, cookieIndexed).filter((e) => e.at > cut && e.at < answer.at)).toEqual([]);
 			await noSessionOpened(a, cut);
 			await healed(d, a);

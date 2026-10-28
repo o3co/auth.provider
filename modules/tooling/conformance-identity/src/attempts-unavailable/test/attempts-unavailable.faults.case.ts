@@ -15,14 +15,13 @@ import {
 import { describe, expect, it } from "vitest";
 import {
 	type Answer,
-	attemptFrom,
 	faultScene,
-	identifierLockout,
 	loginAt,
 	nextSource,
 	on,
 	said,
 } from "../../faults/test/faults.ts";
+import { attemptFrom, identifierLockout } from "../../faults/test/wire.ts";
 
 // The scene's value, not the default (`closed`): a request limit lets requests by where the store
 // cannot count, and the attempt limit refuses them still, whatever the fail mode.
@@ -119,7 +118,8 @@ describe("password login's attempt limit letting no attempt by while the store c
 			expect(said(answer)).toEqual(refusedUnconfirmed);
 			// The attempt's count did not succeed from the first cut to the answer. Cuts 20 ms apart cannot
 			// stop a command getting through on a connection just opened, so the scene checks only the
-			// write its guarantee rests on.
+			// write its guarantee rests on. The count itself may get through, rarely, and the attempt then
+			// go on: that is the fault not taking, not the guarantee broken.
 			expect(
 				successes(a, attemptFrom(source)).filter((e) => e.at > cut && e.at < answer.at),
 			).toEqual([]);
