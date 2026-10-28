@@ -18,7 +18,7 @@ import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
-import { CompactSign, FlattenedSign, type JWTPayload, SignJWT } from "jose";
+import { CompactSign, EncryptJWT, FlattenedSign, type JWTPayload, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { clientKeys, type Jwk, type SpentAssertions, spentAssertions } from "../src/contract.ts";
 import { assertionMethod, assertionType } from "../src/method.ts";
@@ -497,6 +497,32 @@ describe("private_key_jwt", () => {
 		expect(await outcome(c, presenting(extended))).toBe("bad_credentials");
 		expect(lastWarned()).toBe("not a JWT");
 		expect(await outcome(c, presenting(await signed({})))).toBe("app");
+	});
+
+	it("refuses an assertion RFC 7519 makes invalid in the other ways: encrypted, nested, not yet valid, or its payload no claims set [rfc7523-3-y]", async () => {
+		const { c } = await boot();
+		const encrypted = await new EncryptJWT(claims())
+			.setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+			.encrypt(new Uint8Array(32));
+		const nested = await new CompactSign(new TextEncoder().encode(await sign(claims())))
+			.setProtectedHeader({ alg: "ES256", kid: "ec", cty: "JWT" })
+			.sign(ec.privateKey);
+		const listed = await new CompactSign(new TextEncoder().encode(JSON.stringify([claims()])))
+			.setProtectedHeader({ alg: "ES256", kid: "ec" })
+			.sign(ec.privateKey);
+		const cases: Record<string, [string, string]> = {
+			encrypted: [encrypted, "not a JWT"],
+			nested: [nested, "not a JWT"],
+			"a list for claims": [listed, "not a JWT"],
+			"not yet valid": [await sign(claims({ nbf: seconds() + 31 })), "not yet valid"],
+			"exp no number": [await sign(claims({ exp: String(seconds() + 60) })), "not a JWT"],
+		};
+		for (const [name, [assertion, reason]] of Object.entries(cases)) {
+			expect(await outcome(c, presenting(assertion, { client_id: "app" })), name).toBe(
+				"bad_credentials",
+			);
+			expect(lastWarned(), name).toBe(reason);
+		}
 	});
 
 	it("takes one JWT only, never two joined [rfc7523-2.2-a]", async () => {
