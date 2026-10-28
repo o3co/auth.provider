@@ -736,6 +736,28 @@ describe("federation", () => {
 		]);
 	});
 
+	it("finds the local user by the IdP and the upstream's subject alone, never by the profile it gives [oidc-core-5.7-b]", async () => {
+		const aliceSays = {
+			email: "alice@corp.example",
+			name: "Alice",
+			preferred_username: "alice",
+			phone_number: "+15550100",
+		};
+		const s = await serve({
+			answers: answering(
+				["alice", { ...alice, profile: { email: "someone@else.example" } } as UpstreamLogin],
+				["impostor", { subject: "u-other", amr: [], profile: aliceSays } as UpstreamLogin],
+			),
+		});
+		// Alice's subject logs in as alice, whatever profile comes with it.
+		const back = await s.roundTrip("code=alice");
+		expect(back.status).toBe(302);
+		expect(await s.amrOf(back.cookies)).toContain("fed");
+		// Another subject giving alice's email, name, username and phone is no one linked.
+		const impostor = await s.roundTrip("code=impostor");
+		expect([impostor.status, impostor.body]).toEqual([401, { error: "unknown_user" }]);
+	});
+
 	it("records a login with its subject, IdP and source, and one that failed with its reason", async () => {
 		const s = await serve({
 			answers: answering(
