@@ -401,13 +401,14 @@ describe("idp-google", () => {
 		expect(await profileOf({})).toBeUndefined();
 	});
 
-	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless iss is not asked [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
+	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless iss is not asked, comparing it code point by code point [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b] [oidc-discovery-5-c]", async () => {
 		const { upstream, asked } = await open({ token: async () => granted() });
 		for (const iss of [
 			undefined,
 			"",
 			"accounts.google.com",
 			`${issuer}/`,
+			issuer.toUpperCase(),
 			"https://evil.example",
 		]) {
 			expect(await outcome(upstream.exchange(exchange({ iss }))), String(iss)).toBe("refused");

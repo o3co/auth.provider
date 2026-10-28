@@ -49,15 +49,6 @@ From `@mod/claims-selection`.
 |---|---|---|---|---|---|---|
 | `claims-selection.mode` | off \| draining \| on |  | yes | `CLAIMS_SELECTION_MODE` | `on` | off takes no claims request and touches no store; draining keeps holding back what was kept, but keeps nothing new; on takes claims requests. |
 
-## claims-selection-store
-
-From `@mod/claims-selection-store`.
-
-| Key | Type | Default | Required | Variable | Example | Description |
-|---|---|---|---|---|---|---|
-| `claims-selection-store.constrained-shards` | integer (1–65536) | `1024` |  |  |  | How many shards the list of families with constrained selections is spread over; never changed while the list holds any. |
-| `claims-selection-store.constrained-per-shard` | integer (1–100000) | `1000` |  |  |  | How many families one shard holds at most; past it, a family with a constrained selection does not start. |
-
 ## client-assertion
 
 From `@mod/client-assertion`.

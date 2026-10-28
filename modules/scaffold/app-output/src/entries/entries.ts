@@ -37,13 +37,6 @@ const entries: readonly {
 		},
 	},
 	{
-		script: "revoke-constrained-families",
-		file: "src/revoke-constrained-families.ts",
-		template: "revoke-constrained-families.ts.template",
-		runs: "@mod/claims-revocation",
-		fill: { contract: "constrainedFamilyRevocation" },
-	},
-	{
 		script: "unclaimed-factors",
 		file: "src/unclaimed-factors.ts",
 		template: "unclaimed-factors.ts.template",

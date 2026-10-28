@@ -51,6 +51,8 @@ const waiting = (a: Answer) => {
 /** Refused as the count could not be made or confirmed. */
 const uncounted = [503, "service_unavailable", false];
 
+/** Runs in their order as numbers. */
+const byRun = (x: number | undefined, y: number | undefined) => (x ?? 0) - (y ?? 0);
 /** The runs the identifier's counted attempts wrote, at each of the instances, in no order across them. */
 const runsAt = (identifier: string, ...instances: Instance[]) =>
 	instances.flatMap((i) => successes(i, lockoutOf(identifier)).map((e) => lockoutRun(e.command)));
@@ -197,10 +199,10 @@ describe("password login's per-identifier count holding under faults", () => {
 				second.release();
 				expect(said(await atB)).toEqual(failed);
 				// The later one lost its race, read the run again and counted on it: 1, then 2.
-				expect(runsAt(identifier, a, b).sort()).toEqual([1, 2]);
+				expect(runsAt(identifier, a, b).sort(byRun)).toEqual([1, 2]);
 				// The next attempt at either counts on both: a third.
 				expect(said(await failAt(a, identifier))).toEqual(failed);
-				expect(runsAt(identifier, a, b).sort()).toEqual([1, 2, 3]);
+				expect(runsAt(identifier, a, b).sort(byRun)).toEqual([1, 2, 3]);
 				await healed(a);
 			},
 		);
@@ -223,13 +225,13 @@ describe("password login's per-identifier count holding under faults", () => {
 				expect(judged).toBeGreaterThan(0);
 				// Every failure counted, each attempt at most once: one refused may still have been counted,
 				// its write landing after it gave up, which is the safe side.
-				const runs = runsAt(identifier, a, b).sort();
+				const runs = runsAt(identifier, a, b).sort(byRun);
 				expect(runs.length).toBeGreaterThanOrEqual(judged);
 				expect(runs).toEqual(Array.from({ length: runs.length }, (_, n) => n + 1));
 				expect(runs.length).toBeLessThanOrEqual(both.length);
 				// The next attempt counts on all of them.
 				expect(said(await failAt(b, identifier))).toEqual(failed);
-				expect(runsAt(identifier, a, b).sort()).toEqual([...runs, runs.length + 1]);
+				expect(runsAt(identifier, a, b).sort(byRun)).toEqual([...runs, runs.length + 1]);
 				await healed(a);
 			},
 		);

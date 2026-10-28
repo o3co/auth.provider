@@ -316,14 +316,37 @@ describe("the logout a client starts", () => {
 		expect(h.events.map((e) => e.kind)).toEqual(["logout.success"]);
 	});
 
-	it("answers a session already gone as logged out, with no event", async () => {
+	it("answers a hint whose session is gone as logged out, acting on nothing: no event, and no return though one is asked [oidc-rpinit-2-g]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const hint = await h.hintFor(session.id);
 		await h.call("POST", { id_token_hint: hint });
 		h.events.length = 0;
 		expect((await h.call("POST", { id_token_hint: hint })).json).toEqual({ logged_out: true });
+		const returned = await h.call("POST", {
+			id_token_hint: hint,
+			post_logout_redirect_uri: back,
+			state: "s",
+		});
+		expect([returned.status, returned.headers.location, returned.json]).toEqual([
+			200,
+			undefined,
+			{ logged_out: true },
+		]);
 		expect(h.events).toEqual([]);
+	});
+
+	it("passes over a parameter it does not read, an unsupported ui_locales included [oidc-rpinit-2-c]", async () => {
+		const h = await serve();
+		const { session } = await h.login();
+		const hint = await h.hintFor(session.id);
+		const sent = await h.call("POST", {
+			id_token_hint: hint,
+			ui_locales: "tlh-Piqd x-unknown",
+			post_logout_redirect_uri: back,
+		});
+		expect([sent.status, sent.headers.location]).toEqual([303, back]);
+		expect(await h.stillOpen(session.id)).toBe(false);
 	});
 
 	it("logs out a session short of a requirement to be used as any live one: recorded, closed, sent back", async () => {
@@ -525,8 +548,10 @@ describe("the upstream's end of session", () => {
 	});
 });
 
-it("publishes its endpoint and the front-channel and back-channel support [oidc-rpinit-2.1-a] [oidc-bcl-2.1-a]", async () => {
+it("publishes its endpoint, an https URL, and the front-channel and back-channel support [oidc-rpinit-2.1-a] [oidc-bcl-2.1-a] [oidc-rpinit-2.1-b]", async () => {
 	const h = await serve();
+	const endpoint = h.items.find((i) => i.name === "end_session_endpoint")?.value;
+	expect(new URL(String(endpoint)).protocol).toBe("https:");
 	expect(Object.fromEntries(h.items.map((i) => [i.name, i.value]))).toMatchObject({
 		end_session_endpoint: `${issuer}/oauth/logout`,
 		frontchannel_logout_supported: true,
@@ -536,14 +561,14 @@ it("publishes its endpoint and the front-channel and back-channel support [oidc-
 	});
 });
 
-it("publishes its endpoint on the issuer's origin where no public origin is written [oidc-rpinit-2.1-a]", async () => {
+it("publishes its endpoint on the issuer's origin where no public origin is written, https as the issuer is [oidc-rpinit-2.1-a] [oidc-rpinit-2.1-b]", async () => {
 	const h = await serve({ noPublicOrigin: true });
 	expect(h.items.find((i) => i.name === "end_session_endpoint")?.value).toBe(
 		`${issuer}/oauth/logout`,
 	);
 });
 
-it("refuses to start with a client whose return, front-channel or back-channel URL does not fit", async () => {
+it("refuses to start with a client whose return, front-channel or back-channel URL does not fit [oidc-bcl-2.2-a] [oidc-bcl-2.2-c]", async () => {
 	const cases = [
 		["a return with a fragment", "post-logout-redirect-uris", ["https://app.example/after#x"]],
 		["iss in a front channel", "frontchannel-logout-uri", "https://app.example/fc?ISS=1"],
@@ -551,6 +576,8 @@ it("refuses to start with a client whose return, front-channel or back-channel U
 		["a front channel not on the web", "frontchannel-logout-uri", "javascript:alert(1)"],
 		["a back channel not on the web", "backchannel-logout-uri", "ftp://app.example/bc"],
 		["a back channel with a space", "backchannel-logout-uri", " https://app.example/bc"],
+		["a back channel that is no absolute URI", "backchannel-logout-uri", "/bc"],
+		["a back channel with a fragment", "backchannel-logout-uri", "https://app.example/bc#x"],
 	] as const;
 	for (const [name, field, value] of cases) {
 		const refused = await serve({ sections: { app: { [field]: value } } }).catch((error) => error);

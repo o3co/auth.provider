@@ -33,14 +33,6 @@ export interface Lineage {
 
 export const lineage = contract<Lineage>("refresh.lineage");
 
-/** Ends a family whose id refresh gave another module (claims-selection's `follow`), as a session's close does. */
-export interface FamilyRevocation {
-	/** Idempotent, and for a family with no record too; an id refresh names no family by is a TypeError. */
-	revoke(familyId: string): Promise<void>;
-}
-
-export const familyRevocation = contract<FamilyRevocation>("refresh.family-revocation");
-
 export * from "./store.ts";
 
 export const refreshGrantType = "refresh_token";

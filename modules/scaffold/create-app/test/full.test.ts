@@ -52,12 +52,6 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 		start: "node --env-file-if-exists=.env src/main.ts",
 		reseal: "node --env-file-if-exists=.env src/reseal.ts",
 		"unclaimed-factors": "node --env-file-if-exists=.env src/unclaimed-factors.ts",
-		...(modules.includes("@mod/claims-revocation")
-			? {
-					"revoke-constrained-families":
-						"node --env-file-if-exists=.env src/revoke-constrained-families.ts",
-				}
-			: {}),
 	});
 	const composed = modules.map(manifest);
 	const owners = composed.flatMap((m) => m.replaces ?? m.adapts ?? []);

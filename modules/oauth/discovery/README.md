@@ -14,6 +14,7 @@
 
 ## Invariants
 - Only what is upheld is published: an item of a feature not composed is absent, and an item without a value, or whose value is a list with no elements, is left out.
+- A member whose omission means a default is never empty: its contributor publishes it or refuses boot.
 - `issuer` is `issuer`'s URL, and comes first.
 - The document is fixed at boot; no request header shapes it.
 - For an issuer without a path both places are at the root; for one with a path, nothing answers at the root, as a document there would name another issuer.

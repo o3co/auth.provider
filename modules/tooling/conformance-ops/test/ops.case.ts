@@ -321,8 +321,9 @@ const limited = oauthScene({
 			kind: "confidential",
 			method: "client_secret_post",
 			secret: "app-secret-0123456789abcdef",
-			// Allowed no grant: its requests fail authentication before any grant is read.
-			grants: [],
+			// Its requests fail authentication before any grant is read; the grant is the one the
+			// token endpoint asks to be composed at all.
+			grants: ["client_credentials"],
 			scopes: ["read"],
 		},
 	],

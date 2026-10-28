@@ -3,11 +3,11 @@ import { clientAllowance } from "@mod/client-allowance";
 import type { Redeemed } from "@mod/code-grant";
 import { type BuildContext, type Log, Unavailable } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
-import { type FamilyRevocation, refreshGrantType } from "../contract.ts";
+import { refreshGrantType } from "../contract.ts";
 import { allowanceMs, fromStoredRedemption, toStoredRedemption } from "../record.ts";
 import type { Settings } from "../section.ts";
 import { type Revoker, type Stores, settlingIn } from "../settle/settle.ts";
-import { founding, isFamilyName } from "./found.ts";
+import { founding } from "./found.ts";
 
 export function starting(
 	stores: Stores,
@@ -111,16 +111,5 @@ export async function additionOver(c: BuildContext<Settings>) {
 			await c.get(claimsSelections),
 			await c.get(sessions),
 		),
-	};
-}
-
-/** The revocation another module asks of a family by the id `follow` was given. */
-export async function revocationOver(c: BuildContext<Settings>): Promise<FamilyRevocation> {
-	const { revoker } = await settlingIn(c);
-	return {
-		revoke: async (familyId) => {
-			if (!isFamilyName(familyId)) throw new TypeError("refresh: not a family's id");
-			await revoker.revokeFamily(familyId);
-		},
 	};
 }

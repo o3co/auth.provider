@@ -119,9 +119,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `flow` (`src/flow`): the steps a request goes through once its redirect URI is trusted, up to its code.
   - `route` (`src/route`): the endpoint's requests and answers.
   - `step-up` (`src/step-up`): the acr a request asks for, and raising a session's authentication to meet it.
-- `@mod/claims-revocation` (feature, `modules/oauth/claims-revocation`): Revokes, before a deployment goes back to a release before 0.19, every refresh family whose kept selection holds constraints, which such a release would refresh without them. Bridges `claims-selection` (the families listed) and `refresh` (their revocation).
 - `@mod/claims-selection` (feature, `modules/oauth/claims-selection`): Decides which claim names a `claims` request parameter may release (OpenID Connect Core §5.5), by the client's allowance and the subject's consent, and keeps that selection and its value constraints for the code, the refresh family and each access token they give.
-  - `constrained` (`src/constrained`): the run over the families whose kept selection holds constraints, and the sweep of their list.
 - `@mod/client-allowance` (feature, `modules/oauth/client-allowance`): Decides what a client may be issued and may see: its grants, scopes and audiences.
 - `@mod/client-assertion` (feature, `modules/oauth/client-assertion`): Contributes `private_key_jwt` (RFC 7523) to `clients`: the client signs a JWT with one of its keys, used once.
   - `keys` (`src/keys`): the client metadata section that holds a client's keys for its assertions, and whether it is taken with a loose audience.
@@ -356,6 +354,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-identity` (verification, `modules/tooling/conformance-identity`): Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.
   - `attempts-unavailable` (`src/attempts-unavailable`): the fault scenes of password login's attempt limit letting no attempt by while the store cannot count (`guarantee-3-i`).
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `ledger-unavailable` (`src/ledger-unavailable`): the fault scenes of the ledger's subject revocation route answering done only once every step's dependency answered (`guarantee-3-l`).
   - `lockout-holds` (`src/lockout-holds`): the fault scenes of password login's per-identifier count holding across a crash and a failover, each attempt counted once, the same on every instance (`guarantee-5-i`).
   - `login-unavailable` (`src/login-unavailable`): the fault scenes of password login opening no session while the store cannot answer (`guarantee-3-f`).
 - `@mod/conformance-keys` (verification, `modules/tooling/conformance-keys`): Owns the conformance scenes of the keys area: publishing the public key set, with no private part of a key and no shared secret in its answers, and boot refusals for key configuration.
