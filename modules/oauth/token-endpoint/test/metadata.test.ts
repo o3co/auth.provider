@@ -23,6 +23,8 @@ const echo = defineModule({ name: "echo-grant", takes: [] }, (m) => [
 const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
 	m.contribute(authMethods).by(() => ({
 		name: "test_jwt",
+		// An assertion method, as private_key_jwt and client_secret_jwt are: clients refuses one naming no algorithm.
+		assertion: true,
 		signingAlgorithms: ["ES256"],
 		claimed: () => undefined,
 		verify: async () => false,
@@ -55,7 +57,7 @@ async function documentOf(extra: Module[], origin?: string) {
 	return Object.fromEntries(items.map((item) => [item.name, item.value]));
 }
 
-it("publishes its location, the grants it dispatches to, and the client authentication methods with their algorithms [rfc8414-2-h]", async () => {
+it("publishes its location, the grants it dispatches to, and the client authentication methods, an assertion method's beside its algorithms [rfc8414-2-h]", async () => {
 	const document = await documentOf([echo, signed], "https://as.example");
 	expect(document.token_endpoint).toBe("https://as.example/oauth/token");
 	expect(document.grant_types_supported).toEqual(["client_credentials", "urn:test:echo"]);
