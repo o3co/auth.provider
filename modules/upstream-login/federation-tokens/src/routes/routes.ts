@@ -12,6 +12,7 @@ import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
 import { registrable } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
+import { challengeOf } from "@mod/sender-binding";
 import { type Upstreams, upstreams } from "@mod/upstreams";
 import { z } from "zod";
 import events from "../audit-events.ts";
@@ -99,7 +100,12 @@ export async function federationTokens(flow: Flow, request: HttpRequest): Promis
 		if (step === "logout") return await logout(flow, request, idp, caller, record);
 		if (!receives(await flow.clients.find(caller.client))) {
 			record("federation.token.failed", { reason: "forbidden" });
-			return jsonAnswer(403, { error: "forbidden" });
+			// The token is valid but admits no upstream token: insufficient_scope, in its own scheme (RFC 6750 §3.1).
+			return jsonAnswer(
+				403,
+				{ error: "forbidden" },
+				{ headers: challengeOf(caller.tokenType, "insufficient_scope") },
+			);
 		}
 		const current = await flow.renewal.current(caller.session, idp);
 		if (current.kind === "limited") {

@@ -973,5 +973,5 @@ From `@mod/idp-oidc`.
 | `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  | Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. |
 | `federation.idps.<name>.read-userinfo` | boolean | `false` |  | Reads the IdP's UserInfo after each login, with its access token, for profile claims its id_token leaves out; the answer must name the id_token's subject. UserInfo and the description it is read from must then be https. |
 | `federation.idps.<name>.userinfo-endpoint` | string |  |  | Where UserInfo is read, without discovery; only with read-userinfo. |
-| `federation.idps.<name>.require-iss` | boolean | `false` |  | Asks every callback for `iss`, even where the issuer's description does not offer it. |
+| `federation.idps.<name>.accept-missing-iss` | boolean | `false` |  | Takes a callback without `iss` where the issuer's description does not offer it, for an IdP that never sends it; warned of at every start. |
 | `federation.idps.<name>.clock-skew` | string | `30s` |  | How far the IdP's clock may be from ours, for its id_token's times: 0s to 5m. |

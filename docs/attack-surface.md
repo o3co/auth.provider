@@ -182,6 +182,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `dpop.nonce.required` | `@mod/dpop` | `"never"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
 | `federation-grants.keep-on-subject-revocation` | `@mod/federation-grants` | `false` | an established grant answers only to the `delegations` boundary when a revocation asks to keep delegations |
 | `federation.idps` | `@mod/federation` | `{}` | each IdP's `upstream-amr` trusts its word for the local amr it maps, `mfa` among them; its `fresh-login-allowance` lets a login that far back count as fresh |
+| `federation.idps.<name>.accept-missing-iss` | `@mod/idp-oidc` | `false` | named so (`accept-*` and the like) |
 | `http.insecure-origin` | `@mod/http` | `false` | named so (`accept-*` and the like) |
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |

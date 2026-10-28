@@ -119,5 +119,13 @@ export const redeemAt = (i: Instance, c: Code) =>
 /** An answer as a scene compares it: its status and error, or its token type where it gave a token. */
 export const said = (a: Answer) => [a.status, a.body.error ?? a.body.token_type];
 
+/** A family's first refresh token, from a code the instance gives and redeems. */
+export async function familyAt(i: Instance): Promise<string> {
+	const answer = await redeemAt(i, await codeAt(i));
+	const token = answer.body.refresh_token;
+	if (typeof token !== "string") throw new Error(`no refresh token: ${answer.status}`);
+	return token;
+}
+
 export const refreshAt = (i: Instance, token: string) =>
 	tokenAt(i, { grant_type: "refresh_token", refresh_token: token });
