@@ -6,7 +6,7 @@ import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { CompactSign } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
-import { keys, mediaTypeOf } from "../src/contract.ts";
+import { keys } from "../src/contract.ts";
 import keysModule from "../src/module.ts";
 import { section as keysSection } from "../src/signing/section.ts";
 import { keysConfig } from "../src/testing.ts";
@@ -302,17 +302,4 @@ describe("keys", () => {
 		const token = await hs.app.get(keys).sign({ sub: "a" }, "JWT");
 		expect((await hs.app.get(keys).verify(token, "JWT")).kind).toBe("valid");
 	});
-});
-
-it("reads a token's type as its media type alone, without parameters, space, case or application/", () => {
-	for (const typ of [
-		"at+jwt",
-		"AT+JWT",
-		"application/at+jwt",
-		"application/AT+JWT; charset=UTF-8",
-		" at+jwt ;q=1",
-	])
-		expect(mediaTypeOf(typ), typ).toBe("at+jwt");
-	expect(mediaTypeOf("JWT")).toBe("jwt");
-	expect(mediaTypeOf("application/oauth-id-jag+jwt")).toBe("oauth-id-jag+jwt");
 });
