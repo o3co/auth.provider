@@ -97,7 +97,8 @@ describe("bounds the operator keeps", () => {
 			d.topology.pause(old, true);
 			await ok(follower, "REPLICAOF", behind.name, "6379");
 			const end = performance.now() + 30_000;
-			while (!/^connected_slaves:1\b/m.test(await replicationOf(behind))) {
+			// Online, as replicasOnline counts them: a replica still syncing is connected but takes no write.
+			while (!/^slave\d+:.*state=online/m.test(await replicationOf(behind))) {
 				if (performance.now() > end) throw new Error("the follower did not follow");
 				await pause(100);
 			}
