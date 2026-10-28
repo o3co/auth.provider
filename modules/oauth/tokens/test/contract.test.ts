@@ -67,7 +67,7 @@ async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
 
 /** The policies given, contributed. */
 const contributing = (policies: readonly IssuancePolicy[] = []) =>
-	defineModule({ name: "policies", replicaSafe: true, takes: [] }, (m) =>
+	defineModule({ name: "policies", replicaSafe: false, takes: [] }, (m) =>
 		policies.map((policy) => m.contribute(issuancePolicies).by(() => policy)),
 	);
 
