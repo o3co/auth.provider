@@ -43,8 +43,8 @@ The provider fails closed: a dependency that cannot answer never grants anything
 Where a revocation is checked decides how long what it revoked can still be used ([Revocation delays](security-model.md#revocation-delays)).
 
 - **Tested:** at this provider, the next check after a revocation is recorded refuses what it revoked: a subject the ledger revokes, by every way to a token (the code, exchange, federation and second factor areas' scenes, [promise 4](security-model.md#promises-across-modules)).
-- **Declared:** a resource server that asks introspection learns of a revocation at its next call, unless it keeps the answer (at most to the token's `exp`).
-- **Operator's:** a resource server that verifies a JWT access token itself takes it until it expires, whatever was revoked meanwhile. Where that is too long, have resource servers ask introspection, shorten `tokens.access-token-lifetime`, compose `subject-tokens`, and choose `tokens.revocation = denylist` (these act at the provider's own checks).
+- **Declared:** a resource server that asks introspection learns at its next call of what this provider's own checks refuse, unless it keeps the answer (at most to the token's `exp`). Introspection checks no more than they do: a subject's revocation stops an access token only with `subject-tokens` composed, and a token revoked by id only with `tokens.revocation = denylist`. Under `tokens.subject-check = none`, an access token not bound to a session stays active at introspection until it expires.
+- **Operator's:** a resource server that verifies a JWT access token itself takes it until it expires, whatever was revoked meanwhile. Where that is too long, have resource servers ask introspection and compose `subject-tokens` and choose `tokens.revocation = denylist` with it, or shorten `tokens.access-token-lifetime`.
 - **Not yet shown:** a revocation boundary held across instances under Redis faults (guarantee 4-a); no scene runs a resource server outside the provider.
 
 ## Audit
