@@ -1024,7 +1024,7 @@ describe("federation", () => {
 		]);
 	});
 
-	it("sends a browser whose login a gate holds to the held page, by 303 with no query, and its cookies", async () => {
+	it("sends a browser whose login a gate holds to the held page, by 303 with no query, and its cookies [rfc9700-2.1-c]", async () => {
 		const gate = defineModule({ name: "gate", takes: [] }, (m) => [
 			m.contribute(loginGates).by(() => ({
 				name: "second",

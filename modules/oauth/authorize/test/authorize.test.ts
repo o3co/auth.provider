@@ -418,7 +418,7 @@ describe("authorize: session and consent", () => {
 		);
 	});
 
-	it("asks a third party for consent, and lets it through once granted", async () => {
+	it("asks a third party for consent, and lets it through once granted [rfc6749-10.12-a]", async () => {
 		const { app, authorize, login } = await serve();
 		const cookie = await login();
 		expect(
