@@ -352,6 +352,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-oauth` (verification, `modules/tooling/conformance-oauth`): Owns the conformance scenes of the OAuth endpoints area: client credentials, introspection and revocation, jwt-bearer (in the internal module `jwt-bearer`), DPoP, the metadata document, tokens refused to users whose email is not verified, the audit events of issuing and revoking tokens.
   - `assertion-once` (`src/assertion-once`): the fault scenes of a JWT bearer assertion's `jti` spent once (`guarantee-5-c`).
   - `client-assertion-once` (`src/client-assertion-once`): the fault scenes of a client assertion's `jti` spent once (`guarantee-5-d`).
+  - `dpop-once` (`src/dpop-once`): the fault scenes of a DPoP proof's `jti` spent once (`guarantee-5-e`).
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `jwt-bearer` (`src/jwt-bearer`): the scenes of the jwt-bearer grant.
 - `@mod/conformance-ops` (verification, `modules/tooling/conformance-ops`): Owns the conformance scenes of operations: liveness, readiness, the metrics scrape and its dependency gauge, the log level, their boot refusals, and the security headers on every answer.
