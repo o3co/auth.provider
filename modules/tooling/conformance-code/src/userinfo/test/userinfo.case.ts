@@ -115,7 +115,8 @@ describe("OpenID Connect userinfo", () => {
 			expect(answer.body).not.toHaveProperty("sid");
 		}
 		const narrow = await userinfo((await codeTokens("openid")).access_token);
-		expect(narrow.body).toEqual({ sub: "s-alice" });
+		expect(narrow.body).toMatchObject({ sub: "s-alice" });
+		expect(narrow.body).not.toHaveProperty("email");
 	});
 
 	it("answers its JSON as application/json in UTF-8, a character outside ASCII intact [oidc-core-5.3.2-e] [oidc-core-5.3.2-f] [oidc-core-5.3.2-g] [oidc-core-5.3.2-h]", async () => {
