@@ -26,6 +26,7 @@
 ## Invariants
 - The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of the acr asked `acr`, those of the claims a request names beyond its scope `claims`, those of refusing an unverified email `verified-email`, those of a subject the ledger revokes `revocation`, those of clients whose id is the URL of their metadata document `documents`, and that of the whole metadata document `discovery`; the rest are the package's.
 - The fault scenes of a code redeemed once are the internal module `code-once`, those of a refresh token rotated once `refresh-once`, those of a closing session closed `session-closing`, those of no code issued while the store cannot answer `authorize-unavailable`, those of a store that cannot write or evicts `store-rows`, those of the bounds left to the operator `boundaries`, those of a subject's revocation boundary `revocation-boundary`, and what they share `faults`.
+- The scenes of the space-delimited lists the code flow writes and reads are the internal module `space-lists`.
 - The legacy set-up, and the needs the legacy system cannot provide and the differences it answers differently, live only in `src/legacy.ts`.
 - The code flow needs access tokens that can be revoked after they are issued (`tokens` is set to denylist).
 - Touches only the HTTP interface and boot refusals.
