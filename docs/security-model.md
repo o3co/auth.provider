@@ -72,7 +72,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Does not hold where the operator accepts losing what was used: with a store that does not persist (`store.accept-volatile`), a restart forgets it; with `redis.durability = none`, a crash can lose the latest writes, spent assertion and proof ids and lockout records among them; with `redis.replication = none`, a failover would lose writes.
    - Upgrading from rc.1 leaves a window in which JWT bearer assertions spent and id_tokens exchanged under rc.1 are not seen, as [From 0.18.0-rc.1](migration.md#from-0180-rc1) says.
    - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once").
-   - No scene yet for an exchanged id_token used twice. The scenes for a code, a refresh token, and a JWT bearer assertion's, a client assertion's and a DPoP proof's `jti` run two instances sharing Redis, one killed after a write and before its answer, and both acting on the same thing at once.
+   - No scene yet for an exchanged id_token used twice. Which scenes run two instances, and under which faults, is in [Guarantees by deployment](deployment-guarantees.md#several-instances).
 6. **A token bound to a key or a certificate is never used as a bearer token.**
    - Kept by: `sender-binding`, which refuses a bound token presented in another scheme.
    - Scenes: code (userinfo with a DPoP-bound token and with an mTLS-bound one, "refresh: binding a public client's family"), exchange ("token exchange: a binding washed off").
