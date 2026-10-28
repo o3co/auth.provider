@@ -908,13 +908,22 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("starts a new window once the old one has passed", async () => {
 				const s = await harness.open();
 				const k = fresh()("hits");
-				expect((await s.count(k, { ms: 150, limit: 1 })).kind).toBe("counted");
-				expect((await s.count(k, { ms: 150, limit: 1 })).kind).toBe("limited");
-				await sleep(400);
-				expect(await s.count(k, { ms: 150, limit: 1 })).toMatchObject({
-					kind: "counted",
-					count: 1,
-				});
+				// A window long enough that a slow caller's second hit still falls in it, waited out on
+				// the store clock its answer names, never the caller's.
+				const window = { ms: 1_000, limit: 1 };
+				const first = await s.count(k, window);
+				expect(first.kind).toBe("counted");
+				expect((await s.count(k, window)).kind).toBe("limited");
+				// Past resetAt, not at it: a backend may keep the window through resetAt's own millisecond.
+				const resetAt = "resetAt" in first ? first.resetAt : Number.NaN;
+				const giveUp = Date.now() + window.ms + 5_000;
+				let now = await s.now();
+				while (now <= resetAt && Date.now() < giveUp) {
+					await sleep(20);
+					now = await s.now();
+				}
+				expect(now > resetAt, "the store clock did not pass resetAt").toBe(true);
+				expect(await s.count(k, window)).toMatchObject({ kind: "counted", count: 1 });
 			});
 		});
 
