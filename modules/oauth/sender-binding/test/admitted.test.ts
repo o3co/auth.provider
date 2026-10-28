@@ -4,6 +4,7 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig, Unavailable } from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { beforeAll, beforeEach, expect, it } from "vitest";
 import {
 	type Binding,
@@ -64,6 +65,8 @@ const issued: Record<string, Check> = {
 	keyed: { kind: "valid", subject: "bob", binding: bound("jkt", "k1", "DPoP") },
 	certified: { kind: "valid", subject: "carol", binding: bound("x5t", "c1", "Bearer") },
 	stranger: { kind: "valid", subject: "dave", binding: bound("other", "o1", "Other") },
+	"s3cr3t-plain": { kind: "valid", subject: "erin" },
+	"s3cr3t-keyed": { kind: "valid", subject: "erin", binding: bound("jkt", "k9", "DPoP") },
 };
 const tokens = {
 	verifyAccess: async (token: string): Promise<Check> => {
@@ -73,6 +76,7 @@ const tokens = {
 };
 
 let b: SenderBindings;
+const logged = recordingLog();
 beforeAll(async () => {
 	const app = await assemble({
 		modules: [
@@ -83,6 +87,7 @@ beforeAll(async () => {
 			kind("x5t", "Bearer", "x-cert"),
 		],
 		config: { ...kernelConfig(), ...httpConfig(), ...issuerConfig() },
+		runtime: quietRuntime({ log: logged.log }),
 	});
 	b = app.get(senderBinding);
 });
@@ -250,4 +255,26 @@ it("makes a resource's own challenge for a token it refuses, in the token's type
 	expect(challengeOf("DPoP", "insufficient_scope")).toEqual({
 		"www-authenticate": 'DPoP error="insufficient_scope"',
 	});
+});
+
+it("answers no token it was presented, admitting or refusing it, and logs none [rfc9700-4.9.3-a]", async () => {
+	const answers = [
+		await presenting({ authorization: "Bearer s3cr3t-plain" }),
+		await presenting({ authorization: "DPoP s3cr3t-keyed", "x-proof": "k9" }),
+		await presenting({ authorization: "Bearer s3cr3t-keyed", "x-proof": "k9" }),
+		await presenting({ authorization: "DPoP s3cr3t-keyed", "x-proof": "bad" }),
+		await presenting({ authorization: "DPoP s3cr3t-keyed", "x-proof": "nonce" }),
+		await presenting({ authorization: "Bearer s3cr3t-forged" }),
+		await presenting({ authorization: "Bearer s3cr3t-plain s3cr3t-plain" }),
+	];
+	expect(answers.map((a) => a.kind)).toEqual([
+		"admitted",
+		"admitted",
+		"refused",
+		"refused",
+		"refused",
+		"refused",
+		"refused",
+	]);
+	expect(JSON.stringify([answers, logged.lines()])).not.toContain("s3cr3t");
 });

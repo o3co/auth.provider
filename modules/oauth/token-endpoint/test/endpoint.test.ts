@@ -311,7 +311,7 @@ describe("the audience a request asks for", () => {
 });
 
 describe("token endpoint", () => {
-	it("issues client credentials tokens with basic and post, uncached, each answer telling its lifetime [rfc6749-2.3.1-a] [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-3.3-a] [rfc6749-5.1-c] [rfc6749-5.1-d]", async () => {
+	it("issues client credentials tokens with basic and post, uncached by the no-store and no-cache http's jsonAnswer writes on each answer it builds, and with expires_in in every answer the client credentials grant gives, each grant writing its own [rfc6749-2.3.1-a] [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-3.3-a] [rfc6749-5.1-c] [rfc6749-5.1-d]", async () => {
 		const post = await serve();
 		const basic = await post({ grant_type: "client_credentials", scope: "read write" }, "basic");
 		expect(basic.status).toBe(200);
@@ -418,7 +418,7 @@ describe("token endpoint", () => {
 		]);
 	});
 
-	it("answers each refusal with its OAuth error, authenticating the client wherever it can, each code within the error ABNF, the password grant not offered [rfc6749-5.2-b] [rfc6749-3.2.1-a] [rfc6749-4.4-a] [rfc6749-4.4.2-a] [rfc6749-10.2-a] [oidc-core-16.8-a] [rfc6749-5.2-c] [rfc6749-8.5-b] [rfc9700-2.4-a]", async () => {
+	it("answers each refusal with its OAuth error, authenticating the client by clients' authenticate, which every endpoint authenticating a client calls, each code a fixed word within the error ABNF as every endpoint's is, the password grant not offered [rfc6749-5.2-b] [rfc6749-3.2.1-a] [rfc6749-4.4-a] [rfc6749-4.4.2-a] [rfc6749-10.2-a] [oidc-core-16.8-a] [rfc6749-5.2-c] [rfc6749-8.5-b] [rfc9700-2.4-a]", async () => {
 		const post = await serve();
 		const cc = { grant_type: "client_credentials" };
 		const wrong = await post(cc, "basic", { secret: "nope" });
