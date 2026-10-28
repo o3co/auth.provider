@@ -50,7 +50,12 @@ const clientSection: Section<{
 
 export default defineModule(
 	// Its own verifiers are collected, so named; the tokens, the issuer and the ties are others'.
-	{ name: "token-exchange", section, takes: [tokens, issuer, exchangeVerifiers, tokenTies] },
+	{
+		name: "token-exchange",
+		replicaSafe: true,
+		section,
+		takes: [tokens, issuer, exchangeVerifiers, tokenTies],
+	},
 	(m) => [
 		m.contribute(metadataSections).by(() => clientSection),
 		m
