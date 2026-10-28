@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import idpModule from "../src/module.ts";
 
 /** Outbound and its refusals, never asked: the type is only built. */
-const stubs = defineModule({ name: "outbound", takes: [] }, (m) => [
+const stubs = defineModule({ name: "outbound", replicaSafe: true, takes: [] }, (m) => [
 	m.provide(outbound).by(() => ({}) as never),
 	m.provide(outboundRefusals).by(() => ({ explained: () => undefined }) as never),
 ]);

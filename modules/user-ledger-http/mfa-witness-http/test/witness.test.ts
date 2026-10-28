@@ -128,9 +128,10 @@ const settings = (more: Record<string, unknown> = {}) => ({
 	...more,
 });
 const collected = contract<readonly EnrollmentWitness[]>("test.witnesses");
-const collector = defineModule({ name: "test-collector", takes: [enrollmentWitnesses] }, (m) => [
-	m.provide(collected).by((c) => c.collect(enrollmentWitnesses)),
-]);
+const collector = defineModule(
+	{ name: "test-collector", replicaSafe: true, takes: [enrollmentWitnesses] },
+	(m) => [m.provide(collected).by((c) => c.collect(enrollmentWitnesses))],
+);
 async function open(section: unknown = settings(), outbound: Record<string, unknown> = {}) {
 	const logged = recordingLog();
 	const app = await assemble({
@@ -345,7 +346,7 @@ describe("mfa-witness-http at a private address", () => {
 			"/w/enroll": { status: 200, body: { owner: true } },
 			"/w/clear": { status: 204 },
 		};
-		const recording = defineModule({ name: "outbound", takes: [] }, (m) => [
+		const recording = defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(outbound).by(() => ({
 				fetch: async (url, _request, narrower) => {
 					asked.push({ url, narrower });
@@ -566,7 +567,7 @@ describe("mfa-witness-http", () => {
 
 	it("says why its credential may not go in outbound-policy's words, for the scheme and for its URLs' one origin", async () => {
 		const refusedFor = async (refusal: "origins" | "scheme") => {
-			const standIn = defineModule({ name: "outbound", takes: [] }, (m) => [
+			const standIn = defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(outbound).by(() => ({
 					fetch: async () => {
 						throw new Error("never sent");
