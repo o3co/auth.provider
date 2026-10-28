@@ -21,8 +21,19 @@ import type { Doc } from "./workspace.ts";
 export { branchingImports, dependencyCards, heavyDependencyCards } from "./budget/budget.ts";
 export type { Doc, Measure, Pkg, Violation };
 
+/** A package held to another limit than the budget's for one measure, and why. */
+export interface BudgetException {
+	readonly package: string;
+	/** A package's measure as G7 names it, such as `contract values`. */
+	readonly measure: string;
+	readonly limit: number;
+	readonly reason: string;
+}
+
 /** The configuration: the budget numbers, beside the rules guard-imports reads. */
 export interface Budget extends Rules {
+	/** Packages held to another limit for one measure each, each with its reason. */
+	readonly exceptions?: readonly BudgetException[];
 	/** The kind of a wire's contract, held to it alone (G33). */
 	readonly protocolKind: string;
 	readonly readRangeBytes: number;
@@ -162,6 +173,14 @@ export function check(
 		budgetRules(s, p, surfaces);
 	}
 	documentRules(s, documents);
+	// An exception names a package there is, and says why.
+	for (const e of budget.exceptions ?? []) {
+		const where = `budget exception ${e.package} ${e.measure}`;
+		if (!packages.some((p) => p.name === e.package))
+			violations.push({ rule: "G7 budget", where, detail: "names no package in the workspace" });
+		if (e.reason.trim() === "")
+			violations.push({ rule: "G7 budget", where, detail: "gives no reason" });
+	}
 	return violations;
 }
 

@@ -155,6 +155,28 @@ describe("guard", () => {
 		).toEqual(["G9 Hidden (Shown)"]);
 	});
 
+	it("holds a package to the limit an exception gives it for one measure, and refuses one without a reason or a package", () => {
+		const p = pkg("@t/x", { "src/contract.ts": "export const a = 1;\nexport const b = 2;\n" });
+		const tight = { ...budget, contractValues: 1 };
+		const g7 = (b: typeof budget) =>
+			check([p], b)
+				.filter((v) => v.rule === "G7 budget")
+				.map((v) => `${v.where} ${v.detail}`);
+		expect(g7(tight)).toEqual(["@t/x contract values 2 > 1"]);
+		const excepted = (e: object) => ({
+			...tight,
+			exceptions: [{ package: "@t/x", measure: "contract values", limit: 2, reason: "why", ...e }],
+		});
+		expect(g7(excepted({}))).toEqual([]);
+		expect(g7(excepted({ reason: " " }))).toEqual([
+			"budget exception @t/x contract values gives no reason",
+		]);
+		expect(g7(excepted({ package: "@t/none" }))).toEqual([
+			"@t/x contract values 2 > 1",
+			"budget exception @t/none contract values names no package in the workspace",
+		]);
+	});
+
 	it("limits the members of a contract's exported types, more widely for the kinds others build on", () => {
 		const source = {
 			"src/contract.ts":

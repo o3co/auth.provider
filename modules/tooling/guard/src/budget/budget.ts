@@ -95,8 +95,15 @@ export function budgetMeasures(
 	return ["", ...cardDirs].flatMap((unit) => {
 		const where = whereOf(unit);
 		const found: Measure[] = [];
-		const measure = (what: string, value: number, limit?: number) =>
-			found.push(limit === undefined ? { where, what, value } : { where, what, value, limit });
+		const measure = (what: string, value: number, limit?: number) => {
+			// A package's own measure where the budget makes an exception of it, with its reason.
+			const excepted =
+				unit === ""
+					? budget.exceptions?.find((e) => e.package === p.name && e.measure === what)?.limit
+					: undefined;
+			const held = excepted ?? limit;
+			found.push(held === undefined ? { where, what, value } : { where, what, value, limit: held });
+		};
 		const files = p.files.filter((file) => unitOf(file) === unit);
 		let sourceLines = 0;
 		let testLines = 0;
