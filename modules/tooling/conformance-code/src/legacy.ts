@@ -60,6 +60,8 @@ onLegacy(codeArea, {
 		"session-grant-needs-origin-evidence",
 		// The session grant issues no scope when none is asked, whatever the client's defaults.
 		"session-grant-scope-left-out-without-defaults",
+		// Ours refuses a session grant without a session as RFC 6749's 400 invalid_grant; the legacy build answers 401 unauthorized.
+		"session-grant-invalid-grant",
 		// A back channel on plain http at loopback is allowed by its host alone, whatever its port.
 		"back-channel-by-host-and-port",
 		// An expired logout hint is refused; and an old one on a GET gets a page that asks to confirm.
