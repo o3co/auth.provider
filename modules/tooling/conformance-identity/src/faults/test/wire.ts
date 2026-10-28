@@ -15,8 +15,6 @@ export const prefix = "store";
 
 /** A store operation: the adapter runs each as a script; not the handshake each new connection makes, nor the confirming connection's rounds (`ROLE`, `INFO`, its `SET`, `WAIT`). */
 export const isStoreOperation = (command: Command) => command.name === "EVAL";
-/** Every store operation. */
-export const storeOperations: Match = { request: isStoreOperation, succeeded: () => true };
 
 /** The count of a login attempt from the source: its window's counter, under the route's name and the source. */
 export const attemptFrom = (source: string): Match =>

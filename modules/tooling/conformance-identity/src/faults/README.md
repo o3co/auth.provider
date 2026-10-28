@@ -10,7 +10,7 @@ Internal module of `conformance-identity`: what the area's fault scenes share in
 
 ## Offers
 - `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `nextSource`, `loginAt`, `said`, and the scene's `issuer` and user `alice`.
-- From `test/wire.ts`: `prefix`, `isStoreOperation`, `storeOperations`, `attemptFrom`, `identifierLockout`, `lockoutOf`, `lockoutRun`, `sessionRecord`, `cookieIndexed`.
+- From `test/wire.ts`: `prefix`, `isStoreOperation`, `attemptFrom`, `identifierLockout`, `lockoutOf`, `lockoutRun`, `sessionRecord`, `cookieIndexed`.
 
 ## Invariants
 - The store's inside (spaces, partitions, operations, the adapter's commands) is named only in `test/wire.ts`; when the adapter and the wirings describe it themselves, that file alone changes.
