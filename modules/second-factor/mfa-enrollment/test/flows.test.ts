@@ -359,7 +359,7 @@ describe("mfa under races and misuse", () => {
 		const forging =
 			contract<(tx: string, subject: string, secret: string) => Promise<boolean>>("test.forging");
 		const forger = defineModule(
-			{ name: "forger", replicaSafe: true, takes: [flowParts, seal] },
+			{ name: "forger", replicaSafe: false, takes: [flowParts, seal] },
 			(m) => [
 				m.provide(forging).by(async (c) => {
 					const sealed = await c.get(seal);
