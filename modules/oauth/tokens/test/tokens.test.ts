@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign } from "node:crypto";
+import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
@@ -38,8 +38,20 @@ const start = 1_800_000_000_000;
 let now = start;
 beforeEach(() => {
 	now = start;
+	drawn.length = 0;
 });
-const runtime = quietRuntime({ clock: { now: () => now } });
+/** A copy of every draw of 16 bytes the composition made, as base64url, so a test can tell what an id was made from. */
+const drawn: string[] = [];
+const runtime = quietRuntime({
+	clock: { now: () => now },
+	random: {
+		bytes: (n) => {
+			const bytes = new Uint8Array(randomBytes(n));
+			if (n === 16) drawn.push(Buffer.from(bytes).toString("base64url"));
+			return bytes;
+		},
+	},
+});
 const privateKey = generateKeyPairSync("ed25519")
 	.privateKey.export({ format: "pem", type: "pkcs8" })
 	.toString();
@@ -358,10 +370,7 @@ it("writes one audience as a string and more as a list, an empty scope not at al
 it("issues access tokens none can make without its signing key, a changed claim or signature, another key or none refused, each with its own 128-bit id [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
 	const t = await boot({ revocation: "unsupported" });
 	const [one, two] = [await issueFor(t, grant), await issueFor(t, grant)];
-	expect([one.id, two.id]).toEqual([
-		expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
-		expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
-	]);
+	for (const { id } of [one, two]) expect(drawn).toContain(id);
 	expect(one.id).not.toBe(two.id);
 	expect((await t.verifyAccess(one.token)).kind).toBe("valid");
 	const [header = "", payload = "", signature = ""] = one.token.split(".");
