@@ -108,7 +108,7 @@ export function reportFiles(
 	files.set(
 		"README.md",
 		[
-			"# Specification compliance",
+			"# Specification checklist",
 			"",
 			generated,
 			"",
