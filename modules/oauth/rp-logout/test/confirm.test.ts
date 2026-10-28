@@ -122,7 +122,7 @@ describe("the confirmation's routes", () => {
 	});
 
 	it("answer 503, closing nothing, where the session index cannot tell whose the browser is", async () => {
-		const failing = defineModule({ takes: [], name: "session" }, (m) => [
+		const failing = defineModule({ takes: [], name: "session", replicaSafe: true }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
 					handleOf: async () => {
@@ -140,7 +140,7 @@ describe("the confirmation's routes", () => {
 
 	it("close a session past its lifetime through its participants, recording the logout and moving on to the upstream, as the hinted logout does", async () => {
 		const closing: string[] = [];
-		const watcher = defineModule({ takes: [], name: "watcher" }, (m) => [
+		const watcher = defineModule({ takes: [], name: "watcher", replicaSafe: false }, (m) => [
 			m.contribute(participants).by(() => ({
 				name: "watcher",
 				closing: async (session) => {
@@ -148,7 +148,7 @@ describe("the confirmation's routes", () => {
 				},
 			})),
 		]);
-		const upstream = defineModule({ takes: [], name: "upstream-end" }, (m) => [
+		const upstream = defineModule({ takes: [], name: "upstream-end", replicaSafe: true }, (m) => [
 			m.contribute(upstreamEnds).by(() => ({
 				name: "upstream",
 				at: async () => "https://idp.example/logout",

@@ -267,7 +267,7 @@ describe("the logout a client starts", () => {
 	});
 
 	it("answers a close left pending 503, clearing the cookie and recording it by its sid and source alone, never as a logout", async () => {
-		const unfinished = defineModule({ takes: [], name: "unfinished" }, (m) => [
+		const unfinished = defineModule({ takes: [], name: "unfinished", replicaSafe: true }, (m) => [
 			m.contribute(participants).by(() => ({
 				name: "unfinished",
 				closing: async () => {
@@ -297,7 +297,7 @@ describe("the logout a client starts", () => {
 
 	it("closes a session past its lifetime through its participants when its logout comes, as any close does", async () => {
 		const closing: string[] = [];
-		const watcher = defineModule({ takes: [], name: "watcher" }, (m) => [
+		const watcher = defineModule({ takes: [], name: "watcher", replicaSafe: false }, (m) => [
 			m.contribute(participants).by(() => ({
 				name: "watcher",
 				closing: async (session) => {
@@ -351,14 +351,17 @@ describe("the logout a client starts", () => {
 
 	it("logs out a session short of a requirement to be used as any live one: recorded, closed, sent back", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ takes: [], name: "short-to-use" }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "mfa",
-				judges: ["use"],
-				admits: async () =>
-					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
-			})),
-		]);
+		const requirement = defineModule(
+			{ takes: [], name: "short-to-use", replicaSafe: false },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "mfa",
+					judges: ["use"],
+					admits: async () =>
+						short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+				})),
+			],
+		);
 		const h = await serve({ extra: [requirement] });
 		const { session } = await h.login();
 		const hint = await h.hintFor(session.id);
@@ -387,7 +390,7 @@ describe("the logout a client starts", () => {
 	});
 
 	it("passes on an error of the close's that is not Unavailable, recording no failed close", async () => {
-		const broken = defineModule({ takes: [], name: "session" }, (m) => [
+		const broken = defineModule({ takes: [], name: "session", replicaSafe: true }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
 					complete: async (_request, facts) => ({
@@ -508,7 +511,7 @@ it("leaves out a frame whose origin the page's policy cannot name, logging how m
 
 describe("the upstream's end of session", () => {
 	const ending = (seen: { open?: boolean }) =>
-		defineModule({ takes: [sessions], name: "upstream-end" }, (m) => [
+		defineModule({ takes: [sessions], name: "upstream-end", replicaSafe: false }, (m) => [
 			m.contribute(upstreamEnds).by(async (c) => {
 				const kept = await c.late(sessions);
 				return {
@@ -539,7 +542,7 @@ describe("the upstream's end of session", () => {
 	});
 
 	it("refuses to start with two", async () => {
-		const twice = defineModule({ takes: [], name: "upstream-end-2" }, (m) => [
+		const twice = defineModule({ takes: [], name: "upstream-end-2", replicaSafe: true }, (m) => [
 			m.contribute(upstreamEnds).by(() => ({ name: "other", at: async () => undefined })),
 		]);
 		await expect(serve({ extra: [ending({}), twice] })).rejects.toMatchObject({
@@ -629,7 +632,7 @@ it("leaves out the frame of a client a source names whose front channel is at no
 		remote("https://remote.example/off", "https://elsewhere.example/fc"),
 		remote("https://remote.example/on", "https://remote.example/fc"),
 	];
-	const source = defineModule({ takes: [], name: "remote-clients" }, (m) => [
+	const source = defineModule({ takes: [], name: "remote-clients", replicaSafe: true }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id) => records.find((r) => r.id === id),
 		})),
