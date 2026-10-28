@@ -79,10 +79,16 @@ export default defineModule(
 				}
 				known.set(receiver.name, receiver);
 			}
-			// A name written in the list is a configured value: it is told by its place alone.
+			// A name written in the list is a configured value: it is told by its place alone, beside the
+			// names that are composed, which are the modules' own.
+			const composed = [...known.keys()].join(", ") || "none";
 			for (const [at, name] of named.entries()) {
-				if (!known.has(name))
-					refusals.push({ where: `audit.receivers.${at}`, reason: "names no receiver" });
+				if (!known.has(name)) {
+					refusals.push({
+						where: `audit.receivers.${at}`,
+						reason: `names no composed receiver (composed: ${composed})`,
+					});
+				}
 			}
 			if (refusals.length > 0) c.refuseAll(refusals);
 			const max = c.section["max-pending"];
