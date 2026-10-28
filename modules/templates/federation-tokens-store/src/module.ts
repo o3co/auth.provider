@@ -29,26 +29,29 @@ const locks: Space = {
 	guarantees: Object.values(locksGuaranteeFor),
 };
 
-export default defineModule({ name: "federation-tokens-store", takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => tokens),
-	m.contribute(spaces).by(() => locks),
-	m.provide(upstreamTokenStore).by(async (c): Promise<UpstreamTokenStore> => {
-		const place = { store: await c.get(store), space: tokens, log: c.log, random: c.random };
-		const records = recordsIn<StoredUpstreamTokens>(place);
-		return {
-			save: records.create,
-			read: records.read,
-			update: records.change,
-			remove: records.remove,
-			scan: records.scan,
-		};
-	}),
-	m.provide(refreshLocks).by(async (c): Promise<RefreshLocks> => {
-		const place = { store: await c.get(store), space: locks, log: c.log, random: c.random };
-		const marked = recordsIn<string>(place);
-		return {
-			hold: (name, mark, lifetimeMs) => marked.create(name, mark, lifetimeMs),
-			update: marked.change,
-		};
-	}),
-]);
+export default defineModule(
+	{ name: "federation-tokens-store", replicaSafe: true, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => tokens),
+		m.contribute(spaces).by(() => locks),
+		m.provide(upstreamTokenStore).by(async (c): Promise<UpstreamTokenStore> => {
+			const place = { store: await c.get(store), space: tokens, log: c.log, random: c.random };
+			const records = recordsIn<StoredUpstreamTokens>(place);
+			return {
+				save: records.create,
+				read: records.read,
+				update: records.change,
+				remove: records.remove,
+				scan: records.scan,
+			};
+		}),
+		m.provide(refreshLocks).by(async (c): Promise<RefreshLocks> => {
+			const place = { store: await c.get(store), space: locks, log: c.log, random: c.random };
+			const marked = recordsIn<string>(place);
+			return {
+				hold: (name, mark, lifetimeMs) => marked.create(name, mark, lifetimeMs),
+				update: marked.change,
+			};
+		}),
+	],
+);
