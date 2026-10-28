@@ -105,6 +105,21 @@ it.each([
 	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
 });
 
+it("posts to a back channel with a query as registered, adding nothing to it [oidc-bcl-2.2-b]", async () => {
+	const h = await serve({
+		sections: { app: { "backchannel-logout-uri": "https://app.example/bc?tenant=a&x=1" } },
+	});
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	expect(h.sent.map((s) => s.url)).toEqual(["https://app.example/bc?tenant=a&x=1"]);
+	expect([...new URLSearchParams(String(h.sent[0]?.request?.body)).keys()]).toEqual([
+		"logout_token",
+	]);
+	await settled(h, 500);
+});
+
 it("gives up a notice past its time, without sending it again", async () => {
 	const h = await serve({ settings: { "notify-within": "1m" } });
 	h.answering.answer = async () => 503;
