@@ -30,7 +30,8 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { sessionStandIn, stubSessions } from "@mod/session/testing";
+import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import sessionRequirements from "@mod/session-requirements/module";
 import subjectAttributes from "@mod/subject-attributes/module";
@@ -287,6 +288,56 @@ export async function harness(
 export type Harness = Awaited<ReturnType<typeof harness>>;
 
 /** Starts harnesses for a file's tests, each stopped after the test that started it. */
+/**
+ * Sessions that a read ends once past `lifetimeMs`, and whose close still finds the record open, as
+ * the lifecycle's do; a browser's cookie `session=<id>` names its session's handle.
+ */
+export function readEndingSessions(lifetimeMs: number) {
+	return defineModule({ takes: [participants], name: "session" }, (m) => [
+		m.provide(sessions).by(async (c) => {
+			const closers = await c.collect(participants);
+			type Kept = { subject: string; openedAt: number; state: "open" | "closing" | "closed" };
+			const kept = new Map<string, Kept>();
+			const sessionOf = (id: string, r: Kept) => ({
+				id,
+				context: { subject: r.subject, amr: ["pwd"], authenticatedAt: r.openedAt },
+			});
+			return stubSessions({
+				handleOf: async (request) => {
+					const id = /session=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
+					return id !== undefined && kept.has(id) ? id : undefined;
+				},
+				complete: async (_request, facts) => {
+					const id = `s${kept.size + 1}`;
+					const r: Kept = { subject: facts.subject, openedAt: c.clock.now(), state: "open" };
+					kept.set(id, r);
+					return { session: sessionOf(id, r), cookies: [`session=${id}`] };
+				},
+				entryOf: async (id) => {
+					const r = kept.get(id);
+					if (r?.state !== "open") return { kind: "absent" };
+					if (r.openedAt + lifetimeMs <= c.clock.now()) {
+						r.state = "closed";
+						return { kind: "absent" };
+					}
+					return { kind: "entered", session: sessionOf(id, r), endsAt: r.openedAt + lifetimeMs };
+				},
+				close: async (id) => {
+					const r = kept.get(id);
+					if (!r) return { kind: "closed", cookies: [] };
+					const from = r.state;
+					if (r.state !== "closed") {
+						r.state = "closing";
+						for (const closer of closers) await closer.closing(sessionOf(id, r));
+						r.state = "closed";
+					}
+					return { kind: "closed", cookies: [], session: { id, subject: r.subject }, from };
+				},
+			});
+		}),
+	]);
+}
+
 export function servedEach() {
 	const started: Harness[] = [];
 	afterEach(async () => {

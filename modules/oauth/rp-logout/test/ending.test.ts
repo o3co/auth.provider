@@ -10,7 +10,7 @@ import { entryRequirements } from "@mod/session-requirements";
 import { describe, expect, it } from "vitest";
 import { upstreamEnds } from "../src/contract.ts";
 import type { SessionClients } from "../src/store.ts";
-import { back, issuer, servedEach } from "./harness.ts";
+import { back, issuer, readEndingSessions, servedEach } from "./harness.ts";
 
 const serve = servedEach();
 const noCache = { "cache-control": "no-store", pragma: "no-cache" };
@@ -20,47 +20,6 @@ const noCache = { "cache-control": "no-store", pragma: "no-cache" };
  * calls them for any record it finds open, past its lifetime too: as session-lifecycle keeps them
  * while a record outlives its end (a host's clock behind another's, or a lifetime shortened since).
  */
-function readEndingSessions(lifetimeMs: number) {
-	return defineModule({ takes: [participants], name: "session" }, (m) => [
-		m.provide(sessions).by(async (c) => {
-			const closers = await c.collect(participants);
-			type Kept = { subject: string; openedAt: number; state: "open" | "closing" | "closed" };
-			const kept = new Map<string, Kept>();
-			const sessionOf = (id: string, r: Kept) => ({
-				id,
-				context: { subject: r.subject, amr: ["pwd"], authenticatedAt: r.openedAt },
-			});
-			return stubSessions({
-				complete: async (_request, facts) => {
-					const id = `s${kept.size + 1}`;
-					const r: Kept = { subject: facts.subject, openedAt: c.clock.now(), state: "open" };
-					kept.set(id, r);
-					return { session: sessionOf(id, r), cookies: [`session=${id}`] };
-				},
-				entryOf: async (id) => {
-					const r = kept.get(id);
-					if (r?.state !== "open") return { kind: "absent" };
-					if (r.openedAt + lifetimeMs <= c.clock.now()) {
-						r.state = "closed";
-						return { kind: "absent" };
-					}
-					return { kind: "entered", session: sessionOf(id, r), endsAt: r.openedAt + lifetimeMs };
-				},
-				close: async (id) => {
-					const r = kept.get(id);
-					if (!r) return { kind: "closed", cookies: [] };
-					const from = r.state;
-					if (r.state !== "closed") {
-						r.state = "closing";
-						for (const closer of closers) await closer.closing(sessionOf(id, r));
-						r.state = "closed";
-					}
-					return { kind: "closed", cookies: [], session: { id, subject: r.subject }, from };
-				},
-			});
-		}),
-	]);
-}
 
 describe("the logout a client starts", () => {
 	it("ends the session the hint names and clears the cookie of a browser in it", async () => {
