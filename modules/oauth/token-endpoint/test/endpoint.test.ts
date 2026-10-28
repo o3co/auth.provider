@@ -1135,7 +1135,7 @@ describe("token endpoint", () => {
 				bodies: ["json"],
 				handle: async ({ param, value }) => ({
 					kind: "issued",
-					body: { scope: param("scope") ?? null, assertion: value("assertion") ?? null },
+					body: { scope: param("scope") ?? "absent", assertion: value("assertion") ?? "absent" },
 				}),
 			})),
 		]);
@@ -1182,18 +1182,18 @@ describe("token endpoint", () => {
 				handle: async ({ param, value }) => ({
 					kind: "issued",
 					body: {
-						n: param("n") ?? null,
-						value: value("n") ?? null,
-						absent: value("x") ?? null,
+						n: param("n") ?? "absent",
+						value: value("n") ?? "absent",
+						absent: value("x") ?? "absent",
 					},
 				}),
 			})),
 		]);
 		const post = await serve([both], { clients: [echoClients.echo()] });
 		const form = await post({ grant_type: "urn:test:echo", n: "1" }, "echo");
-		expect(form.body).toEqual({ n: "1", value: "1", absent: null });
+		expect(form.body).toEqual({ n: "1", value: "1", absent: "absent" });
 		const json = await post({ grant_type: "urn:test:echo", n: 1 }, "echo", { as: "json" });
-		expect(json.body).toEqual({ n: null, value: 1, absent: null });
+		expect(json.body).toEqual({ n: "absent", value: 1, absent: "absent" });
 		const repeated = await post(new URLSearchParams("grant_type=urn:test:echo&n=1&n=2"), "echo");
 		expect([repeated.status, repeated.body.error]).toEqual([400, "invalid_request"]);
 	});
@@ -1205,7 +1205,7 @@ describe("token endpoint", () => {
 			...(bodies ? { bodies } : {}),
 			handle: async ({ param, value }) => ({
 				kind: "issued",
-				body: { scope: param("scope") ?? null, assertion: value("assertion") ?? null },
+				body: { scope: param("scope") ?? "absent", assertion: value("assertion") ?? "absent" },
 			}),
 		});
 		const echoes = defineModule({ name: "echoes", takes: [] }, (m) => [
@@ -1231,7 +1231,7 @@ describe("token endpoint", () => {
 				expect([name, res.status, res.body.error]).toEqual([name, 400, "invalid_request"]);
 			}
 			const left = await sent({ scope: null, assertion: { id: "a" } });
-			expect([left.status, left.body]).toEqual([200, { scope: null, assertion: { id: "a" } }]);
+			expect([left.status, left.body]).toEqual([200, { scope: "absent", assertion: { id: "a" } }]);
 		}
 		const typed = await post({ grant_type: ["urn:test:echo"] }, "echoes", { as: "json" });
 		expect([typed.status, typed.body.error]).toEqual([400, "invalid_request"]);
@@ -1249,7 +1249,7 @@ describe("token endpoint", () => {
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
-				handle: async ({ binding }) => ({ kind: "issued", body: { binding: binding ?? null } }),
+				handle: async ({ binding }) => ({ kind: "issued", body: { binding: binding ?? "none" } }),
 			})),
 			m.contribute(senderBindings).by(() => ({
 				member: "test",
@@ -1264,6 +1264,6 @@ describe("token endpoint", () => {
 			confirmation: "k1",
 			tokenType: "Test",
 		});
-		expect((await post({ grant_type: "urn:test:echo" }, "echo")).body.binding).toBeNull();
+		expect((await post({ grant_type: "urn:test:echo" }, "echo")).body.binding).toBe("none");
 	});
 });
