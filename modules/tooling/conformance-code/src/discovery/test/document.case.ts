@@ -69,7 +69,9 @@ it("is one JSON object of OpenID Connect Discovery's form: its required members,
 		if (member === "issuer" || /_(endpoint|uri)$/.test(member)) {
 			// A location: an absolute https URL, with no query or fragment where it is the issuer.
 			expect(typeof value, member).toBe("string");
-			expect(new URL(value as string).protocol, member).toBe("https:");
+			const url = new URL(value as string);
+			expect(url.protocol, member).toBe("https:");
+			if (member === "issuer") expect([url.search, url.hash], member).toEqual(["", ""]);
 		} else if (member.endsWith("_supported") && typeof value !== "boolean") {
 			// A list of the values taken: never empty, each a string, each once.
 			expect(Array.isArray(value), member).toBe(true);
