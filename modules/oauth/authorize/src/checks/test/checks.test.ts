@@ -40,7 +40,7 @@ const outcome = (params: Map<string, string>) => {
 };
 
 describe("checks: an OpenID Connect request's form", () => {
-	it("refuses one without a response type as invalid_request, and any type but code as unsupported_response_type, a token in the URL among them [oidc-core-3.1.2.1-c] [oidc-core-3.1.2.2-c] [rfc6750-5.3-d]", () => {
+	it("refuses one without a response type as invalid_request, and any type but code as unsupported_response_type, a token in the URL among them [oidc-core-3.1.2.1-c] [oidc-core-3.1.2.2-c] [rfc6750-5.3-d] [oidc-core-16.4-a]", () => {
 		expect(outcome(oidc({}, "response_type"))).toEqual([
 			"invalid_request",
 			"response_type is required",

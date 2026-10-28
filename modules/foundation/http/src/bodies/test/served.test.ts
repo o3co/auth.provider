@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applying, type HttpRequest, policy, type Route, use } from "../../contract.ts";
 import { handlers, serveWith } from "../../serving/test/serve.ts";
 
-it("reads form bodies with repeated names and ignores other bodies", async () => {
+it("reads form bodies with repeated names and ignores other bodies [rfc6749-10.14-b]", async () => {
 	const forms: unknown[] = [];
 	const base = await serveWith(
 		handlers([
@@ -25,7 +25,7 @@ it("reads form bodies with repeated names and ignores other bodies", async () =>
 	expect(forms).toEqual([{ a: ["1", "2"], b: [" x"] }, {}]);
 });
 
-it("answers 400 to a query whose percent-escapes are not UTF-8, and reads one that is", async () => {
+it("answers 400 to a query whose percent-escapes are not UTF-8, and reads one that is [rfc6749-10.14-b]", async () => {
 	const seen: unknown[] = [];
 	const base = await serveWith(
 		handlers([
@@ -104,7 +104,7 @@ describe("request bodies", () => {
 		return { handled, gated, post, untyped };
 	}
 
-	it("reads a JSON object for a route that takes JSON: frozen, its string members as fields, others as mistyped", async () => {
+	it("reads a JSON object for a route that takes JSON: frozen, its string members as fields, others as mistyped [rfc6749-10.14-b]", async () => {
 		const { handled, post } = await servedBodies();
 		expect(await post("/json", "application/json; charset=utf-8", object)).toBe(204);
 		expect(await post("/json", "application/json", JSON.stringify({ n: null, a: "1" }))).toBe(204);
@@ -145,7 +145,7 @@ describe("request bodies", () => {
 		expect(Object.isFrozen(fields.get("a"))).toBe(true);
 	});
 
-	it("answers 415, 400 and 413 for a body it cannot take, after the route's policies have seen it", async () => {
+	it("answers 415, 400 and 413 for a body it cannot take, after the route's policies have seen it: the boundary every route's values pass, their meaning each route's own item [rfc6749-10.14-b]", async () => {
 		const { handled, gated, post } = await servedBodies();
 		expect(await post("/json", "application/x-www-form-urlencoded", "a=1")).toBe(415);
 		for (const unread of ["[1]", "null", "{nope", '{"a":"1","a":"2"}']) {
