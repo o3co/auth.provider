@@ -53,7 +53,7 @@ const scriptedWitnessing = (name = "witnessing") => {
 			if ((await after()) === "none") marks.delete(subject);
 		},
 	};
-	const module = defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
+	const module = defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(passkeyWitnessing).by(() => witnessing),
 	]);
 	return { module, marks, failing };
