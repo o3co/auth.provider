@@ -34,7 +34,7 @@ async function boot(front: (boundaries: BoundaryStore) => BoundaryStore = (b) =>
 	const app = await assemble({
 		modules: [
 			revocationModule,
-			defineModule({ name: "boundaries", takes: [] }, (m) => [
+			defineModule({ name: "boundaries", replicaSafe: true, takes: [] }, (m) => [
 				m.provide(boundaryStore).by(() => front(stores.boundaries)),
 			]),
 		],
@@ -196,7 +196,7 @@ subjectRevocationContract("the stand-in", async () => {
 
 it("takes every handle its takes name, the module and its stand-in alike", async () => {
 	const stores = memoryBoundaries();
-	const boundaries = defineModule({ name: "boundaries", takes: [] }, (m) => [
+	const boundaries = defineModule({ name: "boundaries", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(boundaryStore).by(() => stores.boundaries),
 	]);
 	const config = kernelConfig();
