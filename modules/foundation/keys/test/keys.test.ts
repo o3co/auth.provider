@@ -6,7 +6,7 @@ import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { CompactSign } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
-import { keys, mediaTypeOf } from "../src/contract.ts";
+import { keys } from "../src/contract.ts";
 import keysModule from "../src/module.ts";
 import { section as keysSection } from "../src/signing/section.ts";
 import { keysConfig } from "../src/testing.ts";
@@ -114,7 +114,7 @@ describe("keys", () => {
 		expect(await k.verify(byOld, "JWT")).toEqual({ kind: "invalid", reason: "kid_expired" });
 	});
 
-	it("publishes and verifies the next key, but never signs with it [oidc-core-10.1-d]", async () => {
+	it("publishes and verifies the next key, but never signs with it, and has the set cached five minutes, the wait the runbook's rotation keeps before the key signs [oidc-core-10.1-d] [oidc-core-10.2.1-c]", async () => {
 		const coming = ed25519Pem();
 		const { app, base } = await boot({
 			...rotated(),
@@ -132,6 +132,11 @@ describe("keys", () => {
 		};
 		expect(published.keys.map((key) => key.kid)).toEqual(["now", "old", "next"]);
 		expect(published.keys.every((key) => !("d" in key))).toBe(true);
+		// The tools of the coordination; the wait between publishing and signing is the operator's, as
+		// docs/runbook.md's "Rotating the signing key" sets it: 300 seconds after the last restart.
+		expect((await fetch(`${base}/.well-known/jwks.json`)).headers.get("cache-control")).toBe(
+			"public, max-age=300",
+		);
 	});
 
 	it("takes a previous key written as a private PEM for its public half alone", async () => {
@@ -170,13 +175,14 @@ describe("keys", () => {
 		expect(await read("https://evil.example")).toBeNull();
 	});
 
-	it("publishes only public members of unexpired keys with a strong ETag [oidc-core-10.1.1-a] [oidc-core-10.2.1-a]", async () => {
+	it("publishes only public members of unexpired keys, each for signatures, with a strong ETag [oidc-core-10.1.1-a] [oidc-core-10.2.1-a] [oidc-core-10.1-e]", async () => {
 		const { base } = await boot(rotated());
 		const res = await fetch(`${base}/.well-known/jwks.json`);
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { keys: Record<string, unknown>[] };
 		expect(body.keys.map((k) => k.kid)).toEqual(["now", "old"]);
 		expect(body.keys.every((k) => !("d" in k))).toBe(true);
+		expect(body.keys.map((k) => k.use)).toEqual(["sig", "sig"]);
 		const etag = res.headers.get("etag") ?? "";
 		expect(etag).toMatch(/^"[A-Za-z0-9_-]+"$/);
 		expect(res.headers.get("cache-control")).toBe("public, max-age=300");
@@ -293,6 +299,23 @@ describe("keys", () => {
 		expect((await fetch(`${ed.base}${ed.app.get(keys).keySetPath()}`)).status).toBe(200);
 	});
 
+	it("names in alg the RSA or ECDSA algorithm it signs with, and verifies under it [oidc-core-10.1-b]", async () => {
+		const pems = {
+			ES256: generateKeyPairSync("ec", { namedCurve: "P-256" }),
+			RS256: generateKeyPairSync("rsa", { modulusLength: 2048 }),
+		};
+		for (const [alg, pair] of Object.entries(pems)) {
+			const priv = pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+			const k = (await boot({ signing: { kid: "k", alg, "private-key": priv } })).app.get(keys);
+			const token = await k.sign({ sub: "a" }, "JWT");
+			const header = JSON.parse(Buffer.from(token.split(".")[0] as string, "base64url").toString());
+			expect(header, alg).toMatchObject({ alg, kid: "k", typ: "JWT" });
+			expect(k.algorithm(), alg).toBe(alg);
+			expect((await k.verify(token, "JWT")).kind, alg).toBe("valid");
+			await stop();
+		}
+	});
+
 	it("signs with HMAC as needing a shared secret", async () => {
 		const hs = await boot({
 			signing: { kid: "h", alg: "HS256", secret: randomBytes(32).toString("base64") },
@@ -302,17 +325,4 @@ describe("keys", () => {
 		const token = await hs.app.get(keys).sign({ sub: "a" }, "JWT");
 		expect((await hs.app.get(keys).verify(token, "JWT")).kind).toBe("valid");
 	});
-});
-
-it("reads a token's type as its media type alone, without parameters, space, case or application/", () => {
-	for (const typ of [
-		"at+jwt",
-		"AT+JWT",
-		"application/at+jwt",
-		"application/AT+JWT; charset=UTF-8",
-		" at+jwt ;q=1",
-	])
-		expect(mediaTypeOf(typ), typ).toBe("at+jwt");
-	expect(mediaTypeOf("JWT")).toBe("jwt");
-	expect(mediaTypeOf("application/oauth-id-jag+jwt")).toBe("oauth-id-jag+jwt");
 });

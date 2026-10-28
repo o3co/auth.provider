@@ -35,8 +35,6 @@ const written = [
 	"exp",
 	"jti",
 	"cnf",
-	// How many of the last `aud` values the issuer added to the grant's audience.
-	"aud_added",
 ];
 
 /** Names a specification gives a meaning an access token's issuer does not write: no grant adds one, and a payload holding one is none the issuer wrote. */

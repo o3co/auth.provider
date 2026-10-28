@@ -3,7 +3,7 @@
 ## Responsibilities
 - Holds the checklist of the specifications this provider implements: each requirement on a role the server takes as an item, and, for each spec's version, a ledger tying every requirement keyword in its text to items or to the reason it is not one.
 - Reads which tests name which items, and refuses an item ID written anywhere else.
-- Writes the compliance report from the checklist and those tests.
+- Writes the checklist report from the checklist and those tests.
 - Its internal module `exceptions` decides whether an accepted difference in a run against another implementation may be taken.
 - Its internal module `evidence` tells what a CI run's tests proved of each item, from the reports its vitest reporter writes.
 

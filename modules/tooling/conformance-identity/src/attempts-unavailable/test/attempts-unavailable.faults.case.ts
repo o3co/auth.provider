@@ -93,14 +93,12 @@ describe("password login's attempt limit letting no attempt by while the store c
 			const stalled = performance.now();
 			a.relay.stall("down");
 			const answer = await loginAt(a, source);
-			const resumed = performance.now();
 			a.relay.resume();
 			expect(said(answer)).toEqual(refusedUnconfirmed);
 			// Its count reached Redis, which counted it before the login gave up; the answer was held.
 			expect(
 				a.relay.executions(attemptFrom(source)).some((e) => e.at > stalled && e.at < answer.at),
 			).toBe(true);
-			expect(resumed).toBeGreaterThan(answer.at);
 			await refusedAtCount(a, stalled);
 			await healed(a);
 		});

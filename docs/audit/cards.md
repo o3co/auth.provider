@@ -186,7 +186,6 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `route` (`src/route`): the handler of `POST /oauth/token`, from the request to the answer, and what a grant issues through.
 - `@mod/token-exchange` (feature, `modules/oauth/token-exchange`): Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
 - `@mod/tokens` (feature, `modules/oauth/tokens`): Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
-  - `audience` (`src/audience`): the audiences an access token is for besides its grant's, as additions answer them, and how `aud` is split back into the two.
   - `issuance` (`src/issuance`): the judgment `admits` and `issue` share, and the issuing `issue` does over it.
 - `@mod/userinfo` (feature, `modules/oauth/userinfo`): Serves OIDC's userinfo: admits the access token a request presents, checks the session it was issued in, and answers `sub` and the claims `oidc` releases for its scope and the selection `claims-selection` kept for the token.
 - `@mod/verified-email` (feature, `modules/oauth/verified-email`): Contributes the issuance policy `verified-email`: no access token for a subject whose email users has not stated verified.
@@ -326,6 +325,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `boundaries` (`src/boundaries`): the fault scenes of bounds the security model leaves to the operator, recorded as they are; no promise is checked, so none names a guarantee or a fault of one.
   - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
   - `code-once` (`src/code-once`): the fault scenes of an authorization code redeemed once (`guarantee-5-a`).
+  - `discovery` (`src/discovery`): the scene of the whole metadata document of an OpenID Provider.
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `faults` (`src/faults`): what the area's fault scenes share in the code flow's words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
@@ -348,6 +348,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-identity` (verification, `modules/tooling/conformance-identity`): Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.
   - `attempts-unavailable` (`src/attempts-unavailable`): the fault scenes of password login's attempt limit letting no attempt by while the store cannot count (`guarantee-3-i`).
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `login-unavailable` (`src/login-unavailable`): the fault scenes of password login opening no session while the store cannot answer (`guarantee-3-f`).
 - `@mod/conformance-keys` (verification, `modules/tooling/conformance-keys`): Owns the conformance scenes of the keys area: publishing the public key set, with no private part of a key and no shared secret in its answers, and boot refusals for key configuration.
 - `@mod/conformance-legacy` (verification, `modules/tooling/conformance-legacy`): Starts the legacy build for conformance scenes (location, how to start it, configuration file, preparation script).
 - `@mod/conformance-mtls` (verification, `modules/tooling/conformance-mtls`): Owns the conformance scenes of the mTLS area: tokens bound to the client's certificate as a trusted proxy forwards it (one PEM block, or Envoy's XFCC), self-signed or under PKI with revocation by CRL, OCSP or both.

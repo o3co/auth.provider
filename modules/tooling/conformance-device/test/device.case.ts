@@ -139,6 +139,24 @@ describe.runIf(areaTarget().can("device-grant"))("the device authorization grant
 		expect((await poll(code)).body.error).toBe("invalid_grant");
 	}, 30_000);
 
+	it("takes a device code only under the device grant type, from the client authenticated [rfc8628-3.4-a] [rfc8628-3.4-c] [rfc8628-3.4-d]", async () => {
+		const { device_code: code = "" } = (await authorize()).body;
+		const asked = (form: Record<string, string>) =>
+			post("/oauth/token", { device_code: code, ...form }, proxied("198.51.100.42"));
+		for (const grant_type of ["device_code", "urn:ietf:params:oauth:grant-type:device-code"]) {
+			const other = await asked({ grant_type, ...credentials("tv") });
+			expect([other.status, other.body.error], grant_type).toEqual([400, "unsupported_grant_type"]);
+		}
+		const unnamed = await asked({ grant_type: deviceGrant });
+		expect([unnamed.status, unnamed.body.error]).toEqual([401, "invalid_client"]);
+		const unproved = await asked({ grant_type: deviceGrant, client_id: "tv" });
+		expect([unproved.status, unproved.body.error]).toEqual([401, "invalid_client"]);
+		const wrong = await asked({ grant_type: deviceGrant, client_id: "tv", client_secret: "wrong" });
+		expect([wrong.status, wrong.body.error]).toEqual([401, "invalid_client"]);
+		// None of these touched the code: the device's own poll still finds it pending.
+		expect((await poll(code)).body.error).toBe("authorization_pending");
+	});
+
 	it("slows a device that polls too often", async () => {
 		const { device_code: code = "" } = (await authorize()).body;
 		expect((await poll(code)).body.error).toBe("authorization_pending");

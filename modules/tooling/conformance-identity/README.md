@@ -5,7 +5,7 @@
 - Owns the scenes of password login against a user ledger asked over HTTP, in the legacy build's HTTP user repository shapes: success, a user it does not hold, its failures, a redirect, a malformed user, and the boot refusal beside users in the settings. A scene's ledger may also look users up by upstream identity, with no lookup by subject.
 - A user ledger over HTTP beside users in the settings is a need the legacy build cannot meet.
 - A recent-authentication window a scene sets (`recentAuthenticationWindow`) is a need the legacy build cannot meet.
-- Owns the fault scenes of password login, on a Redis topology and a deployment of their own, each after a control with no fault: the attempt limit letting no attempt by while the store cannot count (internal module `attempts-unavailable`), with what they share (internal module `faults`).
+- Owns the fault scenes of password login, on a Redis topology and a deployment of their own, each after a control with no fault: the attempt limit letting no attempt by while the store cannot count (internal module `attempts-unavailable`), a login opening no session while the store cannot answer (`login-unavailable`), with what they share (internal module `faults`).
 - Sets up the identity area's parts (public origin, users, login configuration, how a request limit answers while the store fails) on each of the legacy and new targets; the legacy one leaves the last to its own default.
 - On the new target, mail, where composed, is accepted to send nothing.
 - On a pattern's app that takes users from a ledger (`users-http`), serves the users a scene gives from a fake ledger the app is pointed at, unless the scene sets its own.

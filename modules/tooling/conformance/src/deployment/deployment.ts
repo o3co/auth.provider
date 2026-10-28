@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AreaScene } from "../areas.ts";
+import { type AuditTrail, auditSink } from "../audit/audit.ts";
 import { appClockEnv, hostLibfaketime } from "../clock/clock.ts";
 import type { Started } from "../driver.ts";
 import { generated, started, workspace } from "../drivers/app.ts";
@@ -52,6 +53,7 @@ export interface Instance {
 	/** Its trace's URL: the same across a restart. */
 	readonly baseUrl: string;
 	readonly relay: Relay;
+	readonly audit: AuditTrail;
 	requests(): readonly Traced[];
 	running(): boolean;
 	/** Ends it with SIGKILL, what it started with it, answering when it ended on the relay's clock. */
@@ -122,6 +124,8 @@ export async function startDeployment(spec: DeploymentSpec) {
 		for (let index = 0; index < spec.instances; index++) {
 			const relay = await startRelay({ upstream: spec.topology.primary().upstream(), roleOf });
 			stops.push(() => relay.close());
+			const sink = await auditSink();
+			stops.push(() => sink.stop());
 			clocks.push(null);
 			const start = async () => {
 				const offset = clocks[index];
@@ -137,6 +141,7 @@ export async function startDeployment(spec: DeploymentSpec) {
 					{},
 					{
 						redis: { url: relay.url, ...redis },
+						audit: sink,
 						...(env ? { env } : {}),
 					},
 				);
@@ -158,7 +163,7 @@ export async function startDeployment(spec: DeploymentSpec) {
 			};
 			let current: Extract<Started, { kind: "running" }> = await start();
 			let alive = true;
-			// Stopped after a kill too: the instance's audit sink and parties go with it.
+			// Stopped after a kill too: what the instance started goes with it, its audit sink left to be read.
 			stops.push(() => ending());
 			const trace = await startTrace(current.baseUrl);
 			stops.push(() => trace.stop());
@@ -166,6 +171,7 @@ export async function startDeployment(spec: DeploymentSpec) {
 				index,
 				baseUrl: trace.url,
 				relay,
+				audit: sink.trail,
 				requests: () => trace.requests(),
 				running: () => alive,
 				async kill() {

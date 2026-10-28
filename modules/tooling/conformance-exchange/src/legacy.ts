@@ -24,9 +24,6 @@ onLegacy(exchangeArea, {
 		};
 	},
 	differs: [
-		// Ours names the issuer in an openid token's aud beside its grant's audience, and exchanges a
-		// code flow's subject token for its own audience; the legacy build does neither.
-		"token-for-the-issuer",
 		// With a verified email required, token exchange does not start over a users file, and its
 		// refusal of an unverified subject is invalid_request.
 		"email-gate-without-subject-lookup",
