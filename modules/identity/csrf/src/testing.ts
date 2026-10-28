@@ -6,6 +6,6 @@ import { deciding, decidingTakes } from "./deciding.ts";
  * module does and serves no route; without a public origin it refuses every unsafe request.
  */
 export const csrfStandIn = defineModule(
-	{ name: "csrf", replicaSafe: true, takes: decidingTakes },
+	{ name: "csrf", replicaSafe: false, takes: decidingTakes },
 	(m) => deciding(m, "refuse requests"),
 );
