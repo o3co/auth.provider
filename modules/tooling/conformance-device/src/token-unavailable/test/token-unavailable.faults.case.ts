@@ -22,9 +22,9 @@ import {
 	pollAt,
 	said,
 } from "../../faults/test/faults.ts";
-import { isStoreCall, takeOf } from "../../faults/test/wire.ts";
+import { isStoreCall, recordReadOf, takeOf } from "../../faults/test/wire.ts";
 
-// The area lets requests by uncounted where the store fails (rate-limit's fail-mode open, as the OAuth
+// The area lets requests go uncounted where the store fails (rate-limit's fail-mode open, as the OAuth
 // part sets it), so each scene reaches the device grant's own decision: the device's record, the
 // approving session's entry, then the take of the approval.
 
@@ -114,10 +114,10 @@ describe("the token endpoint issuing no token for a device code while the store 
 			const answer = await polledAt(i, d);
 			i.relay.resume();
 			noToken(answer);
-			// Its first read reached Redis, which answered it before the endpoint gave up; the answer was held.
-			expect(i.relay.executions(operations).some((e) => e.at > stalled && e.at < answer.at)).toBe(
-				true,
-			);
+			// The device's record was read on Redis, which answered before the endpoint gave up; the answer was held.
+			expect(
+				i.relay.executions(recordReadOf(d)).some((e) => e.at > stalled && e.at < answer.at),
+			).toBe(true);
 			expect(successes(i, takeOf(d))).toEqual([]);
 			await stillApproved(dep, i, d);
 			await healed(dep, i);
@@ -153,12 +153,12 @@ describe("the token endpoint issuing no token for a device code while the store 
 			const answer = await polledAt(i, d);
 			i.relay.delay(0, "both");
 			noToken(answer);
-			// A call it sent was answered only after the endpoint had given up on it. (Not the first: the
-			// window it could not count lets the poll by, and the decision's next call is the one it waits on.)
+			// The device's record was read, and answered only after the endpoint had given up on it. (Not its
+			// first call: the window it could not count lets the poll by, and the record's read is next.)
 			await ready(i);
-			expect(i.relay.executions(operations).some((e) => e.at > delayed && e.at > answer.at)).toBe(
-				true,
-			);
+			expect(
+				i.relay.executions(recordReadOf(d)).some((e) => e.at > delayed && e.at > answer.at),
+			).toBe(true);
 			expect(successes(i, takeOf(d))).toEqual([]);
 			await stillApproved(dep, i, d);
 			await healed(dep, i);
@@ -213,7 +213,7 @@ describe("the token endpoint issuing no token for a device code while the store 
 		});
 	});
 
-	it("gives no token for a take answered by one server and confirmed on another [guarantee-3-e] {fault:Fs}", async () => {
+	it("gives no token for a device's record read confirmed on a server other than the one that answered it [guarantee-3-e] {fault:Fs}", async () => {
 		await on({ name: "device-token-unavailable-fs", replicas: 3 }, async (dep) => {
 			const i = instanceOf(dep);
 			await control(i);
@@ -233,9 +233,9 @@ describe("the token endpoint issuing no token for a device code while the store 
 			const answer = await polledAt(i, d);
 			const wait = await confirmed;
 			const upstreamOf = (id: number) => i.relay.connections().find((x) => x.id === id)?.upstream;
-			// A write of the decision ran on the new primary, its confirmation passing on the old one.
+			// The device's record was read on the new primary, its confirmation round passing on the old one.
 			const ran = i.relay
-				.executions(operations)
+				.executions(recordReadOf(d))
 				.filter((e) => e.at > from && e.at < wait.at && runIdOf(e.reply) !== undefined)
 				.at(-1);
 			expect(ran && runIdOf(ran.reply)).toBe(newId);
