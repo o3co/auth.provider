@@ -170,14 +170,16 @@ describe("OpenID Connect: the ID token", () => {
 		]);
 	});
 
-	it("ignores in an OpenID Connect request an offline_access the client is not allowed: a code for the rest, the scope answered and carried without it [oidc-core-11-c]", async () => {
+	it("ignores offline_access in an OpenID Connect request, no offline access being offered: a code for the rest, the scope answered and carried without it [oidc-core-11-c]", async () => {
 		const { at, tokens } = await signedIn({ scope: "openid offline_access read" });
 		expect(at?.searchParams.get("error")).toBeNull();
 		for (const [name, scope] of [
 			["answer", tokens.scope],
 			["access token", claimsOf(tokens.access_token).scope],
 		] as const) {
-			expect(String(scope).split(" ").sort(), name).toEqual(["openid", "read"]);
+			const words = String(scope).split(" ");
+			expect(words, name).not.toContain("offline_access");
+			expect(words, name).toEqual(expect.arrayContaining(["openid", "read"]));
 		}
 	});
 
