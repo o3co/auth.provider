@@ -327,7 +327,7 @@ it("has no section: a configuration that writes one is refused at boot", async (
 
 /** A table of claim scopes, as the module releasing claims contributes it. */
 const scoping = (table: Record<string, string>, name = "scoping") =>
-	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
+	defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => table[claim] })),
 	]);
 
