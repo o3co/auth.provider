@@ -16,7 +16,8 @@
 ## Invariants
 - Whether the code grant is composed is `grants`' `composedGrants`. Without it composed, nothing is fetched and the metadata item is left out; boot is not refused.
 - An id is fetched only when it is https, has a path other than `/`, has no query, fragment, user information, IP literal, empty label or loopback host (`url-setting`'s `isLoopbackName`), and is written exactly as the URL parser writes it.
-- Its host is checked before the fetch, spelled as `outbound` spells hosts: `deny` first, then a non-empty `allow`. An `allow` list also narrows `outbound`'s hosts.
+- Its host is checked before the fetch, spelled as `outbound` spells hosts: `deny` first, then `allow` unless `allow-any-host` is set. An `allow` list also narrows `outbound`'s hosts.
+- Boot is refused at `allow` where it is empty and `allow-any-host` is not set: the operator names the document hosts, or takes any.
 - `allow-any-host` takes any host `deny` leaves; every start logs the warning `clients-cimd.any_host_allowed`. Set beside a non-empty `allow`, it refuses boot at its key.
 - The fetch goes only through `outbound`, asks for JSON, and narrows its size and time; it marks its destination `outsideChosen`, as an outside party chooses it, for outbound to keep its name lookups to their share. Only a `200` with a JSON media type and one object is a document.
 - Boot is refused where `max-size` or `timeout` is above `outbound`'s cap, as its `outboundLimits` answers it, naming the key and no value, and where outbound gives the document's names no lookup (`lookupsOf`).

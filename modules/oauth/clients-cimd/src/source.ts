@@ -43,10 +43,21 @@ const withinOutbound = async (c: BuildContext<Settings>) => {
 	if (refusals.length > 0) c.refuseAll(refusals);
 };
 
-/** Refuses boot where allow and allow-any-host are both set; warns at every start of any host taken. */
+/**
+ * Refuses boot unless the operator chose the document hosts: allow names them, or allow-any-host takes
+ * any, never both. Warns at every start of any host taken.
+ */
 const hostsChosen = (c: BuildContext<Settings>) => {
 	const s = c.section;
-	if (!s["allow-any-host"]) return;
+	if (!s["allow-any-host"]) {
+		if (s.allow.length === 0) {
+			c.refuse(
+				"clients-cimd.allow",
+				"is empty: name the hosts a client id's document may come from, or set clients-cimd.allow-any-host",
+			);
+		}
+		return;
+	}
 	if (s.allow.length > 0) {
 		c.refuse("clients-cimd.allow-any-host", "is set beside allow: keep one of them");
 	}
