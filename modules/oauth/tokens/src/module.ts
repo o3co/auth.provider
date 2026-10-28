@@ -5,6 +5,7 @@ import { accessTokenSigning, keys } from "@mod/keys";
 import { senderBinding } from "@mod/sender-binding";
 import { denylistAllowanceMs, denylistOver, revokedTokens } from "@mod/token-denylist";
 import { z } from "zod";
+import { addedFor, audienceOf } from "./audience/audience.ts";
 import {
 	type AccessCheck,
 	type AccessGrant,
@@ -105,15 +106,6 @@ const grantOf = (
 		...(added ? { claims: added } : {}),
 	});
 
-/** `aud` split into the grant's audience and what the issuer added past it; none where `aud_added` would leave the grant none. */
-const audienceOf = (claims: Claims) => {
-	const all = typeof claims.aud === "string" ? [claims.aud] : claims.aud;
-	const added = claims.aud_added ?? 0;
-	if (added === 0) return { grant: all, added: [] };
-	if (typeof claims.aud === "string" || added >= all.length) return undefined;
-	return { grant: all.slice(0, all.length - added), added: all.slice(all.length - added) };
-};
-
 /** The added claims of a verified payload, copied as an issue copies them; undefined for a token none of tokens' issued. */
 const addedOf = (payload: Readonly<Record<string, unknown>>) => {
 	try {
@@ -177,15 +169,7 @@ export default defineModule(
 			const iss = (await c.get(issuer)).url;
 			const lifetime = c.section["access-token-lifetime"];
 			const additions = await c.collect(audienceAdditions);
-			/** The audiences the additions answer for a grant, each once, none its own. */
-			const addedFor = (grant: AccessGrant) => {
-				const answered = additions.flatMap((a) => [...a.added(grant)]);
-				for (const value of answered) {
-					if (typeof value !== "string" || value === "")
-						throw new TypeError("tokens: an added audience is not a non-empty string");
-				}
-				return [...new Set(answered)].filter((value) => !grant.audience.includes(value));
-			};
+			const addedTo = (grant: AccessGrant) => addedFor(additions, grant);
 
 			/** Verifies everything but revocation; `allowanceMs` keeps a just-expired token valid. */
 			const check = async (token: string, allowanceMs = 0): Promise<Checked> => {
@@ -244,7 +228,7 @@ export default defineModule(
 				const kept = keptGrant(grant, iat);
 				const claims = {
 					iss,
-					...grantClaims(kept, addedFor(kept)),
+					...grantClaims(kept, addedTo(kept)),
 					iat,
 					exp,
 					jti: tokenId(c.random),

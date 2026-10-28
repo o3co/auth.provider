@@ -3,11 +3,14 @@ import { type Binding, senderBindings } from "@mod/sender-binding";
 import { denylistAllowanceMs, denylistOver } from "@mod/token-denylist";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
+import { addedFor } from "./audience/audience.ts";
 import {
 	type AccessCheck,
 	type AccessGrant,
 	type Actor,
+	type AudienceAddition,
 	accessConditions,
+	audienceAdditions,
 	type IssuancePolicy,
 	type IssuanceVerdict,
 	type IssueLimits,
@@ -62,6 +65,8 @@ export function tokensContract(
 		readonly policies?: readonly IssuancePolicy[];
 		/** The access-token lifetime the composition is configured with; the section's default where absent. */
 		readonly lifetimeSeconds?: number;
+		/** Audience additions the composition contributes. */
+		readonly additions?: readonly AudienceAddition[];
 	}) => Promise<TokensUnderTest>,
 ): void {
 	const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: ["read"] };
@@ -533,6 +538,47 @@ export function tokensContract(
 			expect((await place.tokens.verifyAccess(other.token)).kind).toBe("valid");
 		});
 	});
+
+	describe("audiences added besides the grant's", () => {
+		const issuer = "https://issuer.example";
+		const adding = (name: string, ...values: string[]): AudienceAddition => ({
+			name,
+			added: (g) => (g.scope.includes("read") ? values : []),
+		});
+		const checked = async (t: Tokens, g = grant) => {
+			const issued = await t.issue({ grant: g, grantType: "test" });
+			if (issued.kind !== "issued") throw new Error(issued.policy);
+			const read = await t.verifyAccess(issued.access.token);
+			if (read.kind !== "valid") throw new Error(read.reason);
+			return read;
+		};
+
+		it("reads them back apart from the grant's audience, each once across additions, none of its own", async () => {
+			const u = await open({
+				revocable: true,
+				additions: [adding("one", issuer, "api"), adding("two", issuer, "x")],
+			});
+			const read = await checked(u.tokens);
+			expect(read.grant.audience).toEqual(["api"]);
+			expect(read.addedAudience).toEqual([issuer, "x"]);
+		});
+
+		it("adds none a grant's audience already holds, among several of its own, and none where none answers", async () => {
+			const u = await open({ revocable: true, additions: [adding("one", issuer)] });
+			const both = await checked(u.tokens, { ...grant, audience: ["api", issuer] });
+			expect(both.grant.audience).toEqual(["api", issuer]);
+			expect(both.addedAudience).toBeUndefined();
+			const none = await checked(u.tokens, { ...grant, scope: ["write"] });
+			expect(none.addedAudience).toBeUndefined();
+		});
+
+		it("refuses, as the caller's mistake, an added audience to a grant with no audience, keeping nothing", async () => {
+			const u = await open({ revocable: true, additions: [adding("one", issuer)] });
+			await expect(
+				u.tokens.issue({ grant: { ...grant, audience: [] }, grantType: "test" }),
+			).rejects.toThrow(TypeError);
+		});
+	});
 }
 
 /**
@@ -548,7 +594,7 @@ export function tokensStandIn(
 	return defineModule(
 		{
 			name: "tokens",
-			takes: [accessConditions, subjectChecks, senderBindings, issuancePolicies],
+			takes: [accessConditions, subjectChecks, senderBindings, issuancePolicies, audienceAdditions],
 		},
 		(m) => [
 			m.provide(tokens).by(async (c) => {
@@ -558,8 +604,10 @@ export function tokensStandIn(
 					...(await c.collect(accessConditions)),
 					...(await c.collect(subjectChecks)),
 				];
+				const additions = await c.collect(audienceAdditions);
 				type Kept = {
 					grant: AccessGrant;
+					added: readonly string[];
 					id: string;
 					issuedAt: number;
 					expiresAt: number;
@@ -608,6 +656,7 @@ export function tokensStandIn(
 						expiresAt: kept.expiresAt,
 						tokenType,
 						...(kept.binding ? { binding: { ...kept.binding, tokenType } } : {}),
+						...(kept.added.length > 0 ? { addedAudience: kept.added } : {}),
 					};
 				};
 				const judge = judging(await c.collect(issuancePolicies), c.clock.now);
@@ -617,6 +666,9 @@ export function tokensStandIn(
 					const id = tokenId(c.random);
 					const token = `stand-in.${id}`;
 					const binding = limits?.binding;
+					const kept = keptGrant(grant, iat);
+					// As tokens adds them: refused where tokens' own would be, before anything is kept.
+					const added = Object.freeze(addedFor(additions, kept));
 					return {
 						access: {
 							token,
@@ -631,7 +683,8 @@ export function tokensStandIn(
 						// Kept only once handed out, so a token refused leaves nothing.
 						keep: () => {
 							issued.set(token, {
-								grant: keptGrant(grant, iat),
+								grant: kept,
+								added,
 								id,
 								issuedAt: iat * 1000,
 								expiresAt: exp * 1000,

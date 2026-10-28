@@ -10,9 +10,9 @@ import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import senderBindingModule from "@mod/sender-binding/module";
 import { describe, expect, it } from "vitest";
-import { type AccessGrant, audienceAdditions, tokens } from "../src/contract.ts";
-import tokensModule from "../src/module.ts";
-import { revokedInMemory } from "./revoked.ts";
+import { revokedInMemory } from "../../../test/revoked.ts";
+import { type AccessGrant, audienceAdditions, tokens } from "../../contract.ts";
+import tokensModule from "../../module.ts";
 
 const runtime = quietRuntime();
 const privateKey = generateKeyPairSync("ed25519")

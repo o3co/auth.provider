@@ -13,6 +13,8 @@ import { denylistAllowanceMs } from "@mod/token-denylist";
 import { expect, it } from "vitest";
 import {
 	type AccessGrant,
+	type AudienceAddition,
+	audienceAdditions,
 	type IssuancePolicy,
 	type IssueLimits,
 	issuancePolicies,
@@ -65,15 +67,19 @@ async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
 	return issued.access;
 }
 
-/** The policies given, contributed. */
-const contributing = (policies: readonly IssuancePolicy[] = []) =>
-	defineModule({ name: "policies", takes: [] }, (m) =>
-		policies.map((policy) => m.contribute(issuancePolicies).by(() => policy)),
-	);
+/** The policies and audience additions given, contributed. */
+const contributing = (
+	policies: readonly IssuancePolicy[] = [],
+	additions: readonly AudienceAddition[] = [],
+) =>
+	defineModule({ name: "policies", takes: [] }, (m) => [
+		...policies.map((policy) => m.contribute(issuancePolicies).by(() => policy)),
+		...additions.map((addition) => m.contribute(audienceAdditions).by(() => addition)),
+	]);
 
 tokensContract(
 	"tokens over keys and a simulated store",
-	async ({ revocable, policies, lifetimeSeconds }) => {
+	async ({ revocable, policies, lifetimeSeconds, additions }) => {
 		const { runtime, module, place } = around();
 		const app = await assemble({
 			modules: [
@@ -84,7 +90,7 @@ tokensContract(
 				tokensModule,
 				revokedInMemory(() => runtime.clock.now()).module,
 				module,
-				contributing(policies),
+				contributing(policies, additions),
 			],
 			config: {
 				...kernelConfig(),
@@ -107,7 +113,7 @@ tokensContract(
 	},
 );
 
-tokensContract("the stand-in", async ({ revocable, policies, lifetimeSeconds }) => {
+tokensContract("the stand-in", async ({ revocable, policies, lifetimeSeconds, additions }) => {
 	const { runtime, module, place } = around();
 	const app = await assemble({
 		modules: [
@@ -116,7 +122,7 @@ tokensContract("the stand-in", async ({ revocable, policies, lifetimeSeconds }) 
 				...(lifetimeSeconds === undefined ? {} : { lifetimeSeconds }),
 			}),
 			module,
-			contributing(policies),
+			contributing(policies, additions),
 		],
 		config: kernelConfig(),
 		runtime,
