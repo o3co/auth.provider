@@ -85,7 +85,7 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 		down: false,
 		family: "fam.secret" as string | undefined,
 	};
-	const standIns = defineModule({ name: "stand-ins", takes: [] }, (m) => [
+	const standIns = defineModule({ name: "stand-ins", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeys).by(() => ({
 			challenge: async (requester) => {
 				requesters.asked.push(requester);
@@ -282,7 +282,7 @@ describe("the passkey grant", () => {
 
 	it("issues through the issuance policies without a session, starting no family when they refuse", async () => {
 		const asked: IssuanceRequest[] = [];
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {

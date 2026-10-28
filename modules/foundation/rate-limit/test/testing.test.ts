@@ -118,7 +118,7 @@ it("holds, reserves, hands back and releases lockouts, under terms too, as the r
 
 it("offers both per-source policies, answering as the real ones do, with no store and no audit", async () => {
 	const window = { limit: 1, ms: 60_000 };
-	const routed = defineModule({ name: "routed", takes: [] }, (m) => [
+	const routed = defineModule({ name: "routed", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(routes).by(() => ({
 			method: "GET",
 			path: "/requests",
@@ -166,7 +166,7 @@ it("offers both per-source policies, answering as the real ones do, with no stor
 it("marks both per-source policies for every method, as the real module does", async () => {
 	const window = { limit: 1, ms: 60_000 };
 	const declared = (uses: readonly PolicyUse[]) =>
-		defineModule({ name: "declared", takes: [] }, (m) =>
+		defineModule({ name: "declared", replicaSafe: true, takes: [] }, (m) =>
 			(["GET", "POST", "PUT", "DELETE"] as const).map((method) =>
 				m.contribute(routes).by(() => ({
 					method,

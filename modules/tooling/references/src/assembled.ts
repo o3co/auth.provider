@@ -121,7 +121,11 @@ async function collectedIn(root: string): Promise<Assembled> {
 	};
 	const probed = contract<readonly (readonly unknown[])[]>("references.collected");
 	const probe = defineModule(
-		{ name: "references-probe", takes: [clients.point, types.point, routes.point, http.marks] },
+		{
+			name: "references-probe",
+			replicaSafe: true,
+			takes: [clients.point, types.point, routes.point, http.marks],
+		},
 		(m) => [
 			m
 				.provide(probed)

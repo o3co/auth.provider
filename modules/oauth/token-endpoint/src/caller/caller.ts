@@ -112,7 +112,11 @@ export function grantInput(
  */
 export const grantCaller = defineModule(
 	// `composedRule`'s takes, and its own; its own `targets` and `grantCalls` are not named.
-	{ name: "token-endpoint", takes: [...targetTakes, clients, tokens, sessionIssuances, grants] },
+	{
+		name: "token-endpoint",
+		replicaSafe: true,
+		takes: [...targetTakes, clients, tokens, sessionIssuances, grants],
+	},
 	(m) => [
 		m.provide(targets).by(composedRule),
 		m.provide(grantCalls).by(async (c) => {

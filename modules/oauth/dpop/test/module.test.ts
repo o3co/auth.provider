@@ -33,7 +33,7 @@ function spentInMemory() {
 	const stand = memoryRecords<true>(() => runtime.clock.now(), { shards: 1, perShard: 1 });
 	const lifetimes: number[] = [];
 	const down = unavailableSwitch<SpentProofs>("spent proofs");
-	const module = defineModule({ name: "spent-proofs", takes: [] }, (m) => [
+	const module = defineModule({ name: "spent-proofs", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(spentProofs).by(() =>
 			down.wrap({
 				save: (name: string, lifetimeMs: number) => {
@@ -48,10 +48,13 @@ function spentInMemory() {
 
 const published = contract<readonly MetadataItem[]>("published");
 const kinds = contract<readonly SenderBinding[]>("kinds");
-const reader = defineModule({ name: "reader", takes: [metadata, senderBindings] }, (m) => [
-	m.provide(published).by((c) => c.collect(metadata)),
-	m.provide(kinds).by((c) => c.collect(senderBindings)),
-]);
+const reader = defineModule(
+	{ name: "reader", replicaSafe: true, takes: [metadata, senderBindings] },
+	(m) => [
+		m.provide(published).by((c) => c.collect(metadata)),
+		m.provide(kinds).by((c) => c.collect(senderBindings)),
+	],
+);
 
 /** The assembly of a composition with dpop, its section where given, and the issuer at `at`. */
 const assembly = (dpopSection?: unknown, spent = spentInMemory(), at = issuer) => ({

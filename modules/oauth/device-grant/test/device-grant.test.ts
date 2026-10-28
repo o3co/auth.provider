@@ -89,12 +89,12 @@ const allowed = (grants: string[]) =>
 	allowancesFor({ grants, scopes: ["read", "write"], "default-scopes": ["read"] });
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
 /** What records a token issued in a session to it, as session-tokens does where composed. */
-const recording = defineModule({ name: "recording", takes: [] }, (m) => [
+const recording = defineModule({ name: "recording", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(sessionIssuances).by(() => ({ issued: async () => {} })),
 ]);
 
@@ -112,7 +112,7 @@ function assembly(
 	};
 	/** Time that passes before the next rewrite of a device reads it, as when the store is slow. */
 	let stall = 0;
-	const stores = defineModule({ name: "device-stores", takes: [] }, (m) => [
+	const stores = defineModule({ name: "device-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(deviceStore).by(() =>
 			down.devices.wrap({
 				...kept.devices,
@@ -347,15 +347,18 @@ describe("device authorization", () => {
 
 	it("answers an assertion beside another method invalid_client, as the token endpoint does, and two other methods invalid_request", async () => {
 		// A method saying it authenticates by an assertion: what makes the refusal the assertion's.
-		const assertionMethod = defineModule({ name: "test-assertion", takes: [] }, (m) => [
-			m.contribute(authMethods).by(() => ({
-				name: "test_assertion",
-				assertion: true,
-				signingAlgorithms: ["ES256"],
-				claimed: (request) => request.fields.single("test_assertion"),
-				verify: async () => false,
-			})),
-		]);
+		const assertionMethod = defineModule(
+			{ name: "test-assertion", replicaSafe: true, takes: [] },
+			(m) => [
+				m.contribute(authMethods).by(() => ({
+					name: "test_assertion",
+					assertion: true,
+					signingAlgorithms: ["ES256"],
+					claimed: (request) => request.fields.single("test_assertion"),
+					verify: async () => false,
+				})),
+			],
+		);
 		const s = await serve({}, [assertionMethod]);
 		const secret = { client_id: "tv", client_secret: clientSecret("tv") };
 		const beside = await s.post("/oauth/device_authorization", { ...secret, test_assertion: "tv" });
@@ -366,7 +369,7 @@ describe("device authorization", () => {
 	});
 
 	it("refuses a resource where the composed rule refuses one to what takes no audience", async () => {
-		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				untargeted: ({ param }) =>
@@ -609,7 +612,7 @@ describe("polling", () => {
 
 	it("issues nothing a contributed policy refuses, and leaves the approved code to a later poll", async () => {
 		const denying = { on: false };
-		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -634,7 +637,7 @@ describe("polling", () => {
 
 	it("refuses and records an approval a contributed policy refuses, before keeping it, as 0.17 refused an unverified email", async () => {
 		const denying = { on: true, description: "not now" };
-		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -676,7 +679,7 @@ describe("polling", () => {
 
 	it("asks the issuance policies with the approving session, at approval and at the poll", async () => {
 		const asked: (string | undefined)[] = [];
-		const policy = defineModule({ name: "watching", takes: [] }, (m) => [
+		const policy = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "watching",
 				judge: async (request) => {
@@ -723,14 +726,17 @@ describe("polling", () => {
 
 	it("issues nothing while the approving session falls short of a requirement to be used, as a closed one", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ name: "short-to-use", takes: [] }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "mfa",
-				judges: ["use"],
-				admits: async () =>
-					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
-			})),
-		]);
+		const requirement = defineModule(
+			{ name: "short-to-use", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "mfa",
+					judges: ["use"],
+					admits: async () =>
+						short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+				})),
+			],
+		);
 		const s = await serve({}, [requirement]);
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });
@@ -741,7 +747,7 @@ describe("polling", () => {
 	it("answers no token issued while the approving session closed", async () => {
 		let asked = 0;
 		let close = async () => {};
-		const closing = defineModule({ name: "closing", takes: [] }, (m) => [
+		const closing = defineModule({ name: "closing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "closing",
 				judge: async () => {
@@ -973,7 +979,7 @@ describe("verification", () => {
 	});
 
 	it("asks the session's entry requirements at use for an approval, and at none for the rest", async () => {
-		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "fresh",
 				judges: ["use"],

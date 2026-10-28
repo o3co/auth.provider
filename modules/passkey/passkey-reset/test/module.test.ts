@@ -9,7 +9,7 @@ import resetModule from "../src/module.ts";
 
 /** The contracts the reset takes, answering as scripted, recording what they were asked. */
 const parts = (calls: string[]) =>
-	defineModule({ name: "parts", takes: [] }, (m) => [
+	defineModule({ name: "parts", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(revocations).by(
 			() =>
 				({
@@ -53,7 +53,7 @@ it("resets over the contracts it is given, and offers the passkeys' step alone o
 it("gives the passkeys' step to the bridge alone, refusing boot to any other module that takes it", async () => {
 	const took = contract<unknown>("test.took");
 	const taker = (name: string) =>
-		defineModule({ name, takes: [passkeyResetPart] }, (m) => [
+		defineModule({ name, replicaSafe: true, takes: [passkeyResetPart] }, (m) => [
 			m.provide(took).by(async (c) => c.get(passkeyResetPart)),
 		]);
 	const composedWith = (name: string) =>

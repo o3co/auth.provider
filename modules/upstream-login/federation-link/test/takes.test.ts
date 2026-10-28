@@ -10,7 +10,7 @@ import { expect, it } from "vitest";
 import linkModule from "../src/module.ts";
 
 /** What the link is built over, never asked: the continuation is only built. */
-const stubs = defineModule({ name: "stubs", takes: [] }, (m) => [
+const stubs = defineModule({ name: "stubs", replicaSafe: true, takes: [] }, (m) => [
 	m.provide(site).by(() => ({ origin: "https://as.example", secureCookies: true }) as never),
 	m.provide(originEvidence).by(() => ({ sameOrigin: () => true })),
 	m.provide(sessions).by(() => ({}) as never),

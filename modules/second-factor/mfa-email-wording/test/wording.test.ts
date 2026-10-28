@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import wordingModule from "../src/module.ts";
 
 const templates = contract<readonly MailTemplate[]>("templates");
-const reader = defineModule({ name: "reader", takes: [mailTemplates] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [mailTemplates] }, (m) => [
 	m.provide(templates).by((c) => c.collect(mailTemplates)),
 ]);
 

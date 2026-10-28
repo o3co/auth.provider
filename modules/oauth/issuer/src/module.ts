@@ -13,6 +13,7 @@ const itemsChecked = contract<readonly MetadataItem[]>("issuer.items");
 export default defineModule(
 	{
 		name: "issuer",
+		replicaSafe: true,
 		section,
 		// Tokens and the discovery document would name a plain-http issuer, open to being changed.
 		refusedInProduction: (s) =>

@@ -75,6 +75,9 @@ const secrets = contract<SecretChecker>("clients.secrets");
 export default defineModule(
 	{
 		name: "clients",
+		// Safe on many instances given the same registered clients on each (deployment-guarantees, Several
+		// instances).
+		replicaSafe: true,
 		section,
 		takes: [authMethods, metadataSections, clientSources, secretCheckers],
 	},

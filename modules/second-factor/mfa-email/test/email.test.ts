@@ -53,7 +53,11 @@ const seen = contract<{
 	templates: readonly string[];
 }>("seen");
 const outside = defineModule(
-	{ name: "outside", takes: [mailPurposes, mailTemplates, bindingProofs, factorKinds] },
+	{
+		name: "outside",
+		replicaSafe: false,
+		takes: [mailPurposes, mailTemplates, bindingProofs, factorKinds],
+	},
 	(m) => [
 		m.provide(mail).by(() => ({
 			send: async (message) => {
@@ -97,9 +101,10 @@ const outside = defineModule(
 );
 
 /** `mfa-binding-proof`, which this kind's proof needs composed; only that it is there. */
-const proofPlace = defineModule({ name: "binding-proof-place", takes: [] }, (m) => [
-	m.provide(bindingProof).by(() => ({}) as BindingProofs),
-]);
+const proofPlace = defineModule(
+	{ name: "binding-proof-place", replicaSafe: true, takes: [] },
+	(m) => [m.provide(bindingProof).by(() => ({}) as BindingProofs)],
+);
 
 /** What mfa-email-proof contributes, as far as this kind's boot asks: the proof's name. */
 const accountEmail: BindingProof = {
@@ -108,9 +113,10 @@ const accountEmail: BindingProof = {
 	send: async () => ({ kind: "refused" }),
 	check: async () => false,
 };
-const proofStand = defineModule({ name: "account-email-stand", takes: [] }, (m) => [
-	m.contribute(bindingProofs).by(() => accountEmail),
-]);
+const proofStand = defineModule(
+	{ name: "account-email-stand", replicaSafe: true, takes: [] },
+	(m) => [m.contribute(bindingProofs).by(() => accountEmail)],
+);
 
 const composition = (settings: Record<string, unknown> = {}) => ({
 	modules: [outside, proofPlace, proofStand, emailModule],

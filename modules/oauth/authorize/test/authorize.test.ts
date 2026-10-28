@@ -125,7 +125,7 @@ async function serve(
 		selectionStore?: Module;
 	} = {},
 ) {
-	const proving = defineModule({ name: "proving", takes: [] }, (m) => [
+	const proving = defineModule({ name: "proving", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.contribute(amrSources)
 			.by(() => ({ name: "proving", amr: options.proves ?? ["pwd", "otp", "mfa"] })),
@@ -136,7 +136,7 @@ async function serve(
 		reauths: unavailableSwitch<ReauthStore>("reauth store"),
 		tokens: unavailableSwitch<Tokens>("tokens"),
 	};
-	const reauthStand = defineModule({ name: "reauth-store", takes: [] }, (m) => [
+	const reauthStand = defineModule({ name: "reauth-store", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.provide(reauthStore)
 			.by(() =>
@@ -319,7 +319,7 @@ const claimScopeTable = new Map([
 	["email", "write"],
 	["groups", "admin"],
 ]);
-const scoping = defineModule({ name: "scoping", takes: [] }, (m) => [
+const scoping = defineModule({ name: "scoping", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => claimScopeTable.get(claim) })),
 ]);
 
@@ -599,9 +599,10 @@ describe("authorize: the section", () => {
 
 	it("contributes the redirect URIs' document copy to client-documents", async () => {
 		const seen = contract<readonly DocumentCopy[]>("test.copies-seen");
-		const probe = defineModule({ name: "copies-probe", takes: [documentCopies] }, (m) => [
-			m.provide(seen).by((c) => c.collect(documentCopies)),
-		]);
+		const probe = defineModule(
+			{ name: "copies-probe", replicaSafe: true, takes: [documentCopies] },
+			(m) => [m.provide(seen).by((c) => c.collect(documentCopies))],
+		);
 		const { app } = await serve({ extra: [probe] });
 		expect(app.get(seen)).toContain(redirectsCopy);
 	});
@@ -622,7 +623,7 @@ afterEach(() => {
 	recorded = [];
 });
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
+const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -671,7 +672,7 @@ describe("authorize: the audience a request asks for", () => {
 	});
 
 	it("sends a parameter the rule reads, sent twice, back as the rule says, and any other as invalid_request [rfc6749-3.1-f]", async () => {
-		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				repeated: (name) =>
@@ -701,7 +702,7 @@ describe("authorize: the audience a request asks for", () => {
 
 	it("asks the issuance policies for the audience asked, and gives their refusal before invalid_target", async () => {
 		const asked: IssuanceRequest[] = [];
-		const policy = defineModule({ name: "refusing-bob", takes: [] }, (m) => [
+		const policy = defineModule({ name: "refusing-bob", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "refusing-bob",
 				judge: async (request) => {
@@ -1078,7 +1079,7 @@ it("revokes a code's token when its session logs out later", async () => {
 
 it("adds an ID token through code-grant when the scope holds the maker's, with the code's facts [oidc-core-3.1.3.3-c] [oidc-core-3.1.3.2-f]", async () => {
 	const asked: IdTokenRequest[] = [];
-	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
+	const maker = defineModule({ name: "maker", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
 			scope: "openid",
 			make: async (r: IdTokenRequest) => {
@@ -1325,7 +1326,7 @@ it("meets an acr by the amr sets its table names, and sends a session that falls
 
 it("binds to the code the first acr met in the order asked, past any not met, or else the session's current acr", async () => {
 	const asked: IdTokenRequest[] = [];
-	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
+	const maker = defineModule({ name: "maker", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
 			scope: "openid",
 			make: async (r: IdTokenRequest) => {
@@ -1424,7 +1425,7 @@ describe("authorize: one trip to raise the authentication", () => {
 
 it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a] [rfc6749-10.14-a]", async () => {
 	const asked: IdTokenRequest[] = [];
-	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
+	const maker = defineModule({ name: "maker", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
 			scope: "openid",
 			make: async (r: IdTokenRequest) => {
@@ -1598,7 +1599,7 @@ describe("authorize: the claims a request names beyond its scope", () => {
 
 	it("reads no names and keeps nothing where claims-parameter is false, says it supports the claims parameter only where true, and warns at boot where false", async () => {
 		const published = contract<readonly MetadataItem[]>("published");
-		const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+		const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 			m.provide(published).by((c) => c.collect(metadata)),
 		]);
 		for (const claimsParameter of [true, false]) {
@@ -1664,7 +1665,7 @@ it("asks a session whose authentication time is unknown to log in again for an e
 
 it("offers a contributed acr unless the operator's table names the same acr", async () => {
 	const offered = (acr: string) =>
-		defineModule({ name: `offers-${acr}`, takes: [] }, (m) => [
+		defineModule({ name: `offers-${acr}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(acrEntries).by(() => ({ acr, sets: [["mfa"]] })),
 		]);
 	const s = await serve({
@@ -1688,7 +1689,7 @@ it("offers a contributed acr unless the operator's table names the same acr", as
 
 it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer [rfc9207-2.3-c] [rfc9700-2.1.1-c] [rfc9700-2.1.1-d] [rfc8414-2-b] [rfc8414-2-g] [oidc-discovery-3-d] [oidc-discovery-3-v]", async () => {
 	const published = contract<readonly MetadataItem[]>("published");
-	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 		m.provide(published).by((c) => c.collect(metadata)),
 	]);
 	const { app } = await serve({ extra: [reader] });
@@ -1877,7 +1878,7 @@ describe("authorize: audit events", () => {
 describe("authorize: the issuance policies", () => {
 	/** A policy that refuses bob, as one would a user whose email is not verified, and keeps what it was asked. */
 	const refusingBob = (asked: IssuanceRequest[], down = false) =>
-		defineModule({ name: "refusing-bob", takes: [] }, (m) => [
+		defineModule({ name: "refusing-bob", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "refusing-bob",
 				judge: async (request) => {

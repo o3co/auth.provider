@@ -48,9 +48,10 @@ import loginModule from "../src/module.ts";
 
 /** The gates composed, collected as login-gates sees them. */
 const collectedGates = contract<readonly LoginGate[]>("test.gates");
-const gatesProbe = defineModule({ name: "gates-probe", takes: [loginGates] }, (m) => [
-	m.provide(collectedGates).by((c) => c.collect(loginGates)),
-]);
+const gatesProbe = defineModule(
+	{ name: "gates-probe", replicaSafe: true, takes: [loginGates] },
+	(m) => [m.provide(collectedGates).by((c) => c.collect(loginGates))],
+);
 
 let stop = async () => {};
 afterEach(async () => {
@@ -76,7 +77,7 @@ interface Setup {
 async function serve(setup: Setup = {}) {
 	const audit = auditStandIn();
 	const seen: LoginFacts[] = [];
-	const gate = defineModule({ name: "test-gate", takes: [] }, (m) => [
+	const gate = defineModule({ name: "test-gate", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "test",
 			hold: async (_request, facts) => {
@@ -263,7 +264,7 @@ describe("a passkey login", () => {
 		const unknown = await s.login(key);
 		expect({ status: unknown.status, body: unknown.body }).toEqual(failed);
 		expect(s.events).toContainEqual(refusedBy("unknown_user"));
-		const unanswerable = defineModule({ name: "users-stub", takes: [] }, (m) => [
+		const unanswerable = defineModule({ name: "users-stub", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(users).by(() => ({ bySubject: async () => ({ kind: "unanswerable" }) }) as never),
 		]);
 		const u = await serve({ users: unanswerable });
@@ -322,7 +323,7 @@ describe("a revocation of the subject since the challenge was made", () => {
 
 	it("closes a session opened meanwhile before its cookie goes out (step 6)", async () => {
 		const closed: string[] = [];
-		const opening = defineModule({ name: "session", takes: [] }, (m) => [
+		const opening = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
 					complete: async () => ({
@@ -371,7 +372,7 @@ describe("the requests it takes", () => {
 			expect(endsRequester(answered.cookies), JSON.stringify(body)).toBe(true);
 		}
 		expect(endsRequester((await s.login(key)).cookies)).toBe(true);
-		const down = defineModule({ name: "users-stub", takes: [] }, (m) => [
+		const down = defineModule({ name: "users-stub", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(users).by(
 				() =>
 					({

@@ -26,41 +26,45 @@ let issuerUrl = "https://as.example";
 let failing: "unavailable" | "bug" | undefined;
 const items = contract<readonly MetadataItem[]>("items");
 /** The parts userinfo reads: every token is admitted, issued in a session no longer open. */
-const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
-	m.provide(senderBinding).by(
-		() =>
-			({
-				admitted: async () => ({
-					kind: "admitted",
-					access: {
-						kind: "valid",
-						id: "t",
-						grant: { subject: "ann", scope: ["openid"] },
-						tokenType: "Bearer",
-					},
-				}),
-			}) as never,
-	),
-	m.provide(tokens).by(() => ({}) as never),
-	m
-		.provide(sessionTokens)
-		.by(() => ({ sessionOf: async () => ({ kind: "bound", handle: "h" }) }) as never),
-	m.provide(sessions).by(() =>
-		stubSessions({
-			entryOf: async () => {
-				if (failing === "unavailable") throw new Unavailable("session");
-				if (failing === "bug") throw new TypeError("bug");
-				return { kind: "absent" };
-			},
-		}),
-	),
-	m
-		.provide(releasedClaims)
-		.by(() => ({ of: async () => ({}), scopeOf: () => undefined }) as ReleasedClaims),
-	m.provide(claimsSelections).by(() => ({ forToken: async () => undefined }) as never),
-	m.provide(items).by((c) => c.collect(metadata)),
-	m.provide(issuer).by(() => ({ url: issuerUrl })),
-]);
+const parts = defineModule(
+	// Safe: it keeps nothing a request writes; `failing` and `issuerUrl` are the test's settings.
+	{ name: "parts", replicaSafe: true, takes: [metadata] },
+	(m) => [
+		m.provide(senderBinding).by(
+			() =>
+				({
+					admitted: async () => ({
+						kind: "admitted",
+						access: {
+							kind: "valid",
+							id: "t",
+							grant: { subject: "ann", scope: ["openid"] },
+							tokenType: "Bearer",
+						},
+					}),
+				}) as never,
+		),
+		m.provide(tokens).by(() => ({}) as never),
+		m
+			.provide(sessionTokens)
+			.by(() => ({ sessionOf: async () => ({ kind: "bound", handle: "h" }) }) as never),
+		m.provide(sessions).by(() =>
+			stubSessions({
+				entryOf: async () => {
+					if (failing === "unavailable") throw new Unavailable("session");
+					if (failing === "bug") throw new TypeError("bug");
+					return { kind: "absent" };
+				},
+			}),
+		),
+		m
+			.provide(releasedClaims)
+			.by(() => ({ of: async () => ({}), scopeOf: () => undefined }) as ReleasedClaims),
+		m.provide(claimsSelections).by(() => ({ forToken: async () => undefined }) as never),
+		m.provide(items).by((c) => c.collect(metadata)),
+		m.provide(issuer).by(() => ({ url: issuerUrl })),
+	],
+);
 
 let logged = recordingLog();
 async function serve(publicOrigin: string | null = "https://as.example") {
@@ -136,6 +140,19 @@ it("leaves an error that is not an inability to tell to http, neither 503 nor lo
 	});
 	expect(res.status).toBe(500);
 	expect(logged.lines().filter((l) => l.event === "userinfo.unavailable")).toEqual([]);
+});
+
+it("answers no token it was presented and logs none, refusing it or unable to tell [rfc9700-4.9.3-a]", async () => {
+	const { url } = await serve();
+	const headers = { authorization: "Bearer s3cr3t-token", "x-forwarded-proto": "https" };
+	const seen: unknown[] = [];
+	for (const fails of [undefined, "unavailable", "bug"] as const) {
+		failing = fails;
+		const res = await fetch(url, { headers });
+		seen.push([res.status, [...res.headers], await res.text()]);
+	}
+	expect(seen.map((answer) => (answer as [number])[0])).toEqual([401, 503, 500]);
+	expect(JSON.stringify([seen, logged.lines()])).not.toContain("s3cr3t");
 });
 
 it("lets a listed origin's page send its token, its DPoP proof and a body's type, and read the challenge, the nonce and the wait [oidc-core-5.3-c]", async () => {

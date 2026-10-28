@@ -7,7 +7,7 @@ import { witnessBackfill } from "../src/contract.ts";
 import { witnessed } from "./harness.ts";
 
 /** A counting kind whose first proof names a credential no two factors may hold. */
-const card = defineModule({ name: "kind-card", takes: [] }, (m) => [
+const card = defineModule({ name: "kind-card", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "card",
 		amr: ["hwk"],

@@ -8,13 +8,13 @@ import bridge from "../src/module.ts";
 const logged = recordingLog();
 const runtime = quietRuntime({ log: logged.log });
 const seen = contract<readonly UpstreamEnd[]>("test.seen");
-const reader = defineModule({ name: "reader", takes: [upstreamEnds] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [upstreamEnds] }, (m) => [
 	m.provide(seen).by((c) => c.collect(upstreamEnds)),
 ]);
 
 it("asks federation-tokens for the end of session, carrying the session, the return and state", async () => {
 	const asked: [string, EndSessionReturn][] = [];
-	const ends = defineModule({ name: "federation-tokens", takes: [] }, (m) => [
+	const ends = defineModule({ name: "federation-tokens", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(upstreamEndSessions).by(() => ({
 			of: async (session, back) => {
 				asked.push([session, back]);
@@ -30,7 +30,7 @@ it("asks federation-tokens for the end of session, carrying the session, the ret
 });
 
 it("answers none when federation-tokens cannot tell, and logs the type of what it threw, not the session", async () => {
-	const ends = defineModule({ name: "federation-tokens", takes: [] }, (m) => [
+	const ends = defineModule({ name: "federation-tokens", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(upstreamEndSessions).by(() => ({
 			of: async (session) => {
 				if (session === "s-1") throw new Error("store down");
@@ -63,7 +63,7 @@ it("refuses to start without federation-tokens", async () => {
 });
 
 it("takes all it names", async () => {
-	const ends = defineModule({ name: "federation-tokens", takes: [] }, (m) => [
+	const ends = defineModule({ name: "federation-tokens", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(upstreamEndSessions).by(() => ({ of: async () => undefined })),
 	]);
 	const input = { modules: [ends, bridge, reader], config: kernelConfig(), runtime };

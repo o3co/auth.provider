@@ -44,7 +44,13 @@ beforeAll(async () => {
 			clients: [app],
 			users: [
 				{ ...user, identifier: user.username, subject: "s-alice", email: "alice@example.com" },
-				{ ...wide, identifier: wide.username, subject: "s-zoe", email: "zo\u00eb@example.com" },
+				{
+					...wide,
+					identifier: wide.username,
+					subject: "s-zoe",
+					email: "zoe@example.com",
+					name: "Zo\u00eb",
+				},
 			],
 			discovery: true,
 			revocation: true,
@@ -120,8 +126,9 @@ describe("OpenID Connect userinfo", () => {
 	});
 
 	it("answers its JSON as application/json in UTF-8, a character outside ASCII intact [oidc-core-5.3.2-e] [oidc-core-5.3.2-f] [oidc-core-5.3.2-g] [oidc-core-5.3.2-h]", async () => {
+		// The character outside ASCII is in the name, as an email is ASCII's addr-spec alone.
 		const { access_token: token } = await codeTokens(
-			"openid email",
+			"openid profile",
 			browserAt(() => base, issuer, wide),
 		);
 		const res = await fetch(`${base}/oauth/userinfo`, {
@@ -132,9 +139,9 @@ describe("OpenID Connect userinfo", () => {
 		// The claims a pattern composes beside these (verified-email's email_verified) are not this scene's.
 		expect(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))).toMatchObject({
 			sub: "s-zoe",
-			email: "zo\u00eb@example.com",
+			name: "Zo\u00eb",
 		});
-		expect(bytes.includes(Buffer.from("zo\u00eb", "utf8"))).toBe(true);
+		expect(bytes.includes(Buffer.from("Zo\u00eb", "utf8"))).toBe(true);
 	});
 
 	it("answers a token a refresh issued with its session's claims, and refuses it once the session has ended", async () => {
