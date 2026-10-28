@@ -1,3 +1,5 @@
+import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
+import { quietRuntime } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { hintReaders } from "../../contract.ts";
 import { hintCheckOver } from "../hint.ts";
@@ -28,5 +30,27 @@ describe("hint: an id_token_hint", () => {
 		for (const hint of [undefined, ""]) expect(await read(hint)).toEqual({ kind: "hint" });
 		const unread = await over();
 		for (const hint of ["id:alice", "forged"]) expect(await unread(hint)).toEqual({ kind: "hint" });
+	});
+
+	it("is refused at boot where a second module reads hints, the point keyed by one key", async () => {
+		const reading = (name: string) =>
+			defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
+				m.contribute(hintReaders).by(() => ({ read: async () => ({ kind: "invalid" }) as const })),
+			]);
+		const asking = defineModule(
+			{ name: "asking", replicaSafe: false, takes: [hintReaders] },
+			(m) => [m.provide(contract<unknown>("asked")).by((c) => hintCheckOver(c))],
+		);
+		const modules = [reading("one"), reading("two"), asking];
+		await expect(
+			assemble({ modules, config: kernelConfig(), runtime: quietRuntime() }),
+		).rejects.toMatchObject({
+			refusals: [
+				{
+					where: "authorize.hint-reader:hint-reader",
+					reason: "more than one contribution for the same key",
+				},
+			],
+		});
 	});
 });

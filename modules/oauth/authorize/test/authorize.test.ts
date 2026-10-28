@@ -2076,20 +2076,6 @@ describe("authorize: an id_token_hint", () => {
 		expect(both.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("refuses at boot a second module reading hints", async () => {
-		const second = defineModule({ name: "second-hinting", replicaSafe: false, takes: [] }, (m) => [
-			m.contribute(hintReaders).by(() => ({ read: async () => ({ kind: "invalid" }) as const })),
-		]);
-		await expect(serve({ extra: [second] })).rejects.toMatchObject({
-			refusals: [
-				{
-					where: "authorize.hint-reader:hint-reader",
-					reason: "more than one contribution for the same key",
-				},
-			],
-		});
-	});
-
 	it("reads no hint in a request without openid", async () => {
 		const { authorize, login } = await serve();
 		const oauth = request({ scope: "read", id_token_hint: "id:bob" });
