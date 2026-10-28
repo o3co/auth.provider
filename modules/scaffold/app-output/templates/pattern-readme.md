@@ -28,7 +28,7 @@ Both examples hold every value in a comment: a copy left as it is sets nothing, 
 To try it on this machine over plain http, set `http.public-origin` to `http://localhost:{{port}}` and `http.insecure-origin` to `true`, and `kernel.environment` to `development`: an http public origin boots only with both, and its cookies cannot be made secure. A deployment keeps an https origin, leaves `http.insecure-origin` `false` and `kernel.environment` `production`.
 A secret's placeholder begins `REPLACE-`; uncommented as it is, boot refuses it. Delete the line of an optional key left unset.
 
-{{firstLogin}}Until every key the modules need is written, the app writes each refusal on standard error, one per line, and exits 78.
+{{firstLogin}}Until every key the modules need is written, the app writes each refusal on standard error, one per line, and exits 78; a refusal of a key it reads from the environment says where to write it (its variable in `.env`, or the key in `{{local}}`).
 A variable 0.17 read that the environment still sets, and no configuration file reads, is named once on standard error, never its value, and boot goes on; set `APP_LEGACY_VARIABLES=refuse` to refuse boot on one instead, or `ignore` to skip the check.
 SIGTERM or SIGINT stops it, draining what is under way, within `kernel.stop-deadline` (`30s` by default); give an orchestrator a grace period longer than `kernel.stop-deadline`.
 
