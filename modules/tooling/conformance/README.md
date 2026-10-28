@@ -3,7 +3,7 @@
 ## Responsibilities
 - Owns the conformance test base: the area contract, scene composition, the driver contract and selection, assembly of the new system, the pattern mode (every scene on one pattern's app), shared tools.
 - Its internal modules for running a target: `drivers` runs the new system, on a scene's parts or a pattern's app; `audit` keeps the events a target sends; `patterns` runs every pattern's areas.
-- Its internal modules for fault scenes: `relay` sits between an app and Redis to cause a fault at a known point and show that it happened; `store-wire` reads the Redis adapter's wire for the relay; `faults` runs a Redis topology and the faults of its nodes; `promotion` promotes a replica without losing what the primary took; `ask` sends a node commands; `clock` runs a process on a moved clock; `deployment` runs a scene's app as instances on a topology.
+- Its internal modules for fault scenes: `relay` causes a fault between an app and Redis at a known point and shows it happened; `store-wire` reads the Redis adapter's wire for it; `faults` runs a Redis topology and its nodes' faults; `promotion` promotes a replica without losing what the primary took; `ask` sends a node commands; `clock` moves a process's clock; `deployment` runs a scene's app as instances on a topology; `fault-scene` is what a scene does with that deployment beside its faults.
 
 ## Not here
 - Scenes and scene vocabulary, and the set-ups for legacy and new (each area's conformance module). Starting the legacy system (`conformance-legacy`). The internals of the system under test.
@@ -23,7 +23,7 @@
   - A fake's script that fails fails the scene when the fake stops
 - Test tools (`./testing`): a fake SMTP relay for a scene's mail (plain SMTP at loopback, on a free port each run; keeps every message, decoded, and finds the latest to an address)
 - A fault run (`CONFORMANCE_FAULTS=1`, `./testing`): `faultRun` tells a scene it is in one, and `faultRunReporter` fails the run where a fault scene (`*.faults.case.ts`) did not run
-- Fault tools for an area's fault scenes (`./testing`), as their internal modules' cards say: `startDeployment` and its instances (`deployment`), `startTopology` and its nodes (`faults`), the relay's match, command, answer and what it records (`relay`), and the store's writes, reads, roles and refusals as the relay matches them (`store-wire`), and whether this host can move an instance's clock (`hostLibfaketime`, `clock`)
+- Fault tools (`./testing`), as their modules' cards say: `startDeployment` and its instances (`deployment`), `startTopology` and its nodes (`faults`), the relay's match, command, answer and records (`relay`), the store's writes, reads, roles and refusals as it matches them (`store-wire`), whether this host can move an instance's clock (`hostLibfaketime`), and a scene's own deployment with the waits and repointing around a fault (`fault-scene`)
 
 ## Invariants
 - Holds neither feature vocabulary nor legacy-system names.
