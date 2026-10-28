@@ -100,7 +100,7 @@ describe("re-authentication records", () => {
 
 it("provides the records over the store the assembly wires, taking all it names", async () => {
 	const stand = memoryRecords<StoredReauth>(() => 0, { shards: 1, perShard: 1 });
-	const place = defineModule({ name: "reauth-place", takes: [] }, (m) => [
+	const place = defineModule({ name: "reauth-place", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(reauthStore).by(() => ({ save: stand.records.create, update: stand.records.change })),
 	]);
 	const input = { modules: [reauthModule, place], config: kernelConfig() };
