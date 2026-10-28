@@ -380,12 +380,21 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const at = (await s.now()) + ms;
 				await overwrite(s, key("at"), 1, { expiry: { kind: "at", at } });
 				// Held or not by the store clock the read names, never by how long the caller took.
-				const held = await s.get(key("at"));
-				expect([held.now, held.entry?.value]).toEqual([held.now, held.now < at ? 1 : undefined]);
+				const heldUntil = async (name: string, until: number) => {
+					const read = await s.get(key(name));
+					expect([read.now, read.entry?.value]).toEqual([
+						read.now,
+						read.now < until ? 1 : undefined,
+					]);
+				};
+				await heldUntil("at", at);
 				const version = versionOf(
 					await overwrite(s, key("gone"), 1, { expiry: { kind: "after", ms } }),
 				);
+				// Written after `before`, so it expires no earlier than `before + ms`.
+				const before = await s.now();
 				await overwrite(s, key("w"), 1, { expiry: { kind: "after", ms } });
+				await heldUntil("w", before + ms);
 				// Every expiry above ends by `end`, as each was written before this read.
 				const end = (await s.now()) + ms;
 				const giveUp = Date.now() + ms + 5_000;
