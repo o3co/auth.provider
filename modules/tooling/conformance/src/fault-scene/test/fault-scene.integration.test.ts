@@ -88,4 +88,16 @@ describe("a fault scene's deployment", () => {
 			}
 		});
 	}, 120_000);
+
+	it("hands a scene no deployment whose primary refuses writes, failing at the start naming what it waited on", async () => {
+		let entered = false;
+		// One replica where two are asked: the primary never counts the good replicas a write needs.
+		const unwritable = { replicas: 1, settings: ["--min-replicas-to-write", "2"] };
+		await expect(
+			on({ name: "fault-scene-unwritable", scene, ...unwritable }, async () => {
+				entered = true;
+			}),
+		).rejects.toThrow(/min_slaves_good_slaves 1 of the 2 min-replicas-to-write asks/);
+		expect(entered).toBe(false);
+	}, 120_000);
 });
