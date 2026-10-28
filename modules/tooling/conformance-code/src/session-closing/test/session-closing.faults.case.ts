@@ -19,8 +19,12 @@ import { describe, expect, it } from "vitest";
 import { browserOn, codeAt, faultScene, on, prefix, redeemAt } from "../../faults/test/faults.ts";
 import { backChannel } from "../../testing.ts";
 
-// Userinfo shows whether a token's path is open; pending closes are gone on with every second.
-const scene = faultScene({ userinfo: true, sweepSeconds: 1 });
+// Userinfo shows whether a token's path is open; pending closes are gone on with every second. A
+// sweep reads every shard of the closings in turn, each read confirmed: over the 1024 a deployment
+// has unless set, one sweep runs past a scene's wait where Redis answers slower (CI), so a few.
+const scene = faultScene({ userinfo: true, sweepSeconds: 1, closingShards: 4 });
+// No sweep within the scene, its first an hour after boot: the logout alone writes the record.
+const logoutAlone = faultScene({ userinfo: true, sweepSeconds: 3600 });
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -165,7 +169,7 @@ async function heldHalfway(i: Instance) {
 
 describe("a closing session closed under faults", () => {
 	it("closes a session whose closing's answer is lost once, the resend taking the first answer [guarantee-1-a] {fault:Lr}", async () => {
-		await on({ name: "session-closing-lr", scene }, async (d) => {
+		await on({ name: "session-closing-lr", scene: logoutAlone }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
 			const s = await sessionAt(a);
