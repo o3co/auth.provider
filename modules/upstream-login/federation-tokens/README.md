@@ -20,7 +20,7 @@
   - An end of session the upstream cannot build is none, warned as `federation-tokens.end_session_failed` with the IdP and the failure's kind only.
 - Route `POST /oauth/federation/<idp>/token` (no body is read): `200 {access_token, token_type: "Bearer", expires_in?, scope?}`; taken from other sites, as a client's own call, authenticated as that client, which reads no cookie.
   - `expires_in` only for a finite end; `scope` only when there is one.
-  - Errors: `401 invalid_token` (or `sender-binding`'s answer), `403 forbidden` (`insufficient_scope`) or `upstream_interaction_required`, `404 federation_not_linked`, `410 refresh_token_absent`, `re_authentication_required` or `refresh_not_supported` (no refresh at the upstream, or an IdP no longer set), `429 rate_limited` (the upstream's `retry-after` when 1 to 86400), `500 refresh_failed`, `502 upstream_token_ineligible` (`retry-after: 300`), `503 lock_timeout` or `temporarily_unavailable`.
+  - Errors: `401 invalid_token` (or `sender-binding`'s answer), `403 forbidden` or `upstream_interaction_required`, `404 federation_not_linked`, `410 refresh_token_absent`, `re_authentication_required` or `refresh_not_supported` (no refresh at the upstream, or an IdP no longer set), `429 rate_limited` (the upstream's `retry-after` when 1 to 86400), `500 refresh_failed`, `502 upstream_token_ineligible` (`retry-after: 300`), `503 lock_timeout` or `temporarily_unavailable`.
 - Route `POST /oauth/federation/<idp>/logout` (form: `post_logout_redirect_uri?`, `state?`): `303` to the upstream's end of session, or `200 {"disconnected": true}` where it has none or fails; taken from other sites as the token route is.
   - Errors as the token route's, without `403`.
 - Both routes answer `no-store` and are limited per source by `rate-limit`'s requests policy.
@@ -33,7 +33,7 @@
 - Test configuration builders and the contract test of both store interfaces (`./testing`).
 
 ## Invariants
-- A token goes out only to a client the operator made a receiver (`receives`).
+- A token goes out only to a client the operator made a receiver (`receives`). Any other is answered `403`: its body's `error` is the route's own word, `forbidden`, and its challenge RFC 6750's, `insufficient_scope`, in its token's scheme.
 - A token goes out only for a presented access token `caller` accepts: its audience names its client, its family has not ended, and its session enters at `use` for the same subject (one short of a requirement does not).
 - The session is checked again before answering.
 - Only a bearer token goes out (any case). Any other type answers `502`, and the record stays.
