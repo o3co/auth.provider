@@ -23,6 +23,10 @@ import { beginBinding, browser, totp } from "../../testing.ts";
 const credential = randomBytes(32).toString("base64url");
 const subject = "alice";
 const scene = faultScene({ credential, sources: ["198.51.100.0/24"] });
+// The scenes' value, not the default (1 s): B's change waits held while A's revocation runs to complete,
+// longer than a command may on a busy host, and a resend would queue behind the hold and give up first,
+// answering unavailable before the fence decides anything.
+const patient = { "command-timeout": "10s" };
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The ledger's revocation of alice at the instance, from its block over https, as its proxy forwards it. */
@@ -93,7 +97,9 @@ function refusedAt(
 	from: number,
 	answer: { status: number; body: Record<string, unknown> },
 ) {
-	expect(answer.status).not.toBe(200);
+	// The fence's refusal: the change decided again on the fence moved is fenced, answered as a login
+	// to make again; not unavailable, which a timeout alone could give.
+	expect([answer.status, answer.body.error]).toEqual([401, "login_required"]);
 	expect(answer.body.recovery_codes).toBeUndefined();
 	expect(successes(b, factorListWritten).filter((e) => e.at > from)).toEqual([]);
 }
@@ -104,6 +110,17 @@ async function afterAt(d: Deployed, i: Instance, code: string) {
 	await ready(i);
 	await pause(1_100);
 	return signedInAt(i, code);
+}
+
+/** A TOTP bound by the browser's session: answers its id. */
+async function boundBy(b: Browser) {
+	const begun = await beginBinding(b, { kind: "totp" }, undefined);
+	const bound = await b.send("POST", "/session/mfa/enrollment/complete", {
+		transaction_id: String(begun.body.transaction),
+		proof: totp(String(begun.body.secret)),
+	});
+	expect(bound.status).toBe(200);
+	return String((bound.body.factor as { id?: unknown } | undefined)?.id);
 }
 
 /** The control: with no fault, B's session reissues her recovery codes; answers the ones it gave. */
@@ -117,18 +134,19 @@ async function control(b: Browser, i: Instance) {
 
 describe("a subject's fence refusing, from another instance, a change to her second factors her revocation overtook", () => {
 	it("removes no factor for a session opened before a revocation completed at another instance [guarantee-4-d] {fault:H2}", async () => {
-		await on({ name: "fence-remove-h2", scene, instances: 2 }, async (d) => {
+		await on({ name: "fence-remove-h2", scene, instances: 2, redis: patient }, async (d) => {
 			const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
 			const { codes } = await enrolledAt(a);
 			const { b: browserB, factors } = await signedInAt(b, codes[0] ?? "");
 			const codesNow = await control(browserB, b);
 			// A second TOTP, so the one removed is not the last.
-			const added = await beginBinding(browserB, { kind: "totp" }, undefined);
-			const bound = await browserB.send("POST", "/session/mfa/enrollment/complete", {
-				transaction_id: String(added.body.transaction),
-				proof: totp(String(added.body.secret)),
+			await boundBy(browserB);
+			// The control of this kind: with no fault, the session removes a factor it bound.
+			const spare = await boundBy(browserB);
+			const removed = await browserB.send("POST", "/session/mfa/factors/remove", {
+				factor_id: spare,
 			});
-			expect(bound.status).toBe(200);
+			expect(removed.status).toBe(200);
 			const factor = factors.find((f) => f.kind === "totp")?.id ?? "";
 			const { held, asked, from } = await heldAtWrite(b, () =>
 				browserB.send("POST", "/session/mfa/factors/remove", { factor_id: factor }),
@@ -143,7 +161,7 @@ describe("a subject's fence refusing, from another instance, a change to her sec
 	});
 
 	it("reissues no recovery codes for a session opened before a revocation completed at another instance [guarantee-4-d] {fault:H2}", async () => {
-		await on({ name: "fence-reissue-h2", scene, instances: 2 }, async (d) => {
+		await on({ name: "fence-reissue-h2", scene, instances: 2, redis: patient }, async (d) => {
 			const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
 			const { codes } = await enrolledAt(a);
 			const { b: browserB } = await signedInAt(b, codes[0] ?? "");
@@ -160,11 +178,13 @@ describe("a subject's fence refusing, from another instance, a change to her sec
 	});
 
 	it("binds no factor whose enrollment a session began before a revocation completed at another instance [guarantee-4-d] {fault:H2}", async () => {
-		await on({ name: "fence-bind-h2", scene, instances: 2 }, async (d) => {
+		await on({ name: "fence-bind-h2", scene, instances: 2, redis: patient }, async (d) => {
 			const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
 			const { codes } = await enrolledAt(a);
 			const { b: browserB, factors } = await signedInAt(b, codes[0] ?? "");
 			const codesNow = await control(browserB, b);
+			// The control of this kind: with no fault, the session binds a factor.
+			const controlBound = await boundBy(browserB);
 			const begun = await beginBinding(browserB, { kind: "totp" }, undefined);
 			const { held, asked, from } = await heldAtWrite(b, () =>
 				browserB.send("POST", "/session/mfa/enrollment/complete", {
@@ -175,12 +195,12 @@ describe("a subject's fence refusing, from another instance, a change to her sec
 			await revokedAt(a);
 			held.release();
 			refusedAt(b, from, await asked);
-			// Her TOTP is the one she had: the enrollment begun before is not bound. (The recovery codes'
-			// factor is renamed by the control's reissue, so it is not compared.)
+			// Her TOTPs are the ones she had and the control's: the enrollment begun before is not bound.
+			// (The recovery codes' factor is renamed by the control's reissue, so it is not compared.)
 			const after = await afterAt(d, a, codesNow[0] ?? "");
 			const totps = (fs: readonly { id: string; kind: string }[]) =>
 				fs.filter((f) => f.kind === "totp").map((f) => f.id);
-			expect(totps(after.factors)).toEqual(totps(factors));
+			expect(totps(after.factors).sort()).toEqual([...totps(factors), controlBound].sort());
 		});
 	});
 });
