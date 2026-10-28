@@ -41,6 +41,9 @@ The [guard](modules/tooling/guard/README.md) holds the workspace to its rules: n
 
 ## Commits
 
+- **The README in two languages.** `README.ja.md` is a full translation of `README.md`; a commit that changes one changes the other.
+- A commit says why, not only what; the diff shows what.
+
 In a pull request into `develop`:
 
 - **Conventional Commits**: `feat(<module>): …`, `fix(<module>): …`, `docs: …`, with `!` after the type for a breaking change.
@@ -48,13 +51,11 @@ In a pull request into `develop`:
 - **Changing an interface** takes three commits, each in one module: the provider adds the new form, each user switches to it, then the provider removes the old one.
 
 On `main`, each release is one commit per package, in the order of their dependencies, holding the package's whole change in that version: its subject is in the same form, of the change's main type (`feat` where it adds, `fix` where it only repairs, `!` where it breaks), and its body names the pull requests into `develop` it gathers. The repository's root files and generated documents follow, and the version's commit is last. [Releasing](docs/releasing.md#before-the-tag) says how the release branch is built.
-- **The README in two languages.** `README.ja.md` is a full translation of `README.md`; a commit that changes one changes the other.
-- A commit says why, not only what; the diff shows what.
 
 ## Pull requests
 
 - Open pull requests against `develop`. `main` takes releases.
-- `develop` is reset to `main` after each release, so the commits of a merged pull request are not kept on either branch: the pull request holds them, and its description says why the change was made. After a release, move an open branch onto the new `develop` with `git rebase --onto develop <the old develop's head> <branch>`, and push it.
+- `develop` is reset to `main` after each release, so the commits of a merged pull request are not kept on either branch: the pull request holds them, and its description says why the change was made. After a release, move an open branch onto the new `develop` with `git rebase --onto develop <the old develop's head> <branch>`, and push it with `git push --force-with-lease`, your own branch alone.
 - The required check is `build-and-test`, which passes when both `checks` and `integration` pass.
 - Describe the change, how you tested it, and any setting, route or behavior an operator would notice; a change an operator must act on also adds its line to [the migration guide](docs/migration.md).
 
