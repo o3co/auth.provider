@@ -137,7 +137,7 @@ describe("an authorization code redeemed once under faults", () => {
 			expect(oldId).not.toBe(newId);
 			a.relay.switchUpstream(moved.upstream());
 			a.relay.reset("operations");
-			// Only once the app has connected again: a request meanwhile fails for want of a connection.
+			// Sent once the app holds a connection to the new primary: before, it fails for want of one, a 503 that shows nothing.
 			await reconnected(a, moved.upstream());
 			const from = a.relay.executions(anything).length;
 			const confirmed = a.relay.observe(confirmation({ replicas: 1 }));
@@ -221,6 +221,24 @@ describe("an authorization code redeemed once under faults", () => {
 			// Both uses reached Redis on what they read; only the first took effect.
 			expect(a.relay.executions(codeUse(c))).toHaveLength(1);
 			expect(b.relay.executions(codeUse(c))).toHaveLength(1);
+			expect(successes(a, codeUse(c)).length + successes(b, codeUse(c)).length).toBe(1);
+			await refusedAsUsed(b, c);
+		});
+	});
+
+	it("issues at most once for one code whose two uses at two instances are let go together, a use that comes mid-redemption voiding the code [guarantee-5-a] {fault:H2}", async () => {
+		await on({ name: "code-once-h2-together", instances: 2 }, async (d) => {
+			const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
+			await control(a);
+			const c = await codeAt(a);
+			const holds = [a.relay.hold(codeUse(c)), b.relay.hold(codeUse(c))];
+			const answers = Promise.all([redeemAt(a, c), redeemAt(b, c)]);
+			for (const held of await Promise.all(holds)) held.release();
+			const both = (await answers).map(said);
+			const tokens = both.filter((s) => s[0] === 200);
+			expect(tokens.length).toBeLessThanOrEqual(1);
+			// None issued only as a code that comes again is refused, and voided (RFC 6749 §4.1.2).
+			if (tokens.length === 0) expect(both).toEqual([refused, refused]);
 			expect(successes(a, codeUse(c)).length + successes(b, codeUse(c)).length).toBe(1);
 			await refusedAsUsed(b, c);
 		});
