@@ -493,7 +493,7 @@ it("loses on failover a batch across whose answer was lost, mark and all, and ke
 });
 
 it("takes every handle its takes name, the store and its simulated stand-in alike", async () => {
-	const caller = defineModule({ name: "caller", replicaSafe: true, takes: [] }, (m) => [
+	const caller = defineModule({ name: "caller", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(spaces).by(() => space),
 	]);
 	const accepting = { ...kernelConfig(), store: { "accept-volatile": true } };
