@@ -57,7 +57,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code", replicaSafe: true, takes: [] }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -79,7 +79,7 @@ const code = defineModule({ name: "kind-code", replicaSafe: true, takes: [] }, (
 	})),
 ]);
 /** A way back a subject binds: guessable, not counting, adding no mfa, as a code by mail is by default. */
-const mailBack = defineModule({ name: "kind-mail-back", replicaSafe: true, takes: [] }, (m) => [
+const mailBack = defineModule({ name: "kind-mail-back", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "mail-back",
 		amr: ["email"],

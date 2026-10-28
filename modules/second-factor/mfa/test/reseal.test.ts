@@ -30,7 +30,7 @@ const listKey = (subject: string) =>
 	`s-${createHash("sha256").update(subject).digest("base64url")}`;
 
 /** A counting kind whose proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code", replicaSafe: true, takes: [] }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
