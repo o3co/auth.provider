@@ -124,16 +124,27 @@ it("refuses a path whose constraints name a kind it does not judge, or bound a s
 	expect(await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: 1 })] }, {})).toBe(
 		"name constraints unsupported",
 	);
-	// A minimum past 4 bytes, which asn1js reads as 0 by its valueDec: refused by its value, 2^32 here.
-	const wide = new asn1js.Integer({ valueHex: new Uint8Array([1, 0, 0, 0, 0]).buffer });
-	expect(
-		await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: wide })] }, {}),
-	).toBe("name constraints unsupported");
+	// A minimum of 4 bytes or more, which asn1js reads as 0 by its valueDec: refused by its value,
+	// from the first length it misreads (2^24, 1, a negative one) to 2^32.
+	const integer = (bytes: number[]) =>
+		new asn1js.Integer({ valueHex: new Uint8Array(bytes).buffer });
+	for (const bytes of [
+		[1, 0, 0, 0],
+		[0, 0, 0, 1],
+		[0x80, 0, 0, 0],
+		[1, 0, 0, 0, 0],
+	]) {
+		const minimum = integer(bytes);
+		expect(
+			await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum })] }, {}),
+			JSON.stringify(bytes),
+		).toBe("name constraints unsupported");
+	}
 	// A zero written in more bytes than it needs is still zero: taken.
-	const zero = new asn1js.Integer({ valueHex: new Uint8Array([0, 0, 0, 0, 0]).buffer });
+	const zero = integer([0, 0, 0, 0, 0]);
 	expect(
 		await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: zero })] }, {}),
-	).not.toBe("name constraints unsupported");
+	).toBe("valid");
 	expect(await reasonOf({}, { permitted: [subtree(dns("example.com"), { maximum: 2 })] }, {})).toBe(
 		"name constraints unsupported",
 	);

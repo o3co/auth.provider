@@ -23,7 +23,7 @@ function within(name: pkijs.GeneralName, base: pkijs.GeneralName): boolean {
 	);
 }
 
-/** Whether a subtree's minimum is 0, by its value's bytes, whatever their length: asn1js reads one past 4 bytes as 0. */
+/** Whether a subtree's minimum is 0, by its value's bytes, whatever their length: asn1js reads one of 4 bytes or more as 0. */
 const isZero = (minimum: number | asn1js.Integer) =>
 	typeof minimum === "number"
 		? minimum === 0
