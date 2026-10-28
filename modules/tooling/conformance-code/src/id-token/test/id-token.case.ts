@@ -140,7 +140,11 @@ describe("OpenID Connect: the ID token", () => {
 			const introspected = await fetch(`${base}/oauth/introspect`, {
 				method: "POST",
 				headers: { ...backChannel, "content-type": "application/x-www-form-urlencoded" },
-				body: new URLSearchParams({ token, client_id: app.id, client_secret: app.secret ?? "" }),
+				body: new URLSearchParams({
+					token: token ?? "",
+					client_id: app.id,
+					client_secret: app.secret ?? "",
+				}),
 			});
 			const answer = await succeeded(introspected, "introspection");
 			expect(answer.active, name).toBe(true);
