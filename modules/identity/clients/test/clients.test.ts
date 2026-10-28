@@ -751,13 +751,12 @@ describe("clients", () => {
 	});
 
 	it("refuses at boot an assertion method naming no signing algorithms, so discovery names the algorithms of every assertion method it lists [rfc8414-2-h]", async () => {
-		for (const signingAlgorithms of [undefined, []]) {
-			const refused = await refusalsOf(
-				boot([method("asserted", { assertion: true, signingAlgorithms })]),
-			);
+		// Without the list, and with an empty one.
+		for (const named of [{}, { signingAlgorithms: [] }]) {
+			const refused = await refusalsOf(boot([method("asserted", { assertion: true, ...named })]));
 			expect(
 				refused.map((r) => [r.where, r.reason]),
-				String(signingAlgorithms),
+				JSON.stringify(named),
 			).toEqual([
 				[
 					"clients.methods.asserted",
