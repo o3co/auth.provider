@@ -10,10 +10,12 @@
 - **oidc-rpinit-2-f** SHOULD: the OP takes an ID token hint whose `exp` has passed where the client it names holds a current or recent session at the OP.
 - **oidc-rpinit-2-g** SHOULD: an `id_token_hint` whose `sid` matches neither the client's current session at the OP nor a recent one makes the OP treat the request as suspect; the OP may then decline to act on it.
 - **oidc-rpinit-2-h** SHOULD: the OP asks the End-User whether to log out of the OP too.
+  deviates: D-11
 - **oidc-rpinit-2-i** MUST: the OP asks the End-User whether to log out where no `id_token_hint` was given.
 - **oidc-rpinit-2-n** MUST: the OP asks the End-User whether to log out where the ID token given as `id_token_hint` does not belong to the OP's current session with the client, or to the End-User logged in.
 - **oidc-rpinit-2-j** MUST: once the End-User agrees, the OP logs the End-User out.
 - **oidc-rpinit-2-k** SHOULD: a `post_logout_redirect_uri` uses `https`; it may instead use `http` for a confidential client where the OP allows `http`, or an alternate scheme, such as one identifying a callback into a native application.
+  deviates: D-7
 - **oidc-rpinit-2-l** SHOULD: federation-tokens passes the id_token the upstream issued at the login as `id_token_hint` in the logout request it sends to that upstream's end-session endpoint.
   role: rp
 - **oidc-rpinit-2-m** SHOULD: where federation-tokens' logout request to an upstream carries `post_logout_redirect_uri`, it also carries `id_token_hint`.
@@ -32,6 +34,7 @@
 ## 3.1 Post Logout Redirect URIs Registration
 
 - **oidc-rpinit-3.1-a** SHOULD: a client's registered `post_logout_redirect_uris` use `https`; they may instead use `http` for a confidential client where the OP allows `http`, or, as Section 2 allows the parameter, an alternate scheme such as one identifying a callback into a native application.
+  deviates: D-7
 
 ## 4 Validation
 
