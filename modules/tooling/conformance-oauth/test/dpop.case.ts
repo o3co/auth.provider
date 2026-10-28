@@ -1,4 +1,5 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { request } from "node:http";
 import { areaTarget, type Started } from "@mod/conformance";
 import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,7 +9,7 @@ const issuer = "https://issuer.example";
 const signing = generateKeyPairSync("ed25519");
 const holder = generateKeyPairSync("ed25519");
 const secret = "app-secret-0123456789abcdef";
-const scene = (dpop: boolean) =>
+const scene = (dpop: boolean, nonces = false) =>
 	oauthScene({
 		issuer,
 		keys: {
@@ -48,7 +49,7 @@ const scene = (dpop: boolean) =>
 				: []),
 		],
 		introspection: true,
-		dpop,
+		...(nonces ? { dpop: true, dpopNonce: true } : { dpop }),
 	});
 
 async function proof(claims: Record<string, unknown> = {}) {
@@ -68,11 +69,11 @@ const claimsOf = (jwt: unknown) =>
 		unknown
 	>;
 
-function running(dpop: boolean) {
+function running(dpop: boolean, nonces = false) {
 	let started: Started;
 	const s = { base: "" };
 	beforeAll(async () => {
-		started = await areaTarget().start(scene(dpop));
+		started = await areaTarget().start(scene(dpop, nonces));
 		if (started.kind !== "running") throw new Error(`refused:\n${started.output}`);
 		s.base = started.baseUrl;
 	});
@@ -99,6 +100,44 @@ function running(dpop: boolean) {
 				"bound",
 			),
 		introspect: (token: unknown) => post("/oauth/introspect", { token: String(token) }),
+		/** A token request with a proof, and each `DPoP-Nonce` line of the answer as it came on the wire. */
+		nonced: (dpopProof: string) =>
+			new Promise<{ status: number; body: Record<string, unknown>; nonces: string[] }>(
+				(answered, failed) => {
+					const form = new URLSearchParams({
+						client_id: "app",
+						client_secret: secret,
+						grant_type: "client_credentials",
+					});
+					const asking = request(
+						`${s.base}/oauth/token`,
+						{
+							method: "POST",
+							headers: {
+								"content-type": "application/x-www-form-urlencoded",
+								dpop: dpopProof,
+							},
+						},
+						(res) => {
+							const chunks: Buffer[] = [];
+							res.on("data", (chunk: Buffer) => chunks.push(chunk));
+							res.on("end", () => {
+								const lines = res.rawHeaders;
+								const nonces = lines.filter(
+									(_, i) => i % 2 === 1 && lines[i - 1]?.toLowerCase() === "dpop-nonce",
+								);
+								const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<
+									string,
+									unknown
+								>;
+								answered({ status: res.statusCode ?? 0, body, nonces });
+							});
+						},
+					);
+					asking.on("error", failed);
+					asking.end(form.toString());
+				},
+			),
 	};
 }
 
@@ -144,5 +183,33 @@ describe.runIf(areaTarget().can("dpop"))("with DPoP", () => {
 			const answer = await token(await proof(claims));
 			expect([answer.status, answer.body.error]).toEqual([400, "invalid_dpop_proof"]);
 		}
+	});
+});
+
+describe.runIf(areaTarget().can("dpop"))("with DPoP nonces at the token endpoint", () => {
+	const { nonced } = running(true, true);
+	const nonceShape = /^\d+\.[A-Za-z0-9_-]+$/;
+	it("refuses a proof without the current nonce in one DPoP-Nonce header, and takes one with it [rfc9449-8-b]", async () => {
+		// The shape of a nonce, of a window long gone, under a MAC never made here.
+		const forged = `1.${"A".repeat(43)}`;
+		for (const [named, claims] of [
+			["no nonce", {}],
+			["a nonce not issued for now", { nonce: forged }],
+		] as const) {
+			const refused = await nonced(await proof(claims));
+			expect([refused.status, refused.body.error], named).toEqual([400, "use_dpop_nonce"]);
+			// One line on the wire, whatever a client would join several into.
+			expect(refused.nonces, named).toHaveLength(1);
+			expect(refused.nonces[0], named).toMatch(nonceShape);
+		}
+		const { nonces } = await nonced(await proof());
+		const taken = await nonced(await proof({ nonce: nonces[0] }));
+		expect([taken.status, taken.body.token_type]).toEqual([200, "DPoP"]);
+	});
+
+	it("names nonces only beside DPoP", () => {
+		// @ts-expect-error A part without DPoP takes no nonce.
+		const unasked = () => oauthScene({ issuer, clients: [], dpopNonce: true });
+		expect(unasked).toBeTypeOf("function");
 	});
 });
