@@ -28,3 +28,19 @@ it("takes a nonce only in the very form it made it", () => {
 		expect(made.verify(other), other).toBe(false);
 	}
 });
+
+it("makes a nonce no one foresees without the shared secret: a 256-bit MAC over its bucket, another under another secret, a new one each bucket [rfc9449-8-a]", () => {
+	const secret = randomBytes(32);
+	let at = 5_000;
+	const issuing = nonces(secret, 1000, () => at);
+	const current = issuing.issue();
+	const [bucket, mac] = current.split(".");
+	expect(Buffer.from(mac ?? "", "base64url")).toHaveLength(32);
+	expect(nonces(randomBytes(32), 1000, () => at).issue()).not.toBe(current);
+	at += 1000;
+	const next = issuing.issue();
+	expect(next.split(".")[1]).not.toBe(mac);
+	// The next bucket's nonce guessed from the current one is not taken.
+	expect(issuing.verify(`${Number(bucket) + 1}.${mac}`)).toBe(false);
+	expect(issuing.verify(next)).toBe(true);
+});

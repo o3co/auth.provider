@@ -306,6 +306,43 @@ describe("server nonces (RFC 9449 §8)", () => {
 		expect(await (await asking("as+rs"))(await toResource(), atResource)).toMatchObject(askedAgain);
 	});
 
+	it("challenges a resource's request without the nonce in the DPoP scheme as use_dpop_nonce, giving a fresh one [rfc9449-4.2-l]", async () => {
+		shift = bucketMs - (Date.now() % bucketMs) + 1;
+		const app = await boot({ nonce: { required: "as+rs", ttl: `${bucketMs / 1000}s`, secret } });
+		const jkt = await calculateJwkThumbprint(await exportJWK(holder.publicKey));
+		const tokens = {
+			verifyAccess: async () =>
+				({
+					kind: "valid",
+					binding: { member: "jkt", confirmation: jkt, tokenType: "DPoP" },
+				}) as const,
+		};
+		const presenting = async (nonce?: string) =>
+			app.get(senderBinding).admitted(
+				testRequest({
+					method: "POST",
+					path: "/api",
+					headers: new Map([
+						["authorization", `DPoP ${token}`],
+						["dpop", await proof({ htu: `${issuer}/api`, ath, nonce })],
+					]),
+				}),
+				tokens,
+			);
+		const first = await presenting();
+		expect(first).toEqual({
+			kind: "refused",
+			status: 401,
+			error: "use_dpop_nonce",
+			headers: {
+				"www-authenticate": 'DPoP error="use_dpop_nonce"',
+				"dpop-nonce": expect.stringMatching(/^\d+\.[A-Za-z0-9_-]+$/),
+			},
+		});
+		const given = first.kind === "refused" ? first.headers["dpop-nonce"] : undefined;
+		expect((await presenting(given)).kind).toBe("admitted");
+	});
+
 	it("asks none anywhere under never", async () => {
 		expect(await (await asking("never"))(await proof(), issue)).toMatchObject(bound);
 	});
