@@ -115,6 +115,8 @@ export function metricsContract(
  * sees a late read without waiting for the module's bound.
  */
 export function metricsStandIn(boundMs: number) {
+	// Safe on many instances: each instance's counts are its own, the right shape for them, and instances
+	// differing breaks nothing (as http-ops).
 	return defineModule({ name: "metrics", replicaSafe: true, takes: metricsTakes }, (m) => [
 		m.provide(metrics).by(metricsBy(boundMs)),
 	]);
