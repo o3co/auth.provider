@@ -321,6 +321,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
   - `acr` (`src/acr`): the scenes of the acr a client asks for.
   - `authorize-unavailable` (`src/authorize-unavailable`): the fault scenes of the authorization endpoint issuing no code while the store cannot answer (`guarantee-3-a`).
+  - `boundaries` (`src/boundaries`): the fault scenes of bounds the security model leaves to the operator, recorded as they are; no promise is checked, so none names a guarantee or a fault of one.
   - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
   - `code-once` (`src/code-once`): the fault scenes of an authorization code redeemed once (`guarantee-5-a`).
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.

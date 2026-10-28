@@ -69,11 +69,14 @@ export async function deployed(o: {
 	readonly settings?: readonly string[];
 	/** Keys of the Redis section beside its URL. */
 	readonly redis?: Readonly<Record<string, unknown>>;
+	/** A libfaketime offset every Redis node's clock runs at, such as `+2h`. */
+	readonly clock?: string;
 }): Promise<Deployed> {
 	const replicas = o.replicas ?? 2;
 	const topology = await startTopology({
 		replicas,
 		settings: [...(replicas > 0 ? replicated : []), ...(o.settings ?? [])],
+		...(o.clock ? { clock: o.clock } : {}),
 	});
 	try {
 		const deployment = await startDeployment({
