@@ -14,6 +14,7 @@ Internal module of `jwt-bearer`: checking a JWT assertion, all but its single us
 ## Invariants
 - Nothing read unverified reaches a key source unchecked: the issuer must be a string and trusted, the subject well formed as `users` bounds a subject (1 to 255 ASCII characters, as OpenID Connect Core bounds one; a key thumbprint where its issuer says so), and a `kid` text of 1 to 256 well-formed characters.
 - With thumbprints, only the key whose thumbprint is the `sub` verifies it; a contributed key is verified with the `sub` it was asked for.
+- An access token (`typ` `at+jwt`, RFC 9068) is no assertion, whoever signed it and whatever its `aud` names: refused before anything is verified.
 - Every refusal before the signature holds is `untrusted signer`: no JWT read, no trusted issuer, a signer of the wrong shape, no key or none that fits, an algorithm not taken, a malformed header, a signature that does not hold. One after it (`external-jwt`'s `signed`) keeps its words. So the answer tells nothing of which signers have keys.
 - The verified `sub` must be the one read unverified; `jti` is text of 1 to 256 well-formed characters.
 - The subject it stands for is its `sub`, or a self-issued signer's thumbprint; the signer is read, its shape checked and its keys asked for before anything is verified.

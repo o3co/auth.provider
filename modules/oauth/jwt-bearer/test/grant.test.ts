@@ -159,7 +159,7 @@ async function serve(...given: Parameters<typeof assembly>) {
 function assertion(
 	claims: Record<string, unknown>,
 	key: KeyObject = upstream.privateKey,
-	header: { kid?: string } = {},
+	header: { kid?: string; typ?: string } = {},
 ) {
 	return new SignJWT({ jti: `j-${Math.random()}`, ...claims })
 		.setProtectedHeader({ alg: "EdDSA", ...header })
@@ -544,6 +544,16 @@ describe("jwt-bearer", () => {
 		expect(await error("not-a-jwt")).toBe("invalid_grant");
 		expect(await error(await assertion({ ...base, jti: "j-\udc00" }))).toBe("invalid_grant");
 		expect(await error("")).toBe("invalid_request");
+	});
+
+	it("refuses an access token sent as an assertion, its typ at+jwt in either form, though its signer is trusted", async () => {
+		const s = await serve();
+		const error = async (typ?: string) =>
+			errorOf(await s.grant(await assertion(base, upstream.privateKey, typ ? { typ } : {})));
+		expect(await error("at+jwt")).toBe("invalid_grant");
+		expect(await error("application/at+jwt")).toBe("invalid_grant");
+		expect(await error("JWT")).toBe("issued");
+		expect(await error()).toBe("issued");
 	});
 
 	it("refuses, rather than throws on, an assertion whose signed payload is no JSON [rfc7523-3-x]", async () => {
