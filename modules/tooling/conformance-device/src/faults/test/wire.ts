@@ -51,3 +51,30 @@ export const confirmedOf = (d: Device): Match =>
 		name: "settled",
 		operations: ["batch"],
 	});
+
+/**
+ * The writes of a subject's revocation boundary: its record created, or written from what it holds; not
+ * the mark that confirms, before the first, that the subject holds none.
+ */
+export const boundaryOf = (subject: string): Match =>
+	storeWrite({
+		prefix,
+		space: "subject-revocation-store.boundaries",
+		partition: subject,
+		operations: ["putIfAbsent", "replaceIf"],
+	});
+
+/** The write that creates a subject's first boundary; a revocation that finds one held writes it from that instead. */
+export const boundaryCreated = (subject: string): Match =>
+	storeWrite({
+		prefix,
+		space: "subject-revocation-store.boundaries",
+		partition: subject,
+		operations: ["putIfAbsent"],
+	});
+
+/**
+ * A follower's first write after a revocation's boundary: session-lifecycle adding the subject's
+ * sessions to its closings, before it closes any.
+ */
+export const closingAdded: Match = storeWrite({ prefix, space: "session-store.closings" });

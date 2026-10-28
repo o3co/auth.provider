@@ -8,12 +8,12 @@ import {
 } from "@mod/conformance/testing";
 import type { ClientScene } from "@mod/conformance-oauth";
 // The package's entry, which sets the area up on each target.
-import { deviceScene } from "../../main.ts";
+import { type DeviceScene, deviceScene } from "../../main.ts";
 
 export const issuer = "https://issuer.example";
 export const deviceGrant = "urn:ietf:params:oauth:grant-type:device_code";
 const pair = generateKeyPairSync("ed25519");
-const alice = { identifier: "alice", password: "correct horse battery" };
+export const alice = { identifier: "alice", password: "correct horse battery" };
 export const tv: ClientScene = {
 	id: "tv",
 	kind: "confidential",
@@ -24,8 +24,8 @@ export const tv: ClientScene = {
 	defaultScopes: ["read"],
 };
 
-/** The device grant on the Redis store, for one client and one user. */
-export const faultScene = (): AreaScene => ({
+/** The device grant on the Redis store, for one client and one user, with what a scene adds. */
+export const faultScene = (more: Partial<DeviceScene> = {}): AreaScene => ({
 	...deviceScene({
 		issuer,
 		keys: {
@@ -41,13 +41,16 @@ export const faultScene = (): AreaScene => ({
 		verificationUri: `${issuer}/device`,
 		// A scene's value, not the default (5): a scene looks up and decides up to five times as alice in one window.
 		attempts: 20,
+		...more,
 	}),
 	storeFaults: true,
 });
 
-/** Runs a scene on a deployment of its own, as the base does, on the device grant's scene. */
-export const on = (o: Omit<Deploying, "scene">, scene: (d: Deployed) => Promise<void>) =>
-	onDeployment({ ...o, scene: faultScene() }, scene);
+/** Runs a scene on a deployment of its own, as the base does, on the device grant's scene unless it names another. */
+export const on = (
+	o: Omit<Deploying, "scene"> & { readonly scene?: AreaScene },
+	scene: (d: Deployed) => Promise<void>,
+) => onDeployment({ ...o, scene: o.scene ?? faultScene() }, scene);
 
 /** An answer: its status and JSON body. */
 export interface Answer {
