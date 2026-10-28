@@ -40,8 +40,11 @@ export const app: ClientScene = {
 	defaultScopes: ["read"],
 };
 
-/** The JWT bearer grant on the Redis store, for one client, trusting one issuer. */
-export const faultScene = (): AreaScene =>
+/**
+ * The JWT bearer grant on the Redis store, for one client, trusting one issuer; requests let by
+ * uncounted while the store fails, unless `rateLimitWhileStoreFails` says closed.
+ */
+export const faultScene = (o: { readonly rateLimitWhileStoreFails?: "closed" } = {}): AreaScene =>
 	oauthScene({
 		issuer,
 		keys,
@@ -50,6 +53,7 @@ export const faultScene = (): AreaScene =>
 			issuers: [{ issuer: upstream, alg: "EdDSA", publicPem: pem(trusted.publicKey, "spki") }],
 		},
 		storeFaults: true,
+		...o,
 	});
 
 /** Runs a scene on a deployment of its own, as the base does, on the OAuth area's scene unless it names another. */

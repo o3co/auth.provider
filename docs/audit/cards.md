@@ -360,6 +360,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `dpop-once` (`src/dpop-once`): the fault scenes of a DPoP proof's `jti` spent once (`guarantee-5-e`).
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `jwt-bearer` (`src/jwt-bearer`): the scenes of the jwt-bearer grant.
+  - `requests-unavailable` (`src/requests-unavailable`): the fault scenes of the token endpoint's request limit letting no request by while the store cannot count, its fail mode closed (`guarantee-3-h`).
   - `revocation-unavailable` (`src/revocation-unavailable`): the fault scenes of the revocation endpoint answering done only once a token's revocation is kept (`guarantee-3-g`).
   - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a JWT bearer assertion while the store cannot answer (`guarantee-3-d`).
 - `@mod/conformance-ops` (verification, `modules/tooling/conformance-ops`): Owns the conformance scenes of operations: liveness, readiness, the metrics scrape and its dependency gauge, the log level, their boot refusals, and the security headers on every answer.
