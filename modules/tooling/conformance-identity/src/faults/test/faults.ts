@@ -49,11 +49,13 @@ let sent = 0;
 /** A source of its own, as the proxy forwards it, so no scene's count takes another's. */
 export const nextSource = () => `198.51.100.${++sent}`;
 
-/** A login's answer: its status, its error, the session cookie it set, and when it came. */
+/** A login's answer: its status, its error, the session cookie it set, the wait it asks, and when it came. */
 export interface Answer {
 	readonly status: number;
 	readonly error?: string;
 	readonly session?: string;
+	/** `retry-after`, in seconds, where the answer asks a wait. */
+	readonly retryAfter?: number;
 	readonly at: number;
 }
 
@@ -84,10 +86,12 @@ export async function loginAt(
 		.getSetCookie()
 		.map((c) => c.split(";")[0] ?? "")
 		.find((c) => /^__Host-[^=]*session=/.test(c) && !/csrf/.test(c));
+	const wait = res.headers.get("retry-after");
 	return {
 		status: res.status,
 		...(typeof body.error === "string" ? { error: body.error } : {}),
 		...(session ? { session } : {}),
+		...(wait === null ? {} : { retryAfter: Number(wait) }),
 		at: performance.now(),
 	};
 }
@@ -116,3 +120,14 @@ export const identifierLockout: Match = {
 export const sessionRecord: Match = storeWrite({ prefix, space: "session-store.sessions" });
 /** The write that indexes a session under its cookie, without which no request can reach the session. */
 export const cookieIndexed: Match = storeWrite({ prefix, space: "session-store.cookies" });
+
+const sha256 = (text: string) => createHash("sha256").update(text).digest("base64url");
+/** The writes to an identifier's lockout: its reservations, under the route's name and the identifier's NFKC lowercase form, hashed. */
+export const lockoutOf = (identifier: string): Match =>
+	storeWrite({
+		prefix,
+		space: "rate-limit.lockouts",
+		partition: sha256(
+			`login-password.account\n${sha256(identifier.normalize("NFKC").toLowerCase())}`,
+		),
+	});
