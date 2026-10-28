@@ -164,7 +164,7 @@ it("lets a listed origin's page send its token, its DPoP proof and a body's type
 	);
 });
 
-it("names itself in the issuer's metadata [oidc-discovery-3-h]", async () => {
+it("names itself in the issuer's metadata, an https URL on the public origin [oidc-discovery-3-h] [oidc-core-1.2-a]", async () => {
 	const { app } = await serve();
 	expect(app.get(items)).toContainEqual({
 		name: "userinfo_endpoint",
@@ -172,7 +172,7 @@ it("names itself in the issuer's metadata [oidc-discovery-3-h]", async () => {
 	});
 });
 
-it("names itself on the issuer's origin where no public origin is written [oidc-discovery-3-h]", async () => {
+it("names itself on the issuer's origin where no public origin is written, https as the issuer is [oidc-discovery-3-h] [oidc-core-1.2-a]", async () => {
 	issuerUrl = "https://login.example/tenant";
 	const { app } = await serve(null);
 	expect(app.get(site).origin).toBeUndefined();

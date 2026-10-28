@@ -12,6 +12,7 @@ import {
 	storeRead,
 	storeWrite,
 	successes,
+	writable,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { app, browserOn, callback, on, pkce, prefix } from "../../faults/test/faults.ts";
@@ -184,6 +185,9 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 				a.relay.executions(cookieRead).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
 			expect(successes(a, codeKept).length).toBe(kept);
+			// Woken, Redis answers at once but refuses writes until its replicas' acknowledgements catch up,
+			// which a ready instance does not show: the healed login waits for its writes to be taken.
+			await writable(d);
 			await healed(a);
 		});
 	});
