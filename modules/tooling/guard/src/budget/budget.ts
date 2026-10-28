@@ -95,15 +95,8 @@ export function budgetMeasures(
 	return ["", ...cardDirs].flatMap((unit) => {
 		const where = whereOf(unit);
 		const found: Measure[] = [];
-		const measure = (what: string, value: number, limit?: number) => {
-			// A package's own measure where the budget makes an exception of it, with its reason.
-			const excepted =
-				unit === ""
-					? budget.exceptions?.find((e) => e.package === p.name && e.measure === what)?.limit
-					: undefined;
-			const held = excepted ?? limit;
-			found.push(held === undefined ? { where, what, value } : { where, what, value, limit: held });
-		};
+		const measure = (what: string, value: number, limit?: number) =>
+			found.push(limit === undefined ? { where, what, value } : { where, what, value, limit });
 		const files = p.files.filter((file) => unitOf(file) === unit);
 		let sourceLines = 0;
 		let testLines = 0;
@@ -215,12 +208,9 @@ export function budgetRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surf
 			report("G7 budget", where, "no card");
 			continue;
 		}
-		// Each item held to the unit's limit as measured, an exception's where the budget makes one.
-		const itemLimit =
-			byWhere.get(where)?.find((m) => m.what === "card item bytes")?.limit ?? budget.cardItemBytes;
 		for (const line of cardItems(card)) {
 			const opening = line.replace(/^\s*- /, "").slice(0, 12);
-			over("card item bytes", Buffer.byteLength(line), itemLimit, ` (${opening}…)`);
+			over("card item bytes", Buffer.byteLength(line), budget.cardItemBytes, ` (${opening}…)`);
 		}
 		for (const phrase of planPhrases) {
 			if (card.includes(phrase))
