@@ -390,7 +390,7 @@ describe("token endpoint", () => {
 
 	it("limits requests per source before any client is authenticated, answering 429 rate_limited from the rate-limit policy before the endpoint, bound to no token type, parameter or grant (as its 503 when it cannot count), the codes its grants answer being registered [rfc6749-2.3.1-c] [guarantee-10-a] [rfc6749-8.5-a]", async () => {
 		let handled = 0;
-		const counting = defineModule({ name: "counting", takes: [] }, (m) => [
+		const counting = defineModule({ name: "counting", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
