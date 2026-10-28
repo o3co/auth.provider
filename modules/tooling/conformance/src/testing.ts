@@ -11,6 +11,19 @@ export {
 export type { Traced } from "./deployment/trace.ts";
 export { faultRun, faultRunReporter } from "./fault-run.ts";
 export {
+	type Deployed,
+	type Deploying,
+	deployed,
+	failover,
+	instanceOf,
+	on,
+	ready,
+	reconnected,
+	replicasOnline,
+	repointed,
+	successes,
+} from "./fault-scene/fault-scene.ts";
+export {
 	type Node,
 	redisImage,
 	startTopology,

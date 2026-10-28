@@ -313,6 +313,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
   - `deployment` (`src/deployment`): a fault scene's app as a deployment runs it, on a Redis topology.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
+  - `fault-scene` (`src/fault-scene`): what an area's fault scene does with its deployment, apart from the faults it causes, in no area's words.
   - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
   - `patterns` (`src/patterns`): running every pattern's areas on its app.
   - `promotion` (`src/promotion`): promoting a replica of a Redis topology's primary without losing what the primary took.
