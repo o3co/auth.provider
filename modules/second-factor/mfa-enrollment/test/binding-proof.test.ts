@@ -20,7 +20,7 @@ import {
 /** How the binding proof answers its next send, and whether it can read what it checks; each sent one keeps its own code. */
 const contact = { sent: 0, answer: undefined as Sending | undefined, unreadable: false };
 /** A binding proof asked of every subject: it sends a code and takes that code back. */
-const contactProof = defineModule({ name: "contact-proof", takes: [] }, (m) => [
+const contactProof = defineModule({ name: "contact-proof", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(bindingProofs).by(() => ({
 		name: "contact",
 		available: async () => true,
@@ -36,7 +36,7 @@ const contactProof = defineModule({ name: "contact-proof", takes: [] }, (m) => [
 ]);
 /** A counting kind that refuses to give a secret while `limited`. */
 const told = { limited: false };
-const toldKind = defineModule({ name: "kind-told", takes: [] }, (m) => [
+const toldKind = defineModule({ name: "kind-told", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -48,7 +48,7 @@ const toldKind = defineModule({ name: "kind-told", takes: [] }, (m) => [
 	})),
 ]);
 /** A counting kind declaring two amr values; a proof adds one. */
-const pairKind = defineModule({ name: "kind-pair", takes: [] }, (m) => [
+const pairKind = defineModule({ name: "kind-pair", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "pair",
 		amr: ["hwk", "swk"],
@@ -63,7 +63,7 @@ const pairKind = defineModule({ name: "kind-pair", takes: [] }, (m) => [
 	})),
 ]);
 /** A kind that does not count and adds no `mfa`, as email's is by default: a way back a subject binds. */
-const mailedKind = defineModule({ name: "kind-mailed", takes: [] }, (m) => [
+const mailedKind = defineModule({ name: "kind-mailed", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "mailed",
 		amr: ["email"],
