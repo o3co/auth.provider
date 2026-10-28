@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,14 +13,27 @@ const client = (script: string) => {
 	chmodSync(file, 0o755);
 	vi.stubEnv("PATH", `${dir}:/usr/bin:/bin`);
 };
-/** Whether a process of that id still runs. */
+/** Whether a process of that id still runs: one ended but not yet reaped (a zombie, `Z`) does not. */
 const alive = (pid: number) => {
 	try {
 		process.kill(pid, 0);
-		return true;
+		return !execFileSync("ps", ["-o", "stat=", "-p", String(pid)])
+			.toString()
+			.trim()
+			.startsWith("Z");
 	} catch {
 		return false;
 	}
+};
+/**
+ * Whether the process has ended, seen within 5 s: a SIGKILL sent to its group ends it only once the
+ * kernel next runs it, and the client is not its parent, so no exit tells when.
+ */
+const ended = async (pid: number) => {
+	for (let waited = 0; waited < 5_000 && alive(pid); waited += 20) {
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+	return !alive(pid);
 };
 /** Waits until the client has written `file`: a shell starts slowly on a busy machine. */
 const written = async (file: string) => {
@@ -115,8 +129,7 @@ describe("a docker command", () => {
 		});
 		expect(performance.now() - began).toBeLessThan(4_000);
 		const pid = Number(readFileSync(started, "utf8"));
-		await new Promise((resolve) => setTimeout(resolve, 100));
-		expect(alive(pid)).toBe(false);
+		expect(await ended(pid)).toBe(true);
 	});
 
 	it("stopped where its work's signal ends it, the client and what it started ended", async () => {
@@ -128,8 +141,7 @@ describe("a docker command", () => {
 		await written(started);
 		ending.abort();
 		expect(await running).toMatchObject({ kind: "timeout" });
-		await new Promise((resolve) => setTimeout(resolve, 100));
-		expect(alive(Number(readFileSync(started, "utf8")))).toBe(false);
+		expect(await ended(Number(readFileSync(started, "utf8")))).toBe(true);
 		const already = new AbortController();
 		already.abort();
 		expect(await failure(docker(["info"], 5_000, { signal: already.signal }))).toMatchObject({
