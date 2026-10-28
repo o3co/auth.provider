@@ -28,7 +28,7 @@ import {
 
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
-/** Every store operation, a script; not the handshake each new connection makes. */
+/** Every store operation, a script; not the handshake each new connection makes, nor the confirming connection's rounds (`ROLE`, `INFO`, its `SET`, `WAIT`). */
 const operations: Match = { request: (c) => c.name === "EVAL", succeeded: () => true };
 
 /**
@@ -103,14 +103,12 @@ describe("password login opening no session while the store cannot answer", () =
 			a.relay.stall("down");
 			held.release();
 			const answer = await asked;
-			const resumed = performance.now();
 			a.relay.resume();
 			expect(said(answer)).toEqual(unopened);
 			// Its record reached Redis, which wrote it before the login gave up; the answer was held.
 			expect(
 				a.relay.executions(sessionRecord).some((e) => e.at > stalled && e.at < answer.at),
 			).toBe(true);
-			expect(resumed).toBeGreaterThan(answer.at);
 			await noSessionOpened(a, stalled);
 			await healed(a);
 		});
@@ -163,8 +161,8 @@ describe("password login opening no session while the store cannot answer", () =
 			const a = instanceOf(d);
 			await control(a);
 			const { held, asked } = await heldAtSession(a);
-			// The scene's value: the record is resent for about 25 s before the login gives up, so
-			// Redis sleeps past that, or a resend after it woke would open the session.
+			// The scene's value: the record is resent for about 25 s before the login gives up, so Redis
+			// sleeps past the login's answer, and the answer is the slowness's, not a late write's refusal.
 			const { asleep, awake } = d.topology.sleep(d.topology.primary(), 40);
 			// When Redis woke, taken as it wakes, apart from the login's answer.
 			const woke = awake.then(() => performance.now());
@@ -275,13 +273,13 @@ describe("password login opening no session while the store cannot answer", () =
 			expect(sent.every((e) => sameMark(held.command, e.command))).toBe(true);
 			if (answer.session) {
 				expect(said(answer)).toEqual([200, undefined, true]);
-				const kept = [...sent, ...a.relay.executions(cookieIndexed).filter((e) => e.at > from)];
-				expect(kept.filter((e) => e.succeeded).length).toBeGreaterThan(1);
-				expect(
-					kept
-						.filter((e) => e.succeeded)
-						.every((e) => e.at > restarted && runIdOf(e.reply) === runId),
-				).toBe(true);
+				// Its record and its index each kept, every one after the restart, on the server started again.
+				const indexed = a.relay.executions(cookieIndexed).filter((e) => e.at > from);
+				for (const writes of [sent, indexed]) {
+					const kept = writes.filter((e) => e.succeeded);
+					expect(kept.length).toBeGreaterThan(0);
+					expect(kept.every((e) => e.at > restarted && runIdOf(e.reply) === runId)).toBe(true);
+				}
 				await annotate("opened a session kept on Redis started again");
 			} else {
 				expect(said(answer)).toEqual(unopened);
