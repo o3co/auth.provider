@@ -10,13 +10,31 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import { type Assertion, assertion, grantAt, on, said, spendOf } from "../../faults/test/faults.ts";
+import {
+	type Answer,
+	type Assertion,
+	assertion,
+	grantAt,
+	on,
+	said,
+	spendOf,
+} from "../../faults/test/faults.ts";
 
 // The store's spent assertions, as jwt-bearer-store keeps them. An issuer whose jti a ledger
 // (jti-ledger-http) spends instead holds the assertion once by that ledger, which no scene here checks.
 
-const refused = [400, "invalid_grant"];
 const issued = [200, "Bearer"];
+
+/**
+ * Refused as replayed: an expired assertion is refused `invalid_grant` too, before its spend, so the
+ * description tells the replay's refusal from the age's.
+ */
+const replayed = (answer: Answer) =>
+	expect([answer.status, answer.body.error, answer.body.error_description]).toEqual([
+		400,
+		"invalid_grant",
+		"assertion replayed",
+	]);
 
 /**
  * The control: with no fault, an assertion's jti is spent by one write that succeeds, and the
@@ -28,13 +46,19 @@ async function control(i: Instance) {
 	expect(said(await grantAt(i, a))).toEqual(issued);
 	await seen;
 	expect(successes(i, spendOf(a))).toHaveLength(1);
-	expect(said(await grantAt(i, a))).toEqual(refused);
+	replayed(await grantAt(i, a));
 	expect(successes(i, spendOf(a))).toHaveLength(1);
 }
 
-/** After the fault: the assertion is refused as spent, and a new one is taken. */
+/**
+ * After the fault: the assertion is refused as replayed by its spend, which is sent and finds it spent
+ * (an expired one is refused before any spend), and a new one is taken.
+ */
 async function refusedAsSpent(i: Instance, a: Assertion) {
-	expect(said(await grantAt(i, a))).toEqual(refused);
+	const [sent, took] = [i.relay.executions(spendOf(a)).length, successes(i, spendOf(a))];
+	replayed(await grantAt(i, a));
+	expect(i.relay.executions(spendOf(a)).length).toBeGreaterThan(sent);
+	expect(successes(i, spendOf(a))).toEqual(took);
 	expect(said(await grantAt(i, assertion()))).toEqual(issued);
 }
 
@@ -146,7 +170,7 @@ describe("a JWT bearer assertion's jti spent once under faults", () => {
 			first.release();
 			expect(said(await atA)).toEqual(issued);
 			second.release();
-			expect(said(await atB)).toEqual(refused);
+			replayed(await atB);
 			expect(successes(a, spendOf(sent)).length + successes(b, spendOf(sent)).length).toBe(1);
 			await refusedAsSpent(b, sent);
 		});
@@ -160,11 +184,11 @@ describe("a JWT bearer assertion's jti spent once under faults", () => {
 			const holds = [a.relay.hold(spendOf(sent)), b.relay.hold(spendOf(sent))];
 			const answers = Promise.all([grantAt(a, sent), grantAt(b, sent)]);
 			for (const held of await Promise.all(holds)) held.release();
-			const both = (await answers).map(said);
-			expect(both.filter((s) => s[0] === 200).length).toBeLessThanOrEqual(1);
+			const both = await answers;
+			expect(both.filter((x) => x.status === 200).length).toBeLessThanOrEqual(1);
 			// One spend takes effect; the other finds it spent and is refused as a replay.
 			expect(successes(a, spendOf(sent)).length + successes(b, spendOf(sent)).length).toBe(1);
-			expect(both.filter((s) => s[0] !== 200).every((s) => s[1] === "invalid_grant")).toBe(true);
+			for (const refused of both.filter((x) => x.status !== 200)) replayed(refused);
 			await refusedAsSpent(b, sent);
 		});
 	});

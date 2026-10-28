@@ -38,9 +38,19 @@ async function control(i: Instance) {
 	expect(successes(i, clientSpendOf(a))).toHaveLength(1);
 }
 
-/** After the fault: the assertion is refused as spent, and a new one authenticates. */
+/**
+ * After the fault: the assertion is refused as spent, and a new one authenticates. An expired assertion
+ * is refused `invalid_client` too, naming no reason, before any spend; so the refusal is told by its
+ * spend, which is sent and finds it spent.
+ */
 async function refusedAsSpent(i: Instance, a: Assertion) {
+	const [sent, took] = [
+		i.relay.executions(clientSpendOf(a)).length,
+		successes(i, clientSpendOf(a)),
+	];
 	expect(said(await authenticatedAt(i, a))).toEqual(refused);
+	expect(i.relay.executions(clientSpendOf(a)).length).toBeGreaterThan(sent);
+	expect(successes(i, clientSpendOf(a))).toEqual(took);
 	expect(said(await authenticatedAt(i, clientAssertion()))).toEqual(issued);
 }
 
