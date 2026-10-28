@@ -321,7 +321,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
   - `acr` (`src/acr`): the scenes of the acr a client asks for.
   - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
+  - `code-once` (`src/code-once`): the fault scenes of an authorization code redeemed once (`guarantee-5-a`).
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
+  - `faults` (`src/faults`): what the area's fault scenes share, its scene deployed on a Redis topology and the store writes a fault is about.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.

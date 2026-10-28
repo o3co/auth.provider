@@ -1,5 +1,6 @@
 /** Tools for the area modules' scenes. */
 
+export { hostLibfaketime } from "./clock/clock.ts";
 export {
 	type Deployment,
 	type DeploymentRecord,

@@ -15,7 +15,10 @@ it("is registered by every vitest config of the workspace, so no run's tests go 
 	expect(configs).toContain("vitest.config.ts");
 	const unregistered = configs.filter(
 		(f) =>
-			!/reporters: \["default", evidenceReporter\(\)\]/.test(readFileSync(join(root, f), "utf8")),
+			// Further reporters may follow it, such as a fault run's.
+			!/reporters: \["default", evidenceReporter\(\)(\]|, )/.test(
+				readFileSync(join(root, f), "utf8"),
+			),
 	);
 	expect(unregistered).toEqual([]);
 });
