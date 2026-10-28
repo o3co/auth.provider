@@ -854,18 +854,17 @@ describe("refresh tokens", () => {
 
 	it("are kept only as a hash of their secret, never the token or the secret itself [rfc6749-10.4-a]", async () => {
 		const s = await serve();
+		/** The family's record as kept now holds the hash of this token's secret, and neither the token nor the secret. */
+		const keptAsHash = (token: string | undefined) => {
+			const [family = "", secret = ""] = (token ?? "").split(".");
+			const kept = s.stores.kept.peek(family) as { current?: string } | undefined;
+			expect(kept?.current).toBe(createHash("sha256").update(secret).digest("base64url"));
+			expect(JSON.stringify(kept)).not.toContain(secret);
+		};
 		const first = await s.redeem();
+		keptAsHash(first.refresh_token);
 		const second = await s.refresh(first.refresh_token);
-		for (const token of [first.refresh_token ?? "", second.body.refresh_token ?? ""]) {
-			const kept = JSON.stringify(s.stores.kept.peek(familyNameOf(token)));
-			const secret = token.split(".")[1] ?? "";
-			expect(kept).not.toContain(secret);
-			expect(kept).not.toContain(token);
-		}
-		const current = (s.stores.kept.peek(familyNameOf(first.refresh_token)) as { current?: string })
-			?.current;
-		const secret = second.body.refresh_token?.split(".")[1] ?? "";
-		expect(current).toBe(createHash("sha256").update(secret).digest("base64url"));
+		keptAsHash(second.body.refresh_token);
 	});
 
 	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
