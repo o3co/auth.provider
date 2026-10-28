@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Owns the conformance scenes of the device area: device authorization, the verification interface and polling (RFC 8628), refusing an approval by a user whose email is not verified, and the audit events of the verification interface.
-- Owns the fault scenes of the device area, on a Redis topology and a deployment of their own, each after a control with no fault: a device code decided and redeemed once (internal module `device-code-once`), a subject's revocation boundary refusing a device approved before it (`revocation-boundary`), with what they share (`faults`).
+- Owns the fault scenes of the device area, on a Redis topology and a deployment of their own, each after a control with no fault: a device code decided and redeemed once (internal module `device-code-once`), a subject's revocation boundary refusing a device approved before it (`revocation-boundary`), no token for a device code while the store cannot answer (`token-unavailable`), with what they share (`faults`).
 - Sets up the device area's part (the verification page, the attempt limit) on each of the legacy and new targets; a device scene may also name subjects the ledger revokes, as the identity area sets them up.
 
 ## Not here

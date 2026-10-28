@@ -1,7 +1,9 @@
 import type { AreaScene } from "../areas.ts";
+import { ask } from "../ask/ask.ts";
 import { type Instance, startDeployment } from "../deployment/deployment.ts";
 import { startTopology, type Topology } from "../faults/topology.ts";
 import type { Match, Upstream } from "../relay/relay.ts";
+import type { Reply } from "../relay/resp.ts";
 
 /** What every node of a topology with replicas starts with: a write needs one replica, lagging no more than 2 s. */
 const replicated = ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "2"];
@@ -91,13 +93,49 @@ export const instanceOf = (d: Deployed, index = 0): Instance => {
 export const successes = (i: Instance, match: Match) =>
 	i.relay.executions(match).filter((e) => e.succeeded);
 
-/** Until the instance's relay holds an open connection to `upstream`, within 10 s. */
+/**
+ * Until the instance's relay holds an open connection to `upstream` and has answered a call on it, its
+ * client's check (a request before it sends nothing), within 10 s; then until that Redis takes writes
+ * (one just promoted refuses them as NOREPLICAS), within 30 s. Past either bound it fails naming why.
+ */
 export async function reconnected(i: Instance, upstream: Upstream) {
 	const end = performance.now() + 10_000;
 	const to = (c: { upstream: Upstream }) =>
 		c.upstream.host === upstream.host && c.upstream.port === upstream.port;
-	while (!i.relay.connections().some((c) => c.open && to(c))) {
+	const opened = () => i.relay.connections().filter((c) => c.open && to(c));
+	while (opened().length === 0) {
 		if (performance.now() > end) throw new Error(`instance ${i.index} did not connect again`);
+		await pause(100);
+	}
+	const checked = () => {
+		const ids = new Set(opened().map((c) => c.id));
+		return i.relay
+			.executions({ request: () => true, succeeded: () => true })
+			.some((e) => ids.has(e.connection));
+	};
+	while (!checked()) {
+		if (performance.now() > end) {
+			throw new Error(`instance ${i.index} sent nothing answered on its new connection`);
+		}
+		await pause(50);
+	}
+	const named = `the Redis at ${upstream.host}:${upstream.port}`;
+	const writableBy = performance.now() + 30_000;
+	const asking = (...args: string[]) =>
+		ask(upstream, args, Math.max(1, Math.ceil(writableBy - performance.now()))).catch(
+			(cause: unknown) => {
+				throw new Error(`${named} did not answer ${args.join(" ")} within 30 s`, { cause });
+			},
+		);
+	const toWrite = await minReplicasToWrite(asking, named);
+	for (;;) {
+		const { good } = await replication(asking);
+		if (good >= toWrite) return;
+		if (performance.now() > writableBy) {
+			throw new Error(
+				`${named} did not take writes within 30 s: min_slaves_good_slaves ${good} of the ${toWrite} min-replicas-to-write asks`,
+			);
+		}
 		await pause(100);
 	}
 }
@@ -141,6 +179,26 @@ export async function replicasOnline(d: Deployed): Promise<void> {
 	}
 }
 
+/** A node's `min-replicas-to-write`, or a failure naming it where the node does not answer it. */
+async function minReplicasToWrite(asking: (...args: string[]) => Promise<Reply>, node: string) {
+	const asked = await asking("CONFIG", "GET", "min-replicas-to-write");
+	const value = asked.kind === "array" ? asked.items?.[1] : undefined;
+	if (value?.kind !== "bulk") {
+		throw new Error(`${node} did not answer min-replicas-to-write: ${JSON.stringify(asked)}`);
+	}
+	return Number(value.data?.toString() ?? "");
+}
+
+/** A node's replicas online and its good ones, as `INFO replication` counts them. */
+async function replication(asking: (...args: string[]) => Promise<Reply>) {
+	const info = await asking("INFO", "replication");
+	const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
+	return {
+		online: text.split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length,
+		good: Number(/min_slaves_good_slaves:(\d+)/.exec(text)?.[1] ?? 0),
+	};
+}
+
 /**
  * Until the topology has recovered from a fault, within 30 s: the primary has every replica the
  * topology names online, and as many good replicas as its `min-replicas-to-write` asks, so it takes
@@ -151,18 +209,11 @@ export async function replicasOnline(d: Deployed): Promise<void> {
 export async function recovered(d: Deployed): Promise<void> {
 	const end = performance.now() + 30_000;
 	const primary = d.topology.primary();
-	const asked = await primary.ask("CONFIG", "GET", "min-replicas-to-write");
-	const value = asked.kind === "array" ? asked.items?.[1] : undefined;
-	if (value?.kind !== "bulk") {
-		throw new Error(`the primary did not answer min-replicas-to-write: ${JSON.stringify(asked)}`);
-	}
-	const toWrite = Number(value.data?.toString() ?? "");
+	const asking = (...args: string[]) => primary.ask(...args);
+	const toWrite = await minReplicasToWrite(asking, "the primary");
 	const named = d.topology.replicas().length;
 	for (;;) {
-		const info = await primary.ask("INFO", "replication");
-		const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
-		const online = text.split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length;
-		const good = Number(/min_slaves_good_slaves:(\d+)/.exec(text)?.[1] ?? 0);
+		const { online, good } = await replication(asking);
 		if (online >= named && good >= toWrite) return;
 		if (performance.now() > end) {
 			throw new Error(

@@ -23,6 +23,7 @@ export interface LedgerUser {
 	readonly subject?: string;
 	readonly email?: string;
 	readonly emailVerified?: boolean;
+	readonly name?: string;
 	/** The upstream identity the ledger links to this user. */
 	readonly upstream?: { readonly idp: string; readonly subject: string };
 }
@@ -65,6 +66,7 @@ export function usersLedger(
 		username: user.identifier,
 		...(user.email === undefined ? {} : { email: user.email }),
 		...(user.emailVerified === undefined ? {} : { emailVerified: user.emailVerified }),
+		...(user.name === undefined ? {} : { name: user.name }),
 	});
 	return {
 		credential,
