@@ -567,7 +567,7 @@ describe("mfa-witness-http", () => {
 
 	it("says why its credential may not go in outbound-policy's words, for the scheme and for its URLs' one origin", async () => {
 		const refusedFor = async (refusal: "origins" | "scheme") => {
-			const standIn = defineModule({ name: "outbound", replicaSafe: true, takes: [] }, (m) => [
+			const standIn = defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(outbound).by(() => ({
 					fetch: async () => {
 						throw new Error("never sent");
