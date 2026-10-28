@@ -133,27 +133,6 @@ export async function replicasOnline(d: Deployed): Promise<void> {
 }
 
 /**
- * Until the primary takes writes again, within 30 s: as many good replicas as its
- * `min-replicas-to-write` asks, as `INFO replication` counts them. A primary that slept or was held
- * answers at once, before its replicas' acknowledgements catch up, and refuses writes as
- * `NOREPLICAS` meanwhile, which an instance's readiness does not show.
- */
-export async function writable(d: Deployed): Promise<void> {
-	const end = performance.now() + 30_000;
-	const asked = await d.topology.primary().ask("CONFIG", "GET", "min-replicas-to-write");
-	const value = asked.kind === "array" ? asked.items?.[1] : undefined;
-	const want = value?.kind === "bulk" ? Number(value.data?.toString() ?? 0) : 0;
-	for (;;) {
-		const info = await d.topology.primary().ask("INFO", "replication");
-		const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
-		const good = Number(/min_slaves_good_slaves:(\d+)/.exec(text)?.[1] ?? 0);
-		if (good >= want) return;
-		if (performance.now() > end) throw new Error(`${good} of ${want} good replicas to write`);
-		await pause(100);
-	}
-}
-
-/**
  * Until the topology has recovered from a fault, within 30 s: the primary has every replica the
  * topology names online, and as many good replicas as its `min-replicas-to-write` asks, so it takes
  * writes again, which an instance's readiness does not show. A scene calls it in its recovery alone,

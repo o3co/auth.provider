@@ -7,7 +7,7 @@ Internal module of `conformance`: what an area's fault scene does with its deplo
 - Waits for an instance to be ready again, or connected again to a server, and for the primary's replicas to be online again; points every relay at the primary after a promotion or a crash, and promotes a replica that has caught up.
 
 ## Offers
-- `deployed` and `on` (a scene on a deployment of its own), `instanceOf`, `successes` (a match's successful executions on an instance's relay), `reconnected`, `ready`, `replicasOnline`, `writable` (until the primary has the good replicas its `min-replicas-to-write` asks, which a ready instance does not show), `recovered` (a scene's recovery from a fault), `repointed`, `failover`; the types `Deployed` and `Deploying`.
+- `deployed` and `on` (a scene on a deployment of its own), `instanceOf`, `successes` (a match's successful executions on an instance's relay), `reconnected`, `ready`, `replicasOnline`, `recovered` (a scene's recovery from a fault), `repointed`, `failover`; the types `Deployed` and `Deploying`.
 
 ## Invariants
 - `recovered` waits, within 30 s, for every replica the topology names online and the good replicas the primary's `min-replicas-to-write` asks, which an instance's readiness does not show; past it, it fails naming what it waited on. A scene calls it in its recovery alone, never while it holds the primary unwritable on purpose.
