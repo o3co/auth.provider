@@ -75,7 +75,7 @@ export const usedIn = (used: UsedIdTokens) =>
 		m.provide(usedIdTokens).by(() => used),
 	]);
 export const usedStandIn = defineModule(
-	{ name: "used-id-tokens", replicaSafe: true, takes: [] },
+	{ name: "used-id-tokens", replicaSafe: false, takes: [] },
 	(m) => [m.provide(usedIdTokens).by(() => memoryUsedIdTokens().used)],
 );
 
