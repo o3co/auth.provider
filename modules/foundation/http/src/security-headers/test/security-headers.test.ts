@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 async function serveWith(list: readonly Route[]) {
-	const handlers = defineModule({ name: "handlers", takes: [] }, (m) =>
+	const handlers = defineModule({ name: "handlers", replicaSafe: true, takes: [] }, (m) =>
 		list.map((route) => m.contribute(routes).by(() => declared(route))),
 	);
 	const app = await assemble({
