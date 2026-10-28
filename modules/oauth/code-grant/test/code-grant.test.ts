@@ -471,7 +471,7 @@ it("redeems a code once, and a code that comes again revokes what it gave [rfc67
 	expect(await revoked(s, String(first.body.access_token))).toBe(true);
 });
 
-it("keeps neither the code nor the token it gave in the code's record, the token noted by its reference and end alone [rfc6749-10.3-a]", async () => {
+it("keeps neither the code nor the token it gave in code-grant's own record of the code, the token noted by its reference and end alone [rfc6749-10.3-a]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const redeemed = await s.redeem(code);
