@@ -112,6 +112,8 @@ export function idTokenReaderOf(
 		const read = idTokenClaims.safeParse(checked.claims);
 		if (!read.success) throw new UpstreamRefused();
 		const { sub, aud, azp, auth_time, nonce: carried } = read.data;
+		// Every audience is the client: it trusts no other (OpenID Connect Core §3.1.3.7).
+		if (Array.isArray(aud) && aud.some((one) => one !== client)) throw new UpstreamRefused();
 		// Several audiences: the client must be the authorized party.
 		if (Array.isArray(aud) && aud.length !== 1 && azp !== client) throw new UpstreamRefused();
 		// A given authorized party is the client too, unless the type takes cross-client identity.
