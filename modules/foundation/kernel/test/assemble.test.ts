@@ -44,7 +44,7 @@ describe("assemble", () => {
 			});
 			const refusals = await refusalsOf(
 				assemble({
-					modules: [defineModule({ name: "m", section, takes: [] })],
+					modules: [defineModule({ name: "m", replicaSafe: true, section, takes: [] })],
 					config: { ...single, m: { n: 1 } },
 				}),
 			);
@@ -88,6 +88,7 @@ describe("assemble", () => {
 	it("refuses a key that names an object's prototype in a section, by the section's path", async () => {
 		const m = defineModule({
 			name: "m",
+			replicaSafe: true,
 			section: z.strictObject({ limits: z.record(z.string(), z.number()) }),
 			takes: [],
 		});
@@ -104,11 +105,13 @@ describe("assemble", () => {
 	it("reports every section issue by path, never the value: a needed key not set as required, any other in the schema's words [guarantee-8-a]", async () => {
 		const m = defineModule({
 			name: "m",
+			replicaSafe: true,
 			section: z.strictObject({ secret: z.string().min(32), n: z.number(), e: z.enum(["a"]) }),
 			takes: [],
 		});
 		const refined = defineModule({
 			name: "r",
+			replicaSafe: true,
 			section: z.strictObject({ w: z.string({ error: "kept" }) }),
 			takes: [],
 		});
@@ -127,6 +130,7 @@ describe("assemble", () => {
 	it("takes a field set to undefined as absent, and refuses values configuration cannot hold", async () => {
 		const m = defineModule({
 			name: "m",
+			replicaSafe: true,
 			section: z.strictObject({ n: z.number(), note: z.string().optional() }),
 			takes: [],
 		});
@@ -141,7 +145,12 @@ describe("assemble", () => {
 	});
 
 	it("refuses a value configuration cannot hold by its key path, inside lists too [guarantee-8-a]", async () => {
-		const m = defineModule({ name: "m", section: z.strictObject({ a: z.unknown() }), takes: [] });
+		const m = defineModule({
+			name: "m",
+			replicaSafe: true,
+			section: z.strictObject({ a: z.unknown() }),
+			takes: [],
+		});
 		const deep = { a: { list: [1, { at: new Date(0) }], n: Number.POSITIVE_INFINITY } };
 		const refusals = await refusalsOf(assemble({ modules: [m], config: { ...single, m: deep } }));
 		expect(refusals.map((r) => r.where)).toEqual(["m.a.list.1.at"]);
@@ -156,13 +165,20 @@ describe("assemble", () => {
 			"~standard": { version: 1, vendor: "other", validate: (value: unknown) => ({ value }) },
 		} as const;
 		// @ts-expect-error a schema of another library is not read
-		expect(defineModule({ name: "m", section: other, takes: [] }).section).toBe(other);
+		expect(defineModule({ name: "m", replicaSafe: true, section: other, takes: [] }).section).toBe(
+			other,
+		);
 	});
 
 	it("hands each module its own frozen section", async () => {
 		const seen = contract<{ list: string[] }>("seen");
 		const m = defineModule(
-			{ name: "m", section: z.strictObject({ list: z.array(z.string()) }), takes: [] },
+			{
+				name: "m",
+				replicaSafe: true,
+				section: z.strictObject({ list: z.array(z.string()) }),
+				takes: [],
+			},
 			(m) => [m.provide(seen).by((c) => c.section)],
 		);
 		const app = await assemble({ modules: [m], config: { ...single, m: { list: ["a"] } } });
@@ -173,10 +189,10 @@ describe("assemble", () => {
 		type Point = { name: string; held: { state: number } };
 		const seen = contract<readonly Point[]>("seen");
 		const points = extensionPoint<Point>("points", { multiplicity: "many" });
-		const owner = defineModule({ name: "owner", takes: [points] }, (m) => [
+		const owner = defineModule({ name: "owner", replicaSafe: false, takes: [points] }, (m) => [
 			m.provide(seen).by((c) => c.collect(points)),
 		]);
-		const a = defineModule({ name: "a", takes: [] }, (m) => [
+		const a = defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(points).by(() => ({ name: "a", held: { state: 0 } })),
 		]);
 		const app = await assemble({ modules: [owner, a], config: single });
@@ -188,11 +204,15 @@ describe("assemble", () => {
 	it("resolves contracts across modules and collects contributions", async () => {
 		const greeting = contract<string>("greeting");
 		const names = extensionPoint<string>("names", { multiplicity: "many" });
-		const owner = defineModule({ name: "owner", takes: [names] }, (m) => [
+		const owner = defineModule({ name: "owner", replicaSafe: false, takes: [names] }, (m) => [
 			m.provide(greeting).by(async (c) => `hello ${(await c.collect(names)).join(",")}`),
 		]);
-		const a = defineModule({ name: "a", takes: [] }, (m) => [m.contribute(names).by(() => "a")]);
-		const b = defineModule({ name: "b", takes: [] }, (m) => [m.contribute(names).by(() => "b")]);
+		const a = defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(names).by(() => "a"),
+		]);
+		const b = defineModule({ name: "b", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(names).by(() => "b"),
+		]);
 		const app = await assemble({ modules: [owner, a, b], config: single });
 		expect(app.get(greeting)).toBe("hello a,b");
 	});
@@ -204,8 +224,12 @@ describe("assemble", () => {
 		const dup = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [] }, (m) => [m.provide(x).by(() => 1)]),
-					defineModule({ name: "b", takes: [] }, (m) => [m.provide(x).by(() => 2)]),
+					defineModule({ name: "a", replicaSafe: true, takes: [] }, (m) => [
+						m.provide(x).by(() => 1),
+					]),
+					defineModule({ name: "b", replicaSafe: true, takes: [] }, (m) => [
+						m.provide(x).by(() => 2),
+					]),
 				],
 				config: single,
 			}),
@@ -217,7 +241,9 @@ describe("assemble", () => {
 		const missing = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [y] }, (m) => [m.provide(x).by((c) => c.get(y))]),
+					defineModule({ name: "a", replicaSafe: true, takes: [y] }, (m) => [
+						m.provide(x).by((c) => c.get(y)),
+					]),
 				],
 				config: single,
 			}),
@@ -229,8 +255,12 @@ describe("assemble", () => {
 		const cycle = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [y] }, (m) => [m.provide(x).by((c) => c.get(y))]),
-					defineModule({ name: "b", takes: [x] }, (m) => [m.provide(y).by((c) => c.get(x))]),
+					defineModule({ name: "a", replicaSafe: true, takes: [y] }, (m) => [
+						m.provide(x).by((c) => c.get(y)),
+					]),
+					defineModule({ name: "b", replicaSafe: true, takes: [x] }, (m) => [
+						m.provide(y).by((c) => c.get(x)),
+					]),
 				],
 				config: single,
 			}),
@@ -245,17 +275,17 @@ describe("assemble", () => {
 		const cycle = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "top", takes: [b, c] }, (m) => [
+					defineModule({ name: "top", replicaSafe: true, takes: [b, c] }, (m) => [
 						m.provide(top).by(async (ctx) => (await Promise.all([ctx.get(b), ctx.get(c)]))[0]),
 					]),
 					// Each asks after a pause, so the two branches start before either asks the other.
-					defineModule({ name: "b", takes: [c] }, (m) => [
+					defineModule({ name: "b", replicaSafe: true, takes: [c] }, (m) => [
 						m.provide(b).by(async (ctx) => {
 							await Promise.resolve();
 							return ctx.get(c);
 						}),
 					]),
-					defineModule({ name: "c", takes: [b] }, (m) => [
+					defineModule({ name: "c", replicaSafe: true, takes: [b] }, (m) => [
 						m.provide(c).by(async (ctx) => {
 							await Promise.resolve();
 							return ctx.get(b);
@@ -276,10 +306,10 @@ describe("assemble", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [] }, (m) => [
+					defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
 						m.contribute(routes).by(() => ({ path: "/p" })),
 					]),
-					defineModule({ name: "b", takes: [] }, (m) => [
+					defineModule({ name: "b", replicaSafe: false, takes: [] }, (m) => [
 						m.contribute(routes).by(() => ({ path: "/p" })),
 					]),
 				],
@@ -299,7 +329,7 @@ describe("assemble", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [] }, (m) => [
+					defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
 						m.contribute(routes).by(() => ({ path: "/p" })),
 					]),
 				],
@@ -318,13 +348,13 @@ describe("assemble", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [] }, (m) => [
+					defineModule({ name: "a", replicaSafe: true, takes: [] }, (m) => [
 						m.provide(opened).by(() => open("a.cookies")),
 					]),
-					defineModule({ name: "b", takes: [opened] }, (m) => [
+					defineModule({ name: "b", replicaSafe: true, takes: [opened] }, (m) => [
 						m.provide(contract<string>("built-on")).by((c) => c.get(opened)),
 					]),
-					defineModule({ name: "c", takes: [] }, (m) => [
+					defineModule({ name: "c", replicaSafe: true, takes: [] }, (m) => [
 						m.provide(contract<string>("secretive")).by(() => {
 							throw new Error("token=abc");
 						}),
@@ -368,7 +398,7 @@ describe("assemble", () => {
 			const refusals = await refusalsOf(
 				assemble({
 					modules: [
-						defineModule({ name: `odd${i}`, takes: [] }, (m) => [
+						defineModule({ name: `odd${i}`, replicaSafe: true, takes: [] }, (m) => [
 							m.provide(contract<string>(`odd${i}`)).by(() => {
 								throw value;
 							}),
@@ -386,7 +416,7 @@ describe("assemble", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [] }, (m) => [
+					defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
 						m.contribute(steps).by(() => {
 							throw new Error("broken");
 						}),
@@ -404,9 +434,11 @@ describe("assemble", () => {
 			keyOf: (r) => r.path,
 		});
 		const route = (name: string, path: string) =>
-			defineModule({ name, takes: [] }, (m) => [m.contribute(routes).by(() => ({ path }))]);
+			defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
+				m.contribute(routes).by(() => ({ path })),
+			]);
 		const collecting = (name: string) =>
-			defineModule({ name, takes: [routes] }, (m) => [
+			defineModule({ name, replicaSafe: false, takes: [routes] }, (m) => [
 				m.provide(contract<number>(name)).by(async (c) => (await c.collect(routes)).length),
 			]);
 		const refusals = await refusalsOf(
@@ -432,7 +464,7 @@ describe("assemble", () => {
 	it("refuses an extension point that needs at least one contribution when it has none, naming it", async () => {
 		const steps = extensionPoint<string>("proof steps", { multiplicity: "some" });
 		const counted = contract<number>("counted");
-		const owner = defineModule({ name: "owner", takes: [steps] }, (m) => [
+		const owner = defineModule({ name: "owner", replicaSafe: false, takes: [steps] }, (m) => [
 			m.provide(counted).by(async (c) => (await c.collect(steps)).length),
 		]);
 		const refusals = await refusalsOf(assemble({ modules: [owner], config: single }));
@@ -442,8 +474,12 @@ describe("assemble", () => {
 		const app = await assemble({
 			modules: [
 				owner,
-				defineModule({ name: "a", takes: [] }, (m) => [m.contribute(steps).by(() => "a")]),
-				defineModule({ name: "b", takes: [] }, (m) => [m.contribute(steps).by(() => "b")]),
+				defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
+					m.contribute(steps).by(() => "a"),
+				]),
+				defineModule({ name: "b", replicaSafe: false, takes: [] }, (m) => [
+					m.contribute(steps).by(() => "b"),
+				]),
 			],
 			config: single,
 		});
@@ -454,10 +490,10 @@ describe("assemble", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [] }, (m) => [
+					defineModule({ name: "a", replicaSafe: true, takes: [] }, (m) => [
 						m.provide(contract("p")).by((c) => c.refuse("a.k", "bad")),
 					]),
-					defineModule({ name: "b", takes: [] }, (m) => [
+					defineModule({ name: "b", replicaSafe: true, takes: [] }, (m) => [
 						m.provide(contract("q")).by((c) => c.refuse("b.k", "bad")),
 					]),
 				],
@@ -471,7 +507,7 @@ describe("assemble", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [] }, (m) => [
+					defineModule({ name: "a", replicaSafe: true, takes: [] }, (m) => [
 						m.provide(contract("p")).by((c) =>
 							c.refuseAll([
 								{ where: "a.x", reason: "bad" },
@@ -490,7 +526,7 @@ describe("assemble", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [] }, (m) => [
+					defineModule({ name: "a", replicaSafe: true, takes: [] }, (m) => [
 						m.provide(contract("p")).by(() => {
 							throw new Error("token=abc");
 						}),
@@ -502,48 +538,6 @@ describe("assemble", () => {
 		expect(JSON.stringify(refusals)).not.toContain("abc");
 	});
 
-	it("refuses replica-unsafe modules only when deployed on multiple replicas", async () => {
-		const unsafe = defineModule({ name: "mem", replicaSafe: false, takes: [] });
-		await expect(assemble({ modules: [unsafe], config: single })).resolves.toBeDefined();
-		const refusals = await refusalsOf(
-			assemble({ modules: [unsafe], config: kernelConfig({ deployment: "multi" }) }),
-		);
-		expect(refusals.map((r) => r.where)).toEqual(["mem"]);
-	});
-
-	it("asks a module whether it is replica-safe only with a section that passed", async () => {
-		const asked: unknown[] = [];
-		const m = defineModule({
-			name: "m",
-			section: z.strictObject({ shared: z.boolean() }),
-			replicaSafe: (section) => {
-				asked.push(section);
-				return section.shared;
-			},
-			takes: [],
-		});
-		const multi = kernelConfig({ deployment: "multi" });
-		const bad = await refusalsOf(
-			assemble({ modules: [m], config: { ...multi, m: { shared: 1 } } }),
-		);
-		expect([bad.map((r) => r.where), asked]).toEqual([["m.shared"], []]);
-		const unsafe = await refusalsOf(
-			assemble({ modules: [m], config: { ...multi, m: { shared: false } } }),
-		);
-		expect([unsafe.map((r) => r.where), asked]).toEqual([["m"], [{ shared: false }]]);
-	});
-
-	it("tells each factory the deployment's environment, production unless set", async () => {
-		const told = contract<string>("told");
-		const telling = defineModule({ name: "telling", takes: [] }, (m) => [
-			m.provide(told).by((c) => c.environment),
-		]);
-		const asTold = async (config: object) =>
-			(await assemble({ modules: [telling], config })).get(told);
-		expect(await asTold(single)).toBe("production");
-		expect(await asTold(kernelConfig({ environment: "development" }))).toBe("development");
-	});
-
 	it("refuses a kernel section without a deployment, which has no default", async () => {
 		const refusals = await refusalsOf(assemble({ modules: [], config: { kernel: {} } }));
 		expect(refusals.map((r) => r.where)).toEqual(["kernel.deployment"]);
@@ -553,8 +547,12 @@ describe("assemble", () => {
 		const [one, other] = [contract<string>("same"), contract<string>("same")];
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "a", takes: [] }, (m) => [m.provide(one).by(() => "a")]),
-				defineModule({ name: "b", takes: [] }, (m) => [m.provide(other).by(() => "b")]),
+				defineModule({ name: "a", replicaSafe: true, takes: [] }, (m) => [
+					m.provide(one).by(() => "a"),
+				]),
+				defineModule({ name: "b", replicaSafe: false, takes: [] }, (m) => [
+					m.provide(other).by(() => "b"),
+				]),
 			],
 			config: single,
 		});
@@ -567,11 +565,15 @@ describe("assemble", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "owner", takes: [only] }, (m) => [
+					defineModule({ name: "owner", replicaSafe: false, takes: [only] }, (m) => [
 						m.provide(used).by(async (c) => (await c.collect(only))[0] ?? ""),
 					]),
-					defineModule({ name: "a", takes: [] }, (m) => [m.contribute(only).by(() => "a")]),
-					defineModule({ name: "b", takes: [] }, (m) => [m.contribute(only).by(() => "b")]),
+					defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
+						m.contribute(only).by(() => "a"),
+					]),
+					defineModule({ name: "b", replicaSafe: false, takes: [] }, (m) => [
+						m.contribute(only).by(() => "b"),
+					]),
 				],
 				config: single,
 			}),
@@ -581,41 +583,24 @@ describe("assemble", () => {
 
 	it("refuses a module named kernel, the kernel's own section's name", async () => {
 		// A section taking anything, so only the name can refuse it.
-		const named = defineModule({ name: "kernel", section: z.looseObject({}), takes: [] });
+		const named = defineModule({
+			name: "kernel",
+			replicaSafe: true,
+			section: z.looseObject({}),
+			takes: [],
+		});
 		const refusals = await refusalsOf(assemble({ modules: [named], config: single }));
 		expect(refusals).toEqual([{ where: "kernel", reason: "duplicate module name" }]);
 	});
 
 	it("refuses a section given to a module that takes none", async () => {
 		const refusals = await refusalsOf(
-			assemble({ modules: [defineModule({ name: "m", takes: [] })], config: { ...single, m: {} } }),
+			assemble({
+				modules: [defineModule({ name: "m", replicaSafe: true, takes: [] })],
+				config: { ...single, m: {} },
+			}),
 		);
 		expect(refusals).toEqual([{ where: "m", reason: "module without a section" }]);
-	});
-
-	it("reads a section left out of the configuration as an empty one, its defaults filled in", async () => {
-		const read = contract<unknown>("read");
-		const m = defineModule(
-			{ name: "m", section: z.strictObject({ n: z.number().default(3) }), takes: [] },
-			(m) => [m.provide(read).by((c) => c.section)],
-		);
-		const app = await assemble({ modules: [m], config: single });
-		expect(app.get(read)).toEqual({ n: 3 });
-	});
-
-	it("reads a module's section from the configuration's own keys only", async () => {
-		const read = contract<unknown>("read");
-		const app = await assemble({
-			modules: [
-				defineModule({ name: "constructor", takes: [] }),
-				defineModule(
-					{ name: "toString", section: z.strictObject({}).default({}), takes: [] },
-					(m) => [m.provide(read).by((c) => c.section)],
-				),
-			],
-			config: single,
-		});
-		expect(app.get(read)).toEqual({});
 	});
 
 	it("refuses a configuration whose root is not an object", async () => {
@@ -626,17 +611,10 @@ describe("assemble", () => {
 		}
 	});
 
-	it("takes a module that says nothing of replicas as safe on multiple instances", async () => {
-		const multi = kernelConfig({ deployment: "multi" });
-		await expect(
-			assemble({ modules: [defineModule({ name: "m", takes: [] })], config: multi }),
-		).resolves.toBeDefined();
-	});
-
 	it("reports the sections' refusals with a contract provided twice, building nothing", async () => {
 		const twice = contract<number>("twice");
 		const providing = (name: string) =>
-			defineModule({ name, takes: [] }, (m) => [m.provide(twice).by(() => 1)]);
+			defineModule({ name, replicaSafe: true, takes: [] }, (m) => [m.provide(twice).by(() => 1)]);
 		const refusals = await refusalsOf(
 			assemble({ modules: [providing("a"), providing("b")], config: { ...single, ghost: {} } }),
 		);
@@ -644,7 +622,7 @@ describe("assemble", () => {
 	});
 
 	it("refuses with the module's name when a factory refuses with an empty list", async () => {
-		const m = defineModule({ name: "m", takes: [] }, (m) => [
+		const m = defineModule({ name: "m", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(contract<number>("x")).by((c) => c.refuseAll([])),
 		]);
 		expect(await refusalsOf(assemble({ modules: [m], config: single }))).toEqual([
@@ -660,7 +638,7 @@ describe("assemble", () => {
 	it("refuses an extension point that needs exactly one contribution when it has none, collected or not", async () => {
 		const only = extensionPoint<string>("only", { multiplicity: "one" });
 		const used = contract<string>("used");
-		const owner = defineModule({ name: "owner", takes: [only] }, (m) => [
+		const owner = defineModule({ name: "owner", replicaSafe: false, takes: [only] }, (m) => [
 			m.provide(used).by(async (c) => (await c.collect(only))[0] ?? ""),
 		]);
 		expect(await refusalsOf(assemble({ modules: [owner], config: single }))).toEqual([
@@ -673,10 +651,12 @@ describe("assemble", () => {
 		const list = contract<readonly string[]>("list");
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "owner", takes: [many] }, (m) => [
+				defineModule({ name: "owner", replicaSafe: false, takes: [many] }, (m) => [
 					m.provide(list).by((c) => c.collect(many)),
 				]),
-				defineModule({ name: "a", takes: [] }, (m) => [m.contribute(many).by(() => "a")]),
+				defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
+					m.contribute(many).by(() => "a"),
+				]),
 			],
 			config: single,
 		});
@@ -691,7 +671,7 @@ describe("assemble", () => {
 			leaf: contract<void>("leaf"),
 		};
 		const chain = (name: keyof typeof handles, after?: keyof typeof handles) =>
-			defineModule({ name, takes: after ? [handles[after]] : [] }, (m) => [
+			defineModule({ name, replicaSafe: false, takes: after ? [handles[after]] : [] }, (m) => [
 				m.provide(handles[name]).by(async (c) => {
 					if (after) await c.get(handles[after]);
 					c.onStart(() => {
@@ -720,7 +700,7 @@ describe("assemble", () => {
 describe("late", () => {
 	const greeter = contract<{ greet(name: string): string }>("greeter");
 	const greetings = extensionPoint<{ say(): string }>("greetings", { multiplicity: "many" });
-	const owner = defineModule({ name: "owner", takes: [greetings] }, (m) => [
+	const owner = defineModule({ name: "owner", replicaSafe: false, takes: [greetings] }, (m) => [
 		m.provide(greeter).by(async (c) => {
 			const all = await c.collect(greetings);
 			return { greet: (name: string) => `hello ${name} (${all.length})` };
@@ -728,14 +708,17 @@ describe("late", () => {
 	]);
 
 	it("lets a contributor hold its owner's interface and use it once assembly is done", async () => {
-		const contributor = defineModule({ name: "contributor", takes: [greeter] }, (m) => [
-			m.contribute(greetings).by((c) => {
-				const later = c.late(greeter);
-				return { say: () => later().greet("late") };
-			}),
-		]);
+		const contributor = defineModule(
+			{ name: "contributor", replicaSafe: false, takes: [greeter] },
+			(m) => [
+				m.contribute(greetings).by((c) => {
+					const later = c.late(greeter);
+					return { say: () => later().greet("late") };
+				}),
+			],
+		);
 		let said: (() => string) | undefined;
-		const keeper = defineModule({ name: "keeper", takes: [greetings] }, (m) => [
+		const keeper = defineModule({ name: "keeper", replicaSafe: false, takes: [greetings] }, (m) => [
 			m.provide(contract<object>("keeper")).by(async (c) => {
 				said = (await c.collect(greetings))[0]?.say;
 				return {};
@@ -746,7 +729,7 @@ describe("late", () => {
 	});
 
 	it("throws when a late reference is used during assembly, refusing boot", async () => {
-		const eager = defineModule({ name: "eager", takes: [greeter] }, (m) => [
+		const eager = defineModule({ name: "eager", replicaSafe: false, takes: [greeter] }, (m) => [
 			m.contribute(greetings).by((c) => {
 				const later = c.late(greeter);
 				return { say: () => later().greet("now"), now: later() };
@@ -758,7 +741,7 @@ describe("late", () => {
 
 	it("refuses boot when nothing provides what a late reference names", async () => {
 		const missing = contract<object>("missing");
-		const asking = defineModule({ name: "asking", takes: [missing] }, (m) => [
+		const asking = defineModule({ name: "asking", replicaSafe: true, takes: [missing] }, (m) => [
 			m.provide(contract<object>("asking")).by((c) => ({ later: c.late(missing) })),
 		]);
 		expect(await refusalsOf(assemble({ modules: [asking], config: single }))).toEqual([
@@ -768,13 +751,13 @@ describe("late", () => {
 
 	it("never hands over an interface from an assembly that was refused", async () => {
 		let later: (() => unknown) | undefined;
-		const holder = defineModule({ name: "holder", takes: [greeter] }, (m) => [
+		const holder = defineModule({ name: "holder", replicaSafe: false, takes: [greeter] }, (m) => [
 			m.provide(contract<object>("holder")).by((c) => {
 				later = c.late(greeter);
 				return {};
 			}),
 		]);
-		const broken = defineModule({ name: "broken", takes: [] }, (m) => [
+		const broken = defineModule({ name: "broken", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(contract<object>("broken")).by(() => {
 				throw new Error("broken");
 			}),
@@ -786,13 +769,13 @@ describe("late", () => {
 
 describe("takenBy", () => {
 	const signer = contract<{ sign(): string }>("signer", { takenBy: ["issuer"] });
-	const keys = defineModule({ name: "keys", takes: [] }, (m) => [
+	const keys = defineModule({ name: "keys", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(signer).by(() => ({ sign: () => "signed" })),
 	]);
 	/** A module named `name` providing `out`, which takes the signer as `how` says. */
 	const taker = (name: string, how: "get" | "late" | "caught" | "late-caught") => {
 		const out = contract<object>(`${name}-out`);
-		return defineModule({ name, takes: [signer] }, (m) => [
+		return defineModule({ name, replicaSafe: true, takes: [signer] }, (m) => [
 			m.provide(out).by(async (c) => {
 				if (how === "late") c.late(signer);
 				else if (how === "get") await c.get(signer);
@@ -811,7 +794,7 @@ describe("takenBy", () => {
 		const app = await assemble({ modules: [keys, taker("issuer", "get")], config: single });
 		expect(app.get(signer).sign()).toBe("signed");
 		const signs = contract<{ sign(): string }>("signs");
-		const late = defineModule({ name: "issuer", takes: [signer] }, (m) => [
+		const late = defineModule({ name: "issuer", replicaSafe: true, takes: [signer] }, (m) => [
 			m.provide(signs).by((c) => {
 				const later = c.late(signer);
 				return { sign: () => later().sign() };
@@ -837,13 +820,16 @@ describe("takenBy", () => {
 		]) {
 			for (const how of ["get", "late"] as const) {
 				// It names what it takes, the lookalike: one label, another contract.
-				const tokens = defineModule({ name: "tokens", takes: [lookalike] }, (m) => [
-					m.provide(contract<object>("tokens-out")).by(async (c) => {
-						if (how === "get") await c.get(lookalike);
-						else c.late(lookalike);
-						return {};
-					}),
-				]);
+				const tokens = defineModule(
+					{ name: "tokens", replicaSafe: true, takes: [lookalike] },
+					(m) => [
+						m.provide(contract<object>("tokens-out")).by(async (c) => {
+							if (how === "get") await c.get(lookalike);
+							else c.late(lookalike);
+							return {};
+						}),
+					],
+				);
 				const refused = await refusalsOf(assemble({ modules: [keys, tokens], config: single }));
 				expect(refused, how).toEqual([{ where: "tokens", reason: "no module provides signer" }]);
 			}
@@ -852,10 +838,10 @@ describe("takenBy", () => {
 
 	it("lets no module take a contract whose takenBy is empty", async () => {
 		const sealed = contract<object>("sealed", { takenBy: [] });
-		const holder = defineModule({ name: "holder", takes: [] }, (m) => [
+		const holder = defineModule({ name: "holder", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(sealed).by(() => ({})),
 		]);
-		const reader = defineModule({ name: "reader", takes: [sealed] }, (m) => [
+		const reader = defineModule({ name: "reader", replicaSafe: true, takes: [sealed] }, (m) => [
 			m.provide(contract<object>("read")).by(async (c) => c.get(sealed)),
 		]);
 		expect(await refusalsOf(assemble({ modules: [holder, reader], config: single }))).toEqual([
@@ -869,10 +855,10 @@ describe("takenBy", () => {
 		takers.push("tokens");
 		expect(kept.takenBy).toEqual(["issuer"]);
 		expect(Object.isFrozen(kept.takenBy)).toBe(true);
-		const holder = defineModule({ name: "holder", takes: [] }, (m) => [
+		const holder = defineModule({ name: "holder", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(kept).by(() => ({ sign: () => "signed" })),
 		]);
-		const tokens = defineModule({ name: "tokens", takes: [kept] }, (m) => [
+		const tokens = defineModule({ name: "tokens", replicaSafe: false, takes: [kept] }, (m) => [
 			m.provide(contract<object>("tokens-out")).by(async (c) => c.get(kept)),
 		]);
 		expect(await refusalsOf(assemble({ modules: [holder, tokens], config: single }))).toEqual([
@@ -882,10 +868,10 @@ describe("takenBy", () => {
 
 	it("binds only the contracts that name their takers", async () => {
 		const open = contract<object>("open");
-		const anyone = defineModule({ name: "anyone", takes: [] }, (m) => [
+		const anyone = defineModule({ name: "anyone", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(open).by(() => ({})),
 		]);
-		const reader = defineModule({ name: "reader", takes: [open] }, (m) => [
+		const reader = defineModule({ name: "reader", replicaSafe: true, takes: [open] }, (m) => [
 			m.provide(contract<object>("read")).by(async (c) => c.get(open)),
 		]);
 		await assemble({ modules: [anyone, reader], config: single });

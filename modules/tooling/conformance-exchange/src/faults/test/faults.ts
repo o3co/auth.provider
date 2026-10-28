@@ -9,6 +9,7 @@ import {
 import { type CodeScene, codeScene } from "@mod/conformance-code";
 import { browserAt } from "@mod/conformance-code/testing";
 import type { ClientScene } from "@mod/conformance-oauth";
+import type { ExchangePart } from "../../area.ts";
 // The package's entry, which sets the area up on each target.
 import { exchangeArea } from "../../main.ts";
 
@@ -41,7 +42,7 @@ export const app: ClientScene = {
 };
 
 /** The code flow with token exchange on the Redis store, for one client and two users, with what a scene adds. */
-export function faultScene(more: Partial<CodeScene> = {}): AreaScene {
+export function faultScene(more: Partial<CodeScene> = {}, exchange: ExchangePart = {}): AreaScene {
 	const built = codeScene({
 		issuer,
 		keys: {
@@ -61,8 +62,8 @@ export function faultScene(more: Partial<CodeScene> = {}): AreaScene {
 		...more,
 		storeFaults: true,
 	});
-	const [exchange, part] = exchangeArea.part({});
-	return { ...built, parts: { ...built.parts, [exchange]: part } };
+	const [name, part] = exchangeArea.part(exchange);
+	return { ...built, parts: { ...built.parts, [name]: part } };
 }
 
 /** Runs a scene on a deployment of its own, as the base does, on the token exchange's scene unless it names another. */
@@ -78,7 +79,11 @@ export interface Answer {
 }
 
 /** A form posted by `app` to the instance, as its proxy forwards a client's own call. */
-async function postAt(i: Instance, path: string, form: Record<string, string>): Promise<Answer> {
+export async function postAt(
+	i: Instance,
+	path: string,
+	form: Record<string, string>,
+): Promise<Answer> {
 	const res = await fetch(`${i.baseUrl}${path}`, {
 		method: "POST",
 		headers: {

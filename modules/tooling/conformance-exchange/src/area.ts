@@ -12,6 +12,16 @@ export interface ExchangePart {
 	readonly maxLifetimeSeconds?: number;
 	/** The scene exchanges subject tokens that carry no session, such as a refresh family's. */
 	readonly sessionless?: true;
+	/** Apple's id_tokens, exchanged or sent as JWT bearer assertions, by the clients named. */
+	readonly appleIdTokens?: AppleIdTokensPart;
+}
+
+/** The clients that take Apple's id_tokens, at Apple's own fixed issuer and key set. */
+export interface AppleIdTokensPart {
+	/** Each client's audiences: the app's client IDs at Apple. */
+	readonly clients: Readonly<Record<string, readonly string[]>>;
+	/** The proxy outbound reaches Apple's key set through. */
+	readonly proxy?: string;
 }
 
 export const exchangeArea = area<ExchangePart>("exchange");
@@ -51,6 +61,7 @@ export function exchangeScene(scene: ExchangeScene): AreaScene {
 		...(scene.maxActorDepth ? { maxActorDepth: scene.maxActorDepth } : {}),
 		...(scene.maxLifetimeSeconds ? { maxLifetimeSeconds: scene.maxLifetimeSeconds } : {}),
 		...(scene.sessionless ? { sessionless: true } : {}),
+		...(scene.appleIdTokens ? { appleIdTokens: scene.appleIdTokens } : {}),
 	});
 	return { ...built, parts: { ...built.parts, [name]: part } };
 }
