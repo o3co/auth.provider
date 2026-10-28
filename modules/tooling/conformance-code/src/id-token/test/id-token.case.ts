@@ -170,6 +170,17 @@ describe("OpenID Connect: the ID token", () => {
 		]);
 	});
 
+	it("ignores in an OpenID Connect request an offline_access the client is not allowed: a code for the rest, the scope answered and carried without it [oidc-core-11-c]", async () => {
+		const { at, tokens } = await signedIn({ scope: "openid offline_access read" });
+		expect(at?.searchParams.get("error")).toBeNull();
+		for (const [name, scope] of [
+			["answer", tokens.scope],
+			["access token", claimsOf(tokens.access_token).scope],
+		] as const) {
+			expect(String(scope).split(" ").sort(), name).toEqual(["openid", "read"]);
+		}
+	});
+
 	it("answers no CORS request at the authorization endpoint, a listed origin's included [oidc-discovery-3-ak] [rfc9700-2.6-e]", async () => {
 		const query = new URLSearchParams({ response_type: "code", client_id: app.id });
 		const asked = (method: string, extra: Record<string, string> = {}) =>
