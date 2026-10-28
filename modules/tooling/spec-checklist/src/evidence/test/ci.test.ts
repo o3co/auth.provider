@@ -206,10 +206,27 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		const line = changedLine("interop-due", "due");
 		// A plan moved out of interop-oidf: its old path names what the change touches there.
 		const dir = mkdtempSync(join(tmpdir(), "ci-moved-"));
+		// git as the scratch repository alone has it: no outer repository a hook names, no user's or
+		// system's settings (a global `diff.renames` would change what is read), no hooks.
+		const env = {
+			...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))),
+			GIT_CONFIG_GLOBAL: "/dev/null",
+			GIT_CONFIG_NOSYSTEM: "1",
+		};
 		const git = (...args: string[]) =>
-			execFileSync("git", ["-c", "user.name=ci", "-c", "user.email=ci@example.com", ...args], {
-				cwd: dir,
-			});
+			execFileSync(
+				"git",
+				[
+					"-c",
+					"core.hooksPath=/dev/null",
+					"-c",
+					"user.name=ci",
+					"-c",
+					"user.email=ci@example.com",
+					...args,
+				],
+				{ cwd: dir, env },
+			);
 		try {
 			git("init", "-q");
 			mkdirSync(join(dir, "modules/tooling/interop-oidf/plans"), { recursive: true });
@@ -225,7 +242,7 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 				["-c", `set -euo pipefail; ${line}; printf '%s' "$changed"`],
 				{
 					cwd: dir,
-					env: { ...process.env, BASE: "develop" },
+					env: { ...env, BASE: "develop" },
 					encoding: "utf8",
 				},
 			);
