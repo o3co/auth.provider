@@ -141,7 +141,7 @@ describe("over users and the session's login", () => {
 		attributes: { source, values: { [userAttribute.emailVerified]: true } },
 	});
 	/** A ledger that cannot look users up by subject. */
-	const unanswering = defineModule({ name: "ledger", replicaSafe: true, takes: [] }, (m) => [
+	const unanswering = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(ledgers).by(() => ({
 			verify: async () => ({ kind: "none" }),
 			bySubject: async () => ({ kind: "unanswerable" }),
@@ -154,7 +154,7 @@ describe("over users and the session's login", () => {
 				memoryUsersStores().module,
 				...parts.users,
 				secretHashModule,
-				defineModule({ name: "sessions", replicaSafe: true, takes: [tokens] }, (m) => [
+				defineModule({ name: "sessions", replicaSafe: false, takes: [tokens] }, (m) => [
 					// Sessions that reach tokens as they are built, as a composition's closing tokens does.
 					m.provide(sessions).by(async (c) => {
 						await c.get(tokens);
