@@ -93,7 +93,7 @@ describe("unavailableSwitch", () => {
 describe("switchedModule", () => {
 	const store = contract<Store>("store");
 	const other = contract<Store>("other");
-	const m = defineModule({ name: "m", takes: [] }, (m) => [
+	const m = defineModule({ name: "m", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(store).by(() => new Recording()),
 		m.provide(other).by(() => new Recording()),
 	]);
@@ -110,7 +110,7 @@ describe("switchedModule", () => {
 	});
 
 	it("throws for a module that does not provide the contract", () => {
-		const bare = defineModule({ name: "bare", takes: [] });
+		const bare = defineModule({ name: "bare", replicaSafe: true, takes: [] });
 		expect(() => switchedModule(bare, store, unavailableSwitch<Store>())).toThrow(TypeError);
 	});
 });
