@@ -351,7 +351,7 @@ describe("authorize: trust in the redirect URI", () => {
 		expect(loopback.at?.origin).toBe("http://127.0.0.1:9555");
 	});
 
-	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d] [oidc-core-3.1.2.2-b] [oidc-core-3.1.2.2-i]", async () => {
+	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d] [oidc-core-3.1.2.2-b] [oidc-core-3.1.2.2-i] [rfc6749-10.14-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const cases: [Record<string, string> | string, string][] = [
@@ -1257,7 +1257,7 @@ it("hashes a re-authentication the same whatever the order of parameters or prom
 	expect(res.at?.pathname).not.toBe("/login");
 });
 
-it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it", async () => {
+it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it [rfc6749-10.14-a]", async () => {
 	const s = await serve({
 		acr: { "urn:test:mfa": [["mfa"]] },
 		authorize: { "step-up-page": "https://as.example/mfa" },
@@ -1394,7 +1394,7 @@ describe("authorize: one trip to raise the authentication", () => {
 	});
 });
 
-it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a]", async () => {
+it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a] [rfc6749-10.14-a]", async () => {
 	const asked: IdTokenRequest[] = [];
 	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({

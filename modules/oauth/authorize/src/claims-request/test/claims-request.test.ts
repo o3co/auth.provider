@@ -30,7 +30,7 @@ describe("claims-request", () => {
 		});
 	});
 
-	it("refuses a claim it keeps asked in a shape it does not take", () => {
+	it("refuses a claim it keeps asked in a shape it does not take [rfc6749-10.14-a]", () => {
 		const long = "x".repeat(257);
 		for (const asked of [
 			{ name: 5 },
