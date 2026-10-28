@@ -21,8 +21,6 @@ onNew(codeArea, (part, scene) => {
 		store: "volatile",
 		...(part.without ? { without: part.without } : {}),
 		config: {
-			// The claims parameter is taken, as a deployment that runs 0.19 on every host takes it.
-			"claims-selection": { mode: "on" },
 			// A code that comes again must revoke what it gave.
 			tokens: { revocation: "denylist" },
 			authorize: {
