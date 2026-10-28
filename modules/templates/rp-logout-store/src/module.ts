@@ -31,6 +31,9 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
+// Safe on many instances given the same `notice-shards` and `notices-per-shard` on each
+// (deployment-guarantees, Several instances): logout notices go to a shard by their hash, and a sweep
+// walks only the shards it counts.
 export default defineModule(
 	{ name: "rp-logout-store", replicaSafe: true, section, takes: [store] },
 	(m) => [
