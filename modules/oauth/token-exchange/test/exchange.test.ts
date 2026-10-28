@@ -348,6 +348,24 @@ describe("token-exchange", () => {
 		]);
 	});
 
+	it("refuses a resource that is not an absolute URI, or carries a fragment, before it is compared with the audience [rfc8693-2.1-a] [rfc8693-2.1-b]", async () => {
+		const s = await serve();
+		const subject = subjectOf((await s.issue({ audience: [api] })).token);
+		for (const resource of [new URL(api).host, "/v1", `${api}\t`]) {
+			expect(said(await s.exchange("app", { ...subject, resource })), resource).toEqual([
+				"invalid_target",
+				"resource is not an absolute URI",
+			]);
+		}
+		expect(said(await s.exchange("app", { ...subject, resource: `${api}#part` }))).toEqual([
+			"invalid_target",
+			"resource carries a fragment",
+		]);
+		expect(await s.exchange("app", { ...subject, resource: api })).toMatchObject({
+			kind: "issued",
+		});
+	});
+
 	it("takes an actor only where the subject token's may_act names it", async () => {
 		const mayAct = [{ sub: "app" }, { sub: "carol", iss: "https://idp.example" }];
 		const s = await serve({ verifier: outside(() => ({ ...outsideAnswer, mayAct })) });
@@ -1047,6 +1065,9 @@ describe("token-exchange: what any verifier may answer", () => {
 			"invalid_target",
 			"resource is not the audience issued",
 		]);
+		expect(
+			said(await s.exchange("app", { ...outsider, audience: api, resource: `${api}#part` })),
+		).toEqual(["invalid_target", "resource carries a fragment"]);
 	});
 
 	it("uses a once-only token up after it is checked twice and the policies admit it, issuing only once", async () => {

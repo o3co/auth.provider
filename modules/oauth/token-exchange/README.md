@@ -24,7 +24,7 @@
 - The subject token and the actor token must name the calling client, by issued-to or audience, unless its `others-tokens` is true. A foreign token must list the caller in `clients` instead, whatever `others-tokens` says.
 - A once-only token (its verifier has `consume`), or a foreign one, is refused as the actor.
 - The scope lies within the subject token's scope and the client's allowance; left out, it is the subject token's, cut to the client's. Wider is `invalid_scope`. For a foreign token, there is no scope or audience of its own: the client's allowance decides them, by the same rules for `audience` and `resource`.
-- The audience is one the subject token holds and the client is allowed; left out, the only such one. A `resource` must be that audience. Otherwise `invalid_target`. It declares it takes its audience from the request, so no rule refuses its `resource` before it runs.
+- The audience is one the subject token holds and the client is allowed; left out, the only such one. A `resource` must be an absolute URI without a fragment (RFC 8693 §2.1, read by `resource-indicators`' `resourceRefusal`), and that audience. Otherwise `invalid_target`. It declares it takes its audience from the request, so no rule refuses its `resource` before it runs.
 - Bindings follow `sender-binding`'s answer. A token bound to a key is never exchanged for one without it, for the subject and the actor alike.
 - `act` is the actor's subject over the subject token's chain. Without an actor there is no `act`. A chain past `max-actor-depth` is refused. A `may_act` must name the actor, or the client when there is none; a client never matches an entry with an issuer.
 - A revoked or expired token, or one a tie answers ended (its family, or its session closed or short of a requirement, each told apart in the description), is refused, as subject or actor: the subject's ties first, each token's in their names' order.
@@ -40,7 +40,7 @@
 - `requested_token_type` other than an access token is refused. Unavailable is `503`, never a refusal.
 
 ## Depends on
-- `kernel`, `grants`, `client-allowance`, `tokens`, `clients`, `issuer`, `sender-binding`
+- `kernel`, `grants`, `client-allowance`, `tokens`, `clients`, `issuer`, `sender-binding`, `resource-indicators` (the form of a `resource`)
 
 ## Vocabulary
 - subject token: the token presented for exchange. actor token: the token of whoever acts for the subject.
