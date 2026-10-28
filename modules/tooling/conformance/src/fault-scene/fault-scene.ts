@@ -97,13 +97,21 @@ export async function reconnected(i: Instance, upstream: Upstream) {
 export async function ready(i: Instance, ms = 30_000): Promise<void> {
 	const end = performance.now() + ms;
 	for (;;) {
-		const status = await fetch(`${i.baseUrl}/readyz`).then(
-			(r) => r.status,
+		const left = end - performance.now();
+		if (left <= 0) throw new Error(`instance ${i.index} not ready within ${ms} ms`);
+		// Each request ends with the time left, so an instance that takes it and never answers holds no one.
+		const status = await fetch(`${i.baseUrl}/readyz`, {
+			signal: AbortSignal.timeout(Math.ceil(left)),
+		}).then(
+			async (r) => {
+				await r.body?.cancel();
+				return r.status;
+			},
 			() => 0,
 		);
-		if (status === 200) return;
-		if (performance.now() > end) throw new Error(`instance ${i.index} not ready within ${ms} ms`);
-		await pause(200);
+		// Ready only within the time: an answer past it is too late.
+		if (status === 200 && performance.now() <= end) return;
+		await pause(Math.min(200, Math.max(0, end - performance.now())));
 	}
 }
 
