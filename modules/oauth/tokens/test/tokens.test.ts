@@ -430,10 +430,10 @@ it("answers unsupported to any revocation where revocation is not configured, a 
 	expect(await t.revokeAccess("garbage")).toEqual({ kind: "unsupported" });
 });
 
-it("reads the access token's lifetime with its unit, in whole seconds, an hour unless set [rfc6750-5.3-b]", () => {
+it("reads the access token's lifetime with its unit, in whole seconds, an hour by default, which an operator may set up to a day [rfc6750-5.3-b]", () => {
 	const lifetimeOf = (settings: object) =>
 		section.safeParse({ revocation: "unsupported", ...settings }).data?.["access-token-lifetime"];
-	// Short-lived unless the operator says otherwise: an hour, as RFC 6750 §5.3 asks at most.
+	// The default is an hour, the most RFC 6750 §5.3 asks; a longer one, for any client, is the operator's choice.
 	expect(defaultLifetimeSeconds).toBe(3600);
 	expect(
 		[{}, { "access-token-lifetime": "2h" }, { "access-token-lifetime": "2s" }].map(lifetimeOf),
