@@ -40,7 +40,8 @@
 		"release:evidence-fetch": "pnpm --filter @mod/distribution run release-evidence-fetch",
 		"release:evidence-judge": "pnpm --filter @mod/distribution run release-evidence-judge",
 		"release:sbom": "pnpm --filter @mod/distribution run release-sbom",
-		"release:listed": "pnpm --filter @mod/distribution run release-listed"
+		"release:listed": "pnpm --filter @mod/distribution run release-listed",
+		"release:notes": "pnpm --filter @mod/distribution run release-notes"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",
