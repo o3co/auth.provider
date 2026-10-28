@@ -232,4 +232,29 @@ describe("a refresh token rotated once under faults", () => {
 			await refusedAsSpent(b, token);
 		});
 	});
+
+	it("rotates at most once for one token whose two rotations at two instances are let go together, the family then ended as a reuse [guarantee-5-b] {fault:H2}", async () => {
+		await on({ name: "refresh-once-h2-together", scene, instances: 2 }, async (d) => {
+			const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
+			await control(a);
+			const token = await familyAt(a);
+			const holds = [a.relay.hold(rotationFrom(token)), b.relay.hold(rotationFrom(token))];
+			const answers = Promise.all([refreshAt(a, token), refreshAt(b, token)]);
+			for (const held of await Promise.all(holds)) held.release();
+			const both = await answers;
+			const tokens = both.filter((x) => x.status === 200);
+			expect(tokens.length).toBeLessThanOrEqual(1);
+			// None given only as both are refused, the loser's use a reuse either way.
+			if (tokens.length === 0) expect(both.map(said)).toEqual([refused, refused]);
+			expect(
+				successes(a, rotationFrom(token)).length + successes(b, rotationFrom(token)).length,
+			).toBeLessThanOrEqual(1);
+			// The loser of two uses ends the family: no token of it is taken any more.
+			for (const given of [token, ...tokens.map(next)]) {
+				expect(said(await refreshAt(a, given))).toEqual(refused);
+				expect(said(await refreshAt(b, given))).toEqual(refused);
+			}
+			expect(said(await refreshAt(b, await familyAt(b)))).toEqual(issued);
+		});
+	});
 });
