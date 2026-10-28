@@ -99,7 +99,7 @@ describe("introspection", () => {
 
 	it("answers 503 when a condition on access tokens cannot tell, never inactive, recording and warning so [rfc7662-4-a]", async () => {
 		const down = unavailableSwitch<AccessCondition>();
-		const condition = defineModule({ name: "condition", replicaSafe: true, takes: [] }, (m) => [
+		const condition = defineModule({ name: "condition", replicaSafe: false, takes: [] }, (m) => [
 			m
 				.contribute(accessConditions)
 				.by(() => down.wrap({ name: "test", holds: async () => "holds" as const })),
