@@ -314,6 +314,7 @@ describe("clients", () => {
 	it("marks a refusal an assertion method is part of, with the challenges of the methods tried", async () => {
 		const assertion = method("test_assertion", {
 			assertion: true,
+			signingAlgorithms: ["ES256"],
 			// Any part of it sent: the request uses the assertion.
 			claimed: (r) =>
 				r.form.get("test_assertion")?.[0] ?? (r.form.has("test_assertion_type") ? "" : undefined),
@@ -731,7 +732,7 @@ describe("clients", () => {
 	});
 
 	it("refuses at boot a method signing with the JWS algorithm none, in any case, so discovery's *_auth_signing_alg_values_supported never names none [rfc8414-2-j] [rfc8414-2-m] [rfc8414-2-o]", async () => {
-		// The three discovery fields read the registry's signingAlgorithms() alone: a registry that cannot hold none lists none.
+		// The three discovery fields read the registry's signingAlgorithms() alone, so a registry that cannot hold none never lists it.
 		for (const alg of ["none", "NONE", "None"]) {
 			const refused = await refusalsOf(
 				boot([method("signer", { signingAlgorithms: ["ES256", alg] })]),
@@ -747,6 +748,32 @@ describe("clients", () => {
 		const c = await boot();
 		expect(c.methods()).toContain("none");
 		expect(c.signingAlgorithms()).toEqual([]);
+	});
+
+	it("refuses at boot an assertion method naming no signing algorithms, so discovery names the algorithms of every assertion method it lists [rfc8414-2-h]", async () => {
+		for (const signingAlgorithms of [undefined, []]) {
+			const refused = await refusalsOf(
+				boot([method("asserted", { assertion: true, signingAlgorithms })]),
+			);
+			expect(
+				refused.map((r) => [r.where, r.reason]),
+				String(signingAlgorithms),
+			).toEqual([
+				[
+					"clients.methods.asserted",
+					"names no signing algorithms, though it authenticates by an assertion",
+				],
+			]);
+		}
+		const c = await boot([method("asserted", { assertion: true, signingAlgorithms: ["ES256"] })]);
+		expect(c.signingAlgorithms()).toEqual(["ES256"]);
+	});
+
+	it("refuses at boot a method naming an empty list of signing algorithms", async () => {
+		const refused = await refusalsOf(boot([method("signer", { signingAlgorithms: [] })]));
+		expect(refused.map((r) => [r.where, r.reason])).toEqual([
+			["clients.methods.signer", "names an empty list of signing algorithms"],
+		]);
 	});
 
 	it("says whether the operator registered a client, or a source named it", async () => {

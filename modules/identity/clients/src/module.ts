@@ -18,7 +18,7 @@ import {
 	secretPost,
 	secretSection,
 } from "./methods.ts";
-import { clientRecord, readRecord, registry } from "./registry.ts";
+import { clientRecord, methodIssues, readRecord, registry } from "./registry.ts";
 
 const section = z
 	.strictObject({
@@ -89,19 +89,9 @@ export default defineModule(
 		m.contribute(metadataSections).by(() => secretSection),
 		m.provide(registered).by(async (c) => {
 			const known = byName(await c.collect(metadataSections));
-			const contributed = await c.collect(authMethods);
-			const methods = new Set(contributed.map((a) => a.name));
+			const methods = new Set((await c.collect(authMethods)).map((a) => a.name));
 			const found = new Map<string, Client>();
 			const issues: { where: string; reason: string }[] = [];
-			// The JWS algorithm none, not the method named none: discovery names every signing algorithm.
-			for (const method of contributed) {
-				if ((method.signingAlgorithms ?? []).some((alg) => alg.toLowerCase() === "none")) {
-					issues.push({
-						where: `clients.methods.${method.name}`,
-						reason: "names the JWS algorithm none among its signing algorithms",
-					});
-				}
-			}
 			for (const [i, entry] of c.section.registered.entries()) {
 				if (!methods.has(entry.method)) {
 					issues.push({
@@ -125,15 +115,16 @@ export default defineModule(
 			if (issues.length > 0) return c.refuseAll(issues);
 			return found;
 		}),
-		m
-			.provide(clients)
-			.by(async (c) =>
-				registry(
-					await c.get(registered),
-					await c.collect(clientSources),
-					await c.collect(authMethods),
-					byName(await c.collect(metadataSections)),
-				),
-			),
+		m.provide(clients).by(async (c) => {
+			const methods = await c.collect(authMethods);
+			const issues = methodIssues(methods);
+			if (issues.length > 0) return c.refuseAll(issues);
+			return registry(
+				await c.get(registered),
+				await c.collect(clientSources),
+				methods,
+				byName(await c.collect(metadataSections)),
+			);
+		}),
 	],
 );
