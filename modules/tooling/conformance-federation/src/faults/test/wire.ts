@@ -1,4 +1,4 @@
-import { type Match, storeWrite } from "@mod/conformance/testing";
+import { type Command, type Match, storeWrite, writtenValues } from "@mod/conformance/testing";
 
 // The store's own names a scene matches its writes by: the spaces and partitions subject-revocation
 // and session-lifecycle write. Nothing else in the area names them.
@@ -35,3 +35,14 @@ export const closingAdded: Match = storeWrite({ prefix, space: "session-store.cl
 
 /** A write to a grant's record: among them a read ending a grant its subject's revocation covers (`backstop`). */
 export const grantWritten: Match = storeWrite({ prefix, space: "federation-grants-store.grants" });
+
+/** The boundaries a write of a subject's boundary puts: `sessions` and, once a revocation moved it, `delegations`. */
+export const boundariesPut = (command: Command): { sessions?: unknown; delegations?: unknown } => {
+	const put = writtenValues(command).find(
+		(w) => w.key.space === "subject-revocation-store.boundaries" && w.key.name === "record",
+	)?.value as { sessions?: unknown; delegations?: unknown; value?: unknown } | undefined;
+	const value = (put && typeof put === "object" && "value" in put ? put.value : put) as
+		| { sessions?: unknown; delegations?: unknown }
+		| undefined;
+	return value ?? {};
+};
