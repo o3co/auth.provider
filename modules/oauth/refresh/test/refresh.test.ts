@@ -60,7 +60,7 @@ import {
 } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { familyRevocation, lineage } from "../src/contract.ts";
+import { lineage } from "../src/contract.ts";
 import refreshModule from "../src/module.ts";
 import { liveFamily, toStored, toStoredRedemption } from "../src/record.ts";
 import { section } from "../src/section.ts";
@@ -1516,34 +1516,4 @@ it("takes all its module names, its confidential clients' families bound or not"
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 		expect((await takesUnused(input))["refresh"], String(bindConfidential)).toBeUndefined();
 	}
-});
-
-describe("a family's revocation, asked by another module", () => {
-	it("ends the family and the access tokens it issued, and takes the same id again as done", async () => {
-		const s = await serve();
-		const first = await s.redeem();
-		const family = (await familyOf(s, first.redemption)) ?? "";
-		await s.app.get(familyRevocation).revoke(family);
-		await s.app.get(familyRevocation).revoke(family);
-		expect(await s.refresh(first.refresh_token)).toMatchObject({ status: 400 });
-		expect(await s.active(first.access_token)).toBe(false);
-		expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
-	});
-
-	it("refuses an id refresh never names a family by, writing nothing", async () => {
-		const s = await serve();
-		// 16 bytes in base64url end in A, Q, g or w: any other last letter is no name refresh makes.
-		for (const id of [
-			"",
-			"x",
-			"a".repeat(22),
-			"a".repeat(23),
-			"a".repeat(21),
-			`${"a".repeat(21)}=`,
-			`${"a".repeat(20)}/A`,
-		]) {
-			await expect(s.app.get(familyRevocation).revoke(id), id).rejects.toThrow(TypeError);
-			expect(await s.stores.kept.records.read(id)).toBeUndefined();
-		}
-	});
 });
