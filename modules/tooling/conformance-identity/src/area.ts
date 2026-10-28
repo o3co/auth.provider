@@ -62,6 +62,8 @@ export interface IdentityPart {
 	readonly recentAuthenticationSeconds?: number;
 	/** The https origins whose pages may read the routes that take cross-origin requests. */
 	readonly corsOrigins?: readonly string[];
+	/** How a request limit answers while the store cannot count (`rate-limit.fail-mode`); the deployment's default unless set. */
+	readonly rateLimitWhileStoreFails?: "open" | "closed";
 }
 
 export const identityArea = area<IdentityPart>("identity");

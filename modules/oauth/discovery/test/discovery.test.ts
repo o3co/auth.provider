@@ -42,13 +42,14 @@ async function serve(extra: Module[], url = "https://as.example", corsOrigins: s
 		const res = await fetch(`${base}${path}`, { method, headers });
 		return {
 			status: res.status,
+			type: res.headers.get("content-type"),
 			allowed: res.headers.get("access-control-allow-origin"),
 			body: res.status === 200 ? await res.json() : undefined,
 		};
 	};
 }
 
-it("serves one document at both well-known names, the configured issuer first and each contributed member [oidc-discovery-3-a] [oidc-discovery-4-a] [oidc-discovery-4.1-a] [oidc-discovery-4.3-a] [rfc8414-2-a] [rfc8414-3.1-a] [rfc8414-3.3-a]", async () => {
+it("serves one document at both well-known names, 200 as application/json, the configured issuer first and each contributed member [oidc-discovery-3-a] [oidc-discovery-4-a] [oidc-discovery-4.1-a] [oidc-discovery-4.3-a] [rfc8414-2-a] [rfc8414-3.1-a] [rfc8414-3.3-a] [oidc-discovery-4-c] [oidc-discovery-4.2-a] [rfc8414-3.2-a] [rfc9207-2.3-a]", async () => {
 	const get = await serve([
 		item("b_supported", ["x"]),
 		item("a_endpoint", "https://as.example/a"),
@@ -67,11 +68,26 @@ it("serves one document at both well-known names, the configured issuer first an
 	]) {
 		const res = await get(path);
 		expect(res.status).toBe(200);
+		expect(res.type).toMatch(/^application\/json(;|$)/);
 		expect(res.body).toEqual(expected);
 		expect(Object.keys(res.body as object)[0]).toBe("issuer");
 	}
 	expect((await get("/.well-known/openid-configuration", "POST")).status).not.toBe(200);
 	expect((await get("/.well-known/openid-configuration/x")).status).toBe(404);
+});
+
+it("serves the document under the registered well-known names alone [rfc8414-3-c]", async () => {
+	const get = await serve([]);
+	for (const path of [
+		"/.well-known/openid-config",
+		"/.well-known/oauth-authorization-server-x",
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/openid-federation",
+		"/.well-known/configuration",
+		"/openid-configuration",
+	]) {
+		expect((await get(path)).status, path).toBe(404);
+	}
 });
 
 it("answers for an issuer with a path where RFC 8414 inserts the well-known name and where OpenID appends it, and not at the root [oidc-discovery-4-a] [oidc-discovery-4.3-a] [rfc8414-3-a] [rfc8414-3.1-a] [rfc8414-3.3-a]", async () => {
