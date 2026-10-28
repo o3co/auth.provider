@@ -868,6 +868,7 @@ describe("refresh tokens", () => {
 		expect(current).toBe(createHash("sha256").update(secret).digest("base64url"));
 	});
 
+	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
 	it("carry a secret of 32 fresh random bytes, and refuse one whose family is none, or whose secret is changed, as a reuse that ends the family [rfc6749-10.4-e] [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
 		const s = await serve();
 		const first = await s.redeem();
