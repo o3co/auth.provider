@@ -3,6 +3,7 @@ import {
 	failover,
 	type Instance,
 	instanceOf,
+	type Match,
 	ready,
 	replicasOnline,
 	repointed,
@@ -20,7 +21,7 @@ import {
 	pollAt,
 	said,
 } from "../../faults/test/faults.ts";
-import { confirmedOf, decisionOf, takeOf } from "../../faults/test/wire.ts";
+import { confirmedOf, decisionOf, isStoreCall, takeOf } from "../../faults/test/wire.ts";
 
 const issued = [200, "Bearer"];
 // A taken code answers no description, as an unknown one does; an expired one answers `expired_token`.
@@ -41,14 +42,17 @@ async function control(i: Instance) {
 }
 
 /**
- * After the fault: the device is refused as taken, its poll confirming the taken record it read with
- * no take of its own, and a new device is issued.
+ * After the fault: the device is refused as taken, with no take of its own, while its record is still
+ * kept: polled by its own client, a kept device answers `invalid_grant` only once taken (a pending one
+ * answers `authorization_pending`, an approved one issues), and a lost one is looked up as unknown.
+ * Then a new device is issued.
  */
 async function refusedAsTaken(i: Instance, d: Device) {
-	const [confirmed, took] = [i.relay.executions(confirmedOf(d)).length, successes(i, takeOf(d))];
+	const took = successes(i, takeOf(d));
 	expect(said(await pollAt(i, d))).toEqual(refused);
-	expect(i.relay.executions(confirmedOf(d)).length).toBeGreaterThan(confirmed);
 	expect(successes(i, takeOf(d))).toEqual(took);
+	const kept = await decideAt(i, await loginAt(i), "lookup", d);
+	expect([kept.status, kept.body.client_id]).toEqual([200, "tv"]);
 	expect(said(await pollAt(i, await approvedAt(i)))).toEqual(issued);
 }
 
@@ -57,6 +61,18 @@ const onceUnder = (i: Instance, d: Device, first: { command: Parameters<typeof s
 	const effects = successes(i, takeOf(d));
 	expect(effects.length).toBeGreaterThan(0);
 	expect(effects.every((e) => sameMark(first.command, e.command))).toBe(true);
+};
+
+/**
+ * A write that lost its race at the instance: sent on what it read, sent again only under its own mark
+ * (a resend, never a second decision), and never taking effect.
+ */
+const lostOnly = (i: Instance, match: Match) => {
+	const sent = i.relay.executions(match);
+	expect(sent.length).toBeGreaterThan(0);
+	expect(
+		sent.every((e) => !e.succeeded && sameMark(sent[0]?.command ?? e.command, e.command)),
+	).toBe(true);
 };
 
 describe("a device code decided and redeemed once under faults", () => {
@@ -69,7 +85,7 @@ describe("a device code decided and redeemed once under faults", () => {
 			const answer = await pollAt(i, dv);
 			const dropped = await drop.first;
 			// Nothing but the take was cut with its answer.
-			expect(dropped.collateral.filter((x) => x.command.name === "EVAL")).toEqual([]);
+			expect(dropped.collateral.filter((x) => isStoreCall(x.command))).toEqual([]);
 			expect(said(answer)).toEqual(issued);
 			expect(successes(i, takeOf(dv)).length).toBeGreaterThan(1);
 			onceUnder(i, dv, dropped);
@@ -161,7 +177,7 @@ describe("a device code decided and redeemed once under faults", () => {
 			second.release();
 			expect(said(await atB)).toEqual(refused);
 			// The later take lost on the version it read, read the record taken, and confirmed it.
-			expect(b.relay.executions(takeOf(dv))).toHaveLength(1);
+			lostOnly(b, takeOf(dv));
 			expect(b.relay.executions(confirmedOf(dv)).length).toBeGreaterThan(0);
 			expect(successes(a, takeOf(dv)).length + successes(b, takeOf(dv)).length).toBe(1);
 			await refusedAsTaken(b, dv);
@@ -203,8 +219,7 @@ describe("a device code decided and redeemed once under faults", () => {
 			const later = await denying;
 			expect([later.status, later.body.error]).toEqual([409, "already_decided"]);
 			// The denial lost on the version it read, read the device approved, and confirmed it.
-			expect(b.relay.executions(denial)).toHaveLength(1);
-			expect(successes(b, denial)).toEqual([]);
+			lostOnly(b, denial);
 			expect(b.relay.executions(confirmedOf(dv)).length).toBeGreaterThan(0);
 			expect(successes(a, approval)).toHaveLength(1);
 			expect(said(await pollAt(b, dv))).toEqual(issued);

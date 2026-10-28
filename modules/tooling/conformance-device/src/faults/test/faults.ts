@@ -39,7 +39,7 @@ export const faultScene = (): AreaScene => ({
 		clients: [tv],
 		users: [alice],
 		verificationUri: `${issuer}/device`,
-		// A scene's value, not the default (5): a scene decides up to four codes as alice in one window.
+		// A scene's value, not the default (5): a scene looks up and decides up to five times as alice in one window.
 		attempts: 20,
 	}),
 	storeFaults: true,
@@ -126,11 +126,11 @@ export async function loginAt(i: Instance): Promise<string> {
 	return cookie;
 }
 
-/** Alice's decision on the device, sent to the instance's verification interface as its page sends it. */
+/** Alice's lookup of the device, or her decision on it, sent to the instance's verification interface as its page sends it. */
 export const decideAt = (
 	i: Instance,
 	cookie: string,
-	action: "approve" | "deny",
+	action: "lookup" | "approve" | "deny",
 	d: Device,
 ): Promise<Answer> =>
 	send(

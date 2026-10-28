@@ -10,7 +10,7 @@ Internal module of `conformance-device`: the fault scenes of a device code decid
 - Checks that a device approved at one instance and denied at another at once is decided once: the decision let go first stands, the other is refused `already_decided`, and the poll follows the one that stood (`H2`).
 
 ## Invariants
-- A taken device's poll answers `invalid_grant` with no description, as an unknown device's does, and an expired one answers `expired_token`; so a refusal as taken is told by the poll confirming the taken record it read, with no take of its own.
+- A taken device's poll answers `invalid_grant` with no description, as an unknown device's does, and an expired one answers `expired_token`; so a refusal as taken is told by the poll sending no take of its own while the device is still looked up at the verification interface: polled by its own client, a kept device answers `invalid_grant` only once taken.
 
 ## Depends on
 - `faults`; `conformance` (the fault scene's deployment and the relay's matches)
