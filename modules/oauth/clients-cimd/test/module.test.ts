@@ -495,6 +495,11 @@ describe("clients-cimd: the operator's section", () => {
 			{ allow: [`${"a".repeat(64)}.example`] },
 			"clients-cimd.allow.0",
 		],
+		[
+			"offline_access in the ceiling",
+			{ scopes: ["openid", "offline_access"] },
+			"clients-cimd.scopes.1",
+		],
 		["a size of zero", { "max-size": "0B" }, "clients-cimd.max-size"],
 		["no concurrency", { "max-concurrent": 0 }, "clients-cimd.max-concurrent"],
 	])("refuses boot for %s", async (_, settings, where) => {
