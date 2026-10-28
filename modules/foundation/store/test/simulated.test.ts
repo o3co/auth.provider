@@ -23,7 +23,7 @@ const fullyConfirmed: Space = {
 /** A simulated store over the spaces given, on the test's clock unless another is given. */
 async function open(declared: readonly Space[] = [space], clock: Runtime["clock"] = runtime.clock) {
 	const simulated = simulatedStore();
-	const caller = defineModule({ name: "caller", takes: [] }, (m) =>
+	const caller = defineModule({ name: "caller", replicaSafe: true, takes: [] }, (m) =>
 		declared.map((d) => m.contribute(spaces).by(() => d)),
 	);
 	const app = await assemble({
@@ -493,7 +493,7 @@ it("loses on failover a batch across whose answer was lost, mark and all, and ke
 });
 
 it("takes every handle its takes name, the store and its simulated stand-in alike", async () => {
-	const caller = defineModule({ name: "caller", takes: [] }, (m) => [
+	const caller = defineModule({ name: "caller", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(spaces).by(() => space),
 	]);
 	const accepting = { ...kernelConfig(), store: { "accept-volatile": true } };
