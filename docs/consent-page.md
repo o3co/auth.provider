@@ -54,6 +54,7 @@ challenge=<the challenge>&decision=accept&csrf_token=<csrf_token>
 | Answer | What the page does |
 |---|---|
 | `303` | Nothing: the browser follows it back to the authorization endpoint, which goes on to the client with a code, or with `access_denied` after a denial. Post as a form navigation, so the browser follows it. |
+| `401 {"error": "no_session"}` | As above: the browser holds no session. |
 | `400 {"error": "unknown_challenge"}` | As above. Sending the other decision for an answered challenge gets this too. |
 | `400` `invalid_decision` or `repeated_parameter` | The request is malformed: fix the page. The challenge stays usable. |
 | `403 {"error": "csrf"}` | Get a new token, then post again. The challenge stays usable. |
