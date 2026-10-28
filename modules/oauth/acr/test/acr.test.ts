@@ -86,6 +86,13 @@ it("knows the asked acr the table holds, in the order asked, by exact name", asy
 	expect(decided.known("URN:T:AA constructor toString __proto__")).toEqual([]);
 });
 
+it("knows an acr only by its own code points, compared one by one: none normalized, recomposed or of another case [oidc-core-14-a] [oidc-core-14-b] [oidc-core-14-c]", async () => {
+	const { decided } = await serve({ "urn:t:café": [["pwd"]] }, offers());
+	expect(decided.known("urn:t:café")).toEqual(["urn:t:café"]);
+	// e and U+0301 is the same text to a reader, normalized, but other code points.
+	expect(decided.known("urn:t:café urn:t:CAFÉ urn:t:caf")).toEqual([]);
+});
+
 it("meets the first known acr whose one set the session holds whole", async () => {
 	const { decided } = await serve(table, offers());
 	expect(decided.met(["urn:t:aa", "urn:t:zz"], ["pwd"])).toBe("urn:t:zz");

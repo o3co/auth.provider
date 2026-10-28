@@ -160,7 +160,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `lineage` (`src/lineage`): the families (`of`, `adopt`, `start`) behind the `lineage` contract and the `family` tie, and `tokens`' access condition on a family's end.
   - `settle` (`src/settle`): the stores, the revoker, and what revokes families from outside.
 - `@mod/resource-indicators` (feature, `modules/oauth/resource-indicators`): Contributes the rule for the audience a request asks for (RFC 8707) to `grants`' target rules: reads the `resource` parameter and narrows the audience issued to it, or refuses it where the grant takes no audience.
-- `@mod/rp-logout` (feature, `modules/oauth/rp-logout`): Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), the front-channel page (`page`) and back-channel notices (`notices`).
+- `@mod/rp-logout` (feature, `modules/oauth/rp-logout`): Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), a person's confirmation where no hint names the session (`confirm`), the close both share (`closing`), the pages it ends on (`page`) and back-channel notices (`notices`).
+  - `closing` (`src/closing`): the close a logout asks, the same whichever route asked it.
+  - `confirm` (`src/confirm`): the confirmation of a logout a client started without a hint (OpenID Connect RP-Initiated Logout 1.0 §2).
   - `ending` (`src/ending`): the logout a client starts (OpenID Connect RP-Initiated Logout 1.0).
   - `notices` (`src/notices`): back-channel notices that a session closed.
   - `page` (`src/page`): the front-channel page.
@@ -336,6 +338,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `userinfo` (`src/userinfo`): the scenes of OpenID Connect's userinfo.
   - `verified-email` (`src/verified-email`): the scenes of refusing a token to a user whose email is not verified.
 - `@mod/conformance-device` (verification, `modules/tooling/conformance-device`): Owns the conformance scenes of the device area: device authorization, the verification interface and polling (RFC 8628), refusing an approval by a user whose email is not verified, and the audit events of the verification interface.
+  - `device-code-once` (`src/device-code-once`): the fault scenes of a device code decided and redeemed once (`guarantee-5-f`).
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
 - `@mod/conformance-exchange` (verification, `modules/tooling/conformance-exchange`): Owns the conformance scenes of the exchange area: Token Exchange (RFC 8693), its success with and without an actor, the lifetime asked, and its refusals, among them a subject whose email is not verified.
 - `@mod/conformance-federation` (verification, `modules/tooling/conformance-federation`): Owns the conformance scenes of the federation area: logging a browser in through an upstream OpenID Connect IdP, Google, Apple, or GitHub's OAuth, the audit events of those logins, and a start while the store fails.
   - `freshness` (`src/freshness`): the scenes of a federation login meeting a client's demand for a fresh login.
@@ -356,12 +360,15 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `dpop-once` (`src/dpop-once`): the fault scenes of a DPoP proof's `jti` spent once (`guarantee-5-e`).
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `jwt-bearer` (`src/jwt-bearer`): the scenes of the jwt-bearer grant.
+  - `requests-unavailable` (`src/requests-unavailable`): the fault scenes of the token endpoint's request limit letting no request by while the store cannot count, its fail mode closed (`guarantee-3-h`).
   - `revocation-unavailable` (`src/revocation-unavailable`): the fault scenes of the revocation endpoint answering done only once a token's revocation is kept (`guarantee-3-g`).
   - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a JWT bearer assertion while the store cannot answer (`guarantee-3-d`).
 - `@mod/conformance-ops` (verification, `modules/tooling/conformance-ops`): Owns the conformance scenes of operations: liveness, readiness, the metrics scrape and its dependency gauge, the log level, their boot refusals, and the security headers on every answer.
 - `@mod/conformance-passkey` (verification, `modules/tooling/conformance-passkey`): Owns the conformance scenes of the passkey area: registering a passkey from a session, and its refusals (no session, a second factor not recent, an origin or a frame not listed, a frame whose page is not reported, a challenge answered twice or past its lifetime, a credential id another account holds, a user not verified when required, the limit of passkeys per user, the store failing).
 - `@mod/conformance-recipes` (verification, `modules/tooling/conformance-recipes`): Keeps each recipe in the documents from going stale: a recipe's scene generates the app with the recipe's own command, starts it, and makes the recipe's requests over HTTP, as a user of the provider would.
 - `@mod/conformance-second-factor` (verification, `modules/tooling/conformance-second-factor`): Owns the conformance scenes of the second-factor area: second factor at login (by a form or a JSON body), enrollment, naming factors, step-up, lockout, a recovery code that lets in one login only when two use it at once, store failure, the audit events they record.
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `recovery-code-once` (`src/recovery-code-once`): the fault scenes of a recovery code used once (`guarantee-5-g`).
 - `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
   - `fetched` (`src/fetched`): the packages of this version npm already holds, taken from the registry for a release run again.

@@ -36,6 +36,8 @@ const sceneWith = (clients: readonly ClientScene[], allowed: readonly string[]):
 	users: [{ identifier: user.username, password: user.password }],
 	discovery: true,
 	logout: { allowed },
+	// Each scene signs a browser in afresh, all from one sender.
+	login: { attempts: 100 },
 });
 
 /** The back channel of an allowed client, and of one the operator did not allow. */
@@ -203,7 +205,7 @@ describe("a logout the client starts", () => {
 	// Open redirect: only a return the hint's client registered, compared exactly, is taken; any other
 	// refuses the request, the session left as it was.
 	it.runIf(!areaTarget().differs("logout-unregistered-return-refused"))(
-		"refuses a return the client did not register, never sending the browser to it, and leaves the session [oidc-rpinit-2-b] [oidc-rpinit-3-b]",
+		"refuses a return the client did not register, never sending the browser to it, and leaves the session [oidc-rpinit-2-b] [oidc-rpinit-3-b] [oidc-rpinit-4-c]",
 		async () => {
 			for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
 				const at = await signedIn();
@@ -232,7 +234,7 @@ describe("a logout the client starts", () => {
 
 	// A client_id beside the hint must be the client the ID token was issued to (RP-Initiated Logout 1.0 §2).
 	it.runIf(!areaTarget().differs("logout-client-id-checked"))(
-		"refuses a client_id that is not the client the hint was issued to, leaving the session [oidc-rpinit-2-a]",
+		"refuses a client_id that is not the client the hint was issued to, leaving the session [oidc-rpinit-2-a] [oidc-rpinit-4-c]",
 		async () => {
 			const at = await signedIn();
 			for (const method of ["GET", "POST"] as const) {
@@ -252,7 +254,7 @@ describe("a logout the client starts", () => {
 	// A parameter sent twice reads as none: refused first, so neither the client_id check nor the
 	// return's can be passed by sending it twice.
 	it.runIf(!areaTarget().differs("logout-repeated-parameter-refused"))(
-		"refuses a client_id or a return sent twice, leaving the session",
+		"refuses a client_id or a return sent twice, leaving the session [oidc-rpinit-4-c]",
 		async () => {
 			for (const [name, value] of [
 				["client_id", "other"],
@@ -277,17 +279,139 @@ describe("a logout the client starts", () => {
 		},
 	);
 
-	it("refuses a request without a hint [oidc-rpinit-3-a] [oidc-rpinit-4-c]", async () => {
-		const at = await signedIn();
-		for (const method of ["GET", "POST"] as const) {
-			const answer = await logout(at, method, { post_logout_redirect_uri: back });
-			expect([answer.status, answer.json?.error]).toEqual([400, "invalid_request"]);
-		}
-		expect(await stillSignedIn(at)).toBe(true);
-	});
+	// RP-Initiated Logout 1.0 §2: with no hint, the OP asks the End-User whether to log out; §3: with no
+	// hint, a return cannot be confirmed as the client's, so the confirmation never sends the browser to it.
+	describe.runIf(!areaTarget().differs("logout-confirmed-without-hint"))(
+		"a logout a client starts without a hint",
+		() => {
+			/** The confirmation page as the browser holding the session gets it, with the form's cookie. */
+			const confirmationFor = async (at: SignedIn) => {
+				const session = await at.browser.login();
+				const res = await fetch(`${base}/oauth/logout/confirm`, {
+					headers: at.browser.headers({ cookie: session }),
+				});
+				const text = await res.text();
+				const field = (name: string) =>
+					unescaped(new RegExp(`name="${name}" value="([^"]*)"`).exec(text)?.[1] ?? "");
+				const csrf = res.headers.getSetCookie().map((c) => c.split(";")[0] ?? "")[0] ?? "";
+				return {
+					res,
+					text,
+					cookie: `${session}; ${csrf}`,
+					token: field("csrf_token"),
+					confirmation: field("confirmation"),
+				};
+			};
+			/** The form posted as a browser does from a page under no-referrer: Origin null, no Referer. */
+			const posted = (
+				at: SignedIn,
+				cookie: string,
+				fields: Record<string, string>,
+				origin = "null",
+			) =>
+				fetch(`${base}/oauth/logout/confirm`, {
+					method: "POST",
+					redirect: "manual",
+					headers: at.browser.headers({
+						cookie,
+						origin,
+						"content-type": "application/x-www-form-urlencoded",
+					}),
+					body: new URLSearchParams(fields).toString(),
+				});
+
+			it("asks the person on its own site whether to log out, and logs them out once they agree [oidc-rpinit-2-i] [oidc-rpinit-2-j]", async () => {
+				const at = await signedIn();
+				// The RP's cross-site POST carries no session cookie: it is sent on to this site first.
+				const started = await fetch(`${base}/oauth/logout`, {
+					method: "POST",
+					redirect: "manual",
+					headers: at.browser.headers({ "content-type": "application/x-www-form-urlencoded" }),
+					body: new URLSearchParams({ state: "s" }).toString(),
+				});
+				expect([started.status, started.headers.get("location")]).toEqual([
+					303,
+					"/oauth/logout/confirm",
+				]);
+				expect(await stillSignedIn(at)).toBe(true);
+				const page = await confirmationFor(at);
+				expect(page.res.status).toBe(200);
+				expect(page.text).toContain("Do you want to log out of");
+				const policy = page.res.headers.get("content-security-policy") ?? "";
+				expect(policy).toContain("form-action 'self'");
+				expect(policy).toContain("frame-ancestors 'none'");
+				expect(policy).not.toContain("script-src");
+				const done = await posted(at, page.cookie, {
+					csrf_token: page.token,
+					confirmation: page.confirmation,
+				});
+				expect(done.status).toBe(200);
+				expect(await done.text()).toContain("You are logged out.");
+				expect(await stillSignedIn(at)).toBe(false);
+			});
+
+			it("asks the person where a request without a hint names a return, and once they agree never sends the browser to it [oidc-rpinit-2-i] [oidc-rpinit-3-a]", async () => {
+				for (const method of ["GET", "POST"] as const) {
+					const at = await signedIn();
+					const started = await logout(at, method, {
+						post_logout_redirect_uri: back,
+						client_id: "app",
+						state: "s",
+					});
+					expect([method, started.status, started.headers.get("location")]).toEqual([
+						method,
+						303,
+						"/oauth/logout/confirm",
+					]);
+					expect(await stillSignedIn(at)).toBe(true);
+					const page = await confirmationFor(at);
+					expect(page.text).toContain("Do you want to log out of");
+					expect(page.text).not.toContain(back);
+					const done = await posted(at, page.cookie, {
+						csrf_token: page.token,
+						confirmation: page.confirmation,
+					});
+					const text = await done.text();
+					expect([method, done.status, done.headers.get("location")]).toEqual([method, 200, null]);
+					expect(text).toContain("You are logged out.");
+					expect(text).not.toContain(back);
+					expect(await stillSignedIn(at)).toBe(false);
+				}
+			});
+
+			it("refuses the form without its CSRF token, or from another site, closing nothing", async () => {
+				const at = await signedIn();
+				const page = await confirmationFor(at);
+				const without = await posted(at, page.cookie, { confirmation: page.confirmation });
+				const foreign = await posted(
+					at,
+					page.cookie,
+					{ csrf_token: page.token, confirmation: page.confirmation },
+					"https://evil.example",
+				);
+				expect([without.status, foreign.status]).toEqual([403, 403]);
+				expect(await stillSignedIn(at)).toBe(true);
+			});
+
+			it("asks again, closing nothing, where the browser holds another session than the page was shown for", async () => {
+				const first = await signedIn();
+				const second = await signedIn();
+				const shownToFirst = await confirmationFor(first);
+				const ownPage = await confirmationFor(second);
+				const answer = await posted(second, ownPage.cookie, {
+					csrf_token: ownPage.token,
+					confirmation: shownToFirst.confirmation,
+				});
+				expect(answer.status).toBe(200);
+				expect(await answer.text()).toContain("Do you want to log out of");
+				expect(await stillSignedIn(first)).toBe(true);
+				expect(await stillSignedIn(second)).toBe(true);
+			});
+		},
+	);
 
 	// A hint naming no session cannot say which session to end.
-	it("refuses a hint that names no session, leaving the session", async () => {
+	it("refuses a hint that names no session, leaving the session [oidc-rpinit-4-c]", async () => {
 		const at = await signedIn();
 		const { sid: _, ...claims } = claimsOf(at.idToken);
 		const answer = await logout(at, "GET", { id_token_hint: signed({ typ: "JWT" }, claims) });
@@ -296,7 +420,7 @@ describe("a logout the client starts", () => {
 	});
 
 	// Token confusion: only an ID token is taken as the hint, never another kind the provider signs.
-	it("refuses as the hint a token of another kind, or one the provider did not sign [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
+	it("refuses as the hint a token of another kind, or one the provider did not sign [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b] [oidc-rpinit-4-c]", async () => {
 		const at = await signedIn();
 		const other = generateKeyPairSync("ed25519").privateKey;
 		const foreign = signed({ typ: "JWT" }, claimsOf(at.idToken), other);
@@ -328,7 +452,7 @@ describe("hints past their time", () => {
 	);
 
 	it.runIf(!areaTarget().differs("old-logout-hint"))(
-		"refuses a hint issued over a day ago, by GET or POST, leaving the session open",
+		"refuses a hint issued over a day ago, by GET or POST, leaving the session open [oidc-rpinit-4-c]",
 		async () => {
 			const at = await signedIn();
 			const hint = aged(at.idToken, 90_000);

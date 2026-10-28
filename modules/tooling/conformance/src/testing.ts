@@ -19,10 +19,10 @@ export {
 	on,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	successes,
-	writable,
 } from "./fault-scene/fault-scene.ts";
 export {
 	type Node,

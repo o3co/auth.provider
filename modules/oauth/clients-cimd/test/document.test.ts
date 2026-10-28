@@ -111,8 +111,6 @@ describe("document record", () => {
 		["a client secret's expiry", { client_secret_expires_at: 0 }],
 		["a secret method", { token_endpoint_auth_method: "client_secret_basic" }],
 		["a key method", { token_endpoint_auth_method: "private_key_jwt" }],
-		["no redirect URIs", { redirect_uris: undefined }],
-		["empty redirect URIs", { redirect_uris: [] }],
 		["redirect URIs not strings", { redirect_uris: [1] }],
 		["grant types without the code", { grant_types: ["refresh_token"] }],
 		["grant types not strings", { grant_types: "authorization_code" }],
@@ -126,6 +124,12 @@ describe("document record", () => {
 		["a scope not scope tokens", { scope: "read  write" }],
 	])("is refused for %s", (_, fields) => {
 		expect(record(fields)).toHaveProperty("refused");
+	});
+
+	it("refuses a document that registers no redirect URI, the client then never taking one [rfc6749-3.1.2.2-a]", () => {
+		for (const redirect_uris of [undefined, []]) {
+			expect(record({ redirect_uris }), JSON.stringify(redirect_uris)).toHaveProperty("refused");
+		}
 	});
 
 	it("puts each section an owner copies from the document, as copied, the field a copy refuses refusing it", () => {

@@ -94,6 +94,24 @@ describe("introspection", () => {
 		expect((await introspect("not-a-token")).body).toEqual({ active: false });
 	});
 
+	it("answers a signed token active only once its signature verifies: one byte of the signature changed, or the payload, is inactive [rfc7662-4-e]", async () => {
+		const token = await issue();
+		expect((await introspect(token)).body.active).toBe(true);
+		const [header = "", payload = "", signature = ""] = token.split(".");
+		const flipped = Buffer.from(signature, "base64url");
+		flipped[0] = (flipped[0] ?? 0) ^ 1;
+		const claims = JSON.parse(Buffer.from(payload, "base64url").toString());
+		const widened = Buffer.from(JSON.stringify({ ...claims, scope: "read write" })).toString(
+			"base64url",
+		);
+		for (const forged of [
+			`${header}.${payload}.${flipped.toString("base64url")}`,
+			`${header}.${widened}.${signature}`,
+		]) {
+			expect((await introspect(forged)).body).toEqual({ active: false });
+		}
+	});
+
 	it("refuses a public client and a wrong secret [rfc7662-2.1-d]", async () => {
 		const token = await issue();
 		expect((await introspect(token, "pub")).status).toBe(401);

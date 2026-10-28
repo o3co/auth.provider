@@ -9,9 +9,9 @@ Packages with a module the full template with every opt-in does not compose: `@m
 
 ## Routes
 
-54 routes (GET 21, POST 33); each is in [the route reference](routes.md).
+56 routes (GET 22, POST 34); each is in [the route reference](routes.md).
 
-- `HEAD` is answered for each `GET` that does not change state (15 of them), and for no other: a `GET` that changes state is never reached by `HEAD`.
+- `HEAD` is answered for each `GET` that does not change state (16 of them), and for no other: a `GET` that changes state is never reached by `HEAD`.
 - A CORS preflight (`OPTIONS` with `Access-Control-Request-Method`) is answered for the routes a path reaches that take cross-origin requests.
 
 `GET` routes that change state:

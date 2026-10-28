@@ -632,12 +632,20 @@ jobs:
         run: pnpm --filter "${{ matrix.area }}" run conformance:faults
       # The deployment's tests that move an instance's clock, in one leg alone (the integration job runs
       # the rest); with CONFORMANCE_FAULTS=1 a missing library fails them rather than skips. They report
-      # no evidence.
+      # no evidence. A name filter that matches nothing passes with every test skipped, so the step
+      # fails unless at least the two it holds ran and passed.
       - name: Deployment tests with a moved clock
         if: ${{ !cancelled() && strategy.job-index == 0 }}
         env:
           CONFORMANCE_FAULTS: '1'
-        run: pnpm exec vitest run --config vitest.integration.config.ts modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts -t clock
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run --config vitest.integration.config.ts modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts -t clock --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/clock-tests.json"
+          jq -e '.numPassedTests >= 2' "$RUNNER_TEMP/clock-tests.json" > /dev/null || {
+            echo "the clock step did not pass the 2 deployment clock tests it holds" >&2
+            exit 1
+          }
       - name: Keep what each scene ran on
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,10 +1,12 @@
 import {
 	confirmation,
+	type Deployed,
 	type Instance,
 	instanceOf,
 	type Match,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	runIdOf,
@@ -54,8 +56,9 @@ async function refusedAtCount(i: Instance, from: number) {
 	expect(i.relay.executions(identifierLockout).filter((e) => e.at > from)).toEqual([]);
 }
 
-/** Healed: the instance is ready, and a login from a new source is counted and opens a session. */
-async function healed(i: Instance) {
+/** Healed: the topology has recovered and the instance is ready, and a login from a new source is counted and opens a session. */
+async function healed(d: Deployed, i: Instance) {
+	await recovered(d);
 	await ready(i);
 	const source = nextSource();
 	expect(said(await loginAt(i, source))).toEqual([200, undefined, true]);
@@ -81,7 +84,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			await ready(a);
 			expect(a.relay.executions(attemptFrom(source)).some((e) => e.at > resumed)).toBe(true);
 			await refusedAtCount(a, stalled);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -100,7 +103,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 				a.relay.executions(attemptFrom(source)).some((e) => e.at > stalled && e.at < answer.at),
 			).toBe(true);
 			await refusedAtCount(a, stalled);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -108,17 +111,20 @@ describe("password login's attempt limit letting no attempt by while the store c
 		await on({ name: "attempts-unavailable-r", scene }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
+			const source = nextSource();
 			const cut = performance.now();
 			a.relay.reset("all");
 			const cutting = setInterval(() => a.relay.reset("all"), 20);
-			const answer = await loginAt(a, nextSource()).finally(() => clearInterval(cutting));
+			const answer = await loginAt(a, source).finally(() => clearInterval(cutting));
 			expect(said(answer)).toEqual(refusedUnconfirmed);
-			// Nothing reached Redis from the first cut to the answer.
-			expect(a.relay.executions(anything).filter((e) => e.at > cut && e.at < answer.at)).toEqual(
-				[],
-			);
+			// The attempt's count did not succeed from the first cut to the answer. Cuts 20 ms apart cannot
+			// stop a command getting through on a connection just opened, so the scene checks only the
+			// write its guarantee rests on.
+			expect(
+				successes(a, attemptFrom(source)).filter((e) => e.at > cut && e.at < answer.at),
+			).toEqual([]);
 			await refusedAtCount(a, cut);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -138,7 +144,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			const count = a.relay.executions(attemptFrom(source)).find((e) => e.at > delayed);
 			expect(count?.at).toBeGreaterThan(answer.at);
 			await refusedAtCount(a, delayed);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -160,7 +166,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 				a.relay.executions(attemptFrom(source)).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
 			await refusedAtCount(a, asking);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -186,7 +192,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			if (!answer) throw new Error("the login was not answered during the promotion");
 			expect(said(answer)).toEqual(refusedUnconfirmed);
 			await refusedAtCount(a, from);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -221,7 +227,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			expect(said(answer)).toEqual(refusedUnconfirmed);
 			a.relay.reset("confirming");
 			await refusedAtCount(a, from);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -247,7 +253,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			expect(a.relay.executions(attemptFrom(source)).filter((e) => e.at > from)).toEqual([]);
 			await replicasOnline(d);
 			await refusedAtCount(a, from);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 });

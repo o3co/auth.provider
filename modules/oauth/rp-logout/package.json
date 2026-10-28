@@ -15,6 +15,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
+		"@mod/csrf": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
@@ -31,6 +32,7 @@
 	},
 	"devDependencies": {
 		"@mod/claims-selection": "workspace:*",
+		"@mod/cookies": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session-requirements": "workspace:*",

@@ -9,6 +9,7 @@ interface Step {
 	readonly id?: string;
 	readonly name?: string;
 	readonly if?: string;
+	readonly shell?: string;
 	readonly env?: Readonly<Record<string, string>>;
 	readonly uses?: string;
 	readonly run?: string;
@@ -71,15 +72,31 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(gate.steps.map((s) => s.run).join("\n")).toContain("needs.conformance-faults.result");
 	});
 
-	it("run conformance's deployment tests that move an instance's clock in one leg of the fault job, failing rather than skipping and reporting no evidence", () => {
+	it("run conformance's deployment tests that move an instance's clock in one leg of the fault job, failing rather than skipping or matching none, and reporting no evidence", () => {
 		const steps = job("conformance-faults").steps;
 		const clock = steps.find((s) => s.name === "Deployment tests with a moved clock");
 		expect(clock?.if).toBe(expr("!cancelled() && strategy.job-index == 0"));
 		expect(clock?.env?.CONFORMANCE_FAULTS).toBe("1");
-		// The whole command, so no other config or name filter leaves the clock's tests out unseen.
+		// The whole script, so no other config or name filter leaves the clock's tests out unseen, and the
+		// count of those that passed, as a filter matching nothing passes with every test skipped.
+		const tests = "modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts";
+		// The count is the deployment's tests a fault run never skips, those that move a clock.
+		const held =
+			readFileSync(join(root, tests), "utf8").split("it.runIf(faultRun || hostLibfaketime())(")
+				.length - 1;
+		expect(held).toBeGreaterThan(0);
 		expect(clock?.run).toBe(
-			"pnpm exec vitest run --config vitest.integration.config.ts modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts -t clock",
+			[
+				"set -euo pipefail",
+				`pnpm exec vitest run --config vitest.integration.config.ts ${tests} -t clock --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/clock-tests.json"`,
+				`jq -e '.numPassedTests >= ${held}' "$RUNNER_TEMP/clock-tests.json" > /dev/null || {`,
+				`  echo "the clock step did not pass the ${held} deployment clock tests it holds" >&2`,
+				"  exit 1",
+				"}",
+				"",
+			].join("\n"),
 		);
+		expect(clock?.shell).toBe("bash");
 		expect(clock?.env?.SPEC_EVIDENCE_DIR).toBeUndefined();
 		// After the step that takes the library and the one that finds it moves Node's clock.
 		const at = (name: string) => steps.findIndex((s) => s.name === name);
