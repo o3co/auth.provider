@@ -43,8 +43,9 @@ async function control(i: Instance) {
 
 /**
  * After the fault: the device is refused as taken, with no take of its own, while its record is still
- * kept: polled by its own client, a kept device answers `invalid_grant` only once taken (a pending one
- * answers `authorization_pending`, an approved one issues), and a lost one is looked up as unknown.
+ * kept: polled by its own client, a kept device answers `invalid_grant` only once taken, or approved
+ * under a session since closed, which no scene closes (a pending one answers `authorization_pending`,
+ * an approved one issues), and a lost one is looked up as unknown.
  * Then a new device is issued.
  */
 async function refusedAsTaken(i: Instance, d: Device) {
