@@ -138,7 +138,7 @@ const refusedFor = (reason: string) =>
 
 /** A policy that allows what `allows` allows, and refuses the rest. */
 const policy = (allows: (request: IssuanceRequest) => boolean) =>
-	defineModule({ name: "test-policy", replicaSafe: true, takes: [] }, (m) => [
+	defineModule({ name: "test-policy", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(issuancePolicies).by(() => ({
 			name: "test-policy",
 			judge: async (request) =>
