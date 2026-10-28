@@ -6,7 +6,7 @@ import {
 	type Instance,
 	on as onDeployment,
 } from "@mod/conformance/testing";
-import { identityArea } from "@mod/conformance-identity";
+import { identityArea, type RevocationScene } from "@mod/conformance-identity";
 import { keysArea } from "@mod/conformance-keys";
 import { expect } from "vitest";
 // The package's entry, which sets the area up on each target.
@@ -16,8 +16,8 @@ import { beginBinding, browser, issuer, letInByRecovery, password, totp } from "
 const pair = generateKeyPairSync("ed25519");
 const user = "alice";
 
-/** A password login a second factor holds, on the Redis store, for one user. */
-export const faultScene = (): AreaScene => ({
+/** A password login a second factor holds, on the Redis store, for one user, the ledger revoking subjects where a scene says. */
+export const faultScene = (revocations?: RevocationScene): AreaScene => ({
 	...sceneOf(
 		keysArea.part({
 			signing: {
@@ -32,15 +32,18 @@ export const faultScene = (): AreaScene => ({
 			users: [{ identifier: user, password }],
 			// A scene's value, not the default: a scene logs the user in a dozen times in one window.
 			login: { attempts: 100, windowSeconds: 600 },
+			...(revocations ? { revocations } : {}),
 		}),
 		secondFactorArea.part({ mode: "optional" }),
 	),
 	storeFaults: true,
 });
 
-/** Runs a scene on a deployment of its own, as the base does, on the second factor's scene. */
-export const on = (o: Omit<Deploying, "scene">, scene: (d: Deployed) => Promise<void>) =>
-	onDeployment({ ...o, scene: faultScene() }, scene);
+/** Runs a scene on a deployment of its own, as the base does, on the second factor's scene unless it names another. */
+export const on = (
+	o: Omit<Deploying, "scene"> & { readonly scene?: AreaScene },
+	scene: (d: Deployed) => Promise<void>,
+) => onDeployment({ ...o, scene: o.scene ?? faultScene() }, scene);
 
 export type Browser = ReturnType<typeof browser>;
 

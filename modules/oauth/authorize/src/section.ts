@@ -20,6 +20,12 @@ export const section = z.strictObject({
 		.describe(
 			"oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default.",
 		),
+	"claims-parameter": z
+		.boolean()
+		.prefault(true)
+		.describe(
+			"Whether the claims request parameter's names and value constraints are taken, and discovery says it is supported. False ignores them, and boot warns; the sub asked, the acr, an essential auth_time and the parameter's form still hold, as do the scope's claims and the selections already kept.",
+		),
 	requests: z
 		.number()
 		.int()

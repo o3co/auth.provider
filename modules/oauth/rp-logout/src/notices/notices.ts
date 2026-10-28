@@ -16,8 +16,9 @@ import {
 
 /**
  * What a notice holds: one client to tell that a session closed, until a time (epoch ms on `kernel`'s
- * clock), and the logout token's id every try sends. Fields it does not know are left unread, so a
- * notice a newer host wrote is still delivered; one with no id gets a new one on each try.
+ * clock), the logout token's id every try sends, and, once a try failed, the time before which it is
+ * not tried again. Fields it does not know are left unread, so a notice a newer host wrote is still
+ * delivered; one with no id gets a new one on each try, and one with no such time is tried at once.
  */
 const fieldsShape = z.object({
 	client: z.string(),
@@ -25,6 +26,7 @@ const fieldsShape = z.object({
 	subject: z.string(),
 	until: z.number(),
 	jti: z.string().min(1).optional(),
+	after: z.number().optional(),
 });
 type Fields = z.infer<typeof fieldsShape>;
 
@@ -39,6 +41,8 @@ export interface NoticeParts {
 	readonly random: Random;
 	readonly log: Log;
 	readonly notifyMs: number;
+	/** How long a notice whose try failed waits before it is tried again. */
+	readonly retryMs: number;
 }
 
 /** OpenID Connect Back-Channel Logout 1.0 §2.4: the event a logout token carries. */
@@ -86,19 +90,9 @@ export function noticesOver(p: NoticeParts) {
 			throw error;
 		}
 	};
-	/** Tells the client once; a notice settled either way is done, and one to try again throws. */
-	const send = async (notice: string): Promise<void> => {
-		const fields = fieldsOf(notice);
-		const done = () => p.pending.done(notice);
-		if (!fields) {
-			p.log.warn("rp-logout.notice_unreadable", {});
-			return done();
-		}
+	/** One try at telling the client; a notice settled either way is done, and one to try again throws. */
+	const attempt = async (fields: Fields, done: () => Promise<void>): Promise<void> => {
 		const { client } = fields;
-		if (p.clock.now() > fields.until) {
-			p.log.warn("rp-logout.notice_expired", { client });
-			return done();
-		}
 		const registered = (await p.clients.find(client))?.section(registration);
 		const uri = registered?.["backchannel-logout-uri"];
 		if (!registered || uri === undefined) return done();
@@ -113,6 +107,46 @@ export function noticesOver(p: NoticeParts) {
 		if (answer === 408 || answer === 429 || answer >= 500) throw new Unavailable("rp-logout");
 		p.log.warn("rp-logout.backchannel_rejected", { client, status: String(answer) });
 		return done();
+	};
+	/**
+	 * Keeps the notice to be tried no sooner than `retryMs` after it was last due, or after it was made
+	 * where it never waited (Back-Channel Logout 1.0 §2.5), its other fields as they were, those it does
+	 * not know among them. The time is read from the notice alone, never the clock, so every host that
+	 * fails the same notice at once keeps the same one, which the store holds once. Kept before the old
+	 * one goes, so a failure between leaves the notice twice, never none: the client tells the repeat
+	 * by its id. Answers the notice kept.
+	 */
+	const later = async (notice: string, fields: Fields): Promise<string> => {
+		const due = fields.after ?? fields.until - p.notifyMs;
+		const next = JSON.stringify({ ...JSON.parse(notice), after: due + p.retryMs });
+		await p.pending.add(next);
+		await p.pending.done(notice);
+		return next;
+	};
+	/**
+	 * Tries a notice whose wait is over; one to try again is kept to wait, and throws. The notice kept
+	 * goes into `kept`, so a sweep that comes upon it again, its time still past, passes over it.
+	 */
+	const send = async (notice: string, kept?: Set<string>): Promise<void> => {
+		const fields = fieldsOf(notice);
+		const done = () => p.pending.done(notice);
+		if (!fields) {
+			p.log.warn("rp-logout.notice_unreadable", {});
+			return done();
+		}
+		if (p.clock.now() > fields.until) {
+			p.log.warn("rp-logout.notice_expired", { client: fields.client });
+			return done();
+		}
+		if (fields.after !== undefined && p.clock.now() < fields.after) return;
+		try {
+			await attempt(fields, done);
+		} catch (error) {
+			// Where the store cannot keep the wait either, the notice stays as it was, tried at the next sweep.
+			const next = await later(notice, fields).catch(() => undefined);
+			if (next !== undefined) kept?.add(next);
+			throw error;
+		}
 	};
 	return {
 		/** Keeps a notice for each client the session holds; answers the notices once all are kept. */
@@ -130,7 +164,13 @@ export function noticesOver(p: NoticeParts) {
 		deliver: async (notices: readonly string[]): Promise<void> => {
 			for (const notice of notices) await send(notice).catch(() => undefined);
 		},
-		sweep: () => p.pending.each(send),
+		/** Tries every kept notice whose wait is over once, and one kept again in this sweep not again. */
+		sweep: () => {
+			const kept = new Set<string>();
+			return p.pending.each((notice) =>
+				kept.has(notice) ? Promise.resolve() : send(notice, kept),
+			);
+		},
 	};
 }
 
@@ -159,5 +199,7 @@ export async function noticesFrom(c: BuildContext<Settings>): Promise<Notices> {
 		random: c.random,
 		log: c.log,
 		notifyMs: c.section["notify-within"] * 1000,
+		// At least a sweep apart, so the sweep after a failure never tries it again at once.
+		retryMs: c.section["sweep-interval"] * 1000,
 	});
 }

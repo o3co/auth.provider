@@ -53,7 +53,9 @@ export interface FlowParts extends Place {
 	readonly sessions: Pick<Sessions, "enter">;
 	readonly codes: Pick<Codes, "issue" | "redemptionOf" | "lifetimeMs">;
 	/** What a claims request names beyond its scope: read, selected and kept only while `on`. */
-	readonly selections: Pick<ClaimsSelections, "mode" | "scopeOf" | "select" | "keepForCode">;
+	readonly selections: Pick<ClaimsSelections, "scopeOf" | "select" | "keepForCode">;
+	/** Whether a claims request's names and value constraints are taken (the package's `claims-parameter`). */
+	readonly claimsParameter: boolean;
 	/** Whether `tokens`' issuance policies would let the code's access token be issued. */
 	readonly tokens: Pick<Tokens, "admits">;
 	readonly clock: Clock;
@@ -74,7 +76,7 @@ export type Flow = (trusted: Trusted) => Promise<Decision>;
 export function flowWith(parts: FlowParts): Flow {
 	const { issuer, self, sessions: entered, codes: issued, clock, loginPage } = parts;
 	const { reauths, stepUp, consent, openidRequired, tokens: issuance, target: targetOf } = parts;
-	const { selections } = parts;
+	const { selections, claimsParameter } = parts;
 	const urlWith = (params: Iterable<readonly [string, string]>) =>
 		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
 
@@ -86,10 +88,10 @@ export function flowWith(parts: FlowParts): Flow {
 		const { challenge, nonce, prompt } = checked;
 		const allowed = checkScope(client, one("scope"), issuer, openidRequired);
 		if (allowed.kind !== "allowed") return allowed;
-		// The names and the sub a claims request asks are OpenID Connect's alone, the names read only while
-		// selections are taken and the sub whatever the mode; an acr or auth_time asked holds for any request.
+		// The names and the sub a claims request asks are OpenID Connect's alone, the names read only where
+		// claims-parameter takes them and the sub whatever it says; an acr or auth_time asked holds for any request.
 		const oidc = allowed.scope.includes("openid");
-		const naming = oidc && selections.mode === "on";
+		const naming = oidc && claimsParameter;
 		const claimsText = one("claims");
 		const claims =
 			claimsText === undefined
@@ -227,6 +229,7 @@ export async function flowOver(c: BuildContext<Settings>, place: Place): Promise
 		clock: c.clock,
 		loginPage: c.section["login-page"],
 		openidRequired: c.section["oidc-mode"] === "oidc-required",
+		claimsParameter: c.section["claims-parameter"],
 		reauths,
 		stepUp: await stepUpOver(c, reauths),
 		consent: await consentDecisionOver(c),

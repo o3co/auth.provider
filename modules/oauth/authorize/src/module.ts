@@ -1,4 +1,4 @@
-import { claimsSelections, selectionConsents } from "@mod/claims-selection";
+import { selectionConsents } from "@mod/claims-selection";
 import { documentCopies } from "@mod/client-documents";
 import { metadataSections } from "@mod/clients";
 import { routes, use } from "@mod/http";
@@ -40,11 +40,15 @@ export default defineModule(
 		// Answers only in the query, and takes no request object by reference (discovery's default is true).
 		m.contribute(metadata).by(() => ({ name: "response_modes_supported", value: ["query"] })),
 		m.contribute(metadata).by(() => ({ name: "request_uri_parameter_supported", value: false })),
-		// Claims requests are taken only while claims-selection is on; otherwise discovery's default, false, stands.
-		m.contribute(metadata).by(async (c) => ({
-			name: "claims_parameter_supported",
-			value: (await c.get(claimsSelections)).mode === "on" ? true : undefined,
-		})),
+		// Claims requests are taken only where claims-parameter says; otherwise discovery's default, false,
+		// stands, and boot says so once, as this item is built once.
+		m.contribute(metadata).by((c) => {
+			if (!c.section["claims-parameter"]) c.log.warn("authorize.claims_parameter_off");
+			return {
+				name: "claims_parameter_supported",
+				value: c.section["claims-parameter"] ? true : undefined,
+			};
+		}),
 		// Consent for a claims request's names is judged as it is for the scope: first-party, or agreed to.
 		m.contribute(selectionConsents).by(async (c) => {
 			const { consented } = await consentDecisionOver(c);

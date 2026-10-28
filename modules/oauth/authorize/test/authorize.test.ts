@@ -11,7 +11,7 @@ import {
 	selectionRecords,
 } from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
@@ -119,8 +119,8 @@ async function serve(
 		asking?: boolean;
 		/** The deployment's environment, production unless a test tries a page on this machine. */
 		environment?: "production" | "development";
-		/** claims-selection's mode; on unless a test is about another. */
-		claims?: "off" | "draining" | "on";
+		/** The package's claims-parameter; true unless a test is about false. */
+		claimsParameter?: boolean;
 		/** claims-selection's store; the in-memory one unless a test makes it fail. */
 		selectionStore?: Module;
 	} = {},
@@ -243,10 +243,13 @@ async function serve(
 			]),
 			...(options.asking === false ? { consent: {} } : consentConfig()),
 			// Most scenes here are not about OpenID Connect, so they leave out openid.
-			...authorizeConfig({ "oidc-mode": "dual", ...options.authorize }),
+			...authorizeConfig({
+				"oidc-mode": "dual",
+				"claims-parameter": options.claimsParameter ?? true,
+				...options.authorize,
+			}),
 			...acrConfig(options.acr ?? {}),
 			...codeGrantConfig({ "code-lifetime": "1m", ...options.codeGrant }),
-			...claimsSelectionConfig({ mode: options.claims ?? "on" }),
 		},
 		runtime,
 	};
@@ -351,7 +354,7 @@ describe("authorize: trust in the redirect URI", () => {
 		expect(loopback.at?.origin).toBe("http://127.0.0.1:9555");
 	});
 
-	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d] [oidc-core-3.1.2.2-b] [oidc-core-3.1.2.2-i] [rfc6749-10.14-a]", async () => {
+	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d] [oidc-core-3.1.2.2-b] [oidc-core-3.1.2.2-i] [rfc6749-10.14-a] [rfc6749-4.1.2.1-d]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const cases: [Record<string, string> | string, string][] = [
@@ -381,6 +384,7 @@ describe("authorize: trust in the redirect URI", () => {
 				res.at?.searchParams.get("state"),
 				res.at?.searchParams.get("iss"),
 			]).toEqual([error, "s1", issuer]);
+			expect(res.at?.searchParams.get("error")).toMatch(/^[\x20\x21\x23-\x5B\x5D-\x7E]+$/);
 		}
 		const twice = await authorize(`${new URLSearchParams(request())}&state=s2`, cookie);
 		expect([twice.at?.searchParams.get("error"), twice.at?.searchParams.has("state")]).toEqual([
@@ -582,10 +586,11 @@ describe("authorize: the section", () => {
 		]);
 	});
 
-	it("reads a section that holds only the login page with the defaults it had", () => {
+	it("reads a section that holds only the login page with the defaults it had, claims-parameter true", () => {
 		expect(section.parse(login)).toEqual({
 			...login,
 			"oidc-mode": "oidc-required",
+			"claims-parameter": true,
 			requests: 60,
 			window: 60,
 		});
@@ -1567,13 +1572,13 @@ describe("authorize: the claims a request names beyond its scope", () => {
 		expect(plain.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode, before an acr it cannot know, and reads no sub without openid [oidc-core-5.5.1-b]", async () => {
+	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever claims-parameter, before an acr it cannot know, and reads no sub without openid [oidc-core-5.5.1-b]", async () => {
 		type Served = Awaited<ReturnType<typeof serve>>;
 		const error = async (s: Served, claims: Record<string, unknown>, cookie: string) =>
 			(await s.authorize(asking(claimsOf(claims)), cookie)).at?.searchParams.get("error");
 		const unknown = { essential: true, value: "urn:test:unknown" };
-		for (const mode of ["on", "off", "draining"] as const) {
-			const s = await serve({ claims: mode });
+		for (const claimsParameter of [true, false]) {
+			const s = await serve({ claimsParameter });
 			const cookie = await s.login();
 			const oauth = { scope: "read", claims: claimsOf({ id_token: { sub: { value: "bob" } } }) };
 			expect((await s.authorize(request(oauth), cookie)).at?.searchParams.has("code")).toBe(true);
@@ -1591,21 +1596,29 @@ describe("authorize: the claims a request names beyond its scope", () => {
 		}
 	});
 
-	it("reads no names and keeps nothing unless on, and says it supports the claims parameter only when on", async () => {
+	it("reads no names and keeps nothing where claims-parameter is false, says it supports the claims parameter only where true, and warns at boot where false", async () => {
 		const published = contract<readonly MetadataItem[]>("published");
 		const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 			m.provide(published).by((c) => c.collect(metadata)),
 		]);
-		for (const mode of ["off", "draining", "on"] as const) {
-			const s = await serve({ claims: mode, extra: [reader] });
+		for (const claimsParameter of [true, false]) {
+			const from = logged.lines().length;
+			const s = await serve({ claimsParameter, extra: [reader] });
 			const cookie = await s.login();
 			const res = await s.authorize(asking(claimsOf({ userinfo: { name: null } })), cookie);
+			// Ignored where false: the request is not refused, and the code is given with nothing kept.
+			expect(res.at?.searchParams.has("code"), String(claimsParameter)).toBe(true);
 			const kept = await selectionOf(s, res.at?.searchParams.get("code"));
-			expect(kept === undefined, mode).toBe(mode !== "on");
+			expect(kept === undefined, String(claimsParameter)).toBe(!claimsParameter);
 			const supported = s.app
 				.get(published)
 				.find((item) => item.name === "claims_parameter_supported");
-			expect(supported?.value, mode).toBe(mode === "on" ? true : undefined);
+			expect(supported?.value, String(claimsParameter)).toBe(claimsParameter ? true : undefined);
+			const warned = logged
+				.lines()
+				.slice(from)
+				.filter((l) => l.event === "authorize.claims_parameter_off");
+			expect(warned.length, String(claimsParameter)).toBe(claimsParameter ? 0 : 1);
 			await stop();
 		}
 	});

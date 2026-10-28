@@ -12,26 +12,15 @@ import {
 	repointed,
 	runIdOf,
 	sameMark,
-	storeWrite,
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	type Code,
-	codeAt,
-	codeNoted,
-	codeUse,
-	on,
-	prefix,
-	redeemAt,
-	said,
-} from "../../faults/test/faults.ts";
+import { type Code, codeAt, on, redeemAt, said } from "../../faults/test/faults.ts";
+import { codeNoted, codeRecord, codeUse, isStoreOperation } from "../../faults/test/wire.ts";
 
 const refused = [400, "invalid_grant"];
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
-/** Any write to a code's record. */
-const codeRecord = storeWrite({ prefix, space: "code-grant-store.codes" });
 const issued = [200, "Bearer"];
 
 /**
@@ -72,7 +61,7 @@ describe("an authorization code redeemed once under faults", () => {
 			const answer = await redeemAt(a, c);
 			const dropped = await drop.first;
 			// Nothing but the use was cut with its answer.
-			expect(dropped.collateral.filter((x) => x.command.name === "EVAL")).toEqual([]);
+			expect(dropped.collateral.filter((x) => isStoreOperation(x.command))).toEqual([]);
 			expect(said(answer)).toEqual(issued);
 			// The dropped send, and a resend under its mark that took its answer.
 			expect(successes(a, codeUse(c)).length).toBeGreaterThan(1);

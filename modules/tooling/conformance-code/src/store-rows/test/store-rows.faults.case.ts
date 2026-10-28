@@ -10,26 +10,15 @@ import {
 	ready,
 	recovered,
 	startDeployment,
-	storeWrite,
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	type Code,
-	codeAt,
-	codeUse,
-	faultScene,
-	on,
-	prefix,
-	redeemAt,
-	said,
-} from "../../faults/test/faults.ts";
+import { type Code, codeAt, faultScene, on, redeemAt, said } from "../../faults/test/faults.ts";
+import { codeRecord, codeUse } from "../../faults/test/wire.ts";
 
 const refused = [400, "invalid_grant"];
 const issued = [200, "Bearer"];
 const unavailable = [503, "temporarily_unavailable"];
-/** Any write to a code's record, which a redemption makes before it uses the code up. */
-const codeRecord = storeWrite({ prefix, space: "code-grant-store.codes" });
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The control: with no fault, a code is used up by one write that succeeds, and a token given. */

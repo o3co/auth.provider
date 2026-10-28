@@ -1,6 +1,6 @@
 import { auditStandIn } from "@mod/audit/testing";
 import claimsSelection from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import { type Clients, clients, metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
@@ -177,7 +177,6 @@ export async function harness(
 			...usersConfig([]),
 			...clientsConfig(registered),
 			...rpLogoutConfig({ "sweep-interval": "1s", ...options.settings }),
-			...claimsSelectionConfig(),
 		},
 		runtime,
 	});

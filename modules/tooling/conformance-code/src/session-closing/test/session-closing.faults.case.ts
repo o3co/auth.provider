@@ -1,6 +1,5 @@
 import {
 	confirmation,
-	type Execution,
 	failover,
 	type Instance,
 	instanceOf,
@@ -10,13 +9,20 @@ import {
 	replicasOnline,
 	repointed,
 	runIdOf,
-	type StoreKey,
 	sameMark,
-	storeWrite,
 	writtenValues,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import { browserOn, codeAt, faultScene, on, prefix, redeemAt } from "../../faults/test/faults.ts";
+import { browserOn, codeAt, faultScene, on, redeemAt } from "../../faults/test/faults.ts";
+import {
+	added,
+	type Closing,
+	closingOf,
+	doneWith,
+	isStoreOperation,
+	recordAs,
+	revocationOf,
+} from "../../faults/test/wire.ts";
 import { backChannel } from "../../testing.ts";
 
 // Userinfo shows whether a token's path is open; pending closes are gone on with every second. The
@@ -28,56 +34,6 @@ const logoutAlone = faultScene({ userinfo: true, sweepSeconds: 3600 });
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const state = (v: unknown) => (v as { state?: unknown } | null)?.state;
-/** A handle added to the closings: a shard's list holding one, as a scene starts with none pending. */
-const added = storeWrite({
-	prefix,
-	space: "session-store.closings",
-	value: (v) => Array.isArray(v) && v.length > 0,
-});
-/** The session's record written as `closing`, or as `closed`. */
-const recordAs = (s: "closing" | "closed", handle?: string): Match =>
-	storeWrite({
-		prefix,
-		space: "session-store.sessions",
-		...(handle ? { partition: handle } : {}),
-		value: (v) => state(v) === s,
-	});
-/** The participant's write that puts the session's access token, by its `jti`, on the revoked list. */
-const revocationOf = (jti: string) =>
-	storeWrite({
-		prefix,
-		space: "tokens-store.revoked",
-		partition: jti,
-		operations: ["putIfAbsent"],
-	});
-
-/** A close a logout began: its session's handle, the closings' shard it was added to, and its token's `jti`. */
-interface Closing {
-	readonly handle: string;
-	readonly shard: StoreKey;
-	readonly jti: string;
-}
-
-/** The close an add wrote, the one item of its shard's list, for the session whose token is `jti`. */
-function closingOf(add: Execution, jti: string): Closing {
-	const [written] = writtenValues(add.command);
-	const list = written?.value;
-	if (!written || !Array.isArray(list) || list.length !== 1 || typeof list[0] !== "string")
-		throw new Error(`the closings held more than the one close: ${JSON.stringify(list)}`);
-	return { handle: list[0], shard: written.key, jti };
-}
-
-/** The close's shard written without its handle: the close is done. */
-const doneWith = (c: Closing) =>
-	storeWrite({
-		prefix,
-		space: c.shard.space,
-		partition: c.shard.partition,
-		name: c.shard.name,
-		value: (v) => Array.isArray(v) && !v.includes(c.handle),
-	});
 
 /** The `jti` of an access token issued as a JWT. */
 const jtiOf = (token: string) => {
@@ -196,7 +152,7 @@ describe("a closing session closed under faults", () => {
 			const drop = a.relay.dropReplyTo(recordAs("closing"));
 			expect(await s.browser.logout()).toBe(200);
 			const dropped = await drop.first;
-			expect(dropped.collateral.filter((x) => x.command.name === "EVAL")).toEqual([]);
+			expect(dropped.collateral.filter((x) => isStoreOperation(x.command))).toEqual([]);
 			const c = closingOf(await add, s.jti);
 			const effects = successesSince([a], recordAs("closing", c.handle), from);
 			expect(effects.length).toBeGreaterThan(1);
@@ -280,7 +236,7 @@ describe("a closing session closed under faults", () => {
 					(e) =>
 						e.at > s.from &&
 						e.at < wait.at &&
-						e.command.name === "EVAL" &&
+						isStoreOperation(e.command) &&
 						runIdOf(e.reply) !== undefined,
 				)
 				.at(-1);

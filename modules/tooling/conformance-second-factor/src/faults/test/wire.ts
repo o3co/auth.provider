@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type Command, type Match, storeWrite } from "@mod/conformance/testing";
+import { type Command, keysOf, type Match, storeRead, storeWrite } from "@mod/conformance/testing";
 
 // The store's own names a scene matches its writes by: the space, its records' fields, the
 // operations, and how a recovery code is kept, as mfa-store, mfa and mfa-recovery keep them. Nothing
@@ -37,3 +37,26 @@ export const useOf = (code: string): Match =>
 					f.kind === "recovery_code" && Array.isArray(f.state) && f.state.at(-1) === digest(code),
 			),
 	});
+
+/**
+ * Any write to a subject's factor list: a factor bound or removed, recovery codes reissued, and the
+ * fence a revocation moves (mfa-revocation, a follower), each written on what was read, so a change
+ * read before a fence moved finds the list changed and decides again. Not the mark that confirms a
+ * read, which changes nothing.
+ */
+export const factorListWritten: Match = storeWrite({
+	prefix,
+	space: "mfa-store.factors",
+	name: "record",
+	operations: ["putIfAbsent", "replaceIf"],
+});
+
+/** A read of a subject's revocation boundary: a session's check, comparing its authentication with it. */
+export const boundaryRead = (subject: string): Match => {
+	const read = storeRead({ prefix, space: "subject-revocation-store.boundaries" });
+	return {
+		request: (command) =>
+			read.request(command) && keysOf(command).some((k) => k.partition === subject),
+		succeeded: read.succeeded,
+	};
+};

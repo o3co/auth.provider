@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import { claimsSelections, type Selection, selectionConsents } from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type Client, clients } from "@mod/clients";
@@ -191,7 +191,6 @@ function assembly(options: Options = {}) {
 				confidentialClient({ id: "exchanger", sections: allowed([...both, exchangeType]) }),
 			]),
 			...codeGrantConfig(),
-			...claimsSelectionConfig({ mode: "on" }),
 			...refreshConfig({
 				lifetime: `${options.lifetime ?? 3600}s`,
 				"sweep-interval": "1s",

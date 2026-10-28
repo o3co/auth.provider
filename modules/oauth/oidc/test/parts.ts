@@ -1,6 +1,6 @@
 import { selectionConsents } from "@mod/claims-selection";
 import claimsSelection from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import { type IdTokenMaker, idTokens, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
@@ -103,12 +103,17 @@ export const composed = (p: {
 		...keysConfig(),
 		...issuerConfig({ url: "https://as.example" }),
 		...usersConfig([]),
-		// Off unless a test keeps a selection: an ID token's redemption then reads no pin.
-		...claimsSelectionConfig({ mode: "off" }),
 		...p.config,
 	},
 	runtime: p.runtime,
 });
 
-/** The composition of `composed`, assembled. */
-export const booted = (p: Parameters<typeof composed>[0]) => assemble(composed(p));
+/**
+ * The composition of `composed`, assembled, with the tests' default redemption (`r-test`) pinned, as
+ * code-grant pins each redemption before an ID token is made for it.
+ */
+export async function booted(p: Parameters<typeof composed>[0]) {
+	const app = await assemble(composed(p));
+	for (const hook of app.get(hooks)) await hook.pin("r-test");
+	return app;
+}
