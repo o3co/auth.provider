@@ -201,7 +201,7 @@ it("connects directly to a dotted entry's name and the names under it, and to no
 	expect(await underDot(".other.example.test")).toEqual({ proxied: 1, resolved: 0 });
 });
 
-it("checks a destination written as an address against that address, never the proxy's [oidc-core-16.17-a] [oidc-discovery-7.1-a]", async () => {
+it("checks a destination written as an address against that address, never the proxy's [oidc-core-16.17-a] [oidc-discovery-7.1-a] [oidc-discovery-7.1-d]", async () => {
 	const out = outboundOver(
 		section.parse({ "allow-any-public": true, proxy: `http://127.0.0.1:${proxyPort}` }),
 		noResolving,
@@ -217,6 +217,32 @@ it("checks a destination written as an address against that address, never the p
 	// A certificate for the proxy's address, or for localhost, does not stand for the destination.
 	expect(await reached("proxy")).toBe("unreachable");
 	expect(await reached("public")).toBe(200);
+});
+
+it("checks the server's certificate over the tunnel: its name the host asked for, by an authority trusted [oidc-discovery-7.1-d]", async () => {
+	const proxied = { proxy: `http://127.0.0.1:${proxyPort}` };
+	const reached = (out: ReturnType<typeof paths>, url: string) =>
+		out.fetch(url).then(
+			(answer) => answer.status,
+			(error: unknown) => (error as Partial<OutboundUnavailable>).failure,
+		);
+	expect(await reached(paths(proxied), at("/jwks"))).toBe(200);
+	// The tunnel leads to the same server, whose certificate names idp.example.test alone.
+	const otherName = paths({ ...proxied, allow: ["idp.example.test", "other.example.test"] });
+	expect(await reached(otherName, `https://other.example.test:${idpPort}/jwks`)).toBe(
+		"unreachable",
+	);
+	const untrusted = outboundOver(
+		section.parse({ allow: ["idp.example.test"], ...proxied }),
+		noResolving,
+		{},
+	);
+	expect(await reached(untrusted, at("/jwks"))).toBe("unreachable");
+	expect(asked.map((a) => a.target)).toEqual([
+		`idp.example.test:${idpPort}`,
+		`other.example.test:${idpPort}`,
+		`idp.example.test:${idpPort}`,
+	]);
 });
 
 it("asks the proxy for a destination written as an address as written, never its IPv4 spelling", async () => {
