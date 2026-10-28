@@ -326,7 +326,8 @@ jobs:
         with:
           # The daily run tests develop, where merged work waits for the next release.
           ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
-          # A pull request's change is read against its base, from where they part.
+          # A pull request's change is read against its base, from where they part; a moved file by both
+          # its paths.
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -348,7 +349,7 @@ jobs:
           patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
           faults=$(pnpm --silent --filter @mod/spec-checklist run plan faults)
           if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then
-            changed=$(git diff --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\n") | map(select(. != ""))')
+            changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\n") | map(select(. != ""))')
             reaches=$(jq -c "$REACHES" <<<"$changed")
             echo "files the change touches: $changed; they reach the scenes: $reaches"
             if [ "$reaches" != true ]; then

@@ -73,7 +73,7 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		const lines = (step?.run ?? "").split("\n").map((l) => l.trim());
 		for (const line of [
 			'if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then',
-			`changed=$(git diff --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\\n") | map(select(. != ""))')`,
+			`changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\\n") | map(select(. != ""))')`,
 			'reaches=$(jq -c "$REACHES" <<<"$changed")',
 			'if [ "$reaches" != true ]; then',
 			"areas='[]'",
@@ -105,6 +105,8 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			[["package.json"], "true"],
 			[[".github/workflows/ci.yml"], "true"],
 			[["docs/compliance/guarantee.md", "modules/oauth/code-grant/src/grant.ts"], "true"],
+			// A file moved out of a module into the docs: without renames, both its paths are read.
+			[["docs/notes/grant.ts", "modules/oauth/code-grant/src/grant.ts"], "true"],
 		];
 		for (const [files, answer] of cases) expect([files, reaches(files)]).toEqual([files, answer]);
 		// A job with nothing planned is skipped, as a matrix of none cannot run.
