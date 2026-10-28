@@ -3,7 +3,7 @@ import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import senderBindingModule from "@mod/sender-binding/module";
@@ -30,7 +30,8 @@ const lifetimeMs = 3_600_000;
 const after = (ms: number) => {
 	now = start + ms;
 };
-const runtime = quietRuntime({ clock: { now: () => now } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
 
 /** Issues through `issue`, which nothing here refuses, and answers what it issued. */
@@ -140,4 +141,23 @@ it("answers unavailable, never valid or invalid, while the revoked tokens' place
 	await expect(t.revokeReferenced(referenceOf(issued))).rejects.toBeInstanceOf(Unavailable);
 	place.down = false;
 	expect(await t.verifyAccess(token)).toMatchObject({ kind: "valid" });
+});
+
+it("keeps no access token it checks or revokes, only the token's id, and logs none [rfc9700-4.9.3-a]", async () => {
+	const { place, t, token } = await boot();
+	const checked = await t.verifyAccess(token);
+	if (checked.kind !== "valid") throw new Error(`refused: ${checked.reason}`);
+	expect(await t.issuedToOf(token)).toEqual({ kind: "issued", issuedTo: "c" });
+	expect(await t.revokeAccess(token)).toEqual({ kind: "revoked" });
+	expect(await t.verifyAccess(token)).toEqual({ kind: "invalid", reason: "revoked" });
+	place.down = true;
+	await expect(t.verifyAccess(token)).rejects.toBeInstanceOf(Unavailable);
+	place.down = false;
+	after(lifetimeMs + denylistAllowanceMs);
+	expect(await t.verifyAccess(token)).toMatchObject({ kind: "invalid" });
+	// The place was asked, by the id alone.
+	expect(place.asked).toContainEqual(["save", checked.id, expect.any(Number)]);
+	// Neither the token nor its signature, without which it cannot be rebuilt, reached the place or the log.
+	const kept = JSON.stringify([place.asked, logged.lines()]);
+	for (const secret of [token, token.split(".")[2] ?? token]) expect(kept).not.toContain(secret);
 });
