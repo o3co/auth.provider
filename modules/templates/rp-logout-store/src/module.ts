@@ -31,21 +31,24 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "rp-logout-store", section, takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => held),
-	m.contribute(spaces).by(() => pending),
-	m.provide(sessionClients).by(async (c) =>
-		keyedSetsIn({
-			...(await placeIn(c, held)),
-			cap: c.section["clients-per-session"],
-			clock: c.clock,
-		}),
-	),
-	m.provide(pendingNotices).by(async (c) =>
-		deferredIn({
-			...(await placeIn(c, pending)),
-			shards: c.section["notice-shards"],
-			perShard: c.section["notices-per-shard"],
-		}),
-	),
-]);
+export default defineModule(
+	{ name: "rp-logout-store", replicaSafe: true, section, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => held),
+		m.contribute(spaces).by(() => pending),
+		m.provide(sessionClients).by(async (c) =>
+			keyedSetsIn({
+				...(await placeIn(c, held)),
+				cap: c.section["clients-per-session"],
+				clock: c.clock,
+			}),
+		),
+		m.provide(pendingNotices).by(async (c) =>
+			deferredIn({
+				...(await placeIn(c, pending)),
+				shards: c.section["notice-shards"],
+				perShard: c.section["notices-per-shard"],
+			}),
+		),
+	],
+);
