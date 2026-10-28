@@ -28,7 +28,7 @@
 - A close left pending records `logout.close_pending` and answers `503 temporarily_unavailable`, clearing the cookie, as `logout` does, however often it is sent again: its tokens live until the close is swept, so it is no logout yet.
 - After a close, `logout.success`, with the subject and `sid`. Then, in order: the front-channel page when the browser prefers HTML to JSON and a client can be framed; `303` to the upstream; `303` to the return; `200 {"logged_out":true}`.
 - Every answer is `no-store` with `Pragma: no-cache`.
-- Each host sweeps the kept notices every `sweep-interval`, logging how many it keeps; a notice whose try failed waits a `sweep-interval` before it is tried again (Back-Channel Logout 1.0 §2.5); a session's close never waits for a client.
+- Each host sweeps the kept notices every `sweep-interval`, logging how many it keeps; a notice whose try failed is not tried again until a `sweep-interval` after it was last due, or made, whichever host tried it, a late sweep trying it at once (Back-Channel Logout 1.0 §2.5); a session's close never waits for a client.
 - A client the store pushes out of a session's set is logged.
 - Returns and channel URLs are as `registration` judges them; a registered client's back channel that `outbound`'s policy refuses refuses boot.
 - A record whose section does not fit is refused whole (`clients`).

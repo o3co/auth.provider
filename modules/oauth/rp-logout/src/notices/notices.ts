@@ -109,12 +109,16 @@ export function noticesOver(p: NoticeParts) {
 		return done();
 	};
 	/**
-	 * Keeps the notice to be tried no sooner than `retryMs` from now (Back-Channel Logout 1.0 §2.5),
-	 * its other fields as they were, those it does not know among them. Kept before the old one goes,
-	 * so a failure between leaves the notice twice, never none: the client tells the repeat by its id.
+	 * Keeps the notice to be tried no sooner than `retryMs` after it was last due, or after it was made
+	 * where it never waited (Back-Channel Logout 1.0 §2.5), its other fields as they were, those it does
+	 * not know among them. The time is read from the notice alone, never the clock, so every host that
+	 * fails the same notice at once keeps the same one, which the store holds once. Kept before the old
+	 * one goes, so a failure between leaves the notice twice, never none: the client tells the repeat
+	 * by its id.
 	 */
-	const later = async (notice: string) => {
-		const next = JSON.stringify({ ...JSON.parse(notice), after: p.clock.now() + p.retryMs });
+	const later = async (notice: string, fields: Fields) => {
+		const due = fields.after ?? fields.until - p.notifyMs;
+		const next = JSON.stringify({ ...JSON.parse(notice), after: due + p.retryMs });
 		await p.pending.add(next);
 		await p.pending.done(notice);
 	};
@@ -135,7 +139,7 @@ export function noticesOver(p: NoticeParts) {
 			await attempt(fields, done);
 		} catch (error) {
 			// Where the store cannot keep the wait either, the notice stays as it was, tried at the next sweep.
-			await later(notice).catch(() => undefined);
+			await later(notice, fields).catch(() => undefined);
 			throw error;
 		}
 	};

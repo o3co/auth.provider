@@ -6,22 +6,39 @@ import type { PendingNotices } from "../../store.ts";
 import { noticesOver } from "../notices.ts";
 
 const retryMs = 60_000;
+const notifyMs = 86_400_000;
 const uri = "https://app.example/bc";
+const unavailable = async () => 503;
+const noAnswer = async (): Promise<number> => {
+	throw new OutboundUnavailable("timeout");
+};
 
-/** The notices over a clock the test moves, a store kept in memory and a client answering in turn. */
-function noticesFor(answers: (() => Promise<number>)[]) {
+/**
+ * The notices over a clock the test moves, a store kept in memory holding one notice made now, and a
+ * client answering in turn, then with 200. The store holds a notice once, as every store does.
+ */
+function noticesFor(answers: (() => Promise<number>)[] = []) {
 	let now = 1_800_000_000_000;
-	const kept = new Set<string>();
+	const made = now;
+	const notice = JSON.stringify({
+		client: "app",
+		session: "s-1",
+		subject: "alice",
+		until: made + notifyMs,
+		jti: "j-1",
+		added: "x",
+	});
+	const kept = new Set<string>([notice]);
 	const pending: PendingNotices = {
-		add: async (notice) => {
-			kept.add(notice);
+		add: async (added) => {
+			kept.add(added);
 		},
-		done: async (notice) => {
-			kept.delete(notice);
+		done: async (settled) => {
+			kept.delete(settled);
 		},
 		each: async (handle) => {
 			let failed = 0;
-			for (const notice of [...kept]) await handle(notice).catch(() => failed++);
+			for (const listed of [...kept]) await handle(listed).catch(() => failed++);
 			return { failed };
 		},
 	};
@@ -50,20 +67,14 @@ function noticesFor(answers: (() => Promise<number>)[]) {
 		clock: { now: () => now },
 		random: { bytes: (length) => new Uint8Array(length) },
 		log: recordingLog().log,
-		notifyMs: 86_400_000,
+		notifyMs,
 		retryMs,
-	});
-	const notice = JSON.stringify({
-		client: "app",
-		session: "s-1",
-		subject: "alice",
-		until: now + 86_400_000,
-		jti: "j-1",
-		added: "x",
 	});
 	return {
 		notices,
 		notice,
+		made,
+		answers,
 		sent,
 		kept: () => [...kept].map((k) => JSON.parse(k) as Record<string, unknown>),
 		now: () => now,
@@ -73,23 +84,13 @@ function noticesFor(answers: (() => Promise<number>)[]) {
 	};
 }
 
-it.each([
-	["the client answers it is unavailable", async () => 503],
-	[
-		"no answer comes",
-		async (): Promise<number> => {
-			throw new OutboundUnavailable("timeout");
-		},
-	],
-])(
-	"waits a sweep's interval after a failed try before sending a notice again, where %s [oidc-bcl-2.5-a]",
-	async (_name, failing) => {
+it("waits a sweep's interval after a failed try before sending a notice again, whether the client answers it is unavailable or no answer comes [oidc-bcl-2.5-a]", async () => {
+	for (const failing of [unavailable, noAnswer]) {
 		const t = noticesFor([failing]);
 		await t.notices.deliver([t.notice]);
-		const failedAt = t.now();
 		expect(t.sent).toEqual([uri]);
 		// Kept with the time before which it is not tried, its other fields, those it does not know among them, as they were.
-		expect(t.kept()).toEqual([{ ...JSON.parse(t.notice), after: failedAt + retryMs }]);
+		expect(t.kept()).toEqual([{ ...JSON.parse(t.notice), after: t.made + retryMs }]);
 		await t.notices.sweep();
 		t.advance(retryMs - 1);
 		await t.notices.sweep();
@@ -97,20 +98,48 @@ it.each([
 		t.advance(1);
 		await t.notices.sweep();
 		expect([t.sent, t.kept()]).toEqual([[uri, uri], []]);
-	},
-);
+	}
+});
 
-it("waits again after each failed try, counting from that try", async () => {
-	const t = noticesFor([async () => 503, async () => 429]);
+it("waits again after each failed try, a sweep's interval after it was last due", async () => {
+	const t = noticesFor([unavailable, async () => 429]);
 	await t.notices.deliver([t.notice]);
 	t.advance(retryMs);
 	await t.notices.sweep();
 	expect(t.sent).toHaveLength(2);
-	expect(t.kept().map((k) => k.after)).toEqual([t.now() + retryMs]);
+	expect(t.kept().map((k) => k.after)).toEqual([t.made + 2 * retryMs]);
 	t.advance(retryMs - 1);
 	await t.notices.sweep();
 	expect(t.sent).toHaveLength(2);
 	t.advance(1);
+	await t.notices.sweep();
+	expect([t.sent.length, t.kept()]).toEqual([3, []]);
+});
+
+it("keeps one notice where two hosts fail it at once, their clocks apart [oidc-bcl-2.5-a]", async () => {
+	const t = noticesFor();
+	// Each try fails a few milliseconds after the other, as on two hosts.
+	const later = async () => {
+		t.advance(7);
+		return 503;
+	};
+	t.answers.push(later, later);
+	await Promise.all([t.notices.sweep(), t.notices.sweep()]);
+	expect(t.sent).toEqual([uri, uri]);
+	expect(t.kept()).toEqual([{ ...JSON.parse(t.notice), after: t.made + retryMs }]);
+});
+
+it("tries at once a notice kept before notices waited, and one a late sweep finds past its time, at each sweep until it is due later", async () => {
+	const t = noticesFor([unavailable, unavailable]);
+	// A notice without a time to wait for, kept by an earlier host, is found by a sweep ten intervals late.
+	t.advance(10 * retryMs);
+	await t.notices.sweep();
+	expect(t.sent).toHaveLength(1);
+	// Due a sweep's interval after it was made: already past, so the next sweep tries it.
+	expect(t.kept().map((k) => k.after)).toEqual([t.made + retryMs]);
+	await t.notices.sweep();
+	expect(t.sent).toHaveLength(2);
+	expect(t.kept().map((k) => k.after)).toEqual([t.made + 2 * retryMs]);
 	await t.notices.sweep();
 	expect([t.sent.length, t.kept()]).toEqual([3, []]);
 });

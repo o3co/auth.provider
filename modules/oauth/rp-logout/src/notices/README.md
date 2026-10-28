@@ -3,7 +3,7 @@
 Internal module of `rp-logout`: back-channel notices that a session closed.
 
 ## Responsibilities
-- Keeps a notice for each client a closing session holds, and sends each a logout token until it is settled or too old, a failed try waiting a `sweep-interval` before the next.
+- Keeps a notice for each client a closing session holds, and sends each a logout token until it is settled or too old, a failed try not tried again until a `sweep-interval` after it was last due, or made.
 
 ## Not here
 - Which clients a session holds (written by the package on each redemption). When a session closes (`session`).
