@@ -266,6 +266,16 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 					"modules/upstream-login/idp-oidc/README.md modules/tooling/interop-oidf/src/rp/scene.ts",
 				),
 			).toEqual({ oidf: "true", scope: "all", plans: every });
+			// A pull request touching more than a pipe holds: the provider module first, tooling after it.
+			const many = Array.from(
+				{ length: 3000 },
+				(_, i) => `modules/tooling/conformance-oauth/src/file-${i}.ts`,
+			);
+			expect(outputs(["modules/oauth/authorize/src/module.ts", ...many].join(" "))).toEqual({
+				oidf: "true",
+				scope: "rp",
+				plans: '["rp"]',
+			});
 			// Docs alone, or tooling the suite does not run: no suite plan.
 			for (const file of [
 				"docs/migration.md",

@@ -769,7 +769,8 @@ jobs:
           touches() { grep -qE "$1" <<<"$changed" && echo true || echo false; }
           shared='^modules/tooling/(conformance-front|conformance-tunnel|spec-checklist)/'
           all=$(touches "^modules/tooling/(interop-oidf|conformance)/|$shared")
-          provider=$(grep -E '^modules/' <<<"$changed" | grep -qvE '^modules/tooling/' && echo true || echo false)
+          # Read whole, not by grep -q: one stopping at its first line would cut the pipe before it ends.
+          provider=$([ -n "$(grep -E '^modules/' <<<"$changed" | grep -vE '^modules/tooling/' || true)" ] && echo true || echo false)
           scenes=$(touches '^modules/tooling/conformance-federation/')
           rp=$([ "$provider" = true ] || [ "$scenes" = true ] && echo true || echo false)
           if [ "$all" = true ]; then scope=all; elif [ "$rp" = true ]; then scope=rp; else scope=none; fi
