@@ -43,9 +43,20 @@ const withinOutbound = async (c: BuildContext<Settings>) => {
 	if (refusals.length > 0) c.refuseAll(refusals);
 };
 
+/** Refuses boot where allow and allow-any-host are both set; warns at every start of any host taken. */
+const hostsChosen = (c: BuildContext<Settings>) => {
+	const s = c.section;
+	if (!s["allow-any-host"]) return;
+	if (s.allow.length > 0) {
+		c.refuse("clients-cimd.allow-any-host", "is set beside allow: keep one of them");
+	}
+	c.log.warn("clients-cimd.any_host_allowed", {});
+};
+
 /** The client source: an id's form and host first, then the kept or fetched document. */
 export async function sourceOver(c: BuildContext<Settings>): Promise<ClientSource> {
 	await withinOutbound(c);
+	hostsChosen(c);
 	const s = c.section;
 	const composed = c.late(composedGrants);
 	const fetching = fetchingWith(

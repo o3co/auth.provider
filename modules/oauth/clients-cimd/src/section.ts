@@ -17,6 +17,12 @@ export const section = z.strictObject({
 		.describe(
 			"The host names a client id's document may be fetched from (.name also takes the names under it); when not empty, only these, and outbound's hosts narrow to them.",
 		),
+	"allow-any-host": z
+		.boolean()
+		.prefault(false)
+		.describe(
+			"Fetches a client id's document from any host deny leaves, where allow is empty; warned of at every start.",
+		),
 	deny: z
 		.array(hostEntry)
 		.prefault([])

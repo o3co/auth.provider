@@ -527,6 +527,23 @@ describe("clients-cimd: the operator's section", () => {
 		await expect(boot({}, { lookups: 1 })).resolves.toBeDefined();
 	});
 
+	it("takes any host deny leaves where allow-any-host is set, warning at every start, and never beside allow", async () => {
+		const any = await boot({ "allow-any-host": true });
+		expect(any.lines()).toEqual([
+			{ level: "warn", event: "clients-cimd.any_host_allowed", fields: {} },
+		]);
+		expect(await any.find()).toMatchObject({ id });
+		expect(sent.map((one) => one.narrower?.hosts)).toEqual([undefined]);
+		expect((await boot({ allow: ["app.example"] })).lines()).toEqual([]);
+		const error = await boot({ "allow-any-host": true, allow: ["app.example"] }).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals).toEqual([
+			{ where: "clients-cimd.allow-any-host", reason: "is set beside allow: keep one of them" },
+		]);
+	});
+
 	it("boots with the size and the timeout at outbound's cap or below it", async () => {
 		const caps = { maxBytes: 5120, timeoutMs: 5000 };
 		await expect(boot({}, { caps })).resolves.toBeDefined();
@@ -629,6 +646,7 @@ describe("clients-cimd: times and sizes in the section", () => {
 	it("reads an empty section with the defaults it had", () => {
 		expect(section.parse({})).toEqual({
 			allow: [],
+			"allow-any-host": false,
 			deny: [],
 			scopes: [],
 			audiences: [],
