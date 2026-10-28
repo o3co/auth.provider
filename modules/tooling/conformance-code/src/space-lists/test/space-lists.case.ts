@@ -38,6 +38,8 @@ beforeAll(async () => {
 			},
 			clients: [app],
 			users: [{ identifier: "alice", password: "correct horse battery" }],
+			// The session meets both; urn:t:any, first, is its current acr where none asked is known.
+			acr: { values: { "urn:t:any": [["pwd"]], "urn:t:pwd": [["pwd"]] } },
 		}),
 	);
 	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
@@ -66,24 +68,30 @@ const claimsOf = (jwt: string | undefined) =>
 		unknown
 	>;
 
+/** The tokens the code of a fresh login's request with these parameters gives. */
+async function redeemed(extra: Record<string, string>) {
+	browser.forget();
+	const res = await browser.authorize(request(extra));
+	return (await succeeded(
+		await fetch(`${base}/oauth/token`, {
+			method: "POST",
+			headers: { ...backChannel, "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({
+				grant_type: "authorization_code",
+				client_id: app.id,
+				client_secret: app.secret ?? "",
+				code: res.at?.searchParams.get("code") ?? "",
+				redirect_uri: callback,
+				code_verifier: verifier,
+			}),
+		}),
+		"the token endpoint",
+	)) as Record<string, string>;
+}
+
 describe("space-delimited lists", () => {
 	it("writes the scope it answers and the access token carries with one ASCII space between its values [oidc-core-14-d]", async () => {
-		const res = await browser.authorize(request({ scope: "openid read write" }));
-		const tokens = (await succeeded(
-			await fetch(`${base}/oauth/token`, {
-				method: "POST",
-				headers: { ...backChannel, "content-type": "application/x-www-form-urlencoded" },
-				body: new URLSearchParams({
-					grant_type: "authorization_code",
-					client_id: app.id,
-					client_secret: app.secret ?? "",
-					code: res.at?.searchParams.get("code") ?? "",
-					redirect_uri: callback,
-					code_verifier: verifier,
-				}),
-			}),
-			"the token endpoint",
-		)) as Record<string, string>;
+		const tokens = await redeemed({ scope: "openid read write" });
 		for (const [name, scope] of [
 			["answer", tokens.scope],
 			["access token", claimsOf(tokens.access_token).scope],
@@ -102,4 +110,15 @@ describe("space-delimited lists", () => {
 		expect(await error({ scope: "openid read", prompt: "login\tconsent" })).toBe("invalid_request");
 		expect(await error({ scope: "openid read" })).toBeNull();
 	});
+
+	// The legacy build answers an acr_values acr it does not know otherwise.
+	it.skipIf(areaTarget().differs("voluntary-acr"))(
+		"splits acr_values on the ASCII space alone, a tab joining two acr into one it does not know [oidc-core-14-d]",
+		async () => {
+			const acrOf = async (acr_values: string) =>
+				claimsOf((await redeemed({ scope: "openid", acr_values })).id_token).acr;
+			expect(await acrOf("urn:t:none urn:t:pwd")).toBe("urn:t:pwd");
+			expect(await acrOf("urn:t:none\turn:t:pwd")).toBe("urn:t:any");
+		},
+	);
 });
