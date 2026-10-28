@@ -13,6 +13,8 @@ Internal module of `conformance-exchange`: the fault scenes of an Apple id_token
 ## Invariants
 - Apple's issuer and key set stay as exchange-id-tokens fixes them: the scenes reach Apple's own host (`faults`).
 - Each grant's refusal of an id_token taken is told by its description (`subject_token has been used`, `assertion replayed`) and by its take, sent and finding it taken.
+- The faults are on the token exchange's take. The JWT bearer grant's take is the same take on the same record, and is faulted only where `H2` crosses the two grants.
+- After a promotion or a crash, a scene waits for the topology to recover, every replica online and as many good as a write asks, before the writes that follow.
 
 ## Depends on
 - `faults`; `conformance` (the fault scene's deployment and the relay's matches)
