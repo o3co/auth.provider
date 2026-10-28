@@ -5,7 +5,7 @@ import { senderBindings } from "@mod/sender-binding";
 import { type AccessCondition, accessConditions } from "@mod/tokens";
 import { describe, expect, it } from "vitest";
 import { section } from "../src/section.ts";
-import { serve } from "./serve.ts";
+import { later, serve } from "./serve.ts";
 
 describe("introspection", () => {
 	it("tells a resource server sharing the audience about an active token [rfc7662-2.2-a]", async () => {
@@ -20,6 +20,25 @@ describe("introspection", () => {
 			aud: "https://api",
 			scope: "read",
 		});
+	});
+
+	it("finds an access token whatever type its hint names [rfc7662-2.1-b]", async () => {
+		const s = await serve();
+		const token = await s.issue();
+		for (const token_type_hint of ["access_token", "refresh_token", "id_token", "unknown"]) {
+			const answer = await s.post("/oauth/introspect", "api", { token, token_type_hint });
+			expect(answer.json, token_type_hint).toMatchObject({ active: true, sub: "app" });
+		}
+	});
+
+	it("answers an access token active only before its expiry [rfc7662-4-b]", async () => {
+		const s = await serve();
+		const token = await s.issue({ notAfter: Date.now() + 60_000 });
+		expect(await s.active(token)).toBe(true);
+		later(59_000);
+		expect(await s.active(token)).toBe(true);
+		later(1_000);
+		expect(await s.active(token)).toBe(false);
 	});
 
 	it("tells a resource server how an access token is bound", async () => {

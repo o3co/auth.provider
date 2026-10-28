@@ -26,7 +26,9 @@ import { afterEach } from "vitest";
 import tokenControl from "../src/module.ts";
 
 const logged = recordingLog();
-const runtime = quietRuntime({ log: logged.log });
+/** How far the composition's clock runs ahead of the real one; each test starts at none. */
+let ahead = 0;
+const runtime = quietRuntime({ log: logged.log, clock: { now: () => Date.now() + ahead } });
 const confidential = (id: string, audiences: string[], grants: string[] = []) =>
 	confidentialClient({
 		id,
@@ -34,7 +36,15 @@ const confidential = (id: string, audiences: string[], grants: string[] = []) =>
 	});
 
 let stop = async () => {};
-afterEach(() => stop());
+afterEach(() => {
+	ahead = 0;
+	return stop();
+});
+
+/** Moves the composition's clock on by this much. */
+export const later = (ms: number) => {
+	ahead += ms;
+};
 
 export type Form = Record<string, string> | [string, string][];
 
