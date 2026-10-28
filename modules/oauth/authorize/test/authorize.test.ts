@@ -700,6 +700,25 @@ describe("authorize: the audience a request asks for", () => {
 		expect(unruled.at?.searchParams.get("error")).toBe("invalid_request");
 	});
 
+	it("sends a rule's description back in RFC 6749's characters alone, any other shown as ? [rfc6749-4.1.2.1-e]", async () => {
+		const loud = defineModule({ name: "loud", takes: [] }, (m) => [
+			m.contribute(targetRules).by(() => ({
+				target: ({ audience }) => ({ kind: "audience", audience }),
+				repeated: () => ({
+					kind: "error",
+					error: "invalid_target",
+					description: 'one "resource", caf\u00e9\n\\',
+				}),
+			})),
+		]);
+		const query = new URLSearchParams(request({ client_id: "wide" }));
+		query.append("resource", "https://two");
+		query.append("resource", "https://api");
+		const s = await serve({ extra: [loud] });
+		const asked = await s.authorize(query.toString(), await s.login());
+		expect(asked.at?.searchParams.get("error_description")).toBe("one ?resource?, caf???");
+	});
+
 	it("asks the issuance policies for the audience asked, and gives their refusal before invalid_target", async () => {
 		const asked: IssuanceRequest[] = [];
 		const policy = defineModule({ name: "refusing-bob", replicaSafe: false, takes: [] }, (m) => [

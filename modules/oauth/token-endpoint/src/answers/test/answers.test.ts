@@ -4,7 +4,7 @@ import clientEvents from "@mod/clients/audit-events";
 import { testRequest } from "@mod/http/testing";
 import { describe, expect, it } from "vitest";
 import declared from "../../audit-events.ts";
-import { authenticateClient } from "../answers.ts";
+import { authenticateClient, errorDescription, oauthError } from "../answers.ts";
 
 type Refused = Extract<Authentication, { kind: "refused" }>["reason"];
 
@@ -29,6 +29,26 @@ const reasons: readonly Refused[] = [
 	"bad_credentials",
 	"invalid_record",
 ];
+
+describe("errorDescription", () => {
+	it("keeps printable ASCII but the quote and the backslash, showing any other character as ?, as oauthError writes it", () => {
+		expect(errorDescription("scope is not allowed: read write")).toBe(
+			"scope is not allowed: read write",
+		);
+		for (const [text, written] of [
+			["caf\u00e9", "caf?"],
+			['say "no"', "say ?no?"],
+			["a\\b", "a?b"],
+			["line\nbreak", "line?break"],
+			["\u{1F600}", "??"],
+		] as const) {
+			expect(errorDescription(text), text).toBe(written);
+		}
+		expect(oauthError(400, "invalid_request", "caf\u00e9").body).toEqual({
+			json: { error: "invalid_request", error_description: "caf?" },
+		});
+	});
+});
 
 describe("authenticateClient", () => {
 	it("answers two methods or malformed credentials invalid_request, but invalid_client where an assertion is part of them, challenged as the methods tried", async () => {
