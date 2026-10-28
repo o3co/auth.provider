@@ -1,10 +1,12 @@
 import {
 	confirmation,
+	type Deployed,
 	type Instance,
 	instanceOf,
 	type Match,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	runIdOf,
@@ -62,8 +64,9 @@ async function noSessionOpened(i: Instance, from: number) {
 	expect(successes(i, cookieIndexed).filter((e) => e.at > from)).toEqual([]);
 }
 
-/** Healed: the instance is ready, and a new login opens a session. */
-async function healed(i: Instance) {
+/** Healed: the topology has recovered and the instance is ready, and a new login opens a session. */
+async function healed(d: Deployed, i: Instance) {
+	await recovered(d);
 	await ready(i);
 	expect(said(await loginAt(i, nextSource()))).toEqual([200, undefined, true]);
 }
@@ -88,7 +91,7 @@ describe("password login opening no session while the store cannot answer", () =
 			await ready(a);
 			expect(a.relay.executions(sessionRecord).some((e) => e.at > resumed)).toBe(true);
 			await noSessionOpened(a, stalled);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -108,7 +111,7 @@ describe("password login opening no session while the store cannot answer", () =
 				a.relay.executions(sessionRecord).some((e) => e.at > stalled && e.at < answer.at),
 			).toBe(true);
 			await noSessionOpened(a, stalled);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -131,7 +134,7 @@ describe("password login opening no session while the store cannot answer", () =
 				expect(successes(a, opening).filter((e) => e.at > cut && e.at < answer.at)).toEqual([]);
 			}
 			await noSessionOpened(a, cut);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -151,7 +154,7 @@ describe("password login opening no session while the store cannot answer", () =
 			const first = a.relay.executions(sessionRecord).find((e) => e.at > released);
 			expect(first?.at).toBeGreaterThan(released + 1_000);
 			await noSessionOpened(a, released);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -176,7 +179,7 @@ describe("password login opening no session while the store cannot answer", () =
 				a.relay.executions(sessionRecord).filter((e) => e.at > released && e.at < answer.at),
 			).toEqual([]);
 			await noSessionOpened(a, released);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -205,7 +208,7 @@ describe("password login opening no session while the store cannot answer", () =
 			const at = answer.at;
 			expect(successes(a, sessionRecord).filter((e) => e.at > from && e.at < at)).toEqual([]);
 			await noSessionOpened(a, from);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -242,7 +245,7 @@ describe("password login opening no session while the store cannot answer", () =
 			expect(said(answer)).toEqual(unopened);
 			a.relay.reset("confirming");
 			await noSessionOpened(a, from);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -286,7 +289,7 @@ describe("password login opening no session while the store cannot answer", () =
 				await annotate("answered temporarily_unavailable");
 			}
 			await replicasOnline(d);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 });
