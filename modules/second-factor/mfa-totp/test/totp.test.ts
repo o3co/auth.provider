@@ -24,7 +24,7 @@ const composition = (
 	modules: [
 		http,
 		totpModule,
-		defineModule({ name: "reader", takes: [factorKinds] }, (m) => [
+		defineModule({ name: "reader", replicaSafe: true, takes: [factorKinds] }, (m) => [
 			m.provide(kinds).by((c) => c.collect(factorKinds)),
 		]),
 	],

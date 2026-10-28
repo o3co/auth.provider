@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
 	type Command,
 	type Execution,
-	keysOf,
 	type Match,
 	type StoreKey,
 	storeRead,
@@ -26,6 +25,10 @@ export const codeKept = storeWrite({
 	space: "code-grant-store.codes",
 	operations: ["putIfAbsent"],
 });
+/** A read of a session's entry, confirmed: a refresh reads its family's session after the family. */
+export const sessionRead = storeRead({ prefix, space: "session-store.sessions" });
+/** A read of a refresh token's family's record, which a refresh waits on first. */
+export const familyRead = storeRead({ prefix, space: "refresh-store.families" });
 /** A read of a code's record, which a redemption waits on first. */
 export const codeRead = storeRead({ prefix, space: "code-grant-store.codes" });
 /** The mark that confirms a read of a code's record, written beside it: the code's read, confirmed. */
@@ -84,10 +87,6 @@ export function rotationFrom(token: string): Match {
 		},
 	});
 }
-
-/** Whether a call is on a refresh family's record. */
-export const onFamilies = (command: Command) =>
-	keysOf(command).some((k) => k.space === "refresh-store.families");
 
 const state = (v: unknown) => (v as { state?: unknown } | null)?.state;
 /** A handle added to the closings: a shard's list holding one, as a scene starts with none pending. */

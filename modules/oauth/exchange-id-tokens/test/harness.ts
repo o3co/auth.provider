@@ -63,7 +63,7 @@ export const settings = {
 	},
 };
 
-export const dpopKind = defineModule({ name: "dpop-kind", takes: [] }, (m) => [
+export const dpopKind = defineModule({ name: "dpop-kind", replicaSafe: true, takes: [] }, (m) => [
 	m
 		.contribute(senderBindings)
 		.by(() => ({ member: "jkt", tokenType: "DPoP", read: async () => ({ kind: "absent" }) })),
@@ -71,12 +71,13 @@ export const dpopKind = defineModule({ name: "dpop-kind", takes: [] }, (m) => [
 /** The id_tokens taken, in memory, fresh for each composition. */
 /** The id_tokens taken in this store, so compositions can share one. */
 export const usedIn = (used: UsedIdTokens) =>
-	defineModule({ name: "used-id-tokens", takes: [] }, (m) => [
+	defineModule({ name: "used-id-tokens", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(usedIdTokens).by(() => used),
 	]);
-export const usedStandIn = defineModule({ name: "used-id-tokens", takes: [] }, (m) => [
-	m.provide(usedIdTokens).by(() => memoryUsedIdTokens().used),
-]);
+export const usedStandIn = defineModule(
+	{ name: "used-id-tokens", replicaSafe: false, takes: [] },
+	(m) => [m.provide(usedIdTokens).by(() => memoryUsedIdTokens().used)],
+);
 
 /** Alice's links, one through each kind the section takes, under the name it gives users: a link no module names refuses boot. */
 export const linksFor = (section: unknown) =>

@@ -13,6 +13,7 @@ import { placeOver } from "./place.ts";
 export default defineModule(
 	{
 		name: "mfa-enrollment",
+		replicaSafe: true,
 		takes: [
 			bindingProof,
 			factorKinds,

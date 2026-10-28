@@ -37,44 +37,50 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "refresh-store", section, takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => families),
-	m.contribute(spaces).by(() => redemptions),
-	m.contribute(spaces).by(() => bySession),
-	m.contribute(spaces).by(() => byFamily),
-	m.contribute(spaces).by(() => links),
-	m.contribute(spaces).by(() => settles),
-	m.provide(familyStore).by(async (c) => {
-		const records = recordsIn<StoredFamily>(await placeIn(c, families));
-		return { save: records.create, read: records.read, update: records.change };
-	}),
-	m.provide(redemptionStore).by(async (c) => {
-		const records = recordsIn<StoredRedemption>(await placeIn(c, redemptions));
-		return { save: records.create, read: records.read };
-	}),
-	m.provide(tokenFamilies).by(async (c) => {
-		const records = recordsIn<StoredLink>(await placeIn(c, links));
-		return { save: records.create, read: records.read };
-	}),
-	m.provide(sessionFamilies).by(async (c) =>
-		keyedSetsIn({
-			...(await placeIn(c, bySession)),
-			cap: c.section["families-per-session"],
-			clock: c.clock,
+// Safe on many instances given the same `settle-shards` and `settles-per-shard` on each
+// (deployment-guarantees, Several instances): revocations to settle go to a shard by their hash, and a
+// sweep walks only the shards it counts.
+export default defineModule(
+	{ name: "refresh-store", replicaSafe: true, section, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => families),
+		m.contribute(spaces).by(() => redemptions),
+		m.contribute(spaces).by(() => bySession),
+		m.contribute(spaces).by(() => byFamily),
+		m.contribute(spaces).by(() => links),
+		m.contribute(spaces).by(() => settles),
+		m.provide(familyStore).by(async (c) => {
+			const records = recordsIn<StoredFamily>(await placeIn(c, families));
+			return { save: records.create, read: records.read, update: records.change };
 		}),
-	),
-	m.provide(issuedAccess).by(async (c) =>
-		keyedSetsIn({
-			...(await placeIn(c, byFamily)),
-			cap: c.section["tokens-per-family"],
-			clock: c.clock,
+		m.provide(redemptionStore).by(async (c) => {
+			const records = recordsIn<StoredRedemption>(await placeIn(c, redemptions));
+			return { save: records.create, read: records.read };
 		}),
-	),
-	m.provide(settleList).by(async (c) =>
-		deferredIn({
-			...(await placeIn(c, settles)),
-			shards: c.section["settle-shards"],
-			perShard: c.section["settles-per-shard"],
+		m.provide(tokenFamilies).by(async (c) => {
+			const records = recordsIn<StoredLink>(await placeIn(c, links));
+			return { save: records.create, read: records.read };
 		}),
-	),
-]);
+		m.provide(sessionFamilies).by(async (c) =>
+			keyedSetsIn({
+				...(await placeIn(c, bySession)),
+				cap: c.section["families-per-session"],
+				clock: c.clock,
+			}),
+		),
+		m.provide(issuedAccess).by(async (c) =>
+			keyedSetsIn({
+				...(await placeIn(c, byFamily)),
+				cap: c.section["tokens-per-family"],
+				clock: c.clock,
+			}),
+		),
+		m.provide(settleList).by(async (c) =>
+			deferredIn({
+				...(await placeIn(c, settles)),
+				shards: c.section["settle-shards"],
+				perShard: c.section["settles-per-shard"],
+			}),
+		),
+	],
+);

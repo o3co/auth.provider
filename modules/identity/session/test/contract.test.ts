@@ -34,7 +34,7 @@ async function placeOver(
 				? { kind: "short", requirement: "test", answer: { error: "short" } }
 				: { kind: "admit", judged: credentialsJudged && level === "credentials" },
 	};
-	const around = defineModule({ name: "around", takes: [] }, (m) => [
+	const around = defineModule({ name: "around", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(entryJudge).by(() => judge),
 		m.contribute(closingParticipants).by(() => ({
 			closing: async (session) => {

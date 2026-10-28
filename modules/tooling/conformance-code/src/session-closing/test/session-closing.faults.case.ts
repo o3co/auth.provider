@@ -226,22 +226,16 @@ describe("a closing session closed under faults", () => {
 			const wait = await a.relay.observe(confirmation({ replicas: 1 }));
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
 			const sent = a.relay.executions(anything).filter((e) => e.at > s.from);
-			// The sweep's calls run on the new primary, on a connection to it, and their confirmation
-			// passes on the old one, on a connection still to it ...
+			// The sweep's revocation of the session's token, the close's participant, runs on the new primary,
+			// on a connection to it, and its confirmation passes on the old one, on a connection still to it ...
 			// The write it confirms may have been resent on the new connection as it opened, before the
 			// relay was watched, so it is looked for from the logout's start.
-			const first = a.relay
-				.executions(anything)
-				.filter(
-					(e) =>
-						e.at > s.from &&
-						e.at < wait.at &&
-						isStoreOperation(e.command) &&
-						runIdOf(e.reply) !== undefined,
-				)
+			const revoked = a.relay
+				.executions(revocationOf(s.jti))
+				.filter((e) => e.at > s.from && e.at < wait.at && runIdOf(e.reply) !== undefined)
 				.at(-1);
-			expect(first && runIdOf(first.reply)).toBe(newId);
-			expect(first && upstreamOf(first.connection)).toEqual(moved.upstream());
+			expect(revoked && runIdOf(revoked.reply)).toBe(newId);
+			expect(revoked && upstreamOf(revoked.connection)).toEqual(moved.upstream());
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
 			const info = sent.findLast(
 				(e) => e.connection === wait.connection && e.command.name === "INFO",

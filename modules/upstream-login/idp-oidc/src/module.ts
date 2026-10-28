@@ -7,7 +7,9 @@ import { settingsOf } from "./settings.ts";
 import { opened } from "./upstream.ts";
 
 export default defineModule(
-	{ name: "idp-oidc", takes: [externalJwt, outbound, outboundRefusals] },
+	// Safe on many instances given the same settings on each (deployment-guarantees, Several instances); each
+	// reads the issuer's discovery document once, at boot.
+	{ name: "idp-oidc", replicaSafe: true, takes: [externalJwt, outbound, outboundRefusals] },
 	(m) => [
 		m.contribute(idpTypes).by(async (c) => {
 			const reach = { outbound: await c.get(outbound), refusals: await c.get(outboundRefusals) };

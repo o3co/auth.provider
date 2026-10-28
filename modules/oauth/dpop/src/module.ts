@@ -56,45 +56,50 @@ const section = z.strictObject({
 /** Kept longer than any proof is accepted by this much, so clock differences never let one back. */
 const clockAllowanceMs = 60_000;
 
-export default defineModule({ name: "dpop", section, takes: [spentProofs] }, (m) => [
-	m.contribute(senderBindings).by(async (c) => {
-		const windowMs = c.section["proof-window"] * 1000;
-		const { required, ttl, secret } = c.section.nonce;
-		// The section holds a secret wherever a nonce is asked.
-		const asked =
-			required === "never" || secret === undefined
-				? {}
-				: {
-						nonce: {
-							at: required,
-							...nonces(Buffer.from(secret, "base64"), ttl * 1000, c.clock.now),
-						},
-					};
-		const rules = { algorithms: c.section.algorithms, windowMs, ...asked };
-		const spent = await c.get(spentProofs);
-		return {
-			member: "jkt",
-			name: "dpop",
-			tokenType: "DPoP",
-			explicit: true,
-			read: async (request, scene, issuer) => {
-				const origin = new URL(issuer).origin;
-				const checked = await readProof(request, scene, { ...rules, origin }, c.clock.now());
-				if (checked.kind !== "proved") return checked;
-				// A proof is accepted within the window on either side of its iat, so it is
-				// remembered for twice the window from now.
-				// A thumbprint holds no dot, so the name is one key's and one jti's alone.
-				const recorded = await spent.save(
-					`${checked.jkt}.${checked.jti}`,
-					2 * windowMs + clockAllowanceMs,
-				);
-				if (recorded !== "created") return refused("proof used before");
-				return { kind: "bound", confirmation: checked.jkt };
-			},
-		};
-	}),
-	m.contribute(metadata).by((c) => ({
-		name: "dpop_signing_alg_values_supported",
-		value: c.section.algorithms,
-	})),
-]);
+export default defineModule(
+	// Safe on many instances given the same nonce secret on each: a nonce is an HMAC over a time bucket, kept
+	// nowhere (deployment-guarantees, Several instances).
+	{ name: "dpop", replicaSafe: true, section, takes: [spentProofs] },
+	(m) => [
+		m.contribute(senderBindings).by(async (c) => {
+			const windowMs = c.section["proof-window"] * 1000;
+			const { required, ttl, secret } = c.section.nonce;
+			// The section holds a secret wherever a nonce is asked.
+			const asked =
+				required === "never" || secret === undefined
+					? {}
+					: {
+							nonce: {
+								at: required,
+								...nonces(Buffer.from(secret, "base64"), ttl * 1000, c.clock.now),
+							},
+						};
+			const rules = { algorithms: c.section.algorithms, windowMs, ...asked };
+			const spent = await c.get(spentProofs);
+			return {
+				member: "jkt",
+				name: "dpop",
+				tokenType: "DPoP",
+				explicit: true,
+				read: async (request, scene, issuer) => {
+					const origin = new URL(issuer).origin;
+					const checked = await readProof(request, scene, { ...rules, origin }, c.clock.now());
+					if (checked.kind !== "proved") return checked;
+					// A proof is accepted within the window on either side of its iat, so it is
+					// remembered for twice the window from now.
+					// A thumbprint holds no dot, so the name is one key's and one jti's alone.
+					const recorded = await spent.save(
+						`${checked.jkt}.${checked.jti}`,
+						2 * windowMs + clockAllowanceMs,
+					);
+					if (recorded !== "created") return refused("proof used before");
+					return { kind: "bound", confirmation: checked.jkt };
+				},
+			};
+		}),
+		m.contribute(metadata).by((c) => ({
+			name: "dpop_signing_alg_values_supported",
+			value: c.section.algorithms,
+		})),
+	],
+);

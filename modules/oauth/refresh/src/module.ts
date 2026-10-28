@@ -13,7 +13,9 @@ import { participantOver, revocableOver, settlingTakes } from "./settle/settle.t
 
 // Each factory's helpers say what they take; `families` is the module's own.
 export default defineModule(
-	{ name: "refresh", section, takes: [...settlingTakes, ...grantTakes] },
+	// Safe on many instances: every instance runs the sweep over the shared store, and finishing a revocation
+	// twice does no harm.
+	{ name: "refresh", replicaSafe: true, section, takes: [...settlingTakes, ...grantTakes] },
 	(m) => [
 		m.contribute(grants).by(grantOver),
 		m.contribute(additions).by(additionOver),

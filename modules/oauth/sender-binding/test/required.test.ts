@@ -22,7 +22,7 @@ const holding = (section: { required?: boolean; kinds?: string[] }): Client => (
 const bound = (member: string): Binding => ({ member, confirmation: "k", tokenType: "T" });
 /** A binding kind writing `member`, named for operators when `name` is given. */
 const kind = (member: string, name?: string) =>
-	defineModule({ name: `kind-${member}`, takes: [] }, (m) => [
+	defineModule({ name: `kind-${member}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(senderBindings).by(() => ({
 			member,
 			tokenType: "T",

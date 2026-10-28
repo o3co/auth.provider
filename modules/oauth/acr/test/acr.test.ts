@@ -27,15 +27,15 @@ let stop = async () => {};
 afterEach(() => stop());
 
 const proving = (amr: string[]) =>
-	defineModule({ name: "proving", takes: [] }, (m) => [
+	defineModule({ name: "proving", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(amrSources).by(() => ({ name: "proving", amr })),
 	]);
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 const offering = (name: string, sets: string[][]) =>
-	defineModule({ name: `offers-${name}`, takes: [] }, (m) => [
+	defineModule({ name: `offers-${name}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(acrEntries).by(() => ({ acr: name, sets })),
 	]);
 

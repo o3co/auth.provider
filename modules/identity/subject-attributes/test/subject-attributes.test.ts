@@ -25,7 +25,7 @@ const short: Entry = { kind: "short", requirement: "mfa", answer: { error: "mfa_
 
 /** Sessions by handle, entered with their context or as the entry given; `asked` lists each read. */
 const sessionsOf = (byHandle: Record<string, AuthContext | Entry>, asked: string[] = []) =>
-	defineModule({ name: "sessions", takes: [] }, (m) => [
+	defineModule({ name: "sessions", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
 				entryOf: async (handle, level) => {
@@ -40,7 +40,7 @@ const sessionsOf = (byHandle: Record<string, AuthContext | Entry>, asked: string
 	]);
 
 /** A ledger that cannot look users up by subject. */
-const unanswering = defineModule({ name: "ledger", takes: [] }, (m) => [
+const unanswering = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(ledgers).by(() => ({
 		verify: async () => ({ kind: "none" }),
 		bySubject: async () => ({ kind: "unanswerable" }),

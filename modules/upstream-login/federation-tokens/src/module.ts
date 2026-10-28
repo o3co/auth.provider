@@ -23,7 +23,9 @@ const kept = contract<Renewal>("federation-tokens.kept");
  */
 const takes = [upstreamTokenStore, upstreams, ...vaultTakes, ...renewalTakes, ...routesTakes];
 
-export default defineModule({ name, section, takes }, (m) => [
+// Safe on many instances: a failed refresh is held 30 s by the instance that saw it; another may ask the
+// upstream sooner, and that is all they differ in.
+export default defineModule({ name, replicaSafe: true, section, takes }, (m) => [
 	m.contribute(metadataSections).by(() => clientSection),
 	m
 		.contribute(resealers)
