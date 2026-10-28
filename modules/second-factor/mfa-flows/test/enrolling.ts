@@ -11,7 +11,11 @@ import { type EnrollmentFlow, enrollmentFlow, flowParts } from "../src/contract.
  * next sign-in. What a binding keeps is `{ pending }`, as the real one keeps it.
  */
 export const testEnrollment = defineModule(
-	{ name: "test-enrollment", takes: [flowParts, factorBinding, factorManaging, sessions] },
+	{
+		name: "test-enrollment",
+		replicaSafe: true,
+		takes: [flowParts, factorBinding, factorManaging, sessions],
+	},
 	(m) => [
 		m.contribute(enrollmentFlow).by(async (c): Promise<EnrollmentFlow> => {
 			const decided = await c.get(factorBinding);
