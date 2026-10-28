@@ -107,7 +107,7 @@ describe("idp-github", () => {
 		expect(enterprise.upstream.authorizationUrl(start)).toMatch(/^https:\/\/ghe\.example\//);
 	});
 
-	it("exchanges the code with its verifier and the client's secret, and answers the user's numeric id [rfc6750-2.3-d] [rfc9700-4.3.2-a]", async () => {
+	it("exchanges the code with its verifier and the client's secret, and answers the user's numeric id, asking for the user with the token as a credential alone, in no body [rfc6750-2.3-d] [rfc9700-4.3.2-a] [rfc6750-2.2-c]", async () => {
 		const { upstream, asked } = open({});
 		expect(await upstream.exchange(exchange())).toEqual({ subject: "583231", amr: [] });
 		const [token, user] = asked;
@@ -128,6 +128,7 @@ describe("idp-github", () => {
 			"x-github-api-version": "2022-11-28",
 		});
 		expect(user?.request.credential).toBe("Bearer gho_x");
+		expect([user?.request.method ?? "GET", user?.request.body]).toEqual(["GET", undefined]);
 	});
 
 	it("gives the user's public profile, its email never verified, as GitHub's user answer cannot say so", async () => {
