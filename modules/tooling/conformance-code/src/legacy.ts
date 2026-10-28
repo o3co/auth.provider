@@ -82,5 +82,8 @@ onLegacy(codeArea, {
 		"logout-client-id-checked",
 		// Ours refuses a logout request that sends any parameter more than once.
 		"logout-repeated-parameter-refused",
+		// Ours asks the person to confirm a logout with neither a hint nor a return, on a page of its own;
+		// the legacy build refuses one without a hint.
+		"logout-confirmed-without-hint",
 	],
 });

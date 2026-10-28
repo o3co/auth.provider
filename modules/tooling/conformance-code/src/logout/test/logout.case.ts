@@ -36,6 +36,8 @@ const sceneWith = (clients: readonly ClientScene[], allowed: readonly string[]):
 	users: [{ identifier: user.username, password: user.password }],
 	discovery: true,
 	logout: { allowed },
+	// Each scene signs a browser in afresh, all from one sender.
+	login: { attempts: 100 },
 });
 
 /** The back channel of an allowed client, and of one the operator did not allow. */
@@ -274,6 +276,107 @@ describe("a logout the client starts", () => {
 				}
 				expect([name, await stillSignedIn(at)]).toEqual([name, true]);
 			}
+		},
+	);
+
+	// RP-Initiated Logout 1.0 §2: with no hint, the OP asks the End-User whether to log out.
+	describe.runIf(!areaTarget().differs("logout-confirmed-without-hint"))(
+		"a logout a client starts with neither a hint nor a return",
+		() => {
+			/** The confirmation page as the browser holding the session gets it, with the form's cookie. */
+			const confirmationFor = async (at: SignedIn) => {
+				const session = await at.browser.login();
+				const res = await fetch(`${base}/oauth/logout/confirm`, {
+					headers: at.browser.headers({ cookie: session }),
+				});
+				const text = await res.text();
+				const field = (name: string) =>
+					unescaped(new RegExp(`name="${name}" value="([^"]*)"`).exec(text)?.[1] ?? "");
+				const csrf = res.headers.getSetCookie().map((c) => c.split(";")[0] ?? "")[0] ?? "";
+				return {
+					res,
+					text,
+					cookie: `${session}; ${csrf}`,
+					token: field("csrf_token"),
+					confirmation: field("confirmation"),
+				};
+			};
+			/** The form posted as a browser does from a page under no-referrer: Origin null, no Referer. */
+			const posted = (
+				at: SignedIn,
+				cookie: string,
+				fields: Record<string, string>,
+				origin = "null",
+			) =>
+				fetch(`${base}/oauth/logout/confirm`, {
+					method: "POST",
+					redirect: "manual",
+					headers: at.browser.headers({
+						cookie,
+						origin,
+						"content-type": "application/x-www-form-urlencoded",
+					}),
+					body: new URLSearchParams(fields).toString(),
+				});
+
+			it("asks the person on its own site whether to log out, and logs them out once they agree [oidc-rpinit-2-i] [oidc-rpinit-2-j]", async () => {
+				const at = await signedIn();
+				// The RP's cross-site POST carries no session cookie: it is sent on to this site first.
+				const started = await fetch(`${base}/oauth/logout`, {
+					method: "POST",
+					redirect: "manual",
+					headers: at.browser.headers({ "content-type": "application/x-www-form-urlencoded" }),
+					body: new URLSearchParams({ state: "s" }).toString(),
+				});
+				expect([started.status, started.headers.get("location")]).toEqual([
+					303,
+					"/oauth/logout/confirm",
+				]);
+				expect(await stillSignedIn(at)).toBe(true);
+				const page = await confirmationFor(at);
+				expect(page.res.status).toBe(200);
+				expect(page.text).toContain("Do you want to log out of");
+				const policy = page.res.headers.get("content-security-policy") ?? "";
+				expect(policy).toContain("form-action 'self'");
+				expect(policy).toContain("frame-ancestors 'none'");
+				expect(policy).not.toContain("script-src");
+				const done = await posted(at, page.cookie, {
+					csrf_token: page.token,
+					confirmation: page.confirmation,
+				});
+				expect(done.status).toBe(200);
+				expect(await done.text()).toContain("You are logged out.");
+				expect(await stillSignedIn(at)).toBe(false);
+			});
+
+			it("refuses the form without its CSRF token, or from another site, closing nothing", async () => {
+				const at = await signedIn();
+				const page = await confirmationFor(at);
+				const without = await posted(at, page.cookie, { confirmation: page.confirmation });
+				const foreign = await posted(
+					at,
+					page.cookie,
+					{ csrf_token: page.token, confirmation: page.confirmation },
+					"https://evil.example",
+				);
+				expect([without.status, foreign.status]).toEqual([403, 403]);
+				expect(await stillSignedIn(at)).toBe(true);
+			});
+
+			it("asks again, closing nothing, where the browser holds another session than the page was shown for", async () => {
+				const first = await signedIn();
+				const second = await signedIn();
+				const shownToFirst = await confirmationFor(first);
+				const ownPage = await confirmationFor(second);
+				const answer = await posted(second, ownPage.cookie, {
+					csrf_token: ownPage.token,
+					confirmation: shownToFirst.confirmation,
+				});
+				expect(answer.status).toBe(200);
+				expect(await answer.text()).toContain("Do you want to log out of");
+				expect(await stillSignedIn(first)).toBe(true);
+				expect(await stillSignedIn(second)).toBe(true);
+			});
 		},
 	);
 
