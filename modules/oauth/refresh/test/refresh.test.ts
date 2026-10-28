@@ -55,6 +55,7 @@ import {
 	type AccessGrant,
 	type IssueLimits,
 	issuancePolicies,
+	referenceOf,
 	type Tokens,
 	tokens,
 } from "@mod/tokens";
@@ -744,6 +745,33 @@ describe("refresh tokens", () => {
 			extra: { scope: "read" },
 		});
 		expect(read?.kind).toBe("issued");
+	});
+
+	it("keep no access token in refresh's own record and lists, a family's tokens by their reference alone [rfc6749-10.3-a]", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		const issued = [first.access_token ?? "", String(second.body.access_token)];
+		const ids: string[] = [];
+		const references: string[] = [];
+		for (const token of issued) {
+			const checked = await s.app.get(tokens).verifyAccess(token);
+			if (checked.kind !== "valid") throw new Error("not valid");
+			ids.push(checked.id);
+			references.push(referenceOf(checked));
+		}
+		const family = familyNameOf(first.refresh_token);
+		const listed = (await s.stores.byFamily.members(family)).map((m) => m.member);
+		// The family's record, each token's link to it, the family's tokens and the session's families.
+		const kept = JSON.stringify([
+			s.stores.kept.peek(family),
+			ids.map((id) => s.stores.links.peek(id)),
+			listed,
+			await s.stores.bySession.members(s.session.id),
+		]);
+		for (const token of issued) expect(kept).not.toContain(token);
+		// The family's tokens, each by its id and end, the reference tokens revokes by.
+		expect([...listed].sort()).toEqual([...references].sort());
 	});
 
 	it("record the family a reuse revokes, with its subject and client, and never a token", async () => {
