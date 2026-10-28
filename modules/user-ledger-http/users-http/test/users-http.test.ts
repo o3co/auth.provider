@@ -136,9 +136,10 @@ const settings = (extra: Record<string, unknown> = {}) => ({
 	...extra,
 });
 const collected = contract<readonly Ledger[]>("test.ledgers");
-const collector = defineModule({ name: "test-collector", takes: [ledgers] }, (m) => [
-	m.provide(collected).by((c) => c.collect(ledgers)),
-]);
+const collector = defineModule(
+	{ name: "test-collector", replicaSafe: true, takes: [ledgers] },
+	(m) => [m.provide(collected).by((c) => c.collect(ledgers))],
+);
 const boot = (
 	section: unknown,
 	registered: unknown[] = [],
@@ -601,7 +602,7 @@ describe("users-http", () => {
 	it("names verify-url as the operator's own, at boot and on each request, so a ledger at a private address is reached", async () => {
 		const checked: (Narrower | undefined)[] = [];
 		const sent: (Narrower | undefined)[] = [];
-		const recording = defineModule({ name: "outbound", takes: [] }, (m) => [
+		const recording = defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(outbound).by(() => ({
 				fetch: async (_url, _request, narrower) => {
 					sent.push(narrower);
@@ -845,7 +846,7 @@ describe("users-http looking a user up by subject", () => {
 
 	it("says why its credential may not go in outbound-policy's words", async () => {
 		for (const refusal of ["origins", "scheme"] as const) {
-			const standIn = defineModule({ name: "outbound", takes: [] }, (m) => [
+			const standIn = defineModule({ name: "outbound", replicaSafe: true, takes: [] }, (m) => [
 				m.provide(outbound).by(() => ({
 					fetch: async () => {
 						throw new Error("never sent");
