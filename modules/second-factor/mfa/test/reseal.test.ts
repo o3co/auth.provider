@@ -30,7 +30,7 @@ const listKey = (subject: string) =>
 	`s-${createHash("sha256").update(subject).digest("base64url")}`;
 
 /** A counting kind whose proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -50,7 +50,7 @@ const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
 		},
 	})),
 ]);
-const step = defineModule({ name: "step", takes: [] }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 /** A seal over a ring of its own, to write what another key sealed. */
@@ -58,7 +58,7 @@ const sealOver = async (ring: Readonly<Record<string, unknown>>) =>
 	(await assemble({ modules: [sealModule], config: { ...kernelConfig(), seal: ring } })).get(seal);
 
 /** A module holding sessions to the factors, as `mfa-entry` does in an app. */
-const enforcer = defineModule({ name: "enforcer", takes: [] }, (m) => [
+const enforcer = defineModule({ name: "enforcer", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
