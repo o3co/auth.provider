@@ -14,7 +14,7 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { codeAt, faultScene, on, redeemAt, refreshAt, said } from "../../faults/test/faults.ts";
-import { isStoreOperation, onFamilies, rotationFrom } from "../../faults/test/wire.ts";
+import { familyRead, isStoreOperation, rotationFrom } from "../../faults/test/wire.ts";
 
 const scene = faultScene({ refresh: {} });
 const refused = [400, "invalid_grant"];
@@ -134,8 +134,8 @@ describe("a refresh token rotated once under faults", () => {
 			const wait = await confirmed;
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
 			const sent = a.relay.executions(anything).slice(from);
-			// The first call on the family's record ran on the new primary, on a connection to it ...
-			const first = sent.find((e) => e.at < wait.at && onFamilies(e.command));
+			// The read of the family's record ran on the new primary, on a connection to it ...
+			const first = sent.find((e) => e.at < wait.at && familyRead.request(e.command));
 			expect(first && runIdOf(first.reply)).toBe(newId);
 			expect(first && upstreamOf(first.connection)).toEqual(moved.upstream());
 			// ... and its confirmation passed on the old one, on a connection still to it.
