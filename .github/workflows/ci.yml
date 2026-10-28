@@ -642,11 +642,10 @@ jobs:
         run: |
           set -euo pipefail
           pnpm exec vitest run --config vitest.integration.config.ts modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts -t clock --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/clock-tests.json"
-          passed=$(jq '.numPassedTests' "$RUNNER_TEMP/clock-tests.json")
-          if [ "$passed" -lt 2 ]; then
-            echo "the clock step passed $passed of the deployment's clock tests, not the 2 it holds" >&2
+          jq -e '.numPassedTests >= 2' "$RUNNER_TEMP/clock-tests.json" > /dev/null || {
+            echo "the clock step did not pass the 2 deployment clock tests it holds" >&2
             exit 1
-          fi
+          }
       - name: Keep what each scene ran on
         if: always()
         uses: actions/upload-artifact@v4
