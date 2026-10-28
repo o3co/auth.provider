@@ -281,6 +281,23 @@ describe("users ledgers", () => {
 		}
 	});
 
+	it("leaves out an email's verification with an email it leaves out, so none is kept without its email", async () => {
+		const attributes = { name: "Alice", email: "a..b@example.com", email_verified: true };
+		const recorded = recordingLog();
+		const u = await usersOf(
+			answering({ kind: "user", user: { subject: "s-alice", attributes } }),
+			recorded,
+		);
+		expect(await u.bySubject("s-alice")).toEqual({
+			kind: "user",
+			user: { subject: "s-alice", attributes: { name: "Alice" } },
+		});
+		expect(recorded.lines().map((line) => line.fields.attribute)).toEqual([
+			"email",
+			"email_verified",
+		]);
+	});
+
 	it("logs an attribute's name with no control or format character, and at most 200 characters", async () => {
 		const attributes = { "h\u202Ed\u0000": "x\u0000", ["n".repeat(300)]: "x\u0000" };
 		const recorded = recordingLog();
