@@ -65,10 +65,6 @@ export interface Instance {
 	clock(offset: string): Promise<void>;
 }
 
-/**
- * The commit a scene ran on, as the evidence names it: `SPEC_EVIDENCE_COMMIT` where set, else the
- * checkout's HEAD, never the event's (a daily run checks out develop while its event names main).
- */
 function commitTested(): string | null {
 	if (process.env.SPEC_EVIDENCE_COMMIT) return process.env.SPEC_EVIDENCE_COMMIT;
 	try {
