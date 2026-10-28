@@ -62,6 +62,8 @@ export interface GrantsPart {
 	readonly connections: readonly ConnectionScene[];
 	/** How many intents one client may lodge in a window, whatever user it names. */
 	readonly lodges?: { readonly limit: number; readonly windowSeconds: number };
+	/** A revocation that asks to keep delegations leaves established grants to the `delegations` boundary alone. */
+	readonly keepOnSubjectRevocation?: boolean;
 }
 
 /** Logging in through upstream IdPs, at a public origin. */
