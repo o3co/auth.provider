@@ -4124,6 +4124,12 @@ importers:
         specifier: workspace:*
         version: link:../conformance-oauth
     devDependencies:
+      '@mod/conformance-front':
+        specifier: workspace:*
+        version: link:../conformance-front
+      '@mod/conformance-tunnel':
+        specifier: workspace:*
+        version: link:../conformance-tunnel
       '@mod/spec-checklist':
         specifier: workspace:*
         version: link:../spec-checklist
