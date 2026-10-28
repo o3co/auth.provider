@@ -46,6 +46,8 @@ function over(
 	} = {},
 ) {
 	const calls: unknown[][] = [];
+	/** The Authorization header of each request handed to sender-binding. */
+	const admittedFrom: (string | undefined)[] = [];
 	const clock = { at: 0 };
 	const fail = (part: string) => {
 		if (told.failing === part) throw new Unavailable(part);
@@ -53,7 +55,8 @@ function over(
 	const handle = userinfoOver({
 		now: () => clock.at,
 		senderBinding: {
-			admitted: async () => {
+			admitted: async (request) => {
+				admittedFrom.push(request.headers.get("authorization"));
 				calls.push(["admitted"]);
 				fail("admitted");
 				return (told.admission ?? { kind: "admitted", access: valid() }) as never;
@@ -91,11 +94,11 @@ function over(
 			},
 		},
 	});
-	const run = async () => {
-		const res = await handle(testRequest());
+	const run = async (request = testRequest()) => {
+		const res = await handle(request);
 		return { status: res.status, headers: res.headers, json: (res.body as { json: unknown }).json };
 	};
-	return { run, calls };
+	return { run, calls, admittedFrom };
 }
 
 const noStore = { "cache-control": "no-store", pragma: "no-cache" };
@@ -229,6 +232,26 @@ describe("userinfo", () => {
 			json: { error: "invalid_request" },
 		});
 		expect(invalid.calls).toEqual([["admitted"]]);
+	});
+
+	it("hands the token presented to sender-binding alone, the other parts its id, and answers it nowhere [rfc9700-4.9.3-a]", async () => {
+		const presented = new Map([["authorization", "Bearer s3cr3t-token"]]);
+		const short = valid("Bearer", { ...grant, scope: ["profile"] });
+		const seen: unknown[] = [];
+		for (const told of [
+			{},
+			{ session: { kind: "unbound" } as const },
+			{ entry: { kind: "absent" } as const },
+			{ admission: { kind: "admitted", access: short } as const },
+		]) {
+			const o = over(told);
+			seen.push(await o.run(testRequest({ headers: presented })), o.calls);
+			expect(o.admittedFrom).toEqual(["Bearer s3cr3t-token"]);
+		}
+		expect(seen.filter((_, i) => i % 2 === 0).map((a) => (a as { status: number }).status)).toEqual(
+			[200, 200, 401, 403],
+		);
+		expect(JSON.stringify(seen)).not.toContain("s3cr3t");
 	});
 
 	it("fails unavailable when a check or the claims cannot tell, answering no claim", async () => {

@@ -138,6 +138,19 @@ it("leaves an error that is not an inability to tell to http, neither 503 nor lo
 	expect(logged.lines().filter((l) => l.event === "userinfo.unavailable")).toEqual([]);
 });
 
+it("answers no token it was presented and logs none, refusing it or unable to tell [rfc9700-4.9.3-a]", async () => {
+	const { url } = await serve();
+	const headers = { authorization: "Bearer s3cr3t-token", "x-forwarded-proto": "https" };
+	const seen: unknown[] = [];
+	for (const fails of [undefined, "unavailable", "bug"] as const) {
+		failing = fails;
+		const res = await fetch(url, { headers });
+		seen.push([res.status, [...res.headers], await res.text()]);
+	}
+	expect(seen.map((answer) => (answer as [number])[0])).toEqual([401, 503, 500]);
+	expect(JSON.stringify([seen, logged.lines()])).not.toContain("s3cr3t");
+});
+
 it("lets a listed origin's page send its token, its DPoP proof and a body's type, and read the challenge, the nonce and the wait [oidc-core-5.3-c]", async () => {
 	const { url } = await serve();
 	const res = await fetch(url, {
