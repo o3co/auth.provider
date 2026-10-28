@@ -13,14 +13,13 @@ import {
 import { describe, expect, it } from "vitest";
 import {
 	type Answer,
-	attemptFrom,
 	faultScene,
-	identifierLockout,
 	loginAt,
 	nextSource,
 	on,
 	said,
 } from "../../faults/test/faults.ts";
+import { attemptFrom, identifierLockout } from "../../faults/test/wire.ts";
 
 // The scene's value, not the default (`closed`): a request limit lets requests by where the store
 // cannot count, and the attempt limit refuses them still, whatever the fail mode.

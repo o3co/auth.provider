@@ -14,14 +14,16 @@ import {
 import { describe, expect, it } from "vitest";
 import {
 	type Answer,
-	attemptFrom,
-	cookieIndexed,
 	loginAt,
 	nextSource,
 	on,
 	said,
-	sessionRecord,
 } from "../../faults/test/faults.ts";
+import {
+	attemptFrom,
+	cookieIndexed,
+	sessionRecord,
+} from "../../faults/test/wire.ts";
 
 // Each fault comes once the attempt is counted and the login holds its first session write: earlier,
 // the attempt limit refuses first (attempts-unavailable's scenes), and the session is never reached.

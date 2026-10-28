@@ -13,12 +13,12 @@ import { describe, expect, it } from "vitest";
 import {
 	type Answer,
 	faultScene,
-	lockoutOf,
 	loginAt,
 	nextSource,
 	on,
 	said,
 } from "../../faults/test/faults.ts";
+import { isStoreOperation, lockoutOf } from "../../faults/test/wire.ts";
 
 // The scene's value, not the default (10): the first failure at an identifier starts its wait, which
 // doubles with each failure after it (1 s, 2 s, 4 s, …), so the next wait tells how many were counted.
@@ -91,7 +91,7 @@ describe("password login's per-identifier count holding under faults", () => {
 			const drop = a.relay.dropReplyTo(lockoutOf(identifier));
 			const answer = await failAt(a, identifier);
 			const dropped = await drop.first;
-			expect(dropped.collateral.filter((x) => x.command.name === "EVAL")).toEqual([]);
+			expect(dropped.collateral.filter((x) => isStoreOperation(x.command))).toEqual([]);
 			// The reservation took effect, unheard: the attempt is refused, and stays a failure.
 			expect(said(answer)).toEqual(uncounted);
 			await ready(a);
