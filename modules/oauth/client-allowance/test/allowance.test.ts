@@ -150,7 +150,11 @@ describe("grants, scopes, issuances and audiences seen", () => {
 		const { allowedIssuance } = clientAllowance;
 		const client = holding({ scopes: ["read"], audiences: ["https://api", "https://other"] });
 		const defaulted = holding({ scopes: ["read", "write"], "default-scopes": ["read"] });
-		expect(allowedIssuance(defaulted, undefined, "https://as")).toMatchObject({ scope: ["read"] });
+		expect(allowedIssuance(defaulted, undefined, "https://as")).toEqual({
+			kind: "allowed",
+			scope: ["read"],
+			audience: ["https://as"],
+		});
 		expect(allowedIssuance(client, "read read", "https://as")).toEqual({
 			kind: "allowed",
 			scope: ["read"],
