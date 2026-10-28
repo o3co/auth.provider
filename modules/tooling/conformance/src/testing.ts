@@ -22,6 +22,7 @@ export {
 	replicasOnline,
 	repointed,
 	successes,
+	writable,
 } from "./fault-scene/fault-scene.ts";
 export {
 	type Node,
