@@ -3,7 +3,6 @@ import { type Redeemed, type RedemptionHook, redemptionHooks } from "@mod/code-g
 import { type TokenTie, tokenTies } from "@mod/grants";
 import {
 	assemble,
-	BootRefused,
 	contract,
 	defineModule,
 	isUnavailable,
@@ -351,29 +350,19 @@ it("keeps reading, pinning and holding back what is kept when draining, but keep
 	await expect(s.selections.keepForCode("r-2", asked, 600_000)).rejects.toThrow(TypeError);
 });
 
-it("is on in the section a test gives it, unless the test says otherwise", () => {
-	expect(claimsSelectionConfig()).toEqual({ "claims-selection": { mode: "on" } });
+it("gives a test's section only what the test says", () => {
+	expect(claimsSelectionConfig()).toEqual({ "claims-selection": {} });
 	expect(claimsSelectionConfig({ mode: "off" })).toEqual({ "claims-selection": { mode: "off" } });
 });
 
-it("refuses to start without a mode, naming the key and the choice to make, and refuses another value", async () => {
+it("is on where no mode is given, and refuses another value", async () => {
 	const stores = claimsSelectionInMemory();
-	const unset = assemble({
+	const app = await assemble({
 		modules: [claimsSelectionModule, stores.module],
 		config: kernelConfig(),
 		runtime,
 	});
-	const refused = await unset.catch((error: unknown) => error);
-	expect(BootRefused.is(refused) && refused.refusals).toEqual([
-		{
-			where: "claims-selection.mode",
-			reason: expect.stringMatching(
-				/`off` while any host runs a release before 0\.19.*`draining` once every host runs 0\.19, then `on` once every host is draining/,
-			),
-		},
-	]);
-	// No way back to a release before 0.19 is a choice to name.
-	expect(BootRefused.is(refused) && refused.refusals[0]?.reason).not.toMatch(/going back/);
+	expect(app.get(claimsSelections).mode).toBe("on");
 	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
 });
 

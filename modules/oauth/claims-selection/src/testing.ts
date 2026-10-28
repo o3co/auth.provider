@@ -94,7 +94,7 @@ export function claimsSelectionInMemory(
 	};
 }
 
-/** claims-selection's section, as a configuration gives it: `on` unless `settings` says otherwise. */
+/** claims-selection's section, as a configuration gives it. */
 export function claimsSelectionConfig(settings: Partial<Settings> = {}) {
-	return { "claims-selection": { mode: "on", ...settings } };
+	return { "claims-selection": { ...settings } };
 }
