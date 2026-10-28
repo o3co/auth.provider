@@ -868,6 +868,7 @@ describe("refresh tokens", () => {
 	});
 
 	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+	// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
 	it("carry a secret of 32 fresh random bytes, and refuse one whose family is none, or whose secret is changed, as a reuse that ends the family [rfc6749-10.4-e] [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
 		const s = await serve();
 		const first = await s.redeem();
