@@ -131,7 +131,7 @@ describe("refresh: rotation and reuse", () => {
 });
 
 describe("refresh: what a token may do", () => {
-	it("narrows the scope on request and never widens it [rfc6749-6-a]", async () => {
+	it("narrows the scope on request and never widens it [rfc6749-6-a] [rfc9700-2.3-d]", async () => {
 		const { refresh_token: token = "" } = await tokensFor();
 		const narrowed = await refresh(token, "app", { scope: "read" });
 		expect([narrowed.status, narrowed.body.scope]).toEqual([200, "read"]);

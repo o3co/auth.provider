@@ -101,7 +101,7 @@ describe("authorization code: before the redirect URI is trusted", () => {
 });
 
 describe("authorization code: errors sent back", () => {
-	it("sends refusals back with state and iss [rfc6749-3.1-f] [rfc6749-3.1.1-a] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc9207-2-a] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d] [oidc-core-6.1-a]", async () => {
+	it("sends refusals back with state and iss [rfc6749-3.1-f] [rfc6749-3.1.1-a] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc9207-2-a] [oidc-core-3.1.2.6-c] [oidc-core-3.1.2.6-d] [oidc-core-6.1-a] [rfc6749-4.1.2.1-d]", async () => {
 		const cases: [Record<string, string> | string, string][] = [
 			[request({ response_type: "token" }), "unsupported_response_type"],
 			[request({ code_challenge: "" }), "invalid_request"],
@@ -119,10 +119,11 @@ describe("authorization code: errors sent back", () => {
 				res.at?.searchParams.get("state"),
 				res.at?.searchParams.get("iss"),
 			]).toEqual([error, "s1", issuer]);
+			expect(res.at?.searchParams.get("error")).toMatch(/^[\x20\x21\x23-\x5B\x5D-\x7E]+$/);
 		}
 	});
 
-	it("answers prompt=none without a session with login_required [oidc-core-3.1.2.1-k] [oidc-core-3.1.2.3-c] [oidc-core-3.1.2.3-d] [rfc9207-2-a]", async () => {
+	it("answers prompt=none without a session with login_required [oidc-core-3.1.2.1-k] [oidc-core-3.1.2.3-c] [oidc-core-3.1.2.3-d] [rfc9207-2-a] [oidc-core-15.1-b]", async () => {
 		const res = await browser.authorize(request({ prompt: "none" }), false);
 		expect([res.at?.searchParams.get("error"), res.at?.searchParams.get("iss")]).toEqual([
 			"login_required",
@@ -201,7 +202,7 @@ describe("OpenID Connect: openid required by default", () => {
 		);
 	});
 
-	it("gives a code to a request that names openid [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a]", async () => {
+	it("gives a code to a request that names openid, asked by GET [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a] [oidc-discovery-3-t] [rfc6749-3.1-c]", async () => {
 		expect(answer(await browser.authorize(request({ scope: "openid read" })))).toEqual([
 			true,
 			null,
