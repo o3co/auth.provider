@@ -6,6 +6,7 @@ import {
 	replicasOnline,
 	repointed,
 	successes,
+	writable,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { type Answer, assertion, faultScene, grantAt, on, said } from "../../faults/test/faults.ts";
@@ -151,6 +152,9 @@ describe("the token endpoint's request limit letting no request by while the sto
 				i.relay.executions(requestCounted).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
 			await refusedAtCount(i, asking);
+			// Woken, Redis answers at once but refuses writes until its replicas' acknowledgements catch up,
+			// which a ready instance does not show: the healed request, whose count is a write, waits for it.
+			await writable(d);
 			await healed(i);
 		});
 	});
