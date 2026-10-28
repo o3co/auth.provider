@@ -115,12 +115,13 @@ function serialized(response: HttpResponse) {
 	if (response.cookies?.length) headers["set-cookie"] = [...response.cookies];
 	const body = response.body;
 	const isJson = typeof body === "object" && "json" in body;
+	const payload = isJson ? JSON.stringify(body.json) : body;
 	if (isJson) {
-		const nulls = nullMembers(body.json);
+		// Read back from what is written: NaN, Infinity, undefined in a list and a toJSON's null are null there too.
+		const nulls = typeof payload === "string" ? nullMembers(JSON.parse(payload)) : [];
 		if (nulls.length > 0) throw new NullMembers(nulls);
 		headers["content-type"] ??= "application/json";
 	}
-	const payload = isJson ? JSON.stringify(body.json) : body;
 	// Stated, not chunked, so a HEAD answer carries the length its GET would.
 	if (payload !== undefined) headers["content-length"] = String(Buffer.byteLength(payload));
 	return { headers, payload };

@@ -592,6 +592,11 @@ it("answers 500 for a JSON answer holding a member whose value is null, at any d
 						list: [{ item: null }, null],
 					}),
 			},
+			{
+				method: "GET",
+				path: "/written-null",
+				handle: () => jsonAnswer(200, { expires_in: Math.ceil(Number.NaN), list: [undefined] }),
+			},
 			{ method: "GET", path: "/none", handle: () => jsonAnswer(200, { kept: "v", list: [1] }) },
 		]),
 		{},
@@ -607,6 +612,8 @@ it("answers 500 for a JSON answer holding a member whose value is null, at any d
 		},
 	]);
 	expect(JSON.stringify(recorded.lines())).not.toContain("secret-value");
+	// What JSON writes as null is refused alike: a number that is not one, and undefined in a list.
+	expect((await fetch(`${base}/written-null`)).status).toBe(500);
 	expect((await fetch(`${base}/none`)).status).toBe(200);
 });
 
