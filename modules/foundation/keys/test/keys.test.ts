@@ -114,7 +114,7 @@ describe("keys", () => {
 		expect(await k.verify(byOld, "JWT")).toEqual({ kind: "invalid", reason: "kid_expired" });
 	});
 
-	it("publishes and verifies the next key, but never signs with it, so verifiers holding the set as cached have it before it signs [oidc-core-10.1-d] [oidc-core-10.2.1-c]", async () => {
+	it("publishes and verifies the next key, but never signs with it, and has the set cached five minutes, the wait the runbook's rotation keeps before the key signs [oidc-core-10.1-d] [oidc-core-10.2.1-c]", async () => {
 		const coming = ed25519Pem();
 		const { app, base } = await boot({
 			...rotated(),
@@ -132,7 +132,8 @@ describe("keys", () => {
 		};
 		expect(published.keys.map((key) => key.kid)).toEqual(["now", "old", "next"]);
 		expect(published.keys.every((key) => !("d" in key))).toBe(true);
-		// Cached five minutes: a next key published that long before it signs is held by every verifier.
+		// The tools of the coordination; the wait between publishing and signing is the operator's, as
+		// docs/runbook.md's "Rotating the signing key" sets it: 300 seconds after the last restart.
 		expect((await fetch(`${base}/.well-known/jwks.json`)).headers.get("cache-control")).toBe(
 			"public, max-age=300",
 		);
