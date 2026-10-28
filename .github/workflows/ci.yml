@@ -309,8 +309,9 @@ jobs:
   #
   # A pull request to develop runs the areas its change reaches, and their fault scenes, but no
   # pattern: the areas whose packages it changes and those depending on them, the base and what it
-  # depends on among them (pnpm's `...[<base>]`), so a change to an area's set-up shows on the areas
-  # composing it, and a change to the base on every area. One that reaches none runs none.
+  # depends on among them (pnpm's `...<package>`), so a change to an area's set-up shows on the areas
+  # composing it, and a change to the base on every area; but spec-checklist, which every area
+  # depends on for its evidence reporter alone, reaches none. One that reaches none runs none.
   conformance-plan:
     needs: conformance-due
     if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
@@ -343,7 +344,15 @@ jobs:
           patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
           faults=$(pnpm --silent --filter @mod/spec-checklist run plan faults)
           if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then
-            reached=$(pnpm list --recursive --depth -1 --json --filter "...[origin/$BASE]" | jq -c '[.[].name]')
+            # spec-checklist reaches every area only by its evidence reporter: its checklist's words
+            # change no scene, so it reaches none here, and its reporter waits for the full runs.
+            changed=$(pnpm list --recursive --depth -1 --json --filter "[origin/$BASE]" | jq -r '.[].name | select(. != "@mod/spec-checklist")')
+            reached='[]'
+            if [ -n "$changed" ]; then
+              filters=()
+              for name in $changed; do filters+=(--filter "...$name"); done
+              reached=$(pnpm list --recursive --depth -1 --json "${filters[@]}" | jq -c '[.[].name]')
+            fi
             echo "packages the change reaches: $reached"
             areas=$(jq -cn --argjson planned "$areas" --argjson reached "$reached" '[$planned[] | select(. as $p | $reached | index($p))]')
             faults=$(jq -cn --argjson planned "$faults" --argjson reached "$reached" '[$planned[] | select(. as $p | $reached | index($p))]')

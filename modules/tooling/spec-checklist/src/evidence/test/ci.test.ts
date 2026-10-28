@@ -68,10 +68,16 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(step?.env).toEqual({ EVENT: expr("github.event_name"), BASE: expr("github.base_ref") });
 		const script = step?.run ?? "";
 		expect(script).toContain('if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then');
-		// The packages the change reaches: those it changed and those depending on them.
+		// The packages the change reaches: those it changed, spec-checklist left out, and those depending
+		// on them; spec-checklist reaches every area by its evidence reporter alone.
 		expect(script).toContain(
-			`reached=$(pnpm list --recursive --depth -1 --json --filter "...[origin/$BASE]" | jq -c '[.[].name]')`,
+			`changed=$(pnpm list --recursive --depth -1 --json --filter "[origin/$BASE]" | jq -r '.[].name | select(. != "@mod/spec-checklist")')`,
 		);
+		expect(script).toContain(`for name in $changed; do filters+=(--filter "...$name"); done`);
+		expect(script).toContain(
+			`reached=$(pnpm list --recursive --depth -1 --json "\${filters[@]}" | jq -c '[.[].name]')`,
+		);
+		expect(script).not.toContain("...[origin/");
 		for (const list of ["areas", "faults"]) {
 			expect(script).toContain(
 				`${list}=$(jq -cn --argjson planned "$${list}" --argjson reached "$reached" '[$planned[] | select(. as $p | $reached | index($p))]')`,
