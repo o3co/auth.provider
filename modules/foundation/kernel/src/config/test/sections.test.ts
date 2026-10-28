@@ -9,7 +9,12 @@ describe("a module's section, as the kernel reads it", () => {
 	it("converts a string as the HOCON library's typed getters do, a number or a boolean as the schema asks", async () => {
 		const read = contract<unknown>("read");
 		const m = defineModule(
-			{ name: "m", section: z.strictObject({ n: z.number(), b: z.boolean() }), takes: [] },
+			{
+				name: "m",
+				replicaSafe: true,
+				section: z.strictObject({ n: z.number(), b: z.boolean() }),
+				takes: [],
+			},
 			(m) => [m.provide(read).by((c) => c.section)],
 		);
 		const app = await assemble({ modules: [m], config: { ...single, m: { n: "5", b: "true" } } });
@@ -24,8 +29,8 @@ describe("a module's section, as the kernel reads it", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "same", takes: [] }),
-					defineModule({ name: "same", takes: [] }),
+					defineModule({ name: "same", replicaSafe: true, takes: [] }),
+					defineModule({ name: "same", replicaSafe: true, takes: [] }),
 				],
 				config: single,
 			}),
@@ -46,6 +51,7 @@ describe("a module's section, as the kernel reads it", () => {
 			const m = defineModule(
 				{
 					name: "m",
+					replicaSafe: false,
 					section: z.object({}).transform(() => {
 						throw thrown;
 					}),
@@ -73,5 +79,40 @@ describe("a module's section, as the kernel reads it", () => {
 			]);
 			expect([built, asked]).toEqual([false, false]);
 		}
+	});
+
+	it("reads a section left out of the configuration as an empty one, its defaults filled in", async () => {
+		const read = contract<unknown>("read");
+		const m = defineModule(
+			{
+				name: "m",
+				replicaSafe: true,
+				section: z.strictObject({ n: z.number().default(3) }),
+				takes: [],
+			},
+			(m) => [m.provide(read).by((c) => c.section)],
+		);
+		const app = await assemble({ modules: [m], config: single });
+		expect(app.get(read)).toEqual({ n: 3 });
+	});
+
+	it("reads a module's section from the configuration's own keys only", async () => {
+		const read = contract<unknown>("read");
+		const app = await assemble({
+			modules: [
+				defineModule({ name: "constructor", replicaSafe: true, takes: [] }),
+				defineModule(
+					{
+						name: "toString",
+						replicaSafe: true,
+						section: z.strictObject({}).default({}),
+						takes: [],
+					},
+					(m) => [m.provide(read).by((c) => c.section)],
+				),
+			],
+			config: single,
+		});
+		expect(app.get(read)).toEqual({});
 	});
 });

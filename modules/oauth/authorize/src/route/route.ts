@@ -7,7 +7,7 @@ import { issuer as named } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { answerTo, matches, redirects } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
-import { oauthError } from "@mod/token-endpoint";
+import { errorDescription, oauthError } from "@mod/token-endpoint";
 import events from "../audit-events.ts";
 import { type Decision, refusal } from "../decision.ts";
 import { type Flow, flowOver, flowTakes, type Place } from "../flow/flow.ts";
@@ -87,7 +87,10 @@ export function routeWith({
 								? { code: d.code }
 								: {
 										error: d.error,
-										...(d.description ? { error_description: d.description } : {}),
+										// Held to RFC 6749's characters, as the token endpoint's: a rule or policy may say anything.
+										...(d.description
+											? { error_description: errorDescription(d.description) }
+											: {}),
 									},
 						),
 			);
