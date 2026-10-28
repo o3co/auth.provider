@@ -11,7 +11,7 @@ import {
 	selectionRecords,
 } from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
@@ -250,7 +250,6 @@ async function serve(
 			}),
 			...acrConfig(options.acr ?? {}),
 			...codeGrantConfig({ "code-lifetime": "1m", ...options.codeGrant }),
-			...claimsSelectionConfig({ mode: "on" }),
 		},
 		runtime,
 	};
