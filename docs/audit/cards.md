@@ -326,6 +326,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `faults` (`src/faults`): what the area's fault scenes share, its scene deployed on a Redis topology and the store writes a fault is about.
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
+  - `refresh-once` (`src/refresh-once`): the fault scenes of a refresh token rotated once (`guarantee-5-b`).
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.
   - `revocation` (`src/revocation`): the scenes of a subject the ledger revokes over HTTP.
   - `userinfo` (`src/userinfo`): the scenes of OpenID Connect's userinfo.

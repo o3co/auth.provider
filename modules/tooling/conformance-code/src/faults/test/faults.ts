@@ -100,6 +100,16 @@ export async function deployed(o: {
 	}
 }
 
+/** Runs a scene on a deployment of its own, stopped however the scene ends. */
+export async function on(o: Parameters<typeof deployed>[0], scene: (d: Deployed) => Promise<void>) {
+	const d = await deployed(o);
+	try {
+		await scene(d);
+	} finally {
+		await d.stop();
+	}
+}
+
 /** The instance at `index`, which the scene's deployment must have. */
 export const instanceOf = (d: Deployed, index = 0): Instance => {
 	const i = d.instances[index];
@@ -171,6 +181,34 @@ export const redeemAt = (i: Instance, c: Code) =>
 /** An answer as a scene compares it: its status and error, or its token type where it gave a token. */
 export const said = (a: Answer) => [a.status, a.body.error ?? a.body.token_type];
 
+export const refreshAt = (i: Instance, token: string) =>
+	tokenAt(i, { grant_type: "refresh_token", refresh_token: token });
+
+/** A refresh token's family, which names its record, and its secret. */
+const partsOf = (token: string) => {
+	const [family = "", secret = ""] = token.split(".");
+	return { family, secret };
+};
+
+/**
+ * The write that rotates a family from `token`: its record's current secret moved off the token's,
+ * the family still live; a revocation, which keeps no current secret, is none.
+ */
+export function rotationFrom(token: string): Match {
+	const { family, secret } = partsOf(token);
+	const presented = createHash("sha256").update(secret).digest("base64url");
+	return storeWrite({
+		prefix,
+		space: "refresh-store.families",
+		partition: family,
+		operations: ["replaceIf"],
+		value: (v) => {
+			const current = (v as { current?: unknown }).current;
+			return typeof current === "string" && current !== presented;
+		},
+	});
+}
+
 /** A code's record as the store holds it: the fields a scene tells its writes by. */
 interface CodeRecord {
 	readonly state?: unknown;
@@ -234,6 +272,24 @@ export async function failover(d: Deployed): Promise<void> {
 	if (!next) throw new Error("no replica to promote");
 	await d.topology.promote({ replica: next, reattach: others });
 	repointed(d);
+	await replicasOnline(d);
+}
+
+/**
+ * Until the primary has every replica the topology names online again, within 30 s: a node started
+ * again answers before its replicas are back, and a write needs one of them.
+ */
+export async function replicasOnline(d: Deployed): Promise<void> {
+	const end = performance.now() + 30_000;
+	const want = d.topology.replicas().length;
+	for (;;) {
+		const info = await d.topology.primary().ask("INFO", "replication");
+		const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
+		const online = text.split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length;
+		if (online >= want) return;
+		if (performance.now() > end) throw new Error(`${online} of ${want} replicas online`);
+		await pause(100);
+	}
 }
 
 /** Points every instance's relay at the primary where it answers now, as a crash may move it. */
