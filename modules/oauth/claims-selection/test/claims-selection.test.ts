@@ -35,17 +35,20 @@ afterEach(async () => {
 
 const seen = contract<{ hook: RedemptionHook; tie: TokenTie }>("seen");
 /** Hands the contributed hook and tie to the test. */
-const reader = defineModule({ name: "reader", takes: [redemptionHooks, tokenTies] }, (m) => [
-	m.provide(seen).by(async (c) => {
-		const [hook] = await c.collect(redemptionHooks);
-		const [tie] = await c.collect(tokenTies);
-		if (!hook || !tie) throw new Error("nothing contributed");
-		return { hook, tie };
-	}),
-]);
+const reader = defineModule(
+	{ name: "reader", replicaSafe: false, takes: [redemptionHooks, tokenTies] },
+	(m) => [
+		m.provide(seen).by(async (c) => {
+			const [hook] = await c.collect(redemptionHooks);
+			const [tie] = await c.collect(tokenTies);
+			if (!hook || !tie) throw new Error("nothing contributed");
+			return { hook, tie };
+		}),
+	],
+);
 /** A consent judge that agrees to the scopes in `agreed`, which a test may change. */
 const judging = (agreed: Set<string>, name = "judge") =>
-	defineModule({ name, takes: [] }, (m) => [
+	defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m
 			.contribute(selectionConsents)
 			.by((): SelectionConsent => ({ consented: async (_c, _s, scope) => agreed.has(scope) })),
@@ -324,7 +327,7 @@ it("has no section: a configuration that writes one is refused at boot", async (
 
 /** A table of claim scopes, as the module releasing claims contributes it. */
 const scoping = (table: Record<string, string>, name = "scoping") =>
-	defineModule({ name, takes: [] }, (m) => [
+	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => table[claim] })),
 	]);
 
