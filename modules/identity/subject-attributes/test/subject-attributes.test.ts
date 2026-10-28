@@ -40,7 +40,7 @@ const sessionsOf = (byHandle: Record<string, AuthContext | Entry>, asked: string
 	]);
 
 /** A ledger that cannot look users up by subject. */
-const unanswering = defineModule({ name: "ledger", replicaSafe: true, takes: [] }, (m) => [
+const unanswering = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(ledgers).by(() => ({
 		verify: async () => ({ kind: "none" }),
 		bySubject: async () => ({ kind: "unanswerable" }),
