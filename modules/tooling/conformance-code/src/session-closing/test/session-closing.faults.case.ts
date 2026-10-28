@@ -123,6 +123,12 @@ async function control(i: Instance) {
 	expect(await userinfoAt(i, s.token)).toBe(401);
 }
 
+/** Which way a close stopped halfway was finished, for the scene's report: by the logout or a sweep. */
+const finishedBy = (answer: number) =>
+	answer === 200
+		? "closed by the logout itself, its held write resent within its patience"
+		: "closed by a sweep, the logout answering it pending";
+
 /** After the fault: the old token is refused, and a new session's token is taken. */
 async function refusedAfter(i: Instance, token: string) {
 	expect(await userinfoAt(i, token)).toBe(401);
@@ -188,7 +194,9 @@ describe("a closing session closed under faults", () => {
 		});
 	});
 
-	it("closes a session confirmed closing before a caught-up replica is promoted [guarantee-1-a] {fault:F}", async () => {
+	it("closes a session confirmed closing before a caught-up replica is promoted [guarantee-1-a] {fault:F}", async ({
+		annotate,
+	}) => {
 		await on({ name: "session-closing-f", scene }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
@@ -197,7 +205,9 @@ describe("a closing session closed under faults", () => {
 			// the new primary, the logout then closing it, or the logout answers it pending.
 			await failover(d);
 			const promoted = performance.now();
-			expect([200, 503]).toContain(await s.answer);
+			const answer = await s.answer;
+			expect([200, 503]).toContain(answer);
+			await annotate(finishedBy(answer));
 			await ready(a);
 			await closedAfter([a], s.handle, promoted);
 			await refusedAfter(a, s.token);
@@ -225,7 +235,8 @@ describe("a closing session closed under faults", () => {
 			const sent = a.relay.executions(anything).filter((e) => e.at > s.from);
 			// The sweep's calls run on the new primary, on a connection to it, and their confirmation
 			// passes on the old one, on a connection still to it ...
-			// The write it confirms may have been resent on the new connection as it opened.
+			// The write it confirms may have been resent on the new connection as it opened, before the
+			// relay was watched, so it is looked for from the logout's start.
 			const first = a.relay
 				.executions(anything)
 				.filter(
@@ -257,7 +268,9 @@ describe("a closing session closed under faults", () => {
 		});
 	});
 
-	it("closes a session confirmed closing before Redis is killed at once and started again [guarantee-1-a] {fault:C}", async () => {
+	it("closes a session confirmed closing before Redis is killed at once and started again [guarantee-1-a] {fault:C}", async ({
+		annotate,
+	}) => {
 		await on({ name: "session-closing-c", scene }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
@@ -267,7 +280,9 @@ describe("a closing session closed under faults", () => {
 			const restarted = performance.now();
 			repointed(d);
 			await replicasOnline(d);
-			expect([200, 503]).toContain(await s.answer);
+			const answer = await s.answer;
+			expect([200, 503]).toContain(answer);
+			await annotate(finishedBy(answer));
 			await ready(a);
 			await closedAfter([a], s.handle, restarted);
 			await refusedAfter(a, s.token);
