@@ -119,18 +119,21 @@ export async function reconnected(i: Instance, upstream: Upstream) {
 		}
 		await pause(50);
 	}
-	const asking = (...args: string[]) => ask(upstream, args);
-	const toWrite = await minReplicasToWrite(
-		asking,
-		`the Redis at ${upstream.host}:${upstream.port}`,
-	);
+	const named = `the Redis at ${upstream.host}:${upstream.port}`;
 	const writableBy = performance.now() + 30_000;
+	const asking = (...args: string[]) =>
+		ask(upstream, args, Math.max(1, Math.ceil(writableBy - performance.now()))).catch(
+			(cause: unknown) => {
+				throw new Error(`${named} did not answer ${args.join(" ")} within 30 s`, { cause });
+			},
+		);
+	const toWrite = await minReplicasToWrite(asking, named);
 	for (;;) {
 		const { good } = await replication(asking);
 		if (good >= toWrite) return;
 		if (performance.now() > writableBy) {
 			throw new Error(
-				`the Redis at ${upstream.host}:${upstream.port} did not take writes within 30 s: min_slaves_good_slaves ${good} of the ${toWrite} min-replicas-to-write asks`,
+				`${named} did not take writes within 30 s: min_slaves_good_slaves ${good} of the ${toWrite} min-replicas-to-write asks`,
 			);
 		}
 		await pause(100);
