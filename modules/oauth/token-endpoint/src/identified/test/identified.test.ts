@@ -102,7 +102,7 @@ describe("a request naming no client", () => {
 	const asserted = ["urn:test:assert"];
 	/** A grant whose assertion names the client it is for: `as:<id>`, or a refusal. */
 	const identifying = (seen: { identify: number; handled: unknown[] }) =>
-		defineModule({ name: "identifying", takes: [] }, (m) => [
+		defineModule({ name: "identifying", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:assert",
 				readsAmbient: "none",
@@ -126,7 +126,7 @@ describe("a request naming no client", () => {
 			})),
 		]);
 	/** A method that reads a key header, so a public client may hold a key. */
-	const keyed = defineModule({ name: "keyed", takes: [] }, (m) => [
+	const keyed = defineModule({ name: "keyed", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(authMethods).by(() => ({
 			name: "test-key",
 			claimed: (r) => r.headers.get("x-test-key") ?? undefined,
@@ -134,14 +134,14 @@ describe("a request naming no client", () => {
 		})),
 	]);
 	/** A source naming a public client with no credentials: one the operator did not register. */
-	const sourced = defineModule({ name: "sourced", takes: [] }, (m) => [
+	const sourced = defineModule({ name: "sourced", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id: string) =>
 				id === "sourced" ? client("sourced", "none", asserted) : undefined,
 		})),
 	]);
 	/** A rule that refuses a `resource` sent to a grant that takes no audience, as resource indicators may. */
-	const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+	const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(targetRules).by(() => ({
 			untargeted: ({ param }) =>
 				param("resource")

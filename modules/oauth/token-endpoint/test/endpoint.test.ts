@@ -147,7 +147,7 @@ async function serve(
  * strict, it also refuses a `resource` sent to a grant that takes no audience.
  */
 const narrowing = (name = "narrowing", strict = false) =>
-	defineModule({ name, takes: [] }, (m) => [
+	defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(targetRules).by(() => ({
 			...(strict
 				? {
@@ -203,7 +203,7 @@ describe("the audience a request asks for", () => {
 
 	it("refuses, before the grant runs, an audience asked of a grant that takes none, where the rule says so", async () => {
 		const handled: string[] = [];
-		const echoes = defineModule({ name: "echoes", takes: [] }, (m) => [
+		const echoes = defineModule({ name: "echoes", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -268,7 +268,7 @@ describe("the audience a request asks for", () => {
 	});
 
 	it("leaves an audience asked of a grant that takes none to the grant where the rule says nothing of it", async () => {
-		const echo = defineModule({ name: "echo", takes: [] }, (m) => [
+		const echo = defineModule({ name: "echo", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -282,7 +282,7 @@ describe("the audience a request asks for", () => {
 	});
 
 	it("refuses to boot with a grant that does not say what it reads that a browser sends by itself", async () => {
-		const silent = defineModule({ name: "silent", takes: [] }, (m) => [
+		const silent = defineModule({ name: "silent", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(
 				() =>
 					({
@@ -401,7 +401,7 @@ describe("token endpoint", () => {
 	});
 
 	it("answers credentials a method finds malformed as a malformed request", async () => {
-		const half = defineModule({ name: "half", takes: [] }, (m) => [
+		const half = defineModule({ name: "half", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(authMethods).by(() => ({
 				name: "half",
 				claimed: (r) => r.form.get("half_id")?.[0],
@@ -459,7 +459,7 @@ describe("token endpoint", () => {
 
 	it("refuses a client that must bind and shows no binding, or one of a kind it does not name, before the grant runs", async () => {
 		let ran = 0;
-		const kinds = defineModule({ name: "kinds", takes: [] }, (m) => [
+		const kinds = defineModule({ name: "kinds", replicaSafe: false, takes: [] }, (m) => [
 			...(
 				[
 					["one", "first"],
@@ -512,7 +512,7 @@ describe("token endpoint", () => {
 
 	it("names the claims a grant added to the tokens it issued, never their values, in the order of their names", async () => {
 		const claimed = (name: string, sets: readonly AddedClaims[]) =>
-			defineModule({ name, takes: [] }, (m) => [
+			defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(grants).by(() => ({
 					grantType: name === "twice" ? "urn:test:echo" : "urn:test:other",
 					readsAmbient: "none",
@@ -556,7 +556,7 @@ describe("token endpoint", () => {
 				]),
 			);
 		const issuing = (claims: Record<string, number>) =>
-			defineModule({ name: "many", takes: [] }, (m) => [
+			defineModule({ name: "many", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(grants).by(() => ({
 					grantType: "urn:test:echo",
 					readsAmbient: "none",
@@ -596,7 +596,7 @@ describe("token endpoint", () => {
 				}),
 			);
 		const issuing = (claims: Record<string, number>) =>
-			defineModule({ name: "edge", takes: [] }, (m) => [
+			defineModule({ name: "edge", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(grants).by(() => ({
 					grantType: "urn:test:echo",
 					readsAmbient: "none",
@@ -622,7 +622,7 @@ describe("token endpoint", () => {
 	});
 
 	it("records each issuance and each refusal it decides, with the client and the source, never a token or secret", async () => {
-		const polled = defineModule({ name: "polled", takes: [] }, (m) => [
+		const polled = defineModule({ name: "polled", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -696,7 +696,7 @@ describe("token endpoint", () => {
 	});
 
 	it("answers a grant that cannot tell with 503 temporarily_unavailable, unaudited, logging what and the grant type", async () => {
-		const down = defineModule({ name: "down", takes: [] }, (m) => [
+		const down = defineModule({ name: "down", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -719,7 +719,7 @@ describe("token endpoint", () => {
 	});
 
 	it("keeps a grant type nothing dispatches to out of the log when it cannot tell, as the client's own input", async () => {
-		const down = defineModule({ name: "audit", takes: [] }, (m) => [
+		const down = defineModule({ name: "audit", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(audit).by(() => ({
 				record: () => {
 					throw new Unavailable("audit");
@@ -752,7 +752,7 @@ describe("token endpoint", () => {
 	});
 
 	it("dispatches to a grant contributed from outside, for the clients whose allowance lists it", async () => {
-		const extra = defineModule({ name: "extra-grant", takes: [] }, (m) => [
+		const extra = defineModule({ name: "extra-grant", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -768,7 +768,7 @@ describe("token endpoint", () => {
 
 	it("admits and issues through the issuance policies under the grant type and the session, answering a refusal from admits or from issue as invalid_grant, auditing the policy but no value", async () => {
 		const asked: IssuanceRequest[] = [];
-		const policed = defineModule({ name: "policed", takes: [] }, (m) => [
+		const policed = defineModule({ name: "policed", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -839,7 +839,7 @@ describe("token endpoint", () => {
 
 	it("tells the issuance policies an issuance continues a grant only when the grant says so", async () => {
 		const seen: unknown[] = [];
-		const continuing = defineModule({ name: "continuing", takes: [] }, (m) => [
+		const continuing = defineModule({ name: "continuing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -870,7 +870,7 @@ describe("token endpoint", () => {
 	});
 
 	it("issues for the lifetime a grant gives in place of tokens' own", async () => {
-		const longer = defineModule({ name: "longer", takes: [] }, (m) => [
+		const longer = defineModule({ name: "longer", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -890,7 +890,7 @@ describe("token endpoint", () => {
 
 	it("tells each session issuance of a token issued from a session before the grant answers, and one that fails answers no token", async () => {
 		const told: unknown[] = [];
-		const echo = defineModule({ name: "echo", takes: [] }, (m) => [
+		const echo = defineModule({ name: "echo", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -931,7 +931,7 @@ describe("token endpoint", () => {
 
 	it("issues client credentials through the issuance policies", async () => {
 		const asked: IssuanceRequest[] = [];
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -955,7 +955,7 @@ describe("token endpoint", () => {
 	});
 
 	it("refuses an authentication time far ahead of the clock as invalid_grant, by tokens' own rule", async () => {
-		const ahead = defineModule({ name: "ahead", takes: [] }, (m) => [
+		const ahead = defineModule({ name: "ahead", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -997,7 +997,7 @@ describe("token endpoint", () => {
 	});
 
 	it("answers an error code a grant owns as 400, as the grant names it", async () => {
-		const polled = defineModule({ name: "polled", takes: [] }, (m) => [
+		const polled = defineModule({ name: "polled", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -1012,7 +1012,7 @@ describe("token endpoint", () => {
 	});
 
 	it("answers a grant's error with its status and members, never letting members replace the error [rfc6749-5.2-d]", async () => {
-		const owned = defineModule({ name: "owned", takes: [] }, (m) => [
+		const owned = defineModule({ name: "owned", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -1045,17 +1045,20 @@ describe("token endpoint", () => {
 	});
 
 	it("challenges a grant's 401 with the client's method, or with every method when it has none", async () => {
-		const unauthorized = defineModule({ name: "unauthorized", takes: [] }, (m) => [
-			m.contribute(grants).by(() => ({
-				grantType: "urn:test:echo",
-				readsAmbient: "none",
-				handle: async ({ param }) => ({
-					kind: "error",
-					error: "invalid_client",
-					status: param("status") === "400" ? 400 : 401,
-				}),
-			})),
-		]);
+		const unauthorized = defineModule(
+			{ name: "unauthorized", replicaSafe: true, takes: [] },
+			(m) => [
+				m.contribute(grants).by(() => ({
+					grantType: "urn:test:echo",
+					readsAmbient: "none",
+					handle: async ({ param }) => ({
+						kind: "error",
+						error: "invalid_client",
+						status: param("status") === "400" ? 400 : 401,
+					}),
+				})),
+			],
+		);
 		const post = await serve([unauthorized], {
 			clients: [echoClients.echo(), echoClients.pubecho()],
 		});
@@ -1073,7 +1076,7 @@ describe("token endpoint", () => {
 	});
 
 	it("drops what a grant's error may not carry: a success's or the error's members, an error_uri that is not a printable URI, a status but 400 or 401 [rfc6749-5.2-e] [rfc6749-5.2-a]", async () => {
-		const loose = defineModule({ name: "loose", takes: [] }, (m) => [
+		const loose = defineModule({ name: "loose", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -1128,7 +1131,7 @@ describe("token endpoint", () => {
 	});
 
 	it("takes a JSON body only for a grant that declares it, and a form only for one that does; another type is 415, and an empty form names no grant", async () => {
-		const declared = defineModule({ name: "declared", takes: [] }, (m) => [
+		const declared = defineModule({ name: "declared", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -1174,7 +1177,7 @@ describe("token endpoint", () => {
 	});
 
 	it("gives a grant that takes both bodies each one's values, a form's as single strings [rfc6749-3.2-d]", async () => {
-		const both = defineModule({ name: "both", takes: [] }, (m) => [
+		const both = defineModule({ name: "both", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -1208,7 +1211,7 @@ describe("token endpoint", () => {
 				body: { scope: param("scope") ?? null, assertion: value("assertion") ?? null },
 			}),
 		});
-		const echoes = defineModule({ name: "echoes", takes: [] }, (m) => [
+		const echoes = defineModule({ name: "echoes", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => echoing("urn:test:echo", ["json"])),
 			m.contribute(grants).by(() => echoing("urn:test:other", ["form", "json"])),
 		]);
@@ -1245,7 +1248,7 @@ describe("token endpoint", () => {
 	});
 
 	it("gives a grant the binding its tokens carry, and none when the request has none", async () => {
-		const echo = defineModule({ name: "echo-binding", takes: [] }, (m) => [
+		const echo = defineModule({ name: "echo-binding", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
