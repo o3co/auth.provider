@@ -11,6 +11,8 @@ const pair = generateKeyPairSync("ed25519");
 const verifier = "v".repeat(43);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 const user = { username: "alice", password: "correct horse battery" };
+/** A user whose email holds a character outside ASCII. */
+const wide = { username: "zoe", password: "correct horse battery" };
 /** The one origin whose pages may read userinfo across origins. */
 const page = "https://app.example";
 const app: ClientScene = {
@@ -42,6 +44,7 @@ beforeAll(async () => {
 			clients: [app],
 			users: [
 				{ ...user, identifier: user.username, subject: "s-alice", email: "alice@example.com" },
+				{ ...wide, identifier: wide.username, subject: "s-zoe", email: "zo\u00eb@example.com" },
 			],
 			discovery: true,
 			revocation: true,
@@ -68,9 +71,9 @@ async function post(path: string, as: string, form: Record<string, string>) {
 	return (text ? JSON.parse(text) : {}) as Record<string, string>;
 }
 /** A fresh login's tokens for `scope`, by the code flow. */
-async function codeTokens(scope: string) {
-	browser.forget();
-	const res = await browser.authorize({
+async function codeTokens(scope: string, as = browser) {
+	as.forget();
+	const res = await as.authorize({
 		response_type: "code",
 		client_id: app.id,
 		redirect_uri: callback,
@@ -113,6 +116,23 @@ describe("OpenID Connect userinfo", () => {
 		}
 		const narrow = await userinfo((await codeTokens("openid")).access_token);
 		expect(narrow.body).toEqual({ sub: "s-alice" });
+	});
+
+	it("answers its JSON as application/json in UTF-8, a character outside ASCII intact [oidc-core-5.3.2-e] [oidc-core-5.3.2-f] [oidc-core-5.3.2-g] [oidc-core-5.3.2-h]", async () => {
+		const { access_token: token } = await codeTokens(
+			"openid email",
+			browserAt(() => base, issuer, wide),
+		);
+		const res = await fetch(`${base}/oauth/userinfo`, {
+			headers: { ...backChannel, authorization: `Bearer ${token}` },
+		});
+		expect(res.headers.get("content-type")).toMatch(/^application\/json(;\s*charset=utf-8)?$/i);
+		const bytes = Buffer.from(await res.arrayBuffer());
+		expect(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))).toEqual({
+			sub: "s-zoe",
+			email: "zo\u00eb@example.com",
+		});
+		expect(bytes.includes(Buffer.from("zo\u00eb", "utf8"))).toBe(true);
 	});
 
 	it("answers a token a refresh issued with its session's claims, and refuses it once the session has ended", async () => {

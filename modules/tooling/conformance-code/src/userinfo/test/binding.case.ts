@@ -102,13 +102,13 @@ describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", ()
 		expect([answer.status, Object.keys(answer.body)]).toEqual([200, ["sub"]]);
 	});
 
-	it("refuses the token presented as a Bearer token, challenging for DPoP [rfc9449-7.2-a] [guarantee-6-a]", async () => {
+	it("refuses the token presented as a Bearer token, challenging for DPoP, as the token itself says it is bound [rfc9449-7.2-a] [rfc9449-6-a] [guarantee-6-a]", async () => {
 		const answer = await userinfo({ authorization: `Bearer ${await boundToken()}` });
 		expect(answer.status).toBe(401);
 		expect(answer.challenge).toMatch(/^DPoP/);
 	});
 
-	it("refuses a proof by another key, and one bound to another token [rfc9449-4.3-k] [rfc9449-4.3-l]", async () => {
+	it("refuses a proof by another key, and one bound to another token, granting nothing on the token alone [rfc9449-4.3-k] [rfc9449-4.3-l] [rfc9449-7.1-b]", async () => {
 		const token = await boundToken();
 		const other = await userinfo({
 			authorization: `DPoP ${token}`,
@@ -120,5 +120,25 @@ describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", ()
 			dpop: await proof("/oauth/userinfo", "GET", "another token"),
 		});
 		expect(elsewhere.status).toBe(401);
+	});
+
+	it("refuses the token under the DPoP scheme without a proof [rfc9449-7.1-a]", async () => {
+		const answer = await userinfo({ authorization: `DPoP ${await boundToken()}` });
+		expect(answer.status).toBe(401);
+		expect(answer.challenge).toMatch(/^DPoP/);
+	});
+
+	it("takes no token from Proxy-Authorization, and never challenges in Proxy-Authenticate [rfc9449-7.1-e]", async () => {
+		const token = await boundToken();
+		const res = await fetch(`${base}/oauth/userinfo`, {
+			headers: {
+				...backChannel,
+				"proxy-authorization": `DPoP ${token}`,
+				dpop: await proof("/oauth/userinfo", "GET", token),
+			},
+		});
+		expect(res.status).toBe(401);
+		expect(res.headers.get("proxy-authenticate")).toBeNull();
+		expect(res.headers.get("www-authenticate")).toContain("DPoP");
 	});
 });
