@@ -11,6 +11,8 @@ export interface UserinfoParts {
 	readonly now: () => number;
 	/** The issuer's URL: userinfo is its resource, so a token must be for it. */
 	readonly issuer: string;
+	/** Whether an openid token whose aud does not name the issuer is refused (`issuer-audience` `on`). */
+	readonly requiresIssuer: boolean;
 	readonly senderBinding: Pick<SenderBindings, "admitted">;
 	readonly tokens: Pick<Tokens, "verifyAccess">;
 	readonly sessionTokens: Pick<SessionTokens, "sessionOf">;
@@ -46,7 +48,7 @@ export function userinfoOver(p: UserinfoParts) {
 			);
 		}
 		// A token not for the issuer, whose resource this is, is refused (RFC 9700 §2.3).
-		if (![...grant.audience, ...(addedAudience ?? [])].includes(p.issuer)) {
+		if (p.requiresIssuer && ![...grant.audience, ...(addedAudience ?? [])].includes(p.issuer)) {
 			return answer(401, { error: "invalid_token" }, challengeOf(tokenType, "invalid_token"));
 		}
 		const bound = await p.sessionTokens.sessionOf(id);

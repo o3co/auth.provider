@@ -47,6 +47,8 @@ function over(
 		/** Runs while the selection is read, as a host that stalls there. */
 		duringSelection?: (clock: { at: number }) => void;
 		failing?: "admitted" | "session" | "entry" | "selection" | "claims";
+		/** Whether a token not for the issuer is refused: `issuer-audience` `on` unless said otherwise. */
+		requiresIssuer?: boolean;
 	} = {},
 ) {
 	const calls: unknown[][] = [];
@@ -57,6 +59,7 @@ function over(
 	const handle = userinfoOver({
 		now: () => clock.at,
 		issuer,
+		requiresIssuer: told.requiresIssuer ?? true,
 		senderBinding: {
 			admitted: async () => {
 				calls.push(["admitted"]);
@@ -212,6 +215,14 @@ describe("userinfo", () => {
 			json: { error: "invalid_token" },
 		});
 		expect(o.calls).toEqual([["admitted"]]);
+	});
+
+	it("answers a token not for the issuer where the issuer is not required of it, as adding and off leave it", async () => {
+		const o = over({
+			admission: { kind: "admitted", access: valid("Bearer", grant, []) },
+			requiresIssuer: false,
+		});
+		expect((await o.run()).status).toBe(200);
 	});
 
 	it("answers a token whose grant's audience is the issuer itself, nothing added to it [rfc9700-2.3-c]", async () => {
