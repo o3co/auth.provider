@@ -28,7 +28,7 @@ export interface Deploying {
 	readonly clock?: string;
 }
 
-/** A scene deployed on a topology of its own, its instances each behind a relay. */
+/** A scene deployed on a topology of its own, its instances each behind a relay, handed over once its primary takes writes. */
 export async function deployed(o: Deploying): Promise<Deployed> {
 	const replicas = o.replicas ?? 2;
 	const topology = await startTopology({
@@ -44,7 +44,7 @@ export async function deployed(o: Deploying): Promise<Deployed> {
 			instances: o.instances ?? 1,
 			...(o.redis ? { redis: o.redis } : {}),
 		});
-		return {
+		const d: Deployed = {
 			topology,
 			instances: deployment.instances,
 			async stop() {
@@ -55,6 +55,15 @@ export async function deployed(o: Deploying): Promise<Deployed> {
 				}
 			},
 		};
+		// Handed over writable: a primary whose replicas' acknowledgements lag on a loaded machine
+		// refuses writes, and a scene's control, whose first count is not resent, would fail on it.
+		try {
+			await recovered(d);
+		} catch (error) {
+			await deployment.stop();
+			throw error;
+		}
+		return d;
 	} catch (error) {
 		await topology.stop();
 		throw error;
