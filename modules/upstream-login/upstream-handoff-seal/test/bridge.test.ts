@@ -9,7 +9,7 @@ import bridge from "../src/module.ts";
 
 const runtime = quietRuntime();
 const seen = contract<readonly Seal[]>("test.seen");
-const reader = defineModule({ name: "reader", takes: [handoffSealing] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [handoffSealing] }, (m) => [
 	m.provide(seen).by((c) => c.collect(handoffSealing)),
 ]);
 
