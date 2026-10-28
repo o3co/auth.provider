@@ -187,35 +187,47 @@ describe("OpenID Connect: the ID token", () => {
 		]);
 	});
 
-	it("issues a code under an id_token_hint only for the End-User it names: a code for the one signed in, prompt=none or not, and login_required for another, who has a session here [oidc-core-3.1.2.1-u] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]", async () => {
-		const own = (await signedIn()).tokens.id_token ?? "";
-		const others = (await signedIn({}, bobs)).tokens.id_token ?? "";
-		for (const prompt of [{}, { prompt: "none" }]) {
-			const mine = await browser.authorize(asked({ id_token_hint: own, ...prompt }));
-			expect(mine.at?.searchParams.has("code"), JSON.stringify(prompt)).toBe(true);
-			const theirs = await browser.authorize(asked({ id_token_hint: others, ...prompt }));
-			expect(
-				[theirs.at?.searchParams.get("error"), theirs.at?.searchParams.has("code")],
-				JSON.stringify(prompt),
-			).toEqual(["login_required", false]);
-		}
-	});
+	// The legacy build reads no id_token_hint at authorization, and gives a code for whoever is signed in.
+	it.skipIf(areaTarget().differs("authorize-reads-id-token-hint"))(
+		"issues a code under an id_token_hint only for the End-User it names: a code for the one signed in, prompt=none or not, and login_required for another, who has a session here [oidc-core-3.1.2.1-u] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]",
+		async () => {
+			const own = (await signedIn()).tokens.id_token ?? "";
+			const others = (await signedIn({}, bobs)).tokens.id_token ?? "";
+			for (const prompt of [{}, { prompt: "none" }]) {
+				const mine = await browser.authorize(asked({ id_token_hint: own, ...prompt }));
+				expect(mine.at?.searchParams.has("code"), JSON.stringify(prompt)).toBe(true);
+				const theirs = await browser.authorize(asked({ id_token_hint: others, ...prompt }));
+				expect(
+					[theirs.at?.searchParams.get("error"), theirs.at?.searchParams.has("code")],
+					JSON.stringify(prompt),
+				).toEqual(["login_required", false]);
+			}
+		},
+	);
 
-	it("refuses an id_token_hint it did not issue as invalid_request, sent back with state and iss [oidc-core-3.1.2.2-f]", async () => {
-		await signedIn();
-		const forged = await browser.authorize(asked({ id_token_hint: "e30.e30.c2ln" }));
-		expect(["error", "state", "iss"].map((name) => forged.at?.searchParams.get(name))).toEqual([
-			"invalid_request",
-			"s2",
-			issuer,
-		]);
-	});
+	// The legacy build reads no id_token_hint at authorization, so one it did not issue gets a code too.
+	it.skipIf(areaTarget().differs("authorize-reads-id-token-hint"))(
+		"refuses an id_token_hint it did not issue as invalid_request, sent back with state and iss [oidc-core-3.1.2.2-f]",
+		async () => {
+			await signedIn();
+			const forged = await browser.authorize(asked({ id_token_hint: "e30.e30.c2ln" }));
+			expect(["error", "state", "iss"].map((name) => forged.at?.searchParams.get(name))).toEqual([
+				"invalid_request",
+				"s2",
+				issuer,
+			]);
+		},
+	);
 
-	it("refuses prompt=select_account as account_selection_required, with no page to choose an account by [oidc-core-3.1.2.1-q]", async () => {
-		await signedIn();
-		const res = await browser.authorize(asked({ prompt: "select_account" }));
-		expect(res.at?.searchParams.get("error")).toBe("account_selection_required");
-	});
+	// The legacy build refuses select_account as a prompt word it does not know (invalid_request).
+	it.skipIf(areaTarget().differs("select-account-refused"))(
+		"refuses prompt=select_account as account_selection_required, with no page to choose an account by [oidc-core-3.1.2.1-q]",
+		async () => {
+			await signedIn();
+			const res = await browser.authorize(asked({ prompt: "select_account" }));
+			expect(res.at?.searchParams.get("error")).toBe("account_selection_required");
+		},
+	);
 
 	it("answers no CORS request at the authorization endpoint, a listed origin's included [oidc-discovery-3-ak] [rfc9700-2.6-e]", async () => {
 		const query = new URLSearchParams({ response_type: "code", client_id: app.id });
