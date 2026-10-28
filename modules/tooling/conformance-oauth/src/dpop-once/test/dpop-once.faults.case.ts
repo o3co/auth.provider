@@ -11,6 +11,7 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import {
+	type Answer,
 	dpopScene,
 	on,
 	type Proof,
@@ -21,8 +22,18 @@ import {
 } from "../../faults/test/faults.ts";
 
 const scene = dpopScene();
-const refused = [400, "invalid_dpop_proof"];
 const issued = [200, "DPoP"];
+
+/**
+ * Refused as used before: a proof out of its window is refused `invalid_dpop_proof` too, before its
+ * spend is looked at, so the description tells the replay's refusal from the age's.
+ */
+const usedBefore = (answer: Answer) =>
+	expect([answer.status, answer.body.error, answer.body.error_description]).toEqual([
+		400,
+		"invalid_dpop_proof",
+		"proof used before",
+	]);
 
 /**
  * The control: with no fault, a DPoP proof's jti is spent by one write that succeeds, and the
@@ -34,16 +45,19 @@ async function control(i: Instance) {
 	expect(said(await provenAt(i, p))).toEqual(issued);
 	await seen;
 	expect(successes(i, proofSpendOf(p))).toHaveLength(1);
-	expect(said(await provenAt(i, p))).toEqual(refused);
+	usedBefore(await provenAt(i, p));
 	expect(successes(i, proofSpendOf(p))).toHaveLength(1);
 }
 
 /**
- * After the fault: the proof is refused as used before, and a new one is taken. Each scene ends well
- * within the proof's window (`dpop.proof-window`, a minute unless set), so the refusal is the spend's.
+ * After the fault: the proof is refused as used before by its spend, which is sent and finds it spent
+ * (a proof out of its window is refused before any spend), and a new one is taken.
  */
 async function refusedAsSpent(i: Instance, p: Proof) {
-	expect(said(await provenAt(i, p))).toEqual(refused);
+	const [sent, took] = [i.relay.executions(proofSpendOf(p)).length, successes(i, proofSpendOf(p))];
+	usedBefore(await provenAt(i, p));
+	expect(i.relay.executions(proofSpendOf(p)).length).toBeGreaterThan(sent);
+	expect(successes(i, proofSpendOf(p))).toEqual(took);
 	expect(said(await provenAt(i, await proof()))).toEqual(issued);
 }
 
@@ -151,7 +165,7 @@ describe("a DPoP proof's jti spent once under faults", () => {
 			first.release();
 			expect(said(await atA)).toEqual(issued);
 			second.release();
-			expect(said(await atB)).toEqual(refused);
+			usedBefore(await atB);
 			expect(
 				successes(a, proofSpendOf(sent)).length + successes(b, proofSpendOf(sent)).length,
 			).toBe(1);
@@ -167,15 +181,13 @@ describe("a DPoP proof's jti spent once under faults", () => {
 			const holds = [a.relay.hold(proofSpendOf(sent)), b.relay.hold(proofSpendOf(sent))];
 			const answers = Promise.all([provenAt(a, sent), provenAt(b, sent)]);
 			for (const held of await Promise.all(holds)) held.release();
-			const both = (await answers).map(said);
-			expect(both.filter((s) => s[0] === 200).length).toBeLessThanOrEqual(1);
+			const both = await answers;
+			expect(both.filter((x) => x.status === 200).length).toBeLessThanOrEqual(1);
 			// One spend takes effect; the other finds it spent and is refused as a replay.
 			expect(
 				successes(a, proofSpendOf(sent)).length + successes(b, proofSpendOf(sent)).length,
 			).toBe(1);
-			expect(both.filter((s) => s[0] !== 200).every((s) => s[1] === "invalid_dpop_proof")).toBe(
-				true,
-			);
+			for (const refused of both.filter((x) => x.status !== 200)) usedBefore(refused);
 			await refusedAsSpent(b, sent);
 		});
 	});
