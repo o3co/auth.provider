@@ -2,22 +2,22 @@ import {
 	faultRun,
 	hostLibfaketime,
 	type Instance,
+	instanceOf,
 	type Node,
+	ready,
+	replicasOnline,
 	storeWrite,
+	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import {
 	codeAt,
 	codeUse,
 	faultScene,
-	instanceOf,
 	on,
 	prefix,
-	ready,
 	redeemAt,
-	replicasOnline,
 	said,
-	successes,
 } from "../../faults/test/faults.ts";
 import { backChannel } from "../../testing.ts";
 

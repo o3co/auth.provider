@@ -1,27 +1,27 @@
 import {
 	confirmation,
+	failover,
 	type Instance,
+	instanceOf,
 	keysOf,
 	type Match,
+	ready,
+	reconnected,
+	replicasOnline,
+	repointed,
 	runIdOf,
 	sameMark,
+	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import {
 	codeAt,
-	failover,
 	faultScene,
-	instanceOf,
 	on,
-	ready,
-	reconnected,
 	redeemAt,
 	refreshAt,
-	replicasOnline,
-	repointed,
 	rotationFrom,
 	said,
-	successes,
 } from "../../faults/test/faults.ts";
 
 const scene = faultScene({ refresh: {} });

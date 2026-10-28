@@ -1,27 +1,20 @@
 import {
 	confirmation,
 	type Instance,
-	type Match,
-	runIdOf,
-	sameMark,
-	storeRead,
-	storeWrite,
-} from "@mod/conformance/testing";
-import { describe, expect, it } from "vitest";
-import {
-	app,
-	browserOn,
-	callback,
 	instanceOf,
-	on,
-	pkce,
-	prefix,
+	type Match,
 	ready,
 	reconnected,
 	replicasOnline,
 	repointed,
+	runIdOf,
+	sameMark,
+	storeRead,
+	storeWrite,
 	successes,
-} from "../../faults/test/faults.ts";
+} from "@mod/conformance/testing";
+import { describe, expect, it } from "vitest";
+import { app, browserOn, callback, on, pkce, prefix } from "../../faults/test/faults.ts";
 
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };

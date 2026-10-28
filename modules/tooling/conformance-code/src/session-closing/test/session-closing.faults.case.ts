@@ -1,8 +1,14 @@
 import {
 	confirmation,
 	type Execution,
+	failover,
 	type Instance,
+	instanceOf,
 	type Match,
+	ready,
+	reconnected,
+	replicasOnline,
+	repointed,
 	runIdOf,
 	type StoreKey,
 	sameMark,
@@ -10,20 +16,7 @@ import {
 	writtenValues,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	browserOn,
-	codeAt,
-	failover,
-	faultScene,
-	instanceOf,
-	on,
-	prefix,
-	ready,
-	reconnected,
-	redeemAt,
-	replicasOnline,
-	repointed,
-} from "../../faults/test/faults.ts";
+import { browserOn, codeAt, faultScene, on, prefix, redeemAt } from "../../faults/test/faults.ts";
 import { backChannel } from "../../testing.ts";
 
 // Userinfo shows whether a token's path is open; pending closes are gone on with every second.

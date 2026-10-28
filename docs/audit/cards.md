@@ -326,7 +326,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
   - `code-once` (`src/code-once`): the fault scenes of an authorization code redeemed once (`guarantee-5-a`).
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
-  - `faults` (`src/faults`): what the area's fault scenes share, its scene deployed on a Redis topology and the store writes a fault is about.
+  - `faults` (`src/faults`): what the area's fault scenes share in the code flow's words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
   - `refresh-once` (`src/refresh-once`): the fault scenes of a refresh token rotated once (`guarantee-5-b`).

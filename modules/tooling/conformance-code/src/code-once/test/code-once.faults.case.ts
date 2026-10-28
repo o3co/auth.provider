@@ -1,12 +1,19 @@
 import {
 	confirmation,
+	failover,
 	faultRun,
 	hostLibfaketime,
 	type Instance,
+	instanceOf,
 	type Match,
+	ready,
+	reconnected,
+	replicasOnline,
+	repointed,
 	runIdOf,
 	sameMark,
 	storeWrite,
+	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import {
@@ -14,17 +21,10 @@ import {
 	codeAt,
 	codeNoted,
 	codeUse,
-	failover,
-	instanceOf,
 	on,
 	prefix,
-	ready,
-	reconnected,
 	redeemAt,
-	replicasOnline,
-	repointed,
 	said,
-	successes,
 } from "../../faults/test/faults.ts";
 
 const refused = [400, "invalid_grant"];
