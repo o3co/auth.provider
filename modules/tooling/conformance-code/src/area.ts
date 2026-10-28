@@ -34,6 +34,8 @@ export interface CodePart {
 	readonly userinfo?: boolean;
 	/** Tokens bound by DPoP presented at resources: on the legacy build, its DPoP package, which the oauth area does not set up. */
 	readonly dpopAtResources?: boolean;
+	/** How often each host goes on with pending closes of a session, in seconds; a fault scene's own. */
+	readonly sweepSeconds?: number;
 }
 
 export const codeArea = area<CodePart>("code");
@@ -98,6 +100,7 @@ export function codeScene(scene: CodeScene): AreaScene {
 			...(scene.logout ? { logout: scene.logout } : {}),
 			...(scene.userinfo ? { userinfo: true } : {}),
 			...(scene.dpopAtResources ? { dpopAtResources: true } : {}),
+			...(scene.sweepSeconds ? { sweepSeconds: scene.sweepSeconds } : {}),
 		}),
 	);
 	return scene.storeFaults ? { ...built, storeFaults: true } : built;

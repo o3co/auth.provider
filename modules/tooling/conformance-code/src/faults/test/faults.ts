@@ -129,10 +129,13 @@ export interface Code {
 	readonly challenge: string;
 }
 
-/** A code the instance gives a browser logged in at it, for `app`. */
-export async function codeAt(i: Instance): Promise<Code> {
+/** A browser behind the instance's proxy that logs in there. */
+export const browserOn = (i: Instance) => browserAt(() => i.baseUrl, issuer, alice);
+
+/** A code the instance gives a browser logged in at it (a new one unless given), for `app`. */
+export async function codeAt(i: Instance, browser = browserOn(i)): Promise<Code> {
 	const { verifier, challenge } = pkce();
-	const res = await browserAt(() => i.baseUrl, issuer, alice).authorize({
+	const res = await browser.authorize({
 		response_type: "code",
 		client_id: app.id,
 		redirect_uri: callback,
