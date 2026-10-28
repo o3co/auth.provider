@@ -35,19 +35,6 @@ export interface Issued {
 	readonly expiresAt: number;
 }
 
-/** What a run over the constrained families did: those handed and unlisted, those whose selection ran out, and what failed. */
-export interface ConstrainedRun {
-	readonly handled: number;
-	readonly expired: number;
-	readonly failed: {
-		/** Parts of the list that could not be read. */
-		readonly shards: number;
-		readonly reads: number;
-		readonly handles: number;
-		readonly removals: number;
-	};
-}
-
 /**
  * Whether selections are taken: `off` takes none and touches no store; `draining` keeps holding back
  * what was kept but keeps nothing new; `on` takes them.
@@ -70,11 +57,6 @@ export interface ClaimsSelections {
 	follow(redemption: string, familyId: string, lifetimeMs: number): Promise<void>;
 	/** Keeps for a refreshed token its family's target, the names cut to what is allowed and agreed to now. */
 	forRefreshed(familyId: string, client: Client, subject: string, access: Issued): Promise<void>;
-	/**
-	 * Hands each family whose kept selection holds constraints to `handle`, unlisting it once handled,
-	 * and unlists without it one whose selection ran out; what fails stays listed, to run again.
-	 */
-	constrainedFamilies(handle: (familyId: string) => Promise<void>): Promise<ConstrainedRun>;
 }
 
 export const claimsSelections = contract<ClaimsSelections>("claims-selection");
