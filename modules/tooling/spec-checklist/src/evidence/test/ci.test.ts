@@ -316,6 +316,11 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			};
 			expect(tried(2)).toEqual([0, "answered", "3"]);
 			expect(tried(9)).toEqual([1, "", "4"]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("read a pull request's moved file by both its paths, in interop-due and the conformance plan", () => {
 		const changedLine = (name: string, id: string) =>
 			(job(name).steps.find((s) => s.id === id)?.run ?? "")
