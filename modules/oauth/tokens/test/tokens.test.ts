@@ -368,7 +368,7 @@ it("writes one audience as a string and more as a list, an empty scope not at al
 
 // Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
 // Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
-it("issues access tokens none can make without its signing key, a changed claim or signature, another key or none refused, each with its own 128-bit id [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
+it("issues access tokens none can make without its signing key, a changed claim or signature, another key or none refused, each with its own 128-bit id [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc6749-10.3-b] [rfc6750-5.2-b]", async () => {
 	const t = await boot({ revocation: "unsupported" });
 	const [one, two] = [await issueFor(t, grant), await issueFor(t, grant)];
 	for (const { id } of [one, two]) expect(drawn).toContain(id);
@@ -430,9 +430,11 @@ it("answers unsupported to any revocation where revocation is not configured, a 
 	expect(await t.revokeAccess("garbage")).toEqual({ kind: "unsupported" });
 });
 
-it("reads the access token's lifetime with its unit, in whole seconds, an hour unless set", () => {
+it("reads the access token's lifetime with its unit, in whole seconds, an hour unless set [rfc6750-5.3-b]", () => {
 	const lifetimeOf = (settings: object) =>
 		section.safeParse({ revocation: "unsupported", ...settings }).data?.["access-token-lifetime"];
+	// Short-lived unless the operator says otherwise: an hour, as RFC 6750 §5.3 asks at most.
+	expect(defaultLifetimeSeconds).toBe(3600);
 	expect(
 		[{}, { "access-token-lifetime": "2h" }, { "access-token-lifetime": "2s" }].map(lifetimeOf),
 	).toEqual([defaultLifetimeSeconds, 7200, 2]);
