@@ -256,7 +256,12 @@ describe("path validation", () => {
 	it("takes a certificate in date past 2049, which RFC 5280 writes as GeneralizedTime", async () => {
 		const root = await issue({ cn: "root", ca: true, notAfter: Date.UTC(2070, 0, 1) });
 		const client = await issue({ cn: "client", by: root, notAfter: Date.UTC(2060, 0, 1) });
-		expect(client.certificate.notAfter.value.getTime()).toBe(Date.UTC(2060, 0, 1));
+		// Read back from the DER issued: written as GeneralizedTime, for 2060.
+		const written = new pkijs.Certificate({ schema: asn1js.fromBER(client.der).result }).notAfter;
+		expect([written.type, written.value.getTime()]).toEqual([
+			pkijs.TimeType.GeneralizedTime,
+			Date.UTC(2060, 0, 1),
+		]);
 		expect(await reasonOf(client.der, [], policyOf([root.der]))).toBe("path of 2");
 		const at2061 = Date.UTC(2061, 0, 1);
 		expect(await reasonOf(client.der, [], policyOf([root.der]), at2061)).toEqual(refusedAny);
