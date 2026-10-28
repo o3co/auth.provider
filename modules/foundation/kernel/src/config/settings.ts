@@ -7,7 +7,10 @@ const stopRange = { error: "whole seconds from 1 to 3600" };
 export const kernelSection = z.strictObject(
 	{
 		deployment: z
-			.enum(["single", "multi"], { error: "single or multi" })
+			.enum(["single", "multi"], {
+				error: (issue) =>
+					issue.input === undefined ? "required, and not set: single or multi" : "single or multi",
+			})
 			.describe("single or multi; multi refuses a module unsafe on multiple instances"),
 		environment: z
 			.enum(["production", "development"], { error: "production or development" })
