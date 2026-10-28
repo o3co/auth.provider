@@ -68,7 +68,7 @@ async function authorized(b: Browser, id: number, query = "") {
 }
 
 describe.runIf(able)("federation through GitHub", () => {
-	it("logs a browser in by the user's numeric id", async () => {
+	it("logs a browser in by the user's numeric id, its token sent to the user lookup as a Bearer Authorization [rfc6750-2.1-b]", async () => {
 		const b = browser();
 		const back = await b.get(`${start}/callback?${await authorized(b, 583231)}`);
 		expect([back.status, back.location]).toEqual([302, landing]);
