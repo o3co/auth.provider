@@ -25,8 +25,8 @@ Three choices cut across these shapes and change what the sections below say: wh
 
 The provider fails closed: a dependency that cannot answer never grants anything, and the request is refused, `503`, or for the authorization endpoint a redirect with `error=temporarily_unavailable` ([promise 3](security-model.md#promises-across-modules)). Availability is what it trades for this.
 
-- **Tested** under Redis faults (the network to or from Redis cut, the connection closed, Redis late or slow, a failover, Redis killed):
-  - The authorization endpoint gives no code while a dependency its decision waits on cannot answer (guarantee 3-a).
+- **Tested** under Redis faults, each guarantee under the faults named with it:
+  - The authorization endpoint gives no code while a dependency its decision waits on cannot answer, with the network to or from Redis cut, the connection closed, Redis late or slow, a failover, and Redis killed (guarantee 3-a).
   - Nothing is issued while the store cannot write (memory full, a write's confirmation by the replicas timed out or refused, replication chosen with no replica), and a request made once it can write again passes (guarantee 3-j).
   - The provider does not boot on a Redis set to evict keys (guarantee 3-k).
 - **Tested** with a store that refuses, by each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey) and the identity area's password login over a failing user ledger.
