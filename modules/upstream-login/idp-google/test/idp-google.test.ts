@@ -440,6 +440,10 @@ describe("idp-google", () => {
 				aud: ["client", "other"],
 				azp: "other",
 			}),
+			"another audience beside the client, the client authorized": await idToken({
+				aud: ["client", "other"],
+				azp: "client",
+			}),
 			"an empty subject": await idToken({ sub: "" }),
 			"no issue time": await idToken({ iat: undefined }),
 			"an unreadable login time": await idToken({ auth_time: "yesterday" }),
@@ -463,9 +467,7 @@ describe("idp-google", () => {
 		expect(await exchangedWith(await idToken({ iat: seconds + 31 }))).toBe("refused");
 	});
 
-	it("accepts an id_token for two audiences with this client as azp, or naming another client of the project as azp", async () => {
-		const shared = await idToken({ aud: ["client", "other"], azp: "client" });
-		expect(await exchangedWith(shared)).toMatchObject({ subject: "g-alice" });
+	it("accepts an id_token naming another client of the project as azp, for this client alone", async () => {
 		// Cross-client identity: Google names another client of the project as azp.
 		const crossClient = await idToken({ azp: "android-client" });
 		expect(await exchangedWith(crossClient)).toMatchObject({ subject: "g-alice" });
