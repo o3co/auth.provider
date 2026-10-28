@@ -36,6 +36,7 @@ beforeAll(async () => {
 			users: [{ identifier: "alice", password: "correct horse battery" }],
 			introspection: true,
 			revocation: true,
+			userinfo: true,
 			discovery: true,
 		}),
 	);
@@ -57,21 +58,23 @@ const required = [
 	"id_token_signing_alg_values_supported",
 ];
 
-it("is one JSON object of OpenID Connect Discovery's form: its required members, each value of its type, none empty [oidc-discovery-4-b]", async () => {
+it("is one JSON object of OpenID Connect Discovery's form: its required members, each value of its type, none empty, every location https with no fragment [oidc-discovery-4-b] [oidc-discovery-3-e] [oidc-discovery-3-i] [oidc-discovery-3-k] [rfc8414-2-d] [rfc6749-3.1-b]", async () => {
 	const res = await fetch(`${base}/.well-known/openid-configuration`);
 	expect(res.status).toBe(200);
 	expect(res.headers.get("content-type")).toMatch(/^application\/json(;|$)/);
 	const body: unknown = await res.json();
 	expect(typeof body === "object" && body !== null && !Array.isArray(body)).toBe(true);
 	const document = body as Record<string, unknown>;
-	for (const member of required) expect(document, member).toHaveProperty(member);
+	for (const member of [...required, "userinfo_endpoint"]) {
+		expect(document, member).toHaveProperty(member);
+	}
 	for (const [member, value] of Object.entries(document)) {
 		if (member === "issuer" || /_(endpoint|uri)$/.test(member)) {
-			// A location: an absolute https URL, with no query or fragment where it is the issuer.
+			// A location: an absolute https URL with no fragment, and no query where it is the issuer.
 			expect(typeof value, member).toBe("string");
 			const url = new URL(value as string);
-			expect(url.protocol, member).toBe("https:");
-			if (member === "issuer") expect([url.search, url.hash], member).toEqual(["", ""]);
+			expect([url.protocol, url.hash], member).toEqual(["https:", ""]);
+			if (member === "issuer") expect(url.search, member).toBe("");
 		} else if (
 			member.endsWith("_supported") &&
 			(required.includes(member) || typeof value !== "boolean")
