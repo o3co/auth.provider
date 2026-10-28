@@ -367,6 +367,7 @@ it("writes one audience as a string and more as a list, an empty scope not at al
 });
 
 // Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
 it("issues access tokens none can make without its signing key, a changed claim or signature, another key or none refused, each with its own 128-bit id [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
 	const t = await boot({ revocation: "unsupported" });
 	const [one, two] = [await issueFor(t, grant), await issueFor(t, grant)];
