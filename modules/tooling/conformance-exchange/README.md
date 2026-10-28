@@ -4,6 +4,7 @@
 - Owns the conformance scenes of the exchange area: Token Exchange (RFC 8693), its success with and without an actor, the lifetime asked, and its refusals, among them a subject whose email is not verified.
 - Covers three kinds of hole by behaviour: a binding washed off, a forged actor, a missed revocation.
 - Owns the scene of a subject the ledger revokes across every way to a token: a code redeemed and one not yet, refresh, token exchange, a device's approval polled and one not yet, the back-channel logout token to the session's client, and the fresh login the authorization endpoint then asks for.
+- Owns the fault scenes of the exchange area, on a Redis topology and a deployment of their own, each after a control with no fault: a subject's revocation boundary refusing the exchange of a token given before it (internal module `revocation-boundary`), with what they share (`faults`).
 - Sets up the exchange area's part (the actor chain's limit and the lifetime cap) on each of the legacy and new targets.
 
 ## Not here
@@ -12,6 +13,7 @@
 ## Offers
 - Area `exchange` and the shape of its part
 - Scene builder (builds the key, identity, OAuth and code parts, with refresh, introspection and revocation, from the form written in a scene)
+- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run, named to the evidence as `@mod/conformance-exchange#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
 - The legacy set-up, the needs the legacy system cannot provide, and the differences it answers differently, live only in `src/legacy.ts`.
