@@ -63,18 +63,8 @@ export function checkRequest(
 	};
 }
 
+/** OpenID Connect's offline access, which is not offered: the word's one meaning here. */
 const offline = "offline_access";
-
-/**
- * The requested scope without `offline_access`, in an OpenID Connect request: no offline access is
- * offered, so nothing permits it, and OpenID Connect Core §11 has it ignored, not refused, whatever the
- * client is allowed. `openid` stays, so the scope is never left empty, which would take the client's
- * default. Elsewhere it is a scope word like any other.
- */
-const withoutOffline = (scope: string | undefined) => {
-	const named = clientAllowance.parseScope(scope);
-	return named?.includes("openid") ? named.filter((word) => word !== offline).join(" ") : scope;
-};
 
 /**
  * The scope and audience the client may be issued for the requested scope. With `openid`
@@ -86,7 +76,16 @@ export function checkScope(
 	issuer: string,
 	openidRequired: boolean,
 ) {
-	const allowed = clientAllowance.allowedIssuance(client, withoutOffline(scope), issuer);
+	// Offline access is not offered, so nothing permits it: the request goes on without the word
+	// (OpenID Connect Core §11), whatever the client and whether or not it names openid. A request that
+	// named it alone asked nothing else, and is refused rather than given the client's default.
+	const named = clientAllowance.parseScope(scope);
+	const kept = named?.filter((word) => word !== offline);
+	if (kept?.length === 0 && named?.includes(offline)) {
+		return refusal("invalid_scope", "offline_access is not offered");
+	}
+	const asked = kept === undefined ? scope : kept.join(" ");
+	const allowed = clientAllowance.allowedIssuance(client, asked, issuer);
 	if (allowed.kind === "allowed") {
 		const named = clientAllowance.parseScope(scope) ?? [];
 		return openidRequired && !named.includes("openid")
