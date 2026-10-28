@@ -195,8 +195,7 @@ describe("a deployment of a scene", () => {
 			const [a] = d.instances;
 			if (!a) throw new Error("one instance");
 			expect((await fetch(`${a.baseUrl}/first`)).status).not.toBe(502);
-			// The file now holds no certificate: a start given it is refused, so a restart that is
-			// refused was given the deployment's certificates again.
+			// A start given a file that holds no certificate is refused: so is a restart given the deployment's.
 			await writeFile(cert, "not a certificate\n");
 			await a.kill();
 			await expect(a.restart()).rejects.toThrow(/trusted certificate file/);

@@ -15,7 +15,6 @@ import { type Identity, identityDifferences, identityOf } from "./identity.ts";
 import { markInstance, sweepStrayInstances, unmarkInstance } from "./stray.ts";
 import { startTrace, type Traced } from "./trace.ts";
 
-/** What each instance is started with, besides the scene: the start's own options, so they mean one thing. */
 export interface DeploymentSpec extends StartOptions {
 	/** The scene's name, for its record. */
 	readonly name: string;
@@ -139,7 +138,6 @@ export async function startDeployment(spec: DeploymentSpec) {
 					store,
 					undefined,
 					layers,
-					// The same options at every start, a restart's among them.
 					spec.trustedCertificates ? { trustedCertificates: spec.trustedCertificates } : {},
 					{
 						redis: { url: relay.url, ...redis },
