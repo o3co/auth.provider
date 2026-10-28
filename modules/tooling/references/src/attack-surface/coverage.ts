@@ -247,9 +247,5 @@ export const coverage: Coverage = {
 		{ anchor: "resetting-a-subjects-passkeys", what: "resetting a subject's passkeys" },
 		{ anchor: "filling-the-passkey-witnesss-marks", what: "filling the passkey witness's marks" },
 		{ anchor: "upgrading", what: "upgrading" },
-		{
-			anchor: "the-claims-parameter-through-an-upgrade",
-			what: "taking the claims parameter through an upgrade",
-		},
 	],
 };

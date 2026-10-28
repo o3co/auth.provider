@@ -172,7 +172,6 @@ What each module contains is described by that module's contract card (each modu
 | The claim names a `claims` request releases beyond its scope, by allowance and consent, and their value constraints, kept for the code, the redemption, the refresh family and each access token | contract | claims-selection |
 | Judging consent for a selection's names | extension point kind | claims-selection |
 | The scope each claim belongs to, from the module releasing claims | extension point kind | claims-selection |
-| Whether claims requests are taken (`mode`: `off`, `draining`, `on`) | setting | claims-selection |
 | Pinning a redemption's selection and keeping it for the redeemed token, as `code-grant`'s redemption hooks tell of it | contribution | claims-selection |
 | Carrying a token's constraints to a token exchanged from it, as `grants`' token ties | contribution | claims-selection |
 | A logout a client starts, its returns, the front-channel page and back-channel notices, the clients of each session (client metadata fields, routes, data) | contract / setting / data | rp-logout |
@@ -207,6 +206,7 @@ What each module contains is described by that module's contract card (each modu
 | Device Authorization Grant (device authorization, the verification interface, the device code grant) | contract / setting | device-grant |
 | Authorization endpoint, steering to the raise (step-up) screen | contract / setting | authorize |
 | Reading a `claims` request (acr, `sub` values, the claims named beyond the scope) and refusing a `sub` other than the session's | contract | authorize |
+| Whether a `claims` request's names and value constraints are taken, and discovery says the parameter is supported (`claims-parameter`) | setting | authorize |
 | Judging consent for a claims request's names, as for the scope | contribution | authorize |
 | Re-authentication requests: records asked for one authorization request, taken once, and whether a login is fresh enough | contract | reauth |
 | The acr table, and judging which acr values are known and which are satisfied | contract / setting | acr |

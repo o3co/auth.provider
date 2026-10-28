@@ -13,6 +13,7 @@ Internal module of `authorize`: reading the `claims` request parameter (OpenID C
 
 ## Invariants
 - A parameter that is not a JSON object, or an `acr` or `sub` of no shape Core §5.5.1 gives (`null`, or `essential` a boolean, `value` a string, `values` a non-empty list of strings, not both), is malformed.
+- Without each claim's scope, it reads no name and no value constraint; the parse, the `sub` of an OpenID Connect request, the acr and an essential `auth_time` are read either way.
 - A claim with a scope is held to the bounds `claims-selection` keeps: `value` or up to 16 `values` of scalars, a string up to 256 characters, the whole within `withinLimits`; another is malformed. A claim without a scope, and a member of a claim request it does not read, are passed over (Core §5.5.1).
 
 ## Depends on

@@ -35,19 +35,12 @@ export interface Issued {
 	readonly expiresAt: number;
 }
 
-/**
- * Whether selections are taken: `off` takes none and touches no store; `draining` keeps holding back
- * what was kept but keeps nothing new; `on` takes them.
- */
-export type SelectionMode = "off" | "draining" | "on";
-
 export interface ClaimsSelections {
-	readonly mode: SelectionMode;
 	/** The scope a claim belongs to, as the module releasing claims tells it; none where none does. */
 	scopeOf(claim: string): string | undefined;
 	/** The names the client is allowed and the subject agreed to, by their scopes; the constraints as they are. */
 	select(client: Client, subject: string, asked: Selection): Promise<Selection>;
-	/** Keeps a code's selection by its redemption's name, for the code's lifetime and a minute more; only while `on`. */
+	/** Keeps a code's selection by its redemption's name, for the code's lifetime and a minute more. */
 	keepForCode(redemption: string, selection: Selection, lifetimeMs: number): Promise<void>;
 	/** The selection pinned to a redemption: none for a code without one; throws once the pin is gone. */
 	forCode(redemption: string): Promise<Selection | undefined>;

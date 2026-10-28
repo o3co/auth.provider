@@ -14,7 +14,13 @@
 - Contribution of the return path `/oauth/authorize` to `login-gates`
 - Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`), `claims_parameter_supported` (`true` while `claims-selection` is `on`); to `claims-selection`'s consent judge, as for scope
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`, and of its document copy to `client-documents`
-- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host, never in production) by `url-setting`, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
+- Operator section:
+  - `login-page`: the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked.
+  - `step-up-page`: the page that raises authentication. Optional.
+  - Both pages are https URLs (http only on a loopback host, never in production) by `url-setting`.
+  - `oidc-mode`: `oidc-required` or `dual`.
+  - `requests` (requests per source in each window, over both methods) and `window`.
+  - `claims-parameter`, true by default: a claims request's names and value constraints are taken, and discovery says `claims_parameter_supported`. False ignores them and warns at boot `authorize.claims_parameter_off`; what else a claims request asks still holds, as `claims-request` and `flow` say.
 - Audit events (to `audit`, declared in `./audit-events`):
   - `authorize.granted` when a code is given, with the subject, `client` and `response_type` `code`.
   - `authorize.rejected` on a refusal decided for the client or its consent, with no subject, and `client` and `reason`.
@@ -36,11 +42,7 @@
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
 - Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: the routes' declared `503` `temporarily_unavailable`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
 - A fresh login that `prompt=login` or `max_age` demands counts only through a `reauth` record, made for the whole request when the browser is sent to log in and taken by that request. A session whose authentication time `session` answers as unknown meets neither, nor an essential `auth_time`, so a login is asked again.
-- Back from its login (its record taken) with a session still not new enough, its authentication time unknown or known, a request is refused with `login_required`, never sent to log in again.
-- A request carrying a re-authentication record that is not its own (spent, unknown, or made for other parameters, a demand taken out of it included) is refused with `login_required`.
 - The login page is told the `prompt=login` and `max_age` a request asked, beside `redirect_to`, to hand to a login it starts elsewhere (an upstream's), so that login is new too.
-
-- OpenID Connect's alone: a `claims` `sub` not the session's subject is `login_required`, in any mode; while `claims-selection` is `on`, names asked beyond the scope are kept for the code first, else `temporarily_unavailable`.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `url-setting`, `clients`, `client-documents`, `redirect-uris`, `reauth`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `claims-selection`, `rate-limit`, `audit`

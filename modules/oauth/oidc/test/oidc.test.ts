@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { claimsSelections } from "@mod/claims-selection";
-import { claimsSelectionConfig } from "@mod/claims-selection/testing";
 import type { IdTokenRequest } from "@mod/code-grant";
 import type { Assembly } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
@@ -230,7 +229,7 @@ describe("the claims a code's selection asks of the ID token", () => {
 	const served = async () => {
 		const app = await booted({
 			runtime,
-			config: { ...usersConfig([registered]), ...claimsSelectionConfig({ mode: "on" }) },
+			config: { ...usersConfig([registered]) },
 			sessionsAs: sessionsOf({ h: loginOf("s-alice", "users") }),
 		});
 		const [hook] = app.get(hooks);
