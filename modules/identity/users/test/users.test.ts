@@ -169,6 +169,20 @@ it("refuses to start on a subject that is not 1 to 255 ASCII characters, the ide
 	expect((await named.get(users).bySubject("s-alice")).kind).toBe("user");
 });
 
+it("refuses to start on an email's verification given without an email, at the verification", async () => {
+	const refused = await boot([testUser("a", "p", { attributes: { email_verified: true } })]).catch(
+		(error) => error,
+	);
+	expect((refused as BootRefused).refusals).toEqual([
+		{ where: "users.registered.0.attributes.email_verified", reason: "taken only beside an email" },
+	]);
+	expect(
+		await boot([
+			testUser("a", "p", { attributes: { email: "a@example.com", email_verified: true } }),
+		]),
+	).toBeDefined();
+});
+
 it("refuses to start on an attribute value users does not accept, naming the attribute but never the value [guarantee-8-a]", async () => {
 	const refused = async (attributes: Record<string, unknown>) =>
 		((await boot([testUser("a", "p", { attributes })]).catch((error) => error)) as BootRefused)
