@@ -2,7 +2,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { federationScene } from "../src/main.ts";
+import { federationScene, landedStatus } from "../src/main.ts";
 import { type Browser, browser as openBrowser } from "./browser.ts";
 import { type Authorized, fakeUpstream } from "./upstream.ts";
 
@@ -111,7 +111,7 @@ async function loggedIn(
 		tokens,
 	});
 	const done = await b.get(`/session/oauth/federation/${idp}/callback?${query}`);
-	expect([done.status, done.location]).toEqual([302, landing]);
+	expect([done.status, done.location]).toEqual([landedStatus(), landing]);
 	return b;
 }
 

@@ -1,4 +1,4 @@
-import { type AreaScene, area, sceneOf } from "@mod/conformance";
+import { type AreaScene, area, areaTarget, sceneOf } from "@mod/conformance";
 import { codeArea } from "@mod/conformance-code";
 import {
 	identityArea,
@@ -8,6 +8,10 @@ import {
 } from "@mod/conformance-identity";
 import { type KeysPart, keysArea } from "@mod/conformance-keys";
 import { type ClientScene, oauthArea } from "@mod/conformance-oauth";
+
+/** The status a callback lands its browser with: 303 (RFC 9700 §4.12), or 302 where the target differs. */
+export const landedStatus = (): number =>
+	areaTarget().differs("federation-lands-by-302") ? 302 : 303;
 
 /** An upstream OpenID Connect IdP the deployment logs browsers in through. */
 export interface IdpScene {
