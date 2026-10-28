@@ -1,21 +1,16 @@
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import { type AreaScene, sceneOf } from "@mod/conformance";
 import {
 	type Deployed,
 	type Deploying,
 	type Instance,
-	type Match,
 	on as onDeployment,
-	storeRead,
-	storeWrite,
 } from "@mod/conformance/testing";
 import { keysArea } from "@mod/conformance-keys";
 // The package's entry, which sets the area up on each target.
 import { type IdentityPart, identityArea } from "../../main.ts";
 
 export const issuer = "https://issuer.example";
-/** The deployment's `redis.prefix`: the adapter's own, as no scene sets one. */
-export const prefix = "store";
 const pair = generateKeyPairSync("ed25519");
 export const alice = { username: "alice", password: "alice-horse-battery-staple" };
 
@@ -49,11 +44,13 @@ let sent = 0;
 /** A source of its own, as the proxy forwards it, so no scene's count takes another's. */
 export const nextSource = () => `198.51.100.${++sent}`;
 
-/** A login's answer: its status, its error, the session cookie it set, and when it came. */
+/** A login's answer: its status, its error, the session cookie it set, the wait it asks, and when it came. */
 export interface Answer {
 	readonly status: number;
 	readonly error?: string;
 	readonly session?: string;
+	/** `retry-after`, in seconds, where the answer asks a wait. */
+	readonly retryAfter?: number;
 	readonly at: number;
 }
 
@@ -84,35 +81,15 @@ export async function loginAt(
 		.getSetCookie()
 		.map((c) => c.split(";")[0] ?? "")
 		.find((c) => /^__Host-[^=]*session=/.test(c) && !/csrf/.test(c));
+	const wait = res.headers.get("retry-after");
 	return {
 		status: res.status,
 		...(typeof body.error === "string" ? { error: body.error } : {}),
 		...(session ? { session } : {}),
+		...(wait === null ? {} : { retryAfter: Number(wait) }),
 		at: performance.now(),
 	};
 }
 
 /** An answer as a scene compares it: its status and error, and whether it opened a session. */
 export const said = (a: Answer) => [a.status, a.error, a.session !== undefined];
-
-/** The count of a login attempt from the source: its window's counter, under the route's name and the source. */
-export const attemptFrom = (source: string): Match =>
-	storeWrite({
-		prefix,
-		space: "rate-limit.attempts",
-		partition: createHash("sha256").update(`login-password\n${source}`).digest("base64url"),
-		operations: ["count"],
-	});
-
-const lockoutWrite = storeWrite({ prefix, space: "rate-limit.lockouts" });
-const lockoutRead = storeRead({ prefix, space: "rate-limit.lockouts" });
-/** Any request about an identifier's lockout: its confirmed read, or a write (a reservation, an end of its run, a hand-back). */
-export const identifierLockout: Match = {
-	request: (command) => lockoutRead.request(command) || lockoutWrite.request(command),
-	succeeded: () => true,
-};
-
-/** The write of a new session's record: the first session write a login makes, after its attempt is counted and its identifier's run reserved. */
-export const sessionRecord: Match = storeWrite({ prefix, space: "session-store.sessions" });
-/** The write that indexes a session under its cookie, without which no request can reach the session. */
-export const cookieIndexed: Match = storeWrite({ prefix, space: "session-store.cookies" });

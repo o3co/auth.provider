@@ -10,7 +10,7 @@ import { entryRequirements } from "@mod/session-requirements";
 import { describe, expect, it } from "vitest";
 import { upstreamEnds } from "../src/contract.ts";
 import type { SessionClients } from "../src/store.ts";
-import { back, issuer, servedEach } from "./harness.ts";
+import { back, issuer, readEndingSessions, servedEach } from "./harness.ts";
 
 const serve = servedEach();
 const noCache = { "cache-control": "no-store", pragma: "no-cache" };
@@ -20,47 +20,6 @@ const noCache = { "cache-control": "no-store", pragma: "no-cache" };
  * calls them for any record it finds open, past its lifetime too: as session-lifecycle keeps them
  * while a record outlives its end (a host's clock behind another's, or a lifetime shortened since).
  */
-function readEndingSessions(lifetimeMs: number) {
-	return defineModule({ takes: [participants], name: "session" }, (m) => [
-		m.provide(sessions).by(async (c) => {
-			const closers = await c.collect(participants);
-			type Kept = { subject: string; openedAt: number; state: "open" | "closing" | "closed" };
-			const kept = new Map<string, Kept>();
-			const sessionOf = (id: string, r: Kept) => ({
-				id,
-				context: { subject: r.subject, amr: ["pwd"], authenticatedAt: r.openedAt },
-			});
-			return stubSessions({
-				complete: async (_request, facts) => {
-					const id = `s${kept.size + 1}`;
-					const r: Kept = { subject: facts.subject, openedAt: c.clock.now(), state: "open" };
-					kept.set(id, r);
-					return { session: sessionOf(id, r), cookies: [`session=${id}`] };
-				},
-				entryOf: async (id) => {
-					const r = kept.get(id);
-					if (r?.state !== "open") return { kind: "absent" };
-					if (r.openedAt + lifetimeMs <= c.clock.now()) {
-						r.state = "closed";
-						return { kind: "absent" };
-					}
-					return { kind: "entered", session: sessionOf(id, r), endsAt: r.openedAt + lifetimeMs };
-				},
-				close: async (id) => {
-					const r = kept.get(id);
-					if (!r) return { kind: "closed", cookies: [] };
-					const from = r.state;
-					if (r.state !== "closed") {
-						r.state = "closing";
-						for (const closer of closers) await closer.closing(sessionOf(id, r));
-						r.state = "closed";
-					}
-					return { kind: "closed", cookies: [], session: { id, subject: r.subject }, from };
-				},
-			});
-		}),
-	]);
-}
 
 describe("the logout a client starts", () => {
 	it("ends the session the hint names and clears the cookie of a browser in it", async () => {
@@ -100,12 +59,39 @@ describe("the logout a client starts", () => {
 		]);
 	});
 
-	it("refuses a request without a hint, with a hint it cannot verify, or one that names no session [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
+	it("sends a request without a hint to the person's confirmation, whatever return or client it names, reading and closing nothing", async () => {
+		const h = await serve();
+		const { session } = await h.login();
+		for (const [method, params] of [
+			["GET", {}],
+			["POST", {}],
+			["GET", { state: "s" }],
+			["POST", { state: "s", client_id: "app" }],
+			["GET", { post_logout_redirect_uri: back }],
+			// Neither the client nor its return is read: an unknown one goes to the confirmation too.
+			[
+				"POST",
+				{ post_logout_redirect_uri: "https://elsewhere.example/", client_id: "nobody", state: "s" },
+			],
+		] as const) {
+			const out = await h.call(method, params);
+			expect([method, params, out.status, out.headers.location]).toEqual([
+				method,
+				params,
+				303,
+				"/oauth/logout/confirm",
+			]);
+			expect(out.headers).toMatchObject(noCache);
+		}
+		expect(await h.stillOpen(session.id)).toBe(true);
+		expect(h.events).toEqual([]);
+	});
+
+	it("refuses a hint it cannot verify, or one that names no session [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const forged = (await h.hintFor(session.id)).replace(/\.[^.]+$/, ".AAAA");
 		const cases = [
-			["no hint", "POST", {}, "invalid_request"],
 			["a forged hint", "GET", { id_token_hint: forged }, "invalid_token"],
 			[
 				"another issuer's",

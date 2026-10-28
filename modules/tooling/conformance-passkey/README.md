@@ -6,6 +6,7 @@
 - Owns the scenes of logging in with a passkey into a browser session (`login-passkey`): a session the session's routes take, the refusals alike (options another browser asked, an assertion twice, a credential no one registered), the origin checked and the options' limit, and a verified user let past a second factor or, where it does not count, held by it.
 - Owns the scenes of refusing the password of a subject holding a passkey: before a second factor holds the login, and again when a held one resumes, with the passkey witness at a fake ledger the scene runs, as the mode refuses to boot without one.
 - Owns the scenes of WebAuthn as a second factor: binding a credential that need not be discoverable, proving it at a login it holds, the refusals (a count that did not go up, a response to another challenge), and an acr asking the amr it proves (`pop`) or one it does not (`hwk`).
+- Owns the fault scenes of the passkey area, on a Redis topology and a deployment of their own, each after a control with no fault: a passkey challenge used once (internal module `passkey-challenge-once`), with what they share (`faults`).
 - Sets up the passkey area's parts (relying party, origins, framing pages, user verification, challenge lifetime, passkeys per user, the login and its options' limit, the session login and its password rule, WebAuthn as a second factor) on each of the legacy and new targets.
 - On the legacy target, DPoP comes with the passkey login when the OAuth part asks for it.
 - WebAuthn as a second factor needs the second-factor area's part beside it.
@@ -16,6 +17,7 @@
 
 ## Offers
 - Area `passkey` and the shape of its parts
+- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run, named to the evidence as `@mod/conformance-passkey#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
 - The legacy set-up, and the needs the legacy system cannot provide, live only in `src/legacy.ts`.

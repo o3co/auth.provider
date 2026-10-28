@@ -391,6 +391,29 @@ describe("authorize: trust in the redirect URI", () => {
 	});
 });
 
+it("sends each PKCE refusal back by 302 as invalid_request with state and iss, its description telling why [rfc7636-4.4.1-b] [rfc7636-4.4.1-d]", async () => {
+	const { authorize, login } = await serve();
+	const cookie = await login();
+	for (const [extra, description] of [
+		[{ code_challenge: "" }, "PKCE with S256 is required"],
+		[{ code_challenge_method: "plain" }, "code_challenge_method is not supported: only S256"],
+		[{ code_challenge: "A".repeat(42) }, "code_challenge is malformed"],
+	] as const) {
+		const res = await authorize(request(extra), cookie);
+		const sent = ["error", "error_description", "state", "iss"].map((n) =>
+			res.at?.searchParams.get(n),
+		);
+		expect([res.status, `${res.at?.origin}${res.at?.pathname}`, ...sent]).toEqual([
+			302,
+			callback,
+			"invalid_request",
+			description,
+			"s1",
+			issuer,
+		]);
+	}
+});
+
 it("refuses a client not allowed the code grant with the token endpoint's words for it", async () => {
 	const { authorize, login } = await serve();
 	const res = await authorize(request({ client_id: "nocode" }), await login());

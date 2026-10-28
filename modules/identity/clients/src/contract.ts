@@ -46,7 +46,10 @@ export interface ClientSource {
 
 export interface AuthMethod {
 	readonly name: string;
-	/** The JWS algorithms its credentials may be signed with, for a method whose credentials are signed. */
+	/**
+	 * The JWS algorithms its credentials may be signed with, for a method whose credentials are signed:
+	 * at least one, never `none`, and set by every method that authenticates by an assertion.
+	 */
 	readonly signingAlgorithms?: readonly string[];
 	/** The WWW-Authenticate challenge to send when this method's credentials are refused. */
 	readonly challenge?: string;
