@@ -122,7 +122,7 @@ describe("the confirmation's routes", () => {
 	});
 
 	it("answer 503, closing nothing, where the session index cannot tell whose the browser is", async () => {
-		const failing = defineModule({ takes: [], name: "session", replicaSafe: true }, (m) => [
+		const failing = defineModule({ takes: [], name: "session", replicaSafe: false }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
 					handleOf: async () => {

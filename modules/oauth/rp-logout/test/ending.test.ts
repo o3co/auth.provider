@@ -390,7 +390,7 @@ describe("the logout a client starts", () => {
 	});
 
 	it("passes on an error of the close's that is not Unavailable, recording no failed close", async () => {
-		const broken = defineModule({ takes: [], name: "session", replicaSafe: true }, (m) => [
+		const broken = defineModule({ takes: [], name: "session", replicaSafe: false }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
 					complete: async (_request, facts) => ({
@@ -632,7 +632,7 @@ it("leaves out the frame of a client a source names whose front channel is at no
 		remote("https://remote.example/off", "https://elsewhere.example/fc"),
 		remote("https://remote.example/on", "https://remote.example/fc"),
 	];
-	const source = defineModule({ takes: [], name: "remote-clients", replicaSafe: true }, (m) => [
+	const source = defineModule({ takes: [], name: "remote-clients", replicaSafe: false }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id) => records.find((r) => r.id === id),
 		})),
