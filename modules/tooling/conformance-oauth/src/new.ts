@@ -38,7 +38,14 @@ function clientsSection(part: OauthPart): Record<string, unknown> {
 					...(c.defaultScopes ? { "default-scopes": c.defaultScopes } : {}),
 					audiences: c.audiences ?? [],
 				},
-				...(c.bindingRequired ? { "sender-binding": { required: true } } : {}),
+				...(c.bindingRequired
+					? {
+							"sender-binding": {
+								required: true,
+								...(c.bindingKinds ? { kinds: c.bindingKinds } : {}),
+							},
+						}
+					: {}),
 				...(c.keys || c.jwksUri
 					? {
 							"client-assertion": {
