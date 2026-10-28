@@ -95,8 +95,8 @@ export const successes = (i: Instance, match: Match) =>
 
 /**
  * Until the instance's relay holds an open connection to `upstream` and has answered a call on it, its
- * client's check, within 10 s; then until that Redis takes writes, its good replicas as many as its
- * `min-replicas-to-write` asks, within 30 s. Past either bound it fails naming what it waited on.
+ * client's check (a request before it sends nothing), within 10 s; then until that Redis takes writes
+ * (one just promoted refuses them as NOREPLICAS), within 30 s. Past either bound it fails naming why.
  */
 export async function reconnected(i: Instance, upstream: Upstream) {
 	const end = performance.now() + 10_000;
@@ -107,8 +107,6 @@ export async function reconnected(i: Instance, upstream: Upstream) {
 		if (performance.now() > end) throw new Error(`instance ${i.index} did not connect again`);
 		await pause(100);
 	}
-	// Its client checks a connection it opens before it sends on it: until then a request fails
-	// for want of one, sending nothing.
 	const checked = () => {
 		const ids = new Set(opened().map((c) => c.id));
 		return i.relay
@@ -121,8 +119,6 @@ export async function reconnected(i: Instance, upstream: Upstream) {
 		}
 		await pause(50);
 	}
-	// A primary just promoted refuses writes as NOREPLICAS until its replicas are good, a refusal
-	// a scene would take for the one it checks.
 	const asking = (...args: string[]) => ask(upstream, args);
 	const toWrite = await minReplicasToWrite(
 		asking,
