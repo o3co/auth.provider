@@ -552,6 +552,9 @@ describe("jwt-bearer", () => {
 			errorOf(await s.grant(await assertion(base, upstream.privateKey, typ ? { typ } : {})));
 		expect(await error("at+jwt")).toBe("invalid_grant");
 		expect(await error("application/at+jwt")).toBe("invalid_grant");
+		// Its parameters, the space around it and its case are no part of the type.
+		expect(await error("application/AT+JWT; charset=UTF-8")).toBe("invalid_grant");
+		expect(await error(" at+jwt ;q=1")).toBe("invalid_grant");
 		expect(await error("JWT")).toBe("issued");
 		expect(await error()).toBe("issued");
 	});
