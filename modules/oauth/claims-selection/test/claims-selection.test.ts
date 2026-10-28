@@ -372,6 +372,8 @@ it("refuses to start without a mode, naming the key and the choice to make, and 
 			),
 		},
 	]);
+	// No way back to a release before 0.19 is a choice to name.
+	expect(BootRefused.is(refused) && refused.refusals[0]?.reason).not.toMatch(/going back/);
 	await expect(serve(undefined, "sometimes" as never)).rejects.toThrow();
 });
 
