@@ -234,7 +234,7 @@ describe("a logout the client starts", () => {
 
 	// A client_id beside the hint must be the client the ID token was issued to (RP-Initiated Logout 1.0 §2).
 	it.runIf(!areaTarget().differs("logout-client-id-checked"))(
-		"refuses a client_id that is not the client the hint was issued to, leaving the session [oidc-rpinit-2-a]",
+		"refuses a client_id that is not the client the hint was issued to, leaving the session [oidc-rpinit-2-a] [oidc-rpinit-4-c]",
 		async () => {
 			const at = await signedIn();
 			for (const method of ["GET", "POST"] as const) {
@@ -254,7 +254,7 @@ describe("a logout the client starts", () => {
 	// A parameter sent twice reads as none: refused first, so neither the client_id check nor the
 	// return's can be passed by sending it twice.
 	it.runIf(!areaTarget().differs("logout-repeated-parameter-refused"))(
-		"refuses a client_id or a return sent twice, leaving the session",
+		"refuses a client_id or a return sent twice, leaving the session [oidc-rpinit-4-c]",
 		async () => {
 			for (const [name, value] of [
 				["client_id", "other"],
@@ -411,7 +411,7 @@ describe("a logout the client starts", () => {
 	);
 
 	// A hint naming no session cannot say which session to end.
-	it("refuses a hint that names no session, leaving the session", async () => {
+	it("refuses a hint that names no session, leaving the session [oidc-rpinit-4-c]", async () => {
 		const at = await signedIn();
 		const { sid: _, ...claims } = claimsOf(at.idToken);
 		const answer = await logout(at, "GET", { id_token_hint: signed({ typ: "JWT" }, claims) });
@@ -420,7 +420,7 @@ describe("a logout the client starts", () => {
 	});
 
 	// Token confusion: only an ID token is taken as the hint, never another kind the provider signs.
-	it("refuses as the hint a token of another kind, or one the provider did not sign [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
+	it("refuses as the hint a token of another kind, or one the provider did not sign [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b] [oidc-rpinit-4-c]", async () => {
 		const at = await signedIn();
 		const other = generateKeyPairSync("ed25519").privateKey;
 		const foreign = signed({ typ: "JWT" }, claimsOf(at.idToken), other);
@@ -452,7 +452,7 @@ describe("hints past their time", () => {
 	);
 
 	it.runIf(!areaTarget().differs("old-logout-hint"))(
-		"refuses a hint issued over a day ago, by GET or POST, leaving the session open",
+		"refuses a hint issued over a day ago, by GET or POST, leaving the session open [oidc-rpinit-4-c]",
 		async () => {
 			const at = await signedIn();
 			const hint = aged(at.idToken, 90_000);
