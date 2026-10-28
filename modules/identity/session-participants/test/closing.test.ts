@@ -42,19 +42,22 @@ it("calls the participants one at a time in the order given, past a failing one,
 it("contributes the one closing participants over those the composition contributes", async () => {
 	const closed: string[] = [];
 	const read = contract<ClosingParticipants>("test.closing");
-	const reading = defineModule({ name: "reading", takes: [closingParticipants] }, (m) => [
-		m.provide(read).by(async (c) => {
-			const [closing] = await c.collect(closingParticipants);
-			if (!closing) throw new Error("none");
-			return closing;
-		}),
-		m.contribute(participants).by(() => ({
-			name: "tokens",
-			closing: async (s: Session) => {
-				closed.push(s.id);
-			},
-		})),
-	]);
+	const reading = defineModule(
+		{ name: "reading", replicaSafe: false, takes: [closingParticipants] },
+		(m) => [
+			m.provide(read).by(async (c) => {
+				const [closing] = await c.collect(closingParticipants);
+				if (!closing) throw new Error("none");
+				return closing;
+			}),
+			m.contribute(participants).by(() => ({
+				name: "tokens",
+				closing: async (s: Session) => {
+					closed.push(s.id);
+				},
+			})),
+		],
+	);
 	const app = await assemble({ modules: [participantsModule, reading], config: kernelConfig() });
 	expect(
 		(await takesUnused({ modules: [participantsModule, reading], config: kernelConfig() }))[
