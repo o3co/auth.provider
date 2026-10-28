@@ -27,7 +27,7 @@
 - A settings link wins over a written link of the same upstream identity, which stays hidden and cannot be unlinked (unlink answers fixed); taking the identity out of the settings lets the written link take effect again.
 - A contact is kept once per subject by `mail`'s canonical form, as first given, up to 20, and another past them throws RangeError; an empty subject, upstream part or contact value throws TypeError.
 - A claimed contact is the user's `email` attribute, as given, apart from verified contacts.
-- Attribute values: `email` one mail takes, `picture` an https URL that reads back as given, `email_verified` a boolean, `name` text, `groups` a list of text, no text with a control or format character; another refuses boot in the settings, and from a ledger is left out, its name logged.
+- Attribute values: `email` one mail takes, `picture` an https URL that reads back as given, `email_verified` a boolean, `name` text, `groups` a list of text, no text with a control or format character; another refuses boot in the settings, and from a ledger is left out, its name logged. `email_verified` holds only beside `email`: without it, boot is refused in the settings, and a ledger's is left out.
 - A password hash is one `secret-hash` reads (bcrypt or scrypt), else boot is refused; a password over 1024 bytes is none before any computation or ledger call, and `secret-hash` decides the rest, within its assembly's `max-concurrent`.
 - Each verification does the work of every kind of hash in use, so timing does not tell whether a user exists.
 
