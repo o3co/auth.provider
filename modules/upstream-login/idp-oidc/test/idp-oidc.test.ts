@@ -7,6 +7,7 @@ import {
 	defineModule,
 	isUnavailable,
 	kernelConfig,
+	readConfigured,
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -918,43 +919,62 @@ describe("idp-oidc", () => {
 		expect(sent?.request.credential).toBeUndefined();
 	});
 
-	it("refuses an answer from another issuer before using its code, and one without iss where iss is asked [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
+	it("refuses an answer from another issuer before using its code, and one without iss unless the operator accepts its absence [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
 		const token = await idToken();
 		const { upstream, asked } = await answering(token);
-		for (const iss of ["https://evil.example", ""]) {
-			expect(await outcome(upstream.exchange(codeExchange({ iss }))), iss).toBe("refused");
+		for (const iss of ["https://evil.example", "", undefined]) {
+			expect(await outcome(upstream.exchange(codeExchange({ iss }))), String(iss)).toBe("refused");
 		}
 		expect(asked.some((a) => a.url === `${issuer}/token`)).toBe(false);
-		expect(await outcome(upstream.exchange(codeExchange({ iss: undefined })))).toMatchObject({
-			subject: "u-alice",
-		});
-		const asking: Record<string, Omit<World, "token">> = {
-			"the description offers iss": {
-				description: { authorization_response_iss_parameter_supported: true },
-			},
-			"the operator requires iss": { settings: { "require-iss": true } },
-		};
-		for (const [label, world] of Object.entries(asking)) {
-			const strict = await answering(token, world);
-			expect(await outcome(strict.upstream.exchange(codeExchange({ iss: undefined }))), label).toBe(
+		const accepting = await answering(token, { settings: { "accept-missing-iss": true } });
+		// Accepting a missing iss takes no other: a wrong or empty one is refused before its code is used.
+		for (const iss of ["https://evil.example", ""]) {
+			expect(await outcome(accepting.upstream.exchange(codeExchange({ iss }))), iss).toBe(
 				"refused",
 			);
 		}
+		expect(accepting.asked.some((a) => a.url === `${issuer}/token`)).toBe(false);
+		expect(
+			await outcome(accepting.upstream.exchange(codeExchange({ iss: undefined }))),
+		).toMatchObject({ subject: "u-alice" });
+		const offering = await answering(token, {
+			settings: { "accept-missing-iss": true },
+			description: { authorization_response_iss_parameter_supported: true },
+		});
+		expect(await outcome(offering.upstream.exchange(codeExchange({ iss: undefined })))).toBe(
+			"refused",
+		);
 	});
 
-	it("warns at boot when neither the operator nor the description requires iss", async () => {
+	it("warns at every start where the operator accepts a missing iss the description does not offer", async () => {
+		const accepting = { "accept-missing-iss": true };
 		const notRequired = [{ event: "idp-oidc.iss_not_required", fields: { idp: "corp" } }];
-		expect((await open()).warned).toEqual(notRequired);
-		expect((await open({ settings: givenEndpoints })).warned).toEqual(notRequired);
-		const asking: Record<string, World> = {
+		expect((await open({ settings: accepting })).warned).toEqual(notRequired);
+		expect((await open({ settings: { ...givenEndpoints, ...accepting } })).warned).toEqual(
+			notRequired,
+		);
+		const required: Record<string, World> = {
+			"by default": {},
+			"without discovery": { settings: givenEndpoints },
 			"the description offers iss": {
+				settings: accepting,
 				description: { authorization_response_iss_parameter_supported: true },
 			},
-			"the operator requires iss": { settings: { "require-iss": true } },
 		};
-		for (const [label, world] of Object.entries(asking)) {
+		for (const [label, world] of Object.entries(required)) {
 			expect((await open(world)).warned, label).toEqual([]);
 		}
+	});
+
+	it("refuses 0.18's require-iss as an unknown key, naming it, read as federation reads an IdP's settings", () => {
+		const read = readConfigured(settingsOf(asymmetric, policyRefusing()), {
+			issuer,
+			"client-id": "client",
+			"client-secret": "s",
+			"require-iss": true,
+		});
+		expect(read).toEqual({ issues: [expect.objectContaining({ path: [] })] });
+		expect("issues" in read && read.issues[0]?.message).toMatch(/"require-iss"/);
 	});
 
 	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [oidc-discovery-7.2-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
@@ -1374,7 +1394,12 @@ describe("idp-oidc", () => {
 			app.get(types).find((type) => type.type === "oidc"),
 			"the oidc type",
 		);
-		const base = { issuer, "client-id": "client", "client-secret": "s" };
+		const base = {
+			issuer,
+			"client-id": "client",
+			"client-secret": "s",
+			"accept-missing-iss": true,
+		};
 		expect(oidc.settings.safeParse({ ...base, algorithms: ["HS256"] }).success).toBe(false);
 		await oidc.open(oidc.settings.parse(base), {
 			idp: "corp",
