@@ -90,14 +90,14 @@ cp config/local.conf.example config/local.conf
 
 - `ISSUER_URL` と `HTTP_PUBLIC_ORIGIN`：クライアントから見える URL（末尾のスラッシュなし）と、そのスキーム・ホスト・ポートです。両者のオリジンは一致させてください。
   - デフォルトでは、公開オリジンは https でなければなりません。手元のマシンで平文の http を使って試すには、両方を `http://127.0.0.1:8080` に設定し、`.env` に `HTTP_INSECURE_ORIGIN=true` を設定してください。
-- `KEYS_SIGNING_KID` と `KEYS_SIGNING_ALG`。サンプルでは Ed25519 鍵用に EdDSA を指定しています。
+- `KEYS_SIGNING_KID` と `KEYS_SIGNING_ALG`。サンプルでは RSA 鍵用に RS256 を指定しています。RS256 は、どの OpenID Connect クライアントも検証できます。
 - `AUTHORIZE_LOGIN_PAGE`：ログインページの URL です。プロバイダーと同じオリジンに置きます。たとえば `http://127.0.0.1:8080/login` とし、ページを配信して残りをアプリに渡すプロキシの背後に置きます。アプリはこのページを配信しません。別のオリジンのページでもアプリは起動しますが、そこからのログインは必ず `403 csrf` で拒否されます。`CONSENT_PAGE` は同意ページの URL です。すべてのクライアントがファーストパーティの場合は、未設定のままにしてください。
 - サンプルに従い、`KERNEL_DEPLOYMENT=single`、`STORE_ACCEPT_VOLATILE=true`、`MAIL_ACCEPT_UNSENT=true`、`TOKENS_REVOCATION=denylist` を設定します。これらは、単一インスタンスで動作し、状態をメモリーに保持し（再起動で失われます）、メールを送信しない構成であることを明示します。`TOKENS_REVOCATION=denylist` は失効したアクセストークンを denylist に置いて拒否し、`unsupported` は失効の要求に unsupported と答えます。
 
 署名鍵を生成します。
 
 ```sh
-node -e 'const {generateKeyPairSync}=require("node:crypto");process.stdout.write(generateKeyPairSync("ed25519").privateKey.export({type:"pkcs8",format:"pem"}))' > signing.pem
+node -e 'const {generateKeyPairSync}=require("node:crypto");process.stdout.write(generateKeyPairSync("rsa",{modulusLength:2048}).privateKey.export({type:"pkcs8",format:"pem"}))' > signing.pem
 ```
 
 テスト用ユーザーのパスワードハッシュを作成します。プロバイダーが受け付けるのは bcrypt または scrypt のハッシュで、平文のパスワードは受け付けません。次のコマンドは scrypt ハッシュを出力します。

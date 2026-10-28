@@ -16,11 +16,11 @@ The generated README lists every key the app reads and where each is written. Th
 
 ## Make a signing key
 
-The app signs its tokens with this key (the `keys` card). This prints a new Ed25519 key as PKCS8 PEM:
+The app signs its tokens with this key (the `keys` card). This prints a new RSA key of 2048 bits as PKCS8 PEM, for RS256, which every OpenID Connect client can check:
 
 <!-- generated:signing-key -->
 ```sh
-node -e 'console.log(require("node:crypto").generateKeyPairSync("ed25519").privateKey.export({format:"pem",type:"pkcs8"}).trim())'
+node -e 'console.log(require("node:crypto").generateKeyPairSync("rsa",{modulusLength:2048}).privateKey.export({format:"pem",type:"pkcs8"}).trim())'
 ```
 <!-- end generated -->
 
@@ -53,7 +53,7 @@ store.accept-volatile = true
 audit.receivers = [log]
 keys.signing {
   kid = signing-1
-  alg = EdDSA
+  alg = RS256
   private-key = """-----BEGIN PRIVATE KEY-----
 <the key the script printed>
 -----END PRIVATE KEY-----"""

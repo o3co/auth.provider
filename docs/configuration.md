@@ -303,7 +303,7 @@ From `@mod/keys`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `keys.signing.kid` | string |  | yes | `KEYS_SIGNING_KID` | `signing-1` | The key id tokens signed with this key carry, unique in the ring. |
-| `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `EdDSA` | The algorithm the provider signs with. |
+| `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `RS256` | The algorithm the provider signs with. |
 | `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
 | `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
 | `keys.signing.secret-encoding` | hex \| base64 \| utf8 |  |  |  |  | How `secret` is read: `hex`, `base64` (strict) or `utf8`, the text's own bytes, as 0.17 and policy-verifier read it; a value not of the reading named is refused. Unset, hex or else base64. |
