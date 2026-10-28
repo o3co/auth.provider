@@ -11,23 +11,14 @@ import {
 	repointed,
 	runIdOf,
 	sameMark,
-	storeRead,
-	storeWrite,
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import { app, browserOn, callback, on, pkce, prefix } from "../../faults/test/faults.ts";
+import { app, browserOn, callback, on, pkce } from "../../faults/test/faults.ts";
+import { codeKept, cookieRead, isStoreOperation } from "../../faults/test/wire.ts";
 
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
-/** The write that keeps a new code: the record a code is issued with. */
-const codeKept = storeWrite({
-	prefix,
-	space: "code-grant-store.codes",
-	operations: ["putIfAbsent"],
-});
-/** The read of the browser's session behind its cookie, which the decision waits on first. */
-const cookieRead = storeRead({ prefix, space: "session-store.cookies" });
 
 /** A browser logged in at the instance, before any fault. */
 async function loggedInAt(i: Instance) {
@@ -243,7 +234,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 					(e) =>
 						e.at > from &&
 						e.at < wait.at &&
-						e.command.name === "EVAL" &&
+						isStoreOperation(e.command) &&
 						runIdOf(e.reply) !== undefined,
 				)
 				.at(-1);

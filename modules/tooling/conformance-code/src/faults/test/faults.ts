@@ -4,9 +4,7 @@ import {
 	type Deployed,
 	type Deploying,
 	type Instance,
-	type Match,
 	on as onDeployment,
-	storeWrite,
 } from "@mod/conformance/testing";
 import type { ClientScene } from "@mod/conformance-oauth";
 // The package's entry, which sets the area up on each target.
@@ -15,8 +13,6 @@ import { backChannel, browserAt } from "../../testing.ts";
 
 export const issuer = "https://issuer.example";
 export const callback = "https://app.example/cb";
-/** The deployment's `redis.prefix`: the adapter's own, as no scene sets one. */
-export const prefix = "store";
 const pair = generateKeyPairSync("ed25519");
 const alice = { username: "alice", password: "alice-horse-battery-staple" };
 export const app: ClientScene = {
@@ -125,51 +121,3 @@ export const said = (a: Answer) => [a.status, a.body.error ?? a.body.token_type]
 
 export const refreshAt = (i: Instance, token: string) =>
 	tokenAt(i, { grant_type: "refresh_token", refresh_token: token });
-
-/** A refresh token's family, which names its record, and its secret. */
-const partsOf = (token: string) => {
-	const [family = "", secret = ""] = token.split(".");
-	return { family, secret };
-};
-
-/**
- * The write that rotates a family from `token`: its record's current secret moved off the token's,
- * the family still live; a revocation, which keeps no current secret, is none.
- */
-export function rotationFrom(token: string): Match {
-	const { family, secret } = partsOf(token);
-	const presented = createHash("sha256").update(secret).digest("base64url");
-	return storeWrite({
-		prefix,
-		space: "refresh-store.families",
-		partition: family,
-		operations: ["replaceIf"],
-		value: (v) => {
-			const current = (v as { current?: unknown }).current;
-			return typeof current === "string" && current !== presented;
-		},
-	});
-}
-
-/** A code's record as the store holds it: the fields a scene tells its writes by. */
-interface CodeRecord {
-	readonly state?: unknown;
-	readonly challenge?: unknown;
-	readonly token?: unknown;
-	readonly void?: unknown;
-}
-const codeWrite = (challenge: string, is: (r: CodeRecord) => boolean): Match =>
-	storeWrite({
-		prefix,
-		space: "code-grant-store.codes",
-		operations: ["replaceIf"],
-		value: (v) => (v as CodeRecord).challenge === challenge && is(v as CodeRecord),
-	});
-
-/** The write that uses the code up: its record turned consumed, before any token is noted on it. */
-export const codeUse = (c: Code) =>
-	codeWrite(c.challenge, (r) => r.state === "consumed" && r.token === undefined && !r.void);
-
-/** The write that notes, on the used code, the token issued for it. */
-export const codeNoted = (c: Code) =>
-	codeWrite(c.challenge, (r) => r.state === "consumed" && r.token !== undefined && !r.void);
