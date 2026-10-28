@@ -144,7 +144,7 @@ it("answers unavailable, never valid or invalid, while the revoked tokens' place
 	expect(await t.verifyAccess(token)).toMatchObject({ kind: "valid" });
 });
 
-it("keeps no access token it issues, nor its signature, in the place or the log [oidc-core-16.4-a] [rfc6749-10.3-a]", async () => {
+it("keeps no access token it issues, nor its signature, in tokens' own place or the log [oidc-core-16.4-a] [rfc6749-10.3-a]", async () => {
 	const { place, token } = await boot();
 	const kept = JSON.stringify([place.asked, logged.lines()]);
 	for (const secret of [token, token.split(".")[2] ?? token]) expect(kept).not.toContain(secret);
