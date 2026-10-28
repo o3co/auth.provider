@@ -12,7 +12,7 @@ import { endingFrom, endingTakes } from "./ending/ending.ts";
 import { type Notices, noticesFrom, noticesTakes } from "./notices/notices.ts";
 import { remembering, rememberingTakes } from "./redemptions/redemptions.ts";
 import { registrationIn } from "./registration/registration.ts";
-import { section } from "./section.ts";
+import { type Settings, section } from "./section.ts";
 
 type Handler = (request: HttpRequest) => Promise<HttpResponse>;
 
@@ -26,6 +26,13 @@ const ending = contract<Handler>("rp-logout.ending");
 const confirming = contract<{ readonly show: Handler; readonly take: Handler }>(
 	"rp-logout.confirming",
 );
+
+/** The logout's own requests per source, which every route that may sign a confirmation is counted with. */
+const counted = (c: { readonly section: Settings }) =>
+	use(requestsPerSource, {
+		name: "rp-logout",
+		window: { limit: c.section.requests, ms: c.section.window * 1000 },
+	});
 
 export default defineModule(
 	{
@@ -81,21 +88,16 @@ export default defineModule(
 			path: confirmPath,
 			changesState: false,
 			// Each page signs a confirmation: counted with the logout's own requests.
-			uses: [
-				use(requestsPerSource, {
-					name: "rp-logout",
-					window: { limit: c.section.requests, ms: c.section.window * 1000 },
-				}),
-			],
+			uses: [counted(c)],
 			handle: (await c.get(confirming)).show,
 		})),
 		m.contribute(routes).by(async (c) => ({
 			method: "POST",
 			path: confirmPath,
 			takes: ["form"],
-			uses: [use(csrfChecked)],
-			unlimited:
-				"It closes only the session the requester's own cookie opens, once they agree on this site.",
+			// A POST without a valid confirmation asks again, signing another: counted as the page is, after
+			// the CSRF check, which an own-site policy runs before any per-source one.
+			uses: [use(csrfChecked), counted(c)],
 			handle: (await c.get(confirming)).take,
 		})),
 		...(["GET", "POST"] as const).map((method) =>
@@ -109,12 +111,7 @@ export default defineModule(
 				crossSite:
 					"RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names.",
 				// Counted before any hint is checked, which reads keys and the store.
-				uses: [
-					use(requestsPerSource, {
-						name: "rp-logout",
-						window: { limit: c.section.requests, ms: c.section.window * 1000 },
-					}),
-				],
+				uses: [counted(c)],
 				handle: await c.get(ending),
 			})),
 		),

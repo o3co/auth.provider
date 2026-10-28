@@ -11,16 +11,18 @@ const confirmationOf = (text: string | undefined) =>
 	/name="confirmation" value="([^"]+)"/.exec(text ?? "")?.[1] ?? "";
 
 describe("the confirmation's routes", () => {
-	it("are a GET that changes nothing, counted per source, and a POST under the CSRF check, uncounted", async () => {
+	it("are a GET that changes nothing and a POST under the CSRF check, both counted per source, as each may sign a confirmation", async () => {
 		const h = await serve();
 		const route = (method: string) => h.routes.find((r) => r.path === path && r.method === method);
+		const counted = use(requestsPerSource, {
+			name: "rp-logout",
+			window: { limit: 60, ms: 60_000 },
+		});
 		expect(route("GET")?.changesState).toBe(false);
-		expect(route("GET")?.uses).toEqual([
-			use(requestsPerSource, { name: "rp-logout", window: { limit: 60, ms: 60_000 } }),
-		]);
-		expect(route("POST")?.uses).toEqual([use(csrfChecked)]);
+		expect(route("GET")?.uses).toEqual([counted]);
+		expect(route("POST")?.uses).toEqual([use(csrfChecked), counted]);
 		expect(route("POST")?.takes).toEqual(["form"]);
-		expect(route("POST")?.unlimited).toBeDefined();
+		expect(route("POST")?.unlimited).toBeUndefined();
 	});
 
 	it("bind the page to the session, signed by the provider's keys with the claims it holds", async () => {

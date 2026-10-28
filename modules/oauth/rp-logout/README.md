@@ -10,7 +10,7 @@
 
 ## Offers
 - Routes `GET` and `POST /oauth/logout` (`ending`), both declared to take requests from other sites, and the GET to change state (no HEAD).
-- Routes `GET` and `POST /oauth/logout/confirm` (`confirm`): the GET changes nothing and is counted with the logout's requests; the POST takes a form under `csrf`'s policy and counts no source, closing only the requester's own session.
+- Routes `GET` and `POST /oauth/logout/confirm` (`confirm`): the GET changes nothing; the POST takes a form under `csrf`'s policy, closing only the requester's own session; both share the logout's per-source budget, as each may sign a confirmation.
 - Extension point `upstreamEnds`: at most one; two or more refuse boot.
 - Client metadata section `rp-logout` (`registration`).
 - Contribution to `code-grant`'s session redemptions (`redemptions`): keeps the client until the session ends, and at least `remember-for`.
