@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type Command, type Match, storeWrite } from "@mod/conformance/testing";
+import { type Command, keysOf, type Match, storeRead, storeWrite } from "@mod/conformance/testing";
 import type { Device } from "./faults.ts";
 
 // The store's own names a scene matches its writes by: the space, its records' names and fields, and
@@ -78,3 +78,23 @@ export const boundaryCreated = (subject: string): Match =>
  * sessions to its closings, before it closes any.
  */
 export const closingAdded: Match = storeWrite({ prefix, space: "session-store.closings" });
+
+/** A read of the device's record, as the decision makes one first. */
+export const recordReadOf = (d: Device): Match => {
+	const read = storeRead({ prefix, space: devices, name: "record" });
+	return {
+		request: (command) =>
+			read.request(command) && keysOf(command).some((k) => k.partition === partitionOf(d)),
+		succeeded: read.succeeded,
+	};
+};
+
+/**
+ * A read of a session's entry, as the poll reads the approving session's before the take; the store
+ * confirms it (session-store asks confirmed reads), unlike the device's record.
+ */
+export const sessionEntryRead: Match = storeRead({
+	prefix,
+	space: "session-store.sessions",
+	name: "record",
+});

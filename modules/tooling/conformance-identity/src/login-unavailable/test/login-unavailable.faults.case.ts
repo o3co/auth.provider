@@ -221,8 +221,10 @@ describe("password login opening no session while the store cannot answer", () =
 			a.relay.switchUpstream(moved.upstream());
 			const from = performance.now();
 			a.relay.reset("operations");
-			await reconnected(a, moved.upstream());
+			// Watched before the wait for the new connection: the held record is resent as it opens, and
+			// its round may be done before reconnected returns.
 			const confirmed = a.relay.observe(confirmation({ replicas: 1 }));
+			await reconnected(a, moved.upstream());
 			const wait = await confirmed;
 			const answer = await asked;
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
