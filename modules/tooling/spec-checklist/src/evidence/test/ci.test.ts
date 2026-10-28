@@ -9,6 +9,7 @@ interface Step {
 	readonly id?: string;
 	readonly name?: string;
 	readonly if?: string;
+	readonly shell?: string;
 	readonly env?: Readonly<Record<string, string>>;
 	readonly uses?: string;
 	readonly run?: string;
@@ -71,15 +72,21 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(gate.steps.map((s) => s.run).join("\n")).toContain("needs.conformance-faults.result");
 	});
 
-	it("run conformance's deployment tests that move an instance's clock in one leg of the fault job, failing rather than skipping and reporting no evidence", () => {
+	it("run conformance's deployment tests that move an instance's clock in one leg of the fault job, failing rather than skipping or matching none, and reporting no evidence", () => {
 		const steps = job("conformance-faults").steps;
 		const clock = steps.find((s) => s.name === "Deployment tests with a moved clock");
 		expect(clock?.if).toBe(expr("!cancelled() && strategy.job-index == 0"));
 		expect(clock?.env?.CONFORMANCE_FAULTS).toBe("1");
-		// The whole command, so no other config or name filter leaves the clock's tests out unseen.
-		expect(clock?.run).toBe(
-			"pnpm exec vitest run --config vitest.integration.config.ts modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts -t clock",
+		// The whole command, so no other config or name filter leaves the clock's tests out unseen, and
+		// the count of those that passed, as a filter matching nothing passes with every test skipped.
+		const lines = (clock?.run ?? "").trim().split("\n");
+		expect(lines).toContain(
+			'pnpm exec vitest run --config vitest.integration.config.ts modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts -t clock --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/clock-tests.json"',
 		);
+		expect(lines).toContain("passed=$(jq '.numPassedTests' \"$RUNNER_TEMP/clock-tests.json\")");
+		expect(lines).toContain('if [ "$passed" -lt 2 ]; then');
+		expect(lines[0]).toBe("set -euo pipefail");
+		expect(clock?.shell).toBe("bash");
 		expect(clock?.env?.SPEC_EVIDENCE_DIR).toBeUndefined();
 		// After the step that takes the library and the one that finds it moves Node's clock.
 		const at = (name: string) => steps.findIndex((s) => s.name === name);
