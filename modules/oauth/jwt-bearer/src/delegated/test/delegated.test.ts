@@ -92,7 +92,7 @@ function delegating(
 ) {
 	const spent: string[] = [];
 	const name = script.name ?? "delegate";
-	const module = defineModule({ name, takes: [] }, (m) => [
+	const module = defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(delegatedAssertions).by(
 			() =>
 				({
@@ -122,26 +122,30 @@ const allowed = allowancesFor({
 });
 /** Each name the grant's own store was asked to keep, which a delegated assertion never reaches. */
 const stored: string[] = [];
-const spentStore = defineModule({ name: "spent-assertions", takes: [] }, (m) => [
-	m.provide(spentAssertions).by(() => {
-		const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
-		return {
-			save: (name: string, lifetimeMs: number) => {
-				stored.push(name);
-				return stand.records.create(name, true, lifetimeMs);
-			},
-		};
-	}),
-]);
+const spentStore = defineModule(
+	{ name: "spent-assertions", replicaSafe: false, takes: [] },
+	(m) => [
+		m.provide(spentAssertions).by(() => {
+			const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
+			return {
+				save: (name: string, lifetimeMs: number) => {
+					stored.push(name);
+					return stand.records.create(name, true, lifetimeMs);
+				},
+			};
+		}),
+	],
+);
 
 function assembly(
 	extra: readonly Module[],
 	section: Record<string, unknown> = { "delegated-issuers": [idp] },
 	log = quietRuntime().log,
 ) {
-	const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
-		m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` })),
-	]);
+	const location = defineModule(
+		{ name: "token-endpoint-location", replicaSafe: true, takes: [] },
+		(m) => [m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` }))],
+	);
 	return {
 		modules: [
 			location,
@@ -265,7 +269,7 @@ describe("delegated issuers", () => {
 		const lasting = { ...valid, expiresAt: now + 2000 };
 
 		it("is asked again just before the spend: time the issuance policies take leaves it unspent", async () => {
-			const slow = defineModule({ name: "slow-policy", takes: [] }, (m) => [
+			const slow = defineModule({ name: "slow-policy", replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(issuancePolicies).by(() => ({
 					name: "slow-policy",
 					judge: async () => {
@@ -303,16 +307,19 @@ describe("delegated issuers", () => {
 	});
 
 	it("asks the client's allowance, the audience and the issuance policies before the delegate spends, leaving the assertion usable", async () => {
-		const refusingAudience = defineModule({ name: "refusing-audience", takes: [] }, (m) => [
-			m.contribute(targetRules).by(() => ({
-				target: ({ param, audience }) =>
-					param("resource")
-						? { kind: "error", error: "invalid_target", description: "not here" }
-						: { kind: "audience", audience },
-			})),
-		]);
+		const refusingAudience = defineModule(
+			{ name: "refusing-audience", replicaSafe: true, takes: [] },
+			(m) => [
+				m.contribute(targetRules).by(() => ({
+					target: ({ param, audience }) =>
+						param("resource")
+							? { kind: "error", error: "invalid_target", description: "not here" }
+							: { kind: "audience", audience },
+				})),
+			],
+		);
 		let refusing = true;
-		const policy = defineModule({ name: "refusing-policy", takes: [] }, (m) => [
+		const policy = defineModule({ name: "refusing-policy", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async () =>
@@ -339,7 +346,7 @@ describe("delegated issuers", () => {
 	it("tries no other way for a delegated issuer's assertion: no trusted issuer's keys, subjects or store are asked", async () => {
 		const asked: string[] = [];
 		const own = "https://own.example";
-		const spies = defineModule({ name: "spies", takes: [] }, (m) => [
+		const spies = defineModule({ name: "spies", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(signerKeys).by(() => ({
 				issuer: own,
 				keysOf: async () => {
@@ -410,7 +417,7 @@ describe("delegated issuers", () => {
 
 		it("reads accept-unbound for registered clients alone: one a source names cannot give it to itself", async () => {
 			const logged = recordingLog();
-			const source = defineModule({ name: "a-source", takes: [] }, (m) => [
+			const source = defineModule({ name: "a-source", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(clientSources).by(() => ({
 					find: async (id: string) =>
 						id === "named-phone"
@@ -500,11 +507,14 @@ describe("delegated issuers", () => {
 				"self-issued-prefix": "https://idp.",
 			};
 			const signing = (iss: string) =>
-				defineModule({ name: `keys-${new URL(iss).hostname}`, takes: [] }, (m) => [
-					m
-						.contribute(signerKeys)
-						.by(() => ({ issuer: iss, keysOf: async () => ({ kind: "none" }) })),
-				]);
+				defineModule(
+					{ name: `keys-${new URL(iss).hostname}`, replicaSafe: true, takes: [] },
+					(m) => [
+						m
+							.contribute(signerKeys)
+							.by(() => ({ issuer: iss, keysOf: async () => ({ kind: "none" }) })),
+					],
+				);
 			for (const issuers of [[own], [own, prefixed], [prefixed]]) {
 				const refused = await refusalsOf(
 					[delegating().module, ...issuers.map((i) => signing(i.issuer))],
