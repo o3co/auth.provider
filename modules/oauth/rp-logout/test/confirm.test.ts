@@ -1,4 +1,5 @@
 import { csrfChecked } from "@mod/csrf";
+import csrfModule from "@mod/csrf/module";
 import { use } from "@mod/http";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { keys } from "@mod/keys";
@@ -178,5 +179,15 @@ describe("the confirmation's routes", () => {
 		expect(h.sent.map((s) => [s.url, s.request?.method])).toEqual([
 			["https://app.example/bc", "POST"],
 		]);
+	});
+
+	it("need csrf as an app composes it, which refuses boot without http's public origin", async () => {
+		await expect(serve({ csrfModule, noPublicOrigin: true })).rejects.toMatchObject({
+			refusals: [expect.objectContaining({ where: "csrf", reason: "a public origin is required" })],
+		});
+		const h = await serve({ csrfModule });
+		const { cookie } = await h.login();
+		const shown = await h.confirming("GET", {}, { cookie });
+		expect(shown.text).toContain("Do you want to log out");
 	});
 });

@@ -73,6 +73,8 @@ export async function harness(
 		/** Leaves `http`'s public origin unwritten: the issuer alone names this provider. */
 		readonly noPublicOrigin?: true;
 		readonly sessionsModule?: Module;
+		/** `csrf` as an app composes it, in place of its stand-in. */
+		readonly csrfModule?: Module;
 		/** Makes rp-logout's session clients store fail as it says. */
 		readonly clientsDown?: UnavailableSwitch<SessionClients>;
 		/** Makes the client records fail as it says. */
@@ -152,7 +154,7 @@ export async function harness(
 				: clientsModule,
 			redirectsSection,
 			cookiesModule,
-			csrfStandIn,
+			options.csrfModule ?? csrfStandIn,
 			options.sessionsModule ?? sessionStandIn,
 			sessionRequirements,
 			sessionParticipants,
