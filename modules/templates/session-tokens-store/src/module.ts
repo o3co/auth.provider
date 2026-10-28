@@ -41,6 +41,9 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
+// Safe on many instances given the same `pending-shards` and `pending-per-shard` on each
+// (deployment-guarantees, Several instances): pushed-out tokens go to a shard by their hash, and a
+// sweep walks only the shards it counts.
 export default defineModule(
 	{ name: "session-tokens-store", replicaSafe: true, section, takes: [store] },
 	(m) => [
