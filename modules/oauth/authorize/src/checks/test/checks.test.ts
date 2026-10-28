@@ -1,7 +1,7 @@
 import { allowancesFor } from "@mod/client-allowance/testing";
 import type { Client, Section } from "@mod/clients";
 import { describe, expect, it } from "vitest";
-import { checkRequest } from "../checks.ts";
+import { checkRequest, checkScope } from "../checks.ts";
 
 const sections: Record<string, unknown> = allowancesFor({
 	grants: ["authorization_code"],
@@ -123,5 +123,33 @@ describe("checks: an OpenID Connect request's form", () => {
 				"code_challenge is malformed",
 			]);
 		}
+	});
+});
+
+describe("checks: offline_access", () => {
+	const allowing = (scopes: string[]): Client => {
+		const held = allowancesFor({ grants: ["authorization_code"], scopes });
+		return {
+			...app,
+			section: <T>(section: Section<T>) =>
+				(section.schema["~standard"].validate(held[section.name]) as { value: T }).value,
+		};
+	};
+	const scopeOf = (client: Client, scope: string) => {
+		const decided = checkScope(client, scope, "https://as.example", false);
+		if (decided.kind === "allowed") return decided.scope;
+		return decided.kind === "refuse" ? [decided.kind, decided.error] : [decided.kind];
+	};
+
+	it("drops from an OpenID Connect request an offline_access the client is not allowed, rather than refusing it [oidc-core-11-c]", () => {
+		expect(scopeOf(app, "openid offline_access read")).toEqual(["openid", "read"]);
+		expect(scopeOf(app, "offline_access openid")).toEqual(["openid"]);
+	});
+
+	it("keeps an offline_access the client is allowed, and refuses one without openid as any scope outside the allowance", () => {
+		const offline = allowing(["openid", "read", "offline_access"]);
+		expect(scopeOf(offline, "openid offline_access")).toEqual(["openid", "offline_access"]);
+		expect(scopeOf(app, "offline_access read")).toEqual(["refuse", "invalid_scope"]);
+		expect(scopeOf(app, "offline_access")).toEqual(["refuse", "invalid_scope"]);
 	});
 });
