@@ -61,8 +61,11 @@ export interface Contribution<S> {
 export interface ModuleHead<S> {
 	readonly name: string;
 	readonly section?: ZodType<S>;
-	/** Safe on multiple instances unless it says otherwise; a function is asked only with a section that passed its schema. */
-	readonly replicaSafe?: boolean | ((section: S) => boolean);
+	/**
+	 * Whether it is safe on multiple instances, which every module says; a function is asked only with
+	 * a section that passed its schema. The author's word: the kernel never checks what a module keeps.
+	 */
+	readonly replicaSafe: boolean | ((section: S) => boolean);
 	/**
 	 * What a production deployment must not hold in this section: each a key path below the section
 	 * and a reason, never a value, which boot is refused with. Asked only where `kernel.environment`
