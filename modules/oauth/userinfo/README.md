@@ -8,7 +8,6 @@
 
 ## Offers
 - Routes `GET` and `POST /oauth/userinfo`, the GET declared not to change state and the POST to take requests from other sites without a per-source limit, taking cross-origin requests from the operator's origins: a page may send `authorization`, `dpop` and `content-type`, and read `www-authenticate`, `dpop-nonce` and `retry-after`.
-- Operator section `userinfo`: `issuer-audience`, no longer read, taken while a deployment still states it.
 - The issuer's metadata `userinfo_endpoint`, on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
 
 ## Invariants
