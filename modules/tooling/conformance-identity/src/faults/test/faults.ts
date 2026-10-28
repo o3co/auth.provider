@@ -111,3 +111,8 @@ export const identifierLockout: Match = {
 	request: (command) => lockoutRead.request(command) || lockoutWrite.request(command),
 	succeeded: () => true,
 };
+
+/** The write of a new session's record: the first session write a login makes, after its attempt is counted and its identifier's run reserved. */
+export const sessionRecord: Match = storeWrite({ prefix, space: "session-store.sessions" });
+/** The write that indexes a session under its cookie, without which no request can reach the session. */
+export const cookieIndexed: Match = storeWrite({ prefix, space: "session-store.cookies" });
