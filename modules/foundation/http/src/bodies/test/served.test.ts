@@ -145,7 +145,7 @@ describe("request bodies", () => {
 		expect(Object.isFrozen(fields.get("a"))).toBe(true);
 	});
 
-	it("answers 415, 400 and 413 for a body it cannot take, after the route's policies have seen it, a value's meaning left to its route [rfc6749-10.14-b]", async () => {
+	it("answers 415, 400 and 413 for a body it cannot take, after the route's policies have seen it: the boundary every route's values pass, their meaning each route's own item [rfc6749-10.14-b]", async () => {
 		const { handled, gated, post } = await servedBodies();
 		expect(await post("/json", "application/x-www-form-urlencoded", "a=1")).toBe(415);
 		for (const unread of ["[1]", "null", "{nope", '{"a":"1","a":"2"}']) {
