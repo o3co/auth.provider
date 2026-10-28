@@ -59,6 +59,33 @@ describe("judging a CRL", () => {
 		});
 	});
 
+	it("reads a next update past 2049, which RFC 5280 writes as GeneralizedTime", async () => {
+		const ends = Date.UTC(2070, 0, 1);
+		const root = await issue({ cn: "root", ca: true, notAfter: ends });
+		const intermediate = await issue({ cn: "intermediate", by: root, ca: true, notAfter: ends });
+		const client = await issue({ cn: "client", by: intermediate });
+		const next = Date.UTC(2055, 0, 1);
+		const der = await crlOf({ by: intermediate, revoked: [client], nextUpdate: next });
+		expect(
+			await judgeCrl(der, client.certificate, intermediate.certificate, Date.now(), skewMs),
+		).toEqual({ kind: "revoked", until: next, held: false });
+	});
+
+	it("takes a CRL holding a string that does not decode as malformed", async () => {
+		const { intermediate, client } = await hierarchy();
+		const garbled = new pkijs.CertificateRevocationList({
+			schema: asn1js.fromBER(await crlOf({ by: intermediate, revoked: [client] })).result,
+		});
+		// A BMPString of an odd length, which asn1js 4 answers as a decode error, not a throw.
+		const odd = new asn1js.BmpString({ valueHex: new Uint8Array([0, 0x41, 0]).buffer });
+		garbled.issuer = new pkijs.RelativeDistinguishedNames({
+			typesAndValues: [new pkijs.AttributeTypeAndValue({ type: "2.5.4.3", value: odd })],
+		});
+		const der = new Uint8Array(garbled.toSchema(true).toBER(false));
+		expect(asn1js.fromBER(der).offset).toBe(-1);
+		expect(await said(der, client, intermediate)).toBe("malformed");
+	});
+
 	it("uses nothing from a CRL that is not the issuer's, nor signed by it, nor signed strongly", async () => {
 		const { intermediate, client } = await hierarchy();
 		const reasonOf = (der: Uint8Array) => said(der, client, intermediate);
