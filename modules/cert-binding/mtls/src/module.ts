@@ -9,7 +9,9 @@ import { anchorOf, revocationPolicyOf, section } from "./section.ts";
 import { sourcesOver } from "./sources.ts";
 
 export default defineModule(
-	{ name: "mtls", section, takes: [certificateForwarding, signedOutbound] },
+	// Safe on many instances: each keeps its own revocation caches up to their limits (`crl-ttl`, `ocsp-fresh`,
+	// `failure-lifetime`); hosts may disagree within them, as one host does over time.
+	{ name: "mtls", replicaSafe: true, section, takes: [certificateForwarding, signedOutbound] },
 	(m) => [
 		m.contribute(senderBindings).by(async (c) => {
 			if (!(await c.get(certificateForwarding)).configured) {

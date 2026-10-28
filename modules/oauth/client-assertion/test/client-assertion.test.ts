@@ -71,10 +71,10 @@ async function boot({
 } = {}) {
 	const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
 	const down = unavailableSwitch<SpentAssertions>("spent assertions");
-	const location = defineModule({ name: "token-endpoint", takes: [] }, (m) => [
+	const location = defineModule({ name: "token-endpoint", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(tokenEndpointLocation).by(() => ({ url: tokenEndpoint ?? undefined })),
 	]);
-	const source = defineModule({ name: "source", takes: [] }, (m) => [
+	const source = defineModule({ name: "source", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id) => {
 				looked.push(id);
@@ -82,7 +82,7 @@ async function boot({
 			},
 		})),
 	]);
-	const spent = defineModule({ name: "spent", takes: [] }, (m) => [
+	const spent = defineModule({ name: "spent", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.provide(spentAssertions)
 			.by(() =>

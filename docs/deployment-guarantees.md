@@ -26,8 +26,8 @@ Three choices cut across these shapes and change what the sections below say: wh
 The provider fails closed: a dependency that cannot answer never grants anything, and the request is refused, `503`, or for the authorization endpoint a redirect with `error=temporarily_unavailable` ([promise 3](security-model.md#promises-across-modules)). Availability is what it trades for this.
 
 - **Tested** under Redis faults, each guarantee under the faults named with it:
-  - The authorization endpoint gives no code while a dependency its decision waits on cannot answer, with the network to or from Redis cut, the connection closed, Redis late or slow, a failover, and Redis killed (guarantee 3-a).
-  - The token endpoint gives no token for a JWT bearer assertion while a dependency its decision waits on cannot answer, under the same faults (guarantee 3-d).
+  - The authorization endpoint gives no code while a dependency its decision waits on cannot answer, with the network to or from Redis cut, the connection closed, Redis late or slow, a failover, a failover whose confirmations stay on the old primary, and Redis killed (guarantee 3-a).
+  - The token endpoint gives no token for a code, a refresh token, a JWT bearer assertion or a device code while a dependency its decision waits on cannot answer, under the same faults and a failover whose confirmations stay on the old primary (guarantees 3-b, 3-c, 3-d, 3-e).
   - The token endpoint gives no token for a code while the store cannot write (memory full, a write's confirmation by the replicas timed out or refused, replication chosen with no replica), and redeems the code once it can write again (guarantee 3-j, shown for a code alone).
   - The provider does not boot on a Redis set to evict keys (guarantee 3-k).
   - A password login opens no session, and an attempt limit lets no attempt by whatever `rate-limit.fail-mode` is, while the store cannot answer, under the same faults and a failover whose confirmations stay on the old primary (guarantees 3-f, 3-i).
@@ -35,7 +35,6 @@ The provider fails closed: a dependency that cannot answer never grants anything
   - A revocation route answers done only once its revocation is kept, under the same faults and a failover whose confirmations stay on the old primary: the token revocation endpoint (3-g), and the ledger's subject revocation route, which tells a boundary not confirmed (`unknown`) from one written whose followers did not finish (`incomplete`) (3-l).
 - **Declared:** nothing else is issued while the store cannot write either, and a request made once it can write again passes (guarantee 3-j); the scenes above show it for a code alone.
 - **Tested** with a store that refuses, by each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey) and the identity area's password login over a failing user ledger.
-- **Not yet shown** under the injected Redis faults: the token endpoint for a code, a refresh token and a device code (guarantees 3-b, 3-c and 3-e).
 - **What stops and what goes on.** Every request whose decision needs the store or a ledger answers `503` while it cannot answer. What needs neither goes on: the discovery document, the key set, and a resource server verifying a token itself. `/readyz` answers `503` while the Redis probe fails ([runbook: Outages](runbook.md#outages)).
 - **Declared exceptions, the operator's choice:** `rate-limit.fail-mode = open` lets a request limit pass requests uncounted while its store cannot count (an attempt limit still refuses), and `mtls.revocation.on-unavailable = allow` binds a certificate while its revocation cannot be told.
 - **Operator's:** Redis's availability (replicas, `redis.replication`, failover that never promotes a lagging replica), the probes and the alerts ([runbook: Redis](runbook.md#redis), [Probes and alerts](runbook.md#probes-and-alerts)).
@@ -72,7 +71,8 @@ Audit is best effort ([Audit](security-model.md#audit)).
 - **The faults each ran under.** On one instance: a lost answer, all answers lost (but for 1-a and 5-i), a failover, and Redis killed; for 5-a, 5-b and 1-a also a failover whose confirmations stay on the old primary. On two instances: an instance killed after a write and before its answer, and two instances acting on the same thing at once; for 5-a also an instance's clock moved forward or back, and for 1-a all answers to a closing lost, another instance's sweep closing it. A scene on one instance shows what Redis's faults do, not what a second instance does at the same time.
 - **Declared, not yet shown under these faults:** an id_token exchanged once (5-j).
 - **Declared:** boot refuses a module that declares itself unsafe on several instances, as [promise 5](security-model.md#promises-across-modules) says, with what it takes of a module that declares nothing; check your own modules before setting `kernel.deployment = multi`.
-- **Operator's:** the same configuration on every instance (the signing keys, the issuer, Redis's URL and prefix, the seal key, the registered clients and users), and host clocks synchronized, with no skew allowed between hosts ([Trust assumptions](security-model.md#trust-assumptions), [runbook: Many instances](runbook.md#many-instances)).
+- **Declared:** where the upstream ends a federation grant while the store answers reads but refuses writes, only the instance that heard the end refuses the grant; another hands out the upstream access token it holds until that token ends or the end is written. Where the store answers no reads, every instance answers unavailable.
+- **Operator's:** the same configuration on every instance (the signing keys, the issuer, Redis's URL and prefix, the seal key, the registered clients and users, the trusted proxies and public origin, the DPoP nonce secret, each IdP's settings, and the shard counts and per-shard limits of the work the sweeps walk: code-grant-store's `void-shards`, session-store's `closing-shards`, refresh-store's `settle-shards`, rp-logout-store's `notice-shards` and session-tokens-store's `pending-shards`, each with its `*-per-shard` limit), and host clocks synchronized, with no skew allowed between hosts ([Trust assumptions](security-model.md#trust-assumptions), [runbook: Many instances](runbook.md#many-instances)).
 
 ## Outside the provider
 
@@ -87,7 +87,7 @@ The provider takes the word of what stands beside it, as the [trust assumptions]
 
 Gathered from the sections above:
 
-- Under injected Redis faults: the token endpoint for a code, a refresh token and a device code failing closed (guarantees 3-b, 3-c and 3-e); an exchanged id_token used once (5-j).
+- Under injected Redis faults: an exchanged id_token used once (5-j).
 - Recovery times and a service level under failure.
 - A resource server outside the provider verifying tokens after a revocation.
 - An audit receiver stopped, slowed or filled against a running provider.

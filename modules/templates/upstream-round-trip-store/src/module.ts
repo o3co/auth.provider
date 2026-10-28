@@ -17,11 +17,14 @@ const roundTrips: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "upstream-round-trip-store", takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => roundTrips),
-	m.provide(roundTripStore).by(async (c) => {
-		const place = { store: await c.get(store), space: roundTrips, log: c.log, random: c.random };
-		const records = recordsFor<StoredRoundTrip>(place);
-		return { save: records.create, update: records.change };
-	}),
-]);
+export default defineModule(
+	{ name: "upstream-round-trip-store", replicaSafe: true, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => roundTrips),
+		m.provide(roundTripStore).by(async (c) => {
+			const place = { store: await c.get(store), space: roundTrips, log: c.log, random: c.random };
+			const records = recordsFor<StoredRoundTrip>(place);
+			return { save: records.create, update: records.change };
+		}),
+	],
+);

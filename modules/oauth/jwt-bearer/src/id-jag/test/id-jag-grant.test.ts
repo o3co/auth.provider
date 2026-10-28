@@ -139,7 +139,7 @@ interface Fakes {
 
 function fakes(asked: Asked, withCorpLedger: boolean, given: Fakes) {
 	return [
-		defineModule({ name: "delegate", takes: [] }, (m) => [
+		defineModule({ name: "delegate", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(delegatedAssertions).by(
 				(): DelegatedAssertions => ({
 					declaredBy: "delegate",
@@ -152,7 +152,7 @@ function fakes(asked: Asked, withCorpLedger: boolean, given: Fakes) {
 				}),
 			),
 		]),
-		defineModule({ name: "spent-assertions", takes: [] }, (m) => [
+		defineModule({ name: "spent-assertions", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(spentAssertions).by(() => {
 				const stand =
 					given.spentRecords ?? memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
@@ -165,7 +165,7 @@ function fakes(asked: Asked, withCorpLedger: boolean, given: Fakes) {
 			}),
 		]),
 		// The corp issuer's own ledger, where it is named.
-		defineModule({ name: "corp-ledger", takes: [] }, (m) =>
+		defineModule({ name: "corp-ledger", replicaSafe: false, takes: [] }, (m) =>
 			withCorpLedger && given.corpLedger !== false
 				? [
 						m.contribute(jtiLedgers).by(() => {
@@ -182,7 +182,7 @@ function fakes(asked: Asked, withCorpLedger: boolean, given: Fakes) {
 				: [],
 		),
 		// The audience asked by `resource`, as resource indicators narrow it.
-		defineModule({ name: "narrowing", takes: [] }, (m) => [
+		defineModule({ name: "narrowing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ param, audience, within }) => {
 					const asked = param("resource");
@@ -199,7 +199,7 @@ function fakes(asked: Asked, withCorpLedger: boolean, given: Fakes) {
 
 /** Sender binding as the endpoint composes it: with a DPoP kind writing `jkt`, or with none. */
 const bindingKinds = (dpop: boolean) =>
-	defineModule({ name: "sender-binding", takes: [] }, (m) => [
+	defineModule({ name: "sender-binding", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(senderBinding).by(
 			() =>
 				({
@@ -223,12 +223,13 @@ const bindingKinds = (dpop: boolean) =>
 
 /** The metadata items every module contributes, as the discovery document is made of them. */
 const published = contract<readonly MetadataItem[]>("test.id-jag-metadata");
-const reader = defineModule({ name: "test-metadata", takes: [metadata] }, (m) => [
-	m.provide(published).by((c) => c.collect(metadata)),
-]);
+const reader = defineModule(
+	{ name: "test-metadata", replicaSafe: true, takes: [metadata] },
+	(m) => [m.provide(published).by((c) => c.collect(metadata))],
+);
 
 const grantOf = contract<Grant>("test.id-jag-grant");
-const exposing = defineModule({ name: "test-grant", takes: [grants] }, (m) => [
+const exposing = defineModule({ name: "test-grant", replicaSafe: true, takes: [grants] }, (m) => [
 	m.provide(grantOf).by(async (c) => {
 		const found = (await c.collect(grants)).find((g) => g.grantType === grantType);
 		if (!found) throw new Error("no jwt-bearer grant");
@@ -247,9 +248,10 @@ async function serve(
 	options: { readonly dpop?: boolean; readonly extra?: readonly Module[] } & Fakes = {},
 ) {
 	const asked: Asked = { checks: [], saved: [], spent: [] };
-	const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
-		m.provide(tokenEndpointLocation).by(() => ({ url: tokenEndpoint })),
-	]);
+	const location = defineModule(
+		{ name: "token-endpoint-location", replicaSafe: true, takes: [] },
+		(m) => [m.provide(tokenEndpointLocation).by(() => ({ url: tokenEndpoint }))],
+	);
 	const app = await assemble({
 		modules: [
 			location,
@@ -409,7 +411,7 @@ describe("an ID-JAG where no issuer takes the profile", () => {
 		const device = generateKeyPairSync("ed25519");
 		const thumb = await calculateJwkThumbprint(await exportJWK(device.publicKey), "sha256");
 		const keysAsked: unknown[] = [];
-		const deviceKeys = defineModule({ name: "device-keys", takes: [] }, (m) => [
+		const deviceKeys = defineModule({ name: "device-keys", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(signerKeys).by(
 				(): SignerKeys => ({
 					issuer: "https://devices.example",
@@ -619,7 +621,7 @@ describe("an issuer taking the ID-JAG profile", () => {
 
 	it("checks again what is chosen, refusing an audience the ID-JAG does not name that a target let by", async () => {
 		let judged = 0;
-		const counting = defineModule({ name: "counting", takes: [] }, (m) => [
+		const counting = defineModule({ name: "counting", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "counting",
 				judge: async () => {
@@ -661,17 +663,20 @@ describe("an issuer taking the ID-JAG profile", () => {
 
 	it("gives back no jti spent before a refusal when the token is issued", async () => {
 		let asked = 0;
-		const secondRefuses = defineModule({ name: "second-refuses", takes: [] }, (m) => [
-			m.contribute(issuancePolicies).by(() => ({
-				name: "second-refuses",
-				judge: async () => {
-					asked += 1;
-					return asked === 2
-						? { kind: "refused", reason: "test", description: "refused when issuing" }
-						: { kind: "allowed" };
-				},
-			})),
-		]);
+		const secondRefuses = defineModule(
+			{ name: "second-refuses", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(issuancePolicies).by(() => ({
+					name: "second-refuses",
+					judge: async () => {
+						asked += 1;
+						return asked === 2
+							? { kind: "refused", reason: "test", description: "refused when issuing" }
+							: { kind: "allowed" };
+					},
+				})),
+			],
+		);
 		const s = await serve(undefined, { extra: [secondRefuses] });
 		const assertion = await ofCorp();
 		expect(said(await s.handle(assertion)).startsWith("issued")).toBe(false);

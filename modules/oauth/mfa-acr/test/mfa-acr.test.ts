@@ -8,15 +8,16 @@ import bridge from "../src/module.ts";
 
 const runtime = quietRuntime();
 const offered = contract<() => unknown>("test.offered");
-const reader = defineModule({ name: "reader", takes: [acrEntries] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [acrEntries] }, (m) => [
 	m.provide(offered).by(async (c) => {
 		const entries = await c.collect(acrEntries);
 		return () => entries;
 	}),
 ]);
-const secondFactors = defineModule({ name: "factors-stand-in", takes: [] }, (m) => [
-	m.provide(factorReading).by(() => ({}) as FactorReading),
-]);
+const secondFactors = defineModule(
+	{ name: "factors-stand-in", replicaSafe: true, takes: [] },
+	(m) => [m.provide(factorReading).by(() => ({}) as FactorReading)],
+);
 
 it("offers the acr met by a second factor, only where second factors are composed", async () => {
 	const app = await assemble({

@@ -19,12 +19,12 @@ import tokenControl from "../src/module.ts";
 
 const runtime = quietRuntime();
 
-const refreshKind = defineModule({ name: "refresh-kind", takes: [] }, (m) => [
+const refreshKind = defineModule({ name: "refresh-kind", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(revocableKinds).by(() => ({ hint: "refresh_token", revoke: async () => "unknown" })),
 ]);
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
@@ -80,7 +80,7 @@ it("publishes revocation only where some token can be revoked, and both on the i
 });
 
 /** A signed method, as client-assertion contributes one. */
-const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
+const signed = defineModule({ name: "signed-method", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(authMethods).by(() => ({
 		name: "private_key_jwt",
 		signingAlgorithms: ["ES256"],

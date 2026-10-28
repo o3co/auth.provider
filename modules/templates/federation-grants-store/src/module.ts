@@ -75,43 +75,48 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "federation-grants-store", section, takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => grants),
-	m.contribute(spaces).by(() => steps),
-	m.contribute(spaces).by(() => pending),
-	m.contribute(spaces).by(() => listed),
-	m.contribute(spaces).by(() => locks),
-	m.provide(grantStore).by(async (c): Promise<GrantStore> => {
-		const records = recordsIn<StoredGrant>(await placeIn(c, grants));
-		return {
-			create: records.create,
-			read: records.read,
-			change: records.change,
-			scan: records.scan,
-		};
-	}),
-	m.provide(stepStore).by(async (c): Promise<StepStore> => {
-		const records = stepRecordsFor<StoredStep>(await placeIn(c, steps));
-		return { create: records.create, read: records.read, change: records.change };
-	}),
-	m.provide(pendingIntents).by(async (c): Promise<PendingIntents> => {
-		const sets = keyedSetsIn({
-			...(await placeIn(c, pending)),
-			cap: c.section["pending-per-client-and-subject"],
-			clock: c.clock,
-		});
-		return { add: sets.add, remove: sets.remove };
-	}),
-	m.provide(subjectGrants).by(async (c): Promise<SubjectGrants> => {
-		const sets = keyedSetsIn({
-			...(await placeIn(c, listed)),
-			cap: c.section["grants-per-subject"],
-			clock: c.clock,
-		});
-		return { add: sets.add, members: sets.members, remove: sets.remove };
-	}),
-	m.provide(refreshLockStore).by(async (c): Promise<RefreshLockStore> => {
-		const records = recordsIn<string>(await placeIn(c, locks));
-		return { hold: records.create, update: records.change };
-	}),
-]);
+export default defineModule(
+	// Safe on many instances: a record's expiry is set by the writing instance's clock, kept in step with the
+	// others' by the operator (deployment-guarantees, Several instances).
+	{ name: "federation-grants-store", replicaSafe: true, section, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => grants),
+		m.contribute(spaces).by(() => steps),
+		m.contribute(spaces).by(() => pending),
+		m.contribute(spaces).by(() => listed),
+		m.contribute(spaces).by(() => locks),
+		m.provide(grantStore).by(async (c): Promise<GrantStore> => {
+			const records = recordsIn<StoredGrant>(await placeIn(c, grants));
+			return {
+				create: records.create,
+				read: records.read,
+				change: records.change,
+				scan: records.scan,
+			};
+		}),
+		m.provide(stepStore).by(async (c): Promise<StepStore> => {
+			const records = stepRecordsFor<StoredStep>(await placeIn(c, steps));
+			return { create: records.create, read: records.read, change: records.change };
+		}),
+		m.provide(pendingIntents).by(async (c): Promise<PendingIntents> => {
+			const sets = keyedSetsIn({
+				...(await placeIn(c, pending)),
+				cap: c.section["pending-per-client-and-subject"],
+				clock: c.clock,
+			});
+			return { add: sets.add, remove: sets.remove };
+		}),
+		m.provide(subjectGrants).by(async (c): Promise<SubjectGrants> => {
+			const sets = keyedSetsIn({
+				...(await placeIn(c, listed)),
+				cap: c.section["grants-per-subject"],
+				clock: c.clock,
+			});
+			return { add: sets.add, members: sets.members, remove: sets.remove };
+		}),
+		m.provide(refreshLockStore).by(async (c): Promise<RefreshLockStore> => {
+			const records = recordsIn<string>(await placeIn(c, locks));
+			return { hold: records.create, update: records.change };
+		}),
+	],
+);

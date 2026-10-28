@@ -158,6 +158,56 @@ describe("a deployment of a scene", () => {
 		}
 	});
 
+	it("starts an instance again with the certificates it trusts, as at its first start", async () => {
+		// A self-signed certificate made for the test; the driver refuses a file that holds none.
+		const dir = await mkdtemp(join(tmpdir(), "deployment-trusted-"));
+		const [key, cert] = [join(dir, "key.pem"), join(dir, "cert.pem")];
+		execFileSync(
+			"openssl",
+			[
+				"req",
+				"-x509",
+				"-newkey",
+				"ec",
+				"-pkeyopt",
+				"ec_paramgen_curve:P-256",
+				"-nodes",
+				"-keyout",
+				key,
+				"-out",
+				cert,
+				"-days",
+				"1",
+				"-subj",
+				"/CN=trusted.test",
+			],
+			{ stdio: "ignore" },
+		);
+		const pem = await readFile(cert, "utf8");
+		const d = await startDeployment({
+			name: "trusted",
+			scene,
+			topology,
+			instances: 1,
+			trustedCertificates: [cert],
+		});
+		try {
+			const [a] = d.instances;
+			if (!a) throw new Error("one instance");
+			expect((await fetch(`${a.baseUrl}/first`)).status).not.toBe(502);
+			// A start given a file that holds no certificate is refused: so is a restart given the deployment's.
+			await writeFile(cert, "not a certificate\n");
+			await a.kill();
+			await expect(a.restart()).rejects.toThrow(/trusted certificate file/);
+			await writeFile(cert, pem);
+			await a.restart();
+			expect(a.running()).toBe(true);
+			expect((await fetch(`${a.baseUrl}/again`)).status).not.toBe(502);
+		} finally {
+			await d.stop();
+		}
+	});
+
 	it("writes the scene's set-up beside the run's reports", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "conformance-faults-"));
 		const d = await startDeployment({

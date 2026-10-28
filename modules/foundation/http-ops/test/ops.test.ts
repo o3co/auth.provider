@@ -12,7 +12,7 @@ const runtime = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n) },
 });
 
-const handlers = defineModule({ name: "handlers", takes: [] }, (m) => [
+const handlers = defineModule({ name: "handlers", replicaSafe: true, takes: [] }, (m) => [
 	m
 		.contribute(routes)
 		.by(() => ({ method: "GET", path: "/slow", handle: () => ({ status: 204 }) })),
@@ -54,7 +54,7 @@ describe("liveness", () => {
 	});
 
 	it("refuses boot when another module takes the same route", async () => {
-		const taken = defineModule({ name: "other", takes: [] }, (m) => [
+		const taken = defineModule({ name: "other", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(routes).by(() => ({
 				method: "GET",
 				path: "/_healthcheck",

@@ -35,7 +35,7 @@ afterEach(async () => {
 
 /** Counting kinds whose proof is their secret: two, so a pass is seen to begin only its own kind. */
 const counting = (kind: string) =>
-	defineModule({ name: `kind-${kind}`, takes: [] }, (m) => [
+	defineModule({ name: `kind-${kind}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(factorKinds).by(() => ({
 			kind,
 			amr: ["otp"],
@@ -47,13 +47,13 @@ const counting = (kind: string) =>
 				proof === secret ? { kind: "valid" as const, state: null } : { kind: "invalid" as const },
 		})),
 	]);
-const step = defineModule({ name: "step", takes: [] }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 
 /** What the proof last kept, and how it answers: not available to `nobody`. */
 const contact = { kept: "", limited: false, refused: false, from: [] as unknown[] };
-const owning = defineModule({ name: "proof-contact", takes: [] }, (m) => [
+const owning = defineModule({ name: "proof-contact", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(bindingProofs).by(() => ({
 		name: "contact",
 		available: async (subject, from) => {
@@ -73,7 +73,7 @@ const owning = defineModule({ name: "proof-contact", takes: [] }, (m) => [
 
 async function serve(mode?: "never" | "when-available" | "always", proofs = [owning]) {
 	const stand = memoryRecords<StoredFactors>(() => runtime.clock.now(), { shards: 1, perShard: 1 });
-	const store = defineModule({ name: "factor-store", takes: [] }, (m) => [
+	const store = defineModule({ name: "factor-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorStore).by(() => ({
 			save: (key, record) => stand.records.create(key, record, "endless"),
 			read: stand.records.read,

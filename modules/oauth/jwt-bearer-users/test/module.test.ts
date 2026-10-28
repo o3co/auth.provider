@@ -27,15 +27,18 @@ const devices = { upstream: "device", issuer: "app.devices" };
 const seen = contract<{ resolvers: readonly LinkedSubjects[]; names: readonly UpstreamNames[] }>(
 	"seen",
 );
-const reader = defineModule({ name: "reader", takes: [linkedSubjects, upstreamNames] }, (m) => [
-	m.provide(seen).by(async (c) => ({
-		resolvers: await c.collect(linkedSubjects),
-		names: await c.collect(upstreamNames),
-	})),
-]);
+const reader = defineModule(
+	{ name: "reader", replicaSafe: true, takes: [linkedSubjects, upstreamNames] },
+	(m) => [
+		m.provide(seen).by(async (c) => ({
+			resolvers: await c.collect(linkedSubjects),
+			names: await c.collect(upstreamNames),
+		})),
+	],
+);
 /** Stands for jwt-bearer's list of linked issuers. */
 const linked = (issuers: LinkedIssuers) =>
-	defineModule({ name: "jwt-bearer", takes: [] }, (m) => [
+	defineModule({ name: "jwt-bearer", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(linkedIssuers).by(() => issuers),
 	]);
 const ledgerAnswering = (answer: () => Promise<Verified>): Ledger => ({
@@ -50,7 +53,7 @@ const assembly = (answer: () => Promise<Verified>, issuers = [devices], extra: M
 		usersModule,
 		secretHashModule,
 		memoryUsersStores().module,
-		defineModule({ name: "ledger", takes: [] }, (m) => [
+		defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(ledgers).by(() => ledgerAnswering(answer)),
 		]),
 		linked(issuers),
@@ -94,7 +97,7 @@ it("declares each linked issuer's name in one list, an empty one where none is l
 });
 
 it("lets users refuse boot on a linked name another module declares for another issuer", async () => {
-	const other = defineModule({ name: "federation", takes: [] }, (m) => [
+	const other = defineModule({ name: "federation", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(upstreamNames).by(() => ({
 			declaredBy: "federation",
 			names: [{ name: "device", issuer: "https://elsewhere.example" }],

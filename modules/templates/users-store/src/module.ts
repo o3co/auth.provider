@@ -31,7 +31,7 @@ const contacts: Space = {
 	guarantees: Object.values(contactGuaranteeFor),
 };
 
-export default defineModule({ name: "users-store", takes: [store] }, (m) => [
+export default defineModule({ name: "users-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => links),
 	m.contribute(spaces).by(() => contacts),
 	m.provide(linkStore).by(async (c): Promise<LinkStore> => {

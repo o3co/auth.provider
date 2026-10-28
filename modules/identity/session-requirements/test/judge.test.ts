@@ -45,14 +45,17 @@ it("admits where none falls short, saying whether one judged the level", async (
 
 it("contributes the one entry judge over the requirements the composition contributes", async () => {
 	const judged = contract<EntryJudge>("test.judged");
-	const reading = defineModule({ name: "reading", takes: [entryJudge] }, (m) => [
-		m.provide(judged).by(async (c) => {
-			const [judge] = await c.collect(entryJudge);
-			if (!judge) throw new Error("no judge");
-			return judge;
-		}),
-		m.contribute(entryRequirements).by(() => requirement("mfa", ["use"])),
-	]);
+	const reading = defineModule(
+		{ name: "reading", replicaSafe: false, takes: [entryJudge] },
+		(m) => [
+			m.provide(judged).by(async (c) => {
+				const [judge] = await c.collect(entryJudge);
+				if (!judge) throw new Error("no judge");
+				return judge;
+			}),
+			m.contribute(entryRequirements).by(() => requirement("mfa", ["use"])),
+		],
+	);
 	const app = await assemble({ modules: [requirementsModule, reading], config: kernelConfig() });
 	expect(
 		(await takesUnused({ modules: [requirementsModule, reading], config: kernelConfig() }))[

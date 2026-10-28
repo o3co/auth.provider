@@ -34,7 +34,9 @@ const takes = [
 	redemptionHooks,
 ];
 
-export default defineModule({ name: "code-grant", section, takes }, (m) => [
+// Safe on many instances: every instance runs the sweep over the shared void list, and settling a void twice
+// does no harm (test/voids.test.ts).
+export default defineModule({ name: "code-grant", replicaSafe: true, section, takes }, (m) => [
 	m.provide(codes).by(async (c) => {
 		const store = await c.get(codeStore);
 		const opened = await c.get(sessions);

@@ -666,7 +666,11 @@ export function failStandInListing(stand: Sessions): void {
  * when the listing pushes one out or the subject is revoked.
  */
 export const sessionStandIn = defineModule(
-	{ name: "session", takes: [site, closingParticipants, entryJudge, subjectRevocation] },
+	{
+		name: "session",
+		replicaSafe: false,
+		takes: [site, closingParticipants, entryJudge, subjectRevocation],
+	},
 	(m) => [
 		m.provide(sessions).by(async (c) => {
 			const jar = cookiesFor((await c.get(site)).secureCookies);
