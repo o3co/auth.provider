@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { areaTarget, type Started } from "@mod/conformance";
+import { type AreaScene, areaTarget, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { type Browser, browser as openBrowser } from "../../../test/browser.ts";
 import { type Authorized, fakeUpstream } from "../../../test/upstream.ts";
@@ -28,16 +28,22 @@ const worker = (id: string): ClientScene => ({
 
 let sender = 0;
 
+/** A fake upstream, as the scenes' client there. */
+export type FakeUpstream = Awaited<ReturnType<typeof fakeUpstream>>;
+
+/** The upstream a scene's users log in through, as the scenes' client there. */
+export const upstreamAt = () => fakeUpstream(upstreamClient);
+
 /**
- * A deployment with federation grants for the connection `calendar` at a fake upstream, two
- * backends (`worker`, `other-worker`) and two users who log in through that upstream.
+ * Federation grants for the connection `calendar` at the upstream, two backends (`worker`,
+ * `other-worker`) and two users who log in through that upstream.
  */
-export async function grantsTarget(
+export function grantsScene(
+	corp: FakeUpstream,
 	more: Partial<GrantsPart> = {},
 	extra: Pick<FederationScene, "revocations"> = {},
-) {
-	const corp = await fakeUpstream(upstreamClient);
-	const scene = federationScene({
+): AreaScene {
+	return federationScene({
 		origin,
 		keys: {
 			signing: {
@@ -77,13 +83,13 @@ export async function grantsTarget(
 		},
 		...extra,
 	});
-	const running: Started = await areaTarget().start(scene);
-	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
-	const base = running.baseUrl;
+}
 
+/** What a scene does at a deployment reached at `base`, its users logging in through the upstream. */
+export function grantsAt(base: () => string, corp: FakeUpstream) {
 	/** A client's call, by HTTP Basic with a JSON body, each from an address of its own. */
 	const call = async (path: string, json: Record<string, unknown>, as = "worker") => {
-		const res = await fetch(`${base}${path}`, {
+		const res = await fetch(`${base()}${path}`, {
 			method: "POST",
 			headers: {
 				"x-forwarded-proto": "https",
@@ -116,7 +122,7 @@ export async function grantsTarget(
 
 	/** A browser logged in through the upstream as the user its upstream subject names. */
 	const loggedIn = async (subject = "u-alice"): Promise<Browser> => {
-		const b = openBrowser(() => base, origin);
+		const b = openBrowser(base, origin);
 		const started = await b.get("/session/oauth/federation/corp");
 		const done = await b.get(
 			`/session/oauth/federation/corp/callback?${corp.authorize(started.location, { subject })}`,
@@ -170,18 +176,25 @@ export async function grantsTarget(
 	/** Where a callback sent the browser back to, as its query. */
 	const returned = (done: { location: string }) => new URL(done.location).searchParams;
 
+	return { call, lodge, grantCall, loggedIn, open, answer, callback, connected, returned };
+}
+
+/**
+ * A deployment with federation grants for the connection `calendar` at a fake upstream, two
+ * backends (`worker`, `other-worker`) and two users who log in through that upstream.
+ */
+export async function grantsTarget(
+	more: Partial<GrantsPart> = {},
+	extra: Pick<FederationScene, "revocations"> = {},
+) {
+	const corp = await upstreamAt();
+	const running: Started = await areaTarget().start(grantsScene(corp, more, extra));
+	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
+	const base = running.baseUrl;
 	return {
 		base,
 		corp,
-		call,
-		lodge,
-		grantCall,
-		loggedIn,
-		open,
-		answer,
-		callback,
-		connected,
-		returned,
+		...grantsAt(() => base, corp),
 		stop: async () => {
 			await running.stop();
 			await corp.stop();
