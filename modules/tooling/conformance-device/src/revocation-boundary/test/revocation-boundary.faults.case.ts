@@ -56,9 +56,10 @@ async function revokeAt(i: Instance): Promise<Answer> {
 const done = (a: Answer) => expect([a.status, a.body.complete]).toEqual([200, true]);
 
 /**
- * The device approved before the boundary gives no token at the instance: `invalid_grant`, checked before
- * the poll takes the approval (device-grant), so the take is never written; the approving session is not
- * closed, the followers held, so what refuses is the subject's revocation since its authentication.
+ * The device approved before the boundary gives no token at the instance: `invalid_grant`, the
+ * approving session's entry refused by the subject's boundary before the poll takes the approval, so
+ * the take is never written; the session is not closed, the followers held, so what refuses is the
+ * boundary.
  */
 async function refusedAt(i: Instance, d: Device) {
 	expect(said(await pollAt(i, d))).toEqual([400, "invalid_grant"]);
@@ -82,8 +83,11 @@ async function control(d: Deployed) {
 async function healed(d: Deployed, i: Instance) {
 	await recovered(d);
 	await ready(i);
-	// A boundary is compared in seconds: a login within its second is revoked too, so the new one comes after.
-	await new Promise((resolve) => setTimeout(resolve, 1_100));
+	// A boundary is compared in seconds: a login within its second is revoked too, so the new one comes
+	// a second and more after the boundary's last write.
+	const written = d.instances.flatMap((x) => successes(x, boundaryOf(subject)).map((e) => e.at));
+	const after = Math.max(...written) + 1_100 - performance.now();
+	if (after > 0) await new Promise((resolve) => setTimeout(resolve, after));
 	expect(said(await pollAt(i, await approvedAt(i)))).toEqual([200, "Bearer"]);
 }
 
