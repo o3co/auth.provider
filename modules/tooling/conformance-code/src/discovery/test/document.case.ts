@@ -72,8 +72,11 @@ it("is one JSON object of OpenID Connect Discovery's form: its required members,
 			const url = new URL(value as string);
 			expect(url.protocol, member).toBe("https:");
 			if (member === "issuer") expect([url.search, url.hash], member).toEqual(["", ""]);
-		} else if (member.endsWith("_supported") && typeof value !== "boolean") {
-			// A list of the values taken: never empty, each a string, each once.
+		} else if (
+			member.endsWith("_supported") &&
+			(required.includes(member) || typeof value !== "boolean")
+		) {
+			// A list of the values taken, as a required member always is: never empty, each a string, each once.
 			expect(Array.isArray(value), member).toBe(true);
 			const list = value as unknown[];
 			expect(list.length, member).toBeGreaterThan(0);
