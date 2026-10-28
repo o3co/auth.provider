@@ -7,7 +7,6 @@ import {
 	type Unanswerable,
 	type User,
 	type Users,
-	userAttribute,
 	type Verified,
 } from "./contract.ts";
 
@@ -44,18 +43,6 @@ export const record = z
 						code: "custom",
 						message: "not a value this attribute takes",
 						path: [name],
-					});
-				}
-				// An email's verification goes with the email, as a ledger's is left out without one.
-				const verified = attributes[userAttribute.emailVerified];
-				if (
-					isAttributeValue(userAttribute.emailVerified, verified) &&
-					!Object.hasOwn(attributes, userAttribute.email)
-				) {
-					context.addIssue({
-						code: "custom",
-						message: "taken only beside an email",
-						path: [userAttribute.emailVerified],
 					});
 				}
 			})
