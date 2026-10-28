@@ -1,6 +1,6 @@
 import { auditStandIn } from "@mod/audit/testing";
 import claimsSelectionModule from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
@@ -73,7 +73,6 @@ async function boot() {
 			...issuerConfig({ url: "https://as.example" }),
 			...clientsConfig([confidentialClient({ id: "app", sections: allowed })]),
 			...refreshConfig(),
-			...claimsSelectionConfig(),
 		},
 		runtime,
 	});
