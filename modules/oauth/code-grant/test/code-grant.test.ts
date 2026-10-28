@@ -517,7 +517,7 @@ it("drops a listed void whose record it does not know, as one it cannot revoke, 
 	expect(s.stores.pending()).toEqual([]);
 });
 
-it("refuses a request missing the code, the redirect URI or the verifier, each sent empty as one left out, or with a malformed verifier, leaving the code unused [rfc6749-5.2-f] [rfc7636-4.5-b] [rfc6749-4.1.3-e] [rfc6749-3.2-b]", async () => {
+it("refuses a request missing the code, the redirect URI or the verifier, a code or redirect URI sent empty as one left out, or with a malformed verifier, leaving the code unused [rfc6749-5.2-f] [rfc7636-4.5-b] [rfc6749-4.1.3-e] [rfc6749-3.2-b]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const cases: Record<string, Record<string, string>> = {
