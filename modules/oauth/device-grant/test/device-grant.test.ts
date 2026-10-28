@@ -255,7 +255,7 @@ async function serve(...given: Parameters<typeof assembly>) {
 }
 
 describe("device authorization", () => {
-	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d]", async () => {
+	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d] [rfc8628-5.1-a]", async () => {
 		const s = await serve();
 		const given = await s.authorize();
 		expect(given.status).toBe(200);
@@ -311,19 +311,36 @@ describe("device authorization", () => {
 			const asked = await s.authorize("tv", form);
 			expect(asked.status, JSON.stringify(form)).toBe(200);
 		}
-		// The empty scope is the client's default, as though none were asked.
-		const { code, user } = await s.started("tv", { scope: "" });
+		// Each empty one is read as not sent, through to the token: the client's default scope, the issuer's audience.
 		const cookie = await s.login();
-		await s.verify(cookie, { action: "approve", user_code: user });
-		now += 5_000;
-		expect(await s.poll(code)).toMatchObject({ scope: "read" });
+		const issuedFor = async (form: Record<string, string>) => {
+			const { code, user } = await s.started("tv", form);
+			await s.verify(cookie, { action: "approve", user_code: user });
+			now += 5_000;
+			const issued = (await s.poll(code)) as Record<string, string>;
+			const checked = await s.app.get(tokens).verifyAccess(String(issued.access_token));
+			return checked.kind === "valid" ? checked.grant : checked;
+		};
+		const unsent = await issuedFor({});
+		expect(unsent).toMatchObject({ scope: ["read"], audience: [origin] });
+		for (const form of [{ scope: "" }, { resource: "" }, { scope: "", resource: "" }]) {
+			const grant = await issuedFor(form);
+			expect([grant.scope, grant.audience], JSON.stringify(form)).toEqual([
+				unsent.scope,
+				unsent.audience,
+			]);
+		}
 	});
 
-	it("writes each parameter of its answer once [rfc8628-3.1-e]", async () => {
-		const given = await (await serve()).authorize();
-		expect(given.status).toBe(200);
-		for (const name of ["device_code", "user_code", "verification_uri", "expires_in", "interval"]) {
-			expect(given.text.split(`"${name}":`).length - 1, name).toBe(1);
+	it("writes each parameter of its answer once, the page's address with the code in too [rfc8628-3.1-e]", async () => {
+		for (const settings of [{}, { "complete-uri": true }]) {
+			const given = await (await serve(settings)).authorize();
+			expect(given.status).toBe(200);
+			// Read from the raw body, since parsing would keep one of two.
+			const names = [...given.text.matchAll(/"([^"\\]+)":/g)].map((match) => match[1]);
+			expect(names, JSON.stringify(settings)).toEqual([...new Set(names)]);
+			expect(names.length, JSON.stringify(settings)).toBe(Object.keys(given.body).length);
+			if ("complete-uri" in settings) expect(names).toContain("verification_uri_complete");
 		}
 	});
 
@@ -924,7 +941,7 @@ describe("verification", () => {
 		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
 	});
 
-	it("counts every decision a subject tries, so codes of 8 letters of 20, living 10 minutes, cannot be guessed [rfc8628-5.1-a]", async () => {
+	it("counts every decision a subject tries, so codes cannot be guessed: by default 8 letters of 20, living 10 minutes, 5 tries a subject each window [rfc8628-5.1-a]", async () => {
 		const s = await serve({ attempts: 2 });
 		const cookie = await s.login();
 		for (let i = 0; i < 2; i++) {
