@@ -115,7 +115,7 @@ export function metricsContract(
  * sees a late read without waiting for the module's bound.
  */
 export function metricsStandIn(boundMs: number) {
-	return defineModule({ name: "metrics", replicaSafe: false, takes: metricsTakes }, (m) => [
+	return defineModule({ name: "metrics", replicaSafe: true, takes: metricsTakes }, (m) => [
 		m.provide(metrics).by(metricsBy(boundMs)),
 	]);
 }
