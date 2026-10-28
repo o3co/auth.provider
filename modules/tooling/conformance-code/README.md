@@ -9,7 +9,7 @@
 - Owns the scenes of a password login meeting a client's demand for a fresh login (internal module `fresh-login`).
 - Owns the scenes of what a subject's revocation by the ledger ends.
 - Owns the scenes of the code flow's answers, its refusals, discovery and userinfo's among them, carrying no client's secret, no user's password or token, and no part of the signing key.
-- Owns the fault scenes of the code flow, on a Redis topology and a deployment of its own, each after a control with no fault: a code redeemed once (internal module `code-once`), with what they share (internal module `faults`).
+- Owns the fault scenes of the code flow, on a Redis topology and a deployment of its own, each after a control with no fault: a code redeemed once (internal module `code-once`), a refresh token rotated once (`refresh-once`), with what they share (internal module `faults`).
 - Sets up the code flow area's parts (consent step, refresh, acr table, session grant, metadata document clients, logout with the back-channel origins allowed, beside the documents' hosts where both are on) on each of the legacy and new targets.
 - A code flow part can leave out the consent step.
 - If a second-factor part is present, the code flow set-up also includes the acr bridge.
@@ -24,7 +24,8 @@
 - Test tools (`./testing`): a logged-in browser, requests to the authorization endpoint, and `succeeded` (a set-up's answer read only when it succeeded, else the scene fails naming what answered, its status and its body's start)
 
 ## Invariants
-- The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of the acr asked `acr`, those of the claims a request names beyond its scope `claims`, those of refusing an unverified email `verified-email`, those of a subject the ledger revokes `revocation`, those of clients whose id is the URL of their metadata document `documents`, and the fault scenes of a code redeemed once `code-once`, beside `faults`; the rest are the package's.
+- The scenes of a logout a client starts are the internal module `logout`, those of userinfo `userinfo`, those of the acr asked `acr`, those of the claims a request names beyond its scope `claims`, those of refusing an unverified email `verified-email`, those of a subject the ledger revokes `revocation`, and those of clients whose id is the URL of their metadata document `documents`; the rest are the package's.
+- The fault scenes of a code redeemed once are the internal module `code-once`, those of a refresh token rotated once `refresh-once`, and what they share `faults`.
 - The legacy set-up, and the needs the legacy system cannot provide and the differences it answers differently, live only in `src/legacy.ts`.
 - The code flow needs access tokens that can be revoked after they are issued (`tokens` is set to denylist).
 - Touches only the HTTP interface and boot refusals.

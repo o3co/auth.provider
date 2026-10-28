@@ -14,14 +14,14 @@ import {
 	codeAt,
 	codeNoted,
 	codeUse,
-	type Deployed,
-	deployed,
 	failover,
 	instanceOf,
+	on,
 	prefix,
 	ready,
 	reconnected,
 	redeemAt,
+	replicasOnline,
 	repointed,
 	said,
 	successes,
@@ -33,16 +33,6 @@ const anything: Match = { request: () => true, succeeded: () => true };
 /** Any write to a code's record. */
 const codeRecord = storeWrite({ prefix, space: "code-grant-store.codes" });
 const issued = [200, "Bearer"];
-
-/** Runs a scene on its own deployment, stopped however the scene ends. */
-async function on(o: Parameters<typeof deployed>[0], scene: (d: Deployed) => Promise<void>) {
-	const d = await deployed(o);
-	try {
-		await scene(d);
-	} finally {
-		await d.stop();
-	}
-}
 
 /**
  * The control: with no fault, a code is used up by one write that succeeds, and coming again it is
@@ -177,6 +167,7 @@ describe("an authorization code redeemed once under faults", () => {
 			const crashed = await d.topology.crash(d.topology.primary());
 			expect(crashed.exitCode).toBe(137);
 			repointed(d);
+			await replicasOnline(d);
 			await ready(a);
 			await refusedAsUsed(a, c);
 		});
