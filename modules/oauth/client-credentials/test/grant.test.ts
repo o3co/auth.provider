@@ -60,11 +60,14 @@ describe("client credentials", () => {
 		]);
 	});
 
-	it("refuses a public client, and a scope outside the allowance, before issuing [rfc6749-4.4-a]", async () => {
+	it("refuses a public client, however it authenticated, and a scope outside the allowance, before issuing [rfc6749-4.4-a] [rfc6749-2.3-a]", async () => {
 		expect((await ask(client("public"))).answer).toEqual({
 			kind: "error",
 			error: "unauthorized_client",
 		});
+		// Its registered type decides, never the method it authenticated by.
+		const withSecret = { ...client("public"), method: "client_secret_basic" } as Client;
+		expect((await ask(withSecret)).answer).toEqual({ kind: "error", error: "unauthorized_client" });
 		const outside = await ask(client("confidential", { scopes: ["read"] }), { scope: "write" });
 		expect([outside.answer, outside.issued]).toEqual([
 			{ kind: "error", error: "invalid_scope" },
