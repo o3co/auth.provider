@@ -1,16 +1,18 @@
 import { metadataSections } from "@mod/clients";
+import { csrfChecked } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, routes, use } from "@mod/http";
 import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
 import { outboundRefusals } from "@mod/outbound-policy";
 import { requestsPerSource } from "@mod/rate-limit";
 import { participants } from "@mod/session-participants";
+import { confirmFrom, confirmPath, confirmTakes } from "./confirm/confirm.ts";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom, endingTakes } from "./ending/ending.ts";
 import { type Notices, noticesFrom, noticesTakes } from "./notices/notices.ts";
 import { remembering, rememberingTakes } from "./redemptions/redemptions.ts";
 import { registrationIn } from "./registration/registration.ts";
-import { section } from "./section.ts";
+import { type Settings, section } from "./section.ts";
 
 type Handler = (request: HttpRequest) => Promise<HttpResponse>;
 
@@ -20,13 +22,31 @@ const path = "/oauth/logout";
 const shared = contract<Notices>("rp-logout.notices");
 /** The one handler both methods of the route share, built once. */
 const ending = contract<Handler>("rp-logout.ending");
+/** The confirmation's two handlers, built once. */
+const confirming = contract<{ readonly show: Handler; readonly take: Handler }>(
+	"rp-logout.confirming",
+);
+
+/** The logout's own requests per source, which every route that may sign a confirmation is counted with. */
+const counted = (c: { readonly section: Settings }) =>
+	use(requestsPerSource, {
+		name: "rp-logout",
+		window: { limit: c.section.requests, ms: c.section.window * 1000 },
+	});
 
 export default defineModule(
 	{
 		name,
 		section,
 		replicaSafe: true,
-		takes: [upstreamEnds, outboundRefusals, ...noticesTakes, ...endingTakes, ...rememberingTakes],
+		takes: [
+			upstreamEnds,
+			outboundRefusals,
+			...noticesTakes,
+			...endingTakes,
+			...confirmTakes,
+			...rememberingTakes,
+		],
 	},
 	(m) => [
 		m.contribute(metadataSections).by(registrationIn),
@@ -61,6 +81,25 @@ export default defineModule(
 			if (ends.length > 1) return c.refuse(name, "more than one upstream end of session");
 			return endingFrom(c, ends[0]);
 		}),
+		m.provide(confirming).by(async (c) => confirmFrom(c, (await c.collect(upstreamEnds))[0])),
+		// The confirmation of a logout started without a hint (OpenID Connect RP-Initiated Logout 1.0 §2).
+		m.contribute(routes).by(async (c) => ({
+			method: "GET",
+			path: confirmPath,
+			changesState: false,
+			// Each page signs a confirmation: counted with the logout's own requests.
+			uses: [counted(c)],
+			handle: (await c.get(confirming)).show,
+		})),
+		m.contribute(routes).by(async (c) => ({
+			method: "POST",
+			path: confirmPath,
+			takes: ["form"],
+			// A POST without a valid confirmation asks again, signing another: counted as the page is, after
+			// the CSRF check, which an own-site policy runs before any per-source one.
+			uses: [use(csrfChecked), counted(c)],
+			handle: (await c.get(confirming)).take,
+		})),
 		...(["GET", "POST"] as const).map((method) =>
 			m.contribute(routes).by(async (c) => ({
 				method,
@@ -72,12 +111,7 @@ export default defineModule(
 				crossSite:
 					"RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names.",
 				// Counted before any hint is checked, which reads keys and the store.
-				uses: [
-					use(requestsPerSource, {
-						name: "rp-logout",
-						window: { limit: c.section.requests, ms: c.section.window * 1000 },
-					}),
-				],
+				uses: [counted(c)],
 				handle: await c.get(ending),
 			})),
 		),

@@ -1,10 +1,12 @@
 import {
 	confirmation,
+	type Deployed,
 	type Instance,
 	instanceOf,
 	type Match,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	runIdOf,
@@ -53,8 +55,9 @@ async function control(i: Instance) {
 	expect(successes(i, spent).length).toBe(before + 1);
 }
 
-/** Healed: the instance is ready, and a new assertion is given a token. */
-async function healed(i: Instance) {
+/** Healed: the topology has recovered and the instance is ready, and a new assertion is given a token. */
+async function healed(d: Deployed, i: Instance) {
+	await recovered(d);
 	await ready(i);
 	expect(said(await grantAt(i, assertion()))).toEqual([200, "Bearer"]);
 }
@@ -77,7 +80,7 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 			);
 			await ready(i);
 			expect(successes(i, spendOf(a))).toEqual([]);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -98,7 +101,7 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 			);
 			expect(resumed).toBeGreaterThan(answer.at);
 			expect(successes(i, spendOf(a))).toEqual([]);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -117,7 +120,7 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 				[],
 			);
 			expect(successes(i, spendOf(a))).toEqual([]);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -137,7 +140,7 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 			const read = i.relay.executions(boundaryRead).find((e) => e.at > delayed);
 			expect(read?.at).toBeGreaterThan(answer.at);
 			expect(successes(i, spendOf(a))).toEqual([]);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -159,7 +162,7 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 				i.relay.executions(boundaryRead).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
 			expect(successes(i, spendOf(a))).toEqual([]);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -195,7 +198,7 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 					.filter((e) => e.command.name === "EVAL" && e.at > paused && e.at < held),
 			).toEqual([]);
 			expect(successes(i, spendOf(a))).toEqual([]);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -229,7 +232,7 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
 			noToken(answer);
 			i.relay.reset("confirming");
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -270,7 +273,7 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 				await annotate("answered temporarily_unavailable");
 			}
 			await replicasOnline(d);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 });

@@ -31,15 +31,36 @@ export function frontChannelPage(
 		})
 		.join("");
 	const origins = [...new Set(loadable.map(({ url }) => url.origin))];
+	const page = pageOf(iframes, origins, at.next, delayMs);
+	return { ...page, skipped: frames.length - loadable.length };
+}
+
+/**
+ * The page a logout ends on where no client is framed: it says the user is logged out, and moves the
+ * browser on to `next` at once by the front-channel page's one script, or stays, with no script.
+ */
+export function loggedOutPage(at: { readonly next?: string | undefined }): {
+	readonly html: string;
+	readonly loads: Loads;
+} {
+	return pageOf("", [], at.next, 0);
+}
+
+/** The page: the words that say the user is logged out, the frames, and the move on where there is one. */
+function pageOf(
+	iframes: string,
+	origins: readonly string[],
+	next: string | undefined,
+	delay: number,
+): { readonly html: string; readonly loads: Loads } {
 	const moving =
-		at.next === undefined
+		next === undefined
 			? { attributes: "", script: "", scripts: [] }
 			: {
-					attributes: ` data-target="${escaped(at.next)}" data-delay="${delayMs}"`,
+					attributes: ` data-target="${escaped(next)}" data-delay="${delay}"`,
 					script: `<script>${script}</script>`,
 					scripts: [script],
 				};
-	const html = `<!doctype html><html><head><meta charset="utf-8"><title>Signing out…</title></head><body${moving.attributes}>${iframes}${moving.script}</body></html>`;
-	const loads = { frames: origins, scripts: moving.scripts };
-	return { html, loads, skipped: frames.length - loadable.length };
+	const html = `<!doctype html><html><head><meta charset="utf-8"><title>Logged out</title></head><body${moving.attributes}><h1>Logged out</h1><p>You are logged out.</p>${iframes}${moving.script}</body></html>`;
+	return { html, loads: { frames: [...origins], scripts: moving.scripts } };
 }
