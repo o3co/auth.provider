@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
@@ -162,12 +163,7 @@ it("keeps no access token it checks or revokes, only the token's id, and logs no
 	// The place was asked, by the id alone.
 	expect(place.asked).toContainEqual(["save", checked.id, expect.any(Number)]);
 	// Neither the token nor its signature, without which it cannot be rebuilt, reached the place, the
-	// log, or the failure thrown while the place was down (on its way to the caller's log).
-	const kept = JSON.stringify([
-		place.asked,
-		logged.lines(),
-		String(failed),
-		(failed as Error).cause,
-	]);
+	// log, or the failure thrown while the place was down (on its way to the caller's log), causes and all.
+	const kept = JSON.stringify([place.asked, logged.lines(), inspect(failed, { depth: 5 })]);
 	for (const secret of [token, token.split(".")[2] ?? token]) expect(kept).not.toContain(secret);
 });
