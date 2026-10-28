@@ -14,7 +14,7 @@ export function mailConfig(settings: Partial<MailSettings> = {}) {
 
 /** Declares the purposes the contract tests send, with their templates. */
 export const contractTemplates: Module = defineModule(
-	{ name: "mail-contract", replicaSafe: true, takes: [] },
+	{ name: "mail-contract", replicaSafe: false, takes: [] },
 	(m) => [
 		m.contribute(mailPurposes).by(() => ({ purpose: "contract.notice" })),
 		m.contribute(mailPurposes).by(() => ({ purpose: "contract.broken" })),
