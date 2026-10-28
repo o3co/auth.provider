@@ -5,7 +5,7 @@ import { roundTripsOver } from "./round-trips.ts";
 import { roundTripStore } from "./store.ts";
 
 export default defineModule(
-	{ name: "upstream-round-trip", takes: [cookies, roundTripStore] },
+	{ name: "upstream-round-trip", replicaSafe: true, takes: [cookies, roundTripStore] },
 	(m) => [
 		m.provide(roundTrips).by(async (c) =>
 			roundTripsOver({
