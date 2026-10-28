@@ -51,6 +51,8 @@ export function checkRequest(
 	if ([...prompt].some((p) => !prompts.has(p)) || (prompt.has("none") && prompt.size > 1)) {
 		return refusal("invalid_request", "bad prompt");
 	}
+	// OpenID Connect Core §3.1.2.1: no page lets the End-User choose an account, so a choice asked cannot be had.
+	if (prompt.has("select_account")) return refusal("account_selection_required");
 	const maxAgeText = one("max_age");
 	if (maxAgeText !== undefined && !/^\d{1,9}$/.test(maxAgeText))
 		return refusal("invalid_request", "bad max_age");

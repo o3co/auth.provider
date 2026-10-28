@@ -97,6 +97,12 @@ describe("checks: an OpenID Connect request's form", () => {
 		});
 	});
 
+	it("refuses prompt=select_account as account_selection_required, with no page to choose an account by [oidc-core-3.1.2.1-q]", () => {
+		for (const prompt of ["select_account", "login select_account", "select_account consent"]) {
+			expect(outcome(oidc({ prompt })), prompt).toEqual(["account_selection_required", undefined]);
+		}
+	});
+
 	it("says a code challenge by S256 is required, where it refuses a request without one [rfc7636-4.4.1-b]", () => {
 		for (const sent of [oidc({}, "code_challenge"), oidc({ code_challenge: "" })]) {
 			expect(outcome(sent)).toEqual(["invalid_request", "PKCE with S256 is required"]);
