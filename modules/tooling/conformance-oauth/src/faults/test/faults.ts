@@ -8,6 +8,7 @@ import {
 	on as onDeployment,
 	storeWrite,
 } from "@mod/conformance/testing";
+import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 // The package's entry, which sets the area up on each target.
 import { type ClientScene, oauthScene } from "../../main.ts";
 
@@ -79,17 +80,16 @@ export interface Answer {
 	readonly body: Readonly<Record<string, unknown>>;
 }
 
-/** The assertion sent to the instance's token endpoint by `app`. */
-export async function grantAt(i: Instance, a: Assertion): Promise<Answer> {
+/** A form posted to the instance's token endpoint, and its answer. */
+async function tokenAt(
+	i: Instance,
+	form: Record<string, string>,
+	headers: Record<string, string> = {},
+): Promise<Answer> {
 	const res = await fetch(`${i.baseUrl}/oauth/token`, {
 		method: "POST",
-		headers: { "content-type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({
-			grant_type: grantType,
-			assertion: a.jwt,
-			client_id: app.id,
-			client_secret: app.secret ?? "",
-		}),
+		headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+		body: new URLSearchParams(form),
 	});
 	const text = await res.text();
 	let body: Record<string, unknown> = {};
@@ -98,6 +98,15 @@ export async function grantAt(i: Instance, a: Assertion): Promise<Answer> {
 	} catch {}
 	return { status: res.status, body };
 }
+
+/** The assertion sent to the instance's token endpoint by `app`. */
+export const grantAt = (i: Instance, a: Assertion): Promise<Answer> =>
+	tokenAt(i, {
+		grant_type: grantType,
+		assertion: a.jwt,
+		client_id: app.id,
+		client_secret: app.secret ?? "",
+	});
 
 /** An answer as a scene compares it: its status and error, or its token type where it gave a token. */
 export const said = (a: Answer) => [a.status, a.body.error ?? a.body.token_type];
@@ -155,23 +164,12 @@ export function clientAssertion(): Assertion {
 }
 
 /** A client credentials request the keyed client authenticates by the assertion. */
-export async function authenticatedAt(i: Instance, a: Assertion): Promise<Answer> {
-	const res = await fetch(`${i.baseUrl}/oauth/token`, {
-		method: "POST",
-		headers: { "content-type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({
-			grant_type: "client_credentials",
-			client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-			client_assertion: a.jwt,
-		}),
+export const authenticatedAt = (i: Instance, a: Assertion): Promise<Answer> =>
+	tokenAt(i, {
+		grant_type: "client_credentials",
+		client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+		client_assertion: a.jwt,
 	});
-	const text = await res.text();
-	let body: Record<string, unknown> = {};
-	try {
-		body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-	} catch {}
-	return { status: res.status, body };
-}
 
 /** The write that spends the client assertion's `jti`: its record placed under the client's and the jti's name. */
 export const clientSpendOf = (a: Assertion): Match =>
@@ -181,5 +179,75 @@ export const clientSpendOf = (a: Assertion): Match =>
 		partition: createHash("sha256")
 			.update(JSON.stringify([keyed.id, a.jti]))
 			.digest("base64url"),
+		operations: ["putIfAbsent"],
+	});
+
+const holder = generateKeyPairSync("ed25519");
+/** The client that asks for tokens bound to its holder's key (DPoP). */
+export const holding: ClientScene = {
+	id: "holding",
+	kind: "confidential",
+	method: "client_secret_post",
+	secret: "holding-secret-0123456789abcdef",
+	grants: ["client_credentials"],
+	scopes: ["read"],
+	defaultScopes: ["read"],
+};
+
+/** Client credentials with DPoP on the Redis store, for one client. */
+export const dpopScene = (): AreaScene =>
+	oauthScene({
+		issuer,
+		keys: {
+			signing: {
+				kid: "faults",
+				alg: "EdDSA",
+				privatePem: pem(provider.privateKey, "pkcs8"),
+				publicPem: pem(provider.publicKey, "spki"),
+			},
+		},
+		clients: [holding],
+		dpop: true,
+		storeFaults: true,
+	});
+
+/** A DPoP proof, and the thumbprint of the key it proves. */
+export interface Proof extends Assertion {
+	readonly jkt: string;
+}
+
+/** A DPoP proof of the holder's key for the token endpoint, with a `jti` of its own. */
+export async function proof(): Promise<Proof> {
+	const jwk = await exportJWK(holder.publicKey);
+	const jti = randomUUID();
+	const jwt = await new SignJWT({
+		htm: "POST",
+		htu: `${issuer}/oauth/token`,
+		iat: Math.floor(Date.now() / 1000),
+		jti,
+	})
+		.setProtectedHeader({ alg: "EdDSA", typ: "dpop+jwt", jwk })
+		.sign(holder.privateKey);
+	return { jwt, jti, jkt: await calculateJwkThumbprint(jwk) };
+}
+
+/** A client credentials request by the holding client, proving its key with the proof. */
+export const provenAt = (i: Instance, p: Proof): Promise<Answer> =>
+	tokenAt(
+		i,
+		{
+			grant_type: "client_credentials",
+			client_id: holding.id,
+			client_secret: holding.secret ?? "",
+		},
+		{ dpop: p.jwt },
+	);
+
+/** The write that spends the proof's `jti`: its record placed under the key's thumbprint and the jti. */
+export const proofSpendOf = (p: Proof): Match =>
+	storeWrite({
+		prefix,
+		space: "dpop-store.spent",
+		partition: `${p.jkt}.${p.jti}`,
 		operations: ["putIfAbsent"],
 	});
