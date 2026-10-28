@@ -1,7 +1,7 @@
 /** An absolute URI's start (RFC 3986 §4.3): a scheme and its colon. */
 const scheme = /^[A-Za-z][A-Za-z0-9+.-]*:/;
-/** What no URI holds as written: whitespace and control characters. */
-const unwritten = /[\s\x00-\x1f\x7f]/;
+/** What no URI holds as written (RFC 3986 is ASCII alone): whitespace, control and non-ASCII characters. */
+const unwritten = /[^\x21-\x7e]/;
 
 /**
  * Why a `resource` (RFC 8707 §2) is not one to take: not an absolute URI, or carrying a fragment;

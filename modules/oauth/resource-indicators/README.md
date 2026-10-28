@@ -16,7 +16,7 @@
 
 ## Invariants
 - No `resource`, or an empty one, keeps the default audience.
-- A `resource` that is not an absolute URI (a scheme, no whitespace or control character, one `URL` parses), or that carries a fragment, is refused `invalid_target`, whatever audience is registered.
+- A `resource` that is not an absolute URI (a scheme, printable ASCII alone as RFC 3986 writes one, one `URL` parses), or that carries a fragment, is refused `invalid_target`, whatever audience is registered.
 - A `resource` the issuance may have is the audience, alone; it is compared as a string, as written.
 - Any other is refused `invalid_target`, described by a fixed text that does not echo the value.
 - A `resource` sent to a grant that takes no audience, or to another endpoint that asks, is refused `invalid_target` with a fixed text; none, or an empty one, is not.

@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { resourceRefusal } from "../src/contract.ts";
 
-it("takes an absolute URI without a fragment, and tells why it refuses any other [rfc8707-2-a] [rfc8707-2-b]", () => {
+it("takes an absolute URI, in ASCII, without a fragment, and tells why it refuses any other [rfc8707-2-a] [rfc8707-2-b]", () => {
 	for (const taken of [
 		"https://api.example",
 		"https://api.example/v1?tenant=a",
@@ -17,6 +17,7 @@ it("takes an absolute URI without a fragment, and tells why it refuses any other
 		" https://api.example",
 		"https://api.example/\tv1",
 		"https://api.example\n",
+		"https://b\u00fccher.example/x",
 	]) {
 		expect(resourceRefusal(unwritten), JSON.stringify(unwritten)).toBe(
 			"resource is not an absolute URI",
