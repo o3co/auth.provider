@@ -15,21 +15,21 @@ import {
 	app,
 	type Code,
 	callback,
-	codeNoted,
 	faultScene,
 	issuer,
 	on,
 	pkce,
 	redeemAt,
 	refreshAt,
-	rotationFrom,
 	said,
 } from "../../faults/test/faults.ts";
 import {
 	boundaryCreated,
 	boundaryOf,
 	closingAdded,
+	codeNoted,
 	isStoreOperation,
+	rotationFrom,
 } from "../../faults/test/wire.ts";
 import { backChannel, browserAt } from "../../testing.ts";
 

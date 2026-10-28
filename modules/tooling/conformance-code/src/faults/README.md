@@ -5,12 +5,14 @@ Internal module of `conformance-code`: what the area's fault scenes share in the
 ## Responsibilities
 - Gives the code flow's scene on the Redis store, and runs a scene on a deployment of its own on that scene unless it names another.
 - Runs the code flow against one instance: a code for a browser logged in there (one given or a new one), and a request to its token endpoint, a refresh among them.
-- Names a code's writes as the relay matches them, by the code's challenge: its use (the record turned consumed), and the token noted on it after; and a refresh token's rotation, by its family and secret.
-- Names, in `test/wire.ts`, what the revocation boundary's scenes take from the store's inside: a store operation as the Redis adapter sends it, a subject's boundary writes and the one that creates it, and a follower's first write, session-lifecycle adding to its closings.
+- Names, in `test/wire.ts` alone, what the area's scenes take from the store's inside, so no scene names a space, an operation or a record's field itself:
+  - the store's prefix; a code's record kept, written and read for a browser's session; a code's use (its record turned consumed) and the token noted on it after, by the code's challenge; a refresh token's rotation, by its family and secret, and a call on a family's record;
+  - a closing session's writes: the closings added and done with, its record closing and closed, and its token's revocation;
+  - a store operation as the Redis adapter sends it, a subject's boundary writes and the one that creates it, and a follower's first write, session-lifecycle adding to its closings.
 
 ## Offers
-- `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `browserOn`, `codeAt`, `tokenAt`, `redeemAt`, `refreshAt`, `said`, `codeUse`, `codeNoted`, `rotationFrom`, and the scene's `issuer`, `callback`, `prefix` and client `app`.
-- From `test/wire.ts`: `isStoreOperation`, `boundaryOf`, `boundaryCreated`, `closingAdded`.
+- `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `browserOn`, `codeAt`, `tokenAt`, `redeemAt`, `refreshAt`, `said`, and the scene's `issuer`, `callback` and client `app`.
+- From `test/wire.ts`: `prefix`, `codeRecord`, `codeKept`, `cookieRead`, `codeUse`, `codeNoted`, `rotationFrom`, `onFamilies`, `added`, `recordAs`, `revocationOf`, `closingOf`, `doneWith`, `Closing`, `isStoreOperation`, `boundaryOf`, `boundaryCreated`, `closingAdded`.
 
 ## Invariants
 - Each code has a challenge of its own, so a match on it never takes another code's write.

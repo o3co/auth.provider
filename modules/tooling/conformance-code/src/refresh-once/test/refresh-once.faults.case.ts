@@ -3,7 +3,6 @@ import {
 	failover,
 	type Instance,
 	instanceOf,
-	keysOf,
 	type Match,
 	ready,
 	reconnected,
@@ -14,15 +13,8 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	codeAt,
-	faultScene,
-	on,
-	redeemAt,
-	refreshAt,
-	rotationFrom,
-	said,
-} from "../../faults/test/faults.ts";
+import { codeAt, faultScene, on, redeemAt, refreshAt, said } from "../../faults/test/faults.ts";
+import { onFamilies, rotationFrom } from "../../faults/test/wire.ts";
 
 const scene = faultScene({ refresh: {} });
 const refused = [400, "invalid_grant"];
@@ -143,9 +135,7 @@ describe("a refresh token rotated once under faults", () => {
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
 			const sent = a.relay.executions(anything).slice(from);
 			// The first call on the family's record ran on the new primary, on a connection to it ...
-			const family = (e: (typeof sent)[number]) =>
-				keysOf(e.command).some((k) => k.space === "refresh-store.families");
-			const first = sent.find((e) => e.at < wait.at && family(e));
+			const first = sent.find((e) => e.at < wait.at && onFamilies(e.command));
 			expect(first && runIdOf(first.reply)).toBe(newId);
 			expect(first && upstreamOf(first.connection)).toEqual(moved.upstream());
 			// ... and its confirmation passed on the old one, on a connection still to it.

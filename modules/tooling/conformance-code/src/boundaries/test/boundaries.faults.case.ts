@@ -6,19 +6,11 @@ import {
 	type Node,
 	ready,
 	replicasOnline,
-	storeWrite,
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	codeAt,
-	codeUse,
-	faultScene,
-	on,
-	prefix,
-	redeemAt,
-	said,
-} from "../../faults/test/faults.ts";
+import { codeAt, faultScene, on, redeemAt, said } from "../../faults/test/faults.ts";
+import { codeKept, codeUse } from "../../faults/test/wire.ts";
 import { backChannel } from "../../testing.ts";
 
 // Bounds the security model leaves to the operator, recorded as they are: no promise is checked
@@ -26,12 +18,6 @@ import { backChannel } from "../../testing.ts";
 
 const issued = [200, "Bearer"];
 const refused = [400, "invalid_grant"];
-/** The write that keeps a new code: the record a code is issued with. */
-const codeKept = storeWrite({
-	prefix,
-	space: "code-grant-store.codes",
-	operations: ["putIfAbsent"],
-});
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const ok = async (n: Node, ...args: string[]) => {
