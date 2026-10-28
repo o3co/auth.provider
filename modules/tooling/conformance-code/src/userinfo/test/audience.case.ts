@@ -19,8 +19,8 @@ const coded = (id: string, audiences?: string[]): ClientScene => ({
 	kind: "confidential",
 	method: "client_secret_post",
 	secret: secretOf(id),
-	grants: ["authorization_code"],
-	scopes: ["openid"],
+	grants: ["authorization_code", "refresh_token"],
+	scopes: ["openid", "read"],
 	redirectUris: [callback],
 	firstParty: true,
 	...(audiences ? { audiences } : {}),
@@ -59,6 +59,7 @@ beforeAll(async () => {
 			users: [{ identifier: user.username, password: user.password }],
 			introspection: true,
 			userinfo: true,
+			refresh: {},
 		}),
 	);
 	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
@@ -76,15 +77,15 @@ const form = async (path: string, body: Record<string, string>) => {
 	});
 	return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 };
-/** An access token the code flow issues `client` for openid. */
-async function tokenOf(client: string) {
+/** The tokens the code flow issues `client` for `scope`. */
+async function issuedTo(client: string, scope = "openid") {
 	const browser = browserAt(() => base, issuer, user);
 	const answer = await browser.authorize({
 		response_type: "code",
 		client_id: client,
 		redirect_uri: callback,
 		state: "s1",
-		scope: "openid",
+		scope,
 		code_challenge: challenge,
 		code_challenge_method: "S256",
 	});
@@ -104,8 +105,10 @@ async function tokenOf(client: string) {
 		}),
 		"the token endpoint",
 	);
-	return String(issued.access_token);
+	return issued as Record<string, string>;
 }
+/** An access token the code flow issues `client` for openid. */
+const tokenOf = async (client: string) => (await issuedTo(client)).access_token ?? "";
 const payloadOf = (token: string) =>
 	JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
 const introspected = (token: string, by: string) =>
@@ -145,6 +148,27 @@ describe.skipIf(areaTarget().differs("token-for-the-issuer"))(
 			expect(described.body.active).toBe(true);
 			expect(listOf(described.body.aud)).toEqual([issuer]);
 			expect(await userinfo(token)).toBe(200);
+		});
+
+		it("adds the issuer to a refreshed token only while its scope keeps openid [rfc9700-2.3-c]", async () => {
+			const { refresh_token: first = "" } = await issuedTo("app", "openid read");
+			const refreshed = (refresh_token: string, scope: string) =>
+				form("/oauth/token", {
+					grant_type: "refresh_token",
+					refresh_token,
+					scope,
+					client_id: "app",
+					client_secret: secretOf("app"),
+				});
+			const narrowed = await refreshed(first, "read");
+			expect(narrowed.status).toBe(200);
+			const plain = payloadOf(String(narrowed.body.access_token));
+			expect([plain.aud, plain.aud_added]).toEqual([api, undefined]);
+			const kept = await refreshed(String(narrowed.body.refresh_token), "openid read");
+			expect(payloadOf(String(kept.body.access_token))).toMatchObject({
+				aud: [api, issuer],
+				aud_added: 1,
+			});
 		});
 	},
 );

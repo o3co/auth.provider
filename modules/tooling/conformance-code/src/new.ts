@@ -50,6 +50,8 @@ onNew(codeArea, (part, scene) => {
 						},
 					}
 				: {}),
+			// Every deployment states it; the area takes the issuer's audience as 0.19 ends up taking it.
+			...(part.userinfo ? { userinfo: { "issuer-audience": "on" } } : {}),
 			...(part.refresh?.lifetimeSeconds
 				? { refresh: { lifetime: `${part.refresh.lifetimeSeconds}s` } }
 				: {}),
