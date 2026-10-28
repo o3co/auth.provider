@@ -128,7 +128,8 @@ describe("OpenID Connect userinfo", () => {
 		});
 		expect(res.headers.get("content-type")).toMatch(/^application\/json(;\s*charset=utf-8)?$/i);
 		const bytes = Buffer.from(await res.arrayBuffer());
-		expect(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))).toEqual({
+		// The claims a pattern composes beside these (verified-email's email_verified) are not this scene's.
+		expect(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))).toMatchObject({
 			sub: "s-zoe",
 			email: "zo\u00eb@example.com",
 		});
