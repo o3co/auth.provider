@@ -8,6 +8,7 @@ const root = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
 interface Step {
 	readonly id?: string;
 	readonly name?: string;
+	readonly if?: string;
 	readonly env?: Readonly<Record<string, string>>;
 	readonly uses?: string;
 	readonly run?: string;
@@ -68,6 +69,22 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		};
 		expect(gate.needs).toContain("conformance-faults");
 		expect(gate.steps.map((s) => s.run).join("\n")).toContain("needs.conformance-faults.result");
+	});
+
+	it("run conformance's deployment tests, which move an instance's clock, in one leg of the fault job, failing rather than skipping and reporting no evidence", () => {
+		const steps = job("conformance-faults").steps;
+		const clock = steps.find((s) => s.name === "Deployment tests with a moved clock");
+		expect(clock?.if).toBe(expr("!cancelled() && strategy.job-index == 0"));
+		expect(clock?.env?.CONFORMANCE_FAULTS).toBe("1");
+		expect(clock?.run).toContain(
+			"modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts",
+		);
+		expect(clock?.env?.SPEC_EVIDENCE_DIR).toBeUndefined();
+		// After the step that takes the library and the one that finds it moves Node's clock.
+		const at = (name: string) => steps.findIndex((s) => s.name === name);
+		expect(at("Deployment tests with a moved clock")).toBeGreaterThan(
+			at("The library moves Node's clock here"),
+		);
 	});
 
 	it("take the interop matrices from `run plan` in interop-due, which fixes their commit", () => {
