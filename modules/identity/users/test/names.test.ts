@@ -45,11 +45,29 @@ describe("attribute values", () => {
 	};
 	const unreadable = ["a\u202Eb", "a\u200Bb", "a\u0000b", "a\nb", "a\tb", "a\u007Fb", "a\u0085b"];
 
-	it("accepts an email that mail takes, and refuses any other", () => {
-		judged("email", ["alice@example.com", "Alice@example.com", "josé@bücher.example"], true);
+	it("accepts an email that mail takes and that is RFC 5322's addr-spec in ASCII, and refuses any other [oidc-core-5.1-e]", () => {
 		judged(
 			"email",
 			[
+				"alice@example.com",
+				"Alice@example.com",
+				"a.b+tag@sub.example.com",
+				"o'brien@example.com",
+				"alice@xn--bcher-kva.example",
+			],
+			true,
+		);
+		judged(
+			"email",
+			[
+				"josé@bücher.example",
+				"alice@bücher.example",
+				"a..b@example.com",
+				".a@example.com",
+				"a.@example.com",
+				'"a b"@example.com',
+				"a@-bad.example",
+				"a@bad-.example",
 				"a@victim.test/x",
 				"a@victim.test?x",
 				" a@example.com",
@@ -96,9 +114,9 @@ describe("attribute values", () => {
 		judged("email_verified", ["true", 1, null, [true]], false);
 	});
 
-	it("accepts a name and each group only as text with no control or format character", () => {
-		judged("name", ["Alice", "", "Élodie O'Brien", "العربية"], true);
-		judged("name", [...unreadable, 7, { first: "Alice" }, ["Alice"]], false);
+	it("accepts a name only as text holding more than blanks, so no claim drawn from it is empty, and each group only as text, neither with a control or format character [oidc-core-5.3.2-c]", () => {
+		judged("name", ["Alice", "Élodie O'Brien", "العربية", " Al "], true);
+		judged("name", [...unreadable, "", " ", "\u3000", 7, { first: "Alice" }, ["Alice"]], false);
 		judged("groups", [[], ["admins", "staff"]], true);
 		judged(
 			"groups",

@@ -249,7 +249,7 @@ describe("users ledgers", () => {
 	it("leaves out only an attribute whose value users does not accept, logging its name but never its value", async () => {
 		const attributes = {
 			name: "Alice",
-			email: "a@victim.test/x",
+			email: "a..b@victim.test",
 			email_verified: "true",
 			picture: "javascript:alert(1)",
 			groups: ["admins"],
