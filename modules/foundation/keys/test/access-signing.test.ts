@@ -58,6 +58,19 @@ describe("accessTokenSigning", () => {
 		expect(verified.kind === "valid" && Object.isFrozen(verified.claims)).toBe(true);
 	});
 
+	it("refuses to sign claims holding a null, at any depth, by keys.sign and as an access token alike, naming the claims and not their values [oidc-core-13.3-a]", async () => {
+		const { access, k } = await open(rotated);
+		const claims = { sub: "a", secret: "kept-value", nonce: null, address: { region: null } };
+		const refusal = /^keys: claims are null: nonce address\.region$/;
+		await expect(access.sign(claims)).rejects.toThrow(refusal);
+		await expect(k.sign(claims, "JWT")).rejects.toThrow(refusal);
+		await expect(k.sign({ sub: "a", list: [{ item: null }] }, "JWT")).rejects.toThrow(
+			/claims are null: list\[0\]\.item$/,
+		);
+		await expect(access.sign(claims)).rejects.not.toThrow(/kept-value/);
+		expect(await access.sign({ sub: "a", scope: "read" })).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
+	});
+
 	it("refuses a token of any other typ, and a malformed one, as keys.verify does", async () => {
 		const { access, k } = await open(rotated);
 		expect(await access.verify(await k.sign({ sub: "a" }, "JWT"))).toEqual({
