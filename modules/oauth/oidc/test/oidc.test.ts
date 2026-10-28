@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes, verify } from "node:crypto";
 import { claimsSelections } from "@mod/claims-selection";
 import type { IdTokenRequest } from "@mod/code-grant";
 import type { Assembly } from "@mod/kernel";
@@ -123,6 +123,22 @@ describe("the ID token", () => {
 		expect([header.typ, header.alg, typeof header.kid]).toEqual(["JWT", "EdDSA", "string"]);
 		// No x5u, x5c, jku or jwk: the key is found by its kid in the published set alone.
 		expect(Object.keys(header).sort()).toEqual(["alg", "kid", "typ"]);
+	});
+
+	it("is signed with RS256 if the operator places an RS256 key, as the metadata then names [oidc-core-15.1-a]", async () => {
+		const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+		const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+		const signing = { kid: "r", alg: "RS256", "private-key": pem };
+		const app = await booted({ runtime, config: { keys: { signing } } });
+		const token = await makerOf(app).make(request());
+		const [head = "", body = "", signature = ""] = token.split(".");
+		expect(decoded(token).header.alg).toBe("RS256");
+		const signed = Buffer.from(`${head}.${body}`);
+		expect(verify("sha256", signed, publicKey, Buffer.from(signature, "base64url"))).toBe(true);
+		expect(app.get(published)).toContainEqual({
+			name: "id_token_signing_alg_values_supported",
+			value: ["RS256"],
+		});
 	});
 });
 
