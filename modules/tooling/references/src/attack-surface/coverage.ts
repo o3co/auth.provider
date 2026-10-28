@@ -248,8 +248,8 @@ export const coverage: Coverage = {
 		{ anchor: "filling-the-passkey-witnesss-marks", what: "filling the passkey witness's marks" },
 		{ anchor: "upgrading", what: "upgrading" },
 		{
-			anchor: "the-claims-parameter-through-an-upgrade-and-back",
-			what: "taking the claims parameter through an upgrade, and revoking its constrained refresh families before going back",
+			anchor: "the-claims-parameter-through-an-upgrade",
+			what: "taking the claims parameter through an upgrade",
 		},
 	],
 };

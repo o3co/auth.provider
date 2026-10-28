@@ -216,4 +216,4 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 - [resetting a subject's passkeys](runbook.md#resetting-a-subjects-passkeys)
 - [filling the passkey witness's marks](runbook.md#filling-the-passkey-witnesss-marks)
 - [upgrading](runbook.md#upgrading)
-- [taking the claims parameter through an upgrade, and revoking its constrained refresh families before going back](runbook.md#the-claims-parameter-through-an-upgrade-and-back)
+- [taking the claims parameter through an upgrade](runbook.md#the-claims-parameter-through-an-upgrade)
