@@ -13,8 +13,14 @@ const keySetPath = "/.well-known/jwks.json";
 export default defineModule({ name: "keys", replicaSafe: true, section, takes: [] }, (m) => [
 	m.provide(ring).by((c) => {
 		const read = readRing(c.section);
-		if ("unreadable" in read)
-			return c.refuse(`keys.${read.unreadable}`, "not readable as a key for alg");
+		if ("unreadable" in read) {
+			// Its algorithm is the `alg` beside it.
+			const alg = `keys.${read.unreadable.replace(/[^.]+$/, "alg")}`;
+			return c.refuse(
+				`keys.${read.unreadable}`,
+				`not readable as a key of the kind ${alg} names: write a PEM key of that kind (the example's REPLACE- placeholder is none)`,
+			);
+		}
 		return read;
 	}),
 	m.provide(keys).by(async (c) => ({
