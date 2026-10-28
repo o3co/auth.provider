@@ -51,7 +51,7 @@ beforeAll(async () => {
 				res.writeHead(302, { location: `${op.origin}/authorize` });
 			} else if (at.pathname === "/session/oauth/federation/oidf/callback") {
 				if (at.searchParams.get("code") === "code") {
-					res.writeHead(302, { "set-cookie": "session=u; Path=/", location: returnTarget });
+					res.writeHead(303, { "set-cookie": "session=u; Path=/", location: returnTarget });
 				} else res.writeHead(502, { "content-type": "application/json" });
 			} else if (at.pathname === "/oauth/authorize") {
 				const sent = loggedIn ? "code=c9" : "error=login_required";
