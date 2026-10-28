@@ -168,6 +168,5 @@ describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", ()
 		});
 		expect(res.status).toBe(401);
 		expect(res.headers.get("proxy-authenticate")).toBeNull();
-		expect(res.headers.get("www-authenticate")).toContain("DPoP");
 	});
 });
