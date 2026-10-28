@@ -53,7 +53,7 @@ const scriptedWitnessing = (name = "witnessing") => {
 			if ((await after()) === "none") marks.delete(subject);
 		},
 	};
-	const module = defineModule({ name, takes: [] }, (m) => [
+	const module = defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(passkeyWitnessing).by(() => witnessing),
 	]);
 	return { module, marks, failing };
@@ -86,7 +86,7 @@ it("refuses to boot a passkey store that cannot change both its spaces as one", 
 		credentials: stores.passkeys.credentials,
 		subjects: stores.passkeys.subjects,
 	} as unknown as PasskeyStore;
-	const apart = defineModule({ name: "stores-apart", takes: [] }, (m) => [
+	const apart = defineModule({ name: "stores-apart", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => lacking),
 		m.provide(challengeStore).by(() => stores.challenges),
 	]);
@@ -191,7 +191,7 @@ it("keeps a passkey both asks admitted though the witness cannot mark it, answer
 it("ends a passkey whose write may have landed though its answer was lost", async () => {
 	const stores = memoryStores();
 	let lose = false;
-	const lossy = defineModule({ name: "lossy-stores", takes: [] }, (m) => [
+	const lossy = defineModule({ name: "lossy-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => ({
 			...stores.passkeys,
 			updateTogether: async (keys, p) => {
@@ -265,7 +265,7 @@ it("leaves no usable passkey where the registration is stopped and its end canno
 			return done;
 		},
 	});
-	const down = defineModule({ name: "failing-stores", takes: [] }, (m) => [
+	const down = defineModule({ name: "failing-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => ({
 			credentials: failing(stores.passkeys.credentials),
 			subjects: failing(stores.passkeys.subjects),
@@ -481,7 +481,7 @@ it("ends only its own write where a removal and another registration of the id l
 
 it("refuses to boot with two passkey witnessings contributed", async () => {
 	const witnessing = (name: string) =>
-		defineModule({ name, takes: [] }, (m) => [
+		defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(passkeyWitnessing).by(() => ({
 				settle: async () => false,
 				emptied: async () => {},
@@ -513,7 +513,7 @@ it("reads what a subject's list names as written, for passkey-witnessing alone",
 	expect(await app.get(passkeyReading).writtenHolding("sam")).toBe("passkey");
 	const took = contract<unknown>("test.took");
 	const taker = (name: string) =>
-		defineModule({ name, takes: [passkeyReading] }, (m) => [
+		defineModule({ name, replicaSafe: true, takes: [passkeyReading] }, (m) => [
 			m.provide(took).by(async (c) => c.get(passkeyReading)),
 		]);
 	const composedWith = (name: string) =>
