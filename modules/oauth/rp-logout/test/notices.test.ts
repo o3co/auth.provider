@@ -54,10 +54,14 @@ it("leaves out the session for a client that did not ask for it, and tells no cl
 	expect(h.sent).toHaveLength(1);
 });
 
-it("keeps a notice the client could not take yet, and the sweep delivers it", async () => {
+it("keeps a notice the client could not take yet, and the sweep delivers it, a sweep's interval between tries [oidc-bcl-2.5-a]", async () => {
 	const h = await serve();
 	const answers = [503, 429, 408];
-	h.answering.answer = async () => answers.shift() ?? 200;
+	const triedAt: number[] = [];
+	h.answering.answer = async () => {
+		triedAt.push(Date.now());
+		return answers.shift() ?? 200;
+	};
 	const { session } = await h.login();
 	await h.redeemed(session.id, "app");
 	await h.app.get(sessions).close(session.id);
@@ -66,6 +70,12 @@ it("keeps a notice the client could not take yet, and the sweep delivers it", as
 	await until(() => h.sent.length >= 4, 6000);
 	await settled(h);
 	expect([h.sent.length, await keptNotices(h)]).toEqual([4, []]);
+	// Each try again waits for a sweep, a second here, never sent at once after the one that failed.
+	const gaps = triedAt.slice(1).map((at, i) => at - (triedAt[i] as number));
+	expect(
+		gaps.every((gap) => gap >= 900),
+		JSON.stringify(gaps),
+	).toBe(true);
 	expect(h.logs().filter((l) => l.event === "rp-logout.notices_kept")).toContainEqual(
 		expect.objectContaining({ level: "warn", fields: { count: 1 } }),
 	);
@@ -97,6 +107,21 @@ it.each([
 	await until(() => h.sent.length > 0);
 	await settled(h, 500);
 	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+});
+
+it("posts to a back channel with a query as registered, adding nothing to it [oidc-bcl-2.2-b]", async () => {
+	const h = await serve({
+		sections: { app: { "backchannel-logout-uri": "https://app.example/bc?tenant=a&x=1" } },
+	});
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	expect(h.sent.map((s) => s.url)).toEqual(["https://app.example/bc?tenant=a&x=1"]);
+	expect([...new URLSearchParams(String(h.sent[0]?.request?.body)).keys()]).toEqual([
+		"logout_token",
+	]);
+	await settled(h, 500);
 });
 
 it("gives up a notice past its time, without sending it again", async () => {
