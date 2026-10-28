@@ -14,12 +14,17 @@ export const section = z.strictObject({
 		),
 });
 
-export default defineModule({ name: "external-jwt", section, takes: [outbound] }, (m) => [
-	m.provide(externalJwt).by(async (c) =>
-		externalJwtOver({
-			clock: c.clock,
-			outbound: await c.get(outbound),
-			keySetMaxAgeMs: c.section["key-set-max-age"],
-		}),
-	),
-]);
+export default defineModule(
+	// Safe on many instances: each keeps its own key sets, an hour (stale ones up to `key-set-max-age`), so
+	// hosts may hold different versions, as one host does across a fetch.
+	{ name: "external-jwt", replicaSafe: true, section, takes: [outbound] },
+	(m) => [
+		m.provide(externalJwt).by(async (c) =>
+			externalJwtOver({
+				clock: c.clock,
+				outbound: await c.get(outbound),
+				keySetMaxAgeMs: c.section["key-set-max-age"],
+			}),
+		),
+	],
+);

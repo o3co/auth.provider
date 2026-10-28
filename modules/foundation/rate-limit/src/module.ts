@@ -57,44 +57,47 @@ const section = z.strictObject({
 		),
 });
 
-export default defineModule({ name: "rate-limit", section, takes: [audit, store] }, (m) => [
-	m.provide(uncounted).by(() =>
-		metricCounter({
-			name: "auth_rate_limit_uncounted_total",
-			help: "Uses a limit could not count as the store could not tell, by limit.",
-			labels: { limit: ["attempts", "requests"] },
-		}),
-	),
-	m.contribute(instruments).by((c) => c.get(uncounted)),
-	m.contribute(spaces).by(() => windows),
-	m.contribute(spaces).by(() => attemptWindows),
-	m.contribute(spaces).by(() => lockoutSpace),
-	m.provide(rateLimit).by(async (c) =>
-		counter(await c.get(store), windows, "requests", {
-			uncounted: await c.get(uncounted),
-			now: c.clock.now,
-		}),
-	),
-	m.provide(attemptLimit).by(async (c) =>
-		counter(await c.get(store), attemptWindows, "attempts", {
-			uncounted: await c.get(uncounted),
-			now: c.clock.now,
-		}),
-	),
-	m.provide(lockouts).by(async (c) => lockoutCounter(storedStates(await c.get(store)))),
-	m
-		.contribute(policies)
-		.by(async (c) =>
-			limitingAttempts(await c.get(attemptLimit), { log: c.log, recorded: await c.get(audit) }),
+export default defineModule(
+	{ name: "rate-limit", replicaSafe: true, section, takes: [audit, store] },
+	(m) => [
+		m.provide(uncounted).by(() =>
+			metricCounter({
+				name: "auth_rate_limit_uncounted_total",
+				help: "Uses a limit could not count as the store could not tell, by limit.",
+				labels: { limit: ["attempts", "requests"] },
+			}),
 		),
-	m
-		.contribute(policies)
-		.by(async (c) =>
-			limitingRequests(
-				await c.get(rateLimit),
-				{ log: c.log, recorded: await c.get(audit) },
-				c.section["fail-mode"],
+		m.contribute(instruments).by((c) => c.get(uncounted)),
+		m.contribute(spaces).by(() => windows),
+		m.contribute(spaces).by(() => attemptWindows),
+		m.contribute(spaces).by(() => lockoutSpace),
+		m.provide(rateLimit).by(async (c) =>
+			counter(await c.get(store), windows, "requests", {
+				uncounted: await c.get(uncounted),
+				now: c.clock.now,
+			}),
+		),
+		m.provide(attemptLimit).by(async (c) =>
+			counter(await c.get(store), attemptWindows, "attempts", {
+				uncounted: await c.get(uncounted),
+				now: c.clock.now,
+			}),
+		),
+		m.provide(lockouts).by(async (c) => lockoutCounter(storedStates(await c.get(store)))),
+		m
+			.contribute(policies)
+			.by(async (c) =>
+				limitingAttempts(await c.get(attemptLimit), { log: c.log, recorded: await c.get(audit) }),
 			),
-		),
-	m.contribute(marks).by(() => perSourceMark),
-]);
+		m
+			.contribute(policies)
+			.by(async (c) =>
+				limitingRequests(
+					await c.get(rateLimit),
+					{ log: c.log, recorded: await c.get(audit) },
+					c.section["fail-mode"],
+				),
+			),
+		m.contribute(marks).by(() => perSourceMark),
+	],
+);

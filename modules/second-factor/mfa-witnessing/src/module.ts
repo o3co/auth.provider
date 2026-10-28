@@ -7,7 +7,7 @@ import { witnessBackfill } from "./contract.ts";
 import { backfillWith, witnessingWith } from "./witnessing.ts";
 
 export default defineModule(
-	{ name: "mfa-witnessing", takes: [audit, enrollmentWitnesses, factorReading] },
+	{ name: "mfa-witnessing", replicaSafe: true, takes: [audit, enrollmentWitnesses, factorReading] },
 	(m) => [
 		m.contribute(witnessing).by(async (c) => {
 			const [witness, ...more] = await c.collect(enrollmentWitnesses);

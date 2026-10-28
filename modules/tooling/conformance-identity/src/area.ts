@@ -13,6 +13,8 @@ export interface UserScene {
 	readonly email?: string;
 	/** Whether the user's account states that email verified; stated by neither when left out. */
 	readonly emailVerified?: boolean;
+	/** The name the user's account states, as its `name` claim. */
+	readonly name?: string;
 }
 
 /** An upstream identity: an IdP's name and the upstream subject there. */

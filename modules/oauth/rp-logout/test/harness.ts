@@ -90,20 +90,23 @@ export async function harness(
 	const recorded = auditStandIn();
 	const sent: Sent[] = [];
 	const answering = { answer: async (_url: string): Promise<number> => 200 };
-	const outside = defineModule({ takes: [], name: "outbound-stand-in" }, (m) => [
-		m.provide(outboundRefusals).by(() => ({ explained: (url) => options.refused?.(url) })),
-		m.provide(outbound).by(
-			(): Outbound => ({
-				fetch: async (url, request) => {
-					sent.push({ url, request });
-					const status = await answering.answer(url);
-					return { status, headers: new Map(), body: new Uint8Array() };
-				},
-			}),
-		),
-	]);
+	const outside = defineModule(
+		{ takes: [], name: "outbound-stand-in", replicaSafe: false },
+		(m) => [
+			m.provide(outboundRefusals).by(() => ({ explained: (url) => options.refused?.(url) })),
+			m.provide(outbound).by(
+				(): Outbound => ({
+					fetch: async (url, request) => {
+						sent.push({ url, request });
+						const status = await answering.answer(url);
+						return { status, headers: new Map(), body: new Uint8Array() };
+					},
+				}),
+			),
+		],
+	);
 	const reader = defineModule(
-		{ takes: [sessionRedemptions, routes, metadata], name: "reader" },
+		{ takes: [sessionRedemptions, routes, metadata], name: "reader", replicaSafe: true },
 		(m) => [
 			m.provide(probed).by(async (c) => {
 				const [redemption] = await c.collect(sessionRedemptions);
@@ -133,9 +136,10 @@ export async function harness(
 		}),
 	);
 	// redirect-uris' section, which the front-channel URL is judged against; authorize is not composed.
-	const redirectsSection = defineModule({ takes: [], name: "authorize-section" }, (m) => [
-		m.contribute(metadataSections).by(() => redirects),
-	]);
+	const redirectsSection = defineModule(
+		{ takes: [], name: "authorize-section", replicaSafe: true },
+		(m) => [m.contribute(metadataSections).by(() => redirects)],
+	);
 	const app = await assemble({
 		modules: [
 			http,
@@ -294,7 +298,7 @@ export type Harness = Awaited<ReturnType<typeof harness>>;
  * the lifecycle's do; a browser's cookie `session=<id>` names its session's handle.
  */
 export function readEndingSessions(lifetimeMs: number) {
-	return defineModule({ takes: [participants], name: "session" }, (m) => [
+	return defineModule({ takes: [participants], name: "session", replicaSafe: false }, (m) => [
 		m.provide(sessions).by(async (c) => {
 			const closers = await c.collect(participants);
 			type Kept = { subject: string; openedAt: number; state: "open" | "closing" | "closed" };

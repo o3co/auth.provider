@@ -34,7 +34,7 @@ const challenges: Space = {
 	guarantees: Object.values(challengeGuaranteeFor),
 };
 
-export default defineModule({ name: "webauthn-store", takes: [store] }, (m) => [
+export default defineModule({ name: "webauthn-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => credentials),
 	m.contribute(spaces).by(() => subjects),
 	m.contribute(spaces).by(() => challenges),

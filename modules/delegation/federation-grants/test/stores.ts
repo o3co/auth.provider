@@ -53,13 +53,16 @@ export function memoryStores(now: () => number = () => 0, cap = 16) {
 		hold: (name, mark, lifetimeMs) => held.create(name, mark, lifetimeMs),
 		update: held.change,
 	};
-	const module = defineModule({ name: "federation-grants-stores", takes: [] }, (m) => [
-		m.provide(grantStore).by(() => grantRecords),
-		m.provide(stepStore).by(() => stepRecords),
-		m.provide(pendingIntents).by(() => pending),
-		m.provide(subjectGrants).by(() => subjects),
-		m.provide(refreshLockStore).by(() => lockStore),
-	]);
+	const module = defineModule(
+		{ name: "federation-grants-stores", replicaSafe: false, takes: [] },
+		(m) => [
+			m.provide(grantStore).by(() => grantRecords),
+			m.provide(stepStore).by(() => stepRecords),
+			m.provide(pendingIntents).by(() => pending),
+			m.provide(subjectGrants).by(() => subjects),
+			m.provide(refreshLockStore).by(() => lockStore),
+		],
+	);
 	return {
 		module,
 		grants: grantRecords,

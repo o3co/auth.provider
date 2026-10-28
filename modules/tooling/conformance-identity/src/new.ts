@@ -66,11 +66,12 @@ const setUp = (part: IdentityPart): NewPart => ({
 				...(u.subject ? { subject: u.subject } : {}),
 				"password-hash": u.bcrypt ? bcrypt.hashSync(u.password, 4) : scryptHash(u.password),
 				...(u.upstream ? { upstream: [u.upstream] } : {}),
-				...(u.email || u.emailVerified !== undefined
+				...(u.email || u.emailVerified !== undefined || u.name
 					? {
 							attributes: {
 								...(u.email ? { email: u.email } : {}),
 								...(u.emailVerified === undefined ? {} : { email_verified: u.emailVerified }),
+								...(u.name ? { name: u.name } : {}),
 							},
 						}
 					: {}),

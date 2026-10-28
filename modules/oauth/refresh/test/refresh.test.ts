@@ -103,7 +103,7 @@ function collecting<T>(name: string, point: ExtensionPoint<T>) {
 	const seen = contract<readonly T[]>(name);
 	return {
 		seen,
-		module: defineModule({ name, takes: [point] }, (m) => [
+		module: defineModule({ name, replicaSafe: false, takes: [point] }, (m) => [
 			m.provide(seen).by((c) => c.collect(point)),
 		]),
 	};
@@ -301,7 +301,7 @@ async function serve(options: Options = {}) {
 
 /** The scopes the subject agreed to, which a test may change. */
 const agreed = new Set(["read", "write"]);
-const judging = defineModule({ name: "judging", takes: [] }, (m) => [
+const judging = defineModule({ name: "judging", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(selectionConsents).by(() => ({
 		consented: async (_c: Client, _s: string, scope: string) => agreed.has(scope),
 	})),
@@ -355,7 +355,7 @@ const capturing = {
 /** Runs `during` once a code's token is issued, before the ID token, the additions and the hooks. */
 const meanwhile = (() => {
 	const state = { during: undefined as (() => void) | undefined };
-	const module = defineModule({ name: "meanwhile", takes: [] }, (m) => [
+	const module = defineModule({ name: "meanwhile", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(sessionRedemptions).by(() => ({
 			name: "meanwhile",
 			redeemed: async () => {
@@ -566,7 +566,7 @@ describe("a redemption whose selection runs out between its steps", () => {
 });
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
+const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -829,14 +829,17 @@ describe("refresh tokens", () => {
 
 	it("stop working while the session falls short of a requirement to be used, as a closed one does", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ name: "short-to-use", takes: [] }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "mfa",
-				judges: ["use"],
-				admits: async () =>
-					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
-			})),
-		]);
+		const requirement = defineModule(
+			{ name: "short-to-use", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "mfa",
+					judges: ["use"],
+					admits: async () =>
+						short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+				})),
+			],
+		);
 		const s = await serve({ extra: [requirement] });
 		const first = await s.redeem();
 		short.now = true;
@@ -910,7 +913,7 @@ describe("refresh tokens", () => {
 
 	it("issue nothing a contributed policy refuses, and leave the token usable once it allows again", async () => {
 		const denying = { on: false };
-		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -931,7 +934,7 @@ describe("refresh tokens", () => {
 
 	it("tell the policies a refresh continues a grant they already let through", async () => {
 		const seen: { grantType: string; continuing?: true }[] = [];
-		const watching = defineModule({ name: "watching", takes: [] }, (m) => [
+		const watching = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "watching",
 				judge: async (request) => {
@@ -1034,7 +1037,7 @@ describe("refresh tokens", () => {
 	/** Serves with the refresh addition at hand, and the redemptions codes started. */
 	const takingBack = async () => {
 		const redemptions: string[] = [];
-		const spy = defineModule({ name: "spy", takes: [] }, (m) => [
+		const spy = defineModule({ name: "spy", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(additions).by(() => ({
 				field: "spy",
 				issue: async (redeemed) => {

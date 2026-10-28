@@ -19,15 +19,19 @@ const boundaries: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "subject-revocation-store", takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => boundaries),
-	m.provide(boundaryStore).by(async (c): Promise<BoundaryStore> => {
-		const place = { store: await c.get(store), space: boundaries, log: c.log, random: c.random };
-		const records = recordsIn<StoredBoundary>(place);
-		return {
-			save: records.create,
-			read: records.read,
-			update: (subject, change) => records.change(subject, (record) => ({ value: change(record) })),
-		};
-	}),
-]);
+export default defineModule(
+	{ name: "subject-revocation-store", replicaSafe: true, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => boundaries),
+		m.provide(boundaryStore).by(async (c): Promise<BoundaryStore> => {
+			const place = { store: await c.get(store), space: boundaries, log: c.log, random: c.random };
+			const records = recordsIn<StoredBoundary>(place);
+			return {
+				save: records.create,
+				read: records.read,
+				update: (subject, change) =>
+					records.change(subject, (record) => ({ value: change(record) })),
+			};
+		}),
+	],
+);

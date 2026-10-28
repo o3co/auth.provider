@@ -7,6 +7,7 @@ import { name, section } from "./section.ts";
 export default defineModule(
 	{
 		name,
+		replicaSafe: true,
 		section,
 		refusedInProduction: (s) =>
 			loopbackPagesRefused({

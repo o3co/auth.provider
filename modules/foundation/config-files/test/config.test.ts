@@ -100,7 +100,12 @@ describe("loadConfig", () => {
 describe("sections read from loaded files", () => {
 	const seen = contract<unknown>("seen");
 	const server = defineModule(
-		{ name: "server", section: z.strictObject({ port: z.number(), tls: z.boolean() }), takes: [] },
+		{
+			name: "server",
+			replicaSafe: true,
+			section: z.strictObject({ port: z.number(), tls: z.boolean() }),
+			takes: [],
+		},
 		(m) => [m.provide(seen).by((c) => c.section)],
 	);
 	async function boot(env: Record<string, string>) {
@@ -131,6 +136,7 @@ describe("sections read from loaded files", () => {
 	it("refuses a key that names an object's prototype in a file, by its path and never its value", async () => {
 		const limits = defineModule({
 			name: "m",
+			replicaSafe: true,
 			section: z.strictObject({ limits: z.record(z.string(), z.number()) }),
 			takes: [],
 		});
@@ -149,6 +155,7 @@ describe("sections read from loaded files", () => {
 		const connections = defineModule(
 			{
 				name: "m",
+				replicaSafe: true,
 				section: z.strictObject({
 					connections: z.record(
 						z.string(),
@@ -171,6 +178,7 @@ describe("sections read from loaded files", () => {
 	it("refuses a key that names an object's prototype with the section's other refusals", async () => {
 		const limits = defineModule({
 			name: "m",
+			replicaSafe: true,
 			section: z.strictObject({ limits: z.record(z.string(), z.number()), n: z.number() }),
 			takes: [],
 		});

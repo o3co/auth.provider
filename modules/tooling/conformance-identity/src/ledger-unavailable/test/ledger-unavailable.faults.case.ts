@@ -322,8 +322,11 @@ describe("the ledger's revocation route answering done only once every step's de
 			a.relay.switchUpstream(moved.upstream());
 			const from = performance.now();
 			a.relay.reset("operations");
+			// Watched before the wait for the new connection: the held write is resent as it opens, and
+			// its round may be done before reconnected returns.
+			const confirmed = a.relay.observe(confirmation({ replicas: 1 }));
 			await reconnected(a, moved.upstream());
-			const wait = await a.relay.observe(confirmation({ replicas: 1 }));
+			const wait = await confirmed;
 			const r = await asked;
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
 			// The boundary's write ran on the new primary, its confirmation passing on the old one.

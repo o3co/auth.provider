@@ -97,7 +97,7 @@ const thumb = async () => calculateJwkThumbprint(await exportJWK(device.publicKe
 /** The fakes around the grant: device keys, linked subjects, a delegate, and the store. */
 function fakes(asked: Asked, linkedTo: string | undefined) {
 	return [
-		defineModule({ name: "device-keys", takes: [] }, (m) => [
+		defineModule({ name: "device-keys", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(signerKeys).by(
 				(): SignerKeys => ({
 					issuer: devices,
@@ -109,7 +109,7 @@ function fakes(asked: Asked, linkedTo: string | undefined) {
 				}),
 			),
 		]),
-		defineModule({ name: "linked-subjects", takes: [] }, (m) => [
+		defineModule({ name: "linked-subjects", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(linkedSubjects).by(() => ({
 				declaredBy: "linked-subjects",
 				subjectOf: async (upstream: string, sub: string) => {
@@ -118,7 +118,7 @@ function fakes(asked: Asked, linkedTo: string | undefined) {
 				},
 			})),
 		]),
-		defineModule({ name: "delegate", takes: [] }, (m) => [
+		defineModule({ name: "delegate", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(delegatedAssertions).by(
 				(): DelegatedAssertions => ({
 					declaredBy: "delegate",
@@ -140,7 +140,7 @@ function fakes(asked: Asked, linkedTo: string | undefined) {
 				}),
 			),
 		]),
-		defineModule({ name: "spent-assertions", takes: [] }, (m) => [
+		defineModule({ name: "spent-assertions", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(spentAssertions).by(() => {
 				const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
 				return {
@@ -156,7 +156,7 @@ function fakes(asked: Asked, linkedTo: string | undefined) {
 
 /** The grant as composed, for calling its `identify` as the token endpoint does. */
 const grantOf = contract<Grant>("test.jwt-bearer-grant");
-const exposing = defineModule({ name: "test-grant", takes: [grants] }, (m) => [
+const exposing = defineModule({ name: "test-grant", replicaSafe: true, takes: [grants] }, (m) => [
 	m.provide(grantOf).by(async (c) => {
 		const found = (await c.collect(grants)).find((g) => g.grantType === grantType);
 		if (!found) throw new Error("no jwt-bearer grant");
@@ -175,9 +175,10 @@ async function serve(
 	} = {},
 ) {
 	const asked: Asked = { keys: [], linked: [], checks: [], spends: [], saved: [] };
-	const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
-		m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` })),
-	]);
+	const location = defineModule(
+		{ name: "token-endpoint-location", replicaSafe: true, takes: [] },
+		(m) => [m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` }))],
+	);
 	const app = await assemble({
 		modules: [
 			location,
@@ -345,7 +346,7 @@ describe("a grant naming no client, by an issuer's client", () => {
 	});
 
 	it("uses an assertion up once, whether a request names its client or none, in the store and in a ledger", async () => {
-		const ledger = defineModule({ name: "jti-ledger", takes: [] }, (m) => [
+		const ledger = defineModule({ name: "jti-ledger", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(jtiLedgers).by(() => memoryJtiLedger(shared, () => now)),
 		]);
 		for (const extra of [[], [ledger]]) {
@@ -384,7 +385,7 @@ describe("a grant naming no client, by an issuer's client", () => {
 	it("identifies a self-issued signer as its entry's, its jti apart from the issuer's own", async () => {
 		const prefix = "device:";
 		const id = await thumb();
-		const held = defineModule({ name: "phone-keys", takes: [] }, (m) => [
+		const held = defineModule({ name: "phone-keys", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(signerKeys).by(() => ({
 				issuer: "app.phones",
 				perSigner: true,
@@ -419,7 +420,7 @@ describe("a grant naming no client, by an issuer's client", () => {
 
 	it("refuses to boot, at the entry's client, on a client with credentials, a confidential one, one not registered, and one allowed another grant", async () => {
 		// A key method and another grant, composed, so nothing but jwt-bearer refuses the clients.
-		const composed = defineModule({ name: "composed", takes: [] }, (m) => [
+		const composed = defineModule({ name: "composed", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(authMethods).by(() => ({
 				name: "test-key",
 				claimed: () => undefined,

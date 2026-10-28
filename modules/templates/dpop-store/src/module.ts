@@ -11,7 +11,7 @@ const guaranteeFor: Record<keyof typeof spentProofsNeeds, Guarantee> = {
 };
 const spent: Space = { name: "dpop-store.spent", guarantees: Object.values(guaranteeFor) };
 
-export default defineModule({ name: "dpop-store", takes: [store] }, (m) => [
+export default defineModule({ name: "dpop-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => spent),
 	m.provide(spentProofs).by(async (c) => {
 		const place = { store: await c.get(store), space: spent, log: c.log, random: c.random };

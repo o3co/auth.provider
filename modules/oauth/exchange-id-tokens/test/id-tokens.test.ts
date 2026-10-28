@@ -49,9 +49,10 @@ describe("exchange-id-tokens", () => {
 
 	it("answers a foreign token for the one client that takes it, with no scope or audience of its own", async () => {
 		const verifiersSeen = contract<readonly ExchangeVerifier[]>("test.verifiers");
-		const reader = defineModule({ name: "verifier-reader", takes: [exchangeVerifiers] }, (m) => [
-			m.provide(verifiersSeen).by((c) => c.collect(exchangeVerifiers)),
-		]);
+		const reader = defineModule(
+			{ name: "verifier-reader", replicaSafe: true, takes: [exchangeVerifiers] },
+			(m) => [m.provide(verifiersSeen).by((c) => c.collect(exchangeVerifiers))],
+		);
 		const app = await boot(settings, [reader]);
 		const verifier = app.get(verifiersSeen).find((v) => v.tokenType === idTokenType);
 		const answer = await verifier?.verify(await apple.sign(appleClaims()));
@@ -207,7 +208,7 @@ describe("exchange-id-tokens", () => {
 
 	it("tells users each upstream name it takes, with its issuer, so another module's same name refuses boot unless the issuer is the same", async () => {
 		const naming = (issuer: string) =>
-			defineModule({ name: "federation-like", takes: [] }, (m) => [
+			defineModule({ name: "federation-like", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(upstreamNames).by(() => ({
 					declaredBy: "federation-like",
 					names: [{ name: "google", issuer }],

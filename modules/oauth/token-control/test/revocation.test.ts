@@ -6,7 +6,7 @@ import { type Form, serve } from "./serve.ts";
 describe("revocation", () => {
 	/** A contributed kind answering each token from `answers` (else unknown), noting each try in `tried`. */
 	const kind = (hint: string, answers: Record<string, Revoked>, tried: string[] = []): Module =>
-		defineModule({ name: `kind-${hint}`, takes: [] }, (m) => [
+		defineModule({ name: `kind-${hint}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(revocableKinds).by(
 				(): RevocableKind => ({
 					hint,

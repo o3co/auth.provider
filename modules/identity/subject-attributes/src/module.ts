@@ -20,31 +20,36 @@ const fromLogin = (subject: string, entry: Entry): AttributesAnswer => {
 			};
 };
 
-export default defineModule({ name: "subject-attributes", takes: [sessions, users] }, (m) => [
-	m.provide(subjectAttributes).by(async (c) => {
-		const known = await c.get(users);
-		const open = await c.get(sessions);
-		return {
-			of: async (subject, handle) => {
-				const found = await known.bySubject(subject);
-				switch (found.kind) {
-					case "user":
-						return {
-							kind: "known",
-							vouched: true,
-							attributes: found.user.attributes,
-						};
-					case "none":
-						return {
-							kind: "known",
-							vouched: true,
-							attributes: noAttributes,
-						};
-					case "unanswerable":
-						// Only when users cannot say: the login the session kept, if it is the subject's.
-						return handle === undefined ? neither : fromLogin(subject, await open.entryOf(handle));
-				}
-			},
-		};
-	}),
-]);
+export default defineModule(
+	{ name: "subject-attributes", replicaSafe: true, takes: [sessions, users] },
+	(m) => [
+		m.provide(subjectAttributes).by(async (c) => {
+			const known = await c.get(users);
+			const open = await c.get(sessions);
+			return {
+				of: async (subject, handle) => {
+					const found = await known.bySubject(subject);
+					switch (found.kind) {
+						case "user":
+							return {
+								kind: "known",
+								vouched: true,
+								attributes: found.user.attributes,
+							};
+						case "none":
+							return {
+								kind: "known",
+								vouched: true,
+								attributes: noAttributes,
+							};
+						case "unanswerable":
+							// Only when users cannot say: the login the session kept, if it is the subject's.
+							return handle === undefined
+								? neither
+								: fromLogin(subject, await open.entryOf(handle));
+					}
+				},
+			};
+		}),
+	],
+);

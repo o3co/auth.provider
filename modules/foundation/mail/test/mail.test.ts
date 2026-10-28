@@ -48,7 +48,7 @@ async function relay(how?: "limit" | "down"): Promise<"accepted" | "limit"> {
 
 /** A sender through the stand-in relay that allows one mail per address and then answers limited. */
 const onePerAddress = (how?: "limit" | "down") =>
-	defineModule({ name: "one-per-address", takes: preparerTakes }, (m) => [
+	defineModule({ name: "one-per-address", replicaSafe: false, takes: preparerTakes }, (m) => [
 		m.provide(mail).by(async (c) => {
 			const prepare = await preparer(c);
 			const reached = new Set<string>();
@@ -71,7 +71,7 @@ mailContract("one mail per address", {
 	refusing: (how, modules) => bootWith(onePerAddress(how), modules, {}),
 });
 
-const reset = defineModule({ name: "reset-owner", takes: [] }, (m) => [
+const reset = defineModule({ name: "reset-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(mailPurposes).by(() => ({ purpose: "reset" })),
 	m
 		.contribute(mailTemplates)
@@ -144,7 +144,7 @@ it("refuses to boot unless the operator accepts that nothing is sent, and on man
 });
 
 it("names the purpose that has no template when it refuses to boot", async () => {
-	const bare = defineModule({ name: "bare-owner", takes: [] }, (m) => [
+	const bare = defineModule({ name: "bare-owner", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(mailPurposes).by(() => ({ purpose: "bare" })),
 	]);
 	const booting = boot([bare]);
