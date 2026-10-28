@@ -89,9 +89,19 @@ export default defineModule(
 		m.contribute(metadataSections).by(() => secretSection),
 		m.provide(registered).by(async (c) => {
 			const known = byName(await c.collect(metadataSections));
-			const methods = new Set((await c.collect(authMethods)).map((a) => a.name));
+			const contributed = await c.collect(authMethods);
+			const methods = new Set(contributed.map((a) => a.name));
 			const found = new Map<string, Client>();
 			const issues: { where: string; reason: string }[] = [];
+			// The JWS algorithm none, not the method named none: discovery names every signing algorithm.
+			for (const method of contributed) {
+				if ((method.signingAlgorithms ?? []).some((alg) => alg.toLowerCase() === "none")) {
+					issues.push({
+						where: `clients.methods.${method.name}`,
+						reason: "names the JWS algorithm none among its signing algorithms",
+					});
+				}
+			}
 			for (const [i, entry] of c.section.registered.entries()) {
 				if (!methods.has(entry.method)) {
 					issues.push({

@@ -730,6 +730,25 @@ describe("clients", () => {
 		expect(c.signingAlgorithms()).toEqual(["ES256", "RS256", "EdDSA"]);
 	});
 
+	it("refuses at boot a method signing with the JWS algorithm none, in any case, so discovery's *_auth_signing_alg_values_supported never names none [rfc8414-2-j] [rfc8414-2-m] [rfc8414-2-o]", async () => {
+		// The three discovery fields read the registry's signingAlgorithms() alone: a registry that cannot hold none lists none.
+		for (const alg of ["none", "NONE", "None"]) {
+			const refused = await refusalsOf(
+				boot([method("signer", { signingAlgorithms: ["ES256", alg] })]),
+			);
+			expect(
+				refused.map((r) => [r.where, r.reason]),
+				alg,
+			).toEqual([
+				["clients.methods.signer", "names the JWS algorithm none among its signing algorithms"],
+			]);
+		}
+		// The authentication method named none, a public client's, still composes.
+		const c = await boot();
+		expect(c.methods()).toContain("none");
+		expect(c.signingAlgorithms()).toEqual([]);
+	});
+
 	it("says whether the operator registered a client, or a source named it", async () => {
 		const remote = { kind: "public", method: "none", sections: {} };
 		const c = await boot([source((id) => (id === "remote" ? { id, ...remote } : undefined))]);
