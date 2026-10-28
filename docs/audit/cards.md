@@ -329,7 +329,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `faults` (`src/faults`): what the area's fault scenes share in the code flow's words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
+  - `id-token` (`src/id-token`): the scenes of what an OpenID Connect request's ID token and authorization response carry, and of the authorization endpoint across origins.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
+  - `redemption` (`src/redemption`): the scenes of redeeming a code or a refresh token issued for OpenID Connect at the token endpoint.
+  - `refresh-certificate` (`src/refresh-certificate`): the scenes of a public client's refresh family bound to the certificate its code was redeemed with.
   - `refresh-once` (`src/refresh-once`): the fault scenes of a refresh token rotated once (`guarantee-5-b`).
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.
   - `revocation` (`src/revocation`): the scenes of a subject the ledger revokes over HTTP.
