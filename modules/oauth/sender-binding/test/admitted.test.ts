@@ -107,12 +107,20 @@ it("challenges every scheme, with no error, when no token is presented in a sche
 	}
 });
 
-it("answers a malformed Authorization, or one presenting two tokens, as an invalid request [rfc6750-3.1-a]", async () => {
+it("answers a malformed Authorization, or one presenting two tokens, as an invalid request, and reads no token elsewhere [rfc6750-3.1-a]", async () => {
 	const invalid = refusal(400, 'Bearer error="invalid_request"', "invalid_request");
 	expect(await presenting({ authorization: "Bearer a b" })).toEqual(invalid);
 	expect(await presenting({ authorization: "Bearer plain, Bearer plain" })).toEqual(invalid);
 	// A token holds only RFC 6750's b64token characters.
 	expect(await presenting({ authorization: "Bearer plain,x" })).toEqual(invalid);
+	// The header is the one way a token is presented: one in the query or a form body is never read,
+	// so no request presents its token two ways.
+	for (const where of ["query", "form"] as const) {
+		const elsewhere = { method: "POST", [where]: new Map([["access_token", "plain"]]) };
+		expect(await b.admitted(testRequest(elsewhere), tokens), where).toEqual(
+			refusal(401, "Bearer, DPoP"),
+		);
+	}
 });
 
 it("admits a valid unbound token as Bearer, in any case of the scheme, without reading bindings [rfc6750-2.1-a]", async () => {
