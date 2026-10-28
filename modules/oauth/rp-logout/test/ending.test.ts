@@ -59,7 +59,7 @@ describe("the logout a client starts", () => {
 		]);
 	});
 
-	it("sends a request with neither a hint nor a return to the person's confirmation, closing nothing", async () => {
+	it("sends a request without a hint to the person's confirmation, whatever return or client it names, reading and closing nothing", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		for (const [method, params] of [
@@ -67,6 +67,12 @@ describe("the logout a client starts", () => {
 			["POST", {}],
 			["GET", { state: "s" }],
 			["POST", { state: "s", client_id: "app" }],
+			["GET", { post_logout_redirect_uri: back }],
+			// Neither the client nor its return is read: an unknown one goes to the confirmation too.
+			[
+				"POST",
+				{ post_logout_redirect_uri: "https://elsewhere.example/", client_id: "nobody", state: "s" },
+			],
 		] as const) {
 			const out = await h.call(method, params);
 			expect([method, params, out.status, out.headers.location]).toEqual([
@@ -81,12 +87,11 @@ describe("the logout a client starts", () => {
 		expect(h.events).toEqual([]);
 	});
 
-	it("refuses a return without a hint, a hint it cannot verify, or one that names no session [oidc-rpinit-2-e] [oidc-rpinit-3-a] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
+	it("refuses a hint it cannot verify, or one that names no session [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const forged = (await h.hintFor(session.id)).replace(/\.[^.]+$/, ".AAAA");
 		const cases = [
-			["a return and no hint", "POST", { post_logout_redirect_uri: back }, "invalid_request"],
 			["a forged hint", "GET", { id_token_hint: forged }, "invalid_token"],
 			[
 				"another issuer's",

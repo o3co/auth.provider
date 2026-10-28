@@ -107,10 +107,9 @@ export function endingOver(p: EndingParts) {
 		if (values.repeated().length > 0) return repeated;
 		const hint = values.single("id_token_hint");
 		if (!hint) {
-			// A return cannot be confirmed without a hint (RP-Initiated Logout 1.0 §3); with none asked,
-			// the person is asked whether to log out (§2), on this site, where their session's cookie is sent.
-			if (values.single("post_logout_redirect_uri"))
-				return refused("invalid_request", "id_token_hint is required");
+			// Without a hint the person is asked whether to log out (RP-Initiated Logout 1.0 §2), on this
+			// site, where their session's cookie is sent. No client or return is read: without a hint
+			// either is anyone's to write, so the confirmation ends on this site and never redirects (§3).
 			return { status: 303, headers: { ...noStore, location: confirmPath } };
 		}
 		const checked = await p.hints.check(hint);
