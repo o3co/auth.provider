@@ -114,7 +114,7 @@ function ties(during: () => void = () => {}) {
 		open,
 		short,
 		joined,
-		module: defineModule({ name: "ties", takes: [] }, (m) => [
+		module: defineModule({ name: "ties", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(tokenTies).by(() => family),
 			m.provide(sessions).by(() =>
 				stubSessions({
@@ -132,7 +132,7 @@ function ties(during: () => void = () => {}) {
 			),
 		]),
 		/** session-tokens in memory: its tie, and recording what token-endpoint tells it. */
-		recording: defineModule({ name: "recording", takes: [] }, (m) => [
+		recording: defineModule({ name: "recording", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(tokenTies).by(() => session),
 			m.contribute(sessionIssuances).by(() => ({
 				issued: async (handle, issued) => {
@@ -160,7 +160,7 @@ const outsideAnswer = {
 };
 
 /** A binding kind that writes `jkt`, so tokens bound by it verify. */
-const dpopKind = defineModule({ name: "dpop-kind", takes: [] }, (m) => [
+const dpopKind = defineModule({ name: "dpop-kind", replicaSafe: true, takes: [] }, (m) => [
 	m
 		.contribute(senderBindings)
 		.by(() => ({ member: "jkt", tokenType: "DPoP", read: async () => ({ kind: "absent" }) })),
@@ -214,7 +214,7 @@ async function serve(
 			dpopKind,
 			...(verifier
 				? [
-						defineModule({ name: "outside", takes: [] }, (m) => [
+						defineModule({ name: "outside", replicaSafe: false, takes: [] }, (m) => [
 							m.contribute(exchangeVerifiers).by(() => verifier),
 						]),
 					]
@@ -285,7 +285,7 @@ const tieModule = (
 	name: string,
 	answer: (id: string) => TokenTieAnswer | Promise<TokenTieAnswer>,
 ) =>
-	defineModule({ name: `tie-${name}`, takes: [] }, (m) => [
+	defineModule({ name: `tie-${name}`, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(tokenTies).by(() => ({ name, tieOf: async (id) => answer(id) })),
 	]);
 
@@ -456,7 +456,7 @@ describe("token-exchange: refusals", () => {
 	});
 
 	it("reads its own resource where a rule refuses one to a grant that takes no audience", async () => {
-		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				untargeted: ({ param }) =>
@@ -629,7 +629,7 @@ describe("token-exchange: a verifier's answer", () => {
 
 	it("issues through the issuance policies, refusing as they say", async () => {
 		const asked: IssuanceRequest[] = [];
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -654,7 +654,7 @@ describe("token-exchange: a verifier's answer", () => {
 
 	it("tells the issuance policies the session the subject token was issued in", async () => {
 		const asked: IssuanceRequest[] = [];
-		const watching = defineModule({ name: "watching", takes: [] }, (m) => [
+		const watching = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -673,7 +673,7 @@ describe("token-exchange: a verifier's answer", () => {
 
 	it("tells them the session of a subject token that is in a family too, and refuses one whose session ended", async () => {
 		const asked: IssuanceRequest[] = [];
-		const watching = defineModule({ name: "watching", takes: [] }, (m) => [
+		const watching = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -1108,7 +1108,7 @@ describe("token-exchange: what any verifier may answer", () => {
 	});
 
 	it("leaves a once-only token unused when the policies refuse or a check cannot tell", async () => {
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) =>

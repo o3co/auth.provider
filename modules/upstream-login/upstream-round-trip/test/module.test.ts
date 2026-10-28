@@ -10,7 +10,7 @@ import roundTripModule from "../src/module.ts";
 
 it("provides round trips over the composed store and cookies", async () => {
 	const kept = memoryRecords<StoredRoundTrip>(() => 0, { shards: 1, perShard: 1 });
-	const store = defineModule({ name: "round-trip-store", takes: [] }, (m) => [
+	const store = defineModule({ name: "round-trip-store", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.provide(roundTripStore)
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),
@@ -34,7 +34,7 @@ it("provides round trips over the composed store and cookies", async () => {
 
 it("takes all it names", async () => {
 	const kept = memoryRecords<StoredRoundTrip>(() => 0, { shards: 1, perShard: 1 });
-	const store = defineModule({ name: "round-trip-store", takes: [] }, (m) => [
+	const store = defineModule({ name: "round-trip-store", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.provide(roundTripStore)
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),

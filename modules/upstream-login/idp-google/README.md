@@ -25,7 +25,7 @@
 - A callback without `iss` is refused while `require-iss` holds.
 - The id_token is checked with RS256 only, Google's issuer exactly, the client among its audiences, and `clock-skew`.
 - An id_token that gives `at_hash` must give the access token's; one that does not refuses the exchange.
-- With several audiences, the id_token's `azp` must be the client.
+- An id_token naming an audience other than the client is refused; with several, its `azp` must be the client.
 - With one audience, `azp` may name another client: Google names there another client of the same project that asked for the login (cross-client identity).
 - The id_token must also carry the login's nonce, a non-empty `sub` and a numeric `iat`.
 - Any reason `external-jwt` gives refuses the login.

@@ -219,7 +219,7 @@ describe("login-password answers", () => {
 	it("gives no cookie when the session cannot be opened after a match", async () => {
 		const down = unavailableSwitch<Sessions>("session");
 		down.unavailable("complete");
-		const failing = defineModule({ name: "session", takes: [] }, (m) => [
+		const failing = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(sessions).by(() => down.wrap(stubSessions())),
 		]);
 		const { login, events } = await serve({ sessions: failing });
@@ -373,12 +373,13 @@ describe("login-password attempts", () => {
 });
 
 it("sends the user back to a contributed path on the public origin, with any query, and nowhere near it", async () => {
-	const authorize = defineModule({ name: "return-path", takes: [] }, (m) => [
+	const authorize = defineModule({ name: "return-path", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(returnPaths).by(() => ({ path: "/oauth/authorize" })),
 	]);
-	const device = defineModule({ name: "another-return-path", takes: [] }, (m) => [
-		m.contribute(returnPaths).by(() => ({ path: "/device" })),
-	]);
+	const device = defineModule(
+		{ name: "another-return-path", replicaSafe: true, takes: [] },
+		(m) => [m.contribute(returnPaths).by(() => ({ path: "/device" }))],
+	);
 	const { login } = await serve({ extra: [authorize, device] });
 	const back = "https://as.example/oauth/authorize?client_id=app&state=x";
 	expect((await login({ ...right, redirect_to: back })).body).toEqual({ redirect_to: back });
@@ -401,7 +402,7 @@ it("sends the user back to a contributed path on the public origin, with any que
 
 it("answers a login a gate holds with 403, the gate's answer and its cookies, and opens no session", async () => {
 	const carried: unknown[] = [];
-	const gate = defineModule({ name: "gate", takes: [] }, (m) => [
+	const gate = defineModule({ name: "gate", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "second",
 			hold: async (_request, _facts, done) => {
@@ -488,7 +489,7 @@ it("passes the user's attributes from users' answer to the session, under the so
 
 it("reports the time it verified the password as the login's authentication time", async () => {
 	const seen: unknown[] = [];
-	const gate = defineModule({ name: "gate", takes: [] }, (m) => [
+	const gate = defineModule({ name: "gate", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "watching",
 			hold: async (_request, facts) => {
@@ -606,7 +607,7 @@ describe("login-password attempts per account", () => {
 describe("login-password under a gate that refuses", () => {
 	/** A `logins` whose login answers `outcome`, or throws it. */
 	const answering = (outcome: () => Promise<unknown>) =>
-		defineModule({ name: "logins-stand-in", takes: [] }, (m) => [
+		defineModule({ name: "logins-stand-in", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(logins).by(() => ({
 				login: outcome as never,
 				resume: outcome as never,

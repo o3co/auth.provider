@@ -17,7 +17,7 @@ const built = async (c: Pick<BuildContext<unknown>, "get" | "collect" | "clock">
 	});
 };
 
-export default defineModule({ name: "claims-selection", takes }, (m) => [
+export default defineModule({ name: "claims-selection", replicaSafe: true, takes }, (m) => [
 	m.provide(claimsSelections).by(async (c) => {
 		if ((await c.collect(selectionConsents)).length > 1) {
 			return c.refuse("claims-selection", "more than one judge of consent");

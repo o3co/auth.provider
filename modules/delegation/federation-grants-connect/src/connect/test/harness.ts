@@ -150,32 +150,35 @@ export async function connector(
 		exchange: (x) => script.exchange(x) as ReturnType<Delegation["exchange"]>,
 	} as Delegation;
 	const holders = options.holders ?? {};
-	const stubs = defineModule({ name: "stubs", takes: [grantsBrowsers, routes] }, (m) => [
-		m.provide(upstreams).by(() => ({
-			of: (idp) => (idp === "corp" && !script.withdrawn ? { delegation } : undefined),
-		})),
-		m.provide(users).by(
-			() =>
-				({
-					byUpstream: async (_idp: string, subject: string) => {
-						const holder = holders[subject];
-						if (holder === "down") throw new Unavailable("ledger");
-						return holder === undefined
-							? { kind: "none" }
-							: { kind: "user", user: { subject: holder, attributes: {} } };
-					},
-				}) as unknown as Users,
-		),
-		m.provide(seal).by(() => contextSeal),
-		...(options.requirements ?? []).map((r) => m.contribute(entryRequirements).by(() => r)),
-		m.provide(browsers).by((c) => c.collect(grantsBrowsers)),
-		m.provide(probed).by((c) => c.collect(routes)),
-	]);
+	const stubs = defineModule(
+		{ name: "stubs", replicaSafe: false, takes: [grantsBrowsers, routes] },
+		(m) => [
+			m.provide(upstreams).by(() => ({
+				of: (idp) => (idp === "corp" && !script.withdrawn ? { delegation } : undefined),
+			})),
+			m.provide(users).by(
+				() =>
+					({
+						byUpstream: async (_idp: string, subject: string) => {
+							const holder = holders[subject];
+							if (holder === "down") throw new Unavailable("ledger");
+							return holder === undefined
+								? { kind: "none" }
+								: { kind: "user", user: { subject: holder, attributes: {} } };
+						},
+					}) as unknown as Users,
+			),
+			m.provide(seal).by(() => contextSeal),
+			...(options.requirements ?? []).map((r) => m.contribute(entryRequirements).by(() => r)),
+			m.provide(browsers).by((c) => c.collect(grantsBrowsers)),
+			m.provide(probed).by((c) => c.collect(routes)),
+		],
+	);
 	const kept = memoryRecords<StoredRoundTrip>(() => runtime.clock.now(), {
 		shards: 1,
 		perShard: 1,
 	});
-	const tripStore = defineModule({ name: "trips", takes: [] }, (m) => [
+	const tripStore = defineModule({ name: "trips", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.provide(roundTripStore)
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),

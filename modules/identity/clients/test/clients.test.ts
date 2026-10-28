@@ -26,7 +26,7 @@ const grants: Section<{ allowed: string[] }> = {
 	name: "grants",
 	schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
 };
-const grantsModule = defineModule({ name: "grants-owner", takes: [] }, (m) => [
+const grantsModule = defineModule({ name: "grants-owner", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(metadataSections).by(() => grants),
 ]);
 
@@ -55,7 +55,7 @@ async function boot(extra: readonly Module[] = [], list = registered): Promise<C
 }
 
 const method = (name: string, parts: Partial<AuthMethod> = {}) =>
-	defineModule({ name, takes: [] }, (m) => [
+	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(authMethods).by(() => ({
 			name,
 			claimed: () => undefined,
@@ -64,7 +64,7 @@ const method = (name: string, parts: Partial<AuthMethod> = {}) =>
 		})),
 	]);
 const source = (find: (id: string) => unknown) =>
-	defineModule({ name: "source", takes: [] }, (m) => [
+	defineModule({ name: "source", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id: string) => find(id) as ClientRecord | undefined,
 		})),
@@ -185,7 +185,7 @@ describe("clients", () => {
 
 	describe("a section's boot check", () => {
 		const checked = (seen: unknown[], holders: unknown[] = []) =>
-			defineModule({ name: "checked-owner", takes: [] }, (m) => [
+			defineModule({ name: "checked-owner", replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(metadataSections).by(() => ({
 					name: "checked",
 					schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
@@ -796,7 +796,7 @@ describe("clients", () => {
 
 	it("asks the sources in turn until one names the client", async () => {
 		const remote = { kind: "public" as const, method: "none", sections: {} };
-		const later = defineModule({ name: "later", takes: [] }, (m) => [
+		const later = defineModule({ name: "later", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(clientSources).by(() => ({
 				find: async (id: string) => (id === "later" ? { id, ...remote } : undefined),
 			})),

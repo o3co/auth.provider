@@ -68,8 +68,6 @@ describe("upstream-client's id_token reader", () => {
 		});
 		const atAllowance = readerOf(valid({ auth_time: seconds + 30 }));
 		expect((await atAllowance.read("t", "n")).login.authenticatedAt).toBe(now + 30_000);
-		const shared = readerOf(valid({ aud: ["cid", "other"], azp: "cid" }));
-		expect((await shared.read("t", "n")).login.subject).toBe("alice");
 	});
 
 	/** An id_token's text with the header naming `alg`; the stand-in external-jwt reads no more of it. */
@@ -113,7 +111,7 @@ describe("upstream-client's id_token reader", () => {
 		expect(await outcome(readerOf({ kind: "unavailable" }).read("t", "n"))).toBe("idp-x");
 	});
 
-	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-k]", async () => {
+	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-f] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-k]", async () => {
 		const cases: Record<string, Verified> = {
 			"a reason external-jwt gives": { kind: "invalid", reason: "signature" },
 			"no subject": valid({ sub: undefined }),
@@ -122,6 +120,10 @@ describe("upstream-client's id_token reader", () => {
 			"an issue time as text": valid({ iat: String(seconds) }),
 			"two audiences without the client as azp": valid({ aud: ["cid", "other"] }),
 			"two audiences, another party authorized": valid({ aud: ["cid", "other"], azp: "other" }),
+			"another audience beside the client, the client authorized": valid({
+				aud: ["cid", "other"],
+				azp: "cid",
+			}),
 			"one audience, another party authorized": valid({ azp: "other" }),
 			"a login time as text": valid({ auth_time: "yesterday" }),
 			"a login time before the epoch": valid({ auth_time: -1 }),

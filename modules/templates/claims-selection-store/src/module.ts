@@ -18,11 +18,14 @@ const selections: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "claims-selection-store", takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => selections),
-	m.provide(selectionRecords).by(async (c) => {
-		const place = { store: await c.get(store), space: selections, log: c.log, random: c.random };
-		const records = recordsIn<StoredSelection>(place);
-		return { save: records.create, read: records.read };
-	}),
-]);
+export default defineModule(
+	{ name: "claims-selection-store", replicaSafe: true, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => selections),
+		m.provide(selectionRecords).by(async (c) => {
+			const place = { store: await c.get(store), space: selections, log: c.log, random: c.random };
+			const records = recordsIn<StoredSelection>(place);
+			return { save: records.create, read: records.read };
+		}),
+	],
+);

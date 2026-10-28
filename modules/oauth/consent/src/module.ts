@@ -25,7 +25,7 @@ const isRange = (range: readonly string[]) =>
 /** What its provision and its routes take; each is taken whatever the section says. */
 const takes = [grantStore, askStore, site, sessions, clients, audit];
 
-export default defineModule({ name: "consent", section, takes }, (m) => [
+export default defineModule({ name: "consent", replicaSafe: true, section, takes }, (m) => [
 	m.contribute(metadataSections).by(() => clientSection),
 	m.contribute(documentCopies).by(() => clientCopy),
 	m.provide(consents).by(async (c) => {

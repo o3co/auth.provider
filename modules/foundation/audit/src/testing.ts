@@ -13,7 +13,7 @@ export function auditConfig(settings: Partial<AuditSettings> = {}) {
 /** A stand-in for tests of emitters: it keeps every event, stamped with the composition's clock. */
 export function auditStandIn() {
 	const events: AuditEvent[] = [];
-	const module = defineModule({ name: "audit", takes: [] }, (m) => [
+	const module = defineModule({ name: "audit", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(audit).by((c) => ({
 			record: (event) => {
 				events.push({ ...event, at: c.clock.now() });

@@ -10,7 +10,7 @@ const made = contract<ReturnType<typeof resetOver>>("passkey-reset.made");
 const madeOf = (c: BuildContext<unknown>) => c.get(made);
 
 export default defineModule(
-	{ name: "passkey-reset", takes: [audit, passkeyHolders, revocations] },
+	{ name: "passkey-reset", replicaSafe: true, takes: [audit, passkeyHolders, revocations] },
 	(m) => [
 		m.provide(made).by(async (c) =>
 			resetOver({

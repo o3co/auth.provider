@@ -75,12 +75,15 @@ export function claimsSelectionInMemory(
 		},
 		read: async (name) => live(name)?.value,
 	};
-	const module = defineModule({ name: "claims-selection-stores", takes: [] }, (m) => [
-		m.provide(selectionRecords).by((c: { readonly clock: Clock }) => {
-			now = c.clock.now;
-			return options.around ? options.around(records) : records;
-		}),
-	]);
+	const module = defineModule(
+		{ name: "claims-selection-stores", replicaSafe: false, takes: [] },
+		(m) => [
+			m.provide(selectionRecords).by((c: { readonly clock: Clock }) => {
+				now = c.clock.now;
+				return options.around ? options.around(records) : records;
+			}),
+		],
+	);
 	/** Writes a record over whatever the name holds, as a broken or foreign writer might. */
 	const overwrite = (name: string, kept: unknown) => {
 		entries.set(name, { value: kept as StoredSelection, ends: now() + 60_000 });

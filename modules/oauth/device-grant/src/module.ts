@@ -14,7 +14,9 @@ export const verificationPath = "/oauth/device/verification";
 
 const takes = [...authorizationTakes, ...verificationTakes, ...grantTakes, sessionIssuances];
 
-export default defineModule({ name: "device-grant", section, takes }, (m) => [
+// Safe on many instances: a code's expiry and polling interval are judged by the instance's clock, kept in
+// step with the others' by the operator (deployment-guarantees, Several instances).
+export default defineModule({ name: "device-grant", replicaSafe: true, section, takes }, (m) => [
 	m.contribute(routes).by(async (c) => {
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		return {

@@ -6,8 +6,8 @@ Internal module of `conformance`: a fault scene's app as a deployment runs it, o
 - Starts a scene's app as several instances from one generated app and one settings object, each behind a relay and a trace of its own, kills and restarts them, moves an instance's clock, and records what the scene ran on.
 
 ## Offers
-- `startDeployment` (a scene, its name, a topology, a number of instances, the Redis section's other keys, where its record goes), giving its instances, its record and `stop`.
-- An instance: its URL (its trace's), its relay, its audit trail (`audit`), the requests it was sent (`requests`), whether it runs, `kill` (SIGKILL, what it started with it; how and when it ended, on the relay's clock), `restart` (from the same settings, behind the same URL and relay, on the clock it had) and `clock` (started again on a clock moved by an offset such as `+2h`).
+- `startDeployment` (a scene, its name, a topology, a number of instances, the Redis section's other keys, where its record goes, and the start's options: the certificates its instances trust), giving its instances, its record and `stop`.
+- An instance: its URL (its trace's), its relay, its audit trail (`audit`), the requests it was sent (`requests`), whether it runs, `kill` (SIGKILL, what it started with it; how and when it ended, on the relay's clock), `restart` (from the same settings and options, its trusted certificates among them, behind the same URL and relay, on the clock it had) and `clock` (started again on a clock moved by an offset such as `+2h`).
 - `startTrace`: a plain HTTP proxy in front of one instance, recording each request's method and path, pointed at the instance started again.
 
 ## Invariants

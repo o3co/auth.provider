@@ -20,7 +20,7 @@ const secondFactorAt = (context: AuthContext) => {
 };
 
 export default defineModule(
-	{ name: "mfa-entry", takes: [factorKinds, factorReading, sessions] },
+	{ name: "mfa-entry", replicaSafe: true, takes: [factorKinds, factorReading, sessions] },
 	(m) => [
 		m.contribute(enforcers).by(() => ({ name: "mfa-entry" })),
 		m.provide(secondFactors).by((c) => {
