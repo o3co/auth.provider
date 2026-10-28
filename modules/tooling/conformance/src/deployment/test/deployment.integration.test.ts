@@ -7,7 +7,7 @@ import { area, type NewPart, onNew, sceneOf } from "../../areas.ts";
 import { hostLibfaketime } from "../../clock/clock.ts";
 import { startTopology, type Topology } from "../../faults/topology.ts";
 import type { Match } from "../../relay/relay.ts";
-import { startDeployment } from "../deployment.ts";
+import { type Instance, startDeployment } from "../deployment.ts";
 
 // A scene of no feature: the base's own modules on the Redis store.
 const probe = area<NewPart>("deployment-probe");
@@ -42,6 +42,30 @@ const failedLogin = async (base: string) =>
 			body: new URLSearchParams({ username: "nobody", password: "wrong" }),
 		})
 	).status;
+/** Runs on one instance of the login scene, on a topology of its own with a replica every write waits for, as the login's stores ask. */
+async function onLogin(name: string, scene: (a: Instance) => Promise<void>) {
+	const replicated = await startTopology({
+		replicas: 1,
+		settings: ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "2"],
+	});
+	try {
+		const d = await startDeployment({
+			name,
+			scene: loginScene,
+			topology: replicated,
+			instances: 1,
+		});
+		try {
+			const [a] = d.instances;
+			if (!a) throw new Error("one instance");
+			await scene(a);
+		} finally {
+			await d.stop();
+		}
+	} finally {
+		await replicated.stop();
+	}
+}
 /** Answers once the app at `base` is ready: its store's first answers come after its start. */
 const readyAt = async (base: string) => {
 	for (let tries = 0; tries < 150; tries++) {
@@ -219,23 +243,7 @@ describe("a deployment of a scene", () => {
 	});
 
 	it("keeps an instance's audit events on one trail across a restart, read once it is killed", async () => {
-		// A replica every write waits for, as the login's stores ask.
-		const replicated = await startTopology({
-			replicas: 1,
-			settings: ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "2"],
-		});
-		const d = await startDeployment({
-			name: "audit",
-			scene: loginScene,
-			topology: replicated,
-			instances: 1,
-		}).catch(async (error: unknown) => {
-			await replicated.stop();
-			throw error;
-		});
-		try {
-			const [a] = d.instances;
-			if (!a) throw new Error("one instance");
+		await onLogin("audit", async (a) => {
 			const trail = a.audit;
 			await readyAt(a.baseUrl);
 			const failed = async () =>
@@ -250,11 +258,26 @@ describe("a deployment of a scene", () => {
 			const { result, events } = await a.audit.during(() => failedLogin(a.baseUrl));
 			expect(result).toBe(502);
 			expect(events).toEqual([]);
-		} finally {
-			await d.stop();
-			await replicated.stop();
-		}
+		});
 	});
+
+	// A fault run moves the clock or fails: a host without the library never skips it.
+	it.runIf(faultRun || hostLibfaketime())(
+		"keeps an instance's audit events on one trail across a moved clock",
+		async () => {
+			await onLogin("audit-clock", async (a) => {
+				const trail = a.audit;
+				const failed = async () =>
+					(await trail.during(() => failedLogin(a.baseUrl))).events.map((e) => e.kind);
+				await readyAt(a.baseUrl);
+				expect(await failed()).toEqual(["login.failed"]);
+				await a.clock("+2h");
+				expect(a.audit).toBe(trail);
+				await readyAt(a.baseUrl);
+				expect(await failed()).toEqual(["login.failed"]);
+			});
+		},
+	);
 
 	it("fails its stop where a relay was asked for a fault that never happened", async () => {
 		const d = await startDeployment({ name: "unfired", scene, topology, instances: 1 });
