@@ -1,16 +1,13 @@
-import { audit } from "@mod/audit";
-import { clients } from "@mod/clients";
 import { type FormTokens, formTokens } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Loads, noStore } from "@mod/http";
 import { endpointOrigin, issuer } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { type Keys, keys } from "@mod/keys";
 import { sessions } from "@mod/session";
-import { type ClosingParts, closingOver } from "../closing/closing.ts";
+import { type Closing, closingFrom, closingTakes } from "../closing/closing.ts";
 import type { UpstreamEnd } from "../contract.ts";
 import { frontChannelPage, loggedOutPage } from "../page/page.ts";
 import type { Settings } from "../section.ts";
-import { sessionClients } from "../store.ts";
 
 /** Where a person confirms a logout a client started without a hint. */
 export const confirmPath = "/oauth/logout/confirm";
@@ -20,10 +17,10 @@ const confirmationType = "logout-confirm+jwt";
 /** How long a confirmation page may be answered. */
 const confirmationSeconds = 300;
 
-export interface ConfirmParts extends ClosingParts {
-	readonly sessions: ClosingParts["sessions"] & {
-		handleOf(request: HttpRequest): Promise<string | undefined>;
-	};
+export interface ConfirmParts {
+	readonly sessions: { handleOf(request: HttpRequest): Promise<string | undefined> };
+	/** The close the hinted logout shares. */
+	readonly closing: Closing;
 	readonly keys: Pick<Keys, "sign" | "verify">;
 	readonly forms: FormTokens;
 	/** The issuer's URL, which the confirmation names as its issuer. */
@@ -64,8 +61,8 @@ const notSignedIn = page(
  * browser's cookie opens; `take` closes that session once they agree, and asks again where the
  * browser's session is no longer the one the page was shown for.
  */
-export function confirmOver(p: ConfirmParts) {
-	const closing = closingOver(p);
+export function confirmWith(p: ConfirmParts) {
+	const { closing } = p;
 	const host = new URL(p.issuer).host;
 
 	/** The confirmation page for `handle`: the person's choice, the form's CSRF token and the binding. */
@@ -140,15 +137,7 @@ export function confirmOver(p: ConfirmParts) {
 }
 
 /** What `confirmFrom` takes from the composition. */
-export const confirmTakes = [
-	sessions,
-	keys,
-	formTokens,
-	clients,
-	sessionClients,
-	audit,
-	issuer,
-] as const;
+export const confirmTakes = [sessions, keys, formTokens, issuer, ...closingTakes] as const;
 
 /** The routes' handlers, from the composition's contracts. */
 export async function confirmFrom(c: BuildContext<Settings>, upstream: UpstreamEnd | undefined) {
@@ -156,14 +145,11 @@ export async function confirmFrom(c: BuildContext<Settings>, upstream: UpstreamE
 	const issuerUrl = named.url;
 	// The endpoint's origin, as the metadata names the logout's.
 	const origin = endpointOrigin(named);
-	return confirmOver({
+	return confirmWith({
 		sessions: await c.get(sessions),
+		closing: await closingFrom(c, upstream),
 		keys: await c.get(keys),
 		forms: await c.get(formTokens),
-		clients: await c.get(clients),
-		sessionClients: await c.get(sessionClients),
-		upstream,
-		audit: await c.get(audit),
 		issuer: issuerUrl,
 		confirmUrl: `${origin}${confirmPath}`,
 		now: c.clock.now,

@@ -5,7 +5,8 @@ import { Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
 import type { CloseOutcome } from "@mod/session";
 import { describe, expect, it } from "vitest";
-import { confirmOver, confirmPath } from "../confirm.ts";
+import { closingWith } from "../../closing/closing.ts";
+import { confirmPath, confirmWith } from "../confirm.ts";
 
 const issuer = "https://as.example";
 const confirmUrl = `${issuer}${confirmPath}`;
@@ -38,10 +39,8 @@ function serve(
 	const closes: string[] = [];
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
-	const confirm = confirmOver({
+	const closing = closingWith({
 		sessions: {
-			// The browser's cookie names its session's handle directly in these tests.
-			handleOf: async (request) => /session=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1],
 			close: async (id) => {
 				closes.push(id);
 				return (
@@ -55,10 +54,6 @@ function serve(
 				);
 			},
 		},
-		keys,
-		forms: {
-			issue: () => ({ field: "csrf_token", token: "t".repeat(43), cookies: ["csrf=t"] }),
-		},
 		clients: { find: async () => undefined },
 		sessionClients: { members: async () => [] },
 		upstream:
@@ -66,6 +61,18 @@ function serve(
 				? undefined
 				: { name: "upstream", at: async () => options.upstream },
 		audit: { record: (e) => void recorded.push(e) },
+		log: logged.log,
+	});
+	const confirm = confirmWith({
+		sessions: {
+			// The browser's cookie names its session's handle directly in these tests.
+			handleOf: async (request) => /session=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1],
+		},
+		closing,
+		keys,
+		forms: {
+			issue: () => ({ field: "csrf_token", token: "t".repeat(43), cookies: ["csrf=t"] }),
+		},
 		issuer,
 		confirmUrl,
 		now: () => nowMs,

@@ -4,14 +4,14 @@ import { Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
 import type { CloseOutcome } from "@mod/session";
 import { describe, expect, it } from "vitest";
-import { closingOver } from "../closing.ts";
+import { closingWith } from "../closing.ts";
 
 /** The parts a close takes, each answering as given and keeping the order it was asked in. */
 function parts(close: () => Promise<CloseOutcome>) {
 	const asked: string[] = [];
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
-	const closing = closingOver({
+	const closing = closingWith({
 		clients: {
 			find: async (id) => {
 				asked.push(`client ${id}`);

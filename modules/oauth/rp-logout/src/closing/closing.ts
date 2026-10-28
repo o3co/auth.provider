@@ -1,14 +1,15 @@
-import { type Audit, declaredAudit } from "@mod/audit";
-import type { Client } from "@mod/clients";
+import { type Audit, audit, declaredAudit } from "@mod/audit";
+import { type Client, clients } from "@mod/clients";
 import type { HttpRequest } from "@mod/http";
-import { isUnavailable, type Log } from "@mod/kernel";
+import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
-import type { CloseOutcome } from "@mod/session";
+import { type CloseOutcome, sessions } from "@mod/session";
 import events from "../audit-events.ts";
 import type { LogoutReturn, UpstreamEnd } from "../contract.ts";
 import type { Frame } from "../page/page.ts";
 import { framable, registration } from "../registration/registration.ts";
-import type { SessionClients } from "../store.ts";
+import type { Settings } from "../section.ts";
+import { type SessionClients, sessionClients } from "../store.ts";
 
 export interface ClosingParts {
 	readonly clients: { find(id: string): Promise<Client | undefined> };
@@ -41,7 +42,7 @@ export type Closed =
  * recorded. Nothing reads the session before its close: a read can end one past its lifetime, and
  * the close would then call no participants; what the close found tells whether this is the logout.
  */
-export function closingOver(p: ClosingParts) {
+export function closingWith(p: ClosingParts) {
 	/** The client's record, or none when it is gone or cannot be read; a logout goes on without it. */
 	const clientOf = async (id: string) => {
 		try {
@@ -132,4 +133,24 @@ export function closingOver(p: ClosingParts) {
 		});
 		return { kind: "logged-out", cookies, upstream, frames: () => framesOf(held) };
 	};
+}
+
+export type Closing = ReturnType<typeof closingWith>;
+
+/** What `closingFrom` takes from the composition. */
+export const closingTakes = [clients, sessions, sessionClients, audit] as const;
+
+/** The close, from the composition's contracts, for the route that asks one. */
+export async function closingFrom(
+	c: BuildContext<Settings>,
+	upstream: UpstreamEnd | undefined,
+): Promise<Closing> {
+	return closingWith({
+		clients: await c.get(clients),
+		sessions: await c.get(sessions),
+		sessionClients: await c.get(sessionClients),
+		upstream,
+		audit: await c.get(audit),
+		log: c.log,
+	});
 }

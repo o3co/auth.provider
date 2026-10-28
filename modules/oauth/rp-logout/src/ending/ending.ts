@@ -1,28 +1,20 @@
-import { type Audit, audit } from "@mod/audit";
 import { type Client, clients } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import { issuer } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { type IdTokenHints, idTokenHints } from "@mod/oidc";
-import { type CloseOutcome, type Entry, sessions } from "@mod/session";
-import { type Closed, closingOver } from "../closing/closing.ts";
+import { type Closed, type Closing, closingFrom, closingTakes } from "../closing/closing.ts";
 import { confirmPath } from "../confirm/confirm.ts";
 import type { UpstreamEnd } from "../contract.ts";
 import { frontChannelPage } from "../page/page.ts";
 import { registration } from "../registration/registration.ts";
 import type { Settings } from "../section.ts";
-import { type SessionClients, sessionClients } from "../store.ts";
 
 export interface EndingParts {
 	readonly hints: IdTokenHints;
 	readonly clients: { find(id: string): Promise<Client | undefined> };
-	readonly sessions: {
-		entryOf(id: string): Promise<Entry>;
-		close(id: string, request: HttpRequest): Promise<CloseOutcome>;
-	};
-	readonly sessionClients: Pick<SessionClients, "members">;
-	readonly upstream: UpstreamEnd | undefined;
-	readonly audit: Audit;
+	/** The close the confirmation shares. */
+	readonly closing: Closing;
 	readonly issuer: string;
 	readonly now: () => number;
 	readonly log: Log;
@@ -73,7 +65,7 @@ const withState = (uri: string, state: string | undefined) => {
 };
 
 export function endingOver(p: EndingParts) {
-	const closing = closingOver(p);
+	const { closing } = p;
 	/**
 	 * The return asked, where the hint's one client registered it exactly; `false` where it did not,
 	 * a request refused whole. A record that cannot be read is passed on: whether the return may be
@@ -161,24 +153,14 @@ export function endingOver(p: EndingParts) {
 }
 
 /** What `endingFrom` takes from the composition. */
-export const endingTakes = [
-	idTokenHints,
-	clients,
-	sessions,
-	sessionClients,
-	audit,
-	issuer,
-] as const;
+export const endingTakes = [idTokenHints, clients, issuer, ...closingTakes] as const;
 
 /** The route's handler, from the composition's contracts. */
 export async function endingFrom(c: BuildContext<Settings>, upstream: UpstreamEnd | undefined) {
 	return endingOver({
 		hints: await c.get(idTokenHints),
 		clients: await c.get(clients),
-		sessions: await c.get(sessions),
-		sessionClients: await c.get(sessionClients),
-		upstream,
-		audit: await c.get(audit),
+		closing: await closingFrom(c, upstream),
 		issuer: (await c.get(issuer)).url,
 		now: c.clock.now,
 		log: c.log,

@@ -10,7 +10,7 @@ Internal module of `rp-logout`: the close a logout asks, the same whichever rout
 - Which session to close, and whether the request may close it (`ending`, `confirm`). The answer to the browser (the route's). Building the page (`page`).
 
 ## Offers
-- `closingOver` → (request, the sid, the subject the request named if any, the return) → unavailable, pending, no logout of its own (a session closed before, or gone), or logged out with the upstream's end of session and the frames of its clients.
+- `closingWith` (clients, the session's close, its clients' store, the upstream's end, audit, log) and `closingFrom` (the composition, taking its own contracts) → (request, the sid, the subject the request named if any, the return) → unavailable, pending, no logout of its own (a session closed before, or gone), or logged out with the upstream's end of session and the frames of its clients.
 
 ## Invariants
 - The session's clients and the upstream's end of session are read before the close, which forgets the upstream tokens.

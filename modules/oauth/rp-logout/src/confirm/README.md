@@ -9,7 +9,7 @@ Internal module of `rp-logout`: the confirmation of a logout a client started wi
 - Which requests come here (`ending`). The close itself and what it records (`closing`). The CSRF check (`csrf`'s policy, declared on the route) and its token (`csrf`). Resolving the browser's session (`session`'s `handleOf`). Signing (`keys`).
 
 ## Offers
-- `confirmPath` (`/oauth/logout/confirm`), and `confirmOver` → `show` (the `GET`) and `take` (the `POST`).
+- `confirmPath` (`/oauth/logout/confirm`), and `confirmWith` (the browser's session handle, the shared close, keys, form tokens, issuer and endpoint URLs) and `confirmFrom` (the composition) → `show` (the `GET`) and `take` (the `POST`).
 
 ## Invariants
 - `show` asks only where the browser holds a session; one without says the person is not signed in. The page has no script, posts its one form to this origin alone (`form-action 'self'`), and carries the form's CSRF token and a confirmation bound to the session.
