@@ -36,7 +36,7 @@ describe.runIf(areaTarget().can("store-fault:rate-limit"))(
 	() => {
 		const faulty = faultyTarget(scene);
 
-		it("answers 503 at a rate-limited endpoint while the store cannot count", async () => {
+		it("answers 503 at a rate-limited endpoint while the store cannot count, as the limit's refusal", async () => {
 			const answer = await faulty.whileDown(() =>
 				fetch(`${faulty.base()}/oauth/token`, {
 					method: "POST",
@@ -49,6 +49,8 @@ describe.runIf(areaTarget().can("store-fault:rate-limit"))(
 				}),
 			);
 			expect(answer.status).toBe(503);
+			// The limit's own answer, not issuance's after a request let past it (temporarily_unavailable).
+			expect(((await answer.json()) as { error?: string }).error).toBe("service_unavailable");
 		});
 	},
 );
