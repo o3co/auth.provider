@@ -66,12 +66,13 @@ describe("the link store users asks for", () => {
 		bySubject: async () => none,
 		...(byUpstream ? { byUpstream } : {}),
 	});
-	const contactsOnly = defineModule({ name: "contacts-only", takes: [] }, (m) => [
-		m.provide(contactStore).by(() => memoryUsersStores().contacts.store),
-	]);
+	const contactsOnly = defineModule(
+		{ name: "contacts-only", replicaSafe: true, takes: [] },
+		(m) => [m.provide(contactStore).by(() => memoryUsersStores().contacts.store)],
+	);
 	/** A link store that keeps in memory and lists each method asked of it. */
 	const countedLinks = (asked: string[]) =>
-		defineModule({ name: "counted-links", takes: [] }, (m) => [
+		defineModule({ name: "counted-links", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(linkStore).by(() => {
 				const store = memoryUsersStores().links.store;
 				return new Proxy(store, {
@@ -93,7 +94,7 @@ describe("the link store users asks for", () => {
 		...links,
 		...(ledger
 			? [
-					defineModule({ name: "test-ledger", takes: [] }, (m) => [
+					defineModule({ name: "test-ledger", replicaSafe: true, takes: [] }, (m) => [
 						m.contribute(ledgers).by(() => ledger),
 					]),
 				]

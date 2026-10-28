@@ -76,6 +76,7 @@ function undeclaredLinks(
 export default defineModule(
 	{
 		name: "users",
+		replicaSafe: true,
 		section,
 		takes: [secretCheckers, contactStore, ledgers, linkStore, upstreamNames],
 	},

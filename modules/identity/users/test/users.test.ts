@@ -26,7 +26,7 @@ import {
 } from "../src/testing.ts";
 
 /** The IdP names the registered users below link through, as a federation would declare them. */
-const named = defineModule({ name: "test-idps", takes: [] }, (m) => [
+const named = defineModule({ name: "test-idps", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(upstreamNames).by(() => ({
 		declaredBy: "test-idps",
 		names: ["example", "corp:eu", "idp", "i"].map((name) => ({
