@@ -151,13 +151,23 @@ it("keeps no access token it checks or revokes, only the token's id, and logs no
 	expect(await t.revokeAccess(token)).toEqual({ kind: "revoked" });
 	expect(await t.verifyAccess(token)).toEqual({ kind: "invalid", reason: "revoked" });
 	place.down = true;
-	await expect(t.verifyAccess(token)).rejects.toBeInstanceOf(Unavailable);
+	const failed = await t.verifyAccess(token).then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+	expect(failed).toBeInstanceOf(Unavailable);
 	place.down = false;
 	after(lifetimeMs + denylistAllowanceMs);
 	expect(await t.verifyAccess(token)).toMatchObject({ kind: "invalid" });
 	// The place was asked, by the id alone.
 	expect(place.asked).toContainEqual(["save", checked.id, expect.any(Number)]);
-	// Neither the token nor its signature, without which it cannot be rebuilt, reached the place or the log.
-	const kept = JSON.stringify([place.asked, logged.lines()]);
+	// Neither the token nor its signature, without which it cannot be rebuilt, reached the place, the
+	// log, or the failure thrown while the place was down (on its way to the caller's log).
+	const kept = JSON.stringify([
+		place.asked,
+		logged.lines(),
+		String(failed),
+		(failed as Error).cause,
+	]);
 	for (const secret of [token, token.split(".")[2] ?? token]) expect(kept).not.toContain(secret);
 });
