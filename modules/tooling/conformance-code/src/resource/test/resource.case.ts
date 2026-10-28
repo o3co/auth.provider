@@ -85,10 +85,7 @@ function running(resourceIndicators: boolean) {
 		const claims = body.access_token
 			? JSON.parse(Buffer.from(body.access_token.split(".")[1] ?? "", "base64url").toString())
 			: {};
-		// The grant's audience: aud but the values the issuer added after it (aud_added), such as itself
-		// for an openid token where userinfo is composed.
-		const all = claims.aud === undefined ? undefined : [claims.aud].flat();
-		const aud = all?.slice(0, all.length - Number(claims.aud_added ?? 0));
+		const aud = claims.aud === undefined ? undefined : [claims.aud].flat();
 		return { status: res.status, error: body.error, aud, refresh: body.refresh_token };
 	};
 	const exchange = (code: string, extra: Record<string, string> = {}) =>

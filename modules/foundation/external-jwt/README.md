@@ -13,14 +13,14 @@
   - Key sources: JWKs written in; PEM keys, each for the algorithm it is given for; a key set at a URL, fetched through `outbound` from the caller's hosts, and as the operator's configured URL where the caller names one (`internal`).
   - Verifying answers valid (the header and claims, frozen), invalid with a reason, or unavailable when no key set can be had. An invalid answer found once the signature held (a claim's shape, a time, the issuer, audience or subject) carries `signed: true`; one before it (the header, the algorithm, the key, the signature) carries none.
   - Reasons: `malformed`, `algorithm`, `no-key`, `ambiguous-key`, `signature`, `expired`, `not-yet`, `future-iat`, `too-long`, `issuer`, `audience`, `subject`. A caller maps them to its own words.
-- `typOf` (a header) → its `typ` read as a policy's `typ` is compared, without case and without `application/`; none where it is no string. For a caller to sort tokens by before verifying; whether the header is verified is the caller's to know.
+- `typOf` (a header) → its `typ` read as a policy's `typ` is compared, as a media type: its type alone, without parameters, the space around it, case or `application/`; none where it is no string. For a caller to sort tokens by before verifying; whether the header is verified is the caller's to know.
 - Composition definition, with the operator section `key-set-max-age` (written with its unit, `1h` to `30d`, default `1d`), how long after its fetch a key set is used while no new one can be had.
 - A test signer (`./testing`): a key pair as a JWK and PEM, signing claims or exact bytes with any header, as a sender might.
 
 ## Invariants
 - A token not written in its one form (`keys`' rule for a JWS) is malformed, so one token has one string.
 - Only asymmetric algorithms the caller allows are taken; none and shared secrets never are.
-- A header with `b64` or `crit`, a `kid` that is no string, or a `typ` other than the caller's is malformed. `typ` compares without case and with or without `application/`, by `typOf` alone.
+- A header with `b64` or `crit`, a `kid` that is no string, or a `typ` other than the caller's is malformed. `typ` compares as a media type, without parameters, space or case and with or without `application/`, by `typOf` alone.
 - Keys are read and fit to the algorithm by `keys`' rules for outside keys, and must agree with the header's `kid`; exactly one must, else no key or an ambiguous key.
 - Each key is read under one algorithm (RFC 8725 §3.1), by the caller's whole list and never the header: its own `alg` where allowed, else the one allowed algorithm its kind and curve fit. A key naming none that two allowed algorithms fit is used under neither, an answer of no key that fetching again does not change.
 - The claims are one JSON object in UTF-8 with a numeric `exp`; `nbf` and `iat`, where given, are numeric.

@@ -6,8 +6,7 @@ import { releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
 import { sessionTokens } from "@mod/session-tokens";
-import { audienceAdditions, tokens } from "@mod/tokens";
-import { type Settings, section } from "./section.ts";
+import { tokens } from "@mod/tokens";
 import { unavailable, userinfoOver } from "./userinfo.ts";
 
 const path = "/oauth/userinfo";
@@ -19,11 +18,9 @@ const cors = {
 };
 
 /** The handler, answering a check or claims that cannot tell as `503`, never as a refusal. */
-async function handlerOf(c: BuildContext<Settings>): Promise<Route["handle"]> {
+async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 	const userinfo = userinfoOver({
 		now: c.clock.now,
-		issuer: (await c.get(issuer)).url,
-		requiresIssuer: c.section["issuer-audience"] === "on",
 		senderBinding: await c.get(senderBinding),
 		tokens: await c.get(tokens),
 		sessionTokens: await c.get(sessionTokens),
@@ -54,40 +51,26 @@ const moduleTakes = [
 	issuer,
 ];
 
-export default defineModule(
-	{ name: "userinfo", section, replicaSafe: true, takes: moduleTakes },
-	(m) => [
-		...(["GET", "POST"] as const).map((method) =>
-			m.contribute(routes).by(async (c) => ({
-				method,
-				path,
-				cors,
-				// A POST may carry a body, but the token is read from the header only.
-				takes: ["form", "json", "none"],
-				...(method === "GET"
-					? { changesState: false }
-					: {
-							crossSite:
-								"The access token comes in the Authorization header, never a cookie, and it only reads.",
-							unlimited: "It is authenticated by a bearer access token and only reads.",
-						}),
-				handle: await handlerOf(c),
-			})),
-		),
-		m.contribute(metadata).by(async (c) => {
-			const origin = endpointOrigin(await c.get(issuer));
-			return { name: "userinfo_endpoint", value: `${origin}${path}` };
-		}),
-		// A token issued for openid is for the issuer too, whose resource userinfo is (RFC 9700 §2.3).
-		m.contribute(audienceAdditions).by(async (c) => {
-			const { url } = await c.get(issuer);
-			const mode = c.section["issuer-audience"];
-			// Off or adding, userinfo takes a token not for it; said at start, so it is never left so unawares.
-			if (mode !== "on") c.log.warn("userinfo.issuer_audience_not_required", { mode });
-			return {
-				name: "userinfo",
-				added: (grant) => (mode !== "off" && grant.scope.includes("openid") ? [url] : []),
-			};
-		}),
-	],
-);
+export default defineModule({ name: "userinfo", replicaSafe: true, takes: moduleTakes }, (m) => [
+	...(["GET", "POST"] as const).map((method) =>
+		m.contribute(routes).by(async (c) => ({
+			method,
+			path,
+			cors,
+			// A POST may carry a body, but the token is read from the header only.
+			takes: ["form", "json", "none"],
+			...(method === "GET"
+				? { changesState: false }
+				: {
+						crossSite:
+							"The access token comes in the Authorization header, never a cookie, and it only reads.",
+						unlimited: "It is authenticated by a bearer access token and only reads.",
+					}),
+			handle: await handlerOf(c),
+		})),
+	),
+	m.contribute(metadata).by(async (c) => {
+		const origin = endpointOrigin(await c.get(issuer));
+		return { name: "userinfo_endpoint", value: `${origin}${path}` };
+	}),
+]);
