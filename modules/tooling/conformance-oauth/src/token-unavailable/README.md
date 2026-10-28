@@ -6,8 +6,8 @@ Internal module of `conformance-oauth`: the fault scenes of the token endpoint i
 - Checks, each scene after a control with no fault (the grant spends one assertion and gives a token), that the endpoint answers `503 temporarily_unavailable` with no token while:
   - the network is cut from the app to Redis, nothing reaching Redis (`Pu`), or from Redis to the app, Redis answering the subject's revocation boundary read the app never gets (`Pd`);
   - every connection is cut as it opens, nothing reaching Redis (`R`); Redis answers past the command timeout, the boundary read answered only after the endpoint gave up (`L`); Redis sleeps, the endpoint answering before it wakes (`S`);
-  - the primary holds its writes for a promotion (`F`); the spend is answered by one server and confirmed on another (`Fs`).
-- Where the decision fails before the spend (`Pu`, `Pd`, `R`, `L`, `S`), checks that no spend of the assertion took effect.
+  - the primary holds its writes for a promotion, Redis running none of the grant's calls until the endpoint gave up (`F`); the spend is answered by one server and confirmed on another (`Fs`).
+- Where the decision fails before the spend (`Pu`, `Pd`, `R`, `L`, `S`, `F`), checks that no spend of the assertion took effect.
 - Under `Fs` the spend runs on the new primary and only its confirmation fails: no token is given, and the assertion stays spent, as nothing undoes a spend whose confirmation failed. A `503` is no token, not an assertion left unspent.
 - Checks that a decision made while Redis is killed at once and started again gives a token only where its spend was kept by the server started again, and otherwise answers unavailable, saying which in its report (`C`).
 - After each fault, the endpoint gives a new assertion a token.

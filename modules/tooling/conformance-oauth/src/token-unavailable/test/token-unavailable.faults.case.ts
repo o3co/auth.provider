@@ -170,19 +170,31 @@ describe("the token endpoint issuing no token for a JWT bearer assertion while t
 			const a = assertion();
 			const [next, ...others] = d.topology.replicas();
 			if (!next) throw new Error("a replica");
-			let answer: Answer | undefined;
+			let answer:
+				| { readonly status: number; readonly body: Answer["body"]; readonly at: number }
+				| undefined;
+			let paused = 0;
 			await d.topology.promote({
 				replica: next,
 				reattach: others,
 				// While the old primary holds its writes, before it goes.
 				between: async () => {
-					answer = await grantAt(i, a);
+					paused = performance.now();
+					answer = await grantedAt(i, a);
 				},
 			});
 			repointed(d);
 			await replicasOnline(d);
 			if (!answer) throw new Error("no answer while the writes were held");
 			noToken(answer);
+			// Redis ran none of the grant's calls while it held its writes: the decision gave up before the spend.
+			const held = answer.at;
+			expect(
+				i.relay
+					.executions(anything)
+					.filter((e) => e.command.name === "EVAL" && e.at > paused && e.at < held),
+			).toEqual([]);
+			expect(successes(i, spendOf(a))).toEqual([]);
 			await healed(i);
 		});
 	});
