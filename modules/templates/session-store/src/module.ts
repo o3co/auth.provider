@@ -52,31 +52,34 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "session-store", section, takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => sessions),
-	m.contribute(spaces).by(() => cookies),
-	m.contribute(spaces).by(() => closings),
-	m.contribute(spaces).by(() => subjects),
-	m.provide(sessionStore).by(async (c) => {
-		const records = recordsIn<StoredSession>(await placeIn(c, sessions));
-		return { save: records.create, read: records.read, update: records.change };
-	}),
-	m.provide(cookieIndex).by(async (c) => {
-		const records = cookieRecordsFor<string>(await placeIn(c, cookies));
-		return { save: records.create, read: records.read, remove: records.remove };
-	}),
-	m.provide(subjectSessions).by(async (c) =>
-		keyedSetsIn({
-			...(await placeIn(c, subjects)),
-			cap: c.section["sessions-per-subject"],
-			clock: c.clock,
+export default defineModule(
+	{ name: "session-store", replicaSafe: true, section, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => sessions),
+		m.contribute(spaces).by(() => cookies),
+		m.contribute(spaces).by(() => closings),
+		m.contribute(spaces).by(() => subjects),
+		m.provide(sessionStore).by(async (c) => {
+			const records = recordsIn<StoredSession>(await placeIn(c, sessions));
+			return { save: records.create, read: records.read, update: records.change };
 		}),
-	),
-	m.provide(closingList).by(async (c) =>
-		deferredIn({
-			...(await placeIn(c, closings)),
-			shards: c.section["closing-shards"],
-			perShard: c.section["closings-per-shard"],
+		m.provide(cookieIndex).by(async (c) => {
+			const records = cookieRecordsFor<string>(await placeIn(c, cookies));
+			return { save: records.create, read: records.read, remove: records.remove };
 		}),
-	),
-]);
+		m.provide(subjectSessions).by(async (c) =>
+			keyedSetsIn({
+				...(await placeIn(c, subjects)),
+				cap: c.section["sessions-per-subject"],
+				clock: c.clock,
+			}),
+		),
+		m.provide(closingList).by(async (c) =>
+			deferredIn({
+				...(await placeIn(c, closings)),
+				shards: c.section["closing-shards"],
+				perShard: c.section["closings-per-shard"],
+			}),
+		),
+	],
+);
