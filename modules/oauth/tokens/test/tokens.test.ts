@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
@@ -352,6 +352,31 @@ it("writes one audience as a string and more as a list, an empty scope not at al
 	expect(one.id).toMatch(/^[A-Za-z0-9_-]{22}$/);
 	const two = await issueFor(t, { ...grant, audience: ["a", "b"], scope: ["read"] });
 	expect(claimsOf(two.token)).toMatchObject({ aud: ["a", "b"], scope: "read" });
+});
+
+// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+it("issues access tokens none can make without its signing key, a changed claim or signature, another key or none refused, each with its own 128-bit id [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
+	const t = await boot({ revocation: "unsupported" });
+	const [one, two] = [await issueFor(t, grant), await issueFor(t, grant)];
+	expect([one.id, two.id]).toEqual([
+		expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
+		expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
+	]);
+	expect(one.id).not.toBe(two.id);
+	expect((await t.verifyAccess(one.token)).kind).toBe("valid");
+	const [header = "", payload = "", signature = ""] = one.token.split(".");
+	const encoded = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+	const changedClaim = `${header}.${encoded({ ...claimsOf(one.token), sub: "mallory" })}.${signature}`;
+	const flipped = Buffer.from(signature, "base64url");
+	flipped[0] = (flipped[0] ?? 0) ^ 1;
+	const changedSignature = `${header}.${payload}.${flipped.toString("base64url")}`;
+	const otherKey = generateKeyPairSync("ed25519").privateKey;
+	const otherSignature = sign(null, Buffer.from(`${header}.${payload}`), otherKey);
+	const anotherKey = `${header}.${payload}.${otherSignature.toString("base64url")}`;
+	const unsigned = `${encoded({ alg: "none", typ: "JWT" })}.${payload}.`;
+	for (const forged of [changedClaim, changedSignature, anotherKey, unsigned]) {
+		expect((await t.verifyAccess(forged)).kind, forged).toBe("invalid");
+	}
 });
 
 it("refuses a token whose cap has passed, handing none out", async () => {
