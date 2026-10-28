@@ -351,6 +351,7 @@ describe("device authorization", () => {
 			m.contribute(authMethods).by(() => ({
 				name: "test_assertion",
 				assertion: true,
+				signingAlgorithms: ["ES256"],
 				claimed: (request) => request.fields.single("test_assertion"),
 				verify: async () => false,
 			})),
