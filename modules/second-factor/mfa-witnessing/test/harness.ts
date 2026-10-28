@@ -20,7 +20,7 @@ import bridge from "../src/module.ts";
  * counting kind `code` (the proof is the secret and a counter that must go up) and a way back
  * `backup`. A copy of mfa's own harness, cut to what the witness needs.
  */
-const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -41,7 +41,7 @@ const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
 		},
 	})),
 ]);
-const backup = defineModule({ name: "kind-backup", takes: [] }, (m) => [
+const backup = defineModule({ name: "kind-backup", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -52,10 +52,10 @@ const backup = defineModule({ name: "kind-backup", takes: [] }, (m) => [
 		verify: async () => ({ kind: "invalid" as const }),
 	})),
 ]);
-const step = defineModule({ name: "step", takes: [] }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
-const enforcer = defineModule({ name: "enforcer", takes: [] }, (m) => [
+const enforcer = defineModule({ name: "enforcer", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
@@ -72,7 +72,7 @@ function memoryFactors() {
 		updateTogether: (...given: Parameters<ReturnType<typeof updatingTogether>>) =>
 			updatingTogether(stand.records)(...given),
 	});
-	const module = defineModule({ name: "factor-store", takes: [] }, (m) => [
+	const module = defineModule({ name: "factor-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorStore).by(() => store),
 	]);
 	return {
