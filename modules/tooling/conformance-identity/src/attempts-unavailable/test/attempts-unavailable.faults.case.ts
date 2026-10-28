@@ -108,15 +108,18 @@ describe("password login's attempt limit letting no attempt by while the store c
 		await on({ name: "attempts-unavailable-r", scene }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
+			const source = nextSource();
 			const cut = performance.now();
 			a.relay.reset("all");
 			const cutting = setInterval(() => a.relay.reset("all"), 20);
-			const answer = await loginAt(a, nextSource()).finally(() => clearInterval(cutting));
+			const answer = await loginAt(a, source).finally(() => clearInterval(cutting));
 			expect(said(answer)).toEqual(refusedUnconfirmed);
-			// Nothing reached Redis from the first cut to the answer.
-			expect(a.relay.executions(anything).filter((e) => e.at > cut && e.at < answer.at)).toEqual(
-				[],
-			);
+			// The attempt's count did not succeed from the first cut to the answer. Cuts 20 ms apart cannot
+			// stop a command getting through on a connection just opened, so the scene checks only the
+			// write its guarantee rests on.
+			expect(
+				successes(a, attemptFrom(source)).filter((e) => e.at > cut && e.at < answer.at),
+			).toEqual([]);
 			await refusedAtCount(a, cut);
 			await healed(a);
 		});

@@ -28,8 +28,6 @@ import {
 
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
-/** Every store operation, a script; not the handshake each new connection makes, nor the confirming connection's rounds (`ROLE`, `INFO`, its `SET`, `WAIT`). */
-const operations: Match = { request: (c) => c.name === "EVAL", succeeded: () => true };
 
 /**
  * The answer under the fault: the session could not be opened (`temporarily_unavailable`, not the
@@ -126,11 +124,12 @@ describe("password login opening no session while the store cannot answer", () =
 			held.release();
 			const answer = await asked.finally(() => clearInterval(cutting));
 			expect(said(answer)).toEqual(unopened);
-			// No store operation reached Redis from the first cut to the answer: over the record's
-			// patience, connections reopen and their handshakes may land before the next cut.
-			expect(a.relay.executions(operations).filter((e) => e.at > cut && e.at < answer.at)).toEqual(
-				[],
-			);
+			// No write that opens a session succeeded from the first cut to the answer. Cuts 20 ms apart
+			// cannot stop a command getting through on a connection just opened (a read of Redis's clock,
+			// say), so the scene checks only the writes its guarantee rests on.
+			for (const opening of [sessionRecord, cookieIndexed]) {
+				expect(successes(a, opening).filter((e) => e.at > cut && e.at < answer.at)).toEqual([]);
+			}
 			await noSessionOpened(a, cut);
 			await healed(a);
 		});
