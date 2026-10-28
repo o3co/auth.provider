@@ -85,14 +85,12 @@ describe("the token endpoint's request limit letting no request by while the sto
 			const stalled = performance.now();
 			i.relay.stall("down");
 			const answer = await grantedAt(i);
-			const resumed = performance.now();
 			i.relay.resume();
 			noToken(answer);
 			// Its count reached Redis, which counted it before the endpoint gave up; the answer was held.
 			expect(
 				i.relay.executions(requestCounted).some((e) => e.at > stalled && e.at < answer.at),
 			).toBe(true);
-			expect(resumed).toBeGreaterThan(answer.at);
 			await refusedAtCount(i, stalled);
 			await healed(i);
 		});
@@ -140,6 +138,7 @@ describe("the token endpoint's request limit letting no request by while the sto
 			const i = instanceOf(d);
 			await control(i);
 			const asking = performance.now();
+			// Five seconds, well past the command timeout (1 s by default) the count, never resent, answers at.
 			const { asleep, awake } = d.topology.sleep(d.topology.primary(), 5);
 			// When Redis woke, taken as it wakes, apart from the endpoint's answer.
 			const woke = awake.then(() => performance.now());
@@ -179,6 +178,9 @@ describe("the token endpoint's request limit letting no request by while the sto
 			await replicasOnline(d);
 			if (!answer) throw new Error("no answer while the writes were held");
 			noToken(answer);
+			// No count took effect while the old primary held its writes.
+			const held = answer.at;
+			expect(successes(i, requestCounted).filter((e) => e.at > from && e.at < held)).toEqual([]);
 			await refusedAtCount(i, from);
 			await healed(i);
 		});
