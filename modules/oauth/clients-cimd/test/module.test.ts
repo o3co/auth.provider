@@ -84,7 +84,7 @@ const allowanceSection: Section<unknown> = {
 
 /** The owners' sections, and their copies from a document, as client-documents collects them. */
 const ownersOf = (sections: readonly Section<unknown>[], copies: readonly DocumentCopy[]) =>
-	defineModule({ name: "owners", replicaSafe: true, takes: [] }, (m) => [
+	defineModule({ name: "owners", replicaSafe: false, takes: [] }, (m) => [
 		...sections.map((one) => m.contribute(metadataSections).by(() => one)),
 		...copies.map((one) => m.contribute(documentCopies).by(() => one)),
 	]);
@@ -328,14 +328,17 @@ describe("clients-cimd: a refused document", () => {
 	});
 
 	it("is none and forgotten, as a failed fetch, when checking its record throws", async () => {
-		const throwing = defineModule({ name: "throwing-owner", replicaSafe: true, takes: [] }, (m) => [
-			m.contribute(metadataSections).by(() => ({
-				name: "throwing",
-				schema: z.unknown().transform(() => {
-					throw new Error("unreadable");
-				}),
-			})),
-		]);
+		const throwing = defineModule(
+			{ name: "throwing-owner", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(metadataSections).by(() => ({
+					name: "throwing",
+					schema: z.unknown().transform(() => {
+						throw new Error("unreadable");
+					}),
+				})),
+			],
+		);
 		const app = await boot({}, { extra: [throwing] });
 		expect(await app.find()).toBeUndefined();
 		expect(await app.find()).toBeUndefined();
