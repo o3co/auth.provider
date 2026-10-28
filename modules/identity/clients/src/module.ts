@@ -117,6 +117,8 @@ export default defineModule(
 		}),
 		m.provide(clients).by(async (c) => {
 			const methods = await c.collect(authMethods);
+			// Refused before the registered clients are read: assembly builds `registered` on its own all
+			// the same, so its refusals are reported with these in the one boot.
 			const issues = methodIssues(methods);
 			if (issues.length > 0) return c.refuseAll(issues);
 			return registry(
