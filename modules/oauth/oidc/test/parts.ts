@@ -28,7 +28,7 @@ import oidc from "../src/module.ts";
 
 /** Sessions known by handle, entered as given. */
 export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
-	defineModule({ name: "sessions", takes: [] }, (m) => [
+	defineModule({ name: "sessions", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
 				entryOf: async (handle) => {
@@ -42,7 +42,7 @@ export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
 	]);
 
 /** A ledger that cannot look users up by subject. */
-export const unanswering = defineModule({ name: "ledger", takes: [] }, (m) => [
+export const unanswering = defineModule({ name: "ledger", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(ledgers).by(() => ({
 		verify: async () => ({ kind: "none" }),
 		bySubject: async () => ({ kind: "unanswerable" }),
@@ -63,7 +63,7 @@ export const loginOf = (subject: string, source: string): AuthContext => ({
 export const makers = contract<readonly IdTokenMaker[]>("makers");
 export const hooks = contract<readonly RedemptionHook[]>("hooks");
 /** A judge of consent that agrees to every scope, so a test selects by the client's allowance alone. */
-const agreeing = defineModule({ name: "agreeing", takes: [] }, (m) => [
+const agreeing = defineModule({ name: "agreeing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(selectionConsents).by(() => ({ consented: async () => true })),
 ]);
 export const published = contract<readonly MetadataItem[]>("published");
@@ -91,11 +91,14 @@ export const composed = (p: {
 		claimsSelectionInMemory().module,
 		agreeing,
 		oidc,
-		defineModule({ name: "reader", takes: [idTokens, metadata, redemptionHooks] }, (m) => [
-			m.provide(makers).by((c) => c.collect(idTokens)),
-			m.provide(hooks).by((c) => c.collect(redemptionHooks)),
-			m.provide(published).by((c) => c.collect(metadata)),
-		]),
+		defineModule(
+			{ name: "reader", replicaSafe: true, takes: [idTokens, metadata, redemptionHooks] },
+			(m) => [
+				m.provide(makers).by((c) => c.collect(idTokens)),
+				m.provide(hooks).by((c) => c.collect(redemptionHooks)),
+				m.provide(published).by((c) => c.collect(metadata)),
+			],
+		),
 	],
 	config: {
 		...kernelConfig(),
