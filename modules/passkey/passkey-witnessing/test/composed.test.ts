@@ -57,7 +57,7 @@ async function composed() {
 	});
 	const broken = lossy(inner.get(passkeyStore));
 	const challenges = inner.get(challengeStore);
-	const stores = defineModule({ name: "lossy-stores", takes: [] }, (m) => [
+	const stores = defineModule({ name: "lossy-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => broken.store),
 		m.provide(challengeStore).by(() => challenges),
 	]);
