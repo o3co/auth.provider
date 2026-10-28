@@ -144,3 +144,23 @@ describe("federation-grants' section: a connection's longest access token life",
 		).toMatchObject([{ code: "unrecognized_keys", path: where, keys: [old] }]);
 	});
 });
+
+describe("federation-grants' section: a connection's resource", () => {
+	/** The section with one connection, `cal`, whose resource is the one given. */
+	const withResource = (resource: unknown) => ({
+		connections: {
+			cal: { idp: "corp", scopes: ["openid"], "max-access-token-lifetime": "1h", resource },
+		},
+	});
+
+	it("takes only an absolute URI as the resource sent upstream, refusing the section otherwise [rfc8707-2-d]", () => {
+		const resource = "https://api.example/v1";
+		expect(section.parse(withResource(resource)).connections.cal?.resource).toBe(resource);
+		for (const relative of ["/v1", "api.example/v1", "//api.example/v1", "", 7]) {
+			expect(
+				section.safeParse(withResource(relative)).error?.issues,
+				String(relative),
+			).toMatchObject([{ path: ["connections", "cal", "resource"] }]);
+		}
+	});
+});
