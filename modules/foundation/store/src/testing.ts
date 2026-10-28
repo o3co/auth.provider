@@ -914,8 +914,15 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const first = await s.count(k, window);
 				expect(first.kind).toBe("counted");
 				expect((await s.count(k, window)).kind).toBe("limited");
-				const resetAt = "resetAt" in first ? first.resetAt : Number.POSITIVE_INFINITY;
-				while ((await s.now()) < resetAt) await sleep(20);
+				// Past resetAt, not at it: a backend may keep the window through resetAt's own millisecond.
+				const resetAt = "resetAt" in first ? first.resetAt : Number.NaN;
+				const giveUp = Date.now() + window.ms + 5_000;
+				let now = await s.now();
+				while (now <= resetAt && Date.now() < giveUp) {
+					await sleep(20);
+					now = await s.now();
+				}
+				expect(now > resetAt, "the store clock did not pass resetAt").toBe(true);
 				expect(await s.count(k, window)).toMatchObject({ kind: "counted", count: 1 });
 			});
 		});
