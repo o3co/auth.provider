@@ -141,15 +141,21 @@ describe("checks: offline_access", () => {
 		return decided.kind === "refuse" ? [decided.kind, decided.error] : [decided.kind];
 	};
 
-	it("drops from an OpenID Connect request an offline_access the client is not allowed, rather than refusing it [oidc-core-11-c]", () => {
-		expect(scopeOf(app, "openid offline_access read")).toEqual(["openid", "read"]);
-		expect(scopeOf(app, "offline_access openid")).toEqual(["openid"]);
+	it("drops offline_access from an OpenID Connect request rather than refusing it, the client allowed it or not: no offline access is offered, so nothing permits it [oidc-core-11-c] [oidc-core-11-d]", () => {
+		const offline = allowing(["openid", "read", "offline_access"]);
+		for (const [name, client] of [
+			["not allowed", app],
+			["allowed", offline],
+		] as const) {
+			expect(scopeOf(client, "openid offline_access read"), name).toEqual(["openid", "read"]);
+			expect(scopeOf(client, "offline_access openid"), name).toEqual(["openid"]);
+		}
 	});
 
-	it("keeps an offline_access the client is allowed, and refuses one without openid as any scope outside the allowance", () => {
-		const offline = allowing(["openid", "read", "offline_access"]);
-		expect(scopeOf(offline, "openid offline_access")).toEqual(["openid", "offline_access"]);
+	it("reads offline_access without openid as any scope word: refused outside the allowance, issued within it", () => {
+		const offline = allowing(["read", "offline_access"]);
 		expect(scopeOf(app, "offline_access read")).toEqual(["refuse", "invalid_scope"]);
 		expect(scopeOf(app, "offline_access")).toEqual(["refuse", "invalid_scope"]);
+		expect(scopeOf(offline, "offline_access read")).toEqual(["offline_access", "read"]);
 	});
 });
