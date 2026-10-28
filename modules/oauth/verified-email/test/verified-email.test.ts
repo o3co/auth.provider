@@ -177,7 +177,9 @@ describe("over users and the session's login", () => {
 		usersConfig([testUser("alice", "pw", { subject: "s-alice", attributes })]);
 
 	it("allows a registered user users states verified", async () => {
-		const app = await boot({ users: [usersModule], config: registered(verified(true)) });
+		// Beside the email, where users takes a verification.
+		const attributes = { email: "alice@example.com", ...verified(true) };
+		const app = await boot({ users: [usersModule], config: registered(attributes) });
 		expect(await app.get(tokens).admits(asked("session", "h1"))).toEqual({ kind: "allowed" });
 	});
 
