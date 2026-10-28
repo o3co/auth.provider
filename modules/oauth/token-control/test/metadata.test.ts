@@ -89,7 +89,7 @@ const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
 	})),
 ]);
 
-it("publishes how a client authenticates at each: no public client at introspection, and the algorithms of signed methods as they take them, none of which is none [rfc8414-2-l] [rfc8414-2-n] [rfc8414-2-m] [rfc8414-2-o]", async () => {
+it("publishes how a client authenticates at each: no public client at introspection, and the algorithms of signed methods as they take them [rfc8414-2-l] [rfc8414-2-n]", async () => {
 	const plain = await documentOf(true, "https://as.example");
 	expect(plain.introspection_endpoint_auth_methods_supported).toEqual([
 		"client_secret_basic",
@@ -106,9 +106,7 @@ it("publishes how a client authenticates at each: no public client at introspect
 	expect(withSigned.introspection_endpoint_auth_methods_supported).toContain("private_key_jwt");
 	expect(withSigned.introspection_endpoint_auth_signing_alg_values_supported).toEqual(["ES256"]);
 	expect(withSigned.revocation_endpoint_auth_signing_alg_values_supported).toEqual(["ES256"]);
-	// Published as the signed methods take them, unfiltered. client-assertion is the one method that
-	// signs, and its section refuses none and every MAC: its test "names the asymmetric algorithms an
-	// assertion may be signed with" shows it.
+	// Published as the signed methods take them, unfiltered.
 	// Where revocation is not published, neither is how to authenticate there.
 	const unrevocable = await documentOf(false, "https://as.example", [signed]);
 	expect(unrevocable).not.toHaveProperty("revocation_endpoint_auth_methods_supported");
