@@ -241,7 +241,8 @@ describe.runIf(areaTarget().can("store-fault:refresh-families"))(
 				const { refresh_token: token = "" } = await tokensFor();
 				const answer = await faulty.whileDown(() => refresh(token));
 				expect([answer.status, answer.body.error]).toEqual([503, "temporarily_unavailable"]);
-				// The store answers PING before the app's first read after it is back; a 503 spends nothing, so ask again.
+				// The store answers PING before the app's first read after it is back, so ask again: a 503 whose read
+				// failed spends nothing; one whose rotation landed unheard is answered as a reuse, which this does not wait out.
 				const until = Date.now() + 10_000;
 				let after = await refresh(token);
 				while (after.status === 503 && Date.now() < until) {
