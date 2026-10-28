@@ -62,7 +62,7 @@ Audit is best effort ([Audit](security-model.md#audit)).
   - A JWT bearer assertion's, a client assertion's and a DPoP proof's `jti` is spent once (5-c, 5-d, 5-e).
   - A session left closing is closed by its logout or a later sweep on any instance, and a logout that cannot finish answers `503` (1-a).
 - **Declared, not yet shown under these faults:** a device code decided and redeemed once, a recovery code used once, a passkey challenge used once, a login lockout's count, an id_token exchanged once (5-f to 5-j), and a subject's revocation boundary (4-a).
-- **Declared:** boot refuses a module that declares itself unsafe on several instances (the store kept in memory, the mail that only logs). A module that declares nothing is taken as safe: check your own modules before setting `kernel.deployment = multi`.
+- **Declared:** boot refuses a module that declares itself unsafe on several instances, as [promise 5](security-model.md#promises-across-modules) says, with what it takes of a module that declares nothing; check your own modules before setting `kernel.deployment = multi`.
 - **Operator's:** the same configuration on every instance (the signing keys, the issuer, Redis's URL and prefix, the seal key, the registered clients and users), and host clocks synchronized, with no skew allowed between hosts ([Trust assumptions](security-model.md#trust-assumptions), [runbook: Many instances](runbook.md#many-instances)).
 
 ## Outside the provider
