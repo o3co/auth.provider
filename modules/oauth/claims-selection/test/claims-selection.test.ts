@@ -15,7 +15,6 @@ import { afterEach, expect, it } from "vitest";
 import {
 	claimScopes,
 	claimsSelections,
-	constrainedFamilyList,
 	type Selection,
 	type SelectionConsent,
 	selectionConsents,
@@ -318,7 +317,6 @@ const touched = async (): Promise<never> => {
 };
 const untouchable = defineModule({ name: "untouchable-stores", takes: [] }, (m) => [
 	m.provide(selectionRecords).by(() => ({ save: touched, read: touched })),
-	m.provide(constrainedFamilyList).by(() => ({ add: touched, done: touched, each: touched })),
 ]);
 
 it("touches no store when off: nothing pinned, kept or read, and refuses to keep a code's selection", async () => {
