@@ -94,6 +94,7 @@ The transaction's identifier never goes in a URL; only this `GET` takes it from 
 
 ## Related
 
+- The page a client that is not first-party sends the user to after the login is [your consent page](consent-page.md).
 - Each setting named here is in the [configuration reference](configuration.md).
 - What the provider guarantees about sessions, cookies and CSRF is in the [security model](security-model.md#browsers-sessions-cookies-and-csrf).
 - The module cards of `login-password`, `csrf` and `login-gates` hold the full contract, under `modules/identity/` in the repository, and `login-passkey`'s and `passkey-registration`'s under `modules/passkey/`.
