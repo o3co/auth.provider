@@ -67,7 +67,7 @@ describe("the link store users asks for", () => {
 		...(byUpstream ? { byUpstream } : {}),
 	});
 	const contactsOnly = defineModule(
-		{ name: "contacts-only", replicaSafe: true, takes: [] },
+		{ name: "contacts-only", replicaSafe: false, takes: [] },
 		(m) => [m.provide(contactStore).by(() => memoryUsersStores().contacts.store)],
 	);
 	/** A link store that keeps in memory and lists each method asked of it. */
@@ -94,7 +94,7 @@ describe("the link store users asks for", () => {
 		...links,
 		...(ledger
 			? [
-					defineModule({ name: "test-ledger", replicaSafe: true, takes: [] }, (m) => [
+					defineModule({ name: "test-ledger", replicaSafe: false, takes: [] }, (m) => [
 						m.contribute(ledgers).by(() => ledger),
 					]),
 				]

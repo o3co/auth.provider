@@ -33,7 +33,7 @@ function fakeLedger(calls: string[] = []): Ledger {
 }
 
 const ledgerModule = (ledger: Ledger, name = "test-ledger") =>
-	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
+	defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(ledgers).by(() => ledger),
 	]);
 

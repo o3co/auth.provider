@@ -35,7 +35,7 @@ const boot = async (
 				usersModule,
 				secretHashModule,
 				stores.module,
-				defineModule({ name: "test-ledger", replicaSafe: true, takes: [] }, (m) => [
+				defineModule({ name: "test-ledger", replicaSafe: false, takes: [] }, (m) => [
 					m.contribute(ledgers).by(() => ledger),
 				]),
 				...names.map((name, i) =>
