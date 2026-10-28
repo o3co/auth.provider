@@ -15,6 +15,9 @@ const guarantees = Object.values(guaranteeFor);
 const codes: Space = { name: "code-grant-store.codes", guarantees };
 const voids: Space = { name: "code-grant-store.voids", guarantees };
 
+// Safe on many instances given the same `void-shards` and `voids-per-shard` on each
+// (deployment-guarantees, Several instances): void codes go to a shard by their hash, and a sweep
+// walks only the shards it counts.
 export default defineModule(
 	{ name: "code-grant-store", replicaSafe: true, section, takes: [store] },
 	(m) => [
