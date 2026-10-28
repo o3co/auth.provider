@@ -1688,6 +1688,9 @@ importers:
 
   modules/oauth/oidc:
     dependencies:
+      '@mod/authorize':
+        specifier: workspace:*
+        version: link:../authorize
       '@mod/claims-selection':
         specifier: workspace:*
         version: link:../claims-selection

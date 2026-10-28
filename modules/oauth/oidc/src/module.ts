@@ -1,3 +1,4 @@
+import { hintReaders } from "@mod/authorize";
 import { claimScopes, claimsSelections } from "@mod/claims-selection";
 import { idTokens } from "@mod/code-grant";
 import { issuer, metadata } from "@mod/issuer";
@@ -8,7 +9,7 @@ import { userAttribute } from "@mod/users";
 import { z } from "zod";
 import { claimsOf, scopeOfClaim, tableClaims, tableScopes } from "./claims/table.ts";
 import { idTokenHints, type ReleasedClaims, releasedClaims } from "./contract.ts";
-import { hintsOver } from "./hints.ts";
+import { hintReaderOf, hintsOver } from "./hints.ts";
 
 const section = z.strictObject({
 	"id-token-lifetime": setting
@@ -42,6 +43,11 @@ export default defineModule(
 		m
 			.provide(idTokenHints)
 			.by(async (c) => hintsOver({ keys: await c.get(keys), issuer: (await c.get(issuer)).url })),
+		m
+			.contribute(hintReaders)
+			.by(async (c) =>
+				hintReaderOf(hintsOver({ keys: await c.get(keys), issuer: (await c.get(issuer)).url })),
+			),
 		m.contribute(idTokens).by(async (c) => {
 			const signer = await c.get(keys);
 			// ID tokens are checked by others with the public key; a shared secret could forge them.
