@@ -72,7 +72,7 @@ describe("OpenID Connect userinfo: a token issued in no session", () => {
 	});
 
 	it.skipIf(areaTarget().differs("userinfo-needs-openid"))(
-		"refuses a token whose scope lacks openid as insufficient scope (RFC 6750 §3.1) [rfc6749-7-a] [rfc6749-7.2-a] [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f] [rfc6750-3-g] [rfc6750-3.1-c]",
+		"refuses a token whose scope lacks openid as insufficient scope (RFC 6750 §3.1) [rfc6749-7-a] [rfc6749-7.2-a] [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f] [rfc6750-3-g] [rfc6750-3.1-c] [rfc9700-2.3-c]",
 		async () => {
 			const res = await fetch(`${base}/oauth/userinfo`, {
 				headers: { ...backChannel, authorization: `Bearer ${await issued("read")}` },
