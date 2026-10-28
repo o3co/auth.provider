@@ -58,6 +58,7 @@ onNew(codeArea, (part, scene) => {
 			...(part.sweepSeconds
 				? { "session-lifecycle": { "sweep-interval": `${part.sweepSeconds}s` } }
 				: {}),
+			...(part.closingShards ? { "session-store": { "closing-shards": part.closingShards } } : {}),
 		},
 	};
 });

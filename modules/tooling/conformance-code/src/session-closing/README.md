@@ -9,4 +9,4 @@ Internal module of `conformance-code`: the fault scenes of a closing session clo
   - its instance killed halfway, closed by another instance's sweep, no logout sent there (`K`); another instance's sweep closing it while the logout is held, the logout then answering closed (`H2`).
 
 ## Depends on
-- `faults`; the package's scene builder (userinfo, a sweep every second); `conformance` (the relay's matches)
+- `faults`; the package's scene builder (userinfo, a sweep every second over 4 shards of the closings, or none within the scene where the logout alone closes it); `conformance` (the relay's matches)
