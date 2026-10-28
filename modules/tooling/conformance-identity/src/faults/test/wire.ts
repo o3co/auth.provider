@@ -56,3 +56,28 @@ export const lockoutRun = (command: Command): number | undefined => {
 		.find((r) => typeof r === "number");
 	return typeof run === "number" ? run : undefined;
 };
+
+/**
+ * The writes of a subject's revocation boundary: its record created, or written from what it holds; not
+ * the mark that confirms, before the first, that the subject holds none.
+ */
+export const boundaryOf = (subject: string): Match =>
+	storeWrite({
+		prefix,
+		space: "subject-revocation-store.boundaries",
+		partition: subject,
+		operations: ["putIfAbsent", "replaceIf"],
+	});
+
+/**
+ * A follower's first write after a revocation's boundary: session-lifecycle adding the subject's
+ * sessions to its closings, before it closes any.
+ */
+export const closingAdded: Match = storeWrite({ prefix, space: "session-store.closings" });
+
+/** The write that closes a session's record: a follower's work done for that session, past its first write. */
+export const sessionClosed: Match = storeWrite({
+	prefix,
+	space: "session-store.sessions",
+	value: (v) => (v as { state?: unknown } | null)?.state === "closed",
+});
