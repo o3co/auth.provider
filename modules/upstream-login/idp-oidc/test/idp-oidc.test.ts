@@ -7,6 +7,7 @@ import {
 	defineModule,
 	isUnavailable,
 	kernelConfig,
+	readConfigured,
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -926,6 +927,13 @@ describe("idp-oidc", () => {
 		}
 		expect(asked.some((a) => a.url === `${issuer}/token`)).toBe(false);
 		const accepting = await answering(token, { settings: { "accept-missing-iss": true } });
+		// Accepting a missing iss takes no other: a wrong or empty one is refused before its code is used.
+		for (const iss of ["https://evil.example", ""]) {
+			expect(await outcome(accepting.upstream.exchange(codeExchange({ iss }))), iss).toBe(
+				"refused",
+			);
+		}
+		expect(accepting.asked.some((a) => a.url === `${issuer}/token`)).toBe(false);
 		expect(
 			await outcome(accepting.upstream.exchange(codeExchange({ iss: undefined }))),
 		).toMatchObject({ subject: "u-alice" });
@@ -958,17 +966,15 @@ describe("idp-oidc", () => {
 		}
 	});
 
-	it("refuses 0.18's require-iss as an unknown key, naming it", () => {
-		const settings = settingsOf(asymmetric, policyRefusing());
-		const read = settings.safeParse({
+	it("refuses 0.18's require-iss as an unknown key, naming it, read as federation reads an IdP's settings", () => {
+		const read = readConfigured(settingsOf(asymmetric, policyRefusing()), {
 			issuer,
 			"client-id": "client",
 			"client-secret": "s",
 			"require-iss": true,
 		});
-		expect(read.error?.issues).toMatchObject([
-			{ code: "unrecognized_keys", keys: ["require-iss"] },
-		]);
+		expect(read).toEqual({ issues: [expect.objectContaining({ path: [] })] });
+		expect("issues" in read && read.issues[0]?.message).toMatch(/"require-iss"/);
 	});
 
 	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [oidc-discovery-7.2-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
