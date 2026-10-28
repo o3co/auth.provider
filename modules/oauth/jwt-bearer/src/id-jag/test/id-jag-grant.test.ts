@@ -182,7 +182,7 @@ function fakes(asked: Asked, withCorpLedger: boolean, given: Fakes) {
 				: [],
 		),
 		// The audience asked by `resource`, as resource indicators narrow it.
-		defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
+		defineModule({ name: "narrowing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ param, audience, within }) => {
 					const asked = param("resource");

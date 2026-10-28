@@ -417,7 +417,7 @@ describe("delegated issuers", () => {
 
 		it("reads accept-unbound for registered clients alone: one a source names cannot give it to itself", async () => {
 			const logged = recordingLog();
-			const source = defineModule({ name: "a-source", replicaSafe: true, takes: [] }, (m) => [
+			const source = defineModule({ name: "a-source", replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(clientSources).by(() => ({
 					find: async (id: string) =>
 						id === "named-phone"

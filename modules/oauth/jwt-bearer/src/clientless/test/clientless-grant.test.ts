@@ -346,7 +346,7 @@ describe("a grant naming no client, by an issuer's client", () => {
 	});
 
 	it("uses an assertion up once, whether a request names its client or none, in the store and in a ledger", async () => {
-		const ledger = defineModule({ name: "jti-ledger", replicaSafe: true, takes: [] }, (m) => [
+		const ledger = defineModule({ name: "jti-ledger", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(jtiLedgers).by(() => memoryJtiLedger(shared, () => now)),
 		]);
 		for (const extra of [[], [ledger]]) {
@@ -385,7 +385,7 @@ describe("a grant naming no client, by an issuer's client", () => {
 	it("identifies a self-issued signer as its entry's, its jti apart from the issuer's own", async () => {
 		const prefix = "device:";
 		const id = await thumb();
-		const held = defineModule({ name: "phone-keys", replicaSafe: true, takes: [] }, (m) => [
+		const held = defineModule({ name: "phone-keys", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(signerKeys).by(() => ({
 				issuer: "app.phones",
 				perSigner: true,
