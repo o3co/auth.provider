@@ -10,6 +10,8 @@ const fragmentTexts: Readonly<Record<string, string>> = {
 	"@mod/kernel": "kernel { deployment = single }",
 	"@mod/http": 'http { host = "127.0.0.1", port = 8080 }',
 	"@mod/clients": 'clients { redirect-uris = ["https://app.example.invalid/cb"] }',
+	"@mod/keys":
+		'keys { signing { kid = "k1", private-key = """-----BEGIN PRIVATE KEY-----\nREPLACE\n-----END PRIVATE KEY-----""" } }',
 };
 
 /** Packages as a caller would give them: the fragments above, published under `@o3co/x-`. */
