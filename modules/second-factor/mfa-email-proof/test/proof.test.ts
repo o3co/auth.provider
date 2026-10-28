@@ -45,42 +45,46 @@ beforeEach(() => {
 });
 
 const seen = contract<BindingProof>("seen");
-const outside = defineModule({ name: "outside", takes: [bindingProofs] }, (m) => [
-	m.provide(mail).by(() => ({
-		send: async (message) => {
-			if (answer === "unavailable") throw new Unavailable("mail");
-			sent.push(message);
-			return answer;
-		},
-	})),
-	m.provide(users).by(
-		() =>
-			({
-				claimedContacts: async (subject: string) => {
-					const value = contacts.get(subject);
-					if (value === null) return { kind: "unanswerable" };
-					return value === undefined ? [] : [{ kind: "email", value }];
-				},
-				verifiedContact: async (subject: string, contact: unknown) => {
-					if (contactsFull) throw new RangeError("users: a subject keeps at most 20 contacts");
-					verified.push([subject, contact]);
-				},
-			}) satisfies Pick<Users, "claimedContacts" | "verifiedContact"> as never,
-	),
-	m.provide(subjectAttributes).by(() => ({
-		of: async (_subject: string, handle?: string) => {
-			const told = handle === undefined ? undefined : sessions.get(handle);
-			if (!told) return { kind: "unknown" as const };
-			return { kind: "known" as const, vouched: told.vouched, attributes: { email: told.email } };
-		},
-	})),
-	m.provide(seen).by(async (c) => (await c.collect(bindingProofs))[0] as BindingProof),
-]);
+const outside = defineModule(
+	{ name: "outside", replicaSafe: false, takes: [bindingProofs] },
+	(m) => [
+		m.provide(mail).by(() => ({
+			send: async (message) => {
+				if (answer === "unavailable") throw new Unavailable("mail");
+				sent.push(message);
+				return answer;
+			},
+		})),
+		m.provide(users).by(
+			() =>
+				({
+					claimedContacts: async (subject: string) => {
+						const value = contacts.get(subject);
+						if (value === null) return { kind: "unanswerable" };
+						return value === undefined ? [] : [{ kind: "email", value }];
+					},
+					verifiedContact: async (subject: string, contact: unknown) => {
+						if (contactsFull) throw new RangeError("users: a subject keeps at most 20 contacts");
+						verified.push([subject, contact]);
+					},
+				}) satisfies Pick<Users, "claimedContacts" | "verifiedContact"> as never,
+		),
+		m.provide(subjectAttributes).by(() => ({
+			of: async (_subject: string, handle?: string) => {
+				const told = handle === undefined ? undefined : sessions.get(handle);
+				if (!told) return { kind: "unknown" as const };
+				return { kind: "known" as const, vouched: told.vouched, attributes: { email: told.email } };
+			},
+		})),
+		m.provide(seen).by(async (c) => (await c.collect(bindingProofs))[0] as BindingProof),
+	],
+);
 
 /** `mfa-binding-proof`, which hears this proof; only that it is there. */
-const proofPlace = defineModule({ name: "binding-proof-place", takes: [] }, (m) => [
-	m.provide(bindingProof).by(() => ({}) as BindingProofs),
-]);
+const proofPlace = defineModule(
+	{ name: "binding-proof-place", replicaSafe: true, takes: [] },
+	(m) => [m.provide(bindingProof).by(() => ({}) as BindingProofs)],
+);
 
 const composition = {
 	modules: [outside, proofPlace, proofModule],

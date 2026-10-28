@@ -37,7 +37,12 @@ const releasedOver = (read: SubjectAttributes): ReleasedClaims => ({
 });
 
 export default defineModule(
-	{ name: "oidc", section, takes: [subjectAttributes, keys, issuer, claimsSelections] },
+	{
+		name: "oidc",
+		replicaSafe: true,
+		section,
+		takes: [subjectAttributes, keys, issuer, claimsSelections],
+	},
 	(m) => [
 		m.provide(releasedClaims).by(async (c) => releasedOver(await c.get(subjectAttributes))),
 		m

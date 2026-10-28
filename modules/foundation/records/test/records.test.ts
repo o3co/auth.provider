@@ -35,7 +35,7 @@ async function open() {
 	const app = await assemble({
 		modules: [
 			simulated.module,
-			defineModule({ name: "user", takes: [store] }, (m) => [
+			defineModule({ name: "user", replicaSafe: false, takes: [store] }, (m) => [
 				m.contribute(spaces).by(() => space),
 				m.provide(opened).by((c) => c.get(store)),
 			]),

@@ -75,7 +75,7 @@ const saved: string[] = [];
 const keptFor: number[] = [];
 /** Spent assertions on records' stand-in, whose own clock runs `aheadMs` past the kernel's. */
 const spentOn = (aheadMs = 0) =>
-	defineModule({ name: "spent-assertions", takes: [] }, (m) => [
+	defineModule({ name: "spent-assertions", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(spentAssertions).by(() => {
 			const stand = memoryRecords<true>(() => clock.at + aheadMs, { shards: 1, perShard: 1 });
 			return {
@@ -101,9 +101,10 @@ function assembly(
 	extra: readonly Module[] = [],
 	publicOrigin = true,
 ) {
-	const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
-		m.provide(tokenEndpointLocation).by(() => ({ url: located ?? undefined })),
-	]);
+	const location = defineModule(
+		{ name: "token-endpoint-location", replicaSafe: true, takes: [] },
+		(m) => [m.provide(tokenEndpointLocation).by(() => ({ url: located ?? undefined }))],
+	);
 	return {
 		modules: [
 			location,
@@ -172,7 +173,7 @@ const saidOf = (outcome: GrantOutcome) =>
 	outcome.kind === "error" ? `${outcome.error}: ${outcome.description}` : "issued";
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
+const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -253,7 +254,7 @@ describe("jwt-bearer", () => {
 	it("refuses as expired an assertion with less than a second left when its jti would be used up, and is refused a token with less once signed", async () => {
 		/** How long each asking of the issuance policies takes: before the jti is used up, then in issuing. */
 		let waits: number[] = [];
-		const waiting = defineModule({ name: "test-policy", takes: [] }, (m) => [
+		const waiting = defineModule({ name: "test-policy", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async () => {
@@ -404,7 +405,7 @@ describe("jwt-bearer", () => {
 	it("asks the issuance policies before the jti is used up, and again when issuing", async () => {
 		const asked: IssuanceRequest[] = [];
 		let refusing = new Set([1]);
-		const policy = defineModule({ name: "test-policy", takes: [] }, (m) => [
+		const policy = defineModule({ name: "test-policy", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -751,18 +752,21 @@ describe("jwt-bearer", () => {
 		/** An outbound answering the key set, keeping what it was asked. */
 		function keySetAt(keys: unknown[]) {
 			const asked: { url: string; narrower: Narrower | undefined }[] = [];
-			const module = defineModule({ name: "outbound-stand-in", takes: [] }, (m) => [
-				m.provide(outbound).by(() => ({
-					fetch: async (url, _request, narrower) => {
-						asked.push({ url, narrower });
-						return {
-							status: 200,
-							headers: new Map(),
-							body: new TextEncoder().encode(JSON.stringify({ keys })),
-						};
-					},
-				})),
-			]);
+			const module = defineModule(
+				{ name: "outbound-stand-in", replicaSafe: false, takes: [] },
+				(m) => [
+					m.provide(outbound).by(() => ({
+						fetch: async (url, _request, narrower) => {
+							asked.push({ url, narrower });
+							return {
+								status: 200,
+								headers: new Map(),
+								body: new TextEncoder().encode(JSON.stringify({ keys })),
+							};
+						},
+					})),
+				],
+			);
 			return { module, asked };
 		}
 
@@ -834,7 +838,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 	type Answer = Awaited<ReturnType<SignerKeys["keysOf"]>>;
 	/** A module contributing the device keys, answering as `answer` says now and recording each ask. */
 	const signing = (answer: () => Promise<Answer>, asked: unknown[] = []) =>
-		defineModule({ name: "device-keys", takes: [] }, (m) => [
+		defineModule({ name: "device-keys", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(signerKeys).by(() => ({
 				issuer: fixedIss,
 				perSigner: true,
@@ -851,7 +855,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		asked: unknown[] = [],
 		name = "linked-subjects",
 	) =>
-		defineModule({ name, takes: [] }, (m) => [
+		defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(linkedSubjects).by(() => ({
 				declaredBy: name,
 				subjectOf: async (upstream: string, sub: string) => {
@@ -864,7 +868,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 	const entry = (more: Record<string, unknown> = {}) => [{ issuer: fixedIss, ...more }];
 	const otherIss = "app.phones";
 	/** Keys contributed for the second issuer, answering none. */
-	const otherSigning = defineModule({ name: "phone-keys", takes: [] }, (m) => [
+	const otherSigning = defineModule({ name: "phone-keys", replicaSafe: true, takes: [] }, (m) => [
 		m
 			.contribute(signerKeys)
 			.by(() => ({ issuer: otherIss, perSigner: true, keysOf: async () => ({ kind: "none" }) })),
@@ -1420,7 +1424,7 @@ describe("assertions used up in a ledger a module contributes for their issuer",
 		forIssuer = "https://idp.example",
 		name = "jti-ledger",
 	) =>
-		defineModule({ name, takes: [] }, (m) => [
+		defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(jtiLedgers).by(() => ({
 				issuer: forIssuer,
 				spend: async (spend: Spend) => {

@@ -27,6 +27,10 @@ const windowOf = (settings: Settings) => ({
 export default defineModule(
 	{
 		name,
+		// Safe on many instances: an end the store would not take is held by the instance that heard it alone,
+		// which refuses until the held token ends (deployment-guarantees, Several instances); the sweep writes over
+		// the version it read, so any number running it agree.
+		replicaSafe: true,
 		section,
 		// Each helper names what it takes; the module's own factories take the grant store, audit and the browser half.
 		takes: [

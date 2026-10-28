@@ -80,7 +80,7 @@ export function witnessStandIn(
 			};
 		}
 	}
-	const module = defineModule({ name, takes: [] }, (m) => [
+	const module = defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(enrollmentWitnesses).by(() => witness),
 	]);
 	return { module, witness, marks, failing, lost, next };

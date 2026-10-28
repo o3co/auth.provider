@@ -73,7 +73,7 @@ const attributesOf = (user: User) => ({
 });
 
 export default defineModule(
-	{ name: "login-password", section, takes: [audit, logins, lockouts, users] },
+	{ name: "login-password", replicaSafe: true, section, takes: [audit, logins, lockouts, users] },
 	(m) => [
 		m.contribute(amrSources).by(() => ({ name: "login-password", amr: proves })),
 		m.contribute(routes).by(async (c) => {

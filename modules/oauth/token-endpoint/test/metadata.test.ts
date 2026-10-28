@@ -13,14 +13,14 @@ const quiet = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n).fill(1) },
 });
 
-const echo = defineModule({ name: "echo-grant", takes: [] }, (m) => [
+const echo = defineModule({ name: "echo-grant", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(grants).by(() => ({
 		grantType: "urn:test:echo",
 		readsAmbient: "none",
 		handle: async () => ({ kind: "issued", body: {} }),
 	})),
 ]);
-const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
+const signed = defineModule({ name: "signed-method", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(authMethods).by(() => ({
 		name: "test_jwt",
 		// An assertion method, as private_key_jwt and client_secret_jwt are: clients refuses one naming no algorithm.
@@ -32,7 +32,7 @@ const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
 ]);
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 

@@ -168,7 +168,7 @@ it("refuses to start with keys beside current, with neither, or with an id twice
 it("reseals through each holder in name order, answering counts alone, past a holder that fails", async () => {
 	const ran: string[] = [];
 	const holder = (name: string, fails = false) =>
-		defineModule({ name: `holder-${name}`, takes: [] }, (m) => [
+		defineModule({ name: `holder-${name}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(resealers).by(() => ({
 				name,
 				reseal: async () => {

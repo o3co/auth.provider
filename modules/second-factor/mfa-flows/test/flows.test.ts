@@ -16,7 +16,7 @@ import {
 import { clock, during, serve } from "./harness.ts";
 
 /** A kind that sends a challenge, and takes what the challenge kept as the proof after it. */
-const sending = defineModule({ name: "kind-sending", takes: [] }, (m) => [
+const sending = defineModule({ name: "kind-sending", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "sending",
 		amr: ["otp"],
@@ -34,7 +34,7 @@ const sending = defineModule({ name: "kind-sending", takes: [] }, (m) => [
 
 /** How the told kind answers its next enrollment; its secret is the value no two factors may hold. */
 const told = { answer: undefined as Enrolled | undefined };
-const _toldKind = defineModule({ name: "kind-told", takes: [] }, (m) => [
+const _toldKind = defineModule({ name: "kind-told", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -171,12 +171,15 @@ describe("mfa at login", () => {
 
 	it("tells the caller a login came from once the proof opens it, and no one for a login from nowhere", async () => {
 		const told: [string, string][] = [];
-		const upstream = defineModule({ name: "upstream-stand-in", takes: [] }, (m) => [
-			m.contribute(openedAfterHold).by(() => ({
-				caller: "upstream",
-				opened: async (session, carry) => void told.push([session.context.subject, carry]),
-			})),
-		]);
+		const upstream = defineModule(
+			{ name: "upstream-stand-in", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(openedAfterHold).by(() => ({
+					caller: "upstream",
+					opened: async (session, carry) => void told.push([session.context.subject, carry]),
+				})),
+			],
+		);
 		const s = await serve({}, [upstream]);
 		const { secret } = await s.enrollCode();
 		const verify = ({ tx, factor }: Awaited<ReturnType<typeof s.heldLogin>>, n: number) =>
@@ -613,7 +616,7 @@ const verifies = { guess: 0 };
 afterEach(() => {
 	verifies.guess = 0;
 });
-const slowOnce = defineModule({ name: "kind-slow-once", takes: [] }, (m) => [
+const slowOnce = defineModule({ name: "kind-slow-once", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "once",
 		amr: ["hwk"],
@@ -634,7 +637,7 @@ const slowOnce = defineModule({ name: "kind-slow-once", takes: [] }, (m) => [
 		},
 	})),
 ]);
-const slowGuess = defineModule({ name: "kind-slow-guess", takes: [] }, (m) => [
+const slowGuess = defineModule({ name: "kind-slow-guess", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "guess",
 		amr: ["otp"],

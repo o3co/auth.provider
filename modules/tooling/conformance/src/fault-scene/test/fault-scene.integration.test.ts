@@ -100,4 +100,31 @@ describe("a fault scene's deployment", () => {
 		).rejects.toThrow(/min_slaves_good_slaves 1 of the 2 min-replicas-to-write asks/);
 		expect(entered).toBe(false);
 	}, 120_000);
+
+	it("waits, after a promotion that keeps the old primary, until the client has checked its new connection and the new primary takes writes", async () => {
+		await on({ name: "fault-scene-reconnected", scene, replicas: 3 }, async (d) => {
+			const a = instanceOf(d);
+			const [, moved, follower] = d.topology.replicas();
+			if (!moved || !follower) throw new Error("three replicas");
+			await d.topology.promote({ replica: moved, reattach: [follower], keepOld: true });
+			const switched = performance.now();
+			a.relay.switchUpstream(moved.upstream());
+			a.relay.reset("operations");
+			await reconnected(a, moved.upstream());
+			const onMoved = (id: number) => {
+				const to = a.relay.connections().find((c) => c.id === id)?.upstream;
+				return to?.host === moved.upstream().host && to.port === moved.upstream().port;
+			};
+			// A call was answered on the new connection, and the new primary takes a write at once.
+			expect(
+				a.relay
+					.executions({ request: () => true, succeeded: () => true })
+					.some((e) => e.at > switched && onMoved(e.connection)),
+			).toBe(true);
+			expect(await moved.ask("SET", "fault-scene-reconnected", "1")).toEqual({
+				kind: "simple",
+				text: "OK",
+			});
+		});
+	}, 120_000);
 });

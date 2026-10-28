@@ -142,7 +142,7 @@ describe("tokens", () => {
 	});
 
 	it("stamps a binding into cnf, and takes the token type from the kind that writes the member", async () => {
-		const kind = defineModule({ name: "binding-one", takes: [] }, (m) => [
+		const kind = defineModule({ name: "binding-one", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(senderBindings).by(() => ({
 				member: "one",
 				tokenType: "ONE",
@@ -183,18 +183,21 @@ describe("tokens", () => {
 	it("tells a grant the lifetime it applies, so the grant refuses boot above its ceiling", async () => {
 		const ceilingSeconds = 900;
 		const ceiling = contract<object>("ceiling-grant");
-		const grantWithCeiling = defineModule({ name: "ceiling-grant", takes: [tokens] }, (m) => [
-			m.provide(ceiling).by(async (c) => {
-				const lifetime = (await c.get(tokens)).accessTokenLifetimeSeconds();
-				if (lifetime > ceilingSeconds) {
-					return c.refuse(
-						"ceiling-grant",
-						`lifetime ${lifetime} s is over the ceiling ${ceilingSeconds} s`,
-					);
-				}
-				return {};
-			}),
-		]);
+		const grantWithCeiling = defineModule(
+			{ name: "ceiling-grant", replicaSafe: true, takes: [tokens] },
+			(m) => [
+				m.provide(ceiling).by(async (c) => {
+					const lifetime = (await c.get(tokens)).accessTokenLifetimeSeconds();
+					if (lifetime > ceilingSeconds) {
+						return c.refuse(
+							"ceiling-grant",
+							`lifetime ${lifetime} s is over the ceiling ${ceilingSeconds} s`,
+						);
+					}
+					return {};
+				}),
+			],
+		);
 		const bootWith = (lifetime: string) =>
 			assembled(
 				{ "access-token-lifetime": lifetime, revocation: "unsupported" },
@@ -216,7 +219,7 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 	const seen: { id: string; subject: string; issuedAt: number }[] = [];
 	let answer: "holds" | "revoked" = "holds";
 	const down = unavailableSwitch<AccessCondition>();
-	const condition = defineModule({ name: "condition", takes: [] }, (m) => [
+	const condition = defineModule({ name: "condition", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(accessConditions).by(() =>
 			down.wrap({
 				name: "test",
@@ -239,7 +242,7 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 
 it("asks the subject check whether a token's subject was revoked since it was issued", async () => {
 	let answer: "holds" | "revoked" = "holds";
-	const check = defineModule({ name: "check", takes: [] }, (m) => [
+	const check = defineModule({ name: "check", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(subjectChecks).by(() => ({ holds: async () => answer })),
 	]);
 	const t = await boot(
@@ -254,7 +257,7 @@ it("asks the subject check whether a token's subject was revoked since it was is
 
 it("refuses to start unless exactly one module checks subjects, or the section states that none does", async () => {
 	const check = (name: string) =>
-		defineModule({ name, takes: [] }, (m) => [
+		defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
 		]);
 	const unchecked = {
@@ -282,7 +285,7 @@ it("names and stamps the issuer that issuer owns", async () => {
 
 it("names among the issuer's metadata where the keys its tokens are signed with are published, on the public origin, or on the issuer's where none is written [oidc-discovery-3-j]", async () => {
 	let seen: readonly MetadataItem[] = [];
-	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: false, takes: [metadata] }, (m) => [
 		m.provide(contract<readonly MetadataItem[]>("seen")).by(async (c) => {
 			seen = await c.collect(metadata);
 			return seen;
@@ -400,7 +403,7 @@ it("refuses a token whose cap has passed, handing none out", async () => {
 });
 
 it("refuses a token another issuer stamped, and one bound by two members", async () => {
-	const kinds = defineModule({ name: "two-kinds", takes: [] }, (m) =>
+	const kinds = defineModule({ name: "two-kinds", replicaSafe: true, takes: [] }, (m) =>
 		["one", "two"].map((member) =>
 			m.contribute(senderBindings).by(() => ({
 				member,

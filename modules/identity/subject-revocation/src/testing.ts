@@ -126,7 +126,7 @@ export function subjectRevocationContract(
  * by the contributed followers as there.
  */
 export const subjectRevocationStandIn = defineModule(
-	{ name: "subject-revocation", takes: [revocationFollowers] },
+	{ name: "subject-revocation", replicaSafe: false, takes: [revocationFollowers] },
 	(m) => [
 		m.provide(revocations).by(async (c) => {
 			const boundaries = new Map<string, Boundaries>();
