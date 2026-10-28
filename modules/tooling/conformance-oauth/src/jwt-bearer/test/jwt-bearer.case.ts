@@ -150,6 +150,28 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		}
 	});
 
+	it("checks the client credentials sent beside the assertion, refusing a request whose credentials fail [rfc7523-3.1-a]", async () => {
+		const sent = (credentials: Record<string, string>) =>
+			fetch(`${base}/oauth/token`, {
+				method: "POST",
+				headers: { "content-type": "application/x-www-form-urlencoded" },
+				body: new URLSearchParams({
+					grant_type: grantType,
+					assertion: assertion({}),
+					...credentials,
+				}),
+			}).then(async (res) => [res.status, ((await res.json()) as { error?: string }).error]);
+		expect(await sent({ client_id: "app", client_secret: "wrong" })).toEqual([
+			401,
+			"invalid_client",
+		]);
+		expect(
+			await sent({ client_id: "nobody", client_secret: "app-secret-0123456789abcdef" }),
+		).toEqual([401, "invalid_client"]);
+		const basic = (await post(base, { grant_type: grantType, assertion: assertion({}) })).status;
+		expect(basic).toBe(200);
+	});
+
 	it("refuses a replayed assertion", async () => {
 		const a = assertion({});
 		expect((await post(base, { grant_type: grantType, assertion: a })).status).toBe(200);
