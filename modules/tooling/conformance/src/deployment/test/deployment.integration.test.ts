@@ -14,6 +14,42 @@ const probe = area<NewPart>("deployment-probe");
 onNew(probe, (part) => part);
 const scene = sceneOf(probe.part({ store: "pausable" }));
 const script: Match = { request: (c) => c.name === "EVAL", succeeded: () => true };
+// A scene whose app records an event on a request: a password login of no user fails.
+const audited = area<NewPart>("deployment-audit-probe");
+onNew(audited, (part) => part);
+const origin = "https://issuer.example";
+const loginScene = sceneOf(
+	audited.part({
+		modules: ["@mod/users", "@mod/login-password"],
+		store: "pausable",
+		config: {
+			http: { "trusted-proxies": ["127.0.0.1"], "public-origin": origin },
+			users: { registered: [] },
+		},
+	}),
+);
+const failedLogin = async (base: string) =>
+	(
+		await fetch(`${base}/session/login`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				origin,
+				"x-forwarded-proto": "https",
+				"x-forwarded-for": "198.51.100.50",
+				"x-forwarded-host": new URL(origin).host,
+			},
+			body: new URLSearchParams({ username: "nobody", password: "wrong" }),
+		})
+	).status;
+/** Answers once the app at `base` is ready: its store's first answers come after its start. */
+const readyAt = async (base: string) => {
+	for (let tries = 0; tries < 150; tries++) {
+		if ((await fetch(`${base}/readyz`)).status === 200) return;
+		await new Promise((resolve) => setTimeout(resolve, 200));
+	}
+	throw new Error("not ready");
+};
 
 /** Whether this is a fault run, which never skips what it can not do. */
 const faultRun = process.env.CONFORMANCE_FAULTS === "1";
@@ -180,6 +216,44 @@ describe("a deployment of a scene", () => {
 			startDeployment({ name: "unwritten", scene, topology, instances: 2, recordTo }),
 		).rejects.toThrow();
 		expect(childrenOf(process.pid)).toEqual([]);
+	});
+
+	it("keeps an instance's audit events on one trail across a restart, read once it is killed", async () => {
+		// A replica every write waits for, as the login's stores ask.
+		const replicated = await startTopology({
+			replicas: 1,
+			settings: ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "2"],
+		});
+		const d = await startDeployment({
+			name: "audit",
+			scene: loginScene,
+			topology: replicated,
+			instances: 1,
+		}).catch(async (error: unknown) => {
+			await replicated.stop();
+			throw error;
+		});
+		try {
+			const [a] = d.instances;
+			if (!a) throw new Error("one instance");
+			const trail = a.audit;
+			await readyAt(a.baseUrl);
+			const failed = async () =>
+				(await trail.during(() => failedLogin(a.baseUrl))).events.map((e) => e.kind);
+			expect(await failed()).toEqual(["login.failed"]);
+			await a.restart();
+			expect(a.audit).toBe(trail);
+			await readyAt(a.baseUrl);
+			expect(await failed()).toEqual(["login.failed"]);
+			await a.kill();
+			// Still read: a killed instance sends nothing more, and its trail answers.
+			const { result, events } = await a.audit.during(() => failedLogin(a.baseUrl));
+			expect(result).toBe(502);
+			expect(events).toEqual([]);
+		} finally {
+			await d.stop();
+			await replicated.stop();
+		}
 	});
 
 	it("fails its stop where a relay was asked for a fault that never happened", async () => {
