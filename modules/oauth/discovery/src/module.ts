@@ -20,7 +20,12 @@ export default defineModule({ name: "discovery", takes: [named, metadata] }, (m)
 	[0, 1, 2, 3].map((place) =>
 		m.contribute(routes).by(async (c): Promise<Route> => {
 			const issuer = (await c.get(named)).url;
-			const items = (await c.collect(metadata)).filter((item) => item.value !== undefined);
+			// A value with no elements is left out, as an absent one is (OpenID Connect Discovery §4.2,
+			// RFC 8414 §3.2), whichever module contributed it.
+			const items = (await c.collect(metadata)).filter(
+				(item) =>
+					item.value !== undefined && !(Array.isArray(item.value) && item.value.length === 0),
+			);
 			// The issuer comes first and is the configured one; request headers never shape the document.
 			const document = {
 				issuer,

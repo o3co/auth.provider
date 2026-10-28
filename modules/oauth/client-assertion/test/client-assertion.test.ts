@@ -18,7 +18,7 @@ import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
-import { CompactSign, FlattenedSign, type JWTPayload, SignJWT } from "jose";
+import { CompactSign, EncryptJWT, FlattenedSign, type JWTPayload, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { clientKeys, type Jwk, type SpentAssertions, spentAssertions } from "../src/contract.ts";
 import { assertionMethod, assertionType } from "../src/method.ts";
@@ -153,6 +153,9 @@ const sign = (
 /** An assertion signed with a shared secret, which no client key verifies. */
 const signedWithSecret = () =>
 	new SignJWT(claims()).setProtectedHeader({ alg: "HS256" }).sign(new Uint8Array(32));
+/** An assertion with these claims and no signature, under alg none. */
+const unsigned = (payload: JWTPayload = claims()) =>
+	`${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.`;
 /** A form request; a list gives a field more than once. */
 const asked = (form: Record<string, string | readonly string[]>) =>
 	testRequest({
@@ -266,6 +269,44 @@ describe("private_key_jwt", () => {
 		expect(await tried(c, { iss: 7 })).toBe("unknown_client");
 		expect(looked).not.toContain(7);
 		expect(await tried(c, { iss: "x", sub: "x" }, { client_id: "app" })).toBe("bad_credentials");
+	});
+
+	it("refuses an assertion without iss, sub, aud, jti or exp [oidc-core-9-n] [rfc7521-5.2-b] [rfc7521-5.2-e] [rfc7523-3-b] [rfc7523-3-f]", async () => {
+		const { c } = await boot();
+		for (const claim of ["iss", "sub", "aud", "jti", "exp"]) {
+			expect(await tried(c, { [claim]: undefined }, { client_id: "app" }), claim).toBe(
+				"bad_credentials",
+			);
+		}
+		// Without client_id, an assertion naming no issuer names no client.
+		expect(await tried(c, { iss: undefined })).toBe("unknown_client");
+		expect(await tried(c, {}, { client_id: "app" })).toBe("app");
+	});
+
+	it("compares iss, sub and aud as written, normalizing neither side [rfc7521-5.1-b] [rfc7523-3-d] [rfc7521-5.1-d] [rfc7523-3-k]", async () => {
+		const { c } = await boot({ loose: ["app"] });
+		const asApp = (extra: Record<string, unknown>) => tried(c, extra, { client_id: "app" });
+		for (const id of ["App", "APP", "app ", " app"]) {
+			expect(await asApp({ iss: id }), `iss ${id}`).toBe("bad_credentials");
+			expect(await asApp({ sub: id }), `sub ${id}`).toBe("bad_credentials");
+		}
+		for (const aud of [
+			`${issuer}/`,
+			"HTTPS://issuer.example",
+			"https://ISSUER.example",
+			"https://issuer.example:443",
+			`${tokenUrl}/`,
+			"https://issuer.example/oauth/../oauth/token",
+		]) {
+			expect(await asApp({ aud }), aud).toBe("bad_credentials");
+		}
+		expect(await asApp({})).toBe("app");
+		expect(await asApp({ aud: tokenUrl })).toBe("app");
+	});
+
+	it("ignores the claims it does not understand [oidc-core-9-o]", async () => {
+		const { c } = await boot();
+		expect(await tried(c, { ext: "x", nested: { a: [1] }, nonce: "n", azp: "other" })).toBe("app");
 	});
 
 	it("takes an assertion once per client and jti [oidc-core-9-l]", async () => {
@@ -391,7 +432,7 @@ describe("private_key_jwt", () => {
 		);
 	});
 
-	it("logs why it refused an assertion [rfc7523-3-u] [rfc7521-5.2-n]", async () => {
+	it("logs why it refused an assertion [rfc7523-3-u] [rfc7521-5.2-n] [rfc7523-3-y]", async () => {
 		const { c } = await boot({
 			keys: [jwk(ec.publicKey, { kid: "ec" }), jwk(ecPair().publicKey, { kid: "ec" })],
 		});
@@ -424,7 +465,18 @@ describe("private_key_jwt", () => {
 		expect(await reason(await sign(claims({ aud: "x", exp: seconds() - 30 })))).toBe("expired");
 	});
 
-	it("takes only a JWT: no unencoded payload, and no critical header", async () => {
+	it("refuses an assertion with no signature, under alg none, or with a MAC [oidc-discovery-3-ae] [rfc7521-3-b] [rfc7523-3-s]", async () => {
+		const { c } = await boot();
+		for (const assertion of [unsigned(), `${unsigned()}AAAA`, await signedWithSecret()]) {
+			expect(await outcome(c, presenting(assertion, { client_id: "app" })), assertion).toBe(
+				"bad_credentials",
+			);
+			expect(lastWarned(), assertion).toBe("algorithm");
+		}
+		expect(await outcome(c, presenting(unsigned()))).toBe("bad_credentials");
+	});
+
+	it("takes only a JWT: no unencoded payload, and no critical header [rfc7523-3-y]", async () => {
 		const { c } = await boot();
 		const payload = new TextEncoder().encode(JSON.stringify(claims()));
 		const signed = (header: Record<string, unknown>) =>
@@ -445,6 +497,44 @@ describe("private_key_jwt", () => {
 		expect(await outcome(c, presenting(extended))).toBe("bad_credentials");
 		expect(lastWarned()).toBe("not a JWT");
 		expect(await outcome(c, presenting(await signed({})))).toBe("app");
+	});
+
+	it("refuses an assertion RFC 7519 makes invalid in the other ways: encrypted, nested, not yet valid, or its payload no claims set [rfc7523-3-y]", async () => {
+		const { c } = await boot();
+		const encrypted = await new EncryptJWT(claims())
+			.setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+			.encrypt(new Uint8Array(32));
+		const nested = await new CompactSign(new TextEncoder().encode(await sign(claims())))
+			.setProtectedHeader({ alg: "ES256", kid: "ec", cty: "JWT" })
+			.sign(ec.privateKey);
+		const listed = await new CompactSign(new TextEncoder().encode(JSON.stringify([claims()])))
+			.setProtectedHeader({ alg: "ES256", kid: "ec" })
+			.sign(ec.privateKey);
+		const cases: Record<string, [string, string]> = {
+			encrypted: [encrypted, "not a JWT"],
+			nested: [nested, "not a JWT"],
+			"a list for claims": [listed, "not a JWT"],
+			"not yet valid": [await sign(claims({ nbf: seconds() + 31 })), "not yet valid"],
+			"exp no number": [await sign(claims({ exp: String(seconds() + 60) })), "not a JWT"],
+		};
+		for (const [name, [assertion, reason]] of Object.entries(cases)) {
+			expect(await outcome(c, presenting(assertion, { client_id: "app" })), name).toBe(
+				"bad_credentials",
+			);
+			expect(lastWarned(), name).toBe(reason);
+		}
+	});
+
+	it("takes one JWT only, never two joined [rfc7523-2.2-a]", async () => {
+		const { c } = await boot();
+		const [one, two] = [await sign(claims()), await sign(claims())];
+		for (const joined of [`${one}.${two}`, `${one} ${two}`, `${one},${two}`, `${one}${two}`]) {
+			expect(await outcome(c, presenting(joined, { client_id: "app" })), joined).toBe(
+				"bad_credentials",
+			);
+			expect(lastWarned(), joined).toBe("not a JWT");
+		}
+		expect(await outcome(c, presenting(one, { client_id: "app" }))).toBe("app");
 	});
 
 	it("answers an assertion, its type or the client id given twice as malformed, before judging or spending any", async () => {
@@ -685,7 +775,7 @@ describe("private_key_jwt", () => {
 		).toBe("app");
 	});
 
-	it("reads the body only, never the query, where an assertion would be logged [rfc6749-2.3.1-b]", async () => {
+	it("reads the body's client_assertion only, never the query, where an assertion would be logged, nor a header [rfc6749-2.3.1-b] [oidc-core-9-p]", async () => {
 		const { c } = await boot();
 		const query = new Map([
 			["client_assertion_type", [assertionType]],
@@ -698,6 +788,18 @@ describe("private_key_jwt", () => {
 			json: { client_assertion_type: assertionType },
 		});
 		expect(await outcome(c, halves)).toBe("malformed_credentials");
+		const inHeader = testRequest({
+			method: "POST",
+			headers: new Map([["authorization", `Bearer ${await sign(claims())}`]]),
+			form: new Map([["client_id", ["app"]]]),
+		});
+		expect(await outcome(c, inHeader)).toBe("wrong_method");
+		const otherField = asked({
+			client_assertion_type: assertionType,
+			assertion: await sign(claims()),
+			client_id: "app",
+		});
+		expect(await outcome(c, otherField)).toBe("malformed_credentials");
 	});
 
 	it("leaves a request with no part of an assertion to the other methods, and claims one with either part [rfc6749-2.3-b]", async () => {

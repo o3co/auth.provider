@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { generate, type Plan } from "@mod/create-app";
 import { trialLayer } from "@mod/trial";
 import type { AreaScene, NewPart, Party, StartOptions } from "../areas.ts";
-import { auditSink } from "../audit/audit.ts";
+import { type AuditSink, auditSink } from "../audit/audit.ts";
 import { baseEnv, launch, type Started, startRedis, untilPortHeld } from "../driver.ts";
 import { fakeSmtp } from "../smtp.ts";
 
@@ -126,10 +126,11 @@ export async function started(
 	},
 	layers: readonly string[] = [],
 	options: StartOptions = {},
-	/** Runs on the caller's Redis (its section) and environment, such as a moved clock's, as a group. */
+	/** Runs on the caller's Redis (its section), environment (a moved clock's) and audit sink, as a group. */
 	on?: {
 		readonly redis: Readonly<Record<string, unknown>>;
 		readonly env?: Readonly<Record<string, string>>;
+		readonly audit?: AuditSink;
 	},
 ): Promise<Started> {
 	const parties = trial?.parties ?? [];
@@ -141,7 +142,8 @@ export async function started(
 		await stopParties();
 		throw error;
 	});
-	const sink = await auditSink();
+	const sink = on?.audit ?? (await auditSink());
+	const stopSink = () => (on?.audit ? Promise.resolve() : sink.stop());
 	const smtp = trial?.smtp ? await fakeSmtp() : undefined;
 	// The settings the Redis store requires of a server before it starts.
 	const redis =
@@ -241,7 +243,7 @@ export async function started(
 	const running = await untilPortHeld(startAt, portAttempts);
 	if (running.kind !== "running") {
 		await redis?.stop();
-		await sink.stop();
+		await stopSink();
 		await smtp?.stop();
 		await stopParties();
 		return running;
@@ -251,7 +253,7 @@ export async function started(
 		stop: async () => {
 			await running.stop();
 			await redis?.stop();
-			await sink.stop();
+			await stopSink();
 			await smtp?.stop();
 			await stopParties();
 		},

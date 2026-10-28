@@ -1,6 +1,6 @@
 # Security model
 
-What auth-provider 0.19 guarantees, and what it leaves to the deployment. Each guarantee holds only while the conditions in "Left to you" hold.
+What auth-provider 0.19 guarantees, and what it leaves to the deployment. Each guarantee holds only while the conditions in "Left to you" hold. What each shape of deployment can count on, which of it a test shows, and what is not shown yet, is in [Guarantees by deployment](deployment-guarantees.md).
 
 ## Contents
 

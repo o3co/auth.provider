@@ -397,7 +397,7 @@ describe("token-exchange", () => {
 });
 
 describe("token-exchange: refusals", () => {
-	it("answers each request or token it cannot meet with its own refusal [rfc8693-2.1-e] [rfc8693-2.2.2-b]", async () => {
+	it("answers each request or token it cannot meet with its own refusal [rfc8693-2.1-e] [rfc8693-2.2.2-b] [rfc8693-2.1-c] [rfc8693-2.1-d] [rfc8693-2.1-f]", async () => {
 		const s = await serve({
 			verifier: outside(() => ({ ...outsideAnswer, expiresAt: now + 500 })),
 		});
@@ -418,6 +418,18 @@ describe("token-exchange: refusals", () => {
 			"an actor token without its type": [
 				{ ...subjectOf(own), actor_token: own },
 				["invalid_request", "actor_token and actor_token_type go together"],
+			],
+			"an actor token type without its token": [
+				{ ...subjectOf(own), actor_token_type: accessTokenType },
+				["invalid_request", "actor_token and actor_token_type go together"],
+			],
+			"no subject token": [
+				{ subject_token_type: accessTokenType },
+				["invalid_request", "subject_token and subject_token_type are required"],
+			],
+			"no subject token type": [
+				{ subject_token: own },
+				["invalid_request", "subject_token and subject_token_type are required"],
 			],
 		};
 		for (const [name, [params, answer]] of Object.entries(cases)) {
@@ -442,13 +454,19 @@ describe("token-exchange: refusals", () => {
 		});
 	});
 
-	it("issues a scope asked twice once", async () => {
+	it("issues a scope asked twice once, answering the scope it issued whenever it differs from the one asked [rfc8693-2.2.1-e]", async () => {
 		const s = await serve();
 		const outcome = await s.exchange("app", {
 			...subjectOf((await s.issue()).token),
 			scope: "read read",
 		});
 		expect((await s.issued(outcome)).grant.scope).toEqual(["read"]);
+		expect(outcome).toMatchObject({ kind: "issued", body: { scope: "read" } });
+		// None asked: the scope issued is answered all the same.
+		const unasked = await s.exchange("app", subjectOf((await s.issue()).token));
+		const scope = (await s.issued(unasked)).grant.scope;
+		expect(scope.length).toBeGreaterThan(0);
+		expect(unasked).toMatchObject({ kind: "issued", body: { scope: scope.join(" ") } });
 	});
 });
 

@@ -347,7 +347,7 @@ describe("jwt-bearer", () => {
 		expect(errorOf(await s.grant(await assertion({ ...met, env: "staging" })))).toBe("issued");
 	});
 
-	it("issues within its issuer's ceiling as well as the client's allowance, refusing before the jti is used up", async () => {
+	it("issues within its issuer's ceiling as well as the client's allowance, refusing before the jti is used up [rfc7521-4.1-b]", async () => {
 		const under = (ceiling: Record<string, unknown>) =>
 			serve(undefined, issuer, `${issuer}/oauth/token`, [{ ...trustedUpstream[0], ceiling }]);
 		const before = saved.length;
@@ -517,6 +517,32 @@ describe("jwt-bearer", () => {
 				{ where: "jwt-bearer", reason: "the token endpoint's location needs a public origin" },
 			],
 		});
+	});
+
+	it("compares iss and aud as written, normalizing neither side [rfc7521-5.1-a] [rfc7523-3-c] [rfc7521-5.1-c] [rfc7523-3-j]", async () => {
+		const s = await serve();
+		const error = async (claims: Record<string, unknown>) =>
+			errorOf(await s.grant(await assertion({ ...base, ...claims })));
+		for (const iss of [
+			"https://idp.example/",
+			"https://IDP.example",
+			"HTTPS://idp.example",
+			"https://idp.example:443",
+			" https://idp.example",
+		]) {
+			expect(await error({ iss }), iss).toBe("invalid_grant");
+		}
+		for (const aud of [
+			`${issuer}/`,
+			"https://AS.example",
+			"https://as.example:443",
+			`${issuer}/oauth/token/`,
+			`${issuer}/oauth/../oauth/token`,
+		]) {
+			expect(await error({ aud }), aud).toBe("invalid_grant");
+		}
+		expect(await error({})).toBe("issued");
+		expect(await error({ aud: `${issuer}/oauth/token` })).toBe("issued");
 	});
 
 	it("refuses assertions from strangers, for others, expired, too long-lived or missing claims [rfc7523-2.1-a] [rfc7523-3-e] [rfc7521-5.2-d] [rfc7523-3-h] [rfc7521-5.2-g] [rfc7523-3-n] [rfc7521-5.2-k] [rfc7523-3-t] [rfc7521-5.2-m] [rfc7523-3.1-b] [rfc7521-4.1.1-a]", async () => {
@@ -950,7 +976,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		);
 	});
 
-	it("refuses an issuer that is no string, before asking for any key", async () => {
+	it("refuses an issuer that is missing or no string, before asking for any key [rfc7521-5.2-a] [rfc7523-3-a]", async () => {
 		const thumb = await thumbOf();
 		const asked: unknown[] = [];
 		const s = await serveWith(entry({ subject: "as-is" }), [
@@ -959,7 +985,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 				asked,
 			),
 		]);
-		for (const iss of [[fixedIss], 7, null]) {
+		for (const iss of [undefined, [fixedIss], 7, null]) {
 			const a = await assertion({ ...base, iss, sub: thumb }, device.privateKey);
 			expect(saidOf(await s.grant(a)), JSON.stringify(iss)).toBe("invalid_grant: untrusted signer");
 		}

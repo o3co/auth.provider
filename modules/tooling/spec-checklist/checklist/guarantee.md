@@ -45,21 +45,29 @@
   faults: Pu, Pd, R, L, S, F, Fs, C
 - **guarantee-3-f** MUST NOT: a password login opens a session while a dependency its decision waits on cannot answer.
   faults: Pu, Pd, R, L, S, F, Fs, C
-- **guarantee-3-g** MUST NOT: a revocation route answers that it is done while a dependency it waits on cannot answer.
+- **guarantee-3-g** MUST NOT: the token revocation endpoint answers that a token is revoked while a dependency it waits on cannot answer.
   faults: Pu, Pd, R, L, S, F, Fs, C
-- **guarantee-3-h** MUST NOT: a request limit lets a request pass while its store cannot count, where `rate-limit.fail-mode = closed`; `open` is the operator's declared exception.
-  faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-h** MUST NOT: a request limit lets a request pass while its store cannot count, where `rate-limit.fail-mode = closed`; `open` is the operator's declared exception. No split confirmation is in it: the request windows ask no replication, so no confirmation round can split (rate-limit's card).
+  faults: Pu, Pd, R, L, S, F, C
 - **guarantee-3-i** MUST NOT: an attempt limit lets an attempt pass while its store cannot count, whatever `rate-limit.fail-mode` is.
   faults: Pu, Pd, R, L, S, F, Fs, C
 - **guarantee-3-j** MUST NOT: anything is issued while the store cannot write, and a request made after it can write again passes.
   faults: M, R0, Wt, Nr
 - **guarantee-3-k** MUST NOT: the provider boots on a Redis set to evict keys.
   faults: Ev
+- **guarantee-3-l** MUST NOT: the ledger's subject revocation route (`/ledger/subject-revocations`) answers `200` complete while a dependency it waits on cannot answer; it answers `503` with `state` `unknown` where the boundary's write was not confirmed, `incomplete` where the boundary is written and a follower did not finish, and with no `state` where its window could not count.
+  faults: Pu, Pd, R, L, S, F, Fs, C
 
 ## 4 A subject's revocation boundary refuses everything made before it.
 
-- **guarantee-4-a** MUST NOT: once a subject's boundary is written, a read from any instance lets through what was made before it; a revocation that cannot finish never answers done. Two exceptions alone: where `tokens.subject-check = none` is chosen, an access token lives until it expires; where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations, an established federation grant answers only to the `delegations` boundary. Everything else made before the boundary is still refused. A split confirmation is held by guarantee-5-a, the store's one path.
+- **guarantee-4-a** MUST NOT: once a subject's boundary is written, a read from any instance lets through a session, a code, a refresh token, an access token or a session grant made before it; a revocation that cannot finish never answers done. One exception alone: where `tokens.subject-check = none` is chosen, an access token lives until it expires. A split confirmation is held by guarantee-5-a, the store's one path.
   faults: Lr, Lx, F, C, K, H2
+- **guarantee-4-b** MUST NOT: once a subject's boundary is written, a read from any instance lets a token exchange or a device code made before it issue a token. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
+  faults: H2
+- **guarantee-4-c** MUST NOT: once a subject's boundary is written, a read from any instance lets an established federation grant made before it answer. One exception alone: where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations, the grant answers only to the `delegations` boundary, which such a revocation leaves where it was. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
+  faults: H2
+- **guarantee-4-d** MUST NOT: once a subject's revocation is complete, a second factor's enrollment begun before it binds, or a session opened before it removes a factor or reissues recovery codes, read from any instance. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
+  faults: H2
 
 ## 5 What is used once is used once, on any number of instances.
 
