@@ -721,7 +721,8 @@ jobs:
             echo "clients=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed=$(git diff --name-only "origin/$BASE...HEAD")
+          # A moved file by both its paths: git names a rename by its new one alone.
+          changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD")
           touches() { grep -qE "$1" <<<"$changed" && echo true || echo false; }
           shared='^modules/tooling/(conformance-front|conformance-tunnel|spec-checklist)/'
           echo "oidf=$(touches "^modules/tooling/(interop-oidf|conformance)/|$shared")" >> "$GITHUB_OUTPUT"
