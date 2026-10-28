@@ -118,7 +118,7 @@ it("holds, reserves, hands back and releases lockouts, under terms too, as the r
 
 it("offers both per-source policies, answering as the real ones do, with no store and no audit", async () => {
 	const window = { limit: 1, ms: 60_000 };
-	const routed = defineModule({ name: "routed", replicaSafe: true, takes: [] }, (m) => [
+	const routed = defineModule({ name: "routed", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(routes).by(() => ({
 			method: "GET",
 			path: "/requests",

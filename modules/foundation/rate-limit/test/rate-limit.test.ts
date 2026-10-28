@@ -514,7 +514,7 @@ describe("releasing a lockout under terms", () => {
 
 const window = { limit: 2, ms: 60_000 };
 /** Routes counted by each policy under the name `test`, two to a window. */
-const routed = defineModule({ name: "routed", replicaSafe: true, takes: [] }, (m) => [
+const routed = defineModule({ name: "routed", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(routes).by(() => ({
 		method: "GET",
 		path: "/attempts",
