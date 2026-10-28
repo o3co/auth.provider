@@ -4,6 +4,7 @@ Internal module of `rp-logout`: the close a logout asks, the same whichever rout
 
 ## Responsibilities
 - Reads what the close forgets (the session's clients, the upstream's end of session), closes the session, and records the outcome.
+- Holds the one handling of a close that the hinted logout and a confirmed logout share, so both end a session alike.
 
 ## Not here
 - Which session to close, and whether the request may close it (`ending`, `confirm`). The answer to the browser (the route's). Building the page (`page`).
