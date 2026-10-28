@@ -26,9 +26,12 @@ import { afterEach } from "vitest";
 import tokenControl from "../src/module.ts";
 
 const logged = recordingLog();
-/** How far the composition's clock runs ahead of the real one; each test starts at none. */
+/** The composition's clock: fixed where the tests start, moved on only by `later`, so no boundary rests on real time. */
+const startedAt = Date.now();
 let ahead = 0;
-const runtime = quietRuntime({ log: logged.log, clock: { now: () => Date.now() + ahead } });
+/** What the composition's clock reads now. */
+export const clockNow = () => startedAt + ahead;
+const runtime = quietRuntime({ log: logged.log, clock: { now: clockNow } });
 const confidential = (id: string, audiences: string[], grants: string[] = []) =>
 	confidentialClient({
 		id,

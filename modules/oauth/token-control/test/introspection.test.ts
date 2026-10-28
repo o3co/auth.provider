@@ -5,7 +5,7 @@ import { senderBindings } from "@mod/sender-binding";
 import { type AccessCondition, accessConditions } from "@mod/tokens";
 import { describe, expect, it } from "vitest";
 import { section } from "../src/section.ts";
-import { later, serve } from "./serve.ts";
+import { clockNow, later, serve } from "./serve.ts";
 
 describe("introspection", () => {
 	it("tells a resource server sharing the audience about an active token [rfc7662-2.2-a]", async () => {
@@ -33,11 +33,12 @@ describe("introspection", () => {
 
 	it("answers an access token active only before its expiry [rfc7662-4-b]", async () => {
 		const s = await serve();
-		const token = await s.issue({ notAfter: Date.now() + 60_000 });
+		const token = await s.issue({ notAfter: clockNow() + 60_000 });
+		const exp = Number((await s.post("/oauth/introspect", "app", { token })).json.exp);
+		expect(exp * 1000).toBeGreaterThan(clockNow());
+		later(exp * 1000 - 1 - clockNow());
 		expect(await s.active(token)).toBe(true);
-		later(59_000);
-		expect(await s.active(token)).toBe(true);
-		later(1_000);
+		later(1);
 		expect(await s.active(token)).toBe(false);
 	});
 
