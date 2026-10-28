@@ -20,7 +20,7 @@ import bridge from "../src/module.ts";
  * counting kind `code` (the proof is the secret and a counter that must go up) and a way back
  * `backup`. A copy of mfa's own harness, cut to what the witness needs.
  */
-const code = defineModule({ name: "kind-code", replicaSafe: true, takes: [] }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
