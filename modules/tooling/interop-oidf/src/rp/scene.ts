@@ -86,6 +86,7 @@ export function rpScene(given: {
 				clientSecret: given.client.secret,
 				readUserinfo: given.readUserinfo,
 				scopes: ["openid", "profile", "email"],
+				acceptMissingIss: true,
 			},
 		],
 		landing: given.returnTarget,
