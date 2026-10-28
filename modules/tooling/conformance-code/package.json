@@ -10,7 +10,7 @@
 	},
 	"scripts": {
 		"conformance": "vitest run --config vitest.config.ts",
-		"conformance:faults": "vitest run --config vitest.faults.config.ts",
+		"conformance:faults": "SPEC_EVIDENCE_RUN=faults vitest run --config vitest.faults.config.ts",
 		"evidence-runs": "node -p \"JSON.stringify([{ entry: '@mod/conformance-code#faults', kind: 'faults', matrix: '@mod/conformance-code', files: '.faults.case.ts', noSkip: true }])\""
 	},
 	"dependencies": {

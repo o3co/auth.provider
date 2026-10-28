@@ -1,7 +1,7 @@
-import { platform } from "node:os";
 import {
 	confirmation,
 	faultRun,
+	hostLibfaketime,
 	type Instance,
 	type Match,
 	runIdOf,
@@ -244,20 +244,27 @@ describe("an authorization code redeemed once under faults", () => {
 		});
 	});
 
-	// Only glibc Linux moves Node's clock; a fault run never skips it.
-	it.runIf(faultRun() || platform() === "linux")(
+	// Where the probe finds a libfaketime that moves Node's clock; a fault run never skips it.
+	it.runIf(faultRun() || hostLibfaketime() !== undefined)(
 		"redeems a code once at an instance whose clock is moved forward or back, its lifetime on Redis's clock [guarantee-5-a] {fault:Ta}",
 		async () => {
 			await on({ name: "code-once-ta", instances: 2 }, async (d) => {
 				const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
 				await control(a);
-				for (const offset of ["+10m", "-10m"]) {
+				// Twice the code's 10 minute lifetime, so an end on the app's clock would refuse it. Each
+				// code is redeemed where the clock is ahead of the one that gave it, so its login is never
+				// in the future there, which issuing refuses past 5 minutes.
+				const rounds = [
+					{ offset: "+20m", gives: a, redeems: b },
+					{ offset: "-20m", gives: b, redeems: a },
+				];
+				for (const { offset, gives, redeems } of rounds) {
 					await b.clock(offset);
 					await ready(b);
-					const c = await codeAt(a);
-					expect(said(await redeemAt(b, c)), offset).toEqual(issued);
-					expect(said(await redeemAt(a, c)), offset).toEqual(refused);
-					expect(said(await redeemAt(b, c)), offset).toEqual(refused);
+					const c = await codeAt(gives);
+					expect(said(await redeemAt(redeems, c)), offset).toEqual(issued);
+					expect(said(await redeemAt(gives, c)), offset).toEqual(refused);
+					expect(said(await redeemAt(redeems, c)), offset).toEqual(refused);
 				}
 			});
 		},

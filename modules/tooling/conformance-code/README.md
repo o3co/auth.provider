@@ -20,7 +20,7 @@
 ## Offers
 - Area `code` and the shape of its parts
 - Scene builder (builds the key, identity, OAuth, second-factor and code parts from the form written in a scene)
-- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run; named to the evidence as `@mod/conformance-code#faults`, the area's own run and its pattern runs leaving them out
+- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run; named to the evidence as `@mod/conformance-code#faults` by the run itself, the area's own run and its pattern runs leaving them out
 - Test tools (`./testing`): a logged-in browser, requests to the authorization endpoint, and `succeeded` (a set-up's answer read only when it succeeded, else the scene fails naming what answered, its status and its body's start)
 
 ## Invariants
