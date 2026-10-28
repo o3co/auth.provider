@@ -27,10 +27,11 @@ The provider fails closed: a dependency that cannot answer never grants anything
 
 - **Tested** under Redis faults, each guarantee under the faults named with it:
   - The authorization endpoint gives no code while a dependency its decision waits on cannot answer, with the network to or from Redis cut, the connection closed, Redis late or slow, a failover, and Redis killed (guarantee 3-a).
+  - The token endpoint gives no token for a JWT bearer assertion while a dependency its decision waits on cannot answer, under the same faults (guarantee 3-d).
   - Nothing is issued while the store cannot write (memory full, a write's confirmation by the replicas timed out or refused, replication chosen with no replica), and a request made once it can write again passes (guarantee 3-j).
   - The provider does not boot on a Redis set to evict keys (guarantee 3-k).
 - **Tested** with a store that refuses, by each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey) and the identity area's password login over a failing user ledger.
-- **Not yet shown** under the injected Redis faults: the token endpoint for a code, a refresh token, a JWT bearer assertion and a device code; a password login; the revocation routes; request and attempt limits (guarantees 3-b to 3-i).
+- **Not yet shown** under the injected Redis faults: the token endpoint for a code, a refresh token and a device code; a password login; the revocation routes; request and attempt limits (guarantees 3-b, 3-c and 3-e to 3-i).
 - **What stops and what goes on.** Every request whose decision needs the store or a ledger answers `503` while it cannot answer. What needs neither goes on: the discovery document, the key set, and a resource server verifying a token itself. `/readyz` answers `503` while the Redis probe fails ([runbook: Outages](runbook.md#outages)).
 - **Declared exceptions, the operator's choice:** `rate-limit.fail-mode = open` lets a request limit pass requests uncounted while its store cannot count (an attempt limit still refuses), and `mtls.revocation.on-unavailable = allow` binds a certificate while its revocation cannot be told.
 - **Operator's:** Redis's availability (replicas, `redis.replication`, failover that never promotes a lagging replica), the probes and the alerts ([runbook: Redis](runbook.md#redis), [Probes and alerts](runbook.md#probes-and-alerts)).
@@ -77,7 +78,7 @@ The provider takes the word of what stands beside it, as the [trust assumptions]
 
 Gathered from the sections above:
 
-- Under injected Redis faults: the token endpoint, password login, revocation routes and rate limits failing closed (guarantees 3-b to 3-i); a subject's revocation boundary (4-a); a device code, a recovery code, a passkey challenge, a lockout and an exchanged id_token used once (5-f to 5-j).
+- Under injected Redis faults: the token endpoint for a code, a refresh token and a device code, password login, revocation routes and rate limits failing closed (guarantees 3-b, 3-c and 3-e to 3-i); a subject's revocation boundary (4-a); a device code, a recovery code, a passkey challenge, a lockout and an exchanged id_token used once (5-f to 5-j).
 - Recovery times and a service level under failure.
 - A resource server outside the provider verifying tokens after a revocation.
 - An audit receiver stopped, slowed or filled against a running provider.
