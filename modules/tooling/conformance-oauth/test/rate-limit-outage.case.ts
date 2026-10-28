@@ -21,8 +21,9 @@ const scene = oauthScene({
 			kind: "confidential",
 			method: "client_secret_post",
 			secret: "app-secret",
-			// Allowed no grant: a request is counted before its client or grant is read.
-			grants: [],
+			// A request is counted before its client or grant is read; the grant is the one the token
+			// endpoint asks to be composed at all.
+			grants: ["client_credentials"],
 			scopes: ["read"],
 			defaultScopes: ["read"],
 		},
