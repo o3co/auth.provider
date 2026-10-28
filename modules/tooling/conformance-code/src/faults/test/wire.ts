@@ -28,6 +28,12 @@ export const codeKept = storeWrite({
 });
 /** A read of a code's record, which a redemption waits on first. */
 export const codeRead = storeRead({ prefix, space: "code-grant-store.codes" });
+/** The mark that confirms a read of a code's record, written beside it: the code's read, confirmed. */
+export const codeReadSettled = storeWrite({
+	prefix,
+	space: "code-grant-store.codes",
+	name: "settled",
+});
 /** The read of the browser's session behind its cookie, which an authorization waits on first. */
 export const cookieRead = storeRead({ prefix, space: "session-store.cookies" });
 

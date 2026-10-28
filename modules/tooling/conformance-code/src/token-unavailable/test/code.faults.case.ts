@@ -15,9 +15,9 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { type Answer, type Code, codeAt, on, redeemAt, said } from "../../faults/test/faults.ts";
-import { codeRead, codeUse, isStoreOperation } from "../../faults/test/wire.ts";
+import { codeRead, codeReadSettled, codeUse, isStoreOperation } from "../../faults/test/wire.ts";
 
-// The area lets requests by uncounted where the store fails (rate-limit's fail-mode open), so each
+// The area lets requests go uncounted where the store fails (rate-limit's fail-mode open), so each
 // scene reaches the redemption's own decision: the read of the code's record, then its use.
 
 /** Every request the relay passed. */
@@ -47,6 +47,22 @@ async function healed(d: Deployed, i: Instance) {
 	await recovered(d);
 	await ready(i);
 	expect(said(await redeemAt(i, await codeAt(i)))).toEqual([200, "Bearer"]);
+}
+
+/**
+ * Until the relay has answered a call on a connection to `upstream` since `since`, within 10 s: the
+ * client's check of a connection it opened, after which it sends its requests on it.
+ */
+async function answeredOn(i: Instance, upstream: { host: string; port: number }, since: number) {
+	const end = performance.now() + 10_000;
+	const to = (id: number) => {
+		const c = i.relay.connections().find((x) => x.id === id)?.upstream;
+		return c?.host === upstream.host && c.port === upstream.port;
+	};
+	while (!i.relay.executions(anything).some((e) => e.at > since && to(e.connection))) {
+		if (performance.now() > end) throw new Error("no call answered on the new connection");
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
 }
 
 describe("the token endpoint issuing no token for a code while the store cannot answer", () => {
@@ -187,7 +203,7 @@ describe("the token endpoint issuing no token for a code while the store cannot 
 		});
 	});
 
-	it("gives no token for a decision confirmed on a server other than the one that answered it [guarantee-3-b] {fault:Fs}", async () => {
+	it("gives no token for a read of the code confirmed on a server other than the one that answered it [guarantee-3-b] {fault:Fs}", async () => {
 		await on({ name: "code-token-unavailable-fs", replicas: 3 }, async (d) => {
 			const i = instanceOf(d);
 			await control(i);
@@ -200,28 +216,27 @@ describe("the token endpoint issuing no token for a code while the store cannot 
 			expect(oldId).not.toBe(newId);
 			i.relay.switchUpstream(moved.upstream());
 			i.relay.reset("operations");
-			// Sent once the app holds a connection to the new primary: before, it fails for want of one, a 503 that shows nothing.
+			// Sent once the app holds a connection to the new primary and its client has checked it: before,
+			// the redemption fails for want of one, a 503 that shows nothing, and only a sweep's call is confirmed.
+			const switched = performance.now();
 			await reconnected(i, moved.upstream());
+			await answeredOn(i, moved.upstream(), switched);
 			const from = performance.now();
 			const confirmed = i.relay.observe(confirmation({ replicas: 1 }));
 			const answer = await redeemedAt(i, c);
 			const wait = await confirmed;
 			const upstreamOf = (id: number) => i.relay.connections().find((x) => x.id === id)?.upstream;
-			// A call the decision made ran on the new primary, its confirmation passing on the old one.
-			const first = i.relay
-				.executions(anything)
-				.filter(
-					(e) =>
-						e.at > from &&
-						e.at < wait.at &&
-						isStoreOperation(e.command) &&
-						runIdOf(e.reply) !== undefined,
-				)
+			// The code's read was confirmed by its mark, written on the new primary, the confirmation
+			// passing on the old one; so the decision stopped there, before the code's use.
+			const settled = i.relay
+				.executions(codeReadSettled)
+				.filter((e) => e.at > from && e.at < wait.at && runIdOf(e.reply) !== undefined)
 				.at(-1);
-			expect(first && runIdOf(first.reply)).toBe(newId);
-			expect(first && upstreamOf(first.connection)).toEqual(moved.upstream());
+			expect(settled && runIdOf(settled.reply)).toBe(newId);
+			expect(settled && upstreamOf(settled.connection)).toEqual(moved.upstream());
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
 			noToken(answer);
+			expect(successes(i, codeUse(c))).toEqual([]);
 			i.relay.reset("confirming");
 			await healed(d, i);
 		});
