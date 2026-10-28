@@ -13,7 +13,7 @@ import { type EnrollmentFlow, enrollmentFlow, flowParts } from "../src/contract.
 export const testEnrollment = defineModule(
 	{
 		name: "test-enrollment",
-		replicaSafe: true,
+		replicaSafe: false,
 		takes: [flowParts, factorBinding, factorManaging, sessions],
 	},
 	(m) => [
