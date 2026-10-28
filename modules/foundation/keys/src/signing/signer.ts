@@ -60,7 +60,8 @@ function ringSigner(ring: Ring, now: () => number): RingSigner {
 	return {
 		sign: async (claims, typ) => {
 			// No claim is written as null (OpenID Connect Core §13.3): one with no value is left out.
-			const nulls = nullClaims(claims);
+			// Read back from what is signed: NaN, Infinity, undefined in a list and a toJSON's null are null there too.
+			const nulls = nullClaims(JSON.parse(JSON.stringify(claims)));
 			if (nulls.length > 0) throw new TypeError(`keys: claims are null: ${nulls.join(" ")}`);
 			return new CompactSign(encoder.encode(JSON.stringify(claims)))
 				.setProtectedHeader({ alg: ring.signing.alg, typ, kid: ring.signing.kid })

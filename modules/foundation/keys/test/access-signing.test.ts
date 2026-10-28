@@ -68,6 +68,9 @@ describe("accessTokenSigning", () => {
 			/claims are null: list\[0\]\.item$/,
 		);
 		await expect(access.sign(claims)).rejects.not.toThrow(/kept-value/);
+		await expect(access.sign({ sub: "a", exp: Number.NaN })).rejects.toThrow(
+			/claims are null: exp$/,
+		);
 		expect(await access.sign({ sub: "a", scope: "read" })).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
 	});
 
