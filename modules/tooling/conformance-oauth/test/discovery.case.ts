@@ -107,9 +107,12 @@ describe("the metadata document of a deployment with the client credentials gran
 describe("the metadata document of a deployment without the JWT bearer grant", () => {
 	const get = running("https://issuer.example", { jwtBearer: false });
 
-	it("does not list a grant that is not set up", async () => {
+	it("does not list a grant that is not set up, whether it lists others or, with none set up, leaves the member out", async () => {
 		const { body } = await get("/.well-known/openid-configuration");
-		expect(body.grant_types_supported).not.toContain("urn:ietf:params:oauth:grant-type:jwt-bearer");
+		// An empty list is left out of the document, so the member may be absent.
+		expect((body.grant_types_supported as string[] | undefined) ?? []).not.toContain(
+			"urn:ietf:params:oauth:grant-type:jwt-bearer",
+		);
 	});
 });
 
