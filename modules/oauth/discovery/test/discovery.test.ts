@@ -92,6 +92,27 @@ it("answers for an issuer with a path where RFC 8414 inserts the well-known name
 	expect((await get("/tenant/a/.well-known/oauth-authorization-server")).status).toBe(404);
 });
 
+it("leaves out a member whose value is absent or a list with no elements, whichever module gives it [oidc-discovery-4.2-b] [rfc8414-3.2-b]", async () => {
+	const get = await serve([
+		item("absent", undefined),
+		item("none_supported", []),
+		item("one_supported", ["x"]),
+		item("flag", false),
+		item("empty_text", ""),
+	]);
+	for (const path of [
+		"/.well-known/openid-configuration",
+		"/.well-known/oauth-authorization-server",
+	]) {
+		expect((await get(path)).body, path).toEqual({
+			issuer: "https://as.example",
+			one_supported: ["x"],
+			flag: false,
+			empty_text: "",
+		});
+	}
+});
+
 it("refuses to start when two modules contribute one member", async () => {
 	const refused = (extra: Module[]) =>
 		serve(extra).then(
