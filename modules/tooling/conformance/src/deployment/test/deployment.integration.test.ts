@@ -17,16 +17,29 @@ const script: Match = { request: (c) => c.name === "EVAL", succeeded: () => true
 
 /** Whether this is a fault run, which never skips what it can not do. */
 const faultRun = process.env.CONFORMANCE_FAULTS === "1";
-/** The live processes `pid` started, by pid; none once every instance it started has ended. */
+/**
+ * The live processes `pid` started, by pid; none once every instance it started has ended. One ended
+ * but not yet reaped (a zombie, `Z`) is not live: a stop answers once the group has ended, and Node
+ * reaps the leader only when its loop next turns.
+ */
 const childrenOf = (pid: number) => {
-	try {
-		return execFileSync("pgrep", ["-P", String(pid)])
-			.toString()
-			.split(/\s+/)
-			.filter(Boolean);
-	} catch {
-		return [];
-	}
+	const read = (command: string, args: string[]) => {
+		try {
+			return execFileSync(command, args).toString();
+		} catch {
+			return "";
+		}
+	};
+	// pgrep leaves itself out; ps is then asked of those alone, so neither counts.
+	const children = read("pgrep", ["-P", String(pid)])
+		.split(/\s+/)
+		.filter(Boolean);
+	if (children.length === 0) return [];
+	return read("ps", ["-o", "pid=,stat=", "-p", children.join(",")])
+		.split("\n")
+		.map((line) => line.trim().split(/\s+/))
+		.filter(([child, stat]) => child && !stat?.startsWith("Z"))
+		.map(([child]) => child);
 };
 
 let topology: Topology;
