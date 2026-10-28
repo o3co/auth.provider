@@ -1,28 +1,28 @@
 import {
 	confirmation,
+	type Deployed,
 	type Instance,
+	instanceOf,
 	isNoReplicas,
 	isOutOfMemory,
 	type Node,
 	type Reply,
+	ready,
+	replicasOnline,
 	startDeployment,
 	storeWrite,
+	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import {
 	type Code,
 	codeAt,
 	codeUse,
-	type Deployed,
 	faultScene,
-	instanceOf,
 	on,
 	prefix,
-	ready,
 	redeemAt,
-	replicasOnline,
 	said,
-	successes,
 } from "../../faults/test/faults.ts";
 
 const refused = [400, "invalid_grant"];

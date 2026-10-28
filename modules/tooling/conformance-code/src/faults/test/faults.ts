@@ -1,12 +1,12 @@
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import type { AreaScene } from "@mod/conformance";
 import {
+	type Deployed,
+	type Deploying,
 	type Instance,
 	type Match,
-	startDeployment,
-	startTopology,
+	on as onDeployment,
 	storeWrite,
-	type Topology,
 } from "@mod/conformance/testing";
 import type { ClientScene } from "@mod/conformance-oauth";
 // The package's entry, which sets the area up on each target.
@@ -50,75 +50,11 @@ export const faultScene = (more: Partial<CodeScene> = {}): AreaScene =>
 		storeFaults: true,
 	});
 
-/** What every node of a topology with replicas starts with: a write needs one replica, lagging no more than 2 s. */
-const replicated = ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "2"];
-
-export interface Deployed {
-	readonly topology: Topology;
-	readonly instances: readonly Instance[];
-	stop(): Promise<void>;
-}
-
-/** A scene deployed on a topology of its own: 2 replicas and 1 instance unless said otherwise. */
-export async function deployed(o: {
-	readonly name: string;
-	readonly scene?: AreaScene;
-	readonly replicas?: number;
-	readonly instances?: number;
-	/** Settings every node starts with, after the replication's. */
-	readonly settings?: readonly string[];
-	/** Keys of the Redis section beside its URL. */
-	readonly redis?: Readonly<Record<string, unknown>>;
-	/** A libfaketime offset every Redis node's clock runs at, such as `+2h`. */
-	readonly clock?: string;
-}): Promise<Deployed> {
-	const replicas = o.replicas ?? 2;
-	const topology = await startTopology({
-		replicas,
-		settings: [...(replicas > 0 ? replicated : []), ...(o.settings ?? [])],
-		...(o.clock ? { clock: o.clock } : {}),
-	});
-	try {
-		const deployment = await startDeployment({
-			name: o.name,
-			scene: o.scene ?? faultScene(),
-			topology,
-			instances: o.instances ?? 1,
-			...(o.redis ? { redis: o.redis } : {}),
-		});
-		return {
-			topology,
-			instances: deployment.instances,
-			async stop() {
-				try {
-					await deployment.stop();
-				} finally {
-					await topology.stop();
-				}
-			},
-		};
-	} catch (error) {
-		await topology.stop();
-		throw error;
-	}
-}
-
-/** Runs a scene on a deployment of its own, stopped however the scene ends. */
-export async function on(o: Parameters<typeof deployed>[0], scene: (d: Deployed) => Promise<void>) {
-	const d = await deployed(o);
-	try {
-		await scene(d);
-	} finally {
-		await d.stop();
-	}
-}
-
-/** The instance at `index`, which the scene's deployment must have. */
-export const instanceOf = (d: Deployed, index = 0): Instance => {
-	const i = d.instances[index];
-	if (!i) throw new Error(`the deployment has no instance ${index}`);
-	return i;
-};
+/** Runs a scene on a deployment of its own, as the base does, on the code flow's scene unless it names another. */
+export const on = (
+	o: Omit<Deploying, "scene"> & { readonly scene?: AreaScene },
+	scene: (d: Deployed) => Promise<void>,
+) => onDeployment({ ...o, scene: o.scene ?? faultScene() }, scene);
 
 /** A verifier of its own, so a scene tells its code's writes from any other by the challenge. */
 export function pkce() {
@@ -237,71 +173,3 @@ export const codeUse = (c: Code) =>
 /** The write that notes, on the used code, the token issued for it. */
 export const codeNoted = (c: Code) =>
 	codeWrite(c.challenge, (r) => r.state === "consumed" && r.token !== undefined && !r.void);
-
-/** The successful executions the relay saw of a match. */
-export const successes = (i: Instance, match: Match) =>
-	i.relay.executions(match).filter((e) => e.succeeded);
-
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Until the instance's relay holds an open connection to `upstream`, within 10 s. */
-export async function reconnected(i: Instance, upstream: { host: string; port: number }) {
-	const end = performance.now() + 10_000;
-	const to = (c: { upstream: { host: string; port: number } }) =>
-		c.upstream.host === upstream.host && c.upstream.port === upstream.port;
-	while (!i.relay.connections().some((c) => c.open && to(c))) {
-		if (performance.now() > end) throw new Error(`instance ${i.index} did not connect again`);
-		await pause(100);
-	}
-}
-
-/** Until the instance answers `/readyz` ready, within 30 s, as a scene waits for a fault healed. */
-export async function ready(i: Instance, ms = 30_000): Promise<void> {
-	const end = performance.now() + ms;
-	for (;;) {
-		const status = await fetch(`${i.baseUrl}/readyz`, { headers: backChannel }).then(
-			(r) => r.status,
-			() => 0,
-		);
-		if (status === 200) return;
-		if (performance.now() > end) throw new Error(`instance ${i.index} not ready within ${ms} ms`);
-		await pause(200);
-	}
-}
-
-/**
- * Promotes a replica that has caught up, as `promotion` checks, killing the old primary and
- * reattaching the other replicas, then points every instance's relay at the new primary.
- */
-export async function failover(d: Deployed): Promise<void> {
-	const [next, ...others] = d.topology.replicas();
-	if (!next) throw new Error("no replica to promote");
-	await d.topology.promote({ replica: next, reattach: others });
-	repointed(d);
-	await replicasOnline(d);
-}
-
-/**
- * Until the primary has every replica the topology names online again, within 30 s: a node started
- * again answers before its replicas are back, and a write needs one of them.
- */
-export async function replicasOnline(d: Deployed): Promise<void> {
-	const end = performance.now() + 30_000;
-	const want = d.topology.replicas().length;
-	for (;;) {
-		const info = await d.topology.primary().ask("INFO", "replication");
-		const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
-		const online = text.split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length;
-		if (online >= want) return;
-		if (performance.now() > end) throw new Error(`${online} of ${want} replicas online`);
-		await pause(100);
-	}
-}
-
-/** Points every instance's relay at the primary where it answers now, as a crash may move it. */
-export function repointed(d: Deployed): void {
-	for (const i of d.instances) {
-		i.relay.switchUpstream(d.topology.primary().upstream());
-		i.relay.reset("all");
-	}
-}
