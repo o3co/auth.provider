@@ -139,7 +139,7 @@ describe("clients", () => {
 		});
 	});
 
-	it("refuses each way the credentials do not fit the client [rfc6749-2.3-b] [rfc6749-2.2-a] [rfc6749-2.3.2-a] [oidc-core-3.1.3.1-a]", async () => {
+	it("refuses each way the credentials do not fit the client [rfc6749-2.3-b] [rfc6749-2.2-a] [rfc6749-2.3.2-a] [oidc-core-3.1.3.1-a] [rfc9700-2.5-a]", async () => {
 		const c = await boot();
 		expect(await outcome(c, basic("conf", "nope"), {})).toMatchObject({
 			reason: "bad_credentials",
@@ -160,7 +160,7 @@ describe("clients", () => {
 		expect(await outcome(c, {}, { client_id: ["conf"] })).toMatchObject({ reason: "wrong_method" });
 	});
 
-	it("refuses a confidential client whose method is none [rfc6749-2.2-a]", async () => {
+	it("refuses a confidential client whose method is none, never taking it as public [rfc6749-2.2-a] [rfc6749-2.1-a]", async () => {
 		const c = await boot([], [{ id: "conf-none", kind: "confidential", method: "none" }]);
 		expect(await outcome(c, {}, { client_id: ["conf-none"] })).toMatchObject({
 			reason: "bad_credentials",

@@ -18,7 +18,7 @@ export interface ClientScene {
 	readonly grants: readonly string[];
 	/** Every token it is issued must be sender-bound (`sender-binding`'s `required`); for scenes the legacy build is not asked. */
 	readonly bindingRequired?: boolean;
-	/** The binding kinds a required binding must be of, by the names operators give them (such as dpop); unwritten, any. */
+	/** The binding kinds a required binding must be of, by the names operators give them (such as dpop); unwritten, any. Read only beside `bindingRequired`. */
 	readonly bindingKinds?: readonly string[];
 	readonly scopes: readonly string[];
 	readonly defaultScopes?: readonly string[];

@@ -10,6 +10,7 @@ Internal module of `conformance`: what an area's fault scene does with its deplo
 - `deployed` and `on` (a scene on a deployment of its own), `instanceOf`, `successes` (a match's successful executions on an instance's relay), `reconnected`, `ready`, `replicasOnline`, `recovered` (a scene's recovery from a fault), `repointed`, `failover`; the types `Deployed` and `Deploying`.
 
 ## Invariants
+- A deployment is handed to its scene only once its primary takes writes (`recovered`), so every scene starts writable whatever the machine's load; past the bound, `deployed` fails naming what it waited on and stops what it started.
 - `recovered` waits, within 30 s, for every replica the topology names online and the good replicas the primary's `min-replicas-to-write` asks, which an instance's readiness does not show; past it, it fails naming what it waited on. A scene calls it in its recovery alone, never while it holds the primary unwritable on purpose.
 - A relay is pointed at the primary only by switching its upstream and cutting every connection, so no connection stays on a server that is no longer the primary.
 - Every wait has its bound (10 s for a connection, 30 s for readiness or the replicas) and fails past it.

@@ -104,7 +104,7 @@ function running(resourceIndicators: boolean) {
 describe("RFC 8707: the code flow narrowed to a resource", () => {
 	const s = running(true);
 
-	it("issues the code for the resource asked, and the exchange keeps it or asks it again [rfc8707-2-c] [rfc6750-5.3-c] [rfc9700-2.3-b]", async () => {
+	it("issues the code for the resource asked, and the exchange keeps it or asks it again [rfc8707-2-c] [rfc6750-5.3-c] [rfc9700-2.3-b] [rfc9700-2.3-d]", async () => {
 		expect(await s.exchange(await s.codeOf({ resource: second }))).toMatchObject({ aud: [second] });
 		expect(
 			await s.exchange(await s.codeOf({ resource: second }), { resource: second }),
@@ -149,7 +149,7 @@ describe("RFC 8707: the code flow narrowed to a resource", () => {
 		expect(silent.at?.searchParams.get("error")).toBe("consent_required");
 	});
 
-	it("narrows a refreshed access token only, refusing one outside the family's audience and keeping the refresh token", async () => {
+	it("narrows a refreshed access token only, refusing one outside the family's audience and keeping the refresh token [rfc9700-2.3-d]", async () => {
 		// The family's audience named, as the two systems issue a code asking none for different ones.
 		const issued = await s.exchange(await s.codeOf({ resource: first }));
 		expect(issued.aud).toEqual([first]);

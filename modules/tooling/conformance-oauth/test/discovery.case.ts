@@ -37,7 +37,8 @@ function running(issuer: string, more: Partial<OauthPart> = {}) {
 				issuer,
 				keys,
 				clients: [
-					client("basic", "client_secret_basic"),
+					// The token endpoint's one grant, as it asks one composed.
+					client("basic", "client_secret_basic", ["client_credentials"]),
 					client("post", "client_secret_post"),
 					client("pub", "none"),
 				],
@@ -106,15 +107,25 @@ describe("the metadata document of a deployment with the client credentials gran
 });
 
 describe("the metadata document of a deployment without the JWT bearer grant", () => {
-	const get = running("https://issuer.example", { jwtBearer: false });
-
-	it("does not list a grant that is not set up, whether it lists others or, with none set up, leaves the member out", async () => {
-		const { body } = await get("/.well-known/openid-configuration");
-		// An empty list is left out of the document, so the member may be absent.
-		expect((body.grant_types_supported as string[] | undefined) ?? []).not.toContain(
-			"urn:ietf:params:oauth:grant-type:jwt-bearer",
-		);
+	// One grant is set up, as every deployment's token endpoint has one: the client credentials grant alone.
+	const get = running("https://issuer.example", {
+		jwtBearer: false,
+		clients: [client("svc", "client_secret_basic", ["client_credentials"])],
 	});
+
+	it("does not list a grant that is not set up, and lists the one set up", async () => {
+		const { body } = await get("/.well-known/openid-configuration");
+		expect(body.grant_types_supported).toContain("client_credentials");
+		expect(body.grant_types_supported).not.toContain("urn:ietf:params:oauth:grant-type:jwt-bearer");
+	});
+
+	it.skipIf(areaTarget().differs("grants-listed-though-not-set-up"))(
+		"lists the grants set up alone",
+		async () => {
+			const { body } = await get("/.well-known/openid-configuration");
+			expect(body.grant_types_supported).toEqual(["client_credentials"]);
+		},
+	);
 });
 
 describe("the metadata document of an issuer with a path", () => {

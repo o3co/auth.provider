@@ -306,9 +306,15 @@ jobs:
   # area's fault scenes a run of kind `faults` its `evidence-runs` names. The plan
   # also fixes the one commit every conformance job and compliance check out, so a
   # daily run's jobs test the same develop commit.
+  #
+  # A pull request to develop runs every area and its fault scenes, but no pattern, where it changes
+  # a file the scenes may stand on: any but the docs and spec-checklist's checklist and tests. An
+  # area does not name the modules it composes, which create-app builds as it runs, so the change is
+  # judged by its paths alone. spec-checklist's sources hold every area's evidence reporter, so a
+  # change to them runs every area. A pull request that changes none of those files runs none.
   conformance-plan:
     needs: conformance-due
-    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
     runs-on: ubuntu-latest
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
@@ -320,6 +326,9 @@ jobs:
         with:
           # The daily run tests develop, where merged work waits for the next release.
           ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          # A pull request's change is read against its base, from where they part; a moved file by both
+          # its paths.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -327,11 +336,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - id: plan
         shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          # Whether a change's files (a JSON list of paths) may reach a scene.
+          REACHES: >-
+            any(.[]; (startswith("docs/") or (startswith("modules/tooling/spec-checklist/")
+            and (startswith("modules/tooling/spec-checklist/src/") | not))) | not)
         run: |
           set -euo pipefail
           areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
           patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
           faults=$(pnpm --silent --filter @mod/spec-checklist run plan faults)
+          if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then
+            changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\n") | map(select(. != ""))')
+            reaches=$(jq -c "$REACHES" <<<"$changed")
+            echo "files the change touches: $changed; they reach the scenes: $reaches"
+            if [ "$reaches" != true ]; then
+              areas='[]'
+              faults='[]'
+            fi
+            patterns='[]'
+          fi
           {
             echo "areas=$areas"
             echo "patterns=$patterns"
@@ -345,7 +371,7 @@ jobs:
   # whoever saved one is not known.
   legacy-build:
     needs: conformance-plan
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.areas != '[]' }}
     runs-on: ubuntu-latest
     outputs:
       legacy: ${{ steps.kept.outputs.artifact-id }}
@@ -412,8 +438,8 @@ jobs:
   # skipped; any other fails.
   conformance-area:
     needs: [conformance-plan, legacy-build]
-    # A skipped conformance-due above would otherwise skip this job too.
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.legacy-build.result == 'success' }}
+    # A skipped conformance-due above would otherwise skip this job too; none planned, none runs.
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.legacy-build.result == 'success' && needs.conformance-plan.outputs.areas != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -488,8 +514,8 @@ jobs:
   # One pattern's app, on each area it composes.
   conformance-pattern:
     needs: conformance-plan
-    # A skipped conformance-due above would otherwise skip this job too.
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    # A skipped conformance-due above would otherwise skip this job too; none planned, none runs.
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.patterns != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -564,7 +590,7 @@ jobs:
   # instance's clock: only this job holds the library they need.
   conformance-faults:
     needs: conformance-plan
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.faults != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -695,7 +721,8 @@ jobs:
             echo "clients=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed=$(git diff --name-only "origin/$BASE...HEAD")
+          # A moved file by both its paths: git names a rename by its new one alone.
+          changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD")
           touches() { grep -qE "$1" <<<"$changed" && echo true || echo false; }
           shared='^modules/tooling/(conformance-front|conformance-tunnel|spec-checklist)/'
           echo "oidf=$(touches "^modules/tooling/(interop-oidf|conformance)/|$shared")" >> "$GITHUB_OUTPUT"
@@ -869,16 +896,30 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  # The check required of a release: every area and every pattern passed.
+  # The check required of a release: every area and every pattern passed. On a pull request to
+  # develop, every job planned passed; a job with nothing planned is skipped, and passes.
   conformance:
     needs: [conformance-due, conformance-plan, legacy-build, conformance-area, conformance-pattern, conformance-faults]
-    if: always() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true'))
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true'))
     runs-on: ubuntu-latest
     steps:
-      - name: Every area, every pattern and every area's fault scenes passed
+      - name: Every area, every pattern and every area's fault scenes planned passed
+        env:
+          PLAN: ${{ needs.conformance-plan.result }}
+          LEGACY: ${{ needs.legacy-build.result }}
+          AREAS: ${{ needs.conformance-area.result }}
+          PATTERNS: ${{ needs.conformance-pattern.result }}
+          FAULTS: ${{ needs.conformance-faults.result }}
+          PLANNED_AREAS: ${{ needs.conformance-plan.outputs.areas }}
+          PLANNED_PATTERNS: ${{ needs.conformance-plan.outputs.patterns }}
+          PLANNED_FAULTS: ${{ needs.conformance-plan.outputs.faults }}
         run: |
-          for result in "${{ needs.conformance-plan.result }}" "${{ needs.legacy-build.result }}" "${{ needs.conformance-area.result }}" "${{ needs.conformance-pattern.result }}" "${{ needs.conformance-faults.result }}"; do
-            [ "$result" = success ] || { echo "a conformance job ended $result"; exit 1; }
+          [ "$PLAN" = success ] || { echo "conformance-plan ended $PLAN"; exit 1; }
+          # Each job beside what was planned for it: the legacy build serves the areas.
+          for job in "legacy-build $PLANNED_AREAS $LEGACY" "conformance-area $PLANNED_AREAS $AREAS" "conformance-pattern $PLANNED_PATTERNS $PATTERNS" "conformance-faults $PLANNED_FAULTS $FAULTS"; do
+            read -r name planned result <<<"$job"
+            if [ "$planned" = "[]" ] && [ "$result" = skipped ]; then continue; fi
+            [ "$result" = success ] || { echo "$name ended $result"; exit 1; }
           done
 
   # The check required of a release: every interop job that was due passed (the OIDF suite's plans,

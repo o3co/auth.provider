@@ -1,13 +1,7 @@
-import { type Clock, defineModule, Unavailable } from "@mod/kernel";
+import { type Clock, defineModule } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
 import type { Settings } from "./section.ts";
-import {
-	type ConstrainedFamilyList,
-	constrainedFamilyList,
-	type SelectionRecords,
-	type StoredSelection,
-	selectionRecords,
-} from "./store.ts";
+import { type SelectionRecords, type StoredSelection, selectionRecords } from "./store.ts";
 
 /** A place that keeps selections, as one implementation of the store interface offers it. */
 export interface RecordsPlace {
@@ -61,70 +55,12 @@ export function selectionRecordsContract(name: string, open: () => Promise<Recor
 	});
 }
 
-/** A place that keeps the constrained families' list, as one implementation of the store interface offers it. */
-export interface ListPlace {
-	readonly list: ConstrainedFamilyList;
-	readonly loseNextAnswer?: () => void;
-	readonly failover?: () => Promise<void>;
-	readonly restart?: () => Promise<void>;
-	readonly pressMemory?: () => Promise<void>;
-}
-
-/** What claims-selection needs of the constrained families' list: each family listed once until done, through faults. */
-export function constrainedFamilyListContract(name: string, open: () => Promise<ListPlace>): void {
-	let n = 0;
-	const fresh = () => `fam-${++n}-${Math.random().toString(36).slice(2)}`;
-	const listed = async (list: ConstrainedFamilyList) => {
-		const seen: string[] = [];
-		await list.each(async (id) => {
-			seen.push(id);
-		});
-		return seen;
-	};
-	describe(`claims-selection's constrained families: ${name}`, () => {
-		it("lists a family once however often, hands each listed one, and keeps one whose handling fails", async () => {
-			const { list } = await open();
-			const [kept, failing, gone] = [fresh(), fresh(), fresh()];
-			for (const id of [kept, kept, failing, gone]) await list.add(id);
-			await list.done(gone);
-			const seen = await listed(list);
-			expect(seen.filter((id) => id === kept)).toHaveLength(1);
-			expect(seen).toContain(failing);
-			expect(seen).not.toContain(gone);
-			const { failed } = await list.each(async (id) => {
-				if (id === failing) throw new Error("not handled");
-			});
-			expect(failed).toBe(1);
-			expect(await listed(list)).toContain(failing);
-		});
-
-		it("keeps what it lists through restarts, memory pressure, lost answers and failovers", async (context) => {
-			const place = await open();
-			const { loseNextAnswer: lose, failover, restart, pressMemory } = place;
-			if (!lose || !failover || !restart || !pressMemory) return context.skip();
-			const [kept, settled] = [fresh(), fresh()];
-			await place.list.add(kept);
-			lose();
-			await place.list.add(settled);
-			await failover();
-			await restart();
-			await pressMemory();
-			expect(await listed(place.list)).toEqual(expect.arrayContaining([kept, settled]));
-		});
-	});
-}
-
 /**
  * claims-selection's store in memory, on the composition's clock, for tests that compose the module;
- * `around` and `aroundList` wrap what the composition is given, as a test that fails or watches it
- * does, and the list holds `listCap` families at most.
+ * `around` wraps the records the composition is given, as a test that fails or watches them does.
  */
 export function claimsSelectionInMemory(
-	options: {
-		readonly around?: (records: SelectionRecords) => SelectionRecords;
-		readonly aroundList?: (list: ConstrainedFamilyList) => ConstrainedFamilyList;
-		readonly listCap?: number;
-	} = {},
+	options: { readonly around?: (records: SelectionRecords) => SelectionRecords } = {},
 ) {
 	let now = () => 0;
 	const entries = new Map<string, { readonly value: StoredSelection; readonly ends: number }>();
@@ -140,30 +76,11 @@ export function claimsSelectionInMemory(
 		},
 		read: async (name) => live(name)?.value,
 	};
-	const listed = new Set<string>();
-	const list: ConstrainedFamilyList = {
-		add: async (id) => {
-			if (!listed.has(id) && listed.size >= (options.listCap ?? 100_000))
-				throw new Unavailable("claims-selection stand-in");
-			listed.add(id);
-		},
-		done: async (id) => {
-			listed.delete(id);
-		},
-		each: async (handle) => {
-			let failed = 0;
-			for (const id of [...listed]) await handle(id).catch(() => failed++);
-			return { failed };
-		},
-	};
 	const module = defineModule({ name: "claims-selection-stores", takes: [] }, (m) => [
 		m.provide(selectionRecords).by((c: { readonly clock: Clock }) => {
 			now = c.clock.now;
 			return options.around ? options.around(records) : records;
 		}),
-		m
-			.provide(constrainedFamilyList)
-			.by(() => (options.aroundList ? options.aroundList(list) : list)),
 	]);
 	/** Writes a record over whatever the name holds, as a broken or foreign writer might. */
 	const overwrite = (name: string, kept: unknown) => {
@@ -172,10 +89,8 @@ export function claimsSelectionInMemory(
 	return {
 		module,
 		records,
-		list,
 		overwrite,
 		names: () => [...entries.keys()].filter((k) => live(k)),
-		listed: () => [...listed],
 	};
 }
 

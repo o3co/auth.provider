@@ -118,7 +118,7 @@ describe("upstream-client", () => {
 
 	const bare = { access_token: "at", token_type: "Bearer" };
 
-	it("reads a token endpoint's answer into upstream tokens, keeping its id_token apart", () => {
+	it("reads a token endpoint's answer into upstream tokens, keeping its id_token apart and passing over members it does not know [oidc-core-3.1.3.3-e]", () => {
 		const full = {
 			access_token: "at",
 			token_type: "DPoP",
@@ -126,6 +126,10 @@ describe("upstream-client", () => {
 			expires_in: 0,
 			scope: "openid  email",
 			id_token: "idt",
+			// Members of no profile this reads, of any type: none is a reason to refuse, none is kept.
+			ext_expires_in: 3599,
+			not_before_policy: { at: 0 },
+			issued_token_type: ["x"],
 		};
 		expect(tokenAnswerOf(object(full), ["openid"])).toEqual({
 			tokens: {

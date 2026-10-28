@@ -31,8 +31,8 @@ const scene = (withGrant: boolean) =>
 			},
 		},
 		// Without the grant composed, no client may be allowed it: boot refuses a grant nothing serves.
-		// Other is allowed no grant, so not this one, and the scene needs no other grant composed.
-		clients: [client("app", withGrant ? [grantType] : []), client("other", [])],
+		// Other is allowed the client credentials grant, not this one, so the endpoint has a grant either way.
+		clients: [client("app", withGrant ? [grantType] : []), client("other", ["client_credentials"])],
 		...(withGrant
 			? {
 					jwtBearer: {
@@ -168,8 +168,8 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		expect(
 			await sent({ client_id: "nobody", client_secret: "app-secret-0123456789abcdef" }),
 		).toEqual([401, "invalid_client"]);
-		const basic = (await post(base, { grant_type: grantType, assertion: assertion({}) })).status;
-		expect(basic).toBe(200);
+		const accepted = (await post(base, { grant_type: grantType, assertion: assertion({}) })).status;
+		expect(accepted).toBe(200);
 	});
 
 	it("refuses a replayed assertion", async () => {
