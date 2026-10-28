@@ -76,8 +76,9 @@ describe("the metadata document", () => {
 		expect(openid.body.issuer).toBe(issuer);
 	});
 
-	it("tells where the token, introspection and revocation endpoints are [rfc8414-2-c] [oidc-discovery-3-f]", async () => {
+	it("tells where the token, introspection and revocation endpoints are, the token endpoint over https [rfc8414-2-c] [oidc-discovery-3-f] [oidc-discovery-3-g]", async () => {
 		const { body } = await get("/.well-known/openid-configuration");
+		expect(new URL(String(body.token_endpoint)).protocol).toBe("https:");
 		expect(body).toMatchObject({
 			token_endpoint: `${issuer}/oauth/token`,
 			introspection_endpoint: `${issuer}/oauth/introspect`,

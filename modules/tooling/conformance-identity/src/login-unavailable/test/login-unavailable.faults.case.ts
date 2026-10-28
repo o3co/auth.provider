@@ -124,12 +124,11 @@ describe("password login opening no session while the store cannot answer", () =
 			held.release();
 			const answer = await asked.finally(() => clearInterval(cutting));
 			expect(said(answer)).toEqual(unopened);
-			// No write that opens a session succeeded from the first cut to the answer. Cuts 20 ms apart
-			// cannot stop a command getting through on a connection just opened (a read of Redis's clock,
-			// say), so the scene checks only the writes its guarantee rests on.
-			for (const opening of [sessionRecord, cookieIndexed]) {
-				expect(successes(a, opening).filter((e) => e.at > cut && e.at < answer.at)).toEqual([]);
-			}
+			// No session was indexed under a cookie from the first cut to the answer: the index is the write
+			// that makes a session reachable. Cuts 20 ms apart cannot stop a command getting through on a
+			// connection just opened, and records' resend of the record may land so and write it; the
+			// record alone opens no session.
+			expect(successes(a, cookieIndexed).filter((e) => e.at > cut && e.at < answer.at)).toEqual([]);
 			await noSessionOpened(a, cut);
 			await healed(a);
 		});

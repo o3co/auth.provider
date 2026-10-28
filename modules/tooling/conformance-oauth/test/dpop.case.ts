@@ -30,6 +30,22 @@ const scene = (dpop: boolean) =>
 				defaultScopes: ["read"],
 				audiences: ["https://api.example"],
 			},
+			// Held to DPoP, where DPoP is composed: a kind named must be one.
+			...(dpop
+				? [
+						{
+							id: "bound",
+							kind: "confidential" as const,
+							method: "client_secret_post" as const,
+							secret,
+							grants: ["client_credentials"],
+							scopes: ["read"],
+							defaultScopes: ["read"],
+							bindingRequired: true,
+							bindingKinds: ["dpop"],
+						},
+					]
+				: []),
 		],
 		introspection: true,
 		dpop,
@@ -63,17 +79,25 @@ function running(dpop: boolean) {
 	afterAll(async () => {
 		if (started?.kind === "running") await started.stop();
 	});
-	const post = async (path: string, form: Record<string, string>, headers = {}) => {
+	const post = async (path: string, form: Record<string, string>, headers = {}, client = "app") => {
 		const res = await fetch(`${s.base}${path}`, {
 			method: "POST",
 			headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
-			body: new URLSearchParams({ client_id: "app", client_secret: secret, ...form }),
+			body: new URLSearchParams({ client_id: client, client_secret: secret, ...form }),
 		});
 		return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 	};
 	return {
 		token: (dpopProof: string) =>
 			post("/oauth/token", { grant_type: "client_credentials" }, { dpop: dpopProof }),
+		/** A token request of the client held to DPoP, with a proof or without one. */
+		bound: (dpopProof?: string) =>
+			post(
+				"/oauth/token",
+				{ grant_type: "client_credentials" },
+				dpopProof === undefined ? {} : { dpop: dpopProof },
+				"bound",
+			),
 		introspect: (token: unknown) => post("/oauth/introspect", { token: String(token) }),
 	};
 }
@@ -88,7 +112,14 @@ describe("without DPoP", () => {
 });
 
 describe.runIf(areaTarget().can("dpop"))("with DPoP", () => {
-	const { token, introspect } = running(true);
+	const { token, introspect, bound } = running(true);
+	it("refuses a token request without a proof from a client held to DPoP, and binds one with a proof [rfc9449-5.2-a]", async () => {
+		const unproved = await bound();
+		expect([unproved.status, unproved.body.error]).toEqual([400, "invalid_request"]);
+		const proved = await bound(await proof());
+		expect([proved.status, proved.body.token_type]).toEqual([200, "DPoP"]);
+	});
+
 	it("binds the token to the proof's key, and says so at introspection [rfc9449-5-b] [rfc9449-6.1-a] [rfc9449-6.2-a]", async () => {
 		const answer = await token(await proof());
 		const cnf = { jkt: await calculateJwkThumbprint(await exportJWK(holder.publicKey), "sha256") };
