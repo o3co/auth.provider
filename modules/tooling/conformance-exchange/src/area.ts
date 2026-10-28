@@ -8,7 +8,7 @@ import type { ClientScene } from "@mod/conformance-oauth";
 export interface ExchangePart {
 	/** How many actors an issued token's chain may hold. */
 	readonly maxActorDepth?: number;
-	/** The longest lifetime, in seconds, an exchanged token gets, whatever `expires_in` asks. */
+	/** The longest lifetime, in seconds, an exchanged token gets, whatever lifetime the request asks. */
 	readonly maxLifetimeSeconds?: number;
 	/** The scene exchanges subject tokens that carry no session, such as a refresh family's. */
 	readonly sessionless?: true;
