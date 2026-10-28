@@ -4,6 +4,7 @@ import {
 	type Instance,
 	type Match,
 	runIdOf,
+	type StoreKey,
 	sameMark,
 	storeWrite,
 	writtenValues,
@@ -46,27 +47,47 @@ const recordAs = (s: "closing" | "closed", handle?: string): Match =>
 		...(handle ? { partition: handle } : {}),
 		value: (v) => state(v) === s,
 	});
-/** A participant's write: an access token of the session's put on the revoked list. */
-const revocation = storeWrite({
-	prefix,
-	space: "tokens-store.revoked",
-	operations: ["putIfAbsent"],
-});
-/** The closings' shard written without the handle: its close is done. */
-const doneWith = (handle: string) =>
+/** The participant's write that puts the session's access token, by its `jti`, on the revoked list. */
+const revocationOf = (jti: string) =>
 	storeWrite({
 		prefix,
-		space: "session-store.closings",
-		value: (v) => Array.isArray(v) && !v.includes(handle),
+		space: "tokens-store.revoked",
+		partition: jti,
+		operations: ["putIfAbsent"],
 	});
 
-/** The handle the add wrote, the one item of its shard's list. */
-function handleOf(add: Execution): string {
-	const [list] = writtenValues(add.command).map((w) => w.value);
-	if (!Array.isArray(list) || list.length !== 1 || typeof list[0] !== "string")
-		throw new Error(`the closings held more than the one close: ${JSON.stringify(list)}`);
-	return list[0];
+/** A close a logout began: its session's handle, the closings' shard it was added to, and its token's `jti`. */
+interface Closing {
+	readonly handle: string;
+	readonly shard: StoreKey;
+	readonly jti: string;
 }
+
+/** The close an add wrote, the one item of its shard's list, for the session whose token is `jti`. */
+function closingOf(add: Execution, jti: string): Closing {
+	const [written] = writtenValues(add.command);
+	const list = written?.value;
+	if (!written || !Array.isArray(list) || list.length !== 1 || typeof list[0] !== "string")
+		throw new Error(`the closings held more than the one close: ${JSON.stringify(list)}`);
+	return { handle: list[0], shard: written.key, jti };
+}
+
+/** The close's shard written without its handle: the close is done. */
+const doneWith = (c: Closing) =>
+	storeWrite({
+		prefix,
+		space: c.shard.space,
+		partition: c.shard.partition,
+		name: c.shard.name,
+		value: (v) => Array.isArray(v) && !v.includes(c.handle),
+	});
+
+/** The `jti` of an access token issued as a JWT. */
+const jtiOf = (token: string) => {
+	const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
+	if (typeof claims.jti !== "string") throw new Error("the access token names no jti");
+	return claims.jti as string;
+};
 
 /** A session opened at the instance, and an access token issued from it. */
 async function sessionAt(i: Instance) {
@@ -74,7 +95,7 @@ async function sessionAt(i: Instance) {
 	const answer = await redeemAt(i, await codeAt(i, browser));
 	const token = answer.body.access_token;
 	if (typeof token !== "string") throw new Error(`no access token: ${answer.status}`);
-	return { browser, token };
+	return { browser, token, jti: jtiOf(token) };
 }
 
 const userinfoAt = (i: Instance, token: string) =>
@@ -86,20 +107,18 @@ const successesSince = (on: readonly Instance[], match: Match, since: number) =>
 	on.flatMap((i) => i.relay.executions(match).filter((e) => e.succeeded && e.at > since));
 
 /**
- * Until the close of `handle` is seen done on the instances' relays, within 30 s: a participant's
- * revocation after `since`, then the record written closed, then the closings without the handle,
- * in that order. A session left closing, never closed or never done, does not pass.
+ * Until the close is seen done on the instances' relays, within 30 s: its token's revocation after
+ * `since`, then its record written closed, then its shard without its handle, in that order. A
+ * session left closing, never closed or never done, does not pass.
  */
-async function closedAfter(on: readonly Instance[], handle: string, since: number) {
+async function closedAfter(on: readonly Instance[], c: Closing, since: number) {
 	const end = performance.now() + 30_000;
+	const first = (match: Match, after: number) =>
+		successesSince(on, match, after).sort((x, y) => x.at - y.at)[0];
 	for (;;) {
-		const [revoked] = successesSince(on, revocation, since).sort((x, y) => x.at - y.at);
-		const closed = revoked
-			? successesSince(on, recordAs("closed", handle), revoked.at).sort((x, y) => x.at - y.at)[0]
-			: undefined;
-		const done = closed
-			? successesSince(on, doneWith(handle), closed.at).sort((x, y) => x.at - y.at)[0]
-			: undefined;
+		const revoked = first(revocationOf(c.jti), since);
+		const closed = revoked && first(recordAs("closed", c.handle), revoked.at);
+		const done = closed && first(doneWith(c), closed.at);
 		if (revoked && closed && done) return { revoked, closed, done };
 		if (performance.now() > end)
 			throw new Error(
@@ -119,7 +138,7 @@ async function control(i: Instance) {
 	const from = performance.now();
 	const add = i.relay.observe(added);
 	expect(await s.browser.logout()).toBe(200);
-	await closedAfter([i], handleOf(await add), from);
+	await closedAfter([i], closingOf(await add, s.jti), from);
 	expect(await userinfoAt(i, s.token)).toBe(401);
 }
 
@@ -144,11 +163,11 @@ async function heldHalfway(i: Instance) {
 	const from = performance.now();
 	const add = i.relay.observe(added);
 	const closing = i.relay.observe(recordAs("closing"));
-	const held = i.relay.hold(revocation);
+	const held = i.relay.hold(revocationOf(s.jti));
 	const answer = s.browser.logout().catch(() => 0);
-	const handle = handleOf(await add);
-	expect(writtenValues((await closing).command).map((w) => w.key.partition)).toEqual([handle]);
-	return { ...s, handle, answer, from, held: await held };
+	const c = closingOf(await add, s.jti);
+	expect(writtenValues((await closing).command).map((w) => w.key.partition)).toEqual([c.handle]);
+	return { ...s, closing: c, answer, from, held: await held };
 }
 
 describe("a closing session closed under faults", () => {
@@ -163,11 +182,11 @@ describe("a closing session closed under faults", () => {
 			expect(await s.browser.logout()).toBe(200);
 			const dropped = await drop.first;
 			expect(dropped.collateral.filter((x) => x.command.name === "EVAL")).toEqual([]);
-			const handle = handleOf(await add);
-			const effects = successesSince([a], recordAs("closing", handle), from);
+			const c = closingOf(await add, s.jti);
+			const effects = successesSince([a], recordAs("closing", c.handle), from);
 			expect(effects.length).toBeGreaterThan(1);
 			expect(effects.every((e) => sameMark(dropped.command, e.command))).toBe(true);
-			await closedAfter([a], handle, from);
+			await closedAfter([a], c, from);
 			await refusedAfter(a, s.token);
 		});
 	});
@@ -184,9 +203,9 @@ describe("a closing session closed under faults", () => {
 			await drop.first;
 			drop.end();
 			expect(drop.resends.length).toBeGreaterThan(0);
-			const handle = handleOf(await add);
+			const c = closingOf(await add, s.jti);
 			// The closings held it, so a sweep closes it; only the one logout was sent, to the first.
-			await closedAfter([a, b], handle, from);
+			await closedAfter([a, b], c, from);
 			expect(b.requests().filter((r) => r.path === "/session/logout")).toEqual([]);
 			await ready(a);
 			expect(await userinfoAt(b, s.token)).toBe(401);
@@ -202,14 +221,17 @@ describe("a closing session closed under faults", () => {
 			await control(a);
 			const s = await heldHalfway(a);
 			// The held write goes with its connection, unsent; resent within its patience it may land on
-			// the new primary, the logout then closing it, or the logout answers it pending.
+			// the new primary, the logout then closing it, or the logout answers it pending. Nothing
+			// reaches Redis until the promotion is done, so all that closes it comes after.
+			a.relay.stall("up");
 			await failover(d);
 			const promoted = performance.now();
+			a.relay.resume();
 			const answer = await s.answer;
 			expect([200, 503]).toContain(answer);
 			await annotate(finishedBy(answer));
 			await ready(a);
-			await closedAfter([a], s.handle, promoted);
+			await closedAfter([a], s.closing, promoted);
 			await refusedAfter(a, s.token);
 		});
 	});
@@ -258,11 +280,11 @@ describe("a closing session closed under faults", () => {
 			);
 			// ... so the comparison of the two run ids alone keeps the close from going on.
 			await pause(2_000);
-			expect(successesSince([a], recordAs("closed", s.handle), s.from)).toEqual([]);
+			expect(successesSince([a], recordAs("closed", s.closing.handle), s.from)).toEqual([]);
 			a.relay.reset("confirming");
 			const healed = performance.now();
 			await ready(a);
-			const { closed } = await closedAfter([a], s.handle, s.from);
+			const { closed } = await closedAfter([a], s.closing, s.from);
 			expect(closed.at).toBeGreaterThan(healed);
 			await refusedAfter(a, s.token);
 		});
@@ -275,16 +297,20 @@ describe("a closing session closed under faults", () => {
 			const a = instanceOf(d);
 			await control(a);
 			const s = await heldHalfway(a);
+			// Nothing reaches Redis until it is started again and the relay points at it, so all that
+			// closes it comes after.
+			a.relay.stall("up");
 			const crashed = await d.topology.crash(d.topology.primary());
 			expect(crashed.exitCode).toBe(137);
-			const restarted = performance.now();
 			repointed(d);
 			await replicasOnline(d);
+			const restarted = performance.now();
+			a.relay.resume();
 			const answer = await s.answer;
 			expect([200, 503]).toContain(answer);
 			await annotate(finishedBy(answer));
 			await ready(a);
-			await closedAfter([a], s.handle, restarted);
+			await closedAfter([a], s.closing, restarted);
 			await refusedAfter(a, s.token);
 		});
 	});
@@ -293,14 +319,17 @@ describe("a closing session closed under faults", () => {
 		await on({ name: "session-closing-k", scene, instances: 2 }, async (d) => {
 			const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
 			await control(a);
+			// The other's sweep reaches nothing until the first is killed, so it closes only after.
+			b.relay.stall("up");
 			const s = await heldHalfway(a);
 			const ended = await a.kill();
 			expect(ended.signal).toBe("SIGKILL");
-			// Meanwhile the session is closing, which lets no token in.
+			b.relay.resume();
+			// The session is closing, then closed, either of which lets no token in.
 			expect(await userinfoAt(b, s.token)).toBe(401);
-			await closedAfter([b], s.handle, ended.endedAt);
+			await closedAfter([b], s.closing, ended.endedAt);
 			// The held write was never sent, and only the one logout was, to the killed instance.
-			expect(successesSince([a], revocation, s.from)).toEqual([]);
+			expect(successesSince([a], revocationOf(s.jti), s.from)).toEqual([]);
 			expect(b.requests().filter((r) => r.path === "/session/logout")).toEqual([]);
 			await refusedAfter(b, s.token);
 		});
@@ -312,7 +341,7 @@ describe("a closing session closed under faults", () => {
 			await control(a);
 			const s = await heldHalfway(a);
 			// The other's sweep closes it while the logout is held ...
-			await closedAfter([b], s.handle, s.from);
+			await closedAfter([b], s.closing, s.from);
 			// ... and the logout, let go, finds it closed and answers so.
 			s.held.release();
 			expect(await s.answer).toBe(200);
