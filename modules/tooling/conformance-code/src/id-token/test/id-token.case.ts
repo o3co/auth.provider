@@ -173,6 +173,8 @@ describe("OpenID Connect: the ID token", () => {
 	it("ignores offline_access in an OpenID Connect request, no offline access being offered: a code for the rest, the scope answered and carried without it [oidc-core-11-c]", async () => {
 		const { at, tokens } = await signedIn({ scope: "openid offline_access read" });
 		expect(at?.searchParams.get("error")).toBeNull();
+		// The scope issued is not the one asked, so the answer must say it (RFC 6749 §5.1).
+		expect(typeof tokens.scope).toBe("string");
 		for (const [name, scope] of [
 			["answer", tokens.scope],
 			["access token", claimsOf(tokens.access_token).scope],
