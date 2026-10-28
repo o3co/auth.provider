@@ -967,6 +967,9 @@ describe("idp-oidc", () => {
 			"another issuer": { token: () => idToken({ iss: "https://evil.example" }) },
 			"another audience": { token: () => idToken({ aud: "someone" }) },
 			"many audiences, no azp": { token: () => idToken({ aud: ["client", "x"] }) },
+			"another audience, the client authorized": {
+				token: () => idToken({ aud: ["client", "x"], azp: "client" }),
+			},
 			"azp not the client": { token: () => idToken({ aud: "client", azp: "x" }) },
 			"another nonce": { token: () => idToken({ nonce: "other" }) },
 			"no subject": { token: () => idToken({ sub: "" }) },
@@ -991,10 +994,8 @@ describe("idp-oidc", () => {
 		}
 		const { upstream } = await answering(await idToken());
 		expect(await outcome(upstream.exchange(codeExchange({ nonce: "x" })))).toBe("refused");
-		for (const aud of [["client", "x"], ["client"]]) {
-			const listed = await idToken({ aud, ...(aud.length > 1 ? { azp: "client" } : {}) });
-			expect(await exchanged(listed), aud.join()).toMatchObject({ subject: "u-alice" });
-		}
+		const listed = await idToken({ aud: ["client"] });
+		expect(await exchanged(listed)).toMatchObject({ subject: "u-alice" });
 	});
 
 	it("takes by default one algorithm for each kind of key, PS256 only where the operator names it [oidc-core-3.1.3.7-i]", async () => {
