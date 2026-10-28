@@ -14,7 +14,7 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { codeAt, faultScene, on, redeemAt, refreshAt, said } from "../../faults/test/faults.ts";
-import { onFamilies, rotationFrom } from "../../faults/test/wire.ts";
+import { isStoreOperation, onFamilies, rotationFrom } from "../../faults/test/wire.ts";
 
 const scene = faultScene({ refresh: {} });
 const refused = [400, "invalid_grant"];
@@ -67,7 +67,7 @@ describe("a refresh token rotated once under faults", () => {
 			const drop = a.relay.dropReplyTo(rotationFrom(token));
 			const answer = await refreshAt(a, token);
 			const dropped = await drop.first;
-			expect(dropped.collateral.filter((x) => x.command.name === "EVAL")).toEqual([]);
+			expect(dropped.collateral.filter((x) => isStoreOperation(x.command))).toEqual([]);
 			expect(said(answer)).toEqual(issued);
 			const effects = successes(a, rotationFrom(token));
 			expect(effects.length).toBeGreaterThan(1);

@@ -19,6 +19,7 @@ import {
 	type Closing,
 	closingOf,
 	doneWith,
+	isStoreOperation,
 	recordAs,
 	revocationOf,
 } from "../../faults/test/wire.ts";
@@ -151,7 +152,7 @@ describe("a closing session closed under faults", () => {
 			const drop = a.relay.dropReplyTo(recordAs("closing"));
 			expect(await s.browser.logout()).toBe(200);
 			const dropped = await drop.first;
-			expect(dropped.collateral.filter((x) => x.command.name === "EVAL")).toEqual([]);
+			expect(dropped.collateral.filter((x) => isStoreOperation(x.command))).toEqual([]);
 			const c = closingOf(await add, s.jti);
 			const effects = successesSince([a], recordAs("closing", c.handle), from);
 			expect(effects.length).toBeGreaterThan(1);
@@ -235,7 +236,7 @@ describe("a closing session closed under faults", () => {
 					(e) =>
 						e.at > s.from &&
 						e.at < wait.at &&
-						e.command.name === "EVAL" &&
+						isStoreOperation(e.command) &&
 						runIdOf(e.reply) !== undefined,
 				)
 				.at(-1);

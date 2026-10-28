@@ -15,7 +15,7 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { app, browserOn, callback, on, pkce } from "../../faults/test/faults.ts";
-import { codeKept, cookieRead } from "../../faults/test/wire.ts";
+import { codeKept, cookieRead, isStoreOperation } from "../../faults/test/wire.ts";
 
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
@@ -234,7 +234,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 					(e) =>
 						e.at > from &&
 						e.at < wait.at &&
-						e.command.name === "EVAL" &&
+						isStoreOperation(e.command) &&
 						runIdOf(e.reply) !== undefined,
 				)
 				.at(-1);
