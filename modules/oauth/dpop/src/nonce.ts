@@ -20,15 +20,15 @@ export function nonces(secret: Uint8Array, bucketMs: number, now: () => number):
 		// The clock is read once, so the bucket named and the one signed are the same.
 		issue: () => nonceOf(bucketNow()),
 		verify: (nonce: string) => {
-			const [head, mac, ...rest] = nonce.split(".");
-			if (rest.length > 0 || mac === undefined || head === undefined || !/^\d+$/.test(head)) {
-				return false;
-			}
+			const head = nonce.split(".")[0] ?? "";
+			if (!/^\d+$/.test(head)) return false;
 			const bucket = Number(head);
 			const current = bucketNow();
 			if (bucket !== current && bucket !== current - 1) return false;
-			const presented = Buffer.from(mac, "base64url");
-			const expected = macOf(bucket);
+			// The whole text against the one made for its bucket, so only the very form handed out is
+			// taken: base64url's decoder and Number would also read padding, stray characters or zeros.
+			const presented = Buffer.from(nonce);
+			const expected = Buffer.from(nonceOf(bucket));
 			return presented.length === expected.length && timingSafeEqual(presented, expected);
 		},
 	};

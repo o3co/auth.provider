@@ -34,7 +34,7 @@ const refused = {
 };
 
 describe("resource-indicators", () => {
-	it("keeps the default audience when no resource, or an empty one, is asked", () => {
+	it("keeps the default audience when no resource, or an empty one, is asked [rfc6749-3.2-b]", () => {
 		expect(verdictFor({})).toEqual({ kind: "audience", audience });
 		expect(verdictFor({ resource: "" })).toEqual({ kind: "audience", audience });
 	});
@@ -50,7 +50,7 @@ describe("resource-indicators", () => {
 		expect(verdictFor({ resource: "https://c.example" })).toEqual(refused);
 	});
 
-	it("refuses a resource sent to a grant that takes no audience, with a fixed text, and asks nothing of one left out or empty", () => {
+	it("refuses a resource sent to a grant that takes no audience, with a fixed text, and asks nothing of one left out or empty [rfc6749-3.2-b]", () => {
 		const untargeted = (params: Record<string, string>) =>
 			rule.untargeted?.({ param: (name) => params[name] });
 		expect(untargeted({ resource: "https://b.example" })).toEqual({
