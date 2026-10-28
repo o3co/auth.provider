@@ -16,6 +16,7 @@ interface Step {
 	readonly with?: Readonly<Record<string, unknown>>;
 }
 interface Job {
+	readonly if?: string;
 	readonly outputs?: Readonly<Record<string, string>>;
 	readonly strategy?: { readonly matrix?: Readonly<Record<string, unknown>> };
 	readonly steps: readonly Step[];
@@ -57,6 +58,49 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		);
 	});
 
+	it("run on a pull request to develop the areas its change reaches and their fault scenes, no pattern, and pass where nothing was planned", () => {
+		const plan = job("conformance-plan");
+		expect(plan.if).toContain("github.event_name == 'pull_request'");
+		expect(plan.if).not.toContain("github.base_ref == 'main'");
+		// The change is read against the base, whose history the checkout holds.
+		expect(checkout("conformance-plan")?.with?.["fetch-depth"]).toBe(0);
+		const step = plan.steps.find((s) => s.id === "plan");
+		expect(step?.env).toEqual({ EVENT: expr("github.event_name"), BASE: expr("github.base_ref") });
+		const script = step?.run ?? "";
+		expect(script).toContain('if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then');
+		// The packages the change reaches: those it changed and those depending on them.
+		expect(script).toContain(
+			`reached=$(pnpm list --recursive --depth -1 --json --filter "...[origin/$BASE]" | jq -c '[.[].name]')`,
+		);
+		for (const list of ["areas", "faults"]) {
+			expect(script).toContain(
+				`${list}=$(jq -cn --argjson planned "$${list}" --argjson reached "$reached" '[$planned[] | select(. as $p | $reached | index($p))]')`,
+			);
+		}
+		expect(script).toContain("patterns='[]'");
+		// A job with nothing planned is skipped, as a matrix of none cannot run.
+		const planned = (list: string) => `needs.conformance-plan.outputs.${list} != '[]'`;
+		expect(job("legacy-build").if).toContain(planned("areas"));
+		expect(job("conformance-area").if).toContain(planned("areas"));
+		expect(job("conformance-faults").if).toContain(planned("faults"));
+		expect(job("conformance-pattern").if).toContain(planned("patterns"));
+		// The gate runs on every pull request, and takes a job skipped with nothing planned as passed.
+		const gate = job("conformance");
+		expect(gate.if).toContain("github.event_name == 'pull_request'");
+		const check = gate.steps[0];
+		expect(check?.env).toMatchObject({
+			PLANNED_AREAS: expr("needs.conformance-plan.outputs.areas"),
+			PLANNED_PATTERNS: expr("needs.conformance-plan.outputs.patterns"),
+			PLANNED_FAULTS: expr("needs.conformance-plan.outputs.faults"),
+		});
+		expect(check?.run).toContain(
+			'if [ "$planned" = "[]" ] && [ "$result" = skipped ]; then continue; fi',
+		);
+		expect(check?.run).toContain(
+			'"legacy-build $PLANNED_AREAS $LEGACY" "conformance-area $PLANNED_AREAS $AREAS" "conformance-pattern $PLANNED_PATTERNS $PATTERNS" "conformance-faults $PLANNED_FAULTS $FAULTS"',
+		);
+	});
+
 	it("run each area's fault scenes as a fault run, which skips none, and fail conformance where they did not pass", () => {
 		const faults = job("conformance-faults");
 		const scenes = faults.steps.find((s) => s.name === "Fault scenes");
@@ -69,7 +113,7 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			steps: readonly Step[];
 		};
 		expect(gate.needs).toContain("conformance-faults");
-		expect(gate.steps.map((s) => s.run).join("\n")).toContain("needs.conformance-faults.result");
+		expect(gate.steps.map((s) => s.env?.FAULTS)).toContain(expr("needs.conformance-faults.result"));
 	});
 
 	it("run conformance's deployment tests that move an instance's clock in one leg of the fault job, failing rather than skipping or matching none, and reporting no evidence", () => {
