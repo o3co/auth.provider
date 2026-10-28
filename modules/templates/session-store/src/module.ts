@@ -52,6 +52,9 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
+// Safe on many instances given the same `closing-shards` and `closings-per-shard` on each
+// (deployment-guarantees, Several instances): closing sessions go to a shard by their hash, and a
+// sweep walks only the shards it counts.
 export default defineModule(
 	{ name: "session-store", replicaSafe: true, section, takes: [store] },
 	(m) => [
