@@ -57,25 +57,32 @@ const memory = contract<{
 const noAudit = { record: () => {} };
 
 /** Every limit, lockout and per-source policy, counted in memory with no store and no audit. */
-export const rateLimitStandIn = defineModule({ name: "rate-limit", takes: [] }, (m) => [
-	m.provide(memory).by((c) => ({
-		windows: memoryCounter(c.clock.now),
-		attempts: memoryCounter(c.clock.now),
-		lockouts: memoryStates(c.clock.now),
-	})),
-	m.provide(rateLimit).by(async (c) => (await c.get(memory)).windows),
-	m.provide(attemptLimit).by(async (c) => (await c.get(memory)).attempts),
-	m.provide(lockouts).by(async (c) => lockoutCounter((await c.get(memory)).lockouts)),
-	m.contribute(policies).by(async (c) =>
-		limitingAttempts((await c.get(memory)).attempts, {
-			log: c.log,
-			recorded: noAudit,
-		}),
-	),
-	m
-		.contribute(policies)
-		.by(async (c) =>
-			limitingRequests((await c.get(memory)).windows, { log: c.log, recorded: noAudit }, "closed"),
+export const rateLimitStandIn = defineModule(
+	{ name: "rate-limit", replicaSafe: false, takes: [] },
+	(m) => [
+		m.provide(memory).by((c) => ({
+			windows: memoryCounter(c.clock.now),
+			attempts: memoryCounter(c.clock.now),
+			lockouts: memoryStates(c.clock.now),
+		})),
+		m.provide(rateLimit).by(async (c) => (await c.get(memory)).windows),
+		m.provide(attemptLimit).by(async (c) => (await c.get(memory)).attempts),
+		m.provide(lockouts).by(async (c) => lockoutCounter((await c.get(memory)).lockouts)),
+		m.contribute(policies).by(async (c) =>
+			limitingAttempts((await c.get(memory)).attempts, {
+				log: c.log,
+				recorded: noAudit,
+			}),
 		),
-	m.contribute(marks).by(() => perSourceMark),
-]);
+		m
+			.contribute(policies)
+			.by(async (c) =>
+				limitingRequests(
+					(await c.get(memory)).windows,
+					{ log: c.log, recorded: noAudit },
+					"closed",
+				),
+			),
+		m.contribute(marks).by(() => perSourceMark),
+	],
+);
