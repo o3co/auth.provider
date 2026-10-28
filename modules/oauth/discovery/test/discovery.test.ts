@@ -49,7 +49,7 @@ async function serve(extra: Module[], url = "https://as.example", corsOrigins: s
 	};
 }
 
-it("serves one JSON document at both well-known names, 200 as application/json, the configured issuer first and each contributed member [oidc-discovery-3-a] [oidc-discovery-4-a] [oidc-discovery-4.1-a] [oidc-discovery-4.3-a] [rfc8414-2-a] [rfc8414-3.1-a] [rfc8414-3.3-a] [oidc-discovery-4-b] [oidc-discovery-4-c] [oidc-discovery-4.2-a] [rfc8414-3.2-a] [rfc9207-2.3-a]", async () => {
+it("serves one document at both well-known names, 200 as application/json, the configured issuer first and each contributed member [oidc-discovery-3-a] [oidc-discovery-4-a] [oidc-discovery-4.1-a] [oidc-discovery-4.3-a] [rfc8414-2-a] [rfc8414-3.1-a] [rfc8414-3.3-a] [oidc-discovery-4-c] [oidc-discovery-4.2-a] [rfc8414-3.2-a] [rfc9207-2.3-a]", async () => {
 	const get = await serve([
 		item("b_supported", ["x"]),
 		item("a_endpoint", "https://as.example/a"),
