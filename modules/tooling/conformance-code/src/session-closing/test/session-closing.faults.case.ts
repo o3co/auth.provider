@@ -19,11 +19,11 @@ import { describe, expect, it } from "vitest";
 import { browserOn, codeAt, faultScene, on, prefix, redeemAt } from "../../faults/test/faults.ts";
 import { backChannel } from "../../testing.ts";
 
-// Userinfo shows whether a token's path is open; pending closes are gone on with every second. A
-// sweep reads every shard of the closings in turn, each read confirmed: over the 1024 a deployment
-// has unless set, one sweep runs past a scene's wait where Redis answers slower (CI), so a few.
+// Userinfo shows whether a token's path is open; pending closes are gone on with every second. The
+// scene's values, not the defaults. A sweep reads every shard of the closings in turn, each read confirmed.
+// closing-shards 4: over the default 1024, one sweep on CI's round trips runs past the scene's 30 s wait.
 const scene = faultScene({ userinfo: true, sweepSeconds: 1, closingShards: 4 });
-// No sweep within the scene, its first an hour after boot: the logout alone writes the record.
+// sweep-interval 3600: the logout alone closes it, so no sweep of its own writes closing under another mark.
 const logoutAlone = faultScene({ userinfo: true, sweepSeconds: 3600 });
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
