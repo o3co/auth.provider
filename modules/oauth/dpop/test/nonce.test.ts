@@ -13,3 +13,18 @@ it("makes a nonce of one bucket, whatever the clock does between its reads", () 
 	const bucket = Number(issued.split(".")[0]);
 	expect(nonces(secret, 1000, () => bucket * 1000).verify(issued)).toBe(true);
 });
+
+it("takes a nonce only in the very form it made it", () => {
+	const made = nonces(randomBytes(32), 1000, () => 5_000);
+	const given = made.issue();
+	expect(made.verify(given)).toBe(true);
+	for (const other of [
+		`${given} `,
+		`${given}=`,
+		`${given}!`,
+		`0${given}`,
+		given.replace(".", ". "),
+	]) {
+		expect(made.verify(other), other).toBe(false);
+	}
+});
