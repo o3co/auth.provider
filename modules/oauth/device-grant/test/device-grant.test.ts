@@ -185,10 +185,18 @@ async function serve(...given: Parameters<typeof assembly>) {
 			},
 			body,
 		});
+		const text = await res.text();
 		return {
 			status: res.status,
 			headers: res.headers,
-			body: (await res.json().catch(() => ({}))) as Record<string, string>,
+			text,
+			body: (() => {
+				try {
+					return JSON.parse(text) as Record<string, string>;
+				} catch {
+					return {} as Record<string, string>;
+				}
+			})(),
 		};
 	};
 	const post = (path: string, form: Record<string, string> | string[][], headers = {}) =>
@@ -280,6 +288,45 @@ describe("device authorization", () => {
 		]);
 	});
 
+	it("refuses a request that names no client and authenticates none [rfc8628-3.1-a]", async () => {
+		const s = await serve();
+		for (const form of [{}, { scope: "read" }]) {
+			const asked = await s.post("/oauth/device_authorization", form);
+			expect([asked.status, asked.body.error], JSON.stringify(form)).toEqual([
+				401,
+				"invalid_client",
+			]);
+		}
+	});
+
+	it("reads a parameter sent empty as one not sent, and passes over one it does not know [rfc8628-3.1-b] [rfc8628-3.1-c]", async () => {
+		const s = await serve();
+		for (const form of [
+			{ scope: "" },
+			{ resource: "" },
+			{ scope: "", resource: "" },
+			{ ui_locales: "fr" },
+			{ x_vendor: "1" },
+		]) {
+			const asked = await s.authorize("tv", form);
+			expect(asked.status, JSON.stringify(form)).toBe(200);
+		}
+		// The empty scope is the client's default, as though none were asked.
+		const { code, user } = await s.started("tv", { scope: "" });
+		const cookie = await s.login();
+		await s.verify(cookie, { action: "approve", user_code: user });
+		now += 5_000;
+		expect(await s.poll(code)).toMatchObject({ scope: "read" });
+	});
+
+	it("writes each parameter of its answer once [rfc8628-3.1-e]", async () => {
+		const given = await (await serve()).authorize();
+		expect(given.status).toBe(200);
+		for (const name of ["device_code", "user_code", "verification_uri", "expires_in", "interval"]) {
+			expect(given.text.split(`"${name}":`).length - 1, name).toBe(1);
+		}
+	});
+
 	it("answers an assertion beside another method invalid_client, as the token endpoint does, and two other methods invalid_request", async () => {
 		// A method saying it authenticates by an assertion: what makes the refusal the assertion's.
 		const assertionMethod = defineModule({ name: "test-assertion", takes: [] }, (m) => [
@@ -360,7 +407,7 @@ describe("device authorization", () => {
 
 	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
 	// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
-	it("makes each device code of 32 fresh random bytes [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
+	it("makes each device code of 32 fresh random bytes [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc8628-5.2-a]", async () => {
 		const s = await serve();
 		const codes = [(await s.authorize()).body.device_code, (await s.authorize()).body.device_code];
 		for (const code of codes) expect(drawn).toContain(code);
@@ -877,7 +924,7 @@ describe("verification", () => {
 		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
 	});
 
-	it("counts every decision a subject tries, so codes cannot be guessed", async () => {
+	it("counts every decision a subject tries, so codes of 8 letters of 20, living 10 minutes, cannot be guessed [rfc8628-5.1-a]", async () => {
 		const s = await serve({ attempts: 2 });
 		const cookie = await s.login();
 		for (let i = 0; i < 2; i++) {
