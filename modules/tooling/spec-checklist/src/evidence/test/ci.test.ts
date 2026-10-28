@@ -40,14 +40,34 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		const script = plan.steps.find((s) => s.id === "plan")?.run ?? "";
 		expect(script).toContain("@mod/spec-checklist run plan area");
 		expect(script).toContain("@mod/spec-checklist run plan pattern");
+		expect(script).toContain("@mod/spec-checklist run plan faults");
 		expect(script).toContain('echo "sha=$(git rev-parse HEAD)"');
 		expect(plan.outputs?.sha).toBe(expr("steps.plan.outputs.sha"));
+		expect(plan.outputs?.faults).toBe(expr("steps.plan.outputs.faults"));
 		expect(job("conformance-area").strategy?.matrix?.area).toBe(
 			expr("fromJSON(needs.conformance-plan.outputs.areas)"),
 		);
 		expect(job("conformance-pattern").strategy?.matrix?.pattern).toBe(
 			expr("fromJSON(needs.conformance-plan.outputs.patterns)"),
 		);
+		expect(job("conformance-faults").strategy?.matrix?.area).toBe(
+			expr("fromJSON(needs.conformance-plan.outputs.faults)"),
+		);
+	});
+
+	it("run each area's fault scenes as a fault run, which skips none, and fail conformance where they did not pass", () => {
+		const faults = job("conformance-faults");
+		const scenes = faults.steps.find((s) => s.name === "Fault scenes");
+		expect(scenes?.env?.CONFORMANCE_FAULTS).toBe("1");
+		expect(scenes?.run).toContain("run conformance:faults");
+		// What a scene ran on is kept apart from the evidence, every file of which compliance reads.
+		expect(scenes?.env?.CONFORMANCE_FAULTS_DIR).not.toContain("evidence");
+		const gate = jobs.conformance as unknown as {
+			needs: readonly string[];
+			steps: readonly Step[];
+		};
+		expect(gate.needs).toContain("conformance-faults");
+		expect(gate.steps.map((s) => s.run).join("\n")).toContain("needs.conformance-faults.result");
 	});
 
 	it("take the interop matrices from `run plan` in interop-due, which fixes their commit", () => {
@@ -72,6 +92,9 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(checkout("conformance-pattern")?.with?.ref).toBe(
 			expr("needs.conformance-plan.outputs.sha"),
 		);
+		expect(checkout("conformance-faults")?.with?.ref).toBe(
+			expr("needs.conformance-plan.outputs.sha"),
+		);
 		expect(checkout("interop-oidf")?.with?.ref).toBe(expr("needs.interop-due.outputs.sha"));
 		expect(checkout("interop-clients")?.with?.ref).toBe(expr("needs.interop-due.outputs.sha"));
 		expect(checkout("compliance")?.with?.ref).toBe(
@@ -85,6 +108,7 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			integration: "integration",
 			"conformance-area": "area",
 			"conformance-pattern": "pattern",
+			"conformance-faults": "faults",
 			"interop-clients": "library",
 			"interop-oidf": "oidf-plan",
 			"release-check": "release",
