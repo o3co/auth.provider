@@ -50,8 +50,8 @@ afterAll(async () => {
 	if (running?.kind === "running") await running.stop();
 });
 
-/** A DPoP proof (RFC 9449 §4) by `key`, for `htm` at `path`, bound to `token` when given. */
-async function proof(path: string, htm: string, token?: string, key = holder) {
+/** A DPoP proof (RFC 9449 §4) by `key`, for `htm` at `path`, bound to `token` when given, its claims written over by `over`. */
+async function proof(path: string, htm: string, token?: string, key = holder, over = {}) {
 	const ath = token && createHash("sha256").update(token).digest("base64url");
 	return new SignJWT({
 		htm,
@@ -59,6 +59,7 @@ async function proof(path: string, htm: string, token?: string, key = holder) {
 		iat: Math.floor(Date.now() / 1000),
 		jti: randomUUID(),
 		...(ath ? { ath } : {}),
+		...over,
 	})
 		.setProtectedHeader({ alg: "EdDSA", typ: "dpop+jwt", jwk: await exportJWK(key.publicKey) })
 		.sign(key.privateKey);
@@ -120,6 +121,22 @@ describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", ()
 			dpop: await proof("/oauth/userinfo", "GET", "another token"),
 		});
 		expect(elsewhere.status).toBe(401);
+	});
+
+	it("grants nothing until every check of the proof has passed: its method, its URI, its time and its one use [rfc9449-7.1-b]", async () => {
+		const token = await boundToken();
+		const at = (dpop: string) => userinfo({ authorization: `DPoP ${token}`, dpop });
+		const old = Math.floor(Date.now() / 1000) - 3600;
+		for (const [name, dpop] of [
+			["another method", await proof("/oauth/userinfo", "POST", token)],
+			["another URI", await proof("/oauth/token", "GET", token)],
+			["an hour old", await proof("/oauth/userinfo", "GET", token, holder, { iat: old })],
+		] as const) {
+			expect((await at(dpop)).status, name).toBe(401);
+		}
+		const once = await proof("/oauth/userinfo", "GET", token);
+		expect((await at(once)).status).toBe(200);
+		expect((await at(once)).status).toBe(401);
 	});
 
 	it("refuses the token under the DPoP scheme without a proof [rfc9449-7.1-a]", async () => {
