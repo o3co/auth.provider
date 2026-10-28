@@ -329,7 +329,7 @@ const scoping = defineModule({ name: "scoping", replicaSafe: false, takes: [] },
  * The hint reader oidc would contribute, here a stand-in: `id:<subject>` is an ID token it issued
  * naming that subject, expired or not, and any other none it takes.
  */
-const hinting = defineModule({ name: "hinting", takes: [] }, (m) => [
+const hinting = defineModule({ name: "hinting", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(hintReaders).by(() => ({
 		read: async (hint: string) =>
 			hint.startsWith("id:")
@@ -2058,7 +2058,7 @@ describe("authorize: an id_token_hint", () => {
 	});
 
 	it("refuses at boot a second module reading hints", async () => {
-		const second = defineModule({ name: "second-hinting", takes: [] }, (m) => [
+		const second = defineModule({ name: "second-hinting", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(hintReaders).by(() => ({ read: async () => ({ kind: "invalid" }) as const })),
 		]);
 		await expect(serve({ extra: [second] })).rejects.toMatchObject({
