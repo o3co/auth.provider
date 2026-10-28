@@ -44,7 +44,7 @@ async function refusals(modules: Module[], settings?: Record<string, unknown>) {
 }
 
 const emitting = (...made: (() => Instrument)[]) =>
-	defineModule({ name: "emitter", replicaSafe: true, takes: [] }, (m) =>
+	defineModule({ name: "emitter", replicaSafe: false, takes: [] }, (m) =>
 		made.map((make) => m.contribute(instruments).by(make)),
 	);
 
