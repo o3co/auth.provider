@@ -153,7 +153,7 @@ async function refusedAfter(i: Instance, token: string) {
 
 /**
  * A logout at the instance whose close is confirmed closing and whose participant's write is held,
- * so the close stops halfway: its handle, the logout's answer to come, and when it began.
+ * so the close stops halfway: its handle, the logout's answer to come and when it comes, and when it began.
  */
 async function heldHalfway(i: Instance) {
 	const s = await sessionAt(i);
@@ -162,9 +162,27 @@ async function heldHalfway(i: Instance) {
 	const closing = i.relay.observe(recordAs("closing"));
 	const held = i.relay.hold(revocationOf(s.jti));
 	const answer = s.browser.logout().catch(() => 0);
+	const answered = answer.then(() => performance.now());
 	const c = closingOf(await add, s.jti);
 	expect(writtenValues((await closing).command).map((w) => w.key.partition)).toEqual([c.handle]);
-	return { ...s, closing: c, answer, from, held: await held };
+	return { ...s, closing: c, answer, answered, from, held: await held };
+}
+
+/**
+ * The close stopped halfway seen done after the fault, from `since`. A logout answered done was done
+ * before its answer: its revocation, its record closed and its shard done each seen on the relay
+ * first. One answered pending is finished later, by a sweep.
+ */
+async function finishedAfter(
+	i: Instance,
+	s: Awaited<ReturnType<typeof heldHalfway>>,
+	answer: number,
+	since: number,
+) {
+	const seen = await closedAfter([i], s.closing, since);
+	if (answer !== 200) return;
+	const answered = await s.answered;
+	for (const step of [seen.revoked, seen.closed, seen.done]) expect(step.at).toBeLessThan(answered);
 }
 
 describe("a closing session closed under faults", () => {
@@ -228,7 +246,7 @@ describe("a closing session closed under faults", () => {
 			expect([200, 503]).toContain(answer);
 			await annotate(finishedBy(answer));
 			await ready(a);
-			await closedAfter([a], s.closing, promoted);
+			await finishedAfter(a, s, answer, promoted);
 			await refusedAfter(a, s.token);
 		});
 	});
@@ -307,7 +325,7 @@ describe("a closing session closed under faults", () => {
 			expect([200, 503]).toContain(answer);
 			await annotate(finishedBy(answer));
 			await ready(a);
-			await closedAfter([a], s.closing, restarted);
+			await finishedAfter(a, s, answer, restarted);
 			await refusedAfter(a, s.token);
 		});
 	});
