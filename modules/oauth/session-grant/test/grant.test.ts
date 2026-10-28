@@ -220,22 +220,23 @@ describe("session-grant", () => {
 		});
 	});
 
-	it("refuses a request without same-origin evidence as unauthorized, before reading the session", async () => {
+	it("refuses a request without same-origin evidence with a registered code, invalid_grant, before reading the session [rfc6749-8.5-a]", async () => {
 		const s = await serve();
 		for (const origin of [null, "https://elsewhere.example"]) {
 			expect(await s.call("app", {}, origin)).toEqual({
 				kind: "error",
-				error: "unauthorized",
+				error: "invalid_grant",
 				description: "session is not authenticated",
-				status: 401,
 			});
 		}
 		expect(s.asked).toEqual([]);
 	});
 
-	it("refuses without a session as unauthorized, and names the requirement a session falls short of", async () => {
+	it("refuses without a session as invalid_grant, and names the requirement a session falls short of [rfc6749-8.5-a]", async () => {
 		const absent = await serve({ entry: { kind: "absent" } });
-		expect(await absent.call("app")).toMatchObject({ error: "unauthorized", status: 401 });
+		const refused = await absent.call("app");
+		expect(refused).toMatchObject({ error: "invalid_grant" });
+		expect(refused).not.toHaveProperty("status");
 		const short = await serve({
 			entry: { kind: "short", requirement: "mfa", answer: { error: "mfa_required" } },
 		});
