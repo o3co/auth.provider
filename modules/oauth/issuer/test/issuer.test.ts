@@ -130,6 +130,19 @@ it("takes a plain-http issuer only beside the same plain-http public origin, whi
 	expect(plain.get(issuer).url).toBe("http://as.example");
 });
 
+it("refuses an issuer on another origin than the public origin, saying to give it the same", async () => {
+	const refused = await boot("https://elsewhere.example", "https://as.example").catch(
+		(error: BootRefused) => error.refusals,
+	);
+	expect(refused).toEqual([
+		{
+			where: "issuer.url",
+			reason:
+				"the issuer origin differs from http.public-origin: give issuer.url the same scheme, host and port",
+		},
+	]);
+});
+
 it("refuses a plain-http issuer in a production deployment [oidc-discovery-3-a] [rfc8414-2-a] [rfc8414-3-b] [rfc9207-2-b]", async () => {
 	const refused = await boot("http://as.example", "http://as.example").catch(
 		(error: BootRefused) => error.refusals,
