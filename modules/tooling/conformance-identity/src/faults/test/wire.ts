@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { type Command, type Match, storeRead, storeWrite } from "@mod/conformance/testing";
+import {
+	type Command,
+	type Match,
+	storeRead,
+	storeWrite,
+	writtenValues,
+} from "@mod/conformance/testing";
 
 // What the area's fault scenes name of the store's inside, in one place: the Redis adapter's wire, the
 // spaces and partitions the identity area's modules write. The scenes name only what this file offers.
@@ -44,3 +50,11 @@ export const lockoutOf = (identifier: string): Match =>
 			`login-password.account\n${sha256(identifier.normalize("NFKC").toLowerCase())}`,
 		),
 	});
+
+/** The run of failures a write to an identifier's lockout leaves, as the state it writes holds it. */
+export const lockoutRun = (command: Command): number | undefined => {
+	const run = writtenValues(command)
+		.map((w) => (w.value as { run?: unknown } | null)?.run)
+		.find((r) => typeof r === "number");
+	return typeof run === "number" ? run : undefined;
+};

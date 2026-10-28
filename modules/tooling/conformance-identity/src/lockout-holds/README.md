@@ -3,8 +3,8 @@
 Internal module of `conformance-identity`: the fault scenes of password login's per-identifier count holding across a crash and a failover, each attempt counted once, the same on every instance (`guarantee-5-i`).
 
 ## Responsibilities
-- Reads how many failures an identifier's run holds from the wait the next one starts: the scenes set the wait to start at the first failure, and it doubles with each after, so a run kept and a run lost or counted twice ask different waits.
-- Checks, each scene after a control with no fault (each failure counted by one write, the attempt after them waiting and counting nothing), that:
+- Reads how many failures an identifier's run holds from the state each counted attempt writes, its run; and a wait from an answer only where it is long enough (4 s and more) that a slow host cannot let it lapse before the next attempt: the scenes start the wait at the first failure, doubling with each after.
+- Checks, each scene after a control with no fault (each failure counted by one write, its run one longer than the last), that:
   - a reservation whose answer is lost took effect once, unheard: the attempt is refused unavailable, and stays a failure, counted once and never resent (`Lr`);
   - a run counted before a caught-up replica is promoted, or before Redis is killed at once and started again, is held after (`F`, `C`);
   - an attempt whose instance was killed after its reservation ran and before answering is counted at another instance (`K`);
