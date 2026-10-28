@@ -196,7 +196,7 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		);
 	});
 
-	it("run every suite plan where a pull request to develop touches the harness, and the relying party plan alone where it touches only the relying party's side", () => {
+	it("run every suite plan where a pull request to develop touches the harness, and the relying party plan alone where it touches a provider module or the federation scenes", () => {
 		const due = job("interop-due");
 		const script = (id: string) => due.steps.find((s) => s.id === id)?.run ?? "";
 		const dir = mkdtempSync(join(tmpdir(), "ci-oidf-"));
@@ -243,10 +243,12 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 				return { oidf: all.oidf, scope: all["oidf-scope"], plans: all["oidf-plans"] };
 			};
 			const every = '["basic","config","rp-initiated-logout","rp"]';
+			// A provider module, however far from upstream login (external-jwt is two steps from federation).
 			for (const file of [
 				"modules/upstream-login/idp-oidc/src/upstream.ts",
-				"modules/upstream-login/federation/src/module.ts",
-				"modules/upstream-login/upstream-client/src/id-token/reader.ts",
+				"modules/foundation/external-jwt/src/module.ts",
+				"modules/oauth/authorize/src/module.ts",
+				"modules/scaffold/create-app/src/patterns/sso-federated.ts",
 				"modules/tooling/conformance-federation/src/new.ts",
 			]) {
 				expect(outputs(file), file).toEqual({ oidf: "true", scope: "rp", plans: '["rp"]' });
@@ -264,19 +266,21 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 					"modules/upstream-login/idp-oidc/README.md modules/tooling/interop-oidf/src/rp/scene.ts",
 				),
 			).toEqual({ oidf: "true", scope: "all", plans: every });
-			// Another IdP type, or the provider elsewhere: no suite plan.
+			// Docs alone, or tooling the suite does not run: no suite plan.
 			for (const file of [
-				"modules/upstream-login/idp-google/src/upstream.ts",
-				"modules/oauth/authorize/src/module.ts",
+				"docs/migration.md",
+				"README.md",
+				"modules/tooling/conformance-oauth/src/new.ts",
 			]) {
 				expect(outputs(file).oidf, file).toBe("false");
 			}
 			// A pull request to main, and the other events: every plan.
-			expect(outputs("modules/upstream-login/idp-oidc/src/upstream.ts", { BASE: "main" })).toEqual({
-				oidf: "true",
-				scope: "all",
-				plans: every,
-			});
+			for (const more of [{ BASE: "main" }, { EVENT: "push" }, { EVENT: "schedule" }]) {
+				expect(
+					outputs("modules/upstream-login/idp-oidc/src/upstream.ts", more),
+					JSON.stringify(more),
+				).toEqual({ oidf: "true", scope: "all", plans: every });
+			}
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
