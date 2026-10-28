@@ -473,6 +473,25 @@ describe("guard", () => {
 		).toEqual(["@t/items/src/inner card item bytes 44 > 40 (yyyyyyyyyyyy…)"]);
 	});
 
+	it("holds each card item to a package's exception for its bytes, looser or stricter than the budget", () => {
+		const p = {
+			...pkg("@t/item", { "src/contract.ts": "export const n = 1;\n" }),
+			card: `# item\n- ${"z".repeat(13)}\n`,
+		};
+		const items = (cardItemBytes: number, limit: number) =>
+			check([p], {
+				...budget,
+				cardItemBytes,
+				exceptions: [{ package: "@t/item", measure: "card item bytes", limit, reason: "why" }],
+			})
+				.filter((v) => v.detail.startsWith("card item bytes"))
+				.map((v) => v.detail);
+		// The item is 15 bytes: past the budget's 10, within the exception's 20.
+		expect(items(10, 20)).toEqual([]);
+		// Within the budget's 20, past the exception's 12.
+		expect(items(20, 12)).toEqual(["card item bytes 15 > 12 (zzzzzzzzzzzz…)"]);
+	});
+
 	it("counts comment lines from the syntax tree, ignoring // inside strings, against a share or a floor", () => {
 		const p = pkg("@t/d", {
 			"src/contract.ts":

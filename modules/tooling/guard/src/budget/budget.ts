@@ -215,9 +215,12 @@ export function budgetRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surf
 			report("G7 budget", where, "no card");
 			continue;
 		}
+		// Each item held to the unit's limit as measured, an exception's where the budget makes one.
+		const itemLimit =
+			byWhere.get(where)?.find((m) => m.what === "card item bytes")?.limit ?? budget.cardItemBytes;
 		for (const line of cardItems(card)) {
 			const opening = line.replace(/^\s*- /, "").slice(0, 12);
-			over("card item bytes", Buffer.byteLength(line), budget.cardItemBytes, ` (${opening}…)`);
+			over("card item bytes", Buffer.byteLength(line), itemLimit, ` (${opening}…)`);
 		}
 		for (const phrase of planPhrases) {
 			if (card.includes(phrase))
