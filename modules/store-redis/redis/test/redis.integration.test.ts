@@ -326,7 +326,8 @@ describe("redis", () => {
 		cli(container, "acl", "setuser", user, "on", ">pw", ...every, "-evalsha", "-script");
 		try {
 			let context: BuildContext<unknown> | undefined;
-			const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
+			// Safe: it keeps the build context for the test once, at build; no request writes it.
+			const asker = defineModule({ name: "asker", replicaSafe: true, takes: [] }, (m) => [
 				m.provide(contract<object>("asker")).by((c) => {
 					context = c;
 					return {};
