@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -62,6 +63,23 @@ export interface Instance {
 	 * libfaketime; refused where this host has no thread-safe libfaketime (Linux, glibc).
 	 */
 	clock(offset: string): Promise<void>;
+}
+
+/**
+ * The commit a scene ran on, as the evidence names it: `SPEC_EVIDENCE_COMMIT` where set, else the
+ * checkout's HEAD, never the event's (a daily run checks out develop while its event names main).
+ */
+function commitTested(): string | null {
+	if (process.env.SPEC_EVIDENCE_COMMIT) return process.env.SPEC_EVIDENCE_COMMIT;
+	try {
+		return execFileSync("git", ["rev-parse", "HEAD"], {
+			cwd: workspace,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -201,7 +219,7 @@ export async function startDeployment(spec: DeploymentSpec) {
 			settings: instances.map(() => hash),
 			identity,
 			clocks,
-			commit: process.env.GITHUB_SHA ?? null,
+			commit: commitTested(),
 			run: process.env.GITHUB_RUN_ID ?? null,
 		};
 		await written();
