@@ -46,6 +46,8 @@ function over(
 	} = {},
 ) {
 	const calls: unknown[][] = [];
+	/** The Authorization header of each request handed to sender-binding. */
+	const admittedFrom: (string | undefined)[] = [];
 	const clock = { at: 0 };
 	const fail = (part: string) => {
 		if (told.failing === part) throw new Unavailable(part);
@@ -53,7 +55,8 @@ function over(
 	const handle = userinfoOver({
 		now: () => clock.at,
 		senderBinding: {
-			admitted: async () => {
+			admitted: async (request) => {
+				admittedFrom.push(request.headers.get("authorization"));
 				calls.push(["admitted"]);
 				fail("admitted");
 				return (told.admission ?? { kind: "admitted", access: valid() }) as never;
@@ -95,7 +98,7 @@ function over(
 		const res = await handle(request);
 		return { status: res.status, headers: res.headers, json: (res.body as { json: unknown }).json };
 	};
-	return { run, calls };
+	return { run, calls, admittedFrom };
 }
 
 const noStore = { "cache-control": "no-store", pragma: "no-cache" };
@@ -243,6 +246,7 @@ describe("userinfo", () => {
 		]) {
 			const o = over(told);
 			seen.push(await o.run(testRequest({ headers: presented })), o.calls);
+			expect(o.admittedFrom).toEqual(["Bearer s3cr3t-token"]);
 		}
 		expect(seen.filter((_, i) => i % 2 === 0).map((a) => (a as { status: number }).status)).toEqual(
 			[200, 200, 401, 403],
