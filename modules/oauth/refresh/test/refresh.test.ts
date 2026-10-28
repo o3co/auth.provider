@@ -762,12 +762,19 @@ describe("refresh tokens", () => {
 		}
 		const family = familyNameOf(first.refresh_token);
 		const listed = (await s.stores.byFamily.members(family)).map((m) => m.member);
-		// The family's record, each token's link to it, the family's tokens and the session's families.
+		// The family's record, each token's link to it, the family's tokens, the session's families, and
+		// what its redemption and the settle list were given.
 		const kept = JSON.stringify([
+			s.stores.given,
 			s.stores.kept.peek(family),
 			ids.map((id) => s.stores.links.peek(id)),
 			listed,
 			await s.stores.bySession.members(s.session.id),
+		]);
+		// The code's redemption was written, so its record is searched too.
+		expect(s.stores.given).toContainEqual([
+			expect.any(String),
+			expect.objectContaining({ family }),
 		]);
 		for (const token of issued) expect(kept).not.toContain(token);
 		// The family's tokens, each by its id and end, the reference tokens revokes by.
