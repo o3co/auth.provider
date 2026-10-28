@@ -25,6 +25,8 @@ export const codeKept = storeWrite({
 	space: "code-grant-store.codes",
 	operations: ["putIfAbsent"],
 });
+/** A read of a session's entry, confirmed: a refresh reads its family's session after the family. */
+export const sessionRead = storeRead({ prefix, space: "session-store.sessions" });
 /** A read of a refresh token's family's record, which a refresh waits on first. */
 export const familyRead = storeRead({ prefix, space: "refresh-store.families" });
 /** A read of a code's record, which a redemption waits on first. */
