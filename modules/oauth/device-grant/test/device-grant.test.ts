@@ -319,7 +319,8 @@ describe("device authorization", () => {
 			now += 5_000;
 			const issued = (await s.poll(code)) as Record<string, string>;
 			const checked = await s.app.get(tokens).verifyAccess(String(issued.access_token));
-			return checked.kind === "valid" ? checked.grant : checked;
+			if (checked.kind !== "valid") throw new Error(checked.reason);
+			return checked.grant;
 		};
 		const unsent = await issuedFor({});
 		expect(unsent).toMatchObject({ scope: ["read"], audience: [origin] });
