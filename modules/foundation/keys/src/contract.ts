@@ -44,3 +44,4 @@ export {
 	verifyAlgorithms,
 } from "./material/public.ts";
 export { bearerToken, secretBytes } from "./secret/secret.ts";
+export { mediaTypeOf } from "./signing/media-type.ts";

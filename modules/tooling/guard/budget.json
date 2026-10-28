@@ -20,5 +20,13 @@
 	"testFile": "(^|/)test/|\\.test\\.ts$|\\.case\\.ts$",
 	"fixtureFile": "(^|/)test/fixtures/|\\.vectors\\.ts$",
 	"generatedFile": "\\.bundled\\.mjs$",
-	"integrationTestFile": "\\.integration\\.test\\.ts$"
+	"integrationTestFile": "\\.integration\\.test\\.ts$",
+	"exceptions": [
+		{
+			"package": "@mod/keys",
+			"measure": "contract values",
+			"limit": 13,
+			"reason": "The one reading of a JOSE media type (mediaTypeOf) stays with keys, the signing side that owns typ; external-jwt and jwt-bearer take it from there rather than copy it."
+		}
+	]
 }

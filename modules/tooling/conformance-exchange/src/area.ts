@@ -30,6 +30,8 @@ export interface ExchangeScene extends ExchangePart {
 	readonly resourceIndicators?: boolean;
 	/** Modules the scene is about the absence of, as the code area takes them. */
 	readonly without?: readonly string[];
+	/** OpenID Connect's userinfo, which names the issuer in an openid token's aud. */
+	readonly userinfo?: boolean;
 }
 
 /** The code flow with refresh, introspection and revocation give the tokens to exchange and to check. */
@@ -46,6 +48,7 @@ export function exchangeScene(scene: ExchangeScene): AreaScene {
 		...(scene.verifiedEmail ? { verifiedEmail: true } : {}),
 		...(scene.resourceIndicators ? { resourceIndicators: true } : {}),
 		...(scene.without ? { without: scene.without } : {}),
+		...(scene.userinfo ? { userinfo: true } : {}),
 	});
 	const [name, part] = exchangeArea.part({
 		...(scene.maxActorDepth ? { maxActorDepth: scene.maxActorDepth } : {}),

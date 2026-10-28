@@ -57,6 +57,11 @@ const given: ExchangeScene = {
 			audiences: ["https://other.example"],
 		}),
 		client("svc", ["client_credentials"]),
+		// Allowed the issuer's audience too, so a refusal of it comes from the subject token alone.
+		client("keeper", ["authorization_code", exchangeGrant], {
+			...coded,
+			audiences: [api, issuer],
+		}),
 		{ id: "spa", kind: "public", method: "none", grants: [exchangeGrant], scopes: ["read"] },
 	],
 	users: [{ identifier: "alice", password: "correct horse battery" }],
@@ -75,6 +80,8 @@ function startedFor(asked: AreaScene) {
 		running = await areaTarget().start(asked);
 		if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
 		base = running.baseUrl;
+		// A session another scene's server opened opens nothing here.
+		browser.forget();
 	});
 	afterAll(async () => {
 		if (running?.kind === "running") await running.stop();
@@ -183,6 +190,25 @@ const actedBy = (actor: string | undefined) => ({
 /** Asked by the client the token was issued to, which may see it whatever its audience. */
 const active = async (token: string | undefined, as = "gateway") =>
 	(await post("/oauth/introspect", as, { token: token ?? "" })).body.active;
+
+// The legacy build names no issuer in an openid token's aud, and exchanges no code flow's token for its own audience.
+describe.skipIf(areaTarget().differs("token-for-the-issuer"))(
+	"token exchange of an openid subject token, userinfo composed",
+	() => {
+		startedFor(exchangeScene({ ...given, sessionless: true, userinfo: true }));
+
+		it("takes none of what the issuer added to the subject token's aud: no token for the issuer from it [rfc8693-2.2.2-a] [rfc6749-5.2-a]", async () => {
+			const { access_token: token } = await tokensFor("keeper");
+			// The issuer it names is one the issuer added, never the grant's.
+			expect(claimsOf(token)).toMatchObject({ aud: [api, issuer], aud_added: 1 });
+			expect(refusal(await exchange("keeper", token, { audience: issuer }))).toEqual([
+				400,
+				"invalid_target",
+			]);
+			expect((await exchange("keeper", token, { audience: api })).status).toBe(200);
+		});
+	},
+);
 
 describe("token exchange of tokens no session holds", () => {
 	startedFor(scene);

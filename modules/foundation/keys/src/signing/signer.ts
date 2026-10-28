@@ -6,6 +6,7 @@ import {
 } from "jose";
 import type { AccessTokenSigning, Keys, VerifyResult } from "../contract.ts";
 import { isCanonicalJws } from "../material/jws.ts";
+import { mediaTypeOf } from "./media-type.ts";
 import { expired, type Ring, type RingKey } from "./ring.ts";
 
 const encoder = new TextEncoder();
@@ -66,11 +67,7 @@ function ringSigner(ring: Ring, now: () => number): RingSigner {
 }
 
 /** The access token type, however written: tokens alone signs and verifies it, through accessTokenSigning. */
-const isAccessTokenType = (typ: string) =>
-	(typ.split(";", 1)[0] ?? "")
-		.trim()
-		.toLowerCase()
-		.replace(/^application\//, "") === "at+jwt";
+const isAccessTokenType = (typ: string) => mediaTypeOf(typ) === "at+jwt";
 const refusingAccessTokens = (typ: string) => {
 	if (isAccessTokenType(typ)) {
 		throw new TypeError("keys: an access token is signed and verified through accessTokenSigning");

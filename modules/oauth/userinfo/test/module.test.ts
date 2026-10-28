@@ -3,14 +3,21 @@ import { listening, site } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { issuer, type MetadataItem, metadata } from "@mod/issuer";
-import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	kernelConfig,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { type ReleasedClaims, releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
-import { tokens } from "@mod/tokens";
+import { type AudienceAddition, audienceAdditions, tokens } from "@mod/tokens";
 import { afterEach, expect, it } from "vitest";
 import userinfoModule from "../src/module.ts";
 
@@ -18,15 +25,22 @@ let stop = async () => {};
 afterEach(async () => {
 	failing = undefined;
 	issuerUrl = "https://as.example";
+	added = [issuerUrl];
+	unbound = false;
 	await stop();
 });
+/** What tokens added to the admitted token's audience. */
+let added: string[] = ["https://as.example"];
+/** Whether the admitted token was issued in no session, so it is answered its subject. */
+let unbound = false;
 /** The issuer this provider is named by. */
 let issuerUrl = "https://as.example";
 /** How sessions fail: unable to tell answers 503; anything else is not userinfo's to answer. */
 let failing: "unavailable" | "bug" | undefined;
 const items = contract<readonly MetadataItem[]>("items");
+const additions = contract<readonly AudienceAddition[]>("additions");
 /** The parts userinfo reads: every token is admitted, issued in a session no longer open. */
-const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
+const parts = defineModule({ name: "parts", takes: [metadata, audienceAdditions] }, (m) => [
 	m.provide(senderBinding).by(
 		() =>
 			({
@@ -35,16 +49,20 @@ const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
 					access: {
 						kind: "valid",
 						id: "t",
-						grant: { subject: "ann", scope: ["openid"] },
+						grant: { subject: "ann", audience: ["app"], scope: ["openid"] },
+						...(added.length > 0 ? { addedAudience: added } : {}),
 						tokenType: "Bearer",
 					},
 				}),
 			}) as never,
 	),
 	m.provide(tokens).by(() => ({}) as never),
-	m
-		.provide(sessionTokens)
-		.by(() => ({ sessionOf: async () => ({ kind: "bound", handle: "h" }) }) as never),
+	m.provide(sessionTokens).by(
+		() =>
+			({
+				sessionOf: async () => (unbound ? { kind: "unbound" } : { kind: "bound", handle: "h" }),
+			}) as never,
+	),
 	m.provide(sessions).by(() =>
 		stubSessions({
 			entryOf: async () => {
@@ -59,13 +77,17 @@ const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
 		.by(() => ({ of: async () => ({}), scopeOf: () => undefined }) as ReleasedClaims),
 	m.provide(claimsSelections).by(() => ({ forToken: async () => undefined }) as never),
 	m.provide(items).by((c) => c.collect(metadata)),
+	m.provide(additions).by((c) => c.collect(audienceAdditions)),
 	m.provide(issuer).by(() => ({ url: issuerUrl })),
 ]);
 
 let logged = recordingLog();
-async function serve(publicOrigin: string | null = "https://as.example") {
+async function serve(
+	publicOrigin: string | null = "https://as.example",
+	mode: string | null = "on",
+) {
 	logged = recordingLog();
-	const app = await assemble(composition(publicOrigin));
+	const app = await assemble(composition(publicOrigin, mode));
 	await app.start();
 	stop = () => app.stop(1000);
 	const url = `http://127.0.0.1:${app.get(listening).port()}/oauth/userinfo`;
@@ -73,7 +95,10 @@ async function serve(publicOrigin: string | null = "https://as.example") {
 }
 
 /** userinfo beside http and the parts it reads, on many instances, reached at `publicOrigin`; null writes none. */
-function composition(publicOrigin: string | null = "https://as.example") {
+function composition(
+	publicOrigin: string | null = "https://as.example",
+	mode: string | null = "on",
+) {
 	return {
 		modules: [http, parts, userinfoModule],
 		config: {
@@ -84,6 +109,7 @@ function composition(publicOrigin: string | null = "https://as.example") {
 				"cors-origins": ["https://app.example"],
 				"trusted-proxies": ["127.0.0.1"],
 			}),
+			...(mode === null ? {} : { userinfo: { "issuer-audience": mode } }),
 		},
 		runtime: quietRuntime({ log: logged.log }),
 	};
@@ -162,6 +188,54 @@ it("lets a listed origin's page send its token, its DPoP proof and a body's type
 	expect(got.headers.get("access-control-expose-headers")?.toLowerCase().split(/,\s*/)).toEqual(
 		expect.arrayContaining(["www-authenticate", "dpop-nonce", "retry-after"]),
 	);
+});
+
+it("refuses to boot with issuer-audience unset or another value, naming the choice", async () => {
+	for (const mode of [null, "yes"]) {
+		const refused = await assemble(composition("https://as.example", mode)).catch(
+			(e: unknown) => e,
+		);
+		expect(BootRefused.is(refused) && refused.refusals, String(mode)).toEqual([
+			{
+				where: "userinfo.issuer-audience",
+				reason: expect.stringMatching(
+					/`off` while any host runs a release before 0\.19.*`adding` once every host runs 0\.19, then `on`/,
+				),
+			},
+		]);
+	}
+});
+
+it("adds and requires the issuer as issuer-audience says: off neither, adding the first alone, on both [rfc9700-2.3-c]", async () => {
+	const openid = { subject: "ann", issuedTo: "app", audience: ["app"], scope: ["openid"] };
+	const sent = { headers: { authorization: "Bearer t", "x-forwarded-proto": "https" } };
+	unbound = true;
+	added = [];
+	for (const [mode, adds, answer] of [
+		["off", [], 200],
+		["adding", [issuerUrl], 200],
+		["on", [issuerUrl], 401],
+	] as const) {
+		const { app, url } = await serve("https://as.example", mode);
+		expect(app.get(additions)[0]?.added(openid), mode).toEqual(adds);
+		// A token whose aud does not name the issuer, as one issued before adding.
+		expect((await fetch(url, sent)).status, mode).toBe(answer);
+		const warned = logged
+			.lines()
+			.filter((l) => l.event === "userinfo.issuer_audience_not_required");
+		expect(warned, mode).toEqual(
+			mode === "on" ? [] : [expect.objectContaining({ level: "warn", fields: { mode } })],
+		);
+		await stop();
+	}
+});
+
+it("adds the issuer to the audience of a token issued for openid, and to none other [rfc9700-2.3-c]", async () => {
+	const { app } = await serve();
+	const [addition] = app.get(additions);
+	const grant = { subject: "ann", issuedTo: "app", audience: ["https://api.example"] };
+	expect(addition?.added({ ...grant, scope: ["openid", "profile"] })).toEqual([issuerUrl]);
+	expect(addition?.added({ ...grant, scope: ["read"] })).toEqual([]);
 });
 
 it("names itself in the issuer's metadata [oidc-discovery-3-h]", async () => {

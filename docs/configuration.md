@@ -762,6 +762,14 @@ From `@mod/tokens`.
 | `tokens.issuance-timeout` | string | `10s` |  |  |  | How long the issuance policies may take together, from `1s` to `1m`; past it, the issuance is unavailable. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |
 
+## userinfo
+
+From `@mod/userinfo`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `userinfo.issuer-audience` | off \| adding \| on |  | yes | `USERINFO_ISSUER_AUDIENCE` | `on` | off adds the issuer to no token's audience and requires it of none; adding names the issuer in an openid token's aud, but does not yet require it; on names it and refuses at userinfo an openid token whose aud does not. |
+
 ## users
 
 From `@mod/users`.

@@ -50,6 +50,7 @@ http {
 authorize.login-page = "http://localhost:8080/login"
 tokens.revocation = denylist
 claims-selection.mode = on
+userinfo.issuer-audience = on
 store.accept-volatile = true
 audit.receivers = [log]
 keys.signing {
@@ -80,6 +81,7 @@ clients.registered = [
 - `http.insecure-origin = true` lets the public origin be plain http, for trying the app on your machine only (the `http` card). A deployment uses https.
 - With no `consent.page`, no user is asked for consent, and only a first-party client is served: `my-app` is marked `first-party` (the `consent` card).
 - `claims-selection.mode = on` takes the `claims` request parameter, which every deployment states; the `claims-selection` card says when it is `off` or `draining` instead.
+- `userinfo.issuer-audience = on` names the issuer in an `openid` access token's `aud` and has userinfo require it, which every deployment states; the `userinfo` card says when it is `off` or `adding` instead.
 - The login page at `authorize.login-page` is yours to serve; the [login page guide](login-page.md) says what it sends. The steps below make its requests directly.
 - `my-app` is a public client: it authenticates with PKCE alone (the `clients` card). Its redirect URI is matched by exact string (the `redirect-uris` card of `authorize`).
 

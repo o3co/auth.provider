@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addedClaimsOf } from "../src/contract.ts";
+import { addedClaimsIn, addedClaimsOf } from "../src/contract.ts";
 
 describe("the added claims' copier", () => {
 	const refuses = (given: unknown) => expect(() => addedClaimsOf(given)).toThrow(TypeError);
@@ -56,6 +56,11 @@ describe("the added claims' copier", () => {
 		refuses([1]);
 		refuses("a");
 		expect(Object.prototype).not.toHaveProperty("polluted");
+	});
+
+	it("refuses a name the issuer writes, aud_added among them, and reads none back from a payload", () => {
+		for (const name of ["iss", "aud", "cnf", "aud_added"]) refuses({ [name]: 1 });
+		expect(addedClaimsIn({ aud: ["a", "b"], aud_added: 1, team: "x" })).toEqual({ team: "x" });
 	});
 
 	it("takes names of 1 to 255 code points, well formed, with no control character or space", () => {

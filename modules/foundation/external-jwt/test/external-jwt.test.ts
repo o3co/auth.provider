@@ -130,6 +130,9 @@ describe("headers and keys", () => {
 		expect(typOf({ typ: "application/OAuth-ID-JAG+JWT" })).toBe("oauth-id-jag+jwt");
 		expect(typOf({ typ: "oauth-id-jag+jwt" })).toBe("oauth-id-jag+jwt");
 		expect(typOf({ typ: "JWT" })).toBe("jwt");
+		// Its parameters and the space around it are no part of a type.
+		expect(typOf({ typ: "application/AT+JWT; charset=UTF-8" })).toBe("at+jwt");
+		expect(typOf({ typ: " oauth-id-jag+jwt ;q=1" })).toBe("oauth-id-jag+jwt");
 		for (const header of [{}, { typ: 1 }, { typ: ["JWT"] }, { typ: null }])
 			expect(typOf(header), JSON.stringify(header)).toBeUndefined();
 		// One reading for both: a type typOf tells apart, a policy naming it tells apart the same way.

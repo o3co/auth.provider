@@ -206,6 +206,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `store.accept-volatile` | `@mod/store` | `false` | named so (`accept-*` and the like) |
 | `tokens.revocation` | `@mod/tokens` |  | `unsupported`: nothing issued can be revoked |
 | `tokens.subject-check` | `@mod/tokens` |  | named so (`accept-*` and the like) |
+| `userinfo.issuer-audience` | `@mod/userinfo` |  | `off` and `adding`: userinfo takes an openid access token whose aud does not name the issuer |
 
 ## What the operator does by hand
 

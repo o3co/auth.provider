@@ -14,6 +14,7 @@ Internal module of `guard`: G7, how much each unit may hold and make a reader re
 - `budgetRules` (G7, G9, G17, from those measures), `dependencyCards` (each unit's dependency cards, in bytes), `heavyDependencyCards` (the units whose dependency cards pass their measure) and `branchingImports` (the internal modules reported as branches).
 
 ## Invariants
+- A package the configuration's `exceptions` names is held, for that one measure, to the limit it gives; each names a package of the workspace and gives its reason, or G7 reports it.
 - The budget is measured per unit: the package, and each internal module (a directory with a card) apart from it; a file belongs to the innermost one.
 - A unit's reading scope is its own files, the cards of the modules it lies in, and the cards of the packages it depends on (the package's declared ones, an internal module's imported ones).
 - The public surface counts per package, with a wider member limit for the kinds other modules are built on. Dependencies count per unit, as the workspace packages its shipped `.ts` files import (a `.mjs` file's imports are not counted), common ones aside. Their cards together are measured, and a unit past the measure is reported, not refused: they grow with cards the unit does not own.

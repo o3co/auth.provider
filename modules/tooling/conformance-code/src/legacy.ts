@@ -69,6 +69,10 @@ onLegacy(codeArea, {
 		"resource-mismatch-keeps-code",
 		// Ours answers userinfo only for a token issued with openid.
 		"userinfo-needs-openid",
+		// Ours names the issuer in an openid token's aud beside the grant's audience (aud_added), whose
+		// audience is the issuer for a client with none, which introspection keeps to; userinfo refuses
+		// an openid token not for it. The legacy build names a client with none by its id.
+		"token-for-the-issuer",
 		// Ours takes a front-channel URL only at an origin one of the client's redirect URIs has.
 		"frontchannel-within-redirect-origins",
 		// Ours refuses a logout whose return the hint's client did not register, leaving the session;
