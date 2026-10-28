@@ -44,7 +44,7 @@ it("builds a test configuration on https://issuer.example by default", async () 
 	expect(built.get(issuer).url).toBe("https://issuer.example");
 });
 
-it("refuses an issuer URL the section does not take, as written [oidc-discovery-3-a] [rfc8414-2-a]", async () => {
+it("refuses an issuer URL the section does not take, as written [oidc-discovery-3-a] [rfc8414-2-a] [rfc9207-2-b]", async () => {
 	const refused: Record<string, unknown> = {
 		"another scheme": "ftp://issuer.example",
 		"a trailing /": "https://issuer.example/",
@@ -130,7 +130,7 @@ it("takes a plain-http issuer only beside the same plain-http public origin, whi
 	expect(plain.get(issuer).url).toBe("http://as.example");
 });
 
-it("refuses a plain-http issuer in a production deployment [oidc-discovery-3-a] [rfc8414-2-a]", async () => {
+it("refuses a plain-http issuer in a production deployment [oidc-discovery-3-a] [rfc8414-2-a] [rfc8414-3-b] [rfc9207-2-b]", async () => {
 	const refused = await boot("http://as.example", "http://as.example").catch(
 		(error: BootRefused) => error.refusals,
 	);

@@ -326,6 +326,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `boundaries` (`src/boundaries`): the fault scenes of bounds the security model leaves to the operator, recorded as they are; no promise is checked, so none names a guarantee or a fault of one.
   - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
   - `code-once` (`src/code-once`): the fault scenes of an authorization code redeemed once (`guarantee-5-a`).
+  - `discovery` (`src/discovery`): the scene of the whole metadata document of an OpenID Provider.
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `faults` (`src/faults`): what the area's fault scenes share in the code flow's words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
@@ -346,6 +347,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `link` (`src/link`): the scenes of linking an upstream identity to the account logged in.
 - `@mod/conformance-front` (verification, `modules/tooling/conformance-front`): Puts an https front before a running app, as a deployment's proxy is, for a harness whose outside party (a conformance suite, a client library) reaches the app over https.
 - `@mod/conformance-identity` (verification, `modules/tooling/conformance-identity`): Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.
+  - `attempts-unavailable` (`src/attempts-unavailable`): the fault scenes of password login's attempt limit letting no attempt by while the store cannot count (`guarantee-3-i`).
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
 - `@mod/conformance-keys` (verification, `modules/tooling/conformance-keys`): Owns the conformance scenes of the keys area: publishing the public key set, with no private part of a key and no shared secret in its answers, and boot refusals for key configuration.
 - `@mod/conformance-legacy` (verification, `modules/tooling/conformance-legacy`): Starts the legacy build for conformance scenes (location, how to start it, configuration file, preparation script).
 - `@mod/conformance-mtls` (verification, `modules/tooling/conformance-mtls`): Owns the conformance scenes of the mTLS area: tokens bound to the client's certificate as a trusted proxy forwards it (one PEM block, or Envoy's XFCC), self-signed or under PKI with revocation by CRL, OCSP or both.
@@ -355,6 +358,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `dpop-once` (`src/dpop-once`): the fault scenes of a DPoP proof's `jti` spent once (`guarantee-5-e`).
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `jwt-bearer` (`src/jwt-bearer`): the scenes of the jwt-bearer grant.
+  - `revocation-unavailable` (`src/revocation-unavailable`): the fault scenes of the revocation endpoint answering done only once a token's revocation is kept (`guarantee-3-g`).
   - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a JWT bearer assertion while the store cannot answer (`guarantee-3-d`).
 - `@mod/conformance-ops` (verification, `modules/tooling/conformance-ops`): Owns the conformance scenes of operations: liveness, readiness, the metrics scrape and its dependency gauge, the log level, their boot refusals, and the security headers on every answer.
 - `@mod/conformance-passkey` (verification, `modules/tooling/conformance-passkey`): Owns the conformance scenes of the passkey area: registering a passkey from a session, and its refusals (no session, a second factor not recent, an origin or a frame not listed, a frame whose page is not reported, a challenge answered twice or past its lifetime, a credential id another account holds, a user not verified when required, the limit of passkeys per user, the store failing).
