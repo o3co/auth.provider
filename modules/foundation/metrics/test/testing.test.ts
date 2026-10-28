@@ -9,7 +9,7 @@ import { metricsContract, metricsStandIn } from "../src/testing.ts";
 const opening =
 	(composed: Module, boundMs: number) => async (made: () => readonly Instrument[]) => {
 		const recorded = recordingLog();
-		const emitter = defineModule({ name: "emitter", takes: [] }, (m) =>
+		const emitter = defineModule({ name: "emitter", replicaSafe: true, takes: [] }, (m) =>
 			made().map((i) => m.contribute(instruments).by(() => i)),
 		);
 		const app = await assemble({
