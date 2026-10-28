@@ -56,14 +56,14 @@ import { codeGrantConfig, codeStoreContract } from "../src/testing.ts";
 const grantsSeen = contract<readonly Grant[]>("grants-seen");
 
 let shift = 0;
-/** Every draw of 32 bytes the composition made, in order, so a test can tell what a code was made from. */
+/** A copy of every draw of 32 bytes the composition made, in order, so a test can tell what a code was made from. */
 const drawn: Uint8Array[] = [];
 const runtime = quietRuntime({
 	clock: { now: () => Date.now() + shift },
 	random: {
 		bytes: (n) => {
 			const bytes = new Uint8Array(randomBytes(n));
-			if (n === 32) drawn.push(bytes);
+			if (n === 32) drawn.push(bytes.slice());
 			return bytes;
 		},
 	},
