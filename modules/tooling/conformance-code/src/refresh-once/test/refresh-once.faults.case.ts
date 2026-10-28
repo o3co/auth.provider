@@ -138,7 +138,15 @@ describe("a refresh token rotated once under faults", () => {
 			// confirmed: it ran on the new primary, on a connection to it ...
 			const family = sent.find((e) => e.at < wait.at && familyRead.request(e.command));
 			expect(family && runIdOf(family.reply)).toBe(newId);
-			const entry = sent.findLast((e) => e.at < wait.at && sessionRead.request(e.command));
+			// This refresh's: the first entry read on the family read's connection after it.
+			const entry = sent.find(
+				(e) =>
+					family !== undefined &&
+					e.connection === family.connection &&
+					e.at > family.at &&
+					e.at < wait.at &&
+					sessionRead.request(e.command),
+			);
 			expect(entry && runIdOf(entry.reply)).toBe(newId);
 			expect(entry && upstreamOf(entry.connection)).toEqual(moved.upstream());
 			// ... and its confirmation passed on the old one, on a connection still to it.
