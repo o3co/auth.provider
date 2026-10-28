@@ -65,18 +65,21 @@ function refusedAsUsed(u: Use) {
 }
 
 /**
- * The challenge used once over the uses of its assertion: `tokens` issued on every instance together,
+ * The challenge used once over the uses of its assertion: `tokens` issued on every instance together
+ * (a count, or at most one where the scene cannot tell which), as many uses answered with a token,
  * every use's take reaching the store, and every use but the one issued refused as its challenge not
  * open. Then a new assertion is issued a token at the instance.
  */
 async function usedOnce(
 	uses: readonly Use[],
-	tokens: number,
+	tokens: number | "at most one",
 	i: Instance,
 	authenticator: Authenticator,
 ) {
-	expect(issuedOver(uses)).toBe(tokens);
-	expect(uses.filter((u) => u.answer?.status === 200)).toHaveLength(Math.min(tokens, 1));
+	const count = issuedOver(uses);
+	if (tokens === "at most one") expect(count).toBeLessThanOrEqual(1);
+	else expect(count).toBe(tokens);
+	expect(uses.filter((u) => u.answer?.status === 200)).toHaveLength(count);
 	expect(uses.every((u) => u.reached)).toBe(true);
 	for (const u of uses.slice(1).filter((u) => u.answer?.status !== 200)) refusedAsUsed(u);
 	expect(said(await loginAt(i, await assertionAt(i, authenticator)))).toEqual(issued);
@@ -235,11 +238,9 @@ describe("a passkey challenge used once under faults", () => {
 			const both = Promise.all([useAt(a, sent), useAt(b, sent)]);
 			for (const held of await Promise.all(holds)) held.release();
 			const uses = [...(await both), await useAt(b, sent)];
-			const tokens = issuedOver(uses);
-			expect(tokens).toBeLessThanOrEqual(1);
 			// Every use not issued is refused as its challenge not open, the two let go together among them.
 			for (const u of uses.filter((u) => u.answer?.status !== 200)) refusedAsUsed(u);
-			await usedOnce(uses, tokens, b, authenticator);
+			await usedOnce(uses, "at most one", b, authenticator);
 		});
 	});
 });
