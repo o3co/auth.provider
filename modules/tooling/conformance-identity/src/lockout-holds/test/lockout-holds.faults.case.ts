@@ -31,6 +31,10 @@ const counting = faultScene({ login: { accountAttempts: 1 } });
 // judged as attempts and counted.
 const twoAtOnce = faultScene({ login: { accountAttempts: 3 } });
 
+// The scenes' value, not the default (1 s): two instances' writes held while each other's reaches the
+// relay wait longer than a command may on a busy host, and a lockout's write is not resent.
+const patient = { "command-timeout": "10s" };
+
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /** An identifier of its own, held by no account: attempts at it are counted alike. */
 const nextIdentifier = () => `guess-${randomUUID()}`;
@@ -175,49 +179,59 @@ describe("password login's per-identifier count holding under faults", () => {
 	// unavailable, and no attempt goes on uncounted.
 
 	it("counts both of two attempts at an identifier at two instances, let go one after the other [guarantee-5-i] {fault:H2}", async () => {
-		await on({ name: "lockout-holds-h2", scene: twoAtOnce, instances: 2 }, async (d) => {
-			const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
-			await control(a);
-			const identifier = nextIdentifier();
-			// Both have read the identifier's state and are about to count on it.
-			const [heldA, heldB] = [
-				a.relay.hold(lockoutOf(identifier)),
-				b.relay.hold(lockoutOf(identifier)),
-			];
-			const [atA, atB] = [failAt(a, identifier), failAt(b, identifier)];
-			const [first, second] = await Promise.all([heldA, heldB]);
-			first.release();
-			expect(said(await atA)).toEqual(failed);
-			second.release();
-			expect(said(await atB)).toEqual(failed);
-			// The later one lost its race, read the run again and counted on it: 1, then 2.
-			expect(runsAt(identifier, a, b).sort()).toEqual([1, 2]);
-			// The next attempt at either counts on both: a third.
-			expect(said(await failAt(a, identifier))).toEqual(failed);
-			expect(runsAt(identifier, a, b).sort()).toEqual([1, 2, 3]);
-			await healed(a);
-		});
+		await on(
+			{ name: "lockout-holds-h2", scene: twoAtOnce, instances: 2, redis: patient },
+			async (d) => {
+				const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
+				await control(a);
+				const identifier = nextIdentifier();
+				// Both have read the identifier's state and are about to count on it.
+				const [heldA, heldB] = [
+					a.relay.hold(lockoutOf(identifier)),
+					b.relay.hold(lockoutOf(identifier)),
+				];
+				const [atA, atB] = [failAt(a, identifier), failAt(b, identifier)];
+				const [first, second] = await Promise.all([heldA, heldB]);
+				first.release();
+				expect(said(await atA)).toEqual(failed);
+				second.release();
+				expect(said(await atB)).toEqual(failed);
+				// The later one lost its race, read the run again and counted on it: 1, then 2.
+				expect(runsAt(identifier, a, b).sort()).toEqual([1, 2]);
+				// The next attempt at either counts on both: a third.
+				expect(said(await failAt(a, identifier))).toEqual(failed);
+				expect(runsAt(identifier, a, b).sort()).toEqual([1, 2, 3]);
+				await healed(a);
+			},
+		);
 	});
 
 	it("counts each of two attempts at an identifier at two instances, let go together, at most once and none uncounted [guarantee-5-i] {fault:H2}", async () => {
-		await on({ name: "lockout-holds-h2-together", scene: twoAtOnce, instances: 2 }, async (d) => {
-			const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
-			await control(a);
-			const identifier = nextIdentifier();
-			const holds = [a.relay.hold(lockoutOf(identifier)), b.relay.hold(lockoutOf(identifier))];
-			const answers = Promise.all([failAt(a, identifier), failAt(b, identifier)]);
-			for (const held of await Promise.all(holds)) held.release();
-			const both = await answers;
-			// Each answered as counted (a failure) or refused unavailable; each failure counted once.
-			for (const x of both) expect([failed, uncounted]).toContainEqual(said(x));
-			const judged = both.filter((x) => x.status === 401).length;
-			expect(judged).toBeGreaterThan(0);
-			const runs = runsAt(identifier, a, b).sort();
-			expect(runs).toEqual(Array.from({ length: judged }, (_, n) => n + 1));
-			// The next attempt counts on all of them.
-			expect(said(await failAt(b, identifier))).toEqual(failed);
-			expect(runsAt(identifier, a, b).sort()).toEqual([...runs, judged + 1]);
-			await healed(a);
-		});
+		await on(
+			{ name: "lockout-holds-h2-together", scene: twoAtOnce, instances: 2, redis: patient },
+			async (d) => {
+				const [a, b] = [instanceOf(d, 0), instanceOf(d, 1)];
+				await control(a);
+				const identifier = nextIdentifier();
+				const holds = [a.relay.hold(lockoutOf(identifier)), b.relay.hold(lockoutOf(identifier))];
+				const answers = Promise.all([failAt(a, identifier), failAt(b, identifier)]);
+				for (const held of await Promise.all(holds)) held.release();
+				const both = await answers;
+				// Each answered as counted (a failure) or refused unavailable; each failure counted once.
+				for (const x of both) expect([failed, uncounted]).toContainEqual(said(x));
+				const judged = both.filter((x) => x.status === 401).length;
+				expect(judged).toBeGreaterThan(0);
+				// Every failure counted, each attempt at most once: one refused may still have been counted,
+				// its write landing after it gave up, which is the safe side.
+				const runs = runsAt(identifier, a, b).sort();
+				expect(runs.length).toBeGreaterThanOrEqual(judged);
+				expect(runs).toEqual(Array.from({ length: runs.length }, (_, n) => n + 1));
+				expect(runs.length).toBeLessThanOrEqual(both.length);
+				// The next attempt counts on all of them.
+				expect(said(await failAt(b, identifier))).toEqual(failed);
+				expect(runsAt(identifier, a, b).sort()).toEqual([...runs, runs.length + 1]);
+				await healed(a);
+			},
+		);
 	});
 });
