@@ -107,7 +107,7 @@ it("challenges every scheme, with no error, when no token is presented in a sche
 	}
 });
 
-it("answers a malformed Authorization as an invalid request", async () => {
+it("answers a malformed Authorization, or one presenting two tokens, as an invalid request [rfc6750-3.1-a]", async () => {
 	const invalid = refusal(400, 'Bearer error="invalid_request"', "invalid_request");
 	expect(await presenting({ authorization: "Bearer a b" })).toEqual(invalid);
 	expect(await presenting({ authorization: "Bearer plain, Bearer plain" })).toEqual(invalid);
@@ -208,6 +208,31 @@ it("challenges a kind's refusal in the scheme of the kind that refused", async (
 	expect(
 		await presenting({ authorization: "DPoP keyed", "x-proof": "k1", "x-cert": "bad" }),
 	).toEqual(refusal(401, 'Bearer error="invalid_proof"', "invalid_proof"));
+});
+
+it("writes each challenge with one error at most, no realm, no scope and no description, in the characters RFC 6750 allows [rfc6750-3-d] [rfc6750-3-e] [rfc6750-3-i]", async () => {
+	// Every refusal admission makes, but a kind's own challenge, which is the kind's to write.
+	const requests = [
+		{},
+		{ authorization: "Bearer a b" },
+		{ authorization: "Bearer forged" },
+		{ authorization: "DPoP plain", "x-proof": "k1" },
+		{ authorization: "Bearer stranger" },
+		{ authorization: "DPoP keyed", "x-proof": "bad" },
+		{ authorization: "DPoP keyed", "x-proof": "nonce" },
+		{ authorization: "DPoP keyed", "x-proof": "k1", "x-cert": "c1" },
+	];
+	const challenges = [
+		...(await Promise.all(requests.map(presenting))).map((answer) =>
+			answer.kind === "refused" ? answer.headers["www-authenticate"] : undefined,
+		),
+		challengeOf("Bearer", "insufficient_scope")["www-authenticate"],
+	];
+	for (const challenge of challenges) {
+		expect(challenge).toMatch(
+			/^(Bearer, DPoP|(Bearer|DPoP) error="[\x20-\x21\x23-\x5B\x5D-\x7E]+")$/,
+		);
+	}
 });
 
 it("makes a resource's own challenge for a token it refuses, in the token's type", () => {
