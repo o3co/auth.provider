@@ -196,51 +196,98 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		);
 	});
 
-	it("count develop's merges from the commit the latest conformance run covers, a running one among them, and take conformance as due where GitHub's API does not answer", () => {
+	it("count develop's merges from the commit the latest conformance run covers, a running one among them and no cancelled one, and take conformance as due where GitHub's API does not answer", () => {
 		const step = job("conformance-due").steps.find((s) => s.id === "count");
 		const lines = (step?.run ?? "").split("\n").map((l) => l.trim());
 		for (const line of [
-			`if ! runs=$(api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=develop&event=push&per_page=50" --jq ".workflow_runs[] | select(.id < $GITHUB_RUN_ID) | .id"); then`,
+			`if ! runs=$(api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=develop&event=push&per_page=50" --jq ".workflow_runs[] | select(.id < $GITHUB_RUN_ID) | {id, status, conclusion, head_sha} | tojson"); then`,
+			`if ! jobs=$(api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --jq '[.jobs[] | {name, status, conclusion}]'); then`,
 			`last=$(jq -r --argjson jobs "$jobs" ". + {jobs: \\$jobs} | $COVERS" <<<"$described")`,
+			'done <<<"$runs"',
 			'echo "due=true" >> "$GITHUB_OUTPUT"',
 		]) {
 			expect(lines).toContain(line);
 		}
-		// What a run covers, judged as the step judges it.
+		// What a run covers, judged as the step judges it, on runs in the shapes GitHub gives them.
 		const covers = (run: object) =>
 			execFileSync("jq", ["-r", String(step?.env?.COVERS)], {
 				input: JSON.stringify(run),
 				encoding: "utf8",
 			}).trim();
-		const job_ = (name: string, conclusion: string | null) => ({ name, conclusion });
-		const at = (status: string, ...jobs: { name: string; conclusion: string | null }[]) => ({
+		type Job = { name: string; status: string; conclusion: string | null };
+		const done = (name: string, conclusion: string): Job => ({
+			name,
+			status: "completed",
+			conclusion,
+		});
+		const running = (name: string, status = "in_progress"): Job => ({
+			name,
 			status,
+			conclusion: null,
+		});
+		const at = (status: string, conclusion: string | null, ...jobs: Job[]) => ({
+			status,
+			conclusion,
 			head_sha: "abc",
 			jobs,
 		});
+		const planned = done("conformance-plan", "success");
 		const cases: readonly (readonly [object, string])[] = [
-			// A run whose gate ran, passed or failed.
-			[at("completed", job_("conformance", "success")), "abc"],
-			[at("completed", job_("conformance", "failure")), "abc"],
-			// A run cancelled before its gate, or one not due: it covers nothing.
-			[at("completed", job_("conformance-plan", "success"), job_("conformance", "cancelled")), ""],
-			[at("completed", job_("conformance-due", "success"), job_("conformance", "skipped")), ""],
-			// A run still running, found due and planning or past its plan.
+			// A run that planned and whose gate ran, passed or failed.
+			[at("completed", "success", planned, done("conformance", "success")), "abc"],
+			[at("completed", "failure", planned, done("conformance", "failure")), "abc"],
+			// A cancelled run: its gate still runs, sees the cancelled jobs and fails.
+			[at("completed", "cancelled", planned, done("conformance", "failure")), ""],
+			// A run whose plan failed, its gate failing for it: nothing ran.
 			[
-				at("in_progress", job_("conformance-due", "success"), job_("conformance-plan", null)),
-				"abc",
-			],
-			[
-				at("queued", job_("conformance-due", "success"), job_("conformance-plan", "success")),
-				"abc",
-			],
-			// A run still running that is not due, or has not yet found whether it is.
-			[
-				at("in_progress", job_("conformance-due", "success"), job_("conformance-plan", "skipped")),
+				at(
+					"completed",
+					"failure",
+					done("conformance-plan", "failure"),
+					done("conformance", "failure"),
+				),
 				"",
 			],
-			[at("in_progress", job_("conformance-due", null), job_("conformance-plan", null)), ""],
-			[at("queued"), ""],
+			// A run not due.
+			[
+				at(
+					"completed",
+					"success",
+					done("conformance-plan", "skipped"),
+					done("conformance", "skipped"),
+				),
+				"",
+			],
+			// A run still running, its plan started or past: it found itself due.
+			[
+				at("in_progress", null, done("conformance-due", "success"), running("conformance-plan")),
+				"abc",
+			],
+			[at("in_progress", null, done("conformance-due", "success"), planned), "abc"],
+			// A run still running that is not due, or has not yet found whether it is: its plan not started.
+			[
+				at(
+					"in_progress",
+					null,
+					done("conformance-due", "success"),
+					done("conformance-plan", "skipped"),
+				),
+				"",
+			],
+			[
+				at(
+					"in_progress",
+					null,
+					done("conformance-due", "success"),
+					running("conformance-plan", "queued"),
+				),
+				"",
+			],
+			[
+				at("in_progress", null, running("conformance-due"), running("conformance-plan", "queued")),
+				"",
+			],
+			[at("queued", null), ""],
 		];
 		for (const [run, sha] of cases) expect([run, covers(run)]).toEqual([run, sha]);
 		// The API tried again where it does not answer, four times in all; the pauses left out.

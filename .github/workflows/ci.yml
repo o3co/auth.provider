@@ -254,11 +254,12 @@ jobs:
   # On a push to develop: whether five merges have landed since the commit the
   # latest conformance run on develop covers. When they have, the conformance
   # jobs below run on this push; the daily run covers develop on quieter days.
-  # A run covers its commit once its gate ran (passed or failed), or while it is
-  # still running with its plan not skipped, so pushes landing during a run do
-  # not each start another. A run cancelled or ended before its gate covers
-  # nothing, and the count goes back to the run before it. Where GitHub's API
-  # cannot answer after a few tries, conformance is due.
+  # A run covers its commit once it ended, not cancelled, its plan having passed
+  # and its gate having run; or while it is still running, its plan started (it
+  # found itself due), so pushes landing during a run do not each start another.
+  # A cancelled run, whose gate still runs and fails, covers nothing, nor one
+  # whose plan failed; the count goes back to the run before it. Where GitHub's
+  # API cannot answer after a few tries, conformance is due.
   conformance-due:
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
@@ -277,12 +278,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVERY: 5
-          # The commit a run (its status, head_sha and jobs' names and conclusions) covers; none where it covers none.
+          # The commit a run (its status, conclusion, head_sha and jobs' names, statuses and conclusions)
+          # covers; none where it covers none.
           COVERS: >-
             if .status == "completed"
-            then (if any(.jobs[]; .name == "conformance" and (.conclusion == "success" or .conclusion == "failure")) then .head_sha else "" end)
-            else (if any(.jobs[]; .name == "conformance-due" and .conclusion == "success")
-              and any(.jobs[]; .name == "conformance-plan" and .conclusion != "skipped")
+            then (if .conclusion != "cancelled"
+              and any(.jobs[]; .name == "conformance-plan" and .conclusion == "success")
+              and any(.jobs[]; .name == "conformance" and (.conclusion == "success" or .conclusion == "failure"))
+              then .head_sha else "" end)
+            else (if any(.jobs[]; .name == "conformance-plan"
+              and (.status == "in_progress" or (.status == "completed" and .conclusion == "success")))
               then .head_sha else "" end)
             end
         run: |
@@ -291,21 +296,22 @@ jobs:
           api() {
             local try
             for try in 1 2 3 4; do
-              gh api "$@" && return 0
+              gh api "$@" </dev/null && return 0
               sleep $((try * 10))
             done
             return 1
           }
           last=""
-          # The runs before this one, the newest first.
-          if ! runs=$(api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=develop&event=push&per_page=50" --jq ".workflow_runs[] | select(.id < $GITHUB_RUN_ID) | .id"); then
+          # The runs before this one, the newest first, each as one line of JSON.
+          if ! runs=$(api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=develop&event=push&per_page=50" --jq ".workflow_runs[] | select(.id < $GITHUB_RUN_ID) | {id, status, conclusion, head_sha} | tojson"); then
             echo "GitHub's API did not answer: conformance is due"
             echo "due=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          for run in $runs; do
-            if ! described=$(api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq '{status, head_sha}') ||
-              ! jobs=$(api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --jq '[.jobs[] | {name, conclusion}]'); then
+          while read -r described; do
+            [ -n "$described" ] || continue
+            run=$(jq -r .id <<<"$described")
+            if ! jobs=$(api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --jq '[.jobs[] | {name, status, conclusion}]'); then
               echo "GitHub's API did not answer: conformance is due"
               echo "due=true" >> "$GITHUB_OUTPUT"
               exit 0
@@ -315,7 +321,7 @@ jobs:
               echo "run $run covers $last"
               break
             fi
-          done
+          done <<<"$runs"
           if [ -n "$last" ] && git cat-file -e "$last^{commit}" 2>/dev/null; then
             merges=$(git rev-list --first-parent --count "$last..$GITHUB_SHA")
           else
