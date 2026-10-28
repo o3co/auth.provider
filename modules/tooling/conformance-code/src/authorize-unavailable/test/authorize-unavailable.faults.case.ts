@@ -3,6 +3,7 @@ import {
 	type Instance,
 	type Match,
 	runIdOf,
+	sameMark,
 	storeRead,
 	storeWrite,
 } from "@mod/conformance/testing";
@@ -179,13 +180,13 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			const kept = successes(a, codeKept).length;
 			const asking = performance.now();
 			const { asleep, awake } = d.topology.sleep(d.topology.primary(), 5);
+			// When Redis woke, taken as it wakes, apart from the endpoint's answer.
+			const woke = awake.then(() => performance.now());
 			await asleep;
 			const answer = await authorize(browser);
-			await awake;
-			const woke = performance.now();
 			expect(shape(answer)).toEqual(unavailable);
 			// The endpoint answered while Redis slept, before any read of it was answered.
-			expect(answer.at).toBeLessThan(woke);
+			expect(answer.at).toBeLessThan(await woke);
 			expect(
 				a.relay.executions(cookieRead).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
@@ -266,22 +267,29 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			const a = instanceOf(d);
 			await control(a);
 			const browser = await loggedInAt(a);
-			const kept = successes(a, codeKept).length;
 			// The code's write held, then Redis killed under it: the write goes with its connection.
-			const held = a.relay.hold(codeKept);
+			const from = performance.now();
+			const holding = a.relay.hold(codeKept);
 			const asked = authorize(browser);
-			await held;
+			const held = await holding;
+			// Nothing reaches Redis until it is started again and the relay points at it, so all that
+			// keeps the code comes after.
+			a.relay.stall("up");
 			const crashed = await d.topology.crash(d.topology.primary());
 			expect(crashed.exitCode).toBe(137);
-			const restarted = performance.now();
 			const runId = await d.topology.primary().runId();
 			repointed(d);
+			const restarted = performance.now();
+			a.relay.resume();
 			const answer = await asked;
 			// Resent within its patience, the write may land on the server started again, which
-			// answers it; a code is given only so.
-			const given = successes(a, codeKept).slice(kept);
+			// answers it; a code is given only so. A resend whose confirmation failed takes the answer
+			// first written, so the answers are counted, each the held write under its mark.
+			const sent = a.relay.executions(codeKept).filter((e) => e.at > from);
+			const given = sent.filter((e) => e.succeeded);
+			expect(sent.every((e) => sameMark(held.command, e.command))).toBe(true);
 			if (answer.code) {
-				expect(given.length).toBe(1);
+				expect(given.length).toBeGreaterThan(0);
 				expect(given.every((e) => e.at > restarted && runIdOf(e.reply) === runId)).toBe(true);
 				await annotate("given a code kept on Redis started again");
 			} else {
