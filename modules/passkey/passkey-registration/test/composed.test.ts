@@ -42,7 +42,7 @@ afterEach(() => stop());
 type Options = CreationOptions & { excludeCredentials: { id: string }[] };
 
 /** A step that proves factors, as a login flow contributes one: mfa boots with none otherwise. */
-const step = defineModule({ name: "step", takes: [] }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 

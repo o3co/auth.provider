@@ -95,6 +95,7 @@ const profiled = (s: z.output<typeof section>) => s.issuers.some((i) => i.profil
 export default defineModule(
 	{
 		name: "jwt-bearer",
+		replicaSafe: true,
 		section,
 		takes: (s) => [...takes, ...(profiled(s) ? [senderBinding] : [])],
 	},

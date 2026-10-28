@@ -11,7 +11,7 @@ import { section } from "../src/section.ts";
 let recorded = recordingLog();
 const lines = () => recorded.lines();
 const receiving = (name: string, receive: AuditReceiver["receive"]): Module =>
-	defineModule({ name: `receiver-${name}`, takes: [] }, (m) => [
+	defineModule({ name: `receiver-${name}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(auditReceivers).by(() => ({ name, receive })),
 	]);
 /** A composition naming `receivers`, with the receiving modules and settings a test adds. */

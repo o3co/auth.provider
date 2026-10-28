@@ -62,7 +62,7 @@ async function boot(
 ) {
 	const stores = memoryStores();
 	const closer: Closer = { failing: false, calls: 0, done: [] };
-	const participant = defineModule({ name: "closer", takes: [] }, (m) => [
+	const participant = defineModule({ name: "closer", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(participants).by(() => ({
 			name: "closer",
 			closing: async (s) => {
@@ -329,7 +329,7 @@ describe("session entry", () => {
 
 	it("lets nobody in whose subject is revoked while the entry requirements are asked", async () => {
 		const asked: { gate?: Promise<void>; reached?: () => void } = {};
-		const waiting = defineModule({ name: "waiting", takes: [] }, (m) => [
+		const waiting = defineModule({ name: "waiting", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "waiting",
 				judges: ["use"],
@@ -457,14 +457,17 @@ describe("session entry", () => {
 	it("fails an entry closed when subject revocation cannot tell", async () => {
 		const withCookie = (cookie: string) =>
 			testRequest({ headers: new Map([["cookie", cookie]]), source: { scheme: "https" } });
-		const failing = defineModule({ name: "subject-revocation", takes: [] }, (m) => [
-			m.provide(subjectRevocation).by(() => ({
-				revoke: async () => {},
-				check: async () => {
-					throw new Error("cannot tell");
-				},
-			})),
-		]);
+		const failing = defineModule(
+			{ name: "subject-revocation", replicaSafe: true, takes: [] },
+			(m) => [
+				m.provide(subjectRevocation).by(() => ({
+					revoke: async () => {},
+					check: async () => {
+						throw new Error("cannot tell");
+					},
+				})),
+			],
+		);
 		const other = await assemble({
 			modules: [
 				http,
@@ -508,22 +511,25 @@ describe("session entry", () => {
 
 	it("lets a session in only where every entry requirement admits it at the level asked, and says which fell short", async () => {
 		const asked: string[] = [];
-		const requirement = defineModule({ name: "requirement", takes: [] }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "recent",
-				judges: ["use", "credentials"],
-				admits: async (context, level) => {
-					asked.push(level);
-					if (level === "credentials" && !context.amr.includes("otp")) {
-						return { kind: "short" as const, answer: { needs: "otp" } };
-					}
-					if (level === "use" && context.subject === "mallory") {
-						return { kind: "short" as const, answer: { needs: "nothing" } };
-					}
-					return { kind: "admit" as const };
-				},
-			})),
-		]);
+		const requirement = defineModule(
+			{ name: "requirement", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "recent",
+					judges: ["use", "credentials"],
+					admits: async (context, level) => {
+						asked.push(level);
+						if (level === "credentials" && !context.amr.includes("otp")) {
+							return { kind: "short" as const, answer: { needs: "otp" } };
+						}
+						if (level === "use" && context.subject === "mallory") {
+							return { kind: "short" as const, answer: { needs: "nothing" } };
+						}
+						return { kind: "admit" as const };
+					},
+				})),
+			],
+		);
 		const { s, withCookie, login } = await boot({}, [requirement]);
 		const cookie = await login();
 		expect(await s.enterFor(withCookie(cookie), "credentials")).toEqual({
@@ -991,16 +997,19 @@ describe("session raise", () => {
 
 	it("indexes a raised cookie for at least a millisecond, even when the session ends during the raise", async () => {
 		let ending = false;
-		const moving = defineModule({ name: "subject-revocation", takes: [] }, (m) => [
-			m.provide(subjectRevocation).by(() => ({
-				revoke: async () => {},
-				// The clock reaches the session's end between the entry check and the new cookie.
-				check: async () => {
-					if (ending) now += 1;
-					return "valid" as const;
-				},
-			})),
-		]);
+		const moving = defineModule(
+			{ name: "subject-revocation", replicaSafe: false, takes: [] },
+			(m) => [
+				m.provide(subjectRevocation).by(() => ({
+					revoke: async () => {},
+					// The clock reaches the session's end between the entry check and the new cookie.
+					check: async () => {
+						if (ending) now += 1;
+						return "valid" as const;
+					},
+				})),
+			],
+		);
 		// Each draw of randomness fills its bytes with one count: the handle, the secret, the raised secret.
 		let draws = 0;
 		const random = { bytes: (n: number) => new Uint8Array(n).fill(++draws) };

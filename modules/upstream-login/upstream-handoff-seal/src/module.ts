@@ -2,6 +2,7 @@ import { defineModule } from "@mod/kernel";
 import { seal } from "@mod/seal";
 import { handoffSealing } from "@mod/upstream-handoff";
 
-export default defineModule({ name: "upstream-handoff-seal", takes: [seal] }, (m) => [
-	m.contribute(handoffSealing).by((c) => c.get(seal)),
-]);
+export default defineModule(
+	{ name: "upstream-handoff-seal", replicaSafe: true, takes: [seal] },
+	(m) => [m.contribute(handoffSealing).by((c) => c.get(seal))],
+);

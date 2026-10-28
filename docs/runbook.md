@@ -100,7 +100,7 @@ Rate limits fail closed by default (`rate-limit.fail-mode = closed`), so an outa
 
 Each instance walks every federation grant kept every `federation-grants.sweep-interval` (default `1h`), erasing the credentials of grants past their end or ended by their subject's revocation that no request reads. A pass reads every grant record kept (each lives its lifetime and 30 days more) and, for each grant holding credentials, the subject's revocation boundary once or twice; every instance makes its own passes. Lengthen the interval where there are many grants or many instances.
 
-Set `kernel.deployment = multi` when more than one instance runs. Which modules boot then refuses is [promise 5 of the security model](security-model.md#promises-across-modules); read it for your own modules. A pattern created with an in-memory store says in its README that it runs as one instance.
+Give every instance the same configuration, and keep their clocks in step: what that covers is in [Guarantees by deployment](deployment-guarantees.md#several-instances). Set `kernel.deployment = multi` when more than one instance runs. Which modules boot then refuses is [promise 5 of the security model](security-model.md#promises-across-modules); read it for your own modules. A pattern created with an in-memory store says in its README that it runs as one instance.
 
 ## Rotating the signing key
 

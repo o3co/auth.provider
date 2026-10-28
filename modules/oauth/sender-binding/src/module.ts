@@ -19,7 +19,7 @@ const section = z.strictObject({
 
 // Its own kinds are collected, so named; its own bindings and their refusals are not.
 export default defineModule(
-	{ name: "sender-binding", section, takes: [senderBindings, issuer] },
+	{ name: "sender-binding", replicaSafe: true, section, takes: [senderBindings, issuer] },
 	(m) => [
 		m
 			.contribute(metadataSections)

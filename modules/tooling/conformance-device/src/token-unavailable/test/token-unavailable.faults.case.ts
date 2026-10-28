@@ -58,23 +58,6 @@ async function healed(dep: Deployed, i: Instance) {
 	expect(said(await pollAt(i, await approvedAt(i)))).toEqual([200, "Bearer"]);
 }
 
-/**
- * Until the node takes writes, within 30 s: a replica it was just given counted good, as its
- * `min-replicas-to-write` asks; until then it refuses writes as `NOREPLICAS`, a 503 that shows nothing.
- */
-async function writableNode(node: {
-	ask(...args: string[]): Promise<{ kind: string; data?: Buffer | null }>;
-}) {
-	const end = performance.now() + 30_000;
-	for (;;) {
-		const info = await node.ask("INFO", "replication");
-		const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
-		if (Number(/min_slaves_good_slaves:(\d+)/.exec(text)?.[1] ?? 0) >= 1) return;
-		if (performance.now() > end) throw new Error("the new primary took no writes within 30 s");
-		await new Promise((resolve) => setTimeout(resolve, 100));
-	}
-}
-
 /** The approval was never taken: once healed, the same device gives a token. */
 async function stillApproved(dep: Deployed, i: Instance, d: Device) {
 	await recovered(dep);
@@ -227,7 +210,6 @@ describe("the token endpoint issuing no token for a device code while the store 
 			i.relay.switchUpstream(moved.upstream());
 			i.relay.reset("operations");
 			await reconnected(i, moved.upstream());
-			await writableNode(moved);
 			const from = performance.now();
 			const confirmed = i.relay.observe(confirmation({ replicas: 1 }));
 			const answer = await polledAt(i, d);
@@ -235,13 +217,20 @@ describe("the token endpoint issuing no token for a device code while the store 
 			const upstreamOf = (id: number) => i.relay.connections().find((x) => x.id === id)?.upstream;
 			// The poll read the device's record and then the approving session's entry on the new primary;
 			// the entry's read is confirmed (the device's record is not), its round passing on the old one.
-			expect(
-				i.relay.executions(recordReadOf(d)).some((e) => e.at > from && runIdOf(e.reply) === newId),
-			).toBe(true);
+			const record = i.relay
+				.executions(recordReadOf(d))
+				.find((e) => e.at > from && runIdOf(e.reply) === newId);
+			expect(record).toBeDefined();
+			// The approving session's: the first entry read on the record's connection after it.
 			const ran = i.relay
 				.executions(sessionEntryRead)
-				.filter((e) => e.at > from && e.at < wait.at && runIdOf(e.reply) !== undefined)
-				.at(-1);
+				.find(
+					(e) =>
+						record !== undefined &&
+						e.connection === record.connection &&
+						e.at > record.at &&
+						e.at < wait.at,
+				);
 			expect(ran && runIdOf(ran.reply)).toBe(newId);
 			expect(ran && upstreamOf(ran.connection)).toEqual(moved.upstream());
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());

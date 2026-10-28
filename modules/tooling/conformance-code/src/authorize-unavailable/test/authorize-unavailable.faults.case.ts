@@ -15,7 +15,7 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { app, browserOn, callback, on, pkce } from "../../faults/test/faults.ts";
-import { codeKept, cookieRead, isStoreOperation } from "../../faults/test/wire.ts";
+import { codeKept, cookieRead } from "../../faults/test/wire.ts";
 
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
@@ -207,11 +207,12 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 		});
 	});
 
-	it("gives no code kept on a server other than the one that confirmed it [guarantee-3-a] {fault:Fs}", async () => {
+	it("gives no code from a decision whose read is confirmed on a server other than the one that answered it [guarantee-3-a] {fault:Fs}", async () => {
 		await on({ name: "authorize-unavailable-fs", replicas: 3 }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
 			const browser = await loggedInAt(a);
+			const kept = successes(a, codeKept).length;
 			const old = d.topology.primary();
 			const [, moved, follower] = d.topology.replicas();
 			if (!moved || !follower) throw new Error("three replicas");
@@ -220,28 +221,23 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			expect(oldId).not.toBe(newId);
 			a.relay.switchUpstream(moved.upstream());
 			a.relay.reset("operations");
-			// Sent once the app holds a connection to the new primary: before, it fails for want of one, a 503 that shows nothing.
 			await reconnected(a, moved.upstream());
 			const from = performance.now();
 			const confirmed = a.relay.observe(confirmation({ replicas: 1 }));
 			const answer = await authorize(browser);
 			const wait = await confirmed;
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
-			// A write the decision made ran on the new primary, its confirmation passing on the old one.
-			const first = a.relay
-				.executions(anything)
-				.filter(
-					(e) =>
-						e.at > from &&
-						e.at < wait.at &&
-						isStoreOperation(e.command) &&
-						runIdOf(e.reply) !== undefined,
-				)
+			// The read of the browser's session, the decision's call confirmed first, ran on the new primary,
+			// its confirmation passing on the old one; so the decision stopped there, before any code was kept.
+			const read = a.relay
+				.executions(cookieRead)
+				.filter((e) => e.at > from && e.at < wait.at && runIdOf(e.reply) !== undefined)
 				.at(-1);
-			expect(first && runIdOf(first.reply)).toBe(newId);
-			expect(first && upstreamOf(first.connection)).toEqual(moved.upstream());
+			expect(read && runIdOf(read.reply)).toBe(newId);
+			expect(read && upstreamOf(read.connection)).toEqual(moved.upstream());
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
 			expect(shape(answer)).toEqual(unavailable);
+			expect(successes(a, codeKept).length).toBe(kept);
 			a.relay.reset("confirming");
 			await healed(d, a);
 		});

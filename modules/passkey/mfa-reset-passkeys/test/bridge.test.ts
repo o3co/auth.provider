@@ -8,7 +8,7 @@ import bridge from "../src/module.ts";
 /** The bridge over a part answering `answer`, with a probe reading the reset parts. */
 function composition(answer: PasskeyResetPart["passkeys"]) {
 	const asked: string[] = [];
-	const scripted = defineModule({ name: "scripted-part", takes: [] }, (m) => [
+	const scripted = defineModule({ name: "scripted-part", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(passkeyResetPart).by(() => ({
 			passkeys: async (subject) => {
 				asked.push(subject);
@@ -17,7 +17,7 @@ function composition(answer: PasskeyResetPart["passkeys"]) {
 		})),
 	]);
 	const parts = contract<readonly ResetPart[]>("test.parts");
-	const probe = defineModule({ name: "probe", takes: [resetParts] }, (m) => [
+	const probe = defineModule({ name: "probe", replicaSafe: true, takes: [resetParts] }, (m) => [
 		m.provide(parts).by((c) => c.collect(resetParts)),
 	]);
 	return { input: { modules: [scripted, bridge, probe], config: kernelConfig() }, parts, asked };
