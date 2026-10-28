@@ -1,12 +1,13 @@
 import {
+	type Deployed,
 	type Instance,
 	instanceOf,
 	type Match,
 	ready,
+	recovered,
 	replicasOnline,
 	repointed,
 	successes,
-	writable,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { type Answer, assertion, faultScene, grantAt, on, said } from "../../faults/test/faults.ts";
@@ -52,8 +53,9 @@ async function refusedAtCount(i: Instance, from: number) {
 		expect(i.relay.executions(call).filter((e) => e.at > from)).toEqual([]);
 }
 
-/** Healed: the instance is ready, and a new request is counted and given a token. */
-async function healed(i: Instance) {
+/** Healed: the topology has recovered and the instance is ready, and a new request is counted and given a token. */
+async function healed(d: Deployed, i: Instance) {
+	await recovered(d);
 	await ready(i);
 	await control(i);
 }
@@ -74,7 +76,7 @@ describe("the token endpoint's request limit letting no request by while the sto
 				[],
 			);
 			await refusedAtCount(i, stalled);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -92,7 +94,7 @@ describe("the token endpoint's request limit letting no request by while the sto
 				i.relay.executions(requestCounted).some((e) => e.at > stalled && e.at < answer.at),
 			).toBe(true);
 			await refusedAtCount(i, stalled);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -110,7 +112,7 @@ describe("the token endpoint's request limit letting no request by while the sto
 				[],
 			);
 			await refusedAtCount(i, cut);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -129,7 +131,7 @@ describe("the token endpoint's request limit letting no request by while the sto
 			const count = i.relay.executions(requestCounted).find((e) => e.at > delayed);
 			expect(count?.at).toBeGreaterThan(answer.at);
 			await refusedAtCount(i, delayed);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -151,10 +153,7 @@ describe("the token endpoint's request limit letting no request by while the sto
 				i.relay.executions(requestCounted).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
 			await refusedAtCount(i, asking);
-			// Woken, Redis answers at once but refuses writes until its replicas' acknowledgements catch up,
-			// which a ready instance does not show: the healed request, whose count is a write, waits for it.
-			await writable(d);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -182,7 +181,7 @@ describe("the token endpoint's request limit letting no request by while the sto
 			const held = answer.at;
 			expect(successes(i, requestCounted).filter((e) => e.at > from && e.at < held)).toEqual([]);
 			await refusedAtCount(i, from);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 
@@ -208,7 +207,7 @@ describe("the token endpoint's request limit letting no request by while the sto
 			expect(i.relay.executions(requestCounted).filter((e) => e.at > from)).toEqual([]);
 			await replicasOnline(d);
 			await refusedAtCount(i, from);
-			await healed(i);
+			await healed(d, i);
 		});
 	});
 });

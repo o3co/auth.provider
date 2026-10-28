@@ -8,7 +8,9 @@
 		".": "./src/main.ts"
 	},
 	"scripts": {
-		"conformance": "vitest run --config vitest.config.ts"
+		"conformance": "vitest run --config vitest.config.ts",
+		"conformance:faults": "SPEC_EVIDENCE_RUN=faults vitest run --config vitest.faults.config.ts",
+		"evidence-runs": "node -p \"JSON.stringify([{ entry: '@mod/conformance-passkey#faults', kind: 'faults', matrix: '@mod/conformance-passkey', files: '.faults.case.ts', noSkip: true }])\""
 	},
 	"dependencies": {
 		"@mod/conformance": "workspace:*",

@@ -1943,6 +1943,9 @@ importers:
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -1986,6 +1989,9 @@ importers:
       '@mod/claims-selection':
         specifier: workspace:*
         version: link:../claims-selection
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

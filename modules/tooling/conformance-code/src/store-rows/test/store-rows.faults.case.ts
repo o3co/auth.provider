@@ -8,7 +8,7 @@ import {
 	type Node,
 	type Reply,
 	ready,
-	replicasOnline,
+	recovered,
 	startDeployment,
 	storeWrite,
 	successes,
@@ -119,7 +119,7 @@ describe("nothing issued while the store cannot write, and a request after it ca
 			expect(none || refusedWrite(a, since, isNoReplicas) !== undefined).toBe(true);
 			expect(successes(a, codeUse(c))).toEqual([]);
 			await ok(replica, "REPLICAOF", primary.name, "6379");
-			await replicasOnline(d);
+			await recovered(d);
 			await redeemedOnce(a, c);
 		});
 	});
@@ -150,7 +150,7 @@ describe("nothing issued while the store cannot write, and a request after it ca
 			// there, before the code was used.
 			expect(successes(a, codeRecord).some((e) => e.at > since)).toBe(true);
 			expect(successes(a, codeUse(c))).toEqual([]);
-			await replicasOnline(d);
+			await recovered(d);
 			await redeemedOnce(a, c);
 		});
 	});
@@ -172,7 +172,7 @@ describe("nothing issued while the store cannot write, and a request after it ca
 			expect(answer.body.access_token).toBeUndefined();
 			expect(refusedWrite(a, since, isNoReplicas)).toBeDefined();
 			expect(successes(a, codeUse(c))).toEqual([]);
-			await until(primary, "min_slaves_good_slaves", String(replicas.length));
+			await recovered(d);
 			await redeemedOnce(a, c);
 		});
 	});
