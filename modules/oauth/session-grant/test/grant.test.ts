@@ -93,7 +93,7 @@ async function serve(options: Options = {}) {
 			},
 		})),
 	};
-	const stubs = defineModule({ name: "stubs", takes: [] }, (m) => [
+	const stubs = defineModule({ name: "stubs", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(originEvidence).by(() => ({
 			sameOrigin: (request) => request.headers.get("origin") === ours,
 		})),
@@ -110,7 +110,7 @@ async function serve(options: Options = {}) {
 			}),
 		),
 	]);
-	const telling = defineModule({ name: "telling", takes: [] }, (m) => [
+	const telling = defineModule({ name: "telling", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(sessionIssuances).by(() => ({
 			issued: async (session, issued) => {
 				recorded.set(referenceOf(issued), session);
@@ -264,7 +264,7 @@ describe("session-grant", () => {
 
 	it("issues through the issuance policies from the session entered, recording nothing they refuse", async () => {
 		const asked: IssuanceRequest[] = [];
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -285,7 +285,7 @@ describe("session-grant", () => {
 
 	it("asks the issuance policies once for each token it issues", async () => {
 		const asked: IssuanceRequest[] = [];
-		const allowing = defineModule({ name: "allowing", takes: [] }, (m) => [
+		const allowing = defineModule({ name: "allowing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {

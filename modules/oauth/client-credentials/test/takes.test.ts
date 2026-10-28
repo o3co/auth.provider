@@ -7,7 +7,7 @@ import clientCredentials from "../src/module.ts";
 
 it("takes the issuer, and nothing it names goes untaken", async () => {
 	const collected = contract<unknown>("test.grants");
-	const beside = defineModule({ name: "beside", takes: [grants] }, (m) => [
+	const beside = defineModule({ name: "beside", replicaSafe: true, takes: [grants] }, (m) => [
 		m.provide(issuer).by(() => ({ url: "https://as.example" }) as never),
 		m.provide(collected).by((c) => c.collect(grants)),
 	]);

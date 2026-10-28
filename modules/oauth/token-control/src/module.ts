@@ -32,7 +32,7 @@ const limited = (c: BuildContext<z.output<typeof section>>, name: string) => {
 // token can be revoked need nothing of their own; `revocableKinds` is collected by the revoke route.
 const takes = [...introspectionTakes, ...revocationTakes, issuer, revocableKinds, clients, tokens];
 
-export default defineModule({ name: "token-control", section, takes }, (m) => [
+export default defineModule({ name: "token-control", replicaSafe: true, section, takes }, (m) => [
 	m.contribute(routes).by(async (c) => ({
 		method: "POST",
 		path: introspectPath,

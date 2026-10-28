@@ -48,7 +48,7 @@ const rules: readonly PolicyRule[] = [
 
 /** A module contributing the test's rules, these marks, then these routes. */
 function owner(list: readonly Route[], given: readonly Mark[] = [ownSite, perSource]): Module {
-	return defineModule({ name: "owner", takes: [] }, (m) => [
+	return defineModule({ name: "owner", replicaSafe: false, takes: [] }, (m) => [
 		...rules.map((rule) => m.contribute(policies).by(() => rule)),
 		...given.map((mark) => m.contribute(marks).by(() => mark)),
 		...list.map((route) => m.contribute(routes).by(() => route)),
@@ -100,7 +100,7 @@ describe("a route's declared guarantees", () => {
 
 	it("counts a policy only by the mark of its own value, never by its name [guarantee-9-b]", async () => {
 		const named = policy("test.site");
-		const module = defineModule({ name: "named", takes: [] }, (m) => [
+		const module = defineModule({ name: "named", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(policies).by(() => applying(named, () => "pass")),
 		]);
 		const declared = assemble({

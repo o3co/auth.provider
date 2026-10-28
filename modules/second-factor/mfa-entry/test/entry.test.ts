@@ -40,7 +40,7 @@ const kind = (counts: boolean, addsSecondFactor: boolean) =>
 /** mfa's decisions as the entry judgments ask them: the subjects holding a counting factor, or one unreadable. */
 function decided(holding: Set<string>, required = false, unreadable = new Set<string>()) {
 	const asked: string[] = [];
-	const module = defineModule({ name: "factors-stand-in", takes: [] }, (m) => [
+	const module = defineModule({ name: "factors-stand-in", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorReading).by(
 			() =>
 				({
@@ -62,7 +62,7 @@ async function serve(
 	extra: Module[] = [],
 ) {
 	const stand = decided(holding, required, unreadable);
-	const kindsModule = defineModule({ name: "kinds", takes: [] }, (m) =>
+	const kindsModule = defineModule({ name: "kinds", replicaSafe: true, takes: [] }, (m) =>
 		kinds.map((k) => m.contribute(factorKinds).by(() => k)),
 	);
 	const input = {
@@ -106,9 +106,10 @@ it("takes all it names, a second factor required or not", async () => {
 describe("the entry requirements a second factor sets", () => {
 	it("judges using a session and changing credentials, under mfa's name", async () => {
 		const seen = contract<readonly EntryRequirement[]>("seen");
-		const reader = defineModule({ name: "reader", takes: [entryRequirements] }, (m) => [
-			m.provide(seen).by((c) => c.collect(entryRequirements)),
-		]);
+		const reader = defineModule(
+			{ name: "reader", replicaSafe: true, takes: [entryRequirements] },
+			(m) => [m.provide(seen).by((c) => c.collect(entryRequirements))],
+		);
 		const { app } = await serve(new Set(), {}, [reader]);
 		const mfa = app.get(seen).find((requirement) => requirement.name === "mfa");
 		expect(mfa?.judges).toEqual(["use", "credentials"]);
@@ -194,7 +195,7 @@ it("takes only a second factor proven recently as proven, never a recent sign-in
 
 it("names itself among the modules holding sessions to the subject's factors", async () => {
 	const seen = contract<readonly Enforcer[]>("seen-enforcers");
-	const reader = defineModule({ name: "reader", takes: [enforcers] }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [enforcers] }, (m) => [
 		m.provide(seen).by((c) => c.collect(enforcers)),
 	]);
 	const { app } = await serve(new Set(), {}, [reader]);

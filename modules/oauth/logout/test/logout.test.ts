@@ -22,7 +22,7 @@ async function serve() {
 	const failing = { on: false };
 	const down = unavailableSwitch<Sessions>("sessions");
 	const audit = auditStandIn();
-	const participant = defineModule({ name: "participant", takes: [] }, (m) => [
+	const participant = defineModule({ name: "participant", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(participants).by(() => ({
 			name: "test",
 			closing: async () => {

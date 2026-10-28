@@ -17,11 +17,14 @@ const heldLogins: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "upstream-handoff-store", takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => heldLogins),
-	m.provide(heldLoginStore).by(async (c) => {
-		const place = { store: await c.get(store), space: heldLogins, log: c.log, random: c.random };
-		const records = recordsFor<StoredHeldLogin>(place);
-		return { save: records.create, update: records.change, remove: records.remove };
-	}),
-]);
+export default defineModule(
+	{ name: "upstream-handoff-store", replicaSafe: true, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => heldLogins),
+		m.provide(heldLoginStore).by(async (c) => {
+			const place = { store: await c.get(store), space: heldLogins, log: c.log, random: c.random };
+			const records = recordsFor<StoredHeldLogin>(place);
+			return { save: records.create, update: records.change, remove: records.remove };
+		}),
+	],
+);

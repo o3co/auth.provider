@@ -269,10 +269,13 @@ export function sessionTokensInMemory({ size = 1000, listed = 1000 } = {}) {
 			now = c.clock.now;
 			return value;
 		};
-	const module = defineModule({ name: "session-tokens-stores", takes: [] }, (m) => [
-		m.provide(issuedTokens).by(on(issued)),
-		m.provide(tokenIndex).by(on(index)),
-		m.provide(pendingSessions).by(on(pending)),
-	]);
+	const module = defineModule(
+		{ name: "session-tokens-stores", replicaSafe: false, takes: [] },
+		(m) => [
+			m.provide(issuedTokens).by(on(issued)),
+			m.provide(tokenIndex).by(on(index)),
+			m.provide(pendingSessions).by(on(pending)),
+		],
+	);
 	return { module, issued, index, pending };
 }

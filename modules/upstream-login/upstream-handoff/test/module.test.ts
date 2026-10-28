@@ -9,7 +9,7 @@ import { handoff, handoffSealing, heldLoginStore, noHandoff } from "../src/contr
 import handoffModule from "../src/module.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 0 } });
-const unusedStore = defineModule({ name: "held", takes: [] }, (m) => [
+const unusedStore = defineModule({ name: "held", replicaSafe: true, takes: [] }, (m) => [
 	m.provide(heldLoginStore).by(() => ({
 		save: async () => "created" as const,
 		update: async () => undefined,
@@ -18,7 +18,7 @@ const unusedStore = defineModule({ name: "held", takes: [] }, (m) => [
 ]);
 /** A receiver of upstream tokens, recording each access token it is told. */
 const receiving = (told: string[] = []) =>
-	defineModule({ name: "receiver", takes: [] }, (m) => [
+	defineModule({ name: "receiver", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(upstreamLoginReceivers).by(() => ({
 			name: "one",
 			received: async (at) => void told.push(at.tokens.accessToken),
@@ -34,7 +34,9 @@ const recording = (sealed: string[]): Seal => ({
 	open: (value) => ({ kind: "opened", plain: value }),
 });
 const sealing = (name: string, value: Seal) =>
-	defineModule({ name, takes: [] }, (m) => [m.contribute(handoffSealing).by(() => value)]);
+	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(handoffSealing).by(() => value),
+	]);
 const tokens = { accessToken: "a", tokenType: "Bearer", scope: [] };
 const composition = (modules: readonly Module[]) => ({
 	modules: [unusedStore, ...modules, handoffModule],

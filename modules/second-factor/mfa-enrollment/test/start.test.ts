@@ -17,7 +17,7 @@ afterEach(() => {
 	next.sent = undefined;
 	froms.length = 0;
 });
-const parts = defineModule({ name: "start-parts", takes: [] }, (m) => [
+const parts = defineModule({ name: "start-parts", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],

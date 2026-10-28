@@ -7,7 +7,8 @@ import { settingsOf } from "./settings.ts";
 import { opened } from "./upstream.ts";
 
 export default defineModule(
-	{ name: "idp-google", takes: [externalJwt, outbound, outboundRefusals] },
+	// Safe on many instances given the same settings on each (deployment-guarantees, Several instances).
+	{ name: "idp-google", replicaSafe: true, takes: [externalJwt, outbound, outboundRefusals] },
 	(m) => [
 		m.contribute(idpTypes).by(async (c) => {
 			const out = await c.get(outbound);

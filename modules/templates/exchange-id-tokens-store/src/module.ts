@@ -14,14 +14,17 @@ const used: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "exchange-id-tokens-store", takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => used),
-	m.provide(usedIdTokens).by(async (c): Promise<UsedIdTokens> => {
-		const place = { store: await c.get(store), space: used, log: c.log, random: c.random };
-		const records = recordsIn<{ readonly taken: true }>(place);
-		return {
-			save: (kind, name, lifetimeMs) =>
-				records.create(`${kind}/${name}`, { taken: true }, lifetimeMs),
-		};
-	}),
-]);
+export default defineModule(
+	{ name: "exchange-id-tokens-store", replicaSafe: true, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => used),
+		m.provide(usedIdTokens).by(async (c): Promise<UsedIdTokens> => {
+			const place = { store: await c.get(store), space: used, log: c.log, random: c.random };
+			const records = recordsIn<{ readonly taken: true }>(place);
+			return {
+				save: (kind, name, lifetimeMs) =>
+					records.create(`${kind}/${name}`, { taken: true }, lifetimeMs),
+			};
+		}),
+	],
+);

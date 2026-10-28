@@ -60,7 +60,7 @@ const allowed = allowancesFor({
 });
 
 /** Both records in memory, fresh for each composition. */
-const records = defineModule({ name: "records-in-memory", takes: [] }, (m) => {
+const records = defineModule({ name: "records-in-memory", replicaSafe: false, takes: [] }, (m) => {
 	const held =
 		(kept = new Set<string>()) =>
 		async (name: string): Promise<"created" | "exists"> => {
