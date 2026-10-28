@@ -336,7 +336,7 @@ describe("the logout a client starts", () => {
 		expect(h.events).toEqual([]);
 	});
 
-	it("passes over a parameter it does not read, an unsupported ui_locales included [oidc-rpinit-2-c]", async () => {
+	it("passes over a parameter it does not read, an unsupported ui_locales included, sending a POST back by 303 [oidc-rpinit-2-c] [rfc9700-4.12-a]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const hint = await h.hintFor(session.id);
