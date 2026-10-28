@@ -131,7 +131,12 @@ async function boot(
 		config: {
 			...kernelConfig(),
 			clients: { registered: options.registered ?? [] },
-			"clients-cimd": { scopes: ["openid", "read"], ...settings },
+			// Any host, unless the test names the hosts.
+			"clients-cimd": {
+				scopes: ["openid", "read"],
+				...(settings.allow === undefined ? { "allow-any-host": true } : {}),
+				...settings,
+			},
 		},
 		runtime: quietRuntime({ clock: { now: () => now }, log: recording.log }),
 	};
@@ -141,7 +146,11 @@ async function boot(
 		find: (given = id) => app.get(clients).find(given),
 		supported: () =>
 			app.get(items).find((item) => item.name === "client_id_metadata_document_supported")?.value,
-		lines: recording.lines,
+		/** What was logged past the start's warning of any host taken. */
+		lines: () => recording.lines().filter((line) => line.event !== "clients-cimd.any_host_allowed"),
+		/** What the start warned of the hosts. */
+		warned: () =>
+			recording.lines().filter((line) => line.event === "clients-cimd.any_host_allowed"),
 	};
 }
 
@@ -531,6 +540,37 @@ describe("clients-cimd: the operator's section", () => {
 		await expect(boot({}, { lookups: 1 })).resolves.toBeDefined();
 	});
 
+	it("refuses boot where the operator names no document host and does not take any [rfc9700-4.11.2-c]", async () => {
+		for (const settings of [{ "allow-any-host": false }, { allow: [] }]) {
+			const error = await boot(settings).catch((e: unknown) => e);
+			expect(error, JSON.stringify(settings)).toBeInstanceOf(BootRefused);
+			expect((error as BootRefused).refusals).toEqual([
+				{
+					where: "clients-cimd.allow",
+					reason:
+						"is empty: name the hosts a client id's document may come from, or set clients-cimd.allow-any-host",
+				},
+			]);
+		}
+	});
+
+	it("takes any host deny leaves where allow-any-host is set, warning at every start, and never beside allow", async () => {
+		const any = await boot({ "allow-any-host": true });
+		expect(any.warned()).toEqual([
+			{ level: "warn", event: "clients-cimd.any_host_allowed", fields: {} },
+		]);
+		expect(await any.find()).toMatchObject({ id });
+		expect(sent.map((one) => one.narrower?.hosts)).toEqual([undefined]);
+		expect((await boot({ allow: ["app.example"] })).warned()).toEqual([]);
+		const error = await boot({ "allow-any-host": true, allow: ["app.example"] }).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals).toEqual([
+			{ where: "clients-cimd.allow-any-host", reason: "is set beside allow: keep one of them" },
+		]);
+	});
+
 	it("boots with the size and the timeout at outbound's cap or below it", async () => {
 		const caps = { maxBytes: 5120, timeoutMs: 5000 };
 		await expect(boot({}, { caps })).resolves.toBeDefined();
@@ -633,6 +673,7 @@ describe("clients-cimd: times and sizes in the section", () => {
 	it("reads an empty section with the defaults it had", () => {
 		expect(section.parse({})).toEqual({
 			allow: [],
+			"allow-any-host": false,
 			deny: [],
 			scopes: [],
 			audiences: [],
