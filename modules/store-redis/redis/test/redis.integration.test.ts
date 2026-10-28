@@ -175,7 +175,7 @@ afterAll(() => {
 	if (network) docker("network", "rm", network);
 });
 
-const durable = defineModule({ name: "durable-owner", takes: [] }, (m) => [
+const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
 	...contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 ]);
@@ -326,7 +326,7 @@ describe("redis", () => {
 		cli(container, "acl", "setuser", user, "on", ">pw", ...every, "-evalsha", "-script");
 		try {
 			let context: BuildContext<unknown> | undefined;
-			const asker = defineModule({ name: "asker", takes: [] }, (m) => [
+			const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(contract<object>("asker")).by((c) => {
 					context = c;
 					return {};
@@ -420,8 +420,9 @@ describe("redis", () => {
 		let follower = "";
 		try {
 			await waitFor(() => pings(lone));
-			const replicatedOnly = defineModule({ name: "replicated-owner", takes: [] }, (m) =>
-				contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
+			const replicatedOnly = defineModule(
+				{ name: "replicated-owner", replicaSafe: true, takes: [] },
+				(m) => contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 			);
 			const app = await open(
 				[replicatedOnly],
@@ -639,9 +640,10 @@ describe("one server alone, as configured with replication none", () => {
 	afterAll(() => {
 		for (const id of lone) docker("rm", "-f", "-v", id);
 	});
-	const replicatedOnly = defineModule({ name: "replicated-owner", takes: [] }, (m) => [
-		m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
-	]);
+	const replicatedOnly = defineModule(
+		{ name: "replicated-owner", replicaSafe: true, takes: [] },
+		(m) => [m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] }))],
+	);
 
 	it("boots on Redis 7.4 and 7.0 alike: one server, its run id the same to both connections, and the store's scripts run", async () => {
 		for (const version of ["redis:7.4-alpine", "redis:7.0-alpine"]) {
@@ -700,7 +702,7 @@ describe("settings the server will not show", () => {
 	afterAll(() => {
 		if (blocked) docker("rm", "-f", "-v", blocked);
 	});
-	const kept = defineModule({ name: "kept-owner", takes: [] }, (m) => [
+	const kept = defineModule({ name: "kept-owner", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
 	]);
 	const boot = (redis: object, through = blockedUrl, recorded = recordingLog()) =>
