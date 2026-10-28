@@ -11,7 +11,7 @@
 ## Offers
 - Route `/oauth/authorize` (GET; a POST is a `303` to the GET with the same parameters, which reads the session)
 - Both methods take other sites' requests, with the reason declared: a request arrives as the client's navigation and only starts what the user's own login and consent complete.
-- Extension point `hintReaders` (at most one: a hint → the End-User of an ID token this provider issued / invalid)
+- Extension point `hintReaders`, where the module that issues ID tokens judges an `id_token_hint` (`hint`'s card)
 - Contribution of the return path `/oauth/authorize` to `login-gates`
 - Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`), `claims_parameter_supported` (`true` while `claims-selection` is `on`); to `claims-selection`'s consent judge, as for scope
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`, and of its document copy to `client-documents`
