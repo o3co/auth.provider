@@ -52,7 +52,7 @@ store.accept-volatile = true
 audit.receivers = [log]
 keys.signing {
   kid = signing-1
-  alg = EdDSA
+  alg = RS256
   private-key = """${pem}"""
 }
 users.registered = [
