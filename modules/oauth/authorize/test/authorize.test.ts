@@ -351,7 +351,7 @@ describe("authorize: trust in the redirect URI", () => {
 		expect(loopback.at?.origin).toBe("http://127.0.0.1:9555");
 	});
 
-	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d] [oidc-core-3.1.2.2-b] [oidc-core-3.1.2.2-i] [rfc6749-10.14-a]", async () => {
+	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d] [oidc-core-3.1.2.2-b] [oidc-core-3.1.2.2-i] [rfc6749-10.14-a] [rfc6749-4.1.2.1-d]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const cases: [Record<string, string> | string, string][] = [
@@ -381,6 +381,7 @@ describe("authorize: trust in the redirect URI", () => {
 				res.at?.searchParams.get("state"),
 				res.at?.searchParams.get("iss"),
 			]).toEqual([error, "s1", issuer]);
+			expect(res.at?.searchParams.get("error")).toMatch(/^[\x20\x21\x23-\x5B\x5D-\x7E]+$/);
 		}
 		const twice = await authorize(`${new URLSearchParams(request())}&state=s2`, cookie);
 		expect([twice.at?.searchParams.get("error"), twice.at?.searchParams.has("state")]).toEqual([
