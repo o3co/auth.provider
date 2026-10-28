@@ -49,7 +49,7 @@ describe("access tokens, signed through accessTokenSigning", () => {
 		const refused = async (): Promise<never> => {
 			throw new TypeError("keys: an access token is signed through accessTokenSigning");
 		};
-		const standIn = defineModule({ name: "keys", takes: [] }, (m) => [
+		const standIn = defineModule({ name: "keys", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(keys).by(() => ({ ...ring.get(keys), sign: refused, verify: refused })),
 			m.provide(accessTokenSigning).by(() => ring.get(accessTokenSigning)),
 		]);

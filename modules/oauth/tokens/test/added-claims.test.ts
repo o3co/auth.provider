@@ -115,7 +115,7 @@ describe("claims a grant adds to its access token", () => {
 				return { kind: "allowed" };
 			},
 		};
-		const policies = defineModule({ name: "policies", takes: [] }, (m) => [
+		const policies = defineModule({ name: "policies", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => watching),
 		]);
 		const { t } = await boot([policies]);
@@ -156,7 +156,7 @@ describe("claims a grant adds to its access token", () => {
 				return { kind: "allowed" };
 			},
 		};
-		const policies = defineModule({ name: "policies", takes: [] }, (m) => [
+		const policies = defineModule({ name: "policies", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => watching),
 		]);
 		const { t } = await boot([policies]);

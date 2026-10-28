@@ -38,7 +38,7 @@ function around(random?: Random) {
 	const revoked = new Set<string>();
 	const known = { member: "one", tokenType: "ONE" };
 	const runtime = quietRuntime({ clock: { now: () => now }, ...(random ? { random } : {}) });
-	const module = defineModule({ name: "around", takes: [] }, (m) => [
+	const module = defineModule({ name: "around", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(senderBindings).by(() => ({ ...known, read: async () => ({ kind: "absent" }) })),
 		m.contribute(subjectChecks).by(() => ({
 			holds: async (token) => (revoked.has(token.subject) ? "revoked" : "holds"),
@@ -67,7 +67,7 @@ async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
 
 /** The policies given, contributed. */
 const contributing = (policies: readonly IssuancePolicy[] = []) =>
-	defineModule({ name: "policies", takes: [] }, (m) =>
+	defineModule({ name: "policies", replicaSafe: true, takes: [] }, (m) =>
 		policies.map((policy) => m.contribute(issuancePolicies).by(() => policy)),
 	);
 
