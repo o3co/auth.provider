@@ -427,9 +427,15 @@ describe("idp-apple", () => {
 		expect(later.payload.iat).toBe(seconds + 150);
 	});
 
-	it("refuses a callback naming another issuer before its code is used, and takes one naming none [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
+	it("refuses a callback naming another issuer before its code is used, comparing it code point by code point, and takes one naming none [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b] [oidc-discovery-5-c]", async () => {
 		const { upstream, asked } = await open(async () => granted());
-		for (const iss of ["", "appleid.apple.com", `${issuer}/`, "https://evil.example"]) {
+		for (const iss of [
+			"",
+			"appleid.apple.com",
+			`${issuer}/`,
+			issuer.toUpperCase(),
+			"https://evil.example",
+		]) {
 			expect(await outcome(upstream.exchange(exchange({ iss }))), iss).toBe("refused");
 		}
 		expect(asked).toEqual([]);
