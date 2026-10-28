@@ -29,10 +29,11 @@ const scene = faultScene({ rateLimitWhileStoreFails: "open" });
 const anything: Match = { request: () => true, succeeded: () => true };
 
 /**
- * The answer under the fault: the attempt uncounted (`service_unavailable`, not the
- * `temporarily_unavailable` of a session that could not open), and no session.
+ * The answer under the fault: the attempt refused as its count could not be confirmed, whether or not
+ * Redis counted it (`service_unavailable`, not the `temporarily_unavailable` of a session that could
+ * not open), and no session.
  */
-const uncounted = [503, "service_unavailable", false];
+const refusedUnconfirmed = [503, "service_unavailable", false];
 
 /** The control: with no fault, a login's attempt is counted once, and it opens a session. */
 async function control(i: Instance) {
@@ -43,7 +44,10 @@ async function control(i: Instance) {
 
 /**
  * Refused at the attempt's count, so its identifier was never asked of: its lockout, which would answer
- * alike, saw no request from the fault on, not even one sent then and answered after.
+ * alike, saw no request from the fault on, not even one sent then and answered after. The relay records
+ * what Redis answered; where every connection is cut (`R`) or Redis is down (`C`), a lockout request
+ * cut on its way would go unrecorded, so there this rests on the per-source policy running before the
+ * handler. Either way no attempt passes: the lockout is an attempt limit too, and refuses alike.
  */
 async function refusedAtCount(i: Instance, from: number) {
 	await ready(i);
@@ -69,7 +73,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			const answer = await loginAt(a, source);
 			const resumed = performance.now();
 			a.relay.resume();
-			expect(said(answer)).toEqual(uncounted);
+			expect(said(answer)).toEqual(refusedUnconfirmed);
 			// Nothing reached Redis while cut: the count it sent then is answered only once resumed.
 			expect(a.relay.executions(anything).filter((e) => e.at > stalled && e.at < resumed)).toEqual(
 				[],
@@ -91,7 +95,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			const answer = await loginAt(a, source);
 			const resumed = performance.now();
 			a.relay.resume();
-			expect(said(answer)).toEqual(uncounted);
+			expect(said(answer)).toEqual(refusedUnconfirmed);
 			// Its count reached Redis, which counted it before the login gave up; the answer was held.
 			expect(
 				a.relay.executions(attemptFrom(source)).some((e) => e.at > stalled && e.at < answer.at),
@@ -110,7 +114,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			a.relay.reset("all");
 			const cutting = setInterval(() => a.relay.reset("all"), 20);
 			const answer = await loginAt(a, nextSource()).finally(() => clearInterval(cutting));
-			expect(said(answer)).toEqual(uncounted);
+			expect(said(answer)).toEqual(refusedUnconfirmed);
 			// Nothing reached Redis from the first cut to the answer.
 			expect(a.relay.executions(anything).filter((e) => e.at > cut && e.at < answer.at)).toEqual(
 				[],
@@ -130,7 +134,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			a.relay.delay(1_500, "both");
 			const answer = await loginAt(a, source);
 			a.relay.delay(0, "both");
-			expect(said(answer)).toEqual(uncounted);
+			expect(said(answer)).toEqual(refusedUnconfirmed);
 			// Its count was answered only after the login had given up on it.
 			await ready(a);
 			const count = a.relay.executions(attemptFrom(source)).find((e) => e.at > delayed);
@@ -151,7 +155,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			const woke = awake.then(() => performance.now());
 			await asleep;
 			const answer = await loginAt(a, source);
-			expect(said(answer)).toEqual(uncounted);
+			expect(said(answer)).toEqual(refusedUnconfirmed);
 			// The login answered while Redis slept, before its count was answered.
 			expect(answer.at).toBeLessThan(await woke);
 			expect(
@@ -182,7 +186,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			repointed(d);
 			await replicasOnline(d);
 			if (!answer) throw new Error("the login was not answered during the promotion");
-			expect(said(answer)).toEqual(uncounted);
+			expect(said(answer)).toEqual(refusedUnconfirmed);
 			await refusedAtCount(a, from);
 			await healed(a);
 		});
@@ -216,7 +220,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			expect(count && runIdOf(count.reply)).toBe(newId);
 			expect(count && upstreamOf(count.connection)).toEqual(moved.upstream());
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
-			expect(said(answer)).toEqual(uncounted);
+			expect(said(answer)).toEqual(refusedUnconfirmed);
 			a.relay.reset("confirming");
 			await refusedAtCount(a, from);
 			await healed(a);
@@ -240,7 +244,7 @@ describe("password login's attempt limit letting no attempt by while the store c
 			repointed(d);
 			a.relay.resume();
 			const answer = await asked;
-			expect(said(answer)).toEqual(uncounted);
+			expect(said(answer)).toEqual(refusedUnconfirmed);
 			// A count carries no mark to resend under: the held one was never sent, and none followed it.
 			expect(a.relay.executions(attemptFrom(source)).filter((e) => e.at > from)).toEqual([]);
 			await replicasOnline(d);
