@@ -66,7 +66,8 @@ From `@mod/clients-cimd`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `clients-cimd.allow` | list of string | `[]` |  |  |  | The host names a client id's document may be fetched from (.name also takes the names under it); when not empty, only these, and outbound's hosts narrow to them. |
+| `clients-cimd.allow` | list of string | `[]` |  |  | `["documents.example.invalid"]` | The host names a client id's document may be fetched from (.name also takes the names under it), outbound's hosts narrowed to them; boot is refused while it is empty, unless allow-any-host is set. |
+| `clients-cimd.allow-any-host` | boolean | `false` |  |  |  | Fetches a client id's document from any host deny leaves, where allow is empty; warned of at every start. |
 | `clients-cimd.deny` | list of string | `[]` |  |  |  | The host names a client id's document is never fetched from (.name also takes the names under it), checked before allow. |
 | `clients-cimd.scopes` | list of string | `[]` |  |  |  | The ceiling of scopes such a client may get: a document asking none gets all of them. |
 | `clients-cimd.audiences` | list of string | `[]` |  |  |  | The audiences such a client's tokens may name, as the operator allows. |
