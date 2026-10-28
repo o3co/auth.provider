@@ -59,10 +59,14 @@ async function documentOf(revocable: boolean, origin?: string, extra: Module[] =
 	return Object.fromEntries(items.map((item) => [item.name, item.value]));
 }
 
-it("publishes where it introspects and revokes, on the public origin", async () => {
+it("publishes where it introspects and revokes, as absolute https URLs on the public origin with no fragment [rfc7009-2-c] [rfc7009-2-d] [rfc7662-2-a]", async () => {
 	const document = await documentOf(true, "https://as.example");
 	expect(document.introspection_endpoint).toBe("https://as.example/oauth/introspect");
 	expect(document.revocation_endpoint).toBe("https://as.example/oauth/revoke");
+	for (const endpoint of [document.introspection_endpoint, document.revocation_endpoint]) {
+		const url = new URL(endpoint as string);
+		expect([url.protocol, url.hash], String(endpoint)).toEqual(["https:", ""]);
+	}
 });
 
 it("publishes revocation only where some token can be revoked, and both on the issuer's origin where no public origin is written", async () => {
@@ -85,7 +89,7 @@ const signed = defineModule({ name: "signed-method", takes: [] }, (m) => [
 	})),
 ]);
 
-it("publishes how a client authenticates at each: no public client at introspection, and the algorithms of signed methods [rfc8414-2-l] [rfc8414-2-n]", async () => {
+it("publishes how a client authenticates at each: no public client at introspection, and the algorithms of signed methods as they take them [rfc8414-2-l] [rfc8414-2-n]", async () => {
 	const plain = await documentOf(true, "https://as.example");
 	expect(plain.introspection_endpoint_auth_methods_supported).toEqual([
 		"client_secret_basic",
@@ -102,6 +106,7 @@ it("publishes how a client authenticates at each: no public client at introspect
 	expect(withSigned.introspection_endpoint_auth_methods_supported).toContain("private_key_jwt");
 	expect(withSigned.introspection_endpoint_auth_signing_alg_values_supported).toEqual(["ES256"]);
 	expect(withSigned.revocation_endpoint_auth_signing_alg_values_supported).toEqual(["ES256"]);
+	// Published as the signed methods take them, unfiltered.
 	// Where revocation is not published, neither is how to authenticate there.
 	const unrevocable = await documentOf(false, "https://as.example", [signed]);
 	expect(unrevocable).not.toHaveProperty("revocation_endpoint_auth_methods_supported");
