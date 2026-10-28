@@ -57,6 +57,11 @@ const given: ExchangeScene = {
 			audiences: ["https://other.example"],
 		}),
 		client("svc", ["client_credentials"]),
+		// Allowed the issuer's audience too, so a refusal of it comes from the subject token alone.
+		client("keeper", ["authorization_code", exchangeGrant], {
+			...coded,
+			audiences: [api, issuer],
+		}),
 		{ id: "spa", kind: "public", method: "none", grants: [exchangeGrant], scopes: ["read"] },
 	],
 	users: [{ identifier: "alice", password: "correct horse battery" }],
@@ -440,6 +445,23 @@ describe("token exchange of tokens no session holds", () => {
 				refusal(await exchange("gateway", token, { resource: "https://other.example" })),
 			).toEqual([400, "invalid_target"]);
 		});
+
+		it.skipIf(areaTarget().differs("token-for-the-issuer"))(
+			"takes none of what the issuer added to an openid subject token's aud: no token for the issuer from it [rfc8693-2.2.2-a] [rfc6749-5.2-a]",
+			async () => {
+				const subject = await tokensFor("keeper");
+				const token = subject.access_token;
+				// Where the issuer is named, it is one the issuer added, never the grant's.
+				const claims = claimsOf(token);
+				if ([claims.aud].flat().includes(issuer))
+					expect(claims).toMatchObject({ aud: [api, issuer], aud_added: 1 });
+				expect(refusal(await exchange("keeper", token, { audience: issuer }))).toEqual([
+					400,
+					"invalid_target",
+				]);
+				expect((await exchange("keeper", token, { audience: api })).status).toBe(200);
+			},
+		);
 
 		it("issues access tokens only [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const { access_token: token } = await own("gateway");
