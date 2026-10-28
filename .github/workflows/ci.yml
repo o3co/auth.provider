@@ -307,11 +307,11 @@ jobs:
   # also fixes the one commit every conformance job and compliance check out, so a
   # daily run's jobs test the same develop commit.
   #
-  # A pull request to develop runs the areas its change reaches, and their fault scenes, but no
-  # pattern: the areas whose packages it changes and those depending on them, the base and what it
-  # depends on among them (pnpm's `...<package>`), so a change to an area's set-up shows on the areas
-  # composing it, and a change to the base on every area; but spec-checklist, which every area
-  # depends on for its evidence reporter alone, reaches none. One that reaches none runs none.
+  # A pull request to develop runs every area and its fault scenes, but no pattern, where it changes
+  # a file the scenes may stand on: any but the docs and spec-checklist's checklist and tests. An
+  # area does not name the modules it composes, which create-app builds as it runs, so the change is
+  # judged by its paths alone. spec-checklist's sources hold every area's evidence reporter, so a
+  # change to them runs every area. A pull request that changes none of those files runs none.
   conformance-plan:
     needs: conformance-due
     if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
@@ -326,7 +326,7 @@ jobs:
         with:
           # The daily run tests develop, where merged work waits for the next release.
           ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
-          # A pull request's change is read against its base.
+          # A pull request's change is read against its base, from where they part.
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -338,24 +338,23 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.base_ref }}
+          # Whether a change's files (a JSON list of paths) may reach a scene.
+          REACHES: >-
+            any(.[]; (startswith("docs/") or (startswith("modules/tooling/spec-checklist/")
+            and (startswith("modules/tooling/spec-checklist/src/") | not))) | not)
         run: |
           set -euo pipefail
           areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
           patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
           faults=$(pnpm --silent --filter @mod/spec-checklist run plan faults)
           if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then
-            # spec-checklist reaches every area only by its evidence reporter: its checklist's words
-            # change no scene, so it reaches none here, and its reporter waits for the full runs.
-            changed=$(pnpm list --recursive --depth -1 --json --filter "[origin/$BASE]" | jq -r '.[].name | select(. != "@mod/spec-checklist")')
-            reached='[]'
-            if [ -n "$changed" ]; then
-              filters=()
-              for name in $changed; do filters+=(--filter "...$name"); done
-              reached=$(pnpm list --recursive --depth -1 --json "${filters[@]}" | jq -c '[.[].name]')
+            changed=$(git diff --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\n") | map(select(. != ""))')
+            reaches=$(jq -c "$REACHES" <<<"$changed")
+            echo "files the change touches: $changed; they reach the scenes: $reaches"
+            if [ "$reaches" != true ]; then
+              areas='[]'
+              faults='[]'
             fi
-            echo "packages the change reaches: $reached"
-            areas=$(jq -cn --argjson planned "$areas" --argjson reached "$reached" '[$planned[] | select(. as $p | $reached | index($p))]')
-            faults=$(jq -cn --argjson planned "$faults" --argjson reached "$reached" '[$planned[] | select(. as $p | $reached | index($p))]')
             patterns='[]'
           fi
           {

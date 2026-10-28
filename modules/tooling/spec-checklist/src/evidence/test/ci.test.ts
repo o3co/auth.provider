@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -58,32 +59,54 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		);
 	});
 
-	it("run on a pull request to develop the areas its change reaches and their fault scenes, no pattern, and pass where nothing was planned", () => {
+	it("run on a pull request to develop every area and its fault scenes where its files may reach a scene, else none, no pattern, and pass where nothing was planned", () => {
 		const plan = job("conformance-plan");
 		expect(plan.if).toContain("github.event_name == 'pull_request'");
 		expect(plan.if).not.toContain("github.base_ref == 'main'");
 		// The change is read against the base, whose history the checkout holds.
 		expect(checkout("conformance-plan")?.with?.["fetch-depth"]).toBe(0);
 		const step = plan.steps.find((s) => s.id === "plan");
-		expect(step?.env).toEqual({ EVENT: expr("github.event_name"), BASE: expr("github.base_ref") });
-		const script = step?.run ?? "";
-		expect(script).toContain('if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then');
-		// The packages the change reaches: those it changed, spec-checklist left out, and those depending
-		// on them; spec-checklist reaches every area by its evidence reporter alone.
-		expect(script).toContain(
-			`changed=$(pnpm list --recursive --depth -1 --json --filter "[origin/$BASE]" | jq -r '.[].name | select(. != "@mod/spec-checklist")')`,
-		);
-		expect(script).toContain(`for name in $changed; do filters+=(--filter "...$name"); done`);
-		expect(script).toContain(
-			`reached=$(pnpm list --recursive --depth -1 --json "\${filters[@]}" | jq -c '[.[].name]')`,
-		);
-		expect(script).not.toContain("...[origin/");
-		for (const list of ["areas", "faults"]) {
-			expect(script).toContain(
-				`${list}=$(jq -cn --argjson planned "$${list}" --argjson reached "$reached" '[$planned[] | select(. as $p | $reached | index($p))]')`,
-			);
+		expect(step?.env).toMatchObject({
+			EVENT: expr("github.event_name"),
+			BASE: expr("github.base_ref"),
+		});
+		const lines = (step?.run ?? "").split("\n").map((l) => l.trim());
+		for (const line of [
+			'if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then',
+			`changed=$(git diff --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\\n") | map(select(. != ""))')`,
+			'reaches=$(jq -c "$REACHES" <<<"$changed")',
+			'if [ "$reaches" != true ]; then',
+			"areas='[]'",
+			"faults='[]'",
+			"patterns='[]'",
+		]) {
+			expect(lines).toContain(line);
 		}
-		expect(script).toContain("patterns='[]'");
+		// The judgement itself, run as the step runs it: by the paths alone, as an area names no module it composes.
+		const reaches = (files: readonly string[]) =>
+			execFileSync("jq", ["-c", String(step?.env?.REACHES)], {
+				input: JSON.stringify(files),
+				encoding: "utf8",
+			}).trim();
+		const cases: readonly (readonly [readonly string[], string])[] = [
+			[[], "false"],
+			[["docs/compliance/guarantee.md", "docs/audit/cards.md"], "false"],
+			[["modules/tooling/spec-checklist/checklist/guarantee.md"], "false"],
+			[["modules/tooling/spec-checklist/test/repo.test.ts", "docs/compliance/rfc6749.md"], "false"],
+			// The evidence reporter every area's run holds.
+			[["modules/tooling/spec-checklist/src/evidence/reporter.ts"], "true"],
+			// A module an area composes, which no area names as a dependency.
+			[["modules/identity/login-password/src/login.ts"], "true"],
+			[["modules/store-redis/redis/src/redis-store.ts"], "true"],
+			[["modules/tooling/conformance-device/src/area.ts"], "true"],
+			[["modules/tooling/conformance/src/fault-scene/fault-scene.ts"], "true"],
+			// Files of no package: the lockfile, the root's settings, the workflows.
+			[["pnpm-lock.yaml"], "true"],
+			[["package.json"], "true"],
+			[[".github/workflows/ci.yml"], "true"],
+			[["docs/compliance/guarantee.md", "modules/oauth/code-grant/src/grant.ts"], "true"],
+		];
+		for (const [files, answer] of cases) expect([files, reaches(files)]).toEqual([files, answer]);
 		// A job with nothing planned is skipped, as a matrix of none cannot run.
 		const planned = (list: string) => `needs.conformance-plan.outputs.${list} != '[]'`;
 		expect(job("legacy-build").if).toContain(planned("areas"));
