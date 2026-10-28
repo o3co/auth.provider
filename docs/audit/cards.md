@@ -331,6 +331,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.
   - `revocation` (`src/revocation`): the scenes of a subject the ledger revokes over HTTP.
   - `session-closing` (`src/session-closing`): the fault scenes of a closing session closed, every path for its tokens with it (`guarantee-1-a`).
+  - `store-rows` (`src/store-rows`): the fault scenes of a store that cannot write, by a code redeemed, and of a Redis set to evict keys (`guarantee-3-j`, `guarantee-3-k`).
   - `userinfo` (`src/userinfo`): the scenes of OpenID Connect's userinfo.
   - `verified-email` (`src/verified-email`): the scenes of refusing a token to a user whose email is not verified.
 - `@mod/conformance-device` (verification, `modules/tooling/conformance-device`): Owns the conformance scenes of the device area: device authorization, the verification interface and polling (RFC 8628), refusing an approval by a user whose email is not verified, and the audit events of the verification interface.
