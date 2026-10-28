@@ -8,6 +8,7 @@
 
 ## Offers
 - Routes `GET` and `POST /oauth/userinfo`, the GET declared not to change state and the POST to take requests from other sites without a per-source limit, taking cross-origin requests from the operator's origins: a page may send `authorization`, `dpop` and `content-type`, and read `www-authenticate`, `dpop-nonce` and `retry-after`.
+- An audience addition to `tokens`: a token issued for `openid` is for the issuer too (RFC 9700 §2.3), so its `aud` names it beside the grant's.
 - The issuer's metadata `userinfo_endpoint`, on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
 
 ## Invariants

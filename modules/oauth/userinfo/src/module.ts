@@ -6,7 +6,7 @@ import { releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
 import { sessionTokens } from "@mod/session-tokens";
-import { tokens } from "@mod/tokens";
+import { audienceAdditions, tokens } from "@mod/tokens";
 import { unavailable, userinfoOver } from "./userinfo.ts";
 
 const path = "/oauth/userinfo";
@@ -72,5 +72,13 @@ export default defineModule({ name: "userinfo", replicaSafe: true, takes: module
 	m.contribute(metadata).by(async (c) => {
 		const origin = endpointOrigin(await c.get(issuer));
 		return { name: "userinfo_endpoint", value: `${origin}${path}` };
+	}),
+	// A token issued for openid is for the issuer too, whose resource userinfo is (RFC 9700 §2.3).
+	m.contribute(audienceAdditions).by(async (c) => {
+		const { url } = await c.get(issuer);
+		return {
+			name: "userinfo",
+			added: (grant) => (grant.scope.includes("openid") ? [url] : []),
+		};
 	}),
 ]);

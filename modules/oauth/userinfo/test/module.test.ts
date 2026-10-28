@@ -10,7 +10,7 @@ import { senderBinding } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
-import { tokens } from "@mod/tokens";
+import { type AudienceAddition, audienceAdditions, tokens } from "@mod/tokens";
 import { afterEach, expect, it } from "vitest";
 import userinfoModule from "../src/module.ts";
 
@@ -25,8 +25,9 @@ let issuerUrl = "https://as.example";
 /** How sessions fail: unable to tell answers 503; anything else is not userinfo's to answer. */
 let failing: "unavailable" | "bug" | undefined;
 const items = contract<readonly MetadataItem[]>("items");
+const additions = contract<readonly AudienceAddition[]>("additions");
 /** The parts userinfo reads: every token is admitted, issued in a session no longer open. */
-const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
+const parts = defineModule({ name: "parts", takes: [metadata, audienceAdditions] }, (m) => [
 	m.provide(senderBinding).by(
 		() =>
 			({
@@ -59,6 +60,7 @@ const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
 		.by(() => ({ of: async () => ({}), scopeOf: () => undefined }) as ReleasedClaims),
 	m.provide(claimsSelections).by(() => ({ forToken: async () => undefined }) as never),
 	m.provide(items).by((c) => c.collect(metadata)),
+	m.provide(additions).by((c) => c.collect(audienceAdditions)),
 	m.provide(issuer).by(() => ({ url: issuerUrl })),
 ]);
 
@@ -162,6 +164,14 @@ it("lets a listed origin's page send its token, its DPoP proof and a body's type
 	expect(got.headers.get("access-control-expose-headers")?.toLowerCase().split(/,\s*/)).toEqual(
 		expect.arrayContaining(["www-authenticate", "dpop-nonce", "retry-after"]),
 	);
+});
+
+it("adds the issuer to the audience of a token issued for openid, and to none other [rfc9700-2.3-c]", async () => {
+	const { app } = await serve();
+	const [addition] = app.get(additions);
+	const grant = { subject: "ann", issuedTo: "app", audience: ["https://api.example"] };
+	expect(addition?.added({ ...grant, scope: ["openid", "profile"] })).toEqual([issuerUrl]);
+	expect(addition?.added({ ...grant, scope: ["read"] })).toEqual([]);
 });
 
 it("names itself in the issuer's metadata [oidc-discovery-3-h]", async () => {
