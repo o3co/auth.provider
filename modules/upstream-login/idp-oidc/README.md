@@ -24,10 +24,11 @@
 - Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with that same narrowing: the description's own URL (at `issuer`), or `token-endpoint` and `jwks-uri` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
 - A description whose token endpoint or key set that policy refuses also refuses boot.
 - A description's refusal, `outbound` refusing to fetch it included, is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason. A description answered other than `200`, or that cannot be read as one (no JSON object, not its shape), refuses boot at the IdP, in `federation`'s words, not under `issuer`.
-- An answer naming another issuer in `iss` is refused before its code is used, and one naming none unless `accept-missing-iss` is set and the description does not offer `iss`: then every start logs a warning naming the IdP.
+- An answer naming another issuer in `iss` is refused before its code is used.
+- An answer without `iss` is refused, unless the IdP's `accept-missing-iss` is set and its description does not offer `iss`.
+- Where `iss` is not required so, every start logs a warning naming the IdP (answers are then taken without `iss`).
 - The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences. A key is read under one algorithm (`external-jwt`): with RS256 and PS256 both taken, one naming no `alg` is unused; an IdP signing with PS256 alone takes `["PS256"]`.
 - An id_token that gives `at_hash` must give the access token's, by its signature's digest; one that does not refuses the exchange.
-- Any reason `external-jwt` gives refuses the login.
 - The id_token must name the client as `azp` where it names other audiences, or wherever it gives `azp`.
 - The id_token must carry the login's nonce, a subject and a numeric issue time.
 - The id_token must say no login time (`auth_time`) before 0 or past `kernel`'s clock by more than `clock-skew`.
