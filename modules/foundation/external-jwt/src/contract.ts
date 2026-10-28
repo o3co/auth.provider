@@ -1,5 +1,5 @@
 import { contract } from "@mod/kernel";
-import { mediaTypeOf, type VerifyAlgorithm } from "@mod/keys";
+import type { VerifyAlgorithm } from "@mod/keys";
 import type { Narrower } from "@mod/outbound";
 
 export type Jwk = Readonly<Record<string, unknown>>;
@@ -89,11 +89,17 @@ export interface ExternalJwt {
 export const externalJwt = contract<ExternalJwt>("external-jwt");
 
 /**
- * A header's `typ` as RFC 7515 compares it, by `keys`' one reading of a media type (no parameters,
- * space, case or `application/`): the one a policy's `typ` is compared by, for a caller to sort
- * tokens by. None where it is no string. Whether the header is verified is the caller's to know.
+ * A header's `typ` as RFC 7515 compares it, as a media type: its type alone, its parameters and the
+ * space around it dropped, without case and without `application/`; the one reading a policy's `typ`
+ * is compared by, for a caller to sort tokens by. None where it is no string. Whether the header is
+ * verified is the caller's to know.
  */
 export const typOf = (header: Readonly<Record<string, unknown>>): string | undefined => {
 	const typ = Object.hasOwn(header, "typ") ? header.typ : undefined;
-	return typeof typ === "string" ? mediaTypeOf(typ) : undefined;
+	return typeof typ === "string"
+		? (typ.split(";", 1)[0] ?? "")
+				.trim()
+				.toLowerCase()
+				.replace(/^application\//, "")
+		: undefined;
 };
