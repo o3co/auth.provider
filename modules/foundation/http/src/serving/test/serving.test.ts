@@ -552,7 +552,7 @@ describe("stop", () => {
 	});
 });
 
-it("answers 500 for an answer whose headers cannot be written, and keeps serving", async () => {
+it("answers 500 for an answer whose headers cannot be written, a value it received never written back raw, and keeps serving [rfc6749-10.14-b]", async () => {
 	const base = await serveWith(
 		handlers([
 			{
