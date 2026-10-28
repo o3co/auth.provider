@@ -89,7 +89,7 @@ const settings = (more: Record<string, unknown> = {}) => ({
 });
 const collected = contract<readonly JtiLedger[]>("test.jti-ledgers");
 const collector = defineModule(
-	{ name: "test-collector", replicaSafe: true, takes: [jtiLedgers] },
+	{ name: "test-collector", replicaSafe: false, takes: [jtiLedgers] },
 	(m) => [m.provide(collected).by((c) => c.collect(jtiLedgers))],
 );
 async function open(section: unknown = settings()) {
