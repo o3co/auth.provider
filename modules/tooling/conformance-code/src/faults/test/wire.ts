@@ -1,8 +1,9 @@
 import { type Command, type Match, storeWrite } from "@mod/conformance/testing";
 import { prefix } from "./faults.ts";
 
-// What the revocation boundary's scenes name of the store's inside, in one place: the spaces and
-// partitions subject-revocation and session-lifecycle write. The scenes name only what this file offers.
+// The names the revocation boundary's scenes add of the store's inside: the spaces and partitions
+// subject-revocation and session-lifecycle write. The code flow's own (the prefix, a code's and a refresh
+// token's writes) are still in faults.ts until they are gathered here.
 
 /** A store operation: the Redis adapter runs each as a script. */
 export const isStoreOperation = (command: Command) => command.name === "EVAL";

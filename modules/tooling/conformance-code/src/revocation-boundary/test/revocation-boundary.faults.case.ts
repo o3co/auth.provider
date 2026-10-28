@@ -35,7 +35,9 @@ import { backChannel, browserAt } from "../../testing.ts";
 
 // Each scene reads what was made before a subject's boundary while the revocation's followers are held
 // at their first write, so the subject's sessions are not closed nor their tokens revoked: what refuses
-// is the boundary alone. A read after the followers' cleanup proves nothing of the boundary and is not
+// is the boundary alone. Followers run one at a time (subject-revocation's followers.ts), and the first
+// write held is session-lifecycle's, so every follower after it is held too; one contributed before it
+// that revokes what these scenes read would make them rest on it, and `unfollowed` would not see it. A read after the followers' cleanup proves nothing of the boundary and is not
 // taken as such. The scenes keep `tokens.subject-check` at its default; its exception (`none`) is not
 // checked here.
 
@@ -425,11 +427,16 @@ describe("a subject's boundary refusing, from any instance, what was made before
 			const asked = [revokeAt(a, users.alice.subject), revokeAt(b, users.alice.subject)];
 			for (const held of await Promise.all(creating)) held.release();
 			const followers = await Promise.all(following);
-			// One created it; the other found it held and wrote it from that.
+			// One created it; the other found it held and wrote it from that. A write held past the
+			// command timeout is resent under its mark and answered again, so creations are counted by mark.
 			const created = [a, b].flatMap((i) =>
 				successes(i, boundaryCreated(users.alice.subject)).filter((e) => e.at > from),
 			);
-			expect(created).toHaveLength(1);
+			const marks = created.filter(
+				(e, n) => created.findIndex((f) => sameMark(f.command, e.command)) === n,
+			);
+			expect(created.length).toBeGreaterThan(0);
+			expect(marks).toHaveLength(1);
 			unfollowed(d, from);
 			await refusedAt(c, m);
 			await passesAt(c, other);
