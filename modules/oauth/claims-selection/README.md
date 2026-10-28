@@ -17,13 +17,14 @@
   - `forRefreshed`: a refreshed token kept its family's target, its names cut to what is allowed and agreed to now.
 - `selectionLimits`, `withinLimits` (whether a selection keeps within them) and the types `Selection`, `Target`, `Named`, `Constraint` and `Scalar`.
 - Extension points, two of either refusing boot: the judge of consent, `consented(client, subject, scope)`; the table of claim scopes, `scopeOf(claim)`, from the module releasing claims.
-- Contributions: to `code-grant`'s redemption hooks, the pin, and a redeemed code's token kept the pinned userinfo target; to `grants`' token ties, a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
-- Store interface, wired by the assembly: records by name, each kept once for its lifetime. Operator section: `mode`, `off`, `draining` or `on` (default `on`); offered as `claimsSelections.mode`; `off` and `draining` warn at start (`claims-selection.not_taking`, with the mode).
+- Contribution to `code-grant`'s redemption hooks: the pin, and a redeemed code's token kept the pinned userinfo target.
+- Contribution to `grants`' token ties: a token with constraints ties a token exchanged from it, which keeps those constraints and none of its names.
+- Store interface, wired by the assembly: records by name, each kept once for its lifetime.
 
 ## Invariants
 - A selection holds only scalar values: strings up to 256 characters, booleans and finite numbers; exactly one of `value` and a non-empty `values` of up to 16; 4 KiB whole. Another is a `TypeError`.
 - Without a judge of consent, no name is agreed to.
-- `off` touches no store: nothing is pinned, kept or read, and none is held back. `draining` keeps no new selection but pins, reads and holds back what was kept. A selection is kept for a code only while `on`; otherwise it is a `TypeError`.
+- An empty pin means the code had no selection kept, never that claims requests are not taken; every redemption is pinned.
 - A pin copies the code's selection, or marks it none, and holds it five minutes; the redemption's other reads use only the pin. A pin gone fails the read, never answering none.
 - A code still alive at its pin finds its selection, which outlives the code by a minute; a code past its life is refused by `code-grant` before anything reads its pin.
 - A family's target is written once and never cut: each refresh cuts the names from it again, so a name allowed and agreed to again comes back, as a scope does.
