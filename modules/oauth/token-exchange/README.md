@@ -30,8 +30,8 @@
 - A revoked or expired token, or one a tie answers ended (its family, or its session closed or short of a requirement, each told apart in the description), is refused, as subject or actor: the subject's ties first, each token's in their names' order.
 - The issued token joins the subject token's ties in their names' order (family, then session), issued from the session one names, so `token-endpoint` records it there; at the first that ended meanwhile, it is revoked and the exchange refused. Ties naming two sessions are Unavailable. The actor token's ties only refuse.
 - It never outlives the subject token or the earliest end its ties give. Revoking the subject token alone does not end it.
-- Its lifetime is the `expires_in` asked, or `tokens`' lifetime when none is asked, cut to `max-lifetime`; without that cap, `tokens`' lifetime cuts an asked one too. `expires_in` in the answer is that lifetime.
-- `expires_in` left out or empty asks for nothing. Otherwise it is 1–10 ASCII digits, from 2, the shortest lifetime `tokens` issues, or `invalid_request` before any token is checked.
+- Its lifetime is the `o3co_expires_in` asked, or `tokens`' lifetime when none is asked, cut to `max-lifetime`; without that cap, `tokens`' lifetime cuts an asked one too. `expires_in` in the answer is that lifetime.
+- `o3co_expires_in` (prefixed, RFC 6749 §8.2: `expires_in` is registered for answers only) left out or empty asks for nothing. Otherwise it is 1–10 ASCII digits, from 2, the shortest lifetime `tokens` issues, or `invalid_request` before any token is checked. A request's `expires_in` is an unknown parameter, read as nothing.
 - The subject's amr, authentication time and acr are carried only from this provider's own tokens.
 - The claims a grant added to a token it takes (`claims`) are never carried into the token it issues.
 - It issues through `tokens`' issuance policies, from the subject token's session when it was recorded to one; their refusal is `token-endpoint`'s answer.

@@ -928,53 +928,67 @@ describe("token-exchange: the lifetime asked", () => {
 	const lifetimeOf = (outcome: GrantOutcome) =>
 		outcome.kind === "issued" ? outcome.body.expires_in : said(outcome);
 
-	it("issues for a shorter expires_in, and for the usual lifetime when it is left out or empty [rfc8693-2.2.1-d]", async () => {
+	it("issues for a shorter o3co_expires_in, and for the usual lifetime when it is left out or empty [rfc8693-2.2.1-d]", async () => {
 		const s = await serve();
 		const subject = subjectOf((await s.issue()).token);
-		const shorter = await s.exchange("app", { ...subject, expires_in: "60" });
+		const shorter = await s.exchange("app", { ...subject, o3co_expires_in: "60" });
 		expect(lifetimeOf(shorter)).toBe(60);
 		expect((await s.issued(shorter)).expiresAt).toBe(Math.floor(now / 1000) * 1000 + 60_000);
 		expect(lifetimeOf(await s.exchange("app", subject))).toBe(3600);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "" }))).toBe(3600);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "" }))).toBe(3600);
 	});
 
-	it("cuts a longer expires_in to the operator's cap, and to the subject token's expiry", async () => {
+	it("cuts a longer o3co_expires_in to the operator's cap, and to the subject token's expiry", async () => {
 		const s = await serve({ settings: { "max-lifetime": "10m" } });
 		const subject = subjectOf((await s.issue()).token);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "7200" }))).toBe(600);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "9999999999" }))).toBe(600);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "7200" }))).toBe(600);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "9999999999" }))).toBe(
+			600,
+		);
 		expect(lifetimeOf(await s.exchange("app", subject))).toBe(600);
 		const uncapped = await serve();
 		const own = subjectOf((await uncapped.issue()).token);
-		expect(lifetimeOf(await uncapped.exchange("app", { ...own, expires_in: "7200" }))).toBe(3600);
+		expect(lifetimeOf(await uncapped.exchange("app", { ...own, o3co_expires_in: "7200" }))).toBe(
+			3600,
+		);
 		const short = await serve({ verifier: outside(() => outsideAnswer) });
-		const outsider = { ...subjectOf("outside", outsideType), expires_in: "600" };
+		const outsider = { ...subjectOf("outside", outsideType), o3co_expires_in: "600" };
 		expect(lifetimeOf(await short.exchange("app", outsider))).toBe(60);
+	});
+
+	it("reads a request's expires_in, registered for answers alone, as an unknown parameter that asks nothing", async () => {
+		const s = await serve();
+		const subject = subjectOf((await s.issue()).token);
+		for (const value of ["60", "abc"]) {
+			expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: value }))).toBe(3600);
+		}
 	});
 
 	it("lets a cap above tokens' lifetime extend the lifetime asked, never one left out", async () => {
 		const lasting = outside(() => ({ ...outsideAnswer, expiresAt: now + 86_400_000 }));
 		const s = await serve({ verifier: lasting, settings: { "max-lifetime": "2h" } });
 		const subject = subjectOf("outside", outsideType);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "5400" }))).toBe(5400);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "9000" }))).toBe(7200);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "5400" }))).toBe(5400);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "9000" }))).toBe(7200);
 		expect(lifetimeOf(await s.exchange("app", subject))).toBe(3600);
 	});
 
-	it("refuses an expires_in that is not a whole number of seconds from two, before the tokens", async () => {
+	it("refuses an o3co_expires_in that is not a whole number of seconds from two, before the tokens, its syntax defined [rfc6749-8.2-a]", async () => {
 		const s = await serve();
 		const subject = subjectOf((await s.issue()).token);
 		const malformed = [
 			"invalid_request",
-			"expires_in must be a whole number of seconds from 2, in ASCII digits",
+			"o3co_expires_in must be a whole number of seconds from 2, in ASCII digits",
 		];
 		// One second, its iat cut to the second, would leave a token less than a second.
 		for (const value of ["abc", "0", "1", "-60", "1.5", "1e3", " 60", "+60", "12345678901"]) {
-			expect(said(await s.exchange("app", { ...subject, expires_in: value }))).toEqual(malformed);
+			expect(said(await s.exchange("app", { ...subject, o3co_expires_in: value }))).toEqual(
+				malformed,
+			);
 		}
 		const forged = subjectOf("forged");
-		expect(said(await s.exchange("app", { ...forged, expires_in: "0" }))).toEqual(malformed);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "2" }))).toBe(2);
+		expect(said(await s.exchange("app", { ...forged, o3co_expires_in: "0" }))).toEqual(malformed);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "2" }))).toBe(2);
 	});
 
 	it("refuses a cap that is not a whole number of seconds from two to a day, names no unit, or goes by its name in seconds, at boot", async () => {
