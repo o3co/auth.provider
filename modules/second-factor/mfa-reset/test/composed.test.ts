@@ -98,7 +98,7 @@ describe("a reset composed with mfa-flows and its stores", () => {
 				throw new Unavailable("witness");
 			},
 		};
-		const witness = defineModule({ name: "failing-witness", takes: [] }, (m) => [
+		const witness = defineModule({ name: "failing-witness", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(witnessing).by(() => failing),
 		]);
 		const s = await serve({}, [witness]);
