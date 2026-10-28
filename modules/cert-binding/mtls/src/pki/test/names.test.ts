@@ -124,6 +124,16 @@ it("refuses a path whose constraints name a kind it does not judge, or bound a s
 	expect(await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: 1 })] }, {})).toBe(
 		"name constraints unsupported",
 	);
+	// A minimum past 4 bytes, which asn1js reads as 0 by its valueDec: refused by its value, 2^32 here.
+	const wide = new asn1js.Integer({ valueHex: new Uint8Array([1, 0, 0, 0, 0]).buffer });
+	expect(
+		await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: wide })] }, {}),
+	).toBe("name constraints unsupported");
+	// A zero written in more bytes than it needs is still zero: taken.
+	const zero = new asn1js.Integer({ valueHex: new Uint8Array([0, 0, 0, 0, 0]).buffer });
+	expect(
+		await reasonOf({}, { permitted: [subtree(dns("example.com"), { minimum: zero })] }, {}),
+	).not.toBe("name constraints unsupported");
 	expect(await reasonOf({}, { permitted: [subtree(dns("example.com"), { maximum: 2 })] }, {})).toBe(
 		"name constraints unsupported",
 	);
