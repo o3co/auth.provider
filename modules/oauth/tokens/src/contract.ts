@@ -51,8 +51,6 @@ export type AccessCheck =
 			readonly expiresAt: number;
 			readonly tokenType: string;
 			readonly binding?: Binding;
-			/** What the issuer added to `aud` past the grant's audience; none where it added none, never the grant's. */
-			readonly addedAudience?: readonly string[];
 	  }
 	| {
 			readonly kind: "invalid";
@@ -94,18 +92,6 @@ export interface IssuancePolicy {
 export const issuancePolicies = extensionPoint<IssuancePolicy>("tokens.issuance-policies", {
 	multiplicity: "keyed",
 	keyOf: (policy) => policy.name,
-});
-
-/** A rule a module contributes on whom an access token is for besides its grant's audience. */
-export interface AudienceAddition {
-	readonly name: string;
-	/** The audiences to add for the grant as it is signed; any of the grant's own is left out. */
-	added(grant: AccessGrant): readonly string[];
-}
-
-export const audienceAdditions = extensionPoint<AudienceAddition>("tokens.audience-additions", {
-	multiplicity: "keyed",
-	keyOf: (addition) => addition.name,
 });
 
 export interface IssuanceRefused {
