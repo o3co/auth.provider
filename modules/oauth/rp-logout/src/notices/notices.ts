@@ -114,16 +114,20 @@ export function noticesOver(p: NoticeParts) {
 	 * not know among them. The time is read from the notice alone, never the clock, so every host that
 	 * fails the same notice at once keeps the same one, which the store holds once. Kept before the old
 	 * one goes, so a failure between leaves the notice twice, never none: the client tells the repeat
-	 * by its id.
+	 * by its id. Answers the notice kept.
 	 */
-	const later = async (notice: string, fields: Fields) => {
+	const later = async (notice: string, fields: Fields): Promise<string> => {
 		const due = fields.after ?? fields.until - p.notifyMs;
 		const next = JSON.stringify({ ...JSON.parse(notice), after: due + p.retryMs });
 		await p.pending.add(next);
 		await p.pending.done(notice);
+		return next;
 	};
-	/** Tries a notice whose wait is over; one to try again is kept to wait, and throws. */
-	const send = async (notice: string): Promise<void> => {
+	/**
+	 * Tries a notice whose wait is over; one to try again is kept to wait, and throws. The notice kept
+	 * goes into `kept`, so a sweep that comes upon it again, its time still past, passes over it.
+	 */
+	const send = async (notice: string, kept?: Set<string>): Promise<void> => {
 		const fields = fieldsOf(notice);
 		const done = () => p.pending.done(notice);
 		if (!fields) {
@@ -139,7 +143,8 @@ export function noticesOver(p: NoticeParts) {
 			await attempt(fields, done);
 		} catch (error) {
 			// Where the store cannot keep the wait either, the notice stays as it was, tried at the next sweep.
-			await later(notice, fields).catch(() => undefined);
+			const next = await later(notice, fields).catch(() => undefined);
+			if (next !== undefined) kept?.add(next);
 			throw error;
 		}
 	};
@@ -159,7 +164,13 @@ export function noticesOver(p: NoticeParts) {
 		deliver: async (notices: readonly string[]): Promise<void> => {
 			for (const notice of notices) await send(notice).catch(() => undefined);
 		},
-		sweep: () => p.pending.each(send),
+		/** Tries every kept notice whose wait is over once, and one kept again in this sweep not again. */
+		sweep: () => {
+			const kept = new Set<string>();
+			return p.pending.each((notice) =>
+				kept.has(notice) ? Promise.resolve() : send(notice, kept),
+			);
+		},
 	};
 }
 

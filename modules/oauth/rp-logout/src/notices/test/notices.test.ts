@@ -15,7 +15,9 @@ const noAnswer = async (): Promise<number> => {
 
 /**
  * The notices over a clock the test moves, a store kept in memory holding one notice made now, and a
- * client answering in turn, then with 200. The store holds a notice once, as every store does.
+ * client answering in turn, then with 200. The store holds a notice once, as every store does, and
+ * goes through what it holds as it is then, so a sweep comes upon a notice kept again while it runs,
+ * as one that reads another shard later does.
  */
 function noticesFor(answers: (() => Promise<number>)[] = []) {
 	let now = 1_800_000_000_000;
@@ -38,7 +40,7 @@ function noticesFor(answers: (() => Promise<number>)[] = []) {
 		},
 		each: async (handle) => {
 			let failed = 0;
-			for (const listed of [...kept]) await handle(listed).catch(() => failed++);
+			for (const listed of kept) await handle(listed).catch(() => failed++);
 			return { failed };
 		},
 	};
@@ -129,11 +131,12 @@ it("keeps one notice where two hosts fail it at once, their clocks apart [oidc-b
 	expect(t.kept()).toEqual([{ ...JSON.parse(t.notice), after: t.made + retryMs }]);
 });
 
-it("tries at once a notice kept before notices waited, and one a late sweep finds past its time, at each sweep until it is due later", async () => {
+it("tries at once a notice kept before notices waited, and one a late sweep finds past its time, once a sweep until it is due later", async () => {
 	const t = noticesFor([unavailable, unavailable]);
 	// A notice without a time to wait for, kept by an earlier host, is found by a sweep ten intervals late.
 	t.advance(10 * retryMs);
 	await t.notices.sweep();
+	// The notice kept again is still past its time, and the sweep comes upon it: passed over until the next.
 	expect(t.sent).toHaveLength(1);
 	// Due a sweep's interval after it was made: already past, so the next sweep tries it.
 	expect(t.kept().map((k) => k.after)).toEqual([t.made + retryMs]);
