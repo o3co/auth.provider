@@ -123,7 +123,7 @@ describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", ()
 		expect(elsewhere.status).toBe(401);
 	});
 
-	it("grants nothing until every check of the proof has passed: its method, its URI, its time and its one use [rfc9449-7.1-b]", async () => {
+	it("grants nothing until every check of the proof has passed: its method, its URI, its time, its signature and its one use [rfc9449-7.1-b]", async () => {
 		const token = await boundToken();
 		const at = (dpop: string) => userinfo({ authorization: `DPoP ${token}`, dpop });
 		const old = Math.floor(Date.now() / 1000) - 3600;
@@ -134,6 +134,18 @@ describe("OpenID Connect userinfo: a token bound to its holder's key (DPoP)", ()
 		] as const) {
 			expect((await at(dpop)).status, name).toBe(401);
 		}
+		// alg none, written by hand as no JOSE library signs one: the header and claims a proof needs, and no signature.
+		const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+		const unsigned = `${part({ alg: "none", typ: "dpop+jwt", jwk: await exportJWK(holder.publicKey) })}.${part(
+			{
+				htm: "GET",
+				htu: `${issuer}/oauth/userinfo`,
+				iat: Math.floor(Date.now() / 1000),
+				jti: randomUUID(),
+				ath: createHash("sha256").update(token).digest("base64url"),
+			},
+		)}.`;
+		expect((await at(unsigned)).status, "alg none").toBe(401);
 		const once = await proof("/oauth/userinfo", "GET", token);
 		expect((await at(once)).status).toBe(200);
 		expect((await at(once)).status).toBe(401);
