@@ -125,7 +125,7 @@ async function serve(
 		selectionStore?: Module;
 	} = {},
 ) {
-	const proving = defineModule({ name: "proving", replicaSafe: true, takes: [] }, (m) => [
+	const proving = defineModule({ name: "proving", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.contribute(amrSources)
 			.by(() => ({ name: "proving", amr: options.proves ?? ["pwd", "otp", "mfa"] })),
