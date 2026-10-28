@@ -16,7 +16,6 @@ What an audit of a release reads, from its tag. Each entry names a file by its p
 - [The cards](cards.md) (generated): every package and internal module, by its directory, with the line its card opens with. A card is the `README.md` of the directory named: its responsibilities, what is not its, what it offers, its invariants, its data and what it depends on.
 - [The dependencies](dependencies.md) (generated): what each package depends on to run, and which directories depend on which.
 - The guard holds the code to the cards' shape and the kinds' direction: `modules/tooling/guard/README.md` names each rule.
-- `docs/gates.md`: what the guard stops and what it passes, each misdesign tried with the gate that stops it (review, a check at boot, a conformance scene) and the test that shows it.
 
 ## Dependencies from outside
 

@@ -2,7 +2,7 @@
 
 This page is for anyone changing the code. It explains module boundaries and records the project owner's design decisions.
 
-Each module's README is its card: it describes the module's contract. The owner map, the README of the folder that holds the modules, says where new code belongs. The `guard` and `guard-imports` cards describe the automated checks. [Gates](gates.md) says which misdesigns they stop, and which are left to review, boot checks or conformance. Decisions below cite the relevant rules; those rules define what `guard` enforces.
+Each module's README is its card: it describes the module's contract. The owner map, the README of the folder that holds the modules, says where new code belongs. The `guard` and `guard-imports` cards describe the automated checks. Decisions below cite the relevant rules; those rules define what `guard` enforces.
 
 ## Contents
 
