@@ -2,7 +2,7 @@ import { createPrivateKey, generateKeyPairSync, randomBytes } from "node:crypto"
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { CompactSign, decodeProtectedHeader } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 import { accessTokenSigning, keys } from "../src/contract.ts";
@@ -23,11 +23,11 @@ const ed25519Pem = () => {
 	};
 };
 
-async function open(section: unknown) {
+async function open(section: unknown, at = runtime) {
 	const app = await assemble({
 		modules: [http, keysModule],
 		config: { ...kernelConfig(), ...httpConfig(), keys: section },
-		runtime,
+		runtime: at,
 	});
 	return { access: app.get(accessTokenSigning), k: app.get(keys) };
 }
@@ -56,6 +56,33 @@ describe("accessTokenSigning", () => {
 		const verified = await access.verify(token);
 		expect(verified).toEqual({ kind: "valid", claims: { sub: "a", scope: "read" } });
 		expect(verified.kind === "valid" && Object.isFrozen(verified.claims)).toBe(true);
+	});
+
+	it("refuses to sign claims holding a null, at any depth, by keys.sign and as an access token alike, naming the claims and not their values [oidc-core-13.3-a]", async () => {
+		const recorded = recordingLog();
+		const { access, k } = await open(
+			rotated,
+			quietRuntime({ clock: { now: () => now }, log: recorded.log }),
+		);
+		const claims = { sub: "a", secret: "kept-value", nonce: null, address: { region: null } };
+		const refusal = /^keys: claims are null: nonce address\.region$/;
+		await expect(access.sign(claims)).rejects.toThrow(refusal);
+		await expect(k.sign(claims, "JWT")).rejects.toThrow(refusal);
+		await expect(k.sign({ sub: "a", list: [{ item: null }] }, "JWT")).rejects.toThrow(
+			/claims are null: list\[0\]\.item$/,
+		);
+		await expect(access.sign(claims)).rejects.not.toThrow(/kept-value/);
+		// keys logs the claims it refused by their paths, as the caller's failure is logged by its kind alone.
+		expect(recorded.lines().find((line) => line.event === "keys.null_claims")).toEqual({
+			level: "error",
+			event: "keys.null_claims",
+			fields: { claims: "nonce address.region" },
+		});
+		expect(JSON.stringify(recorded.lines())).not.toContain("kept-value");
+		await expect(access.sign({ sub: "a", exp: Number.NaN })).rejects.toThrow(
+			/claims are null: exp$/,
+		);
+		expect(await access.sign({ sub: "a", scope: "read" })).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
 	});
 
 	it("refuses a token of any other typ, and a malformed one, as keys.verify does", async () => {
