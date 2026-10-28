@@ -1,15 +1,16 @@
 import { randomBytes } from "node:crypto";
 import {
 	confirmation,
+	type Deployed,
 	type Instance,
 	instanceOf,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	runIdOf,
 	successes,
-	writable,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { faultScene, loginAt, nextSource, on, said } from "../../faults/test/faults.ts";
@@ -108,8 +109,9 @@ async function control(i: Instance) {
 	expect(heldToWrites(i, users.carol.subject, from, r)).toBe("complete");
 }
 
-/** Healed: the instance is ready, and the revocation sent again, alice holding a new session for its followers, is done. */
-async function healed(i: Instance) {
+/** Healed: the topology has recovered and the instance is ready, and the revocation sent again, alice holding a new session for its followers, is done. */
+async function healed(d: Deployed, i: Instance) {
+	await recovered(d);
 	await ready(i);
 	// A revocation answered done during the fault closed her sessions; one with none to close writes no follower's.
 	await sessionOf(i, users.alice);
@@ -141,7 +143,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			expect(said3(r)).toEqual(uncounted);
 			await ready(a);
 			expect(successes(a, boundaryOf(users.alice.subject)).filter((e) => e.at > from)).toEqual([]);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -160,7 +162,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			// Nothing reached Redis while cut: no follower began, even once resumed.
 			await ready(a);
 			expect(successes(a, closingAdded).filter((e) => e.at > from)).toEqual([]);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -180,7 +182,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			a.relay.resume();
 			expect(said3(r)).toEqual(incomplete);
 			expect(heldToWrites(a, users.alice.subject, from, r)).toBe("incomplete");
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -201,7 +203,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			).toBe(true);
 			await ready(a);
 			expect(successes(a, closingAdded).filter((e) => e.at > from)).toEqual([]);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -222,7 +224,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			// getting through on a connection just opened: the answer is held to the writes that
 			// succeeded, done only where the boundary and a follower both did.
 			await annotate(`answered ${heldToWrites(a, users.alice.subject, cut, r)}`);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -244,7 +246,7 @@ describe("the ledger's revocation route answering done only once every step's de
 				.executions(boundaryOf(users.alice.subject))
 				.find((e) => e.at > released);
 			expect(first?.at).toBeGreaterThan(released + 1_000);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -268,9 +270,7 @@ describe("the ledger's revocation route answering done only once every step's de
 					.executions(boundaryOf(users.alice.subject))
 					.filter((e) => e.at > released && e.at < r.at),
 			).toEqual([]);
-			// A primary that slept refuses writes until its replicas catch up again.
-			await writable(d);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -297,7 +297,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			if (!r) throw new Error("the revocation was not answered during the promotion");
 			expect(said3(r)).toEqual(unknown);
 			expect(heldToWrites(a, users.alice.subject, from, r)).toBe("unknown");
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -332,7 +332,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			expect(said3(r)).toEqual(unknown);
 			expect(heldToWrites(a, users.alice.subject, from, r)).toBe("unknown");
 			a.relay.reset("confirming");
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -366,7 +366,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			}
 			await annotate(`answered ${way}`);
 			await replicasOnline(d);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 });
