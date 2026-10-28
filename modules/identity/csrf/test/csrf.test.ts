@@ -224,7 +224,7 @@ describe.each([
 	["the module", csrfModule],
 	["the stand-in", csrfStandIn],
 ])("the contract, as %s keeps it", (_, module) => {
-	it("offers the policy to routes: a GET passes, any other method only on evidence or the token [guarantee-9-a]", async () => {
+	it("offers the policy to routes: a GET passes, any other method only on evidence or the token [guarantee-9-a] [oidc-core-3.1.2.3-e]", async () => {
 		const app = await boot("https://as.example", [module, guarded]);
 		await app.start();
 		try {

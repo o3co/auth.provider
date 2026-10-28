@@ -7,26 +7,99 @@ import { area, type NewPart, onNew, sceneOf } from "../../areas.ts";
 import { hostLibfaketime } from "../../clock/clock.ts";
 import { startTopology, type Topology } from "../../faults/topology.ts";
 import type { Match } from "../../relay/relay.ts";
-import { startDeployment } from "../deployment.ts";
+import { type Instance, startDeployment } from "../deployment.ts";
 
 // A scene of no feature: the base's own modules on the Redis store.
 const probe = area<NewPart>("deployment-probe");
 onNew(probe, (part) => part);
 const scene = sceneOf(probe.part({ store: "pausable" }));
 const script: Match = { request: (c) => c.name === "EVAL", succeeded: () => true };
+// A scene whose app records an event on a request: a password login of no user fails.
+const audited = area<NewPart>("deployment-audit-probe");
+onNew(audited, (part) => part);
+const origin = "https://issuer.example";
+const loginScene = sceneOf(
+	audited.part({
+		modules: ["@mod/users", "@mod/login-password"],
+		store: "pausable",
+		config: {
+			http: { "trusted-proxies": ["127.0.0.1"], "public-origin": origin },
+			users: { registered: [] },
+		},
+	}),
+);
+const failedLogin = async (base: string) =>
+	(
+		await fetch(`${base}/session/login`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				origin,
+				"x-forwarded-proto": "https",
+				"x-forwarded-for": "198.51.100.50",
+				"x-forwarded-host": new URL(origin).host,
+			},
+			body: new URLSearchParams({ username: "nobody", password: "wrong" }),
+		})
+	).status;
+/** Runs on one instance of the login scene, on a topology of its own with a replica every write waits for, as the login's stores ask. */
+async function onLogin(name: string, scene: (a: Instance) => Promise<void>) {
+	const replicated = await startTopology({
+		replicas: 1,
+		settings: ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "2"],
+	});
+	try {
+		const d = await startDeployment({
+			name,
+			scene: loginScene,
+			topology: replicated,
+			instances: 1,
+		});
+		try {
+			const [a] = d.instances;
+			if (!a) throw new Error("one instance");
+			await scene(a);
+		} finally {
+			await d.stop();
+		}
+	} finally {
+		await replicated.stop();
+	}
+}
+/** Answers once the app at `base` is ready: its store's first answers come after its start. */
+const readyAt = async (base: string) => {
+	for (let tries = 0; tries < 150; tries++) {
+		if ((await fetch(`${base}/readyz`)).status === 200) return;
+		await new Promise((resolve) => setTimeout(resolve, 200));
+	}
+	throw new Error("not ready");
+};
 
 /** Whether this is a fault run, which never skips what it can not do. */
 const faultRun = process.env.CONFORMANCE_FAULTS === "1";
-/** The live processes `pid` started, by pid; none once every instance it started has ended. */
+/**
+ * The live processes `pid` started, by pid; none once every instance it started has ended. One ended
+ * but not yet reaped (a zombie, `Z`) is not live: a stop answers once the group has ended, and Node
+ * reaps the leader only when its loop next turns.
+ */
 const childrenOf = (pid: number) => {
-	try {
-		return execFileSync("pgrep", ["-P", String(pid)])
-			.toString()
-			.split(/\s+/)
-			.filter(Boolean);
-	} catch {
-		return [];
-	}
+	const read = (command: string, args: string[]) => {
+		try {
+			return execFileSync(command, args).toString();
+		} catch {
+			return "";
+		}
+	};
+	// pgrep leaves itself out; ps is then asked of those alone, so neither counts.
+	const children = read("pgrep", ["-P", String(pid)])
+		.split(/\s+/)
+		.filter(Boolean);
+	if (children.length === 0) return [];
+	return read("ps", ["-o", "pid=,stat=", "-p", children.join(",")])
+		.split("\n")
+		.map((line) => line.trim().split(/\s+/))
+		.filter(([child, stat]) => child && !stat?.startsWith("Z"))
+		.map(([child]) => child);
 };
 
 let topology: Topology;
@@ -107,6 +180,10 @@ describe("a deployment of a scene", () => {
 			redis: { replication: "none", "command-timeout": "2s" },
 		});
 		expect(record.redis.url).toBeUndefined();
+		expect(record.commit).toBe(
+			process.env.SPEC_EVIDENCE_COMMIT ??
+				execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+		);
 	});
 
 	// A fault run moves the clock or fails: a host without the library never skips it.
@@ -164,6 +241,43 @@ describe("a deployment of a scene", () => {
 		).rejects.toThrow();
 		expect(childrenOf(process.pid)).toEqual([]);
 	});
+
+	it("keeps an instance's audit events on one trail across a restart, read once it is killed", async () => {
+		await onLogin("audit", async (a) => {
+			const trail = a.audit;
+			await readyAt(a.baseUrl);
+			const failed = async () =>
+				(await trail.during(() => failedLogin(a.baseUrl))).events.map((e) => e.kind);
+			expect(await failed()).toEqual(["login.failed"]);
+			await a.restart();
+			expect(a.audit).toBe(trail);
+			await readyAt(a.baseUrl);
+			expect(await failed()).toEqual(["login.failed"]);
+			await a.kill();
+			// Still read: a killed instance sends nothing more, and its trail answers.
+			const { result, events } = await a.audit.during(() => failedLogin(a.baseUrl));
+			expect(result).toBe(502);
+			expect(events).toEqual([]);
+		});
+	});
+
+	// A fault run moves the clock or fails: a host without the library never skips it.
+	it.runIf(faultRun || hostLibfaketime())(
+		"keeps an instance's audit events on one trail across a moved clock",
+		async () => {
+			await onLogin("audit-clock", async (a) => {
+				const trail = a.audit;
+				const failed = async () =>
+					(await trail.during(() => failedLogin(a.baseUrl))).events.map((e) => e.kind);
+				await readyAt(a.baseUrl);
+				expect(await failed()).toEqual(["login.failed"]);
+				await a.clock("+2h");
+				expect(a.audit).toBe(trail);
+				await readyAt(a.baseUrl);
+				expect(await failed()).toEqual(["login.failed"]);
+			});
+		},
+	);
 
 	it("fails its stop where a relay was asked for a fault that never happened", async () => {
 		const d = await startDeployment({ name: "unfired", scene, topology, instances: 1 });

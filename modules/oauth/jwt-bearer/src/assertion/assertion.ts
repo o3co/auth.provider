@@ -1,4 +1,4 @@
-import type { Reason } from "@mod/external-jwt";
+import { type Reason, typOf } from "@mod/external-jwt";
 import { Unavailable } from "@mod/kernel";
 import { isWellFormedSubject } from "@mod/users";
 import { decodeJwt, decodeProtectedHeader } from "jose";
@@ -82,8 +82,11 @@ export async function check(
 	let signer: { readonly sub: unknown; readonly kid: unknown };
 	try {
 		const claims = decodeJwt(assertion);
+		const header = decodeProtectedHeader(assertion);
+		// An access token (RFC 9068) is no assertion, whoever signed it and whatever its aud names.
+		if (typOf(header) === "at+jwt") return untrusted;
 		issuer = claims.iss;
-		signer = { sub: claims.sub, kid: decodeProtectedHeader(assertion).kid };
+		signer = { sub: claims.sub, kid: header.kid };
 	} catch {
 		// Not read as a JWT: refused as any other before the signature.
 		return untrusted;

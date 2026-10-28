@@ -313,6 +313,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
   - `deployment` (`src/deployment`): a fault scene's app as a deployment runs it, on a Redis topology.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
+  - `fault-scene` (`src/fault-scene`): what an area's fault scene does with its deployment, apart from the faults it causes, in no area's words.
   - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
   - `patterns` (`src/patterns`): running every pattern's areas on its app.
   - `promotion` (`src/promotion`): promoting a replica of a Redis topology's primary without losing what the primary took.
@@ -320,12 +321,20 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
 - `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
   - `acr` (`src/acr`): the scenes of the acr a client asks for.
+  - `authorize-unavailable` (`src/authorize-unavailable`): the fault scenes of the authorization endpoint issuing no code while the store cannot answer (`guarantee-3-a`).
+  - `boundaries` (`src/boundaries`): the fault scenes of bounds the security model leaves to the operator, recorded as they are; no promise is checked, so none names a guarantee or a fault of one.
   - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
+  - `code-once` (`src/code-once`): the fault scenes of an authorization code redeemed once (`guarantee-5-a`).
+  - `discovery` (`src/discovery`): the scene of the whole metadata document of an OpenID Provider.
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
+  - `faults` (`src/faults`): what the area's fault scenes share in the code flow's words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
+  - `refresh-once` (`src/refresh-once`): the fault scenes of a refresh token rotated once (`guarantee-5-b`).
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.
   - `revocation` (`src/revocation`): the scenes of a subject the ledger revokes over HTTP.
+  - `session-closing` (`src/session-closing`): the fault scenes of a closing session closed, every path for its tokens with it (`guarantee-1-a`).
+  - `store-rows` (`src/store-rows`): the fault scenes of a store that cannot write, by a code redeemed, and of a Redis set to evict keys (`guarantee-3-j`, `guarantee-3-k`).
   - `userinfo` (`src/userinfo`): the scenes of OpenID Connect's userinfo.
   - `verified-email` (`src/verified-email`): the scenes of refusing a token to a user whose email is not verified.
 - `@mod/conformance-device` (verification, `modules/tooling/conformance-device`): Owns the conformance scenes of the device area: device authorization, the verification interface and polling (RFC 8628), refusing an approval by a user whose email is not verified, and the audit events of the verification interface.
@@ -337,11 +346,20 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `link` (`src/link`): the scenes of linking an upstream identity to the account logged in.
 - `@mod/conformance-front` (verification, `modules/tooling/conformance-front`): Puts an https front before a running app, as a deployment's proxy is, for a harness whose outside party (a conformance suite, a client library) reaches the app over https.
 - `@mod/conformance-identity` (verification, `modules/tooling/conformance-identity`): Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.
+  - `attempts-unavailable` (`src/attempts-unavailable`): the fault scenes of password login's attempt limit letting no attempt by while the store cannot count (`guarantee-3-i`).
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `login-unavailable` (`src/login-unavailable`): the fault scenes of password login opening no session while the store cannot answer (`guarantee-3-f`).
 - `@mod/conformance-keys` (verification, `modules/tooling/conformance-keys`): Owns the conformance scenes of the keys area: publishing the public key set, with no private part of a key and no shared secret in its answers, and boot refusals for key configuration.
 - `@mod/conformance-legacy` (verification, `modules/tooling/conformance-legacy`): Starts the legacy build for conformance scenes (location, how to start it, configuration file, preparation script).
 - `@mod/conformance-mtls` (verification, `modules/tooling/conformance-mtls`): Owns the conformance scenes of the mTLS area: tokens bound to the client's certificate as a trusted proxy forwards it (one PEM block, or Envoy's XFCC), self-signed or under PKI with revocation by CRL, OCSP or both.
 - `@mod/conformance-oauth` (verification, `modules/tooling/conformance-oauth`): Owns the conformance scenes of the OAuth endpoints area: client credentials, introspection and revocation, jwt-bearer (in the internal module `jwt-bearer`), DPoP, the metadata document, tokens refused to users whose email is not verified, the audit events of issuing and revoking tokens.
+  - `assertion-once` (`src/assertion-once`): the fault scenes of a JWT bearer assertion's `jti` spent once (`guarantee-5-c`).
+  - `client-assertion-once` (`src/client-assertion-once`): the fault scenes of a client assertion's `jti` spent once (`guarantee-5-d`).
+  - `dpop-once` (`src/dpop-once`): the fault scenes of a DPoP proof's `jti` spent once (`guarantee-5-e`).
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `jwt-bearer` (`src/jwt-bearer`): the scenes of the jwt-bearer grant.
+  - `revocation-unavailable` (`src/revocation-unavailable`): the fault scenes of the revocation endpoint answering done only once a token's revocation is kept (`guarantee-3-g`).
+  - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a JWT bearer assertion while the store cannot answer (`guarantee-3-d`).
 - `@mod/conformance-ops` (verification, `modules/tooling/conformance-ops`): Owns the conformance scenes of operations: liveness, readiness, the metrics scrape and its dependency gauge, the log level, their boot refusals, and the security headers on every answer.
 - `@mod/conformance-passkey` (verification, `modules/tooling/conformance-passkey`): Owns the conformance scenes of the passkey area: registering a passkey from a session, and its refusals (no session, a second factor not recent, an origin or a frame not listed, a frame whose page is not reported, a challenge answered twice or past its lifetime, a credential id another account holds, a user not verified when required, the limit of passkeys per user, the store failing).
 - `@mod/conformance-recipes` (verification, `modules/tooling/conformance-recipes`): Keeps each recipe in the documents from going stale: a recipe's scene generates the app with the recipe's own command, starts it, and makes the recipe's requests over HTTP, as a user of the provider would.

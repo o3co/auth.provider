@@ -71,13 +71,17 @@ import { memoryStores } from "./stores.ts";
 let shift = 0;
 /** Bytes the next draw of 16 takes, so a test can know the name of the next family. */
 let forced: Uint8Array | undefined;
+/** Every draw of 32 bytes the composition made, as base64url, so a test can tell what a secret was made from. */
+const drawn: string[] = [];
 const runtime = quietRuntime({
 	clock: { now: () => Date.now() + shift },
 	random: {
 		bytes: (n) => {
 			const next = n === 16 ? forced : undefined;
 			if (next) forced = undefined;
-			return next ?? new Uint8Array(randomBytes(n));
+			const bytes = next ?? new Uint8Array(randomBytes(n));
+			if (n === 32) drawn.push(Buffer.from(bytes).toString("base64url"));
+			return bytes;
 		},
 	},
 });
@@ -86,6 +90,7 @@ afterEach(async () => {
 	vi.useRealTimers();
 	shift = 0;
 	forced = undefined;
+	drawn.length = 0;
 	await stop();
 });
 const verifier = "v".repeat(43);
@@ -614,7 +619,7 @@ describe("refresh tokens", () => {
 	});
 
 	// One outside the family but within the client is refused in conformance-code's resource scenes.
-	it("refuse an audience neither the family nor the client holds, keeping the token usable, and take the family's own", async () => {
+	it("refuse an audience neither the family nor the client holds, keeping the token usable, and take the family's own [rfc9700-4.14.2-b]", async () => {
 		const s = await serve({ extra: [narrowing] });
 		const { refresh_token: token } = await s.redeem();
 		expect((await s.refresh(token, "app", { resource: "https://two" })).body).toEqual({
@@ -776,7 +781,7 @@ describe("refresh tokens", () => {
 		}
 	});
 
-	it("narrow scope for one access token, never widen it, and keep the original grant for the family [rfc6749-6-a] [rfc6749-6-e]", async () => {
+	it("narrow scope for one access token, never widen it, and keep the original grant for the family [rfc6749-6-a] [rfc6749-6-e] [rfc9700-4.14.2-b]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		const narrowed = await s.refresh(token, "app", { scope: "read" });
@@ -789,7 +794,7 @@ describe("refresh tokens", () => {
 		expect(back.body.scope).toBe("read write");
 	});
 
-	it("keep the original grant for an empty scope, as for none, and refuse a malformed one", async () => {
+	it("keep the original grant for an empty scope, as for none, and refuse a malformed one [rfc6749-3.2-b]", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		const malformed = await s.refresh(token, "app", { scope: "read  write" });
@@ -845,6 +850,40 @@ describe("refresh tokens", () => {
 		// Past the session's lifetime of an hour, within the family's two.
 		shift = 3_600_000 + 1_000;
 		expect((await s.refresh(first.refresh_token)).body.error).toBe("invalid_grant");
+	});
+
+	it("are kept only as a hash of their secret, never the token or the secret itself [rfc6749-10.4-a]", async () => {
+		const s = await serve();
+		/** The family's record as kept now holds the hash of this token's secret, and neither the token nor the secret. */
+		const keptAsHash = (token: string | undefined) => {
+			const [family = "", secret = ""] = (token ?? "").split(".");
+			const kept = s.stores.kept.peek(family) as { current?: string } | undefined;
+			expect(kept?.current).toBe(createHash("sha256").update(secret).digest("base64url"));
+			expect(JSON.stringify(kept)).not.toContain(secret);
+		};
+		const first = await s.redeem();
+		keptAsHash(first.refresh_token);
+		const second = await s.refresh(first.refresh_token);
+		keptAsHash(second.body.refresh_token);
+	});
+
+	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+	// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
+	it("carry a secret of 32 fresh random bytes, and refuse one whose family is none, or whose secret is changed, as a reuse that ends the family [rfc6749-10.4-e] [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		const secrets = [first.refresh_token, second.body.refresh_token].map(
+			(token) => token?.split(".")[1] ?? "",
+		);
+		for (const secret of secrets) expect(drawn).toContain(secret);
+		expect(secrets[0]).not.toBe(secrets[1]);
+		const token = second.body.refresh_token ?? "";
+		const [family = "", secret = ""] = token.split(".");
+		expect((await s.refresh(`${"z".repeat(22)}.${secret}`)).body.error).toBe("invalid_grant");
+		const changed = `${secret.startsWith("A") ? "B" : "A"}${secret.slice(1)}`;
+		expect((await s.refresh(`${family}.${changed}`)).body.error).toBe("invalid_grant");
+		expect((await s.refresh(token)).body.error).toBe("invalid_grant");
 	});
 
 	it("refuse a token with anything after it, without spending the token [rfc6749-6-d]", async () => {

@@ -89,11 +89,17 @@ export interface ExternalJwt {
 export const externalJwt = contract<ExternalJwt>("external-jwt");
 
 /**
- * A header's `typ` as RFC 7515 compares it, without case and without `application/`: the one
- * reading a policy's `typ` is compared by, for a caller to sort tokens by. None where it is no string.
- * Whether the header is verified is the caller's to know.
+ * A header's `typ` as RFC 7515 compares it, as a media type: its type alone, its parameters and the
+ * space around it dropped, without case and without `application/`; the one reading a policy's `typ`
+ * is compared by, for a caller to sort tokens by. None where it is no string. Whether the header is
+ * verified is the caller's to know.
  */
 export const typOf = (header: Readonly<Record<string, unknown>>): string | undefined => {
 	const typ = Object.hasOwn(header, "typ") ? header.typ : undefined;
-	return typeof typ === "string" ? typ.toLowerCase().replace(/^application\//, "") : undefined;
+	return typeof typ === "string"
+		? (typ.split(";", 1)[0] ?? "")
+				.trim()
+				.toLowerCase()
+				.replace(/^application\//, "")
+		: undefined;
 };

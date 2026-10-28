@@ -13,7 +13,7 @@
 ## Invariants
 - The token comes from the `Authorization` header only, admitted by `sender-binding`; a body or query `access_token` is never read. A refusal is passed on with its status and challenge; one for a request with no token carries no `error`.
 - A token whose scope lacks `openid` is refused `403 insufficient_scope`, challenged in the token's scheme, before its session is read.
-- The token's audience is not read: userinfo is the issuer's own resource, answering any token it issued whose session enters.
+- The token's audience is not read: userinfo is the issuer's own resource, answering any token it issued whose session enters. It tells its own tokens by the `openid` scope (OIDC Core §5.3.1); a token's `aud` names its grant's resource (RFC 9068 §4), not the issuer.
 - A token issued in no session (client credentials, say) is answered `sub` only.
 - A token issued in a session is answered its claims only while that session enters at `use` for the token's subject; else (closed, ended, revoked, short of a requirement, or another subject's) `401 invalid_token`, challenged in the token's scheme.
 - The claims are what `oidc` releases for the token's scope and its kept selection: the names it asks beyond the scope, and the constraints on all it releases. The selection is read only for a token whose session enters, and the token's expiry is checked again once it is read: one that ended meanwhile is `401 invalid_token`, never answered without its selection.

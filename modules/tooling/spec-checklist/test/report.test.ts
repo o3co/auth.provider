@@ -60,6 +60,11 @@ describe("summaryTable", () => {
 });
 
 describe("reportFiles", () => {
+	it("titles the README a checklist, claiming no compliance", () => {
+		const readme = reportFiles([spec], tests, new Map()).get("README.md") ?? "";
+		expect(readme.split("\n")[0]).toBe("# Specification checklist");
+	});
+
 	it("writes a page per spec and a README naming none, escaping what would break a table", () => {
 		const files = reportFiles([spec], tests, new Map([["rfc1111-3-a", ["rfc9999-4-e"]]]));
 		expect([...files.keys()]).toEqual(["README.md", "rfc9999.md"]);

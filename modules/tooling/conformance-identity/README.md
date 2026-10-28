@@ -5,7 +5,8 @@
 - Owns the scenes of password login against a user ledger asked over HTTP, in the legacy build's HTTP user repository shapes: success, a user it does not hold, its failures, a redirect, a malformed user, and the boot refusal beside users in the settings. A scene's ledger may also look users up by upstream identity, with no lookup by subject.
 - A user ledger over HTTP beside users in the settings is a need the legacy build cannot meet.
 - A recent-authentication window a scene sets (`recentAuthenticationWindow`) is a need the legacy build cannot meet.
-- Sets up the identity area's parts (public origin, users, login configuration) on each of the legacy and new targets.
+- Owns the fault scenes of password login, on a Redis topology and a deployment of their own, each after a control with no fault: the attempt limit letting no attempt by while the store cannot count (internal module `attempts-unavailable`), a login opening no session while the store cannot answer (`login-unavailable`), with what they share (internal module `faults`).
+- Sets up the identity area's parts (public origin, users, login configuration, how a request limit answers while the store fails) on each of the legacy and new targets; the legacy one leaves the last to its own default.
 - On the new target, mail, where composed, is accepted to send nothing.
 - On a pattern's app that takes users from a ledger (`users-http`), serves the users a scene gives from a fake ledger the app is pointed at, unless the scene sets its own.
 - On a pattern's app that takes users from a ledger (`users-http`), a fake ledger holds the scene's users and answers their upstream links by `upstream-url`; a scene with users a ledger cannot hold (a bcrypt hash) is left out as the app's alternative.
@@ -20,6 +21,7 @@
 - Area `identity` and the shape of its parts (public origin, users, a user ledger over HTTP, return destination and attempt limits)
 - The need for a user ledger over HTTP
 - The need for a user ledger over HTTP beside users in the settings
+- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run, named to the evidence as `@mod/conformance-identity#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
 - The legacy set-up, and the needs the legacy system cannot provide and the differences it answers differently, live only in `src/legacy.ts`.

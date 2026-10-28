@@ -302,7 +302,8 @@ jobs:
   #
   # What the jobs run is read from the runs spec-checklist lists (`run plan`), the
   # same runs whose evidence compliance expects: an area is a package with a
-  # `conformance` script, a pattern a pattern run `conformance` prints. The plan
+  # `conformance` script, a pattern a pattern run `conformance` prints, and an
+  # area's fault scenes a run of kind `faults` its `evidence-runs` names. The plan
   # also fixes the one commit every conformance job and compliance check out, so a
   # daily run's jobs test the same develop commit.
   conformance-plan:
@@ -312,6 +313,7 @@ jobs:
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
       patterns: ${{ steps.plan.outputs.patterns }}
+      faults: ${{ steps.plan.outputs.faults }}
       sha: ${{ steps.plan.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -329,9 +331,11 @@ jobs:
           set -euo pipefail
           areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
           patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
+          faults=$(pnpm --silent --filter @mod/spec-checklist run plan faults)
           {
             echo "areas=$areas"
             echo "patterns=$patterns"
+            echo "faults=$faults"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
@@ -548,6 +552,100 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # One area's fault scenes (`*.faults.case.ts`), on the new system alone: each scene on a Redis
+  # topology and app instances of its own (conformance's relay, topology and deployment). They run
+  # when conformance does (conformance-plan decides): on a pull request to main, on the release
+  # branches, every five merges to develop, and on the daily run, which checks out develop, not the
+  # default branch the schedule runs on, as the plan fixes. An area is in the matrix where its
+  # `evidence-runs` names a run of kind `faults`; its `conformance:faults` reports as
+  # `<area>#faults`. With CONFORMANCE_FAULTS=1 a scene that cannot run (no Docker, no libfaketime
+  # that moves Node's clock) fails rather than skips. Two at a time: each holds several Redis
+  # containers and app instances.
+  conformance-faults:
+    needs: conformance-plan
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        area: ${{ fromJSON(needs.conformance-plan.outputs.faults) }}
+    steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: faults
+          MATRIX: ${{ matrix.area }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
+      - uses: actions/checkout@v4
+        with:
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - run: pnpm install --frozen-lockfile
+      # The thread-safe libfaketime at the version conformance pins (its app clock image, Debian's
+      # package by version), taken out of that image, so an instance's clock moves on this runner.
+      - name: Take the pinned libfaketime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd modules/tooling/conformance
+          image=$(node --input-type=module -e 'import { appClockImage } from "./src/clock/clock.ts"; process.stdout.write(appClockImage());')
+          lib=$(node --input-type=module -e 'import { appLibfaketimeIn } from "./src/clock/clock.ts"; process.stdout.write(appLibfaketimeIn(process.argv[1]));' "$image")
+          mkdir -p "$RUNNER_TEMP/faketime"
+          container=$(docker create "$image")
+          docker cp "$container:$lib" "$RUNNER_TEMP/faketime/libfaketimeMT.so.1"
+          docker rm "$container" > /dev/null
+          echo "CONFORMANCE_FAKETIME_LIB=$RUNNER_TEMP/faketime/libfaketimeMT.so.1" >> "$GITHUB_ENV"
+      # Fails here, not in a scene, where the library does not move this runner's Node.
+      - name: The library moves Node's clock here
+        run: |
+          node --input-type=module -e 'import { hostLibfaketime } from "./modules/tooling/conformance/src/clock/clock.ts"; if (!hostLibfaketime()) { console.error(`no libfaketime moves Node here: ${process.env.CONFORMANCE_FAKETIME_LIB}`); process.exit(1); }'
+      - name: Fault scenes
+        env:
+          CONFORMANCE_FAULTS: '1'
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
+          # What each scene ran on, beside the evidence and apart from it: compliance reads every file there.
+          CONFORMANCE_FAULTS_DIR: ${{ runner.temp }}/fault-setups
+        run: pnpm --filter "${{ matrix.area }}" run conformance:faults
+      - name: Keep what each scene ran on
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fault-setups-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fault-setups
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-faults-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+
   # Whether the interop jobs run, what they run and on which commit. They run on a pull request to
   # main, on the release branches, on the daily run (develop) and by hand, and before a merge to
   # develop where the pull request touches what they test with: the harnesses, the shared front and
@@ -756,13 +854,13 @@ jobs:
 
   # The check required of a release: every area and every pattern passed.
   conformance:
-    needs: [conformance-due, conformance-plan, legacy-build, conformance-area, conformance-pattern]
+    needs: [conformance-due, conformance-plan, legacy-build, conformance-area, conformance-pattern, conformance-faults]
     if: always() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true'))
     runs-on: ubuntu-latest
     steps:
-      - name: Every area and every pattern passed
+      - name: Every area, every pattern and every area's fault scenes passed
         run: |
-          for result in "${{ needs.conformance-plan.result }}" "${{ needs.legacy-build.result }}" "${{ needs.conformance-area.result }}" "${{ needs.conformance-pattern.result }}"; do
+          for result in "${{ needs.conformance-plan.result }}" "${{ needs.legacy-build.result }}" "${{ needs.conformance-area.result }}" "${{ needs.conformance-pattern.result }}" "${{ needs.conformance-faults.result }}"; do
             [ "$result" = success ] || { echo "a conformance job ended $result"; exit 1; }
           done
 
@@ -856,7 +954,7 @@ jobs:
   # and on the release branches it fails where an expected run did not report or an item is
   # failed, incomplete or unverified, and elsewhere it only tells.
   compliance:
-    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, interop-due, interop-oidf, interop-clients, release-check]
+    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, conformance-faults, interop-due, interop-oidf, interop-clients, release-check]
     if: always()
     runs-on: ubuntu-latest
     steps:

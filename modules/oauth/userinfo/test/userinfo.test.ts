@@ -184,7 +184,8 @@ describe("userinfo", () => {
 		expect(await other.run()).toEqual(refused);
 	});
 
-	it("refuses a token whose scope lacks openid as insufficient_scope, in the token's scheme, before reading its session [rfc6750-3.1-c] [rfc9449-7.1-c]", async () => {
+	// This test's resource item reads "meant for it" as: the issuer's resource tells its own tokens by the openid scope (OIDC Core §5.3.1); see the userinfo card's Invariants.
+	it("refuses a token whose scope lacks openid as insufficient_scope, in the token's scheme, before reading its session [rfc6750-3.1-c] [rfc9449-7.1-c] [rfc9700-2.3-c]", async () => {
 		for (const scope of [[], ["profile"], ["openidx"]]) {
 			const o = over({
 				admission: { kind: "admitted", access: valid("DPoP", { ...grant, scope }) },

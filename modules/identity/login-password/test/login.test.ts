@@ -196,7 +196,7 @@ describe("login-password answers", () => {
 		expect((await login("username=alice", { "content-type": "text/plain" })).status).toBe(415);
 	});
 
-	it("refuses without CSRF evidence, and with a repeated field", async () => {
+	it("refuses without CSRF evidence, and with a repeated field [oidc-core-3.1.2.3-e]", async () => {
 		const { login } = await serve();
 		expect((await login(right, { origin: "" })).status).toBe(403);
 		expect((await login(right, { origin: "https://evil.example" })).status).toBe(403);

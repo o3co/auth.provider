@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
@@ -38,8 +38,20 @@ const start = 1_800_000_000_000;
 let now = start;
 beforeEach(() => {
 	now = start;
+	drawn.length = 0;
 });
-const runtime = quietRuntime({ clock: { now: () => now } });
+/** A copy of every draw of 16 bytes the composition made, as base64url, so a test can tell what an id was made from. */
+const drawn: string[] = [];
+const runtime = quietRuntime({
+	clock: { now: () => now },
+	random: {
+		bytes: (n) => {
+			const bytes = new Uint8Array(randomBytes(n));
+			if (n === 16) drawn.push(Buffer.from(bytes).toString("base64url"));
+			return bytes;
+		},
+	},
+});
 const privateKey = generateKeyPairSync("ed25519")
 	.privateKey.export({ format: "pem", type: "pkcs8" })
 	.toString();
@@ -354,6 +366,29 @@ it("writes one audience as a string and more as a list, an empty scope not at al
 	expect(claimsOf(two.token)).toMatchObject({ aud: ["a", "b"], scope: "read" });
 });
 
+// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
+it("issues access tokens none can make without its signing key, a changed claim or signature, another key or none refused, each with its own 128-bit id [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc6749-10.3-b] [rfc6750-5.2-b]", async () => {
+	const t = await boot({ revocation: "unsupported" });
+	const [one, two] = [await issueFor(t, grant), await issueFor(t, grant)];
+	for (const { id } of [one, two]) expect(drawn).toContain(id);
+	expect(one.id).not.toBe(two.id);
+	expect((await t.verifyAccess(one.token)).kind).toBe("valid");
+	const [header = "", payload = "", signature = ""] = one.token.split(".");
+	const encoded = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+	const changedClaim = `${header}.${encoded({ ...claimsOf(one.token), sub: "mallory" })}.${signature}`;
+	const flipped = Buffer.from(signature, "base64url");
+	flipped[0] = (flipped[0] ?? 0) ^ 1;
+	const changedSignature = `${header}.${payload}.${flipped.toString("base64url")}`;
+	const otherKey = generateKeyPairSync("ed25519").privateKey;
+	const otherSignature = sign(null, Buffer.from(`${header}.${payload}`), otherKey);
+	const anotherKey = `${header}.${payload}.${otherSignature.toString("base64url")}`;
+	const unsigned = `${encoded({ alg: "none", typ: "JWT" })}.${payload}.`;
+	for (const forged of [changedClaim, changedSignature, anotherKey, unsigned]) {
+		expect((await t.verifyAccess(forged)).kind, forged).toBe("invalid");
+	}
+});
+
 it("refuses a token whose cap has passed, handing none out", async () => {
 	const t = await boot({ revocation: "unsupported" });
 	expect(await t.issue({ grant, grantType: "test" }, { notAfter: now - 10_000 })).toEqual({
@@ -395,9 +430,11 @@ it("answers unsupported to any revocation where revocation is not configured, a 
 	expect(await t.revokeAccess("garbage")).toEqual({ kind: "unsupported" });
 });
 
-it("reads the access token's lifetime with its unit, in whole seconds, an hour unless set", () => {
+it("reads the access token's lifetime with its unit, in whole seconds, an hour by default, which an operator may set up to a day [rfc6750-5.3-b]", () => {
 	const lifetimeOf = (settings: object) =>
 		section.safeParse({ revocation: "unsupported", ...settings }).data?.["access-token-lifetime"];
+	// The default is an hour, the most RFC 6750 §5.3 asks; a longer one, for any client, is the operator's choice.
+	expect(defaultLifetimeSeconds).toBe(3600);
 	expect(
 		[{}, { "access-token-lifetime": "2h" }, { "access-token-lifetime": "2s" }].map(lifetimeOf),
 	).toEqual([defaultLifetimeSeconds, 7200, 2]);

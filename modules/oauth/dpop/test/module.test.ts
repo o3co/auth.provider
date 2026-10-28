@@ -248,6 +248,16 @@ describe("server nonces (RFC 9449 §8)", () => {
 	const ath = createHash("sha256").update(token).digest("base64url");
 	const toResource = () => proof({ htu: `${issuer}/api`, ath });
 	const askedAgain = { kind: "refused", error: "use_dpop_nonce" };
+	/** A nonce given, forged, or written otherwise than it was given: padded, with a stray character, a leading zero, a space. */
+	const notGiven = (given: string) => [
+		"forged",
+		`${given.split(".")[0]}.AAAA`,
+		`${given} `,
+		`${given}=`,
+		`${given}!`,
+		`0${given}`,
+		given.replace(".", ". "),
+	];
 
 	it("refuses a proof without the current nonce as use_dpop_nonce, giving it, and spends no jti [rfc9449-4.2-e] [rfc9449-4.3-h]", async () => {
 		// Starts at a bucket's edge, so the clock never crosses one by chance within the test.
@@ -259,8 +269,8 @@ describe("server nonces (RFC 9449 §8)", () => {
 		const given = first.headers?.["dpop-nonce"] ?? "";
 		expect(given).toMatch(/^\d+\.[A-Za-z0-9_-]+$/);
 		expect(await read(await proof({ jti, nonce: given }), issue)).toMatchObject(bound);
-		for (const wrong of ["forged", `${given.split(".")[0]}.AAAA`]) {
-			expect(await read(await proof({ nonce: wrong }), issue)).toMatchObject({
+		for (const wrong of notGiven(given)) {
+			expect(await read(await proof({ nonce: wrong }), issue), wrong).toMatchObject({
 				...askedAgain,
 				headers: { "dpop-nonce": given },
 			});
@@ -272,12 +282,65 @@ describe("server nonces (RFC 9449 §8)", () => {
 		expect(await read(await proof({ nonce: given }), issue)).toMatchObject(askedAgain);
 	});
 
+	it("takes at a resource under as+rs only the very nonce it gave [rfc9449-4.3-t]", async () => {
+		shift = bucketMs - (Date.now() % bucketMs) + 1;
+		const read = await asking("as+rs");
+		const first = await read(await toResource(), atResource);
+		if (first.kind !== "refused" || first.error !== "use_dpop_nonce") throw new Error(first.kind);
+		const given = first.headers?.["dpop-nonce"] ?? "";
+		const withNonce = (nonce: string) => proof({ htu: `${issuer}/api`, ath, nonce });
+		expect(await read(await withNonce(given), atResource)).toMatchObject(bound);
+		for (const wrong of notGiven(given)) {
+			expect(await read(await withNonce(wrong), atResource), wrong).toMatchObject({
+				...askedAgain,
+				headers: { "dpop-nonce": given },
+			});
+		}
+	});
+
 	it("asks no nonce at a resource under as", async () => {
 		expect(await (await asking("as"))(await toResource(), atResource)).toMatchObject(bound);
 	});
 
 	it("asks one at a resource too under as+rs", async () => {
 		expect(await (await asking("as+rs"))(await toResource(), atResource)).toMatchObject(askedAgain);
+	});
+
+	it("challenges a resource's request without the nonce in the DPoP scheme as use_dpop_nonce, giving a fresh one [rfc9449-4.2-l]", async () => {
+		shift = bucketMs - (Date.now() % bucketMs) + 1;
+		const app = await boot({ nonce: { required: "as+rs", ttl: `${bucketMs / 1000}s`, secret } });
+		const jkt = await calculateJwkThumbprint(await exportJWK(holder.publicKey));
+		const tokens = {
+			verifyAccess: async () =>
+				({
+					kind: "valid",
+					binding: { member: "jkt", confirmation: jkt, tokenType: "DPoP" },
+				}) as const,
+		};
+		const presenting = async (nonce?: string) =>
+			app.get(senderBinding).admitted(
+				testRequest({
+					method: "POST",
+					path: "/api",
+					headers: new Map([
+						["authorization", `DPoP ${token}`],
+						["dpop", await proof({ htu: `${issuer}/api`, ath, nonce })],
+					]),
+				}),
+				tokens,
+			);
+		const first = await presenting();
+		expect(first).toEqual({
+			kind: "refused",
+			status: 401,
+			error: "use_dpop_nonce",
+			headers: {
+				"www-authenticate": 'DPoP error="use_dpop_nonce"',
+				"dpop-nonce": expect.stringMatching(/^\d+\.[A-Za-z0-9_-]+$/),
+			},
+		});
+		const given = first.kind === "refused" ? first.headers["dpop-nonce"] : undefined;
+		expect((await presenting(given)).kind).toBe("admitted");
 	});
 
 	it("asks none anywhere under never", async () => {

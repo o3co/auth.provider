@@ -53,6 +53,10 @@ onNew(codeArea, (part, scene) => {
 			...(part.refresh?.lifetimeSeconds
 				? { refresh: { lifetime: `${part.refresh.lifetimeSeconds}s` } }
 				: {}),
+			...(part.sweepSeconds
+				? { "session-lifecycle": { "sweep-interval": `${part.sweepSeconds}s` } }
+				: {}),
+			...(part.closingShards ? { "session-store": { "closing-shards": part.closingShards } } : {}),
 		},
 	};
 });
