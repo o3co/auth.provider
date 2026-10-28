@@ -183,7 +183,7 @@ describe("a route's declared guarantees", () => {
 		]);
 	});
 
-	it("checks a route that declares nothing as well: a GET must say, and any other must keep both or say why [guarantee-9-b] [guarantee-10-b]", async () => {
+	it("checks a route that declares nothing as well: a GET must say, and any other must keep both or say why [guarantee-9-b] [guarantee-10-b] [oidc-core-3.1.2.3-e]", async () => {
 		const booting = serveWith(
 			owner([{ method: "GET", path: "/silent", handle: answered }, post("/bare", [])]),
 		);
