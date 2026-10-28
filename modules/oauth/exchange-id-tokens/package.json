@@ -18,7 +18,7 @@
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-exchange": "workspace:*",
 		"@mod/users": "workspace:*",
-		"jose": "6.2.12",
+		"jose": "6.2.13",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {

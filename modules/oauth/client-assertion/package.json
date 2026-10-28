@@ -21,7 +21,7 @@
 		"@mod/outbound-policy": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/url-setting": "workspace:*",
-		"jose": "6.2.12",
+		"jose": "6.2.13",
 		"zod": "4.6.7"
 	},
 	"peerDependencies": {

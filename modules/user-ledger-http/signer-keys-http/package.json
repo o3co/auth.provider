@@ -29,6 +29,6 @@
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"jose": "6.2.12"
+		"jose": "6.2.13"
 	}
 }
