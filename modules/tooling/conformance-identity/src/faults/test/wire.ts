@@ -74,3 +74,10 @@ export const boundaryOf = (subject: string): Match =>
  * sessions to its closings, before it closes any.
  */
 export const closingAdded: Match = storeWrite({ prefix, space: "session-store.closings" });
+
+/** The write that closes a session's record: a follower's work done for that session, past its first write. */
+export const sessionClosed: Match = storeWrite({
+	prefix,
+	space: "session-store.sessions",
+	value: (v) => (v as { state?: unknown } | null)?.state === "closed",
+});

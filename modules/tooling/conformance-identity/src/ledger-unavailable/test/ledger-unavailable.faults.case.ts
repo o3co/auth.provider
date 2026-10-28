@@ -14,7 +14,7 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { faultScene, loginAt, nextSource, on, said } from "../../faults/test/faults.ts";
-import { boundaryOf, closingAdded } from "../../faults/test/wire.ts";
+import { boundaryOf, closingAdded, sessionClosed } from "../../faults/test/wire.ts";
 
 // The ledger's route uses the store in three steps: its request window's count, the subject's
 // boundary, and the followers (session-lifecycle adding the subject's sessions to its closings first).
@@ -81,8 +81,9 @@ const incomplete = [503, "temporarily_unavailable", "incomplete"];
 
 /**
  * What a revocation answered, held to what the store took from `from` to its answer: done only where
- * the boundary and a follower's first write both succeeded; incomplete only where the boundary did and
- * no follower's write; unknown only where no follower's write did.
+ * the boundary, a follower's first write and its work (the subject's session closed) all succeeded;
+ * incomplete only where the boundary did (a follower may have begun and not finished); unknown only
+ * where no follower's write did.
  */
 function heldToWrites(i: Instance, subject: string, from: number, r: Revoked) {
 	const within = (m: Parameters<typeof successes>[1]) =>
@@ -92,13 +93,17 @@ function heldToWrites(i: Instance, subject: string, from: number, r: Revoked) {
 		expect([...said3(r), r.complete]).toEqual([...complete, true]);
 		expect(boundary.length).toBeGreaterThan(0);
 		expect(followed.length).toBeGreaterThan(0);
+		expect(within(sessionClosed).length).toBeGreaterThan(0);
 		return "complete";
 	}
-	const state = r.state === "incomplete" ? incomplete : unknown;
-	expect(said3(r)).toEqual(state);
-	if (r.state === "incomplete") expect(boundary.length).toBeGreaterThan(0);
+	if (r.state === "incomplete") {
+		expect(said3(r)).toEqual(incomplete);
+		expect(boundary.length).toBeGreaterThan(0);
+		return "incomplete";
+	}
+	expect(said3(r)).toEqual(unknown);
 	expect(followed).toEqual([]);
-	return String(r.state);
+	return "unknown";
 }
 
 /** The control: with no fault, the boundary is written, a follower runs, and done is answered. */
@@ -359,7 +364,7 @@ describe("the ledger's revocation route answering done only once every step's de
 			const way = heldToWrites(a, users.alice.subject, from, r);
 			if (way === "complete") {
 				// Done only as the server started again answered the boundary and the follower.
-				for (const m of [boundaryOf(users.alice.subject), closingAdded]) {
+				for (const m of [boundaryOf(users.alice.subject), closingAdded, sessionClosed]) {
 					const kept = successes(a, m).filter((e) => e.at > from && e.at < r.at);
 					expect(kept.every((e) => e.at > restarted && runIdOf(e.reply) === runId)).toBe(true);
 				}
