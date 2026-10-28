@@ -91,6 +91,9 @@ const setUp = (part: IdentityPart): NewPart => ({
 		...(part.recentAuthenticationSeconds
 			? { "session-lifecycle": { "recent-authentication": `${part.recentAuthenticationSeconds}s` } }
 			: {}),
+		...(part.rateLimitWhileStoreFails
+			? { "rate-limit": { "fail-mode": part.rateLimitWhileStoreFails } }
+			: {}),
 		...(part.ledger ? ledgerConfig(part.ledger) : {}),
 		...(part.revocations
 			? {
