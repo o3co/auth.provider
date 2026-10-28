@@ -701,7 +701,7 @@ describe("authorize: the audience a request asks for", () => {
 	});
 
 	it("sends a rule's description back in RFC 6749's characters alone, any other shown as ? [rfc6749-4.1.2.1-e]", async () => {
-		const loud = defineModule({ name: "loud", takes: [] }, (m) => [
+		const loud = defineModule({ name: "loud", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				repeated: () => ({
