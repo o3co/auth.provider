@@ -376,6 +376,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `given` (`src/release-check/given`): which tarballs the release check holds to.
   - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
   - `release-listed` (`src/release-listed`): where the release publishes, the tarballs held to those its lists of what it ships were made of.
+  - `release-notes` (`src/release-notes`): the release's notes, from the version's section of the changelog.
   - `release-sbom` (`src/release-sbom`): the release's lists of what it ships (SBOMs), made from the tarballs it publishes.
   - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
   - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
