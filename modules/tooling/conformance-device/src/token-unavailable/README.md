@@ -6,7 +6,7 @@ Internal module of `conformance-device`: the fault scenes of the token endpoint 
 - Checks, each scene after a control with no fault (an approved device's poll takes its approval once and gives a token), that a poll is answered `503 temporarily_unavailable` with no token while:
   - the network is cut from the app to Redis, nothing reaching Redis (`Pu`), or from Redis to the app, Redis answering a call the app never gets (`Pd`);
   - every connection is cut as it opens, the take not succeeding (`R`); Redis answers past the command timeout, a call answered only after the endpoint gave up (`L`); Redis sleeps, the endpoint answering before it wakes (`S`);
-  - the primary holds its writes for a promotion (`F`); the device's record is read on one server and its read confirmed on another, the new primary first taking writes, and no take is written (`Fs`).
+  - the primary holds its writes for a promotion (`F`); the approving session's entry is read on one server and its read confirmed on another (the device's record, read before it, asks no confirmation), the new primary first taking writes, and no take is written (`Fs`).
 - Where the decision fails before the take (`Pu`, `Pd`, `R`, `L`, `S`, `F`), checks that no take of the approval succeeded and that, once healed, the same device gives a token.
 - Checks that a poll made while Redis is killed at once and started again gives a token only where its take was kept by the server started again, and otherwise answers unavailable, saying which in its report (`C`).
 - After each fault, a newly approved device gives a token.

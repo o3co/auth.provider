@@ -88,3 +88,13 @@ export const recordReadOf = (d: Device): Match => {
 		succeeded: read.succeeded,
 	};
 };
+
+/**
+ * A read of a session's entry, as the poll reads the approving session's before the take; the store
+ * confirms it (session-store asks confirmed reads), unlike the device's record.
+ */
+export const sessionEntryRead: Match = storeRead({
+	prefix,
+	space: "session-store.sessions",
+	name: "record",
+});
