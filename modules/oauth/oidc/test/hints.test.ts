@@ -34,6 +34,24 @@ it("answers the subject, session, client and issue time of an ID token the provi
 	});
 });
 
+it("ignores the claims of a hint it does not understand [oidc-core-2-s]", async () => {
+	const { check, signed } = await serve();
+	const odd = {
+		ext: "x",
+		nested: { a: [1] },
+		nonce: "n",
+		acr: "urn:x",
+		"https://other.example/c": 1,
+	};
+	expect(await check(await signed(odd))).toEqual({
+		kind: "valid",
+		subject: "alice",
+		session: "s1",
+		client: "app",
+		issuedAt: now,
+	});
+});
+
 it("takes the client from azp when the audience names it, else from a single audience", async () => {
 	const { check, signed } = await serve();
 	const clientOf = async (over: Record<string, unknown>) => {
