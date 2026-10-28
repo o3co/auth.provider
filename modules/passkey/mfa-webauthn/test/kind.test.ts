@@ -28,11 +28,14 @@ const known = (values: Record<string, unknown>): AttributesAnswer => ({
 	vouched: true,
 	attributes: values,
 });
-const attributesStandIn = defineModule({ name: "subject-attributes", takes: [] }, (m) => [
-	m.provide(subjectAttributes).by(() => ({
-		of: async (subject) => attributes.get(subject) ?? { kind: "unknown" },
-	})),
-]);
+const attributesStandIn = defineModule(
+	{ name: "subject-attributes", replicaSafe: false, takes: [] },
+	(m) => [
+		m.provide(subjectAttributes).by(() => ({
+			of: async (subject) => attributes.get(subject) ?? { kind: "unknown" },
+		})),
+	],
+);
 const credentialIdOf = (factor: Opened) => (factor.state as { id: string }).id;
 const handleOf = (secret: string) => (JSON.parse(secret) as { handle: string }).handle;
 
@@ -42,7 +45,7 @@ const composition = (settings: Record<string, unknown> = {}) => ({
 		attributesStandIn,
 		webauthnModule,
 		kindModule,
-		defineModule({ name: "reader", takes: [factorKinds] }, (m) => [
+		defineModule({ name: "reader", replicaSafe: true, takes: [factorKinds] }, (m) => [
 			m.provide(kinds).by((c) => c.collect(factorKinds)),
 		]),
 	],

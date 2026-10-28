@@ -106,7 +106,7 @@ describe("accessTokenSigning", () => {
 
 	it("is taken by tokens alone: another module naming it in its takes refuses boot", async () => {
 		const asking = (name: string) =>
-			defineModule({ name, takes: [accessTokenSigning] }, (m) => [
+			defineModule({ name, replicaSafe: true, takes: [accessTokenSigning] }, (m) => [
 				m.provide(contract<object>(`${name}.asks`)).by(async (c) => {
 					try {
 						await c.get(accessTokenSigning);

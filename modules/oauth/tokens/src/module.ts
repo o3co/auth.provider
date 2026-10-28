@@ -110,6 +110,7 @@ const denylisted = (s: { readonly revocation: "denylist" | "unsupported" }) =>
 export default defineModule(
 	{
 		name: "tokens",
+		replicaSafe: true,
 		section,
 		takes: (s) => [
 			keys,

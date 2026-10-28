@@ -86,7 +86,7 @@ function faulty<T extends StoredGrant | StoredAsk>() {
 
 /** A client a source other than the operator's settings shows, as a metadata document would. */
 const documentId = "https://docs.example/client.json";
-const documents = defineModule({ name: "documents", takes: [] }, (m) => [
+const documents = defineModule({ name: "documents", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(clientSources).by(() => ({
 		find: async (id: string) =>
 			id === documentId
@@ -102,9 +102,10 @@ const documents = defineModule({ name: "documents", takes: [] }, (m) => [
 
 /** The document copies composed, as client-documents' reader collects them. */
 const copiesSeen = contract<readonly DocumentCopy[]>("test.copies-seen");
-const copiesProbe = defineModule({ name: "copies-probe", takes: [documentCopies] }, (m) => [
-	m.provide(copiesSeen).by((c) => c.collect(documentCopies)),
-]);
+const copiesProbe = defineModule(
+	{ name: "copies-probe", replicaSafe: true, takes: [documentCopies] },
+	(m) => [m.provide(copiesSeen).by((c) => c.collect(documentCopies))],
+);
 
 const challengeOf = (url: string) => new URL(url).searchParams.get("challenge") ?? "";
 

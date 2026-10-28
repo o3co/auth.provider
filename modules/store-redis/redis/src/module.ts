@@ -239,7 +239,9 @@ const connections = contract<{
 	readonly declared: readonly Space[];
 }>("redis.connections");
 
-export default defineModule({ name: "redis", section, takes: [spaces] }, (m) => [
+// Safe on many instances: it is the shared store, given the same `url` and `prefix` on each
+// (deployment-guarantees, Several instances).
+export default defineModule({ name: "redis", replicaSafe: true, section, takes: [spaces] }, (m) => [
 	m.provide(connections).by(async (c) => {
 		const client = new Redis(c.section.url, {
 			lazyConnect: true,

@@ -36,7 +36,7 @@
 - A signed secret lives `secret-lifetime`, on `kernel`'s clock.
 - The id_token is checked with RS256 only, Apple's issuer exactly, the client among its audiences, and `clock-skew`.
 - An id_token that gives `at_hash` must give the access token's; one that does not refuses the exchange.
-- The id_token's `azp`, which several audiences need, must be the client.
+- The id_token names no audience other than the client, and its `azp`, where given, must be the client.
 - The id_token must also carry the login's nonce, a non-empty `sub` and a numeric `iat`.
 - Any reason `external-jwt` gives refuses the login.
 - The upstream subject is `sub` as it is.

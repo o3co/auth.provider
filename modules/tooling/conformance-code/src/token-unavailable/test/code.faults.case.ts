@@ -49,22 +49,6 @@ async function healed(d: Deployed, i: Instance) {
 	expect(said(await redeemAt(i, await codeAt(i)))).toEqual([200, "Bearer"]);
 }
 
-/**
- * Until the relay has answered a call on a connection to `upstream` since `since`, within 10 s: the
- * client's check of a connection it opened, after which it sends its requests on it.
- */
-async function answeredOn(i: Instance, upstream: { host: string; port: number }, since: number) {
-	const end = performance.now() + 10_000;
-	const to = (id: number) => {
-		const c = i.relay.connections().find((x) => x.id === id)?.upstream;
-		return c?.host === upstream.host && c.port === upstream.port;
-	};
-	while (!i.relay.executions(anything).some((e) => e.at > since && to(e.connection))) {
-		if (performance.now() > end) throw new Error("no call answered on the new connection");
-		await new Promise((resolve) => setTimeout(resolve, 50));
-	}
-}
-
 describe("the token endpoint issuing no token for a code while the store cannot answer", () => {
 	it("gives no token while the network from the app to Redis is cut [guarantee-3-b] {fault:Pu}", async () => {
 		await on({ name: "code-token-unavailable-pu" }, async (d) => {
@@ -216,11 +200,7 @@ describe("the token endpoint issuing no token for a code while the store cannot 
 			expect(oldId).not.toBe(newId);
 			i.relay.switchUpstream(moved.upstream());
 			i.relay.reset("operations");
-			// Sent once the app holds a connection to the new primary and its client has checked it: before,
-			// the redemption fails for want of one, a 503 that shows nothing, and only a sweep's call is confirmed.
-			const switched = performance.now();
 			await reconnected(i, moved.upstream());
-			await answeredOn(i, moved.upstream(), switched);
 			const from = performance.now();
 			const confirmed = i.relay.observe(confirmation({ replicas: 1 }));
 			const answer = await redeemedAt(i, c);

@@ -21,7 +21,7 @@ const facts = () => ({ subject: "alice", amr: ["pwd"], authenticatedAt: now });
 async function boot(log = recordingLog()) {
 	const stores = memoryStores();
 	const closed: string[] = [];
-	const closer = defineModule({ name: "closer", takes: [] }, (m) => [
+	const closer = defineModule({ name: "closer", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(participants).by(() => ({
 			name: "closer",
 			closing: async (s) => {

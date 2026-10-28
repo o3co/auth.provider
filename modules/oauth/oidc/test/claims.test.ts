@@ -31,14 +31,17 @@ const released = async (attributes: Record<string, unknown>, scope: readonly str
 /** As `released`, from a users that hands over its attributes unchecked, so oidc's own checks are what is seen. */
 const unchecked = async (attributes: Record<string, unknown>, scope: readonly string[]) => {
 	// Named users and taking any section, so it stands where users is configured.
-	const standIn = defineModule({ name: "users", section: z.unknown(), takes: [] }, (m) => [
-		m.provide(users).by(
-			() =>
-				({
-					bySubject: async (subject: string) => ({ kind: "user", user: { subject, attributes } }),
-				}) as unknown as Users,
-		),
-	]);
+	const standIn = defineModule(
+		{ name: "users", replicaSafe: true, section: z.unknown(), takes: [] },
+		(m) => [
+			m.provide(users).by(
+				() =>
+					({
+						bySubject: async (subject: string) => ({ kind: "user", user: { subject, attributes } }),
+					}) as unknown as Users,
+			),
+		],
+	);
 	return (await boot({}, standIn)).get(releasedClaims).of("s-alice", scope);
 };
 
@@ -135,7 +138,7 @@ describe("released claims", () => {
 
 	it("reads the attributes from users on each request", async () => {
 		let name = "Alice";
-		const ledger = defineModule({ name: "ledger", takes: [] }, (m) => [
+		const ledger = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(ledgers).by(() => ({
 				verify: async () => ({ kind: "none" }),
 				bySubject: async (subject) => ({

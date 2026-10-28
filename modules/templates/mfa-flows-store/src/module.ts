@@ -31,7 +31,9 @@ const listings: Space = {
 	guarantees: Object.values(listedGuaranteeFor),
 };
 
-export default defineModule({ name: "mfa-flows-store", takes: [store] }, (m) => [
+// Safe on many instances: a flow's expiry is set by the writing instance's clock, kept in step with the
+// others' by the operator (deployment-guarantees, Several instances).
+export default defineModule({ name: "mfa-flows-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => transactions),
 	m.contribute(spaces).by(() => listings),
 	m.provide(transactionStore).by(async (c) => {

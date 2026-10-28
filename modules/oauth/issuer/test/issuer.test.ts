@@ -80,10 +80,10 @@ it("names its endpoints on the issuer's origin: the public origin where one is w
 it("collects the items this server names itself by, refusing two contributions of one item or one of the issuer item", async () => {
 	const named = contract<readonly MetadataItem[]>("named");
 	const item = (module: string, name: string, value: unknown) =>
-		defineModule({ name: module, takes: [] }, (m) => [
+		defineModule({ name: module, replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(metadata).by(() => ({ name, value })),
 		]);
-	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 		m.provide(named).by((c) => c.collect(metadata)),
 	]);
 	const bootWith = (...modules: ReturnType<typeof item>[]) =>

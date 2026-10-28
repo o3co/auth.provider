@@ -140,7 +140,9 @@ const built = contract<Parts>("session-tokens.parts");
 
 const takes = [issuedTokens, tokenIndex, pendingSessions, tokens, sessions];
 
-export default defineModule({ name: "session-tokens", section, takes }, (m) => [
+// Safe on many instances: every instance runs the sweep over the shared store, and revoking a pushed-out
+// token twice does no harm.
+export default defineModule({ name: "session-tokens", replicaSafe: true, section, takes }, (m) => [
 	m.provide(built).by(partsOf),
 	m.provide(sessionTokens).by(async (c) => {
 		const parts = await c.get(built);
