@@ -134,7 +134,7 @@ describe("a request naming no client", () => {
 		})),
 	]);
 	/** A source naming a public client with no credentials: one the operator did not register. */
-	const sourced = defineModule({ name: "sourced", replicaSafe: true, takes: [] }, (m) => [
+	const sourced = defineModule({ name: "sourced", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id: string) =>
 				id === "sourced" ? client("sourced", "none", asserted) : undefined,

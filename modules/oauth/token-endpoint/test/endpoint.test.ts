@@ -752,7 +752,7 @@ describe("token endpoint", () => {
 	});
 
 	it("dispatches to a grant contributed from outside, for the clients whose allowance lists it", async () => {
-		const extra = defineModule({ name: "extra-grant", replicaSafe: true, takes: [] }, (m) => [
+		const extra = defineModule({ name: "extra-grant", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -870,7 +870,7 @@ describe("token endpoint", () => {
 	});
 
 	it("issues for the lifetime a grant gives in place of tokens' own", async () => {
-		const longer = defineModule({ name: "longer", replicaSafe: true, takes: [] }, (m) => [
+		const longer = defineModule({ name: "longer", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
@@ -955,7 +955,7 @@ describe("token endpoint", () => {
 	});
 
 	it("refuses an authentication time far ahead of the clock as invalid_grant, by tokens' own rule", async () => {
-		const ahead = defineModule({ name: "ahead", replicaSafe: true, takes: [] }, (m) => [
+		const ahead = defineModule({ name: "ahead", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
