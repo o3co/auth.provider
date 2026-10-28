@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -193,6 +194,48 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(job("interop-clients").strategy?.matrix?.library).toBe(
 			expr("fromJSON(needs.interop-due.outputs.libraries)"),
 		);
+	});
+
+	it("read a pull request's moved file by both its paths, in interop-due and the conformance plan", () => {
+		const changedLine = (name: string, id: string) =>
+			(job(name).steps.find((s) => s.id === id)?.run ?? "")
+				.split("\n")
+				.map((l) => l.trim())
+				.find((l) => l.startsWith("changed=$(git diff")) ?? "";
+		expect(changedLine("conformance-plan", "plan")).toContain("--no-renames");
+		const line = changedLine("interop-due", "due");
+		// A plan moved out of interop-oidf: its old path names what the change touches there.
+		const dir = mkdtempSync(join(tmpdir(), "ci-moved-"));
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-c", "user.name=ci", "-c", "user.email=ci@example.com", ...args], {
+				cwd: dir,
+			});
+		try {
+			git("init", "-q");
+			mkdirSync(join(dir, "modules/tooling/interop-oidf/plans"), { recursive: true });
+			writeFileSync(join(dir, "modules/tooling/interop-oidf/plans/logout.json"), "{}\n");
+			git("add", ".");
+			git("commit", "-qm", "base");
+			git("branch", "origin/develop");
+			mkdirSync(join(dir, "docs"));
+			git("mv", "modules/tooling/interop-oidf/plans/logout.json", "docs/logout.json");
+			git("commit", "-qm", "moved");
+			const read = execFileSync(
+				"bash",
+				["-c", `set -euo pipefail; ${line}; printf '%s' "$changed"`],
+				{
+					cwd: dir,
+					env: { ...process.env, BASE: "develop" },
+					encoding: "utf8",
+				},
+			);
+			expect(read.split("\n").sort()).toEqual([
+				"docs/logout.json",
+				"modules/tooling/interop-oidf/plans/logout.json",
+			]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("check out the plan's commit in every conformance and interop job and in compliance", () => {
