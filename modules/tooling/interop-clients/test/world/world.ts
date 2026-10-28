@@ -101,7 +101,8 @@ const client = (id: string, method: WorldClient["method"], secret?: string): Cli
 	method,
 	...(secret === undefined ? {} : { secret }),
 	grants: ["authorization_code", "refresh_token", exchangeGrant],
-	scopes: ["openid", "profile", "email", "offline_access"],
+	// Offline access is not offered: a library asking offline_access has the word dropped, and its refresh token comes by the refresh grant.
+	scopes: ["openid", "profile", "email"],
 	audiences: [otherAudience, resource],
 	redirectUris: [redirectUri],
 	firstParty: true,
