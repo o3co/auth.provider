@@ -14,7 +14,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `oidc`)
-- IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (the asymmetric ones `external-jwt` knows; default RS256, ES256, EdDSA, one for each kind of key), `require-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
+- IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (the asymmetric ones `external-jwt` knows; default RS256, ES256, EdDSA, one for each kind of key), `accept-missing-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
 - IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), UserInfo's (`src/userinfo/`), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `outbound` reads a host list: a host, or `.name` for the name and the names under it; default none)
 
 ## Invariants
@@ -25,11 +25,10 @@
 - A description whose token endpoint or key set that policy refuses also refuses boot.
 - A description's refusal, `outbound` refusing to fetch it included, is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason. A description answered other than `200`, or that cannot be read as one (no JSON object, not its shape), refuses boot at the IdP, in `federation`'s words, not under `issuer`.
 - An answer naming another issuer in `iss` is refused before its code is used.
-- An answer without `iss` is refused where the issuer's description offers `iss` or the operator requires it.
-- Where neither requires `iss`, boot logs a warning naming the IdP (answers are then taken without `iss`).
+- An answer without `iss` is refused, unless the IdP's `accept-missing-iss` is set and its description does not offer `iss`.
+- Where `iss` is not required so, every start logs a warning naming the IdP (answers are then taken without `iss`).
 - The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences. A key is read under one algorithm (`external-jwt`): with RS256 and PS256 both taken, one naming no `alg` is unused; an IdP signing with PS256 alone takes `["PS256"]`.
 - An id_token that gives `at_hash` must give the access token's, by its signature's digest; one that does not refuses the exchange.
-- Any reason `external-jwt` gives refuses the login.
 - The id_token must name no audience other than the client, and name the client as `azp` wherever it gives `azp`.
 - The id_token must carry the login's nonce, a subject and a numeric issue time.
 - The id_token must say no login time (`auth_time`) before 0 or past `kernel`'s clock by more than `clock-skew`.

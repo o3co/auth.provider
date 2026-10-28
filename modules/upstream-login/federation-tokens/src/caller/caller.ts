@@ -12,6 +12,8 @@ export type Caller =
 			readonly client: string;
 			readonly session: string;
 			readonly subject: string;
+			/** The scheme its token was presented in, for a challenge of its own. */
+			readonly tokenType: string;
 	  }
 	| {
 			readonly kind: "refused";
@@ -59,6 +61,7 @@ export function callerWith(parts: Parts) {
 			client: grant.issuedTo,
 			session: bound.handle,
 			subject: grant.subject,
+			tokenType,
 		};
 	};
 	return {

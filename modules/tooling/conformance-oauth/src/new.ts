@@ -157,6 +157,17 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 			issuer: { url: part.issuer },
 			...(part.revocation ? { tokens: { revocation: "denylist" } } : {}),
 			clients: clientsSection(part),
+			// Nonces asked at the token endpoint, under a scene's own key: 32 bytes, base64.
+			...(part.dpopNonce
+				? {
+						dpop: {
+							nonce: {
+								required: "as",
+								secret: Buffer.from("conformance dpop nonce key, 32 b").toString("base64"),
+							},
+						},
+					}
+				: {}),
 			...(part.jwtBearer
 				? {
 						"jwt-bearer": {
