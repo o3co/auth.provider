@@ -14,7 +14,7 @@
 ## Invariants
 - An added claim is JSON alone: plain objects (the object prototype or none), arrays with no hole or other property, strings, finite numbers, booleans and null.
 - Only own enumerable data properties are read, and an array's own `length`; nothing given is called. An accessor, a proxy, a cycle, a prototype of its own, a function, a symbol, a bigint or undefined is refused.
-- Reserved at the top: every name an access token's issuer writes, and names a specification gives a meaning it never writes. A payload read back holding one of the latter is none the issuer wrote.
+- Reserved at the top: every name an access token's issuer writes (`aud_added`, how many of the last `aud` values it added, among them), and names a specification gives a meaning it never writes. A payload read back holding one of the latter is none the issuer wrote.
 - Never a key at any depth: `__proto__`, `constructor`, `prototype` and `toJSON`.
 - A name is 1–255 code points, well formed (no lone surrogate), with no control character or space; a string is at most 2048 code points, well formed.
 - At most 256 members to an object or values to an array, 1024 values in all, 8 deep (a claim's value is depth 1), and 4 KiB as JSON in UTF-8.
