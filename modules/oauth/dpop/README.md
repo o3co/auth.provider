@@ -17,7 +17,7 @@
 
 ## Invariants
 - Where a server-provided nonce is asked (RFC 9449 §8), a proof without one taken is refused `use_dpop_nonce` with the current nonce in `DPoP-Nonce`, before the token's hash is checked and before its jti is spent.
-- A nonce is its time bucket and an HMAC under the shared secret, taken in that bucket and the next; nothing is kept, so any instance takes another's.
+- A nonce is its time bucket and an HMAC under the shared secret, taken in that bucket and the next, and only in the very form it was handed out; nothing is kept, so any instance takes another's.
 - The nonce secret is one, as in 0.17: once it is changed, a nonce handed out just before is refused once, and the client sends the proof again with the new nonce.
 - One DPoP header only; repeated headers arrive joined by commas and are refused.
 - A proof not written in its one form (`keys`' rule for a JWS) is no JWT.

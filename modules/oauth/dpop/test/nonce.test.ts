@@ -14,6 +14,21 @@ it("makes a nonce of one bucket, whatever the clock does between its reads", () 
 	expect(nonces(secret, 1000, () => bucket * 1000).verify(issued)).toBe(true);
 });
 
+it("takes a nonce only in the very form it made it", () => {
+	const made = nonces(randomBytes(32), 1000, () => 5_000);
+	const given = made.issue();
+	expect(made.verify(given)).toBe(true);
+	for (const other of [
+		`${given} `,
+		`${given}=`,
+		`${given}!`,
+		`0${given}`,
+		given.replace(".", ". "),
+	]) {
+		expect(made.verify(other), other).toBe(false);
+	}
+});
+
 it("makes a nonce no one foresees without the shared secret: a 256-bit MAC over its bucket, another under another secret, a new one each bucket [rfc9449-8-a]", () => {
 	const secret = randomBytes(32);
 	let at = 5_000;
