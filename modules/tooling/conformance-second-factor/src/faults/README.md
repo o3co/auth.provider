@@ -13,7 +13,7 @@ Internal module of `conformance-second-factor`: what the area's fault scenes sha
 
 ## Invariants
 - The store's own names (spaces, record fields, operations, how a code is kept, the commands it sends) are written in `test/wire.ts` alone, never in a scene's file.
-- A code's use puts its digest last among those used, so a match on one code's use never takes a later code's.
+- A code's use puts its digest last among those used, so a match on one code's use never takes a later code's; a rewrite of the list for another reason would match it too, and no scene makes one.
 - The scene's login attempts are its own value, not the default, so the logins of one scene stay within one window.
 
 ## Depends on

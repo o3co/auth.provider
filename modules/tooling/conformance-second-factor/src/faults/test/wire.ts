@@ -22,7 +22,9 @@ interface FactorList {
 
 /**
  * The write that uses the recovery code up: the subject's factor list with the code's digest last
- * among the recovery codes used. A later code's use puts its own last, so it is never this one's.
+ * among the recovery codes used. A later code's use puts its own last, so it is never this one's; a
+ * rewrite of the list for another reason (another factor's state) would match too, and no scene
+ * makes one.
  */
 export const useOf = (code: string): Match =>
 	storeWrite({
