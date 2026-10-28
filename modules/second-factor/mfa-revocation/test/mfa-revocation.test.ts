@@ -10,7 +10,7 @@ const runtime = quietRuntime();
 
 /** mfa's decisions as far as the bridge asks them: each fence moved, or one that cannot be. */
 const fencing = (fence: FactorManaging["fence"]) =>
-	defineModule({ name: "factors-stand-in", takes: [] }, (m) => [
+	defineModule({ name: "factors-stand-in", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(factorManaging).by(() => ({ fence }) as FactorManaging),
 	]);
 

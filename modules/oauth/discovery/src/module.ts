@@ -15,30 +15,32 @@ function pathsOf(issuer: string): readonly string[] {
 	return [`${path}${openid}`, `${oauth}${path}`].flatMap((p) => [p, `${p}/`]);
 }
 
-export default defineModule({ name: "discovery", takes: [named, metadata] }, (m) =>
-	// Every issuer has the same number of places, so each route is one of them.
-	[0, 1, 2, 3].map((place) =>
-		m.contribute(routes).by(async (c): Promise<Route> => {
-			const issuer = (await c.get(named)).url;
-			// A value with no elements is left out, as an absent one is (OpenID Connect Discovery §4.2,
-			// RFC 8414 §3.2), whichever module contributed it.
-			const items = (await c.collect(metadata)).filter(
-				(item) =>
-					item.value !== undefined && !(Array.isArray(item.value) && item.value.length === 0),
-			);
-			// The issuer comes first and is the configured one; request headers never shape the document.
-			const document = {
-				issuer,
-				...Object.fromEntries(items.map((item) => [item.name, item.value])),
-			};
-			return {
-				method: "GET",
-				changesState: false,
-				path: pathsOf(issuer)[place] as string,
-				// Public metadata a page may read from any listed origin.
-				cors: {},
-				handle: () => ({ status: 200, headers: {}, body: { json: document } }),
-			};
-		}),
-	),
+export default defineModule(
+	{ name: "discovery", replicaSafe: true, takes: [named, metadata] },
+	(m) =>
+		// Every issuer has the same number of places, so each route is one of them.
+		[0, 1, 2, 3].map((place) =>
+			m.contribute(routes).by(async (c): Promise<Route> => {
+				const issuer = (await c.get(named)).url;
+				// A value with no elements is left out, as an absent one is (OpenID Connect Discovery §4.2,
+				// RFC 8414 §3.2), whichever module contributed it.
+				const items = (await c.collect(metadata)).filter(
+					(item) =>
+						item.value !== undefined && !(Array.isArray(item.value) && item.value.length === 0),
+				);
+				// The issuer comes first and is the configured one; request headers never shape the document.
+				const document = {
+					issuer,
+					...Object.fromEntries(items.map((item) => [item.name, item.value])),
+				};
+				return {
+					method: "GET",
+					changesState: false,
+					path: pathsOf(issuer)[place] as string,
+					// Public metadata a page may read from any listed origin.
+					cors: {},
+					handle: () => ({ status: 200, headers: {}, body: { json: document } }),
+				};
+			}),
+		),
 );

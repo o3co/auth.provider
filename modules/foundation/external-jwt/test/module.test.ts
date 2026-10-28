@@ -40,7 +40,7 @@ async function composed(section: Record<string, unknown> | undefined) {
 	const signer = await testSigner("EdDSA", "k1");
 	let now = 1_800_000_000_000;
 	let up = true;
-	const fake = defineModule({ name: "fake-outbound", takes: [] }, (m) => [
+	const fake = defineModule({ name: "fake-outbound", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async () => {
 				if (!up) throw new Unavailable("outbound");
@@ -114,7 +114,7 @@ it("refuses a section outside its bounds", async () => {
 });
 
 it("takes every handle its takes name", async () => {
-	const fake = defineModule({ name: "fake-outbound", takes: [] }, (m) => [
+	const fake = defineModule({ name: "fake-outbound", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async () => {
 				throw new Unavailable("outbound");

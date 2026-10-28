@@ -45,7 +45,7 @@ export function memoryStores() {
 		...sets,
 		add: (...given) => answered("listed.add", sets.add(...given)),
 	});
-	const module = defineModule({ name: "session-stores", takes: [] }, (m) => [
+	const module = defineModule({ name: "session-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(sessionStore).by((c) => {
 			clock = c.clock.now;
 			const { create: save, read, change: update } = kept.records;

@@ -12,6 +12,9 @@ import { section } from "./settings/section.ts";
 export default defineModule(
 	{
 		name: "http",
+		// Safe on many instances given the same `public-origin` and `trusted-proxies` on each
+		// (deployment-guarantees, Several instances); connection and time limits hold per instance.
+		replicaSafe: true,
 		section,
 		// A plain-http origin sends the session's cookie in the clear: for trying it on one machine.
 		refusedInProduction: (s) =>

@@ -4,7 +4,7 @@ import { defineModule } from "@mod/kernel";
 import { carried, issuing, tokenSeconds } from "./check.ts";
 import { deciding, decidingTakes } from "./deciding.ts";
 
-export default defineModule({ name: "csrf", takes: decidingTakes }, (m) => [
+export default defineModule({ name: "csrf", replicaSafe: true, takes: decidingTakes }, (m) => [
 	...deciding(m, "refuse boot"),
 	m.contribute(routes).by(async (c) => {
 		const issue = issuing(await c.get(cookies), c.random);

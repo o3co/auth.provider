@@ -12,7 +12,7 @@ const guaranteeFor: Record<keyof typeof factorStoreNeeds, Guarantee> = {
 };
 const factors: Space = { name: "mfa-store.factors", guarantees: Object.values(guaranteeFor) };
 
-export default defineModule({ name: "mfa-store", takes: [store] }, (m) => [
+export default defineModule({ name: "mfa-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => factors),
 	m.provide(factorStore).by(async (c) => {
 		const place = { store: await c.get(store), space: factors, log: c.log, random: c.random };

@@ -340,7 +340,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `session-closing` (`src/session-closing`): the fault scenes of a closing session closed, every path for its tokens with it (`guarantee-1-a`).
   - `space-lists` (`src/space-lists`): the scenes of the space-delimited lists the code flow writes and reads.
   - `store-rows` (`src/store-rows`): the fault scenes of a store that cannot write, by a code redeemed, and of a Redis set to evict keys (`guarantee-3-j`, `guarantee-3-k`).
-  - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a code while a dependency its decision waits on cannot answer (`guarantee-3-b`).
+  - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a code (`guarantee-3-b`) or a refresh token (`guarantee-3-c`) while a dependency its decision waits on cannot answer.
   - `userinfo` (`src/userinfo`): the scenes of OpenID Connect's userinfo.
   - `verified-email` (`src/verified-email`): the scenes of refusing a token to a user whose email is not verified.
 - `@mod/conformance-device` (verification, `modules/tooling/conformance-device`): Owns the conformance scenes of the device area: device authorization, the verification interface and polling (RFC 8628), refusing an approval by a user whose email is not verified, and the audit events of the verification interface.

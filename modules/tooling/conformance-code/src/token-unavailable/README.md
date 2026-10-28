@@ -1,6 +1,6 @@
 # token-unavailable
 
-Internal module of `conformance-code`: the fault scenes of the token endpoint issuing no token for a code while a dependency its decision waits on cannot answer (`guarantee-3-b`).
+Internal module of `conformance-code`: the fault scenes of the token endpoint issuing no token for a code (`guarantee-3-b`) or a refresh token (`guarantee-3-c`) while a dependency its decision waits on cannot answer.
 
 ## Responsibilities
 - Checks, each scene after a control with no fault (a code used up by one write and a token issued for it), that the endpoint answers `503 temporarily_unavailable` with no token while:
@@ -10,11 +10,12 @@ Internal module of `conformance-code`: the fault scenes of the token endpoint is
 - Where the decision fails before the code's use (`Pu`, `Pd`, `R`, `L`, `S`, `F`, `Fs`), checks that no use of the code took effect.
 - Checks that a decision made while Redis is killed at once and started again gives a token only where the code's use was kept by the server started again, and otherwise answers unavailable, saying which in its report (`C`).
 - After each fault, the topology recovered, the endpoint gives a new code a token.
+- Checks the same for a refresh token, each scene after a control in which a family is rotated by one write and a token issued: the family's record read first where the code's is (`Pd`, `L`, `S`), its session's entry read confirmed under `Fs` after the family's on the same connection, the family's rotation where the code's use is (no rotation where the decision fails before it; a token under `C` only where the rotation was kept).
 
 ## Invariants
-- One file of scenes per grant: a code's in `test/code.faults.case.ts`.
-- The area lets requests go uncounted where the store fails (rate-limit's `fail-mode` open), so each scene reaches the redemption's own decision: the code's read, then its use.
-- The scenes are this area's, not the OAuth area's: a code is issued only by the code flow, which this package composes over `conformance-oauth`'s parts.
+- One file of scenes per grant: a code's in `test/code.faults.case.ts`, a refresh token's in `test/refresh.faults.case.ts`.
+- The area lets requests go uncounted where the store fails (rate-limit's `fail-mode` open), so each scene reaches the grant's own decision: the code's read, then its use; the family's read, its session's, then its rotation.
+- The scenes are this area's, not the OAuth area's: a code, and the refresh token a code's redemption gives, are issued only by the code flow, which this package composes over `conformance-oauth`'s parts.
 
 ## Depends on
-- `faults` (the code flow, and the store's names for the code's read and use); `conformance` (the relay's faults and matches, the topology's promotion, sleep, crash and recovery)
+- `faults` (the code flow and a family's first refresh token, and the store's names for the code's read and use, and the family's read, its session's and its rotation); `conformance` (the relay's faults and matches, the topology's promotion, sleep, crash and recovery)

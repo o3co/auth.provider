@@ -9,7 +9,8 @@ import { accessSigner, signer } from "./signing/signer.ts";
 const ring = contract<Ring>("keys.ring");
 const keySetPath = "/.well-known/jwks.json";
 
-export default defineModule({ name: "keys", section, takes: [] }, (m) => [
+// Safe on many instances given the same keys on each (deployment-guarantees, Several instances).
+export default defineModule({ name: "keys", replicaSafe: true, section, takes: [] }, (m) => [
 	m.provide(ring).by((c) => {
 		const read = readRing(c.section);
 		if ("unreadable" in read)

@@ -63,7 +63,7 @@ transactionListingsContract(
 
 it("declares, for the listings, each guarantee mfa-flows needs, confirmed reads among them", async () => {
 	const declared = contract<readonly Space[]>("declared");
-	const reader = defineModule({ name: "reader", takes: [spaces] }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [spaces] }, (m) => [
 		m.provide(declared).by(async (c) => c.collect(spaces)),
 	]);
 	const app = await assemble({

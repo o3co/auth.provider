@@ -11,6 +11,7 @@ import { resetOver } from "./reset.ts";
 export default defineModule(
 	{
 		name: "mfa-reset",
+		replicaSafe: true,
 		takes: [audit, flowParts, resetParts, factorManaging, factorReading, lockouts, revocations],
 	},
 	(m) => [

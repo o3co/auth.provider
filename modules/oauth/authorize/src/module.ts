@@ -19,6 +19,7 @@ const navigation =
 export default defineModule(
 	{
 		name: "authorize",
+		replicaSafe: true,
 		section,
 		refusedInProduction: (s) =>
 			loopbackPagesRefused({ "login-page": s["login-page"], "step-up-page": s["step-up-page"] }),

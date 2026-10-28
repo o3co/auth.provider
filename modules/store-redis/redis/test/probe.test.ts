@@ -27,14 +27,14 @@ afterEach(async () => {
 });
 
 /** A space that must never be evicted, so boot checks the eviction policy. */
-const kept = defineModule({ name: "kept-owner", takes: [] }, (m) => [
+const kept = defineModule({ name: "kept-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["no-eviction"] })),
 ]);
 
 async function boot(port: number, extra: readonly Module[] = []) {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
-	const asker = defineModule({ name: "asker", takes: [] }, (m) => [
+	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(contract<object>("asker")).by((c) => {
 			context = c;
 			return {};

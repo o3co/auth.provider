@@ -129,7 +129,7 @@ it("refuses a source's client whose secret is no hash, or that holds none, match
 		remote: confidential("remote", "client_secret_post", "plain") as ClientRecord,
 		bare: { id: "bare", kind: "confidential", method: "client_secret_post", sections: {} },
 	};
-	const source = defineModule({ name: "source", takes: [] }, (m) => [
+	const source = defineModule({ name: "source", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({ find: async (id: string) => answers[id] })),
 	]);
 	const c = await boot([], [source]);
@@ -139,7 +139,7 @@ it("refuses a source's client whose secret is no hash, or that holds none, match
 
 it("computes one scrypt per work in use for a known client, an unknown client, an invalid record and another method's client alike, another client_id beside included", async () => {
 	const invalid = { id: "invalid", kind: "confidential", method: "no-such-method" } as ClientRecord;
-	const source = defineModule({ name: "source", takes: [] }, (m) => [
+	const source = defineModule({ name: "source", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id: string) => (id === "invalid" ? invalid : undefined),
 		})),

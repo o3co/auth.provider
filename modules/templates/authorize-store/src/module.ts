@@ -12,7 +12,7 @@ const { namesFromSecret: recordsFor, ...guaranteeFor } = {
 /** Named when authorize kept these records; the name stays, so records written before an upgrade are found after it. */
 const reauths: Space = { name: "authorize-store.reauths", guarantees: Object.values(guaranteeFor) };
 
-export default defineModule({ name: "authorize-store", takes: [store] }, (m) => [
+export default defineModule({ name: "authorize-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => reauths),
 	m.provide(reauthStore).by(async (c) => {
 		const place = { store: await c.get(store), space: reauths, log: c.log, random: c.random };

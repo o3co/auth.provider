@@ -9,7 +9,7 @@ import { section } from "./section.ts";
 /** What the module takes: its helpers' (`routesIn`, `gateIn`); its amr source takes nothing. */
 const takes = [...routesTakes, ...gateTakes];
 
-export default defineModule({ name: "login-passkey", section, takes }, (m) => [
+export default defineModule({ name: "login-passkey", replicaSafe: true, section, takes }, (m) => [
 	m.contribute(amrSources).by((c) => ({
 		name: "login-passkey",
 		amr: amrOf(true, c.section["counts-as-mfa"]),

@@ -548,6 +548,7 @@ export function tokensStandIn(
 	return defineModule(
 		{
 			name: "tokens",
+			replicaSafe: false,
 			takes: [accessConditions, subjectChecks, senderBindings, issuancePolicies],
 		},
 		(m) => [

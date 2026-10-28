@@ -20,7 +20,7 @@ const cors = {
 /** What the endpoint takes: its helpers' (`composedRule`, `endpointIn`), and the grants, the issuer and clients. */
 const takes = [...targetTakes, ...endpointTakes, grants, issuer, clients];
 
-export default defineModule({ name: "token-endpoint", section, takes }, (m) => [
+export default defineModule({ name: "token-endpoint", replicaSafe: true, section, takes }, (m) => [
 	m.provide(targets).by(composedRule),
 	m
 		.provide(composedGrants)

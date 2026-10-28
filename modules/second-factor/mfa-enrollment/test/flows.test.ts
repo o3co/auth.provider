@@ -9,7 +9,7 @@ import { holding } from "../src/held.ts";
 import { clock, serve } from "./harness.ts";
 
 /** A kind that sends a challenge, and takes what the challenge kept as the proof after it. */
-const _sending = defineModule({ name: "kind-sending", takes: [] }, (m) => [
+const _sending = defineModule({ name: "kind-sending", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "sending",
 		amr: ["otp"],
@@ -27,7 +27,7 @@ const _sending = defineModule({ name: "kind-sending", takes: [] }, (m) => [
 
 /** How the told kind answers its next enrollment; its secret is the value no two factors may hold. */
 const told = { answer: undefined as Enrolled | undefined };
-const toldKind = defineModule({ name: "kind-told", takes: [] }, (m) => [
+const toldKind = defineModule({ name: "kind-told", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -209,7 +209,7 @@ const verifies = { guess: 0 };
 afterEach(() => {
 	verifies.guess = 0;
 });
-const slowOnce = defineModule({ name: "kind-slow-once", takes: [] }, (m) => [
+const slowOnce = defineModule({ name: "kind-slow-once", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "once",
 		amr: ["hwk"],
@@ -230,7 +230,7 @@ const slowOnce = defineModule({ name: "kind-slow-once", takes: [] }, (m) => [
 		},
 	})),
 ]);
-const _slowGuess = defineModule({ name: "kind-slow-guess", takes: [] }, (m) => [
+const _slowGuess = defineModule({ name: "kind-slow-guess", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "guess",
 		amr: ["otp"],
@@ -358,17 +358,20 @@ describe("mfa under races and misuse", () => {
 		/** Holds a pending in a transaction, as one sealed by an earlier release, without its first mark. */
 		const forging =
 			contract<(tx: string, subject: string, secret: string) => Promise<boolean>>("test.forging");
-		const forger = defineModule({ name: "forger", takes: [flowParts, seal] }, (m) => [
-			m.provide(forging).by(async (c) => {
-				const sealed = await c.get(seal);
-				const held = (await c.get(flowParts)).transactions;
-				return (tx, subject, secret) =>
-					holding(held).hold(
-						tx,
-						sealed.seal(JSON.stringify({ kind: "code", secret }), `${subject}\npending`),
-					);
-			}),
-		]);
+		const forger = defineModule(
+			{ name: "forger", replicaSafe: false, takes: [flowParts, seal] },
+			(m) => [
+				m.provide(forging).by(async (c) => {
+					const sealed = await c.get(seal);
+					const held = (await c.get(flowParts)).transactions;
+					return (tx, subject, secret) =>
+						holding(held).hold(
+							tx,
+							sealed.seal(JSON.stringify({ kind: "code", secret }), `${subject}\npending`),
+						);
+				}),
+			],
+		);
 		const s = await serve({ mode: "required" }, [forger]);
 		const { tx } = await s.heldLogin("lou");
 		const held = new Map(s.jar());

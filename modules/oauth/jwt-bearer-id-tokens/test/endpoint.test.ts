@@ -202,7 +202,7 @@ async function serve(
 	// The store the simulated one provides, by its own handle: a feature names no capability.
 	const provided = store.module.provides?.[0]?.contract as Contract<object>;
 	const storeModule = shared
-		? defineModule({ name: "store", takes: [] }, (m) => [
+		? defineModule({ name: "store", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(provided).by(() => shared.app.get(provided)),
 			])
 		: store.module;
