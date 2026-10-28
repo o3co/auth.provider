@@ -41,28 +41,31 @@ const placeIn = async (c: Pick<BuildContext<unknown>, "get" | "log" | "random">,
 	random: c.random,
 });
 
-export default defineModule({ name: "session-tokens-store", section, takes: [store] }, (m) => [
-	m.contribute(spaces).by(() => issued),
-	m.contribute(spaces).by(() => indexed),
-	m.contribute(spaces).by(() => pending),
-	m.provide(issuedTokens).by(async (c) => {
-		const cap = c.section["references-per-session"];
-		const sets = keyedSetsIn({
-			...(await placeIn(c, issued)),
-			cap,
-			clock: c.clock,
-		});
-		return { ...sets, size: cap };
-	}),
-	m.provide(tokenIndex).by(async (c) => {
-		const records = recordsIn<string>(await placeIn(c, indexed));
-		return { save: records.create, read: records.read };
-	}),
-	m.provide(pendingSessions).by(async (c) =>
-		deferredIn({
-			...(await placeIn(c, pending)),
-			shards: c.section["pending-shards"],
-			perShard: c.section["pending-per-shard"],
+export default defineModule(
+	{ name: "session-tokens-store", replicaSafe: true, section, takes: [store] },
+	(m) => [
+		m.contribute(spaces).by(() => issued),
+		m.contribute(spaces).by(() => indexed),
+		m.contribute(spaces).by(() => pending),
+		m.provide(issuedTokens).by(async (c) => {
+			const cap = c.section["references-per-session"];
+			const sets = keyedSetsIn({
+				...(await placeIn(c, issued)),
+				cap,
+				clock: c.clock,
+			});
+			return { ...sets, size: cap };
 		}),
-	),
-]);
+		m.provide(tokenIndex).by(async (c) => {
+			const records = recordsIn<string>(await placeIn(c, indexed));
+			return { save: records.create, read: records.read };
+		}),
+		m.provide(pendingSessions).by(async (c) =>
+			deferredIn({
+				...(await placeIn(c, pending)),
+				shards: c.section["pending-shards"],
+				perShard: c.section["pending-per-shard"],
+			}),
+		),
+	],
+);
