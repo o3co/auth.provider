@@ -6,7 +6,7 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { redirectsFor } from "@mod/redirect-uris/testing";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { type Decision, recorded as refused } from "../../decision.ts";
 import { routeWith } from "../route.ts";
 
@@ -119,4 +119,74 @@ it("leaves Unavailable before the redirect URI is trusted to http, which answers
 		},
 	]);
 	expect(before.recorded).toEqual([]);
+});
+
+describe("route: an OpenID Connect request", () => {
+	/** A client that registered no redirect URI. */
+	const bare: Client = { ...nocode, id: "bare", section: <T>() => ({ "redirect-uris": [] }) as T };
+	const find = async (id: string) => ({ nocode, bare })[id as "nocode" | "bare"];
+	const issued = route(async () => ({ kind: "code", code: "c1", subject: "alice" }), find);
+	/** The query an OpenID request sends, with these values set and those named in `left` left out. */
+	const oidc = (extra: Record<string, string> = {}, ...left: string[]) => {
+		const sent = new Map([...query, ["scope", ["openid read"]], ["state", ["s1"]]]);
+		for (const [name, value] of Object.entries(extra)) sent.set(name, [value]);
+		for (const name of left) sent.delete(name);
+		return sent;
+	};
+	/** Where an answer sends the browser, and the code, error, state and iss it carries. */
+	const sentBack = async (answer: typeof issued.answer, sent: Map<string, string[]>) => {
+		const res = await answer(testRequest({ query: sent }));
+		const at = new URL(res.headers?.location ?? "");
+		const carried = ["code", "error", "state", "iss"].map((n) => at.searchParams.get(n));
+		return [res.status, `${at.origin}${at.pathname}`, ...carried];
+	};
+
+	it("answers one without a client or a registered redirect URI locally, never sending it on [oidc-core-3.1.2.1-d] [oidc-core-3.1.2.1-e] [oidc-core-3.1.2.2-c] [rfc6749-3.1.2.2-a] [rfc6749-3.1.2.2-b]", async () => {
+		for (const sent of [
+			oidc({}, "client_id"),
+			oidc({ client_id: "" }),
+			oidc({}, "redirect_uri"),
+			oidc({ redirect_uri: "" }),
+			oidc({ client_id: "bare" }),
+			oidc({ client_id: "bare", redirect_uri: "http://127.0.0.1:9000/cb" }),
+		]) {
+			const res = await issued.answer(testRequest({ query: sent }));
+			expect([res.status, res.headers?.location], JSON.stringify([...sent])).toEqual([
+				400,
+				undefined,
+			]);
+		}
+	});
+
+	it("sends its code, and every refusal once the redirect URI is trusted, back to it by 302 with state and iss [oidc-core-3.1.2.2-i] [oidc-core-16.22-a]", async () => {
+		const refused = (error: string) => [302, callback, null, error, "s1", "https://as.example"];
+		expect(await sentBack(issued.answer, oidc())).toEqual([
+			302,
+			callback,
+			"c1",
+			null,
+			"s1",
+			"https://as.example",
+		]);
+		expect(await sentBack(route(undefined, find).answer, oidc())).toEqual(
+			refused("unauthorized_client"),
+		);
+		const repeated = oidc();
+		repeated.set("nonce", ["n1", "n2"]);
+		expect(await sentBack(issued.answer, repeated)).toEqual(refused("invalid_request"));
+		expect(await sentBack(issued.answer, oidc({ nonce: "n".repeat(2049) }))).toEqual(
+			refused("invalid_request"),
+		);
+	});
+
+	it("takes one by POST as by GET, sending it on to the same GET by 303 [oidc-core-3.1.2.1-a]", async () => {
+		const sent = oidc();
+		const res = await issued.answer(testRequest({ method: "POST", form: sent }));
+		expect(res.status).toBe(303);
+		const at = new URL(res.headers?.location ?? "");
+		expect(`${at.origin}${at.pathname}`).toBe("https://as.example/oauth/authorize");
+		const again = new Map([...at.searchParams].map(([k, v]) => [k, [v]]));
+		expect(again).toEqual(sent);
+		expect((await sentBack(issued.answer, again))[2]).toBe("c1");
+	});
 });

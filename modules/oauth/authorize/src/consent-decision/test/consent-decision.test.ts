@@ -35,4 +35,17 @@ describe("consent-decision", () => {
 			["third", "alice", ["write"]],
 		]);
 	});
+
+	it("refuses a client that is not first-party while consent cannot ask, reading no prompt, and serves a first-party one [oidc-core-3.1.2.1-o]", () => {
+		const decision = consentDecisionWith({
+			consents: { asking: false, ask: async () => "", covers: async () => true },
+		});
+		expect(decision.served(clientOf("third", false))).toEqual({
+			kind: "refuse",
+			error: "unauthorized_client",
+			reason: "client_not_first_party",
+			description: "client is not authorized for the authorization endpoint",
+		});
+		expect(decision.served(clientOf("app", true))).toBeUndefined();
+	});
 });
