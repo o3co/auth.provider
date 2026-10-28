@@ -560,7 +560,8 @@ jobs:
   # `evidence-runs` names a run of kind `faults`; its `conformance:faults` reports as
   # `<area>#faults`. With CONFORMANCE_FAULTS=1 a scene that cannot run (no Docker, no libfaketime
   # that moves Node's clock) fails rather than skips. Two at a time: each holds several Redis
-  # containers and app instances.
+  # containers and app instances. One leg also runs conformance's deployment tests, which move an
+  # instance's clock: only this job holds the library they need.
   conformance-faults:
     needs: conformance-plan
     if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
@@ -629,6 +630,13 @@ jobs:
           # What each scene ran on, beside the evidence and apart from it: compliance reads every file there.
           CONFORMANCE_FAULTS_DIR: ${{ runner.temp }}/fault-setups
         run: pnpm --filter "${{ matrix.area }}" run conformance:faults
+      # The deployment's tests, among them those that move an instance's clock, in one leg alone; with
+      # CONFORMANCE_FAULTS=1 a missing library fails them rather than skips. They report no evidence.
+      - name: Deployment tests with a moved clock
+        if: ${{ !cancelled() && strategy.job-index == 0 }}
+        env:
+          CONFORMANCE_FAULTS: '1'
+        run: pnpm exec vitest run --config vitest.integration.config.ts modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts
       - name: Keep what each scene ran on
         if: always()
         uses: actions/upload-artifact@v4
