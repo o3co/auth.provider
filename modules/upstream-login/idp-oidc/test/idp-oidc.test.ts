@@ -351,11 +351,17 @@ describe("idp-oidc", () => {
 			),
 		});
 		// The same code points, escaped: the issuer it names is ours.
-		for (const escaped of ["https:\\/\\/idp.example", "https://idp.\\u0065xample", "\\u0068ttps://idp.example"]) {
+		for (const escaped of [
+			"https:\\/\\/idp.example",
+			"https://idp.\\u0065xample",
+			"\\u0068ttps://idp.example",
+		]) {
 			await expect(open({ describes: describedAs(escaped) }), escaped).resolves.toBeDefined();
 		}
 		for (const other of ["https://idp.\\u0045xample", "https://idp.example\\/"]) {
-			await expect(open({ describes: describedAs(other) }), other).rejects.toThrow(/another issuer/);
+			await expect(open({ describes: describedAs(other) }), other).rejects.toThrow(
+				/another issuer/,
+			);
 		}
 	});
 
