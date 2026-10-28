@@ -112,3 +112,74 @@ export const spendOf = (a: Assertion): Match =>
 			.digest("base64url"),
 		operations: ["putIfAbsent"],
 	});
+
+const clientKey = generateKeyPairSync("ec", { namedCurve: "P-256" });
+/** The client that authenticates by an assertion signed with its key (`private_key_jwt`). */
+export const keyed: ClientScene = {
+	id: "keyed",
+	kind: "confidential",
+	method: "private_key_jwt",
+	keys: [{ ...clientKey.publicKey.export({ format: "jwk" }), kid: "k1", use: "sig" }],
+	grants: ["client_credentials"],
+	scopes: ["read"],
+	defaultScopes: ["read"],
+};
+
+/** Client credentials on the Redis store, for one client authenticating by its key. */
+export const keyedScene = (): AreaScene =>
+	oauthScene({
+		issuer,
+		keys: {
+			signing: {
+				kid: "faults",
+				alg: "EdDSA",
+				privatePem: pem(provider.privateKey, "pkcs8"),
+				publicPem: pem(provider.publicKey, "spki"),
+			},
+		},
+		clients: [keyed],
+		storeFaults: true,
+	});
+
+/** An assertion the keyed client signs to authenticate, with a `jti` of its own. */
+export function clientAssertion(): Assertion {
+	const now = Math.floor(Date.now() / 1000);
+	const jti = randomUUID();
+	const body = { iss: keyed.id, sub: keyed.id, aud: issuer, iat: now, exp: now + 300, jti };
+	const input = `${b64({ alg: "ES256", kid: "k1" })}.${b64(body)}`;
+	const signature = sign("sha256", Buffer.from(input), {
+		key: clientKey.privateKey,
+		dsaEncoding: "ieee-p1363",
+	}).toString("base64url");
+	return { jwt: `${input}.${signature}`, jti };
+}
+
+/** A client credentials request the keyed client authenticates by the assertion. */
+export async function authenticatedAt(i: Instance, a: Assertion): Promise<Answer> {
+	const res = await fetch(`${i.baseUrl}/oauth/token`, {
+		method: "POST",
+		headers: { "content-type": "application/x-www-form-urlencoded" },
+		body: new URLSearchParams({
+			grant_type: "client_credentials",
+			client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+			client_assertion: a.jwt,
+		}),
+	});
+	const text = await res.text();
+	let body: Record<string, unknown> = {};
+	try {
+		body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+	} catch {}
+	return { status: res.status, body };
+}
+
+/** The write that spends the client assertion's `jti`: its record placed under the client's and the jti's name. */
+export const clientSpendOf = (a: Assertion): Match =>
+	storeWrite({
+		prefix,
+		space: "client-assertion-store.spent",
+		partition: createHash("sha256")
+			.update(JSON.stringify([keyed.id, a.jti]))
+			.digest("base64url"),
+		operations: ["putIfAbsent"],
+	});
