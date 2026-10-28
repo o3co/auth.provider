@@ -108,12 +108,18 @@ describe("the claim table", () => {
 		]);
 	});
 
-	it("lists in claims_supported every claim it releases", async () => {
+	it("lists in claims_supported every claim it releases, each OpenID Connect's or one registered beside them [oidc-core-5.1.2-a]", async () => {
 		const app = await boot(full);
 		const all = await app.get(releasedClaims).of("s-alice", ["profile", "email", "groups"]);
 		const supported = app.get(published).find((item) => item.name === "claims_supported");
 		expect(Object.keys(all)).toHaveLength(5);
 		expect(supported?.value).toEqual(expect.arrayContaining(Object.keys(all)));
+		// The table is fixed: OpenID Connect Core's standard claims, and groups, registered for JWTs
+		// (RFC 7643's attribute, in IANA's JSON Web Token Claims registry).
+		const standard = ["sub", "name", "picture", "email", "email_verified"];
+		for (const claim of (supported?.value ?? []) as string[]) {
+			expect([...standard, "groups"], claim).toContain(claim);
+		}
 	});
 
 	it("counts only whole scope words, so a word joined by a tab or other blank releases nothing", async () => {
