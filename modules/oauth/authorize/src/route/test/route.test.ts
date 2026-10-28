@@ -179,6 +179,18 @@ describe("route: an OpenID Connect request", () => {
 		);
 	});
 
+	// The values the authorize endpoint receives; each other endpoint's are its own module's to check.
+	it("sends a state holding reserved characters back as the one value it was sent [rfc6749-10.14-a]", async () => {
+		const state = "a&b=c#d%25e+f g/?";
+		const res = await issued.answer(testRequest({ query: oidc({ state }) }));
+		const at = new URL(res.headers?.location ?? "");
+		expect([at.hash, at.searchParams.getAll("state"), at.searchParams.get("code")]).toEqual([
+			"",
+			[state],
+			"c1",
+		]);
+	});
+
 	it("takes one by POST as by GET, sending it on to the same GET by 303 [oidc-core-3.1.2.1-a]", async () => {
 		const sent = oidc();
 		const res = await issued.answer(testRequest({ method: "POST", form: sent }));
