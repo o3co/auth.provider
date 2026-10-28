@@ -202,7 +202,7 @@ describe("the audience a request asks for", () => {
 	});
 
 	it("answers a grant another module contributes, as token exchange is, by the same no-store answer as its own [oidc-core-16.4-a]", async () => {
-		const exchanging = defineModule({ name: "exchanging", takes: [] }, (m) => [
+		const exchanging = defineModule({ name: "exchanging", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:echo",
 				readsAmbient: "none",
