@@ -21,6 +21,7 @@ const app: ClientScene = {
 	scopes: ["openid", "read"],
 	redirectUris: [callback],
 	firstParty: true,
+	audiences: ["https://api.example"],
 };
 
 let running: Started;
@@ -42,6 +43,7 @@ beforeAll(async () => {
 			refresh: {},
 			discovery: true,
 			userinfo: true,
+			introspection: true,
 			corsOrigins: [page],
 		}),
 	);
@@ -105,7 +107,7 @@ describe("OpenID Connect: the ID token", () => {
 		}
 	});
 
-	it("carries the nonce asked in the ID token alone, in no access or refresh token and no other member of the answer [oidc-core-2-j]", async () => {
+	it("carries the nonce asked in the ID token alone: in no access or refresh token, no other member of the answers, nor userinfo or introspection [oidc-core-2-j]", async () => {
 		const nonce = "n-only-in-the-id-token-0123";
 		const { tokens } = await signedIn({ nonce });
 		expect(claimsOf(tokens.id_token).nonce).toBe(nonce);
@@ -127,6 +129,23 @@ describe("OpenID Connect: the ID token", () => {
 		)) as Record<string, string>;
 		expect(JSON.stringify(refreshed)).not.toContain(nonce);
 		expect(JSON.stringify(claimsOf(refreshed.access_token))).not.toContain(nonce);
+		for (const [name, token] of [
+			["first", tokens.access_token],
+			["refreshed", refreshed.access_token],
+		] as const) {
+			const userinfo = await fetch(`${base}/oauth/userinfo`, {
+				headers: { ...backChannel, authorization: `Bearer ${token}` },
+			});
+			expect(await succeeded(userinfo, "userinfo")).not.toHaveProperty("nonce");
+			const introspected = await fetch(`${base}/oauth/introspect`, {
+				method: "POST",
+				headers: { ...backChannel, "content-type": "application/x-www-form-urlencoded" },
+				body: new URLSearchParams({ token, client_id: app.id, client_secret: app.secret ?? "" }),
+			});
+			const answer = await succeeded(introspected, "introspection");
+			expect(answer.active, name).toBe(true);
+			expect(JSON.stringify(answer)).not.toContain(nonce);
+		}
 	});
 
 	it("answers prompt=none with a code for the session it has, no id_token_hint asked [oidc-core-3.1.2.1-v] [oidc-core-15.1-b]", async () => {
