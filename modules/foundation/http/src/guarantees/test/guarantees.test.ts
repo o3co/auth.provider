@@ -100,7 +100,7 @@ describe("a route's declared guarantees", () => {
 
 	it("counts a policy only by the mark of its own value, never by its name [guarantee-9-b]", async () => {
 		const named = policy("test.site");
-		const module = defineModule({ name: "named", replicaSafe: true, takes: [] }, (m) => [
+		const module = defineModule({ name: "named", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(policies).by(() => applying(named, () => "pass")),
 		]);
 		const declared = assemble({

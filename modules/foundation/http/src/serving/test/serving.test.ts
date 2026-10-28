@@ -538,7 +538,7 @@ describe("stop", () => {
 	it("closes every connection at once when stop reaches it past the deadline", async () => {
 		const gate = gated();
 		const held = contract<object>("test.held");
-		const hanging = defineModule({ name: "hanging", replicaSafe: true, takes: [] }, (m) => [
+		const hanging = defineModule({ name: "hanging", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(held).by((c) => {
 				c.onStop(() => new Promise(() => {}));
 				return {};
