@@ -6,40 +6,72 @@ import { budget, pkg } from "./workspace.ts";
 // A fixture with exports has its contract surface built by the type checker, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
 
-// Each case is one misdesign of a module whose shape is otherwise sound, and the one rule that stops
-// it; docs/gates.md names these tests beside the gates no rule of the guard is.
+// Static-analysis specimens: packages written for the import rules to read, never composed. Each is a
+// sound workspace but for one feature's misdesign, and the whole workspace's violations are checked.
 const kernel = pkg(
 	"@mis/kernel",
-	{ "src/contract.ts": "export const contract = (name: string) => ({ name });\n" },
+	{
+		"src/contract.ts": [
+			"export interface Contract<T> { readonly label: string; readonly _t?: T }",
+			"export const contract = <T>(label: string): Contract<T> => ({ label });",
+			"export const defineModule = (d: object, parts: (m: unknown) => unknown[]) => ({ d, parts });",
+		].join("\n"),
+	},
 	{ exports: { ".": "./src/contract.ts" } },
 	"foundation",
 );
 const store = pkg(
 	"@mis/store",
-	{ "src/contract.ts": "export const store = 1;\n" },
-	{ exports: { ".": "./src/contract.ts" } },
+	{
+		"src/contract.ts":
+			'import { contract } from "@mis/kernel";\nexport const store = contract<object>("store");\n',
+	},
+	{ exports: { ".": "./src/contract.ts" }, dependencies: { "@mis/kernel": "*" } },
 	"capability",
 );
+/** A feature named `name`, providing its contract by `by`, importing `imports` and depending on `on`. */
+const feature = (
+	name: string,
+	{ imports = "", by = "() => ({})", on = [] as readonly string[] } = {},
+	kind = "feature",
+) =>
+	pkg(
+		name,
+		{
+			"src/contract.ts": `import { contract } from "@mis/kernel";\nexport const offered = contract<object>("${name}");\n`,
+			"src/module.ts": [
+				'import { defineModule } from "@mis/kernel";',
+				'import { offered } from "./contract.ts";',
+				imports,
+				`export default defineModule({ name: "${name}", takes: [] }, (m: any) => [m.provide(offered).by(${by})]);`,
+			].join("\n"),
+		},
+		{
+			exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
+			dependencies: Object.fromEntries(["@mis/kernel", ...on].map((n) => [n, "*"])),
+		},
+		kind,
+	);
+const owner = feature("@mis/owner");
 const adapter = pkg(
 	"@mis/adapter",
-	{ "src/contract.ts": "export const adapted = 1;\n" },
-	{ exports: { ".": "./src/contract.ts" } },
-	"adapter",
-);
-const sibling = pkg(
-	"@mis/sibling",
 	{
-		"src/contract.ts": "export const sibling = 1;\n",
-		"src/module.ts": 'export default { name: "sibling" };\n',
+		"src/contract.ts":
+			'import { contract } from "@mis/kernel";\nexport const adapted = contract<object>("adapted");\n',
 	},
-	{ exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" } },
+	{
+		exports: { ".": "./src/contract.ts" },
+		dependencies: { "@mis/kernel": "*", "@mis/owner": "*" },
+		adapts: "@mis/owner",
+	},
+	"adapter",
 );
 const keys = pkg(
 	"@mis/keys",
 	{
 		"src/contract.ts": [
 			'import { contract } from "@mis/kernel";',
-			'export const signing = contract("keys.signing");',
+			'export const signing = contract<object>("keys.signing", { takenBy: ["@mis/signer"] });',
 		].join("\n"),
 	},
 	{
@@ -49,60 +81,56 @@ const keys = pkg(
 	},
 	"foundation",
 );
-/** A feature whose module is `module`, depending on `on`. */
-const feature = (name: string, module: string, on: readonly string[]) =>
-	pkg(
-		name,
-		{ "src/contract.ts": "export const used = 1;\n", "src/module.ts": module },
-		{
-			exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
-			dependencies: Object.fromEntries(on.map((n) => [n, "*"])),
-		},
-	);
-/** The rules a feature's misdesign raises, among a workspace otherwise sound. */
+const signer = feature("@mis/signer", {
+	imports: 'import { signing } from "@mis/keys";',
+	by: "() => signing",
+	on: ["@mis/keys"],
+});
+const sound: readonly Pkg[] = [kernel, store, owner, adapter, keys, signer];
+/** The rules the whole workspace raises with `misdesigned` in it. */
 const raised = (misdesigned: Pkg) =>
 	[
-		...new Set(
-			importViolations([kernel, store, adapter, sibling, keys, misdesigned], budget)
-				.filter((v) => v.where.startsWith(misdesigned.name))
-				.map((v) => v.rule.split(" ")[0]),
-		),
+		...new Set(importViolations([...sound, misdesigned], budget).map((v) => v.rule.split(" ")[0])),
 	].sort();
 
-describe("misdesigns the import rules stop", () => {
-	it("G16 stops a feature that keeps its data by taking the store itself, not through a store interface its wiring builds", () => {
-		const keeping = feature(
-			"@mis/own-store",
-			'import { store } from "@mis/store";\nexport default store;\n',
-			["@mis/store"],
-		);
-		expect(raised(keeping)).toEqual(["G16"]);
+describe("static-analysis specimens: misdesigns the import rules stop", () => {
+	it("raises nothing for the sound workspace the specimens are put in", () => {
+		expect(importViolations([...sound, feature("@mis/plain")], budget)).toEqual([]);
 	});
 
-	it("G10 stops a feature that leans on an adapter, below which it stands", () => {
-		const leaning = feature(
-			"@mis/on-adapter",
-			'import { adapted } from "@mis/adapter";\nexport default adapted;\n',
-			["@mis/adapter"],
-		);
+	it("G16 stops a feature that takes a store directly", () => {
+		const taking = feature("@mis/takes-store", {
+			imports: 'import { store } from "@mis/store";',
+			by: "() => store",
+			on: ["@mis/store"],
+		});
+		expect(raised(taking)).toEqual(["G16"]);
+	});
+
+	it("G10 stops a feature that depends on an adapter", () => {
+		const leaning = feature("@mis/on-adapter", {
+			imports: 'import { adapted } from "@mis/adapter";',
+			by: "() => adapted",
+			on: ["@mis/adapter"],
+		});
 		expect(raised(leaning)).toEqual(["G10"]);
 	});
 
-	it("G3 stops a feature that composes another module itself, the assembly's to compose", () => {
-		const composing = feature(
-			"@mis/composes",
-			'import sibling from "@mis/sibling/module";\nexport default sibling;\n',
-			["@mis/sibling"],
-		);
+	it("G3 stops a feature that composes another module itself", () => {
+		const composing = feature("@mis/composes", {
+			imports: 'import owner from "@mis/owner/module";',
+			by: "() => owner",
+			on: ["@mis/owner"],
+		});
 		expect(raised(composing)).toEqual(["G3"]);
 	});
 
-	it("G31 stops a feature taking a contract its owner keeps for named takers alone", () => {
-		const taking = feature(
-			"@mis/takes-signing",
-			'import { signing } from "@mis/keys";\nexport default signing;\n',
-			["@mis/keys"],
-		);
+	it("G31 stops a feature that takes a contract its owner keeps for named takers", () => {
+		const taking = feature("@mis/takes-signing", {
+			imports: 'import { signing } from "@mis/keys";',
+			by: "() => signing",
+			on: ["@mis/keys"],
+		});
 		expect(raised(taking)).toEqual(["G31"]);
 	});
 });
