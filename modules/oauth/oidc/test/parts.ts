@@ -28,7 +28,7 @@ import oidc from "../src/module.ts";
 
 /** Sessions known by handle, entered as given. */
 export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
-	defineModule({ name: "sessions", replicaSafe: true, takes: [] }, (m) => [
+	defineModule({ name: "sessions", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
 				entryOf: async (handle) => {
@@ -42,7 +42,7 @@ export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
 	]);
 
 /** A ledger that cannot look users up by subject. */
-export const unanswering = defineModule({ name: "ledger", replicaSafe: true, takes: [] }, (m) => [
+export const unanswering = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(ledgers).by(() => ({
 		verify: async () => ({ kind: "none" }),
 		bySubject: async () => ({ kind: "unanswerable" }),
