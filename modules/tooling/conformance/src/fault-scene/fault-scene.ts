@@ -1,4 +1,4 @@
-import type { AreaScene } from "../areas.ts";
+import type { AreaScene, StartOptions } from "../areas.ts";
 import { type Instance, startDeployment } from "../deployment/deployment.ts";
 import { startTopology, type Topology } from "../faults/topology.ts";
 import type { Match, Upstream } from "../relay/relay.ts";
@@ -13,7 +13,7 @@ export interface Deployed {
 	stop(): Promise<void>;
 }
 
-export interface Deploying {
+export interface Deploying extends StartOptions {
 	readonly name: string;
 	readonly scene: AreaScene;
 	/** 2 unless said otherwise. */
@@ -43,6 +43,7 @@ export async function deployed(o: Deploying): Promise<Deployed> {
 			topology,
 			instances: o.instances ?? 1,
 			...(o.redis ? { redis: o.redis } : {}),
+			...(o.trustedCertificates ? { trustedCertificates: o.trustedCertificates } : {}),
 		});
 		const d: Deployed = {
 			topology,

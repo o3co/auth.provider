@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AreaScene } from "../areas.ts";
+import type { AreaScene, StartOptions } from "../areas.ts";
 import { type AuditTrail, auditSink } from "../audit/audit.ts";
 import { appClockEnv, hostLibfaketime } from "../clock/clock.ts";
 import type { Started } from "../driver.ts";
@@ -15,7 +15,8 @@ import { type Identity, identityDifferences, identityOf } from "./identity.ts";
 import { markInstance, sweepStrayInstances, unmarkInstance } from "./stray.ts";
 import { startTrace, type Traced } from "./trace.ts";
 
-export interface DeploymentSpec {
+/** What each instance is started with, besides the scene: the start's own options, so they mean one thing. */
+export interface DeploymentSpec extends StartOptions {
 	/** The scene's name, for its record. */
 	readonly name: string;
 	readonly scene: AreaScene;
@@ -138,7 +139,8 @@ export async function startDeployment(spec: DeploymentSpec) {
 					store,
 					undefined,
 					layers,
-					{},
+					// The same options at every start, a restart's among them.
+					spec.trustedCertificates ? { trustedCertificates: spec.trustedCertificates } : {},
 					{
 						redis: { url: relay.url, ...redis },
 						audit: sink,
