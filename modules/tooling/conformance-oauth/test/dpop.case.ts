@@ -190,10 +190,11 @@ describe.runIf(areaTarget().can("dpop"))("with DPoP nonces at the token endpoint
 	const { nonced } = running(true, true);
 	const nonceShape = /^\d+\.[A-Za-z0-9_-]+$/;
 	it("refuses a proof without the current nonce in one DPoP-Nonce header, and takes one with it [rfc9449-8-b]", async () => {
-		const stale = `1.${"A".repeat(43)}`;
+		// The shape of a nonce, of a window long gone, under a MAC never made here.
+		const forged = `1.${"A".repeat(43)}`;
 		for (const [named, claims] of [
 			["no nonce", {}],
-			["a stale nonce", { nonce: stale }],
+			["a nonce not issued for now", { nonce: forged }],
 		] as const) {
 			const refused = await nonced(await proof(claims));
 			expect([refused.status, refused.body.error], named).toEqual([400, "use_dpop_nonce"]);
