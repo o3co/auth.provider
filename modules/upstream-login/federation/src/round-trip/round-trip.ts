@@ -105,6 +105,11 @@ export const sent = (location: string, cookies: readonly string[]): HttpResponse
 	headers: { ...noStore, location },
 	cookies,
 });
+export const landed = (location: string, cookies: readonly string[]): HttpResponse => ({
+	status: 303,
+	headers: { ...noStore, location },
+	cookies,
+});
 /** What a start or a callback answers when a store or the upstream cannot tell, in OAuth's word. */
 const unavailable = { error: "temporarily_unavailable" };
 export const secondOf = (ms: number) => Math.floor(ms / 1000) * 1000;
