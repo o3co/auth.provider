@@ -55,7 +55,7 @@ async function documentOf(extra: Module[], origin?: string) {
 	return Object.fromEntries(items.map((item) => [item.name, item.value]));
 }
 
-it("publishes its location, the grants it dispatches to, and the client authentication methods with their algorithms", async () => {
+it("publishes its location, the grants it dispatches to, and the client authentication methods with their algorithms [rfc8414-2-h]", async () => {
 	const document = await documentOf([echo, signed], "https://as.example");
 	expect(document.token_endpoint).toBe("https://as.example/oauth/token");
 	expect(document.grant_types_supported).toEqual(["client_credentials", "urn:test:echo"]);
