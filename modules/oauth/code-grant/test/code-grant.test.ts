@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
@@ -56,7 +56,18 @@ import { codeGrantConfig, codeStoreContract } from "../src/testing.ts";
 const grantsSeen = contract<readonly Grant[]>("grants-seen");
 
 let shift = 0;
-const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
+/** Every draw of 32 bytes the composition made, in order, so a test can tell what a code was made from. */
+const drawn: Uint8Array[] = [];
+const runtime = quietRuntime({
+	clock: { now: () => Date.now() + shift },
+	random: {
+		bytes: (n) => {
+			const bytes = new Uint8Array(randomBytes(n));
+			if (n === 32) drawn.push(bytes);
+			return bytes;
+		},
+	},
+});
 let stop = async () => {};
 /** A code's name as a place might make it: not the code, so a test that peeks by code finds nothing. */
 const nameOf = (code: string) => `n.${createHash("sha256").update(code).digest("base64url")}`;
@@ -83,6 +94,7 @@ const memoryStores = () => {
 };
 afterEach(async () => {
 	shift = 0;
+	drawn.length = 0;
 	await stop();
 });
 
@@ -450,7 +462,7 @@ it("refuses a code the policies refuse once it is used up, issuing nothing", asy
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 });
 
-it("redeems a code once, and a code that comes again revokes what it gave [rfc6749-4.1.2-d] [rfc6749-4.1.2-e]", async () => {
+it("redeems a code once, and a code that comes again revokes what it gave [rfc6749-4.1.2-d] [rfc6749-4.1.2-e] [oidc-core-16.9-a]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const first = await s.redeem(code);
@@ -505,7 +517,7 @@ it("drops a listed void whose record it does not know, as one it cannot revoke, 
 	expect(s.stores.pending()).toEqual([]);
 });
 
-it("refuses a request missing the code, the redirect URI or the verifier, or with a malformed verifier, leaving the code unused [rfc6749-5.2-f] [rfc7636-4.5-b] [rfc6749-4.1.3-e]", async () => {
+it("refuses a request missing the code, the redirect URI or the verifier, each sent empty as one left out, or with a malformed verifier, leaving the code unused [rfc6749-5.2-f] [rfc7636-4.5-b] [rfc6749-4.1.3-e] [rfc6749-3.2-b]", async () => {
 	const s = await serve();
 	const code = await s.issue();
 	const cases: Record<string, Record<string, string>> = {
@@ -569,7 +581,7 @@ it("issues nothing for a code whose session falls short of a requirement to be u
 	await expect(s.app.get(codes).issue(s.facts), "a code for it").rejects.toThrow(Unavailable);
 });
 
-it("keeps an unused code for code-lifetime, and no longer", async () => {
+it("keeps an unused code for code-lifetime, and no longer [oidc-core-16.9-a]", async () => {
 	const s = await serve({ codeGrant: { "code-lifetime": "10s" } });
 	const code = await s.issue();
 	shift = 9000;
@@ -1166,6 +1178,20 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 			await stop();
 		}
 	});
+});
+
+it("makes each code of 32 fresh random bytes, nothing of its challenge, and gives the challenge out nowhere [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc7636-4.4-b]", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	const made = drawn.at(-1);
+	expect(made && Buffer.from(made).toString("base64url")).toBe(code);
+	const other = await s.issue();
+	expect(other).not.toBe(code);
+	expect(Buffer.from(drawn.at(-1) ?? []).toString("base64url")).toBe(other);
+	expect(code).not.toContain(challenge);
+	const redeemed = await s.redeem(code);
+	expect(redeemed.status).toBe(200);
+	expect(JSON.stringify(redeemed.body)).not.toContain(challenge);
 });
 
 it("offers the shape of an S256 challenge: 43 base64url characters, as RFC 7636 makes it", async () => {
