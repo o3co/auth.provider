@@ -137,7 +137,7 @@ const settings = (extra: Record<string, unknown> = {}) => ({
 });
 const collected = contract<readonly Ledger[]>("test.ledgers");
 const collector = defineModule(
-	{ name: "test-collector", replicaSafe: true, takes: [ledgers] },
+	{ name: "test-collector", replicaSafe: false, takes: [ledgers] },
 	(m) => [m.provide(collected).by((c) => c.collect(ledgers))],
 );
 const boot = (
