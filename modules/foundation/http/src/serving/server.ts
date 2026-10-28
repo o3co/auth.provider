@@ -62,6 +62,29 @@ function frozenHead(message: IncomingMessage, proxies: TrustedProxies): Head | u
 	});
 }
 
+/** A JSON answer holding members whose value is null: their key paths, never their values. */
+class NullMembers extends Error {
+	readonly paths: readonly string[];
+	constructor(paths: readonly string[]) {
+		super("null members");
+		this.paths = paths;
+	}
+}
+
+/** The key paths of the members whose value is null, in objects at any depth, arrays' among them. */
+function nullMembers(value: unknown, at = "", found: string[] = []): string[] {
+	if (Array.isArray(value)) {
+		for (const [i, item] of value.entries()) nullMembers(item, `${at}[${i}]`, found);
+	} else if (typeof value === "object" && value !== null) {
+		for (const [key, member] of Object.entries(value)) {
+			const path = at ? `${at}.${key}` : key;
+			if (member === null) found.push(path);
+			else nullMembers(member, path, found);
+		}
+	}
+	return found;
+}
+
 /** Writes the answer; one whose headers cannot be written becomes a bare 500, as does any failure. */
 function write(res: ServerResponse, response: HttpResponse, log: Log): void {
 	try {
@@ -73,7 +96,11 @@ function write(res: ServerResponse, response: HttpResponse, log: Log): void {
 		res.writeHead(response.status, headers);
 		res.end(payload);
 	} catch (error) {
-		log.error("http.unwritable", { kind: error instanceof Error ? error.name : typeof error });
+		if (error instanceof NullMembers) {
+			// The provider writes no member as null (OpenID Connect Core §13.3): a member it has no value for is left out.
+			log.error("http.failed", { kind: "null_member", members: error.paths.join(" ") });
+		} else
+			log.error("http.unwritable", { kind: error instanceof Error ? error.name : typeof error });
 		if (!res.headersSent) res.writeHead(500, secured(noStore));
 		res.end();
 	}
@@ -88,7 +115,11 @@ function serialized(response: HttpResponse) {
 	if (response.cookies?.length) headers["set-cookie"] = [...response.cookies];
 	const body = response.body;
 	const isJson = typeof body === "object" && "json" in body;
-	if (isJson) headers["content-type"] ??= "application/json";
+	if (isJson) {
+		const nulls = nullMembers(body.json);
+		if (nulls.length > 0) throw new NullMembers(nulls);
+		headers["content-type"] ??= "application/json";
+	}
 	const payload = isJson ? JSON.stringify(body.json) : body;
 	// Stated, not chunked, so a HEAD answer carries the length its GET would.
 	if (payload !== undefined) headers["content-length"] = String(Buffer.byteLength(payload));
