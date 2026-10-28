@@ -928,7 +928,7 @@ describe("token-exchange: the lifetime asked", () => {
 	const lifetimeOf = (outcome: GrantOutcome) =>
 		outcome.kind === "issued" ? outcome.body.expires_in : said(outcome);
 
-	it("issues for a shorter o3co_expires_in, and for the usual lifetime when it is left out or empty [rfc8693-2.2.1-d]", async () => {
+	it("issues for a shorter o3co_expires_in, and for the usual lifetime when it is left out or empty, the grant's own parameters being RFC 8693's registered ones and o3co_expires_in an RFC 6749 §8.2 vendor extension [rfc8693-2.2.1-d] [rfc6749-8.3-a]", async () => {
 		const s = await serve();
 		const subject = subjectOf((await s.issue()).token);
 		const shorter = await s.exchange("app", { ...subject, o3co_expires_in: "60" });
