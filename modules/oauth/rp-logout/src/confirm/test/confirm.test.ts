@@ -100,7 +100,7 @@ const shown = (session: string | undefined): HttpRequest =>
 const text = (answer: HttpResponse) => String(answer.body);
 
 describe("the confirmation of a logout a client started without a hint", () => {
-	it("writes every value into its page escaped, so none can break out of its attribute or add markup [rfc6749-10.14-b]", async () => {
+	it("writes every value into its page escaped, so none can break out of its attribute or add markup, rp-logout being the one module that writes HTML [rfc6749-10.14-b]", async () => {
 		const { confirm } = serve({
 			issue: () => ({ field: `f"><img src=x>`, token: `t'&<b>`, cookies: [] }),
 		});
