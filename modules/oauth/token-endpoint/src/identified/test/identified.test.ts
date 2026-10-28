@@ -116,7 +116,7 @@ describe("a request naming no client", () => {
 				},
 				handle: async ({ client, identified }) => {
 					seen.handled.push(identified);
-					return { kind: "issued", body: { client: client.id, identified: identified ?? null } };
+					return { kind: "issued", body: { client: client.id, identified: identified ?? "none" } };
 				},
 			})),
 			m.contribute(grants).by(() => ({
@@ -352,9 +352,12 @@ describe("a request naming no client", () => {
 	it("keeps today's answers for clients that authenticate, or fail to, where a grant can identify [rfc6749-2.3-b] [rfc6749-5.2-b]", async () => {
 		const { post, raw, seen } = await serving();
 		const asConf = await post(assert("as:agents"), "conf");
-		expect([asConf.status, asConf.body]).toEqual([200, { client: "conf", identified: null }]);
+		expect([asConf.status, asConf.body]).toEqual([200, { client: "conf", identified: "none" }]);
 		const asPublic = await raw({ ...assert("as:agents"), client_id: "agents" });
-		expect([asPublic.status, asPublic.body]).toEqual([200, { client: "agents", identified: null }]);
+		expect([asPublic.status, asPublic.body]).toEqual([
+			200,
+			{ client: "agents", identified: "none" },
+		]);
 		const wrong = await post(assert("as:agents"), "conf", "nope");
 		expect([wrong.status, wrong.body.error, wrong.headers.get("www-authenticate")]).toEqual([
 			401,

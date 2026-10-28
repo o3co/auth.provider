@@ -187,6 +187,21 @@ describe("OpenID Connect: the ID token", () => {
 		]);
 	});
 
+	it("ignores offline_access in an OpenID Connect request, no offline access being offered: a code for the rest, the scope answered and carried without it [oidc-core-11-c]", async () => {
+		const { at, tokens } = await signedIn({ scope: "openid offline_access read" });
+		expect(at?.searchParams.get("error")).toBeNull();
+		// The scope issued is not the one asked, so the answer must say it (RFC 6749 §5.1).
+		expect(typeof tokens.scope).toBe("string");
+		for (const [name, scope] of [
+			["answer", tokens.scope],
+			["access token", claimsOf(tokens.access_token).scope],
+		] as const) {
+			const words = String(scope).split(" ");
+			expect(words, name).not.toContain("offline_access");
+			expect(words, name).toEqual(expect.arrayContaining(["openid", "read"]));
+		}
+	});
+
 	// The legacy build reads no id_token_hint at authorization, and gives a code for whoever is signed in.
 	it.skipIf(areaTarget().differs("authorize-reads-id-token-hint"))(
 		"issues a code under an id_token_hint only for the End-User it names: a code for the one signed in, prompt=none or not, and login_required for another, who has a session here [oidc-core-3.1.2.1-u] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]",

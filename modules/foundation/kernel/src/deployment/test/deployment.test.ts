@@ -11,6 +11,7 @@ const secret = "s3cr3t-value";
 /** A module whose section holds a URL, refusing a plain-http one in production. */
 const origin = defineModule({
 	name: "origin",
+	replicaSafe: true,
 	section: z.strictObject({ url: z.string() }),
 	refusedInProduction: (section) =>
 		section.url.startsWith("http:") ? [{ key: "url", reason: "is plain http" }] : [],
@@ -36,7 +37,7 @@ describe("the deployment's environment", () => {
 	it("refuses in production with every other refusal before anything is built", async () => {
 		const built: string[] = [];
 		const missing = contract<string>("missing");
-		const taker = defineModule({ name: "taker", takes: [missing] });
+		const taker = defineModule({ name: "taker", replicaSafe: true, takes: [missing] });
 		const unsafe = defineModule({ name: "unsafe", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<string>("unsafe")).by(() => {
 				built.push("unsafe");
@@ -61,6 +62,7 @@ describe("the deployment's environment", () => {
 		const asked: unknown[] = [];
 		const m = defineModule({
 			name: "m",
+			replicaSafe: true,
 			section: z.strictObject({ n: z.number() }),
 			refusedInProduction: (section) => {
 				asked.push(section);
@@ -136,7 +138,12 @@ describe("the deployment's environment", () => {
 			{ [Symbol.iterator]: throwing },
 		];
 		const modules = answers.map((answer, i) =>
-			defineModule({ name: `a${i}`, refusedInProduction: () => answer as never, takes: [] }),
+			defineModule({
+				name: `a${i}`,
+				replicaSafe: true,
+				refusedInProduction: () => answer as never,
+				takes: [],
+			}),
 		);
 		const refused = await refusalsOf(assemble({ modules, config: production }));
 		expect(refused).toEqual(
@@ -150,6 +157,7 @@ describe("the deployment's environment", () => {
 			({
 				name: `get-${key}`,
 				takes: [],
+				...(key === "replicaSafe" ? {} : { replicaSafe: true }),
 				get [key]() {
 					throw new Error(secret);
 				},
@@ -183,6 +191,7 @@ describe("the deployment's environment", () => {
 		} as unknown as Module;
 		const filled = defineModule({
 			name: "filled",
+			replicaSafe: true,
 			section: z.strictObject({ n: z.number().prefault(7) }),
 			refusedInProduction: (section) => {
 				asked.push(section);
@@ -199,7 +208,7 @@ describe("the deployment's environment", () => {
 
 	it("gives a factory an environment it cannot change", async () => {
 		const outcome = contract<readonly unknown[]>("outcome");
-		const changer = defineModule({ name: "changer", takes: [] }, (m) => [
+		const changer = defineModule({ name: "changer", replicaSafe: false, takes: [] }, (m) => [
 			m
 				.provide(outcome)
 				.by((c) => [
@@ -218,7 +227,12 @@ describe("the deployment's environment", () => {
 				throw new Error(secret);
 			},
 		});
-		const indexed = defineModule({ name: "indexed", refusedInProduction: () => answer, takes: [] });
+		const indexed = defineModule({
+			name: "indexed",
+			replicaSafe: true,
+			refusedInProduction: () => answer,
+			takes: [],
+		});
 		const refused = await refusalsOf(assemble({ modules: [indexed], config: production }));
 		expect(refused).toEqual([{ where: "indexed.k", reason: "r" }]);
 	});
@@ -234,5 +248,102 @@ describe("the deployment's environment", () => {
 		expect(refused).toEqual(
 			answers.map((_, i) => ({ where: `r${i}`, reason: "its multi-instance check failed" })),
 		);
+	});
+
+	it("tells each factory the deployment's environment, production unless set", async () => {
+		const told = contract<string>("told");
+		const telling = defineModule({ name: "telling", replicaSafe: true, takes: [] }, (m) => [
+			m.provide(told).by((c) => c.environment),
+		]);
+		const asTold = async (config: object) =>
+			(await assemble({ modules: [telling], config })).get(told);
+		expect(await asTold(production)).toBe("production");
+		expect(await asTold(kernelConfig({ environment: "development" }))).toBe("development");
+	});
+});
+
+/** A module that takes an id once: in its own process, or in the place it is given. */
+const once = contract<{ use(id: string): boolean }>("once");
+const taking = (name: string, replicaSafe: boolean | "unsaid", kept = new Set<string>()) =>
+	defineModule(
+		replicaSafe === "unsaid"
+			? // The type requires the declaration; left out here on purpose, as a JavaScript module may.
+				({ name, takes: [] } as never)
+			: { name, replicaSafe, takes: [] },
+		(m) => [m.provide(once).by(() => ({ use: (id) => !kept.has(id) && Boolean(kept.add(id)) }))],
+	);
+/** Two instances of an app composing the module, on many instances; each takes `id-1` once. */
+async function twoInstances(module: () => Module) {
+	const multi = kernelConfig({ deployment: "multi" });
+	const apps = [
+		await assemble({ modules: [module()], config: multi }),
+		await assemble({ modules: [module()], config: multi }),
+	];
+	return apps.map((app) => app.get(once).use("id-1"));
+}
+
+describe("the deployment's instances", () => {
+	it("refuses, on many instances only, a module that declares nothing of them", async () => {
+		const refused = await refusalsOf(
+			assemble({
+				modules: [taking("silent", "unsaid")],
+				config: kernelConfig({ deployment: "multi" }),
+			}),
+		);
+		expect(refused).toEqual([
+			{ where: "silent", reason: "declares nothing about multiple instances: say replicaSafe" },
+		]);
+		await expect(
+			assemble({ modules: [taking("silent", "unsaid")], config: production }),
+		).resolves.toBeDefined();
+	});
+
+	it("refuses a module keeping a used id in its own process that declares nothing, before two instances take it twice", async () => {
+		await expect(twoInstances(() => taking("once-in-memory", "unsaid"))).rejects.toMatchObject({
+			refusals: [{ where: "once-in-memory" }],
+		});
+	});
+
+	// The kernel reads the declaration and never what a module keeps: a module that keeps a used id in
+	// its own process and declares itself safe boots, and two instances take one id twice. Human review
+	// required; no automated detection demonstrated.
+	it("boots a module keeping a used id in its own process that falsely declares itself safe, and two instances take it twice: human review required; no automated detection demonstrated", async () => {
+		expect(await twoInstances(() => taking("once-in-memory", true))).toEqual([true, true]);
+	});
+
+	it("takes an id once across two instances where the module keeps it in the place they share", async () => {
+		const shared = new Set<string>();
+		expect(await twoInstances(() => taking("once-shared", true, shared))).toEqual([true, false]);
+	});
+
+	it("refuses replica-unsafe modules only when deployed on multiple replicas", async () => {
+		const unsafe = defineModule({ name: "mem", replicaSafe: false, takes: [] });
+		await expect(assemble({ modules: [unsafe], config: production })).resolves.toBeDefined();
+		const refusals = await refusalsOf(
+			assemble({ modules: [unsafe], config: kernelConfig({ deployment: "multi" }) }),
+		);
+		expect(refusals.map((r) => r.where)).toEqual(["mem"]);
+	});
+
+	it("asks a module whether it is replica-safe only with a section that passed", async () => {
+		const asked: unknown[] = [];
+		const m = defineModule({
+			name: "m",
+			section: z.strictObject({ shared: z.boolean() }),
+			replicaSafe: (section) => {
+				asked.push(section);
+				return section.shared;
+			},
+			takes: [],
+		});
+		const multi = kernelConfig({ deployment: "multi" });
+		const bad = await refusalsOf(
+			assemble({ modules: [m], config: { ...multi, m: { shared: 1 } } }),
+		);
+		expect([bad.map((r) => r.where), asked]).toEqual([["m.shared"], []]);
+		const unsafe = await refusalsOf(
+			assemble({ modules: [m], config: { ...multi, m: { shared: false } } }),
+		);
+		expect([unsafe.map((r) => r.where), asked]).toEqual([["m"], [{ shared: false }]]);
 	});
 });

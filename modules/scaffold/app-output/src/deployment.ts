@@ -84,9 +84,17 @@ export async function writeDeployment(
 	const names = withKernel(modules);
 	const fragments = await packages.fragments(names);
 	const settings = settingsOf(fragments);
+	// From what writes application.conf, so the refusals name only the variables it reads.
+	const keys = {
+		read: Object.fromEntries(settings.map((s) => [s.key, s.env])),
+		severalLines: writtenOf(fragments)
+			.filter((w) => w.severalLines)
+			.map((w) => w.key),
+		local: paths.local,
+	};
 	const http = { serves: names.includes(httpPackage), live: names.includes(opsPackage) };
 	const run = (file: string) => `node --env-file-if-exists=.env ${file}`;
-	const entries = await entriesOf(modules, packages.importOf, run);
+	const entries = await entriesOf(modules, packages.importOf, run, keys);
 	const dependencies = packages.dependencies(names);
 	// The one place a caller without packages outside the release is read as having none.
 	const release = packages.release();
@@ -102,7 +110,7 @@ export async function writeDeployment(
 			...beside.scripts,
 		}),
 		...beside.files,
-		[paths.main]: await mainSource(modules, packages.importOf),
+		[paths.main]: await mainSource(modules, packages.importOf, keys),
 		...entries.files,
 		[paths.application]: applicationConf(fragments),
 		[paths.localExample]: localConfExample(fragments),

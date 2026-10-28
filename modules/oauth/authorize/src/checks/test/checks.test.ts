@@ -1,7 +1,7 @@
 import { allowancesFor } from "@mod/client-allowance/testing";
 import type { Client, Section } from "@mod/clients";
 import { describe, expect, it } from "vitest";
-import { checkRequest } from "../checks.ts";
+import { checkRequest, checkScope } from "../checks.ts";
 
 const sections: Record<string, unknown> = allowancesFor({
 	grants: ["authorization_code"],
@@ -40,7 +40,7 @@ const outcome = (params: Map<string, string>) => {
 };
 
 describe("checks: an OpenID Connect request's form", () => {
-	it("refuses one without a response type as invalid_request, and any type but code as unsupported_response_type, a token in the URL among them [oidc-core-3.1.2.1-c] [oidc-core-3.1.2.2-c] [rfc6750-5.3-d]", () => {
+	it("refuses one without a response type as invalid_request, and any type but code as unsupported_response_type, a token in the URL among them [oidc-core-3.1.2.1-c] [oidc-core-3.1.2.2-c] [rfc6750-5.3-d] [oidc-core-16.4-a]", () => {
 		expect(outcome(oidc({}, "response_type"))).toEqual([
 			"invalid_request",
 			"response_type is required",
@@ -129,5 +129,30 @@ describe("checks: an OpenID Connect request's form", () => {
 				"code_challenge is malformed",
 			]);
 		}
+	});
+});
+
+describe("checks: offline_access", () => {
+	const scopeOf = (scope: string, openidRequired = false) => {
+		const decided = checkScope(app, scope, "https://as.example", openidRequired);
+		if (decided.kind === "allowed") return decided.scope;
+		return decided.kind === "refuse" ? [decided.error, decided.description] : [decided.kind];
+	};
+
+	it("drops offline_access from a request rather than refusing it, as no offline access is offered and so nothing permits it [oidc-core-11-c] [oidc-core-11-d]", () => {
+		expect(scopeOf("openid offline_access read")).toEqual(["openid", "read"]);
+		expect(scopeOf("offline_access openid", true)).toEqual(["openid"]);
+	});
+
+	it("drops offline_access from a request without openid too, the word having the one meaning", () => {
+		expect(scopeOf("offline_access read")).toEqual(["read"]);
+	});
+
+	it("refuses a request that names offline_access alone as invalid_scope, never giving it the client's default", () => {
+		expect(scopeOf("offline_access")).toEqual(["invalid_scope", "offline_access is not offered"]);
+		expect(scopeOf("offline_access offline_access")).toEqual([
+			"invalid_scope",
+			"offline_access is not offered",
+		]);
 	});
 });

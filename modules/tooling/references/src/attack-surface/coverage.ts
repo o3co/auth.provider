@@ -166,6 +166,10 @@ export const coverage: Coverage = {
 			key: "clients-cimd.allow",
 			weakens: "clients name themselves by a metadata document fetched from these hosts",
 		},
+		{
+			key: "clients-cimd.allow-any-host",
+			weakens: "clients name themselves by a metadata document fetched from any host `deny` leaves",
+		},
 	],
 	destinations: [
 		{
@@ -181,6 +185,10 @@ export const coverage: Coverage = {
 		},
 	],
 	notDestinations: [
+		{
+			key: "clients-cimd.allow-any-host",
+			why: "a switch that names no host: documents are fetched where a client id points",
+		},
 		{
 			key: "federation.idps.<name>.hosted-domains",
 			why: "the Google Workspace domains a login must belong to",
