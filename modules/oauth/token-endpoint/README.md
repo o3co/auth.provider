@@ -21,6 +21,7 @@
 - Operator section: `requests` per source in each window (1–100000, default 60) and `window` (1s–1d, default `1m`, written with its unit).
 
 ## Invariants
+- Boot is refused with no grant composed, so `grant_types_supported` is never empty: left out, a client would read it as `authorization_code` and `implicit` (RFC 8414 §2). A grant composed but allowed to no registered client opens no issuance.
 - An issued answer leaves `scope` out when a grant gives it empty, for every grant alike, the test caller too.
 - Requests are limited per source by `rate-limit`'s policy before any client is authenticated; over it, `429`.
 - A request naming no client goes to a grant that identifies its client only when `clients` refuses it as `no_credentials`, finds it `bare`, and its one `grant_type` names a grant with `identify`; any other refusal is answered as `authenticateClient` answers it. The grant's refusal to identify is its answer; a client identified that is not registered with no credentials (public, method `none`) is `503`. Past that, it is checked as an authenticated client.

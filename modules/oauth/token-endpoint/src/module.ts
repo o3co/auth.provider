@@ -56,6 +56,14 @@ export default defineModule({ name: "token-endpoint", section, takes }, (m) => [
 			new Set(composed.map((g) => g.grantType)),
 		);
 		if (unserved.length > 0) return c.refuseAll(unserved);
+		// An endpoint with nothing to issue would publish an empty grant_types_supported, which
+		// discovery leaves out and a client reads as authorization_code and implicit (RFC 8414 §2).
+		if (composed.length === 0) {
+			return c.refuse(
+				"token-endpoint",
+				"no grant is composed: compose one, or leave the token endpoint out",
+			);
+		}
 		// The route has no own-site policy: it relies on each grant saying whether it reads a cookie.
 		const silent = composed.filter((g) => g.readsAmbient !== "none" && g.readsAmbient !== "cookie");
 		if (silent.length > 0) {
