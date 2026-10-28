@@ -98,8 +98,30 @@ describe("checks: an OpenID Connect request's form", () => {
 	});
 
 	it("says a code challenge by S256 is required, where it refuses a request without one [rfc7636-4.4.1-b]", () => {
-		for (const left of ["code_challenge", "code_challenge_method"]) {
-			expect(outcome(oidc({}, left))).toEqual(["invalid_request", "PKCE with S256 is required"]);
+		for (const sent of [oidc({}, "code_challenge"), oidc({ code_challenge: "" })]) {
+			expect(outcome(sent)).toEqual(["invalid_request", "PKCE with S256 is required"]);
+		}
+	});
+
+	it("says the method is not supported, where it refuses plain, another or one left out, which is plain [rfc7636-4.4.1-d]", () => {
+		for (const sent of [
+			oidc({ code_challenge_method: "plain" }),
+			oidc({ code_challenge_method: "S512" }),
+			oidc({}, "code_challenge_method"),
+		]) {
+			expect(outcome(sent)).toEqual([
+				"invalid_request",
+				"code_challenge_method is not supported: only S256",
+			]);
+		}
+	});
+
+	it("says the challenge is malformed, where S256 is asked of one that is not 43 base64url characters", () => {
+		for (const code_challenge of ["A".repeat(42), "A".repeat(44), `${"A".repeat(42)}+`]) {
+			expect(outcome(oidc({ code_challenge }))).toEqual([
+				"invalid_request",
+				"code_challenge is malformed",
+			]);
 		}
 	});
 });

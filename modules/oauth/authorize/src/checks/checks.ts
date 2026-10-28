@@ -38,9 +38,12 @@ export function checkRequest(
 		return recorded("unauthorized_client", "grant_type_not_allowed", description);
 	}
 	const challenge = one("code_challenge");
-	if (!challenge || !challengeShape.test(challenge) || one("code_challenge_method") !== "S256") {
-		return refusal("invalid_request", "PKCE with S256 is required");
-	}
+	if (!challenge) return refusal("invalid_request", "PKCE with S256 is required");
+	// RFC 7636 §4.3: a method left out is plain, which is not taken either.
+	if (one("code_challenge_method") !== "S256")
+		return refusal("invalid_request", "code_challenge_method is not supported: only S256");
+	if (!challengeShape.test(challenge))
+		return refusal("invalid_request", "code_challenge is malformed");
 	const nonce = one("nonce");
 	if (nonce !== undefined && nonce.length > 256)
 		return refusal("invalid_request", "nonce too long");
