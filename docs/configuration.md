@@ -38,16 +38,9 @@ From `@mod/authorize`.
 | `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host). |
 | `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host). |
 | `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  | oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default. |
+| `authorize.claims-parameter` | boolean | `true` |  |  |  | Whether the claims request parameter's names and value constraints are taken, and discovery says it is supported. False ignores them, and boot warns; the sub asked, the acr, an essential auth_time and the parameter's form still hold, as do the scope's claims and the selections already kept. |
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both methods together; over it, 429. |
 | `authorize.window` | string | `1m` |  |  |  | The rate limit's window: a duration with a unit, e.g. 1m. |
-
-## claims-selection
-
-From `@mod/claims-selection`.
-
-| Key | Type | Default | Required | Variable | Example | Description |
-|---|---|---|---|---|---|---|
-| `claims-selection.mode` | off \| draining \| on |  | yes | `CLAIMS_SELECTION_MODE` | `on` | off takes no claims request and touches no store; draining keeps holding back what was kept, but keeps nothing new; on takes claims requests. |
 
 ## client-assertion
 
