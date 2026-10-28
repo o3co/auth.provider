@@ -1,10 +1,12 @@
 import {
 	confirmation,
+	type Deployed,
 	type Instance,
 	instanceOf,
 	type Match,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	runIdOf,
@@ -12,7 +14,6 @@ import {
 	storeRead,
 	storeWrite,
 	successes,
-	writable,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { app, browserOn, callback, on, pkce, prefix } from "../../faults/test/faults.ts";
@@ -73,8 +74,9 @@ async function control(i: Instance) {
 	expect(successes(i, codeKept).length).toBe(before + 1);
 }
 
-/** Healed: the instance is ready, and a new request is given a code. */
-async function healed(i: Instance) {
+/** Healed: the topology has recovered and the instance is ready, and a new request is given a code. */
+async function healed(d: Deployed, i: Instance) {
+	await recovered(d);
 	await ready(i);
 	expect((await authorize(await loggedInAt(i))).code).toBeTruthy();
 }
@@ -99,7 +101,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			await ready(a);
 			expect(a.relay.executions(cookieRead).some((e) => e.at > resumed)).toBe(true);
 			expect(successes(a, codeKept).length).toBe(kept);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -121,7 +123,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			);
 			expect(resumed).toBeGreaterThan(answer.at);
 			expect(successes(a, codeKept).length).toBe(kept);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -141,7 +143,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 				[],
 			);
 			expect(successes(a, codeKept).length).toBe(kept);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -162,7 +164,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			const read = a.relay.executions(cookieRead).find((e) => e.at > delayed);
 			expect(read && read.at).toBeGreaterThan(answer.at);
 			expect(successes(a, codeKept).length).toBe(kept);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -185,10 +187,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 				a.relay.executions(cookieRead).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
 			expect(successes(a, codeKept).length).toBe(kept);
-			// Woken, Redis answers at once but refuses writes until its replicas' acknowledgements catch up,
-			// which a ready instance does not show: the healed login waits for its writes to be taken.
-			await writable(d);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -213,7 +212,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			await replicasOnline(d);
 			expect(answer && shape(answer)).toEqual(unavailable);
 			expect(successes(a, codeKept).length).toBe(kept);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -253,7 +252,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
 			expect(shape(answer)).toEqual(unavailable);
 			a.relay.reset("confirming");
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -294,7 +293,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 				await annotate("answered temporarily_unavailable");
 			}
 			await replicasOnline(d);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 });
