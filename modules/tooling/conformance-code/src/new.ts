@@ -20,6 +20,8 @@ onNew(codeArea, (part, scene) => {
 		],
 		store: "volatile",
 		...(part.without ? { without: part.without } : {}),
+		// The scene alone chooses the document hosts: a trial's allow beside allow-any-host refuses boot.
+		...(part.documents ? { whole: ["clients-cimd"] } : {}),
 		config: {
 			// A code that comes again must revoke what it gave.
 			tokens: { revocation: "denylist" },
