@@ -205,7 +205,7 @@ describe("a logout the client starts", () => {
 	// Open redirect: only a return the hint's client registered, compared exactly, is taken; any other
 	// refuses the request, the session left as it was.
 	it.runIf(!areaTarget().differs("logout-unregistered-return-refused"))(
-		"refuses a return the client did not register, never sending the browser to it, and leaves the session [oidc-rpinit-2-b] [oidc-rpinit-3-b]",
+		"refuses a return the client did not register, never sending the browser to it, and leaves the session [oidc-rpinit-2-b] [oidc-rpinit-3-b] [oidc-rpinit-4-c]",
 		async () => {
 			for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
 				const at = await signedIn();
@@ -279,9 +279,10 @@ describe("a logout the client starts", () => {
 		},
 	);
 
-	// RP-Initiated Logout 1.0 §2: with no hint, the OP asks the End-User whether to log out.
+	// RP-Initiated Logout 1.0 §2: with no hint, the OP asks the End-User whether to log out; §3: with no
+	// hint, a return cannot be confirmed as the client's, so the confirmation never sends the browser to it.
 	describe.runIf(!areaTarget().differs("logout-confirmed-without-hint"))(
-		"a logout a client starts with neither a hint nor a return",
+		"a logout a client starts without a hint",
 		() => {
 			/** The confirmation page as the browser holding the session gets it, with the form's cookie. */
 			const confirmationFor = async (at: SignedIn) => {
@@ -349,6 +350,35 @@ describe("a logout the client starts", () => {
 				expect(await stillSignedIn(at)).toBe(false);
 			});
 
+			it("asks the person where a request without a hint names a return, and once they agree never sends the browser to it [oidc-rpinit-2-i] [oidc-rpinit-3-a]", async () => {
+				for (const method of ["GET", "POST"] as const) {
+					const at = await signedIn();
+					const started = await logout(at, method, {
+						post_logout_redirect_uri: back,
+						client_id: "app",
+						state: "s",
+					});
+					expect([method, started.status, started.headers.get("location")]).toEqual([
+						method,
+						303,
+						"/oauth/logout/confirm",
+					]);
+					expect(await stillSignedIn(at)).toBe(true);
+					const page = await confirmationFor(at);
+					expect(page.text).toContain("Do you want to log out of");
+					expect(page.text).not.toContain(back);
+					const done = await posted(at, page.cookie, {
+						csrf_token: page.token,
+						confirmation: page.confirmation,
+					});
+					const text = await done.text();
+					expect([method, done.status, done.headers.get("location")]).toEqual([method, 200, null]);
+					expect(text).toContain("You are logged out.");
+					expect(text).not.toContain(back);
+					expect(await stillSignedIn(at)).toBe(false);
+				}
+			});
+
 			it("refuses the form without its CSRF token, or from another site, closing nothing", async () => {
 				const at = await signedIn();
 				const page = await confirmationFor(at);
@@ -379,15 +409,6 @@ describe("a logout the client starts", () => {
 			});
 		},
 	);
-
-	it("refuses a request without a hint [oidc-rpinit-3-a] [oidc-rpinit-4-c]", async () => {
-		const at = await signedIn();
-		for (const method of ["GET", "POST"] as const) {
-			const answer = await logout(at, method, { post_logout_redirect_uri: back });
-			expect([answer.status, answer.json?.error]).toEqual([400, "invalid_request"]);
-		}
-		expect(await stillSignedIn(at)).toBe(true);
-	});
 
 	// A hint naming no session cannot say which session to end.
 	it("refuses a hint that names no session, leaving the session", async () => {
