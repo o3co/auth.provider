@@ -239,4 +239,26 @@ describe("path validation", () => {
 		);
 		expect(await reasonOf(new Uint8Array([1, 2, 3]), [], policyOf([root.der]))).toBe("malformed");
 	});
+
+	it("refuses a certificate holding a string that does not decode as malformed", async () => {
+		const { root, intermediate, client } = await hierarchy();
+		const garbled = new pkijs.Certificate({ schema: asn1js.fromBER(client.der).result });
+		// A BMPString of an odd length, which asn1js 4 answers as a decode error, not a throw.
+		const odd = new asn1js.BmpString({ valueHex: new Uint8Array([0, 0x41, 0]).buffer });
+		garbled.subject = new pkijs.RelativeDistinguishedNames({
+			typesAndValues: [new pkijs.AttributeTypeAndValue({ type: "2.5.4.3", value: odd })],
+		});
+		const der = new Uint8Array(garbled.toSchema(true).toBER(false));
+		expect(asn1js.fromBER(der).offset).toBe(-1);
+		expect(await reasonOf(der, [intermediate.der], policyOf([root.der]))).toBe("malformed");
+	});
+
+	it("takes a certificate in date past 2049, which RFC 5280 writes as GeneralizedTime", async () => {
+		const root = await issue({ cn: "root", ca: true, notAfter: Date.UTC(2070, 0, 1) });
+		const client = await issue({ cn: "client", by: root, notAfter: Date.UTC(2060, 0, 1) });
+		expect(client.certificate.notAfter.value.getTime()).toBe(Date.UTC(2060, 0, 1));
+		expect(await reasonOf(client.der, [], policyOf([root.der]))).toBe("path of 2");
+		const at2061 = Date.UTC(2061, 0, 1);
+		expect(await reasonOf(client.der, [], policyOf([root.der]), at2061)).toEqual(refusedAny);
+	});
 });
