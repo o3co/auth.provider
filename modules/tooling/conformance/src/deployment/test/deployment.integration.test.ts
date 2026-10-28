@@ -120,6 +120,10 @@ describe("a deployment of a scene", () => {
 			redis: { replication: "none", "command-timeout": "2s" },
 		});
 		expect(record.redis.url).toBeUndefined();
+		expect(record.commit).toBe(
+			process.env.SPEC_EVIDENCE_COMMIT ??
+				execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+		);
 	});
 
 	// A fault run moves the clock or fails: a host without the library never skips it.
