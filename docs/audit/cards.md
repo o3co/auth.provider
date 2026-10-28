@@ -326,6 +326,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `boundaries` (`src/boundaries`): the fault scenes of bounds the security model leaves to the operator, recorded as they are; no promise is checked, so none names a guarantee or a fault of one.
   - `claims` (`src/claims`): the scenes of the claims a request names beyond its scope.
   - `code-once` (`src/code-once`): the fault scenes of an authorization code redeemed once (`guarantee-5-a`).
+  - `discovery` (`src/discovery`): the scene of the whole metadata document of an OpenID Provider.
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `faults` (`src/faults`): what the area's fault scenes share in the code flow's words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
