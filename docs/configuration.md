@@ -66,7 +66,8 @@ From `@mod/clients-cimd`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `clients-cimd.allow` | list of string | `[]` |  |  |  | The host names a client id's document may be fetched from (.name also takes the names under it); when not empty, only these, and outbound's hosts narrow to them. |
+| `clients-cimd.allow` | list of string | `[]` |  |  | `["documents.example.invalid"]` | The host names a client id's document may be fetched from (.name also takes the names under it), outbound's hosts narrowed to them; boot is refused while it is empty, unless allow-any-host is set. |
+| `clients-cimd.allow-any-host` | boolean | `false` |  |  |  | Fetches a client id's document from any host deny leaves, where allow is empty; warned of at every start. |
 | `clients-cimd.deny` | list of string | `[]` |  |  |  | The host names a client id's document is never fetched from (.name also takes the names under it), checked before allow. |
 | `clients-cimd.scopes` | list of string | `[]` |  |  |  | The ceiling of scopes such a client may get: a document asking none gets all of them. |
 | `clients-cimd.audiences` | list of string | `[]` |  |  |  | The audiences such a client's tokens may name, as the operator allows. |
@@ -101,7 +102,7 @@ From `@mod/consent`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. |
+| `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. An https URL (http only on a loopback host, as authorize's login page). |
 | `consent.challenge-lifetime` | string | `10m` |  |  |  | How long a pending consent challenge stays answerable, from `1m` to `1h` in whole seconds. |
 
 ## device-grant
@@ -761,7 +762,7 @@ From `@mod/users-http`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `users-http.verify-url` | string |  |  | `USERS_HTTP_VERIFY_URL` | `https://ledger.example.invalid/verify` | Where a password is verified; without it, no password matches. Plain http is reached only where outbound's policy names it. |
-| `users-http.subject-url` | string |  |  |  |  | Where a user is looked up by subject; without it, every lookup by subject is unanswerable. Plain http is reached only where outbound's policy names it. |
+| `users-http.subject-url` | string |  |  | `USERS_HTTP_SUBJECT_URL` | `https://ledger.example.invalid/subject` | Where a user is looked up by subject; without it, every lookup by subject is unanswerable. Plain http is reached only where outbound's policy names it. |
 | `users-http.upstream-url` | string |  |  |  |  | Where a user is looked up by upstream identity; without it, users follows the links it keeps. Plain http is reached only where outbound's policy names it. |
 | `users-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
 | `users-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |

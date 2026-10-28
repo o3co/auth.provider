@@ -83,5 +83,11 @@ onLegacy(codeArea, {
 		// Ours asks the person to confirm a logout without a hint, on a page of its own, and never returns
 		// from it, whatever return the request names; the legacy build refuses one without a hint.
 		"logout-confirmed-without-hint",
+		// Ours issues a code only for the End-User an id_token_hint names, and refuses one it did not
+		// issue; the legacy build reads no hint at authorization.
+		"authorize-reads-id-token-hint",
+		// Ours refuses prompt=select_account, having no page to choose an account by; the legacy build
+		// refuses the word as one it does not know.
+		"select-account-refused",
 	],
 });

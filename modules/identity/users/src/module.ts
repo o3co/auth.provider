@@ -94,7 +94,7 @@ export default defineModule(
 			if (ledger && c.section.registered.length > 0) {
 				return c.refuse(
 					"users.registered",
-					"users are registered while a user ledger is contributed",
+					"users are registered while a user ledger is contributed: take users.registered out, the ledger holding the users",
 				);
 			}
 			// This assembly's checkers, which share its limit on checks under way.

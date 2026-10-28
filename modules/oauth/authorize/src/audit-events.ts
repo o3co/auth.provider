@@ -4,10 +4,10 @@ import { auditEvents } from "@mod/audit";
 export default auditEvents({
 	"authorize.granted": {
 		attributes: ["client", "source", "response_type"],
-		when: "a code is given, with the subject and `response_type` `code`",
+		when: "a code is given, with the subject and `response_type` `code`, and `source` only where `request-source` determined it",
 	},
 	"authorize.rejected": {
 		attributes: ["client", "source", "reason", "policy"],
-		when: "a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name)",
+		when: "a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name), and `source` only where `request-source` determined it",
 	},
 });

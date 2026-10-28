@@ -12,6 +12,15 @@ describe("the pages a logout ends on", () => {
 		expect(page?.html).toContain("<iframe");
 	});
 
+	it("writes a client's front-channel URI into its frame escaped, so it cannot break out of the attribute [rfc6749-10.14-b]", () => {
+		const page = frontChannelPage(
+			[{ uri: "https://app.example/f'c\"><b>", withSession: false }],
+			at,
+		);
+		expect(page?.html).toContain('src="https://app.example/f&#39;c%22%3E%3Cb%3E?iss=');
+		expect(page?.html).not.toContain("<b>");
+	});
+
 	it("says so on a page with no frame, and has no script where there is nowhere to go next", () => {
 		const page = loggedOutPage({});
 		expect(page.html).toContain("<title>Logged out</title>");
@@ -21,7 +30,7 @@ describe("the pages a logout ends on", () => {
 		expect(page.loads).toEqual({ frames: [], scripts: [] });
 	});
 
-	it("moves the browser on from a page with no frame by the one script, its target escaped", () => {
+	it("moves the browser on from a page with no frame by the one script, its target escaped [rfc6749-10.14-b]", () => {
 		const next = 'https://idp.example/end?x="<y>"';
 		const page = loggedOutPage({ next });
 		expect(page.loads.frames).toEqual([]);

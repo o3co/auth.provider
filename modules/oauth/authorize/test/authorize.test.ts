@@ -73,6 +73,7 @@ import { tokensStandIn } from "@mod/tokens/testing";
 import { loopbackPagesRefused } from "@mod/url-setting";
 import { afterEach, describe, expect, it } from "vitest";
 import declared from "../src/audit-events.ts";
+import { hintReaders } from "../src/contract.ts";
 import authorizeModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { authorizeConfig } from "../src/testing.ts";
@@ -182,6 +183,7 @@ async function serve(
 			claimsSelectionModule,
 			options.selectionStore ?? claimsSelectionInMemory().module,
 			scoping,
+			hinting,
 			...(options.extra ?? []),
 		],
 		config: {
@@ -321,6 +323,19 @@ const claimScopeTable = new Map([
 ]);
 const scoping = defineModule({ name: "scoping", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => claimScopeTable.get(claim) })),
+]);
+
+/**
+ * The hint reader oidc would contribute, here a stand-in: `id:<subject>` is an ID token it issued
+ * naming that subject, expired or not, and any other none it takes.
+ */
+const hinting = defineModule({ name: "hinting", replicaSafe: false, takes: [] }, (m) => [
+	m.contribute(hintReaders).by(() => ({
+		read: async (hint: string) =>
+			hint.startsWith("id:")
+				? ({ kind: "subject", subject: hint.slice(3) } as const)
+				: ({ kind: "invalid" } as const),
+	})),
 ]);
 
 const request = (extra: Record<string, string> = {}) => ({
@@ -701,7 +716,7 @@ describe("authorize: the audience a request asks for", () => {
 	});
 
 	it("sends a rule's description back in RFC 6749's characters alone, any other shown as ? [rfc6749-4.1.2.1-e]", async () => {
-		const loud = defineModule({ name: "loud", takes: [] }, (m) => [
+		const loud = defineModule({ name: "loud", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				repeated: () => ({
@@ -2019,6 +2034,52 @@ describe("authorize: the issuance policies", () => {
 				.map((line) => line.fields),
 		).toEqual([{ what: "refusing-bob", route: "/oauth/authorize" }]);
 		expect(events).toEqual([]);
+	});
+});
+
+describe("authorize: an id_token_hint", () => {
+	const hinted = (hint: string, extra: Record<string, string> = {}) =>
+		request({ scope: "openid read", id_token_hint: hint, ...extra });
+	const error = (res: { at: URL | undefined }) => res.at?.searchParams.get("error");
+
+	it("issues a code only for the End-User the hint names, as login_required for another whose session there is, prompt=none or not [oidc-core-3.1.2.1-u] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]", async () => {
+		const { authorize, login } = await serve();
+		const alice = await login("alice");
+		expect((await authorize(hinted("id:alice"), alice)).at?.searchParams.has("code")).toBe(true);
+		for (const extra of [{}, { prompt: "none" }, { prompt: "consent" }]) {
+			const res = await authorize(hinted("id:bob", extra), alice);
+			expect([error(res), res.at?.searchParams.has("code")], JSON.stringify(extra)).toEqual([
+				"login_required",
+				false,
+			]);
+		}
+	});
+
+	it("sends a request whose hint names an End-User with no session to log in, and refuses it under prompt=none, as login_required [oidc-core-3.1.2.1-u]", async () => {
+		const { authorize } = await serve();
+		const sent = await authorize(hinted("id:bob"));
+		expect(sent.at?.origin + (sent.at?.pathname ?? "")).toBe("https://as.example/login");
+		expect(error(await authorize(hinted("id:bob", { prompt: "none" })))).toBe("login_required");
+	});
+
+	it("asks the hint's End-User and a claims request's sub alike: a code only where both name the session's", async () => {
+		const { authorize, login } = await serve();
+		const alice = await login("alice");
+		const claims = (sub: string) => JSON.stringify({ id_token: { sub: { value: sub } } });
+		expect(error(await authorize(hinted("id:alice", { claims: claims("bob") }), alice))).toBe(
+			"login_required",
+		);
+		expect(error(await authorize(hinted("id:bob", { claims: claims("alice") }), alice))).toBe(
+			"login_required",
+		);
+		const both = await authorize(hinted("id:alice", { claims: claims("alice") }), alice);
+		expect(both.at?.searchParams.has("code")).toBe(true);
+	});
+
+	it("reads no hint in a request without openid", async () => {
+		const { authorize, login } = await serve();
+		const oauth = request({ scope: "read", id_token_hint: "id:bob" });
+		expect((await authorize(oauth, await login("alice"))).at?.searchParams.has("code")).toBe(true);
 	});
 });
 

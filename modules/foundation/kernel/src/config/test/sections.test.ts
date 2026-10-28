@@ -116,3 +116,56 @@ describe("a module's section, as the kernel reads it", () => {
 		expect(app.get(read)).toEqual({});
 	});
 });
+
+describe("the kernel's own section, refused", () => {
+	/** A module refusing a plain-http URL in production, and declaring itself unsafe on many instances. */
+	const strict = defineModule({
+		name: "strict",
+		replicaSafe: false,
+		section: z.strictObject({ url: z.string().default("http://a.example") }),
+		refusedInProduction: (section) =>
+			section.url.startsWith("http:") ? [{ key: "url", reason: "is plain http" }] : [],
+		takes: [],
+	});
+	const refusedWith = async (kernel: Record<string, unknown>) =>
+		refusalsOf(assemble({ modules: [strict], config: { kernel } }));
+
+	it("keeps the environment and deployment written beside a refused key, asking their checks as written", async () => {
+		const development = { deployment: "single", environment: "development", "stop-deadline": "30" };
+		expect(await refusedWith(development)).toEqual([
+			{ where: "kernel.stop-deadline", reason: expect.any(String) },
+		]);
+		// No environment written is production, its default, so its check is asked.
+		const unwritten = { deployment: "multi", "stop-deadline": "30" };
+		expect((await refusedWith(unwritten)).map((r) => r.where)).toEqual([
+			"kernel.stop-deadline",
+			"strict",
+			"strict.url",
+		]);
+	});
+
+	it("asks no production check where the environment is refused, and no replica check where the deployment is", async () => {
+		const refused = await refusedWith({ deployment: "one", environment: "staging" });
+		expect(refused.map((r) => r.where).sort()).toEqual(["kernel.deployment", "kernel.environment"]);
+	});
+
+	it("says an unset deployment is required, with its choices, and a wrong one by its choices", async () => {
+		const alone = async (kernel: Record<string, unknown>) =>
+			refusalsOf(assemble({ modules: [], config: { kernel } }));
+		expect(await alone({})).toEqual([
+			{ where: "kernel.deployment", reason: "required, and not set: single or multi" },
+		]);
+		expect(await alone({ deployment: "one" })).toEqual([
+			{ where: "kernel.deployment", reason: "single or multi" },
+		]);
+	});
+});
+
+it("refuses a section for a module that is not loaded, saying to take it out or compose the module", async () => {
+	expect(await refusalsOf(assemble({ modules: [], config: { ...single, ghost: {} } }))).toEqual([
+		{
+			where: "ghost",
+			reason: "section for a module that is not loaded: take it out, or compose the module",
+		},
+	]);
+});

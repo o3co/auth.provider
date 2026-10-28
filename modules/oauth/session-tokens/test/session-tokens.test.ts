@@ -395,6 +395,23 @@ it("records a token token-endpoint tells of as issued from a session, so closing
 	expect(await s.t.verifyAccess(token.token)).toEqual({ kind: "invalid", reason: "revoked" });
 });
 
+it("keeps no access token in session-tokens' own index and lists, a token by its id and reference alone [rfc6749-10.3-a]", async () => {
+	const s = await boot();
+	// Each is told with the issued token itself in hand, as token-endpoint holds it.
+	const issued = [await s.issue(), await s.issue()];
+	const listed = (await s.issued.sets.members(s.session.id)).map((m) => m.member);
+	// The session's references, those awaiting, each token's entry in the index and the listed sessions.
+	const kept = JSON.stringify([
+		listed,
+		await s.issued.sets.awaiting(s.session.id),
+		await Promise.all(issued.map((token) => s.issued.records.read(token.id))),
+		await s.issued.pendingListed(),
+	]);
+	for (const { token } of issued) expect(kept).not.toContain(token);
+	// The session's tokens, each by its id and end, the reference tokens revokes by.
+	expect([...listed].sort()).toEqual(issued.map((token) => referenceOf(token)).sort());
+});
+
 it("answers the session a recorded token was issued for, and unbound for any other", async () => {
 	const s = await boot();
 	const a = await s.issue();

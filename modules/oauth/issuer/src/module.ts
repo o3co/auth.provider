@@ -43,7 +43,7 @@ export default defineModule(
 			if (publicOrigin !== undefined && new URL(url).origin !== publicOrigin) {
 				return c.refuse(
 					"issuer.url",
-					"the issuer origin differs from this deployment's public origin",
+					"the issuer origin differs from http.public-origin: give issuer.url the same scheme, host and port",
 				);
 			}
 			return Object.freeze({ url });

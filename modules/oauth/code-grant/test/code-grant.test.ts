@@ -471,6 +471,18 @@ it("redeems a code once, and a code that comes again revokes what it gave [rfc67
 	expect(await revoked(s, String(first.body.access_token))).toBe(true);
 });
 
+it("keeps neither the code nor the token it gave in code-grant's own record of the code, the token noted by its reference and end alone [rfc6749-10.3-a]", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	const redeemed = await s.redeem(code);
+	expect(redeemed.status).toBe(200);
+	const stored = JSON.stringify(s.stores.peek(nameOf(code)));
+	for (const secret of [code, String(redeemed.body.access_token)]) {
+		expect(stored).not.toContain(secret);
+	}
+	expect(Object.keys(keptOf(s, code)?.token ?? {}).sort()).toEqual(["expiresAt", "reference"]);
+});
+
 it("refuses a code another exchange used up while this one was turning it, and lists and marks it void [rfc6749-4.1.2-d]", async () => {
 	const s = await serve();
 	const code = await s.issue();
