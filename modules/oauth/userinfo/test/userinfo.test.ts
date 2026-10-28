@@ -15,19 +15,15 @@ const grant: AccessGrant = {
 	audience: ["app"],
 	scope: ["openid", "profile"],
 };
-const issuer = "https://issuer.example";
-/** A token issued for `granted`, the issuer among the audiences its issuer added unless `added` says otherwise. */
 const valid = (
 	tokenType = "Bearer",
 	granted: AccessGrant = grant,
-	added: readonly string[] = [issuer],
 ): Extract<AccessCheck, { kind: "valid" }> => ({
 	kind: "valid",
 	id: "token-1",
 	grant: granted,
 	expiresAt: 1000,
 	tokenType,
-	...(added.length > 0 ? { addedAudience: added } : {}),
 });
 const open: AuthContext = { subject: "ann", amr: ["pwd"], authenticatedAt: 0 };
 const entered = (context: AuthContext): Entry => ({
@@ -47,8 +43,6 @@ function over(
 		/** Runs while the selection is read, as a host that stalls there. */
 		duringSelection?: (clock: { at: number }) => void;
 		failing?: "admitted" | "session" | "entry" | "selection" | "claims";
-		/** Whether a token not for the issuer is refused: `issuer-audience` `on` unless said otherwise. */
-		requiresIssuer?: boolean;
 	} = {},
 ) {
 	const calls: unknown[][] = [];
@@ -58,8 +52,6 @@ function over(
 	};
 	const handle = userinfoOver({
 		now: () => clock.at,
-		issuer,
-		requiresIssuer: told.requiresIssuer ?? true,
 		senderBinding: {
 			admitted: async () => {
 				calls.push(["admitted"]);
@@ -192,7 +184,7 @@ describe("userinfo", () => {
 		expect(await other.run()).toEqual(refused);
 	});
 
-	it("refuses a token whose scope lacks openid as insufficient_scope, in the token's scheme, before reading its session [rfc6750-3.1-c] [rfc9449-7.1-c]", async () => {
+	it("refuses a token whose scope lacks openid as insufficient_scope, in the token's scheme, before reading its session [rfc6750-3.1-c] [rfc9449-7.1-c] [rfc9700-2.3-c]", async () => {
 		for (const scope of [[], ["profile"], ["openidx"]]) {
 			const o = over({
 				admission: { kind: "admitted", access: valid("DPoP", { ...grant, scope }) },
@@ -207,27 +199,13 @@ describe("userinfo", () => {
 		}
 	});
 
-	it("refuses a token not for the issuer as invalid_token, in the token's scheme, before reading its session [rfc9700-2.3-c]", async () => {
-		const o = over({ admission: { kind: "admitted", access: valid("DPoP", grant, []) } });
-		expect(await o.run()).toEqual({
-			status: 401,
-			headers: { ...noStore, "www-authenticate": 'DPoP error="invalid_token"' },
-			json: { error: "invalid_token" },
-		});
-		expect(o.calls).toEqual([["admitted"]]);
-	});
-
-	it("answers a token not for the issuer where the issuer is not required of it, as adding and off leave it", async () => {
+	it("never reads the token's audience: a token for another audience is answered", async () => {
 		const o = over({
-			admission: { kind: "admitted", access: valid("Bearer", grant, []) },
-			requiresIssuer: false,
+			admission: {
+				kind: "admitted",
+				access: valid("Bearer", { ...grant, audience: ["elsewhere"] }),
+			},
 		});
-		expect((await o.run()).status).toBe(200);
-	});
-
-	it("answers a token whose grant's audience is the issuer itself, nothing added to it [rfc9700-2.3-c]", async () => {
-		const own = { ...grant, audience: [issuer] };
-		const o = over({ admission: { kind: "admitted", access: valid("Bearer", own, []) } });
 		expect((await o.run()).status).toBe(200);
 	});
 
