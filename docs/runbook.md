@@ -24,7 +24,7 @@ How to run auth-provider 0.19: Redis, rotating keys, upgrading, and what to watc
 
 ## Before you deploy
 
-The app relies on the deployment for these. Each is required, not advice.
+The app relies on the deployment for these. Each is required, not advice. What each shape of deployment is guaranteed, and what is left to it, is in [Guarantees by deployment](deployment-guarantees.md).
 
 1. **The proxy in front strips and sets forwarded headers.** It removes any `X-Forwarded-For`, forwarded scheme or client-certificate header a client sent, and sets its own. The app trusts them from `http.trusted-proxies` alone, so a proxy that passes a client's own lets the client choose its source address and certificate.
 2. **Outbound through a proxy leaves address checks to the proxy.** With `outbound.proxy` set, the app checks a destination's name, and an address written in its URL, but never resolves a proxied name: the proxy must refuse private, loopback, link-local and metadata addresses itself, and Azure's platform address `168.63.129.16`. Boot warns of this.
