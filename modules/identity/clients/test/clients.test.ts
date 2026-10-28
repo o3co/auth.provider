@@ -26,7 +26,7 @@ const grants: Section<{ allowed: string[] }> = {
 	name: "grants",
 	schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
 };
-const grantsModule = defineModule({ name: "grants-owner", replicaSafe: true, takes: [] }, (m) => [
+const grantsModule = defineModule({ name: "grants-owner", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(metadataSections).by(() => grants),
 ]);
 
@@ -64,7 +64,7 @@ const method = (name: string, parts: Partial<AuthMethod> = {}) =>
 		})),
 	]);
 const source = (find: (id: string) => unknown) =>
-	defineModule({ name: "source", replicaSafe: true, takes: [] }, (m) => [
+	defineModule({ name: "source", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id: string) => find(id) as ClientRecord | undefined,
 		})),
