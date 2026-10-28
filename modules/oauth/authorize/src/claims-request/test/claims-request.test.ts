@@ -30,7 +30,7 @@ describe("claims-request", () => {
 		});
 	});
 
-	it("refuses a claim it keeps asked in a shape it does not take", () => {
+	it("refuses a claim it keeps asked in a shape it does not take [rfc6749-10.14-a]", () => {
 		const long = "x".repeat(257);
 		for (const asked of [
 			{ name: 5 },
@@ -98,5 +98,20 @@ describe("claims-request", () => {
 			acr: [{ values: many }],
 			subs: [many],
 		});
+	});
+
+	it("reads an acr's JSON escapes into the code points they stand for, normalizing nothing [oidc-core-14-a] [oidc-core-14-b]", () => {
+		const asking = (written: string) =>
+			claimsAsked(`{"id_token":{"acr":{"essential":true,"value":"${written}"}}}`);
+		const valuesOf = (written: string) => {
+			const read = asking(written);
+			return read === "malformed" ? read : read.acr[0]?.values;
+		};
+		// A double backslash is an escape in the JSON; a single one is the test's, so the JSON holds the character.
+		expect(valuesOf("urn:t:caf\\u00e9")).toEqual(["urn:t:caf\u00e9"]);
+		expect(valuesOf("urn:t:\\u0063af\\u00E9")).toEqual(["urn:t:caf\u00e9"]);
+		expect(valuesOf("urn:t:caf\u00e9")).toEqual(["urn:t:caf\u00e9"]);
+		// e and U+0301 stay two code points, as written.
+		expect(valuesOf("urn:t:cafe\\u0301")).toEqual(["urn:t:cafe\u0301"]);
 	});
 });

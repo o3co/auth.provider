@@ -552,6 +552,26 @@ it("refuses a code issued to another client, or presented with another redirect 
 	);
 });
 
+it("redeems a code issued for OpenID Connect only for its own client and redirect URI, only once and only while it lives [oidc-core-3.1.3.2-b] [oidc-core-3.1.3.2-c] [oidc-core-3.1.3.2-e]", async () => {
+	const s = await serve({ codeGrant: { "code-lifetime": "10s", "sweep-interval": "1s" } });
+	const oidc = ["openid", "read"];
+	const elsewhere = await s.app.get(codes).issue({ ...s.facts, scope: oidc, clientId: "other" });
+	expect((await s.redeem(elsewhere)).body).toEqual(refusedBody);
+	const moved = await s.issue(oidc);
+	expect((await s.redeem(moved, { redirect_uri: "https://app.example/other" })).body).toEqual(
+		refusedBody,
+	);
+	expect((await s.redeem("not-a-code")).body).toEqual(refusedBody);
+	const late = await s.issue(oidc);
+	shift = 11_000;
+	expect((await s.redeem(late)).body).toEqual(refusedBody);
+	shift = 0;
+	const code = await s.issue(oidc);
+	const first = await s.redeem(code);
+	expect([first.status, first.body.scope]).toEqual([200, "openid read"]);
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
+});
+
 it("issues nothing for a code whose session closed before the exchange", async () => {
 	const s = await serve();
 	const code = await s.issue();
