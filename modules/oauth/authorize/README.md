@@ -21,14 +21,7 @@
   - `oidc-mode`: `oidc-required` or `dual`.
   - `requests` (requests per source in each window, over both methods) and `window`.
   - `claims-parameter`, true by default: a claims request's names and value constraints are taken, and discovery says `claims_parameter_supported`. False ignores them and warns at boot `authorize.claims_parameter_off`; what else a claims request asks still holds, as `claims-request` and `flow` say.
-- Audit events (to `audit`, declared in `./audit-events`):
-  - `authorize.granted` when a code is given, with the subject, `client` and `response_type` `code`.
-  - `authorize.rejected` on a refusal decided for the client or its consent, with no subject, and `client` and `reason`.
-  - `reason` is `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name.
-  - `source` only when `request-source` determined it.
-  - Never the code, `state`, the redirect URI or the scope.
-  - Nothing for a malformed request, an unknown client or an unknown redirect URI.
-  - Nothing for unavailable either: a warning naming only what and the route, `http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after.
+- Audit events to `audit`: declared in `./audit-events`, listed in the audit event reference. Never the code, `state`, the redirect URI or the scope; none for a malformed request, an unknown client or redirect URI, nor for unavailable, which only warns, naming what and the route (`http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after).
 - Test configuration builders (`./testing`)
 
 ## Invariants
@@ -38,6 +31,7 @@
 - Prompt words are `none`, `login`, `consent` and `select_account`, and `none` stands alone. Under `prompt=none` nothing is shown: a needed login, step-up or consent is refused (`login_required`, `interaction_required`, `consent_required`).
 - An acr is asked by `acr_values`, or by `claims`' `acr` of `id_token` or `userinfo`, counting only those `acr` knows; `claims` of no shape `claims-request` takes is `invalid_request`. The code carries the first asked acr the session meets; a session that falls short goes to the `step-up-page` once. One voluntary and unmet goes on with the session's current acr, if any; an essential one is refused (`step-up`'s card).
 - Under `oidc-mode` `oidc-required`, a request whose own `scope` does not name `openid` is `invalid_scope`, even when the client's default scope holds it. Under `dual`, a request without `openid` gets the scope it asks or the client's default.
+- OpenID Connect's offline access is not offered: `offline_access` in any authorization request is dropped, not refused, and the request goes on without it, whatever the client is allowed (OpenID Connect Core §11). A request left with nothing is `invalid_scope`, never given the client's default.
 - A client that is not first-party, once logged in, is refused with `unauthorized_client` while `consent` is not `asking`. Next, before consent, `tokens`' issuance policies are asked for the code's access token (`authorization_code`, the session); a refusal is `access_denied` with the policy's description.
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
 - Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: the routes' declared `503` `temporarily_unavailable`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.

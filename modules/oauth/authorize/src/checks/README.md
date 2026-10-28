@@ -16,6 +16,7 @@ Internal module of `authorize`: the form of an authorization request, and the sc
 - Only a client `client-allowance` allows the code grant gets one, otherwise `unauthorized_client` described as not authorized for grant_type `authorization_code`, with the reason `grant_type_not_allowed`. A scope left out with no default is refused with the reason `scope_omitted_without_default`.
 - A PKCE challenge is exactly 43 base64url characters, by S256 alone: each refusal says which, a challenge missing, a method not supported (one left out is plain) or a challenge malformed. A nonce is at most 256 characters. `max_age` is 1 to 9 digits. An unknown prompt word, or `none` with another, is `invalid_request`.
 - The scope and audience are those `client-allowance` allows the client for the requested scope; its refusal is given as it is.
+- Before that, `offline_access` is dropped from any authorization request, not refused, whatever the client is allowed: OpenID Connect's offline access, its one meaning here, is not offered. A request that named it alone is `invalid_scope` (`offline_access is not offered`), never given the client's default.
 - After those refusals, with `openid` required, a request whose own scope does not name `openid` is `invalid_scope`; a client's default does not count.
 
 ## Depends on
