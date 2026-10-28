@@ -146,13 +146,16 @@ describe("grants, scopes, issuances and audiences seen", () => {
 		expect(allowsGrant(client([]), "client_credentials")).toBe(false);
 	});
 
-	it("issues each scope asked once, the first allowed audience, and no scope to a client allowed none", () => {
+	it("issues each scope asked once, the first allowed audience, and no scope to a client allowed none, never past its allowance [rfc6750-5.2-c] [rfc9700-2.3-a]", () => {
 		const { allowedIssuance } = clientAllowance;
 		const client = holding({ scopes: ["read"], audiences: ["https://api", "https://other"] });
 		expect(allowedIssuance(client, "read read", "https://as")).toEqual({
 			kind: "allowed",
 			scope: ["read"],
 			audience: ["https://api"],
+		});
+		expect(allowedIssuance(client, "read write", "https://as")).toMatchObject({
+			error: "invalid_scope",
 		});
 		expect(allowedIssuance(holding({}), undefined, "https://as")).toEqual({
 			kind: "allowed",

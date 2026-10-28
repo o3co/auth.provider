@@ -57,9 +57,10 @@ async function documentOf(extra: Module[], origin?: string) {
 	return Object.fromEntries(items.map((item) => [item.name, item.value]));
 }
 
-it("publishes its location, the grants it dispatches to, and the client authentication methods, an assertion method's beside its algorithms [rfc8414-2-h]", async () => {
+it("publishes its location, with no fragment, the grants it dispatches to, and the client authentication methods, an assertion method's beside its algorithms [rfc8414-2-h] [rfc6749-3.2-a]", async () => {
 	const document = await documentOf([echo, signed], "https://as.example");
 	expect(document.token_endpoint).toBe("https://as.example/oauth/token");
+	expect(new URL(String(document.token_endpoint)).hash).toBe("");
 	expect(document.grant_types_supported).toEqual(["client_credentials", "urn:test:echo"]);
 	expect(document.token_endpoint_auth_methods_supported).toEqual([
 		"client_secret_basic",
@@ -70,9 +71,10 @@ it("publishes its location, the grants it dispatches to, and the client authenti
 	expect(document.token_endpoint_auth_signing_alg_values_supported).toEqual(["ES256"]);
 });
 
-it("lists no grant that is not contributed, and no algorithms when no method signs", async () => {
+it("lists no grant that is not contributed, the password grant never, and no algorithms when no method signs [rfc9700-2.4-a]", async () => {
 	const document = await documentOf([]);
 	expect(document.grant_types_supported).toEqual(["client_credentials"]);
+	expect(document.grant_types_supported).not.toContain("password");
 	expect(document).not.toHaveProperty("token_endpoint_auth_signing_alg_values_supported");
 });
 

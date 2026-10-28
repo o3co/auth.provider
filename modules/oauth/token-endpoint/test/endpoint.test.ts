@@ -180,7 +180,7 @@ const claimsOf = (body: Record<string, unknown>) =>
 const audienceOf = (body: Record<string, unknown>) => claimsOf(body).aud;
 
 describe("the audience a request asks for", () => {
-	it("narrows client credentials by the composed rule, within what the client may be issued", async () => {
+	it("narrows client credentials by the composed rule, within what the client may be issued [oidc-core-16.8-a]", async () => {
 		const post = await serve([narrowing("strict", true)]);
 		const asked = (resource?: string) =>
 			post({ grant_type: "client_credentials", ...(resource ? { resource } : {}) }, "narrow");
@@ -311,11 +311,12 @@ describe("the audience a request asks for", () => {
 });
 
 describe("token endpoint", () => {
-	it("issues client credentials tokens with basic and post [rfc6749-2.3.1-a] [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-3.3-a]", async () => {
+	it("issues client credentials tokens with basic and post, uncached, each answer telling its lifetime [rfc6749-2.3.1-a] [rfc6749-5.1-a] [rfc6749-5.1-b] [rfc6749-3.3-a] [rfc6749-5.1-c] [rfc6749-5.1-d]", async () => {
 		const post = await serve();
 		const basic = await post({ grant_type: "client_credentials", scope: "read write" }, "basic");
 		expect(basic.status).toBe(200);
 		expect(basic.headers.get("cache-control")).toBe("no-store");
+		expect(basic.headers.get("pragma")).toBe("no-cache");
 		expect(basic.body).toMatchObject({
 			token_type: "Bearer",
 			expires_in: 3600,
@@ -333,6 +334,21 @@ describe("token endpoint", () => {
 			client_secret: "post-secret",
 		});
 		expect(viaPost.body).toMatchObject({ scope: "read" });
+		expect([viaPost.headers.get("cache-control"), viaPost.headers.get("pragma")]).toEqual([
+			"no-store",
+			"no-cache",
+		]);
+		expect(typeof viaPost.body.expires_in).toBe("number");
+	});
+
+	it("passes over the parameters it does not recognize, issuing as without them [rfc6749-3.2-c]", async () => {
+		const post = await serve();
+		const issued = await post(
+			{ grant_type: "client_credentials", ui_locales: "fr", x_vendor: "1", audience: "x" },
+			"basic",
+		);
+		expect([issued.status, issued.body.token_type]).toEqual([200, "Bearer"]);
+		expect(claimsOf(issued.body)).toMatchObject({ sub: "basic", aud: "https://api" });
 	});
 
 	it("issues a client's default scopes when none is asked, none when it has none, and refuses a client with no default [rfc6749-3.3-b]", async () => {
@@ -402,7 +418,7 @@ describe("token endpoint", () => {
 		]);
 	});
 
-	it("answers each refusal with its OAuth error [rfc6749-5.2-b] [rfc6749-3.2.1-a] [rfc6749-4.4-a] [rfc6749-4.4.2-a]", async () => {
+	it("answers each refusal with its OAuth error, authenticating the client wherever it can, each code within the error ABNF, the password grant not offered [rfc6749-5.2-b] [rfc6749-3.2.1-a] [rfc6749-4.4-a] [rfc6749-4.4.2-a] [rfc6749-10.2-a] [oidc-core-16.8-a] [rfc6749-5.2-c] [rfc6749-8.5-b] [rfc9700-2.4-a]", async () => {
 		const post = await serve();
 		const cc = { grant_type: "client_credentials" };
 		const wrong = await post(cc, "basic", { secret: "nope" });
@@ -423,6 +439,22 @@ describe("token endpoint", () => {
 		expect((await post({ ...cc, client_id: "pub" })).body.error, "public client").toBe(
 			"unauthorized_client",
 		);
+		const password = await post(
+			{ grant_type: "password", username: "alice", password: "pw" },
+			"basic",
+		);
+		expect(password.body.error, "the password grant").toBe("unsupported_grant_type");
+		// Every code the endpoint answers keeps to RFC 6749's NQSCHAR, quote and backslash excepted.
+		const answered = [
+			wrong,
+			await post(cc),
+			await post(cc, "nogrant"),
+			await post({ ...cc, scope: "admin" }, "basic"),
+			await post({ grant_type: "foo" }, "basic"),
+			await post({}, "basic"),
+			password,
+		].map((answer) => String(answer.body.error));
+		for (const error of answered) expect(error).toMatch(/^[\x20-\x21\x23-\x5B\x5D-\x7E]+$/);
 	});
 
 	it("refuses a client that must bind and shows no binding, or one of a kind it does not name, before the grant runs", async () => {

@@ -341,6 +341,30 @@ describe("idp-oidc", () => {
 		}
 	});
 
+	it("compares the description's issuer once its JSON escaping is removed, code point by code point [oidc-discovery-5-a] [oidc-discovery-5-c]", async () => {
+		/** A description written by hand, its issuer as the text gives it. */
+		const describedAs = (issuerText: string) => () => ({
+			status: 200,
+			headers: new Map(),
+			body: new TextEncoder().encode(
+				`{"issuer":"${issuerText}","authorization_endpoint":"${issuer}/authorize","token_endpoint":"${issuer}/token","jwks_uri":"${issuer}/jwks"}`,
+			),
+		});
+		// The same code points, escaped: the issuer it names is ours.
+		for (const escaped of [
+			"https:\\/\\/idp.example",
+			"https://idp.\\u0065xample",
+			"\\u0068ttps://idp.example",
+		]) {
+			await expect(open({ describes: describedAs(escaped) }), escaped).resolves.toBeDefined();
+		}
+		for (const other of ["https://idp.\\u0045xample", "https://idp.example\\/"]) {
+			await expect(open({ describes: describedAs(other) }), other).rejects.toThrow(
+				/another issuer/,
+			);
+		}
+	});
+
 	it("reads the description of an issuer named with a trailing slash at one slash before .well-known [oidc-discovery-4.1-c]", async () => {
 		const slashed = `${issuer}/`;
 		const { asked } = await open({
@@ -511,6 +535,34 @@ describe("idp-oidc", () => {
 			[`${issuer}/a`, `${issuer}/a`],
 			[`${issuer}/out`, `${issuer}/out`],
 		]);
+	});
+
+	it("compares an id_token's nonce with the login's code point by code point, unescaped and never normalized [oidc-discovery-5-a] [oidc-discovery-5-b] [oidc-discovery-5-c]", async () => {
+		const composed = "caf\u00e9";
+		const decomposed = "cafe\u0301";
+		/** An id_token whose payload is written by hand, its nonce as the text gives it. */
+		const writtenWith = async (nonceText: string) => {
+			const t = Math.floor(now / 1000);
+			const payload = `{"iss":"${issuer}","sub":"u-alice","aud":"client","iat":${t},"exp":${t + 300},"nonce":"${nonceText}"}`;
+			return new CompactSign(new TextEncoder().encode(payload))
+				.setProtectedHeader({ alg: "RS256", kid: rsa.jwk.kid as string })
+				.sign(rsa.privateKey);
+		};
+		const loggedIn = async (token: string, nonce: string) => {
+			const { upstream } = await open({ token: () => granted(token) });
+			return outcome(upstream.exchange(codeExchange({ nonce })));
+		};
+		expect(await loggedIn(await idToken({ nonce: composed }), composed)).toMatchObject({
+			subject: "u-alice",
+		});
+		// Its JSON escaping removed, the escaped nonce is the same code points.
+		expect(await loggedIn(await writtenWith("caf\\u00e9"), composed)).toMatchObject({
+			subject: "u-alice",
+		});
+		// Canonically equal, but other code points: neither side is normalized.
+		expect(await loggedIn(await idToken({ nonce: decomposed }), composed)).toBe("refused");
+		expect(await loggedIn(await idToken({ nonce: composed }), decomposed)).toBe("refused");
+		expect(await loggedIn(await idToken({ nonce: "CAF\u00c9" }), composed)).toBe("refused");
 	});
 
 	it("logs in at an issuer named on plain http, comparing its iss as written", async () => {
@@ -1384,7 +1436,7 @@ describe("idp-oidc", () => {
 			expect(asked()).toEqual([]);
 		});
 
-		it("asks UserInfo by GET with the access token as a Bearer credential, completing the id_token's profile [oidc-core-5.3.1-a]", async () => {
+		it("asks UserInfo by GET with the access token as a Bearer credential in no body, completing the id_token's profile [oidc-core-5.3.1-a] [rfc6750-2.2-c]", async () => {
 			const { upstream, asked } = await withUserinfo(
 				() =>
 					json({
