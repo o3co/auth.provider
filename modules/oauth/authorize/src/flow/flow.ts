@@ -242,6 +242,9 @@ export function flowWith(parts: FlowParts): Flow {
 		const selection = asksMore
 			? await selections.select(client, subject, claims.selection)
 			: undefined;
+		if (!reauths.fresh(need, session.context, taken)) {
+			return taken ? refusal("login_required") : toLogin();
+		}
 		const code = await issued.issue({
 			clientId: client.id,
 			redirectUri,
