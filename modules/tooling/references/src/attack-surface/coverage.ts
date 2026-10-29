@@ -136,7 +136,8 @@ export const coverage: Coverage = {
 		},
 		{
 			key: "token-exchange.max-lifetime",
-			weakens: "an exchanged token lives up to this, up to a day, past `tokens`' own lifetimes",
+			weakens:
+				"a lifetime a client asks of an exchange (`o3co_expires_in`) is taken up to this, up to a day, past `tokens`' own lifetimes, though never past the subject token's end or its ties'",
 		},
 		{
 			key: "login-passkey.counts-as-mfa",
