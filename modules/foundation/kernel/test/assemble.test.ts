@@ -298,7 +298,7 @@ describe("assemble", () => {
 		expect(cycle.map((r) => r.reason)).toContainEqual(expect.stringContaining("cycle"));
 	}, 2000);
 
-	it("refuses duplicate keys at a keyed extension point even when nothing collects it", async () => {
+	it("refuses duplicate keys at a keyed extension point even when nothing collects it, naming the contribution by its key [guarantee-8-a]", async () => {
 		const routes = extensionPoint<{ path: string }>("routes", {
 			multiplicity: "keyed",
 			keyOf: (r) => r.path,

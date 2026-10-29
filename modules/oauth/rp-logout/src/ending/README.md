@@ -21,6 +21,8 @@ Internal module of `rp-logout`: the logout a client starts (OpenID Connect RP-In
 - A carried request closes only the session the browser holds, and goes back only to a return its client still registers when it comes back (`carried`'s `current`, through `confirm`).
 - A carried request sent beside `id_token_hint`, `client_id`, `post_logout_redirect_uri` or `state` is `400 invalid_request`, as is one that does not hold as `confirm` checks it; nothing closed. A carried request's failed close is recorded without the subject, as the confirmation's is: the token carries none, so none is put in the URL.
 - The return is used only when it exactly matches one the hint's client registered; otherwise, or where the hint names no one client, the request is `400 invalid_request` and nothing is closed. `state` goes with it. A client record that cannot be read leaves out its frame, logged as `rp-logout.client_unavailable`; one a return is judged by answers `503`, nothing closed.
+- Each `400` above goes to a browser that prefers HTML to JSON as `303` to the deployment's error page where one is set (`error-page`), `error` and `error_description` in its query, never to the return and nothing closed: the pages are the deployment's. Without one, or to any other, it is the JSON. A `503` is JSON always.
+- A session closed before, or gone, is `200 {"logged_out":true}`. After a close, in order: the front-channel page when the browser prefers HTML to JSON and a client can be framed; `303` to the upstream; `303` to the return; `200 {"logged_out":true}`.
 
 ## Depends on
 - `audit`, `clients`, `http`, `issuer`, `oidc` (hints), `request-source` (the source), `session` (close, the cookie's handle); the package's contract, store interfaces, `closing`, `page` and `registration`

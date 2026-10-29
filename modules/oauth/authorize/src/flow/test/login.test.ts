@@ -17,7 +17,7 @@ describe("the flow: logging in before a refusal", () => {
 	const pairs = (query: string) =>
 		[...new URLSearchParams(query)].sort(([a], [b]) => a.localeCompare(b));
 
-	it("sends a browser without a session to log in before a refusal goes back, and the same request back from its login is refused [rfc9700-4.11.2-b]", async () => {
+	it("sends a browser without a session to log in before a refusal goes back, and the same request back from its login is refused [rfc9700-4.11.2-a] [rfc9700-4.11.2-b]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		for (const [sent, error] of [

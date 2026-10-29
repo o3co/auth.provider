@@ -57,10 +57,19 @@ export function settling(
 		const { pushedOut } = await stores.issuedAccess.add(id, referenceOf(access), remainingMs);
 		if (pushedOut.length > 0) {
 			log.error("refresh.access_pushed_out", { count: pushedOut.length });
-			for (const member of pushedOut) await revokeMember(member);
+			// One whose revocation fails awaits, and its family's revocation revokes it.
+			for (const member of pushedOut) {
+				await revokeMember(member);
+				await stores.issuedAccess.settled(id, member);
+			}
 			throw new Unavailable("refresh");
 		}
 	};
+	/** The family's access tokens, those its cap pushed out and still awaiting among them. */
+	const issuedBy = async (id: string) => [
+		...(await stores.issuedAccess.members(id)).map(({ member }) => member),
+		...(await stores.issuedAccess.awaiting(id)),
+	];
 	// Revokes a family and what it issued. Listed first, so `sweep` finishes one stopped halfway; the
 	// mark is written even with no record, so a family being started now never comes alive.
 	const revokeFamily = async (id: string) => {
@@ -73,7 +82,16 @@ export function settling(
 			// A family placed meanwhile is marked when the revocation is tried again.
 			if (written !== "created") throw new Unavailable("refresh");
 		}
-		for (const { member } of await stores.issuedAccess.members(id)) await revokeMember(member);
+		// Cleanup after the mark, which already refuses every token of the family: those its cap
+		// pushed out too, each settled only once this pass revoked it.
+		const gone = new Set<string>();
+		for (const member of await issuedBy(id)) {
+			await revokeMember(member);
+			gone.add(member);
+		}
+		for (const member of await stores.issuedAccess.awaiting(id)) {
+			if (gone.has(member)) await stores.issuedAccess.settled(id, member);
+		}
 		await stores.settles.done(id);
 	};
 	const sweep = async () => {
@@ -131,8 +149,16 @@ export async function revocableOver(c: BuildContext<Settings>) {
 			if (!parsed) return "unknown" as const;
 			const kept = fromStored(await stores.families.read(parsed.id));
 			if (!kept) return "unknown" as const;
+			const live = liveOf(kept);
+			if (!live) {
+				// The mark may stand over a revocation stopped halfway, its access tokens not yet revoked,
+				// and names no client: finished before it is answered, whoever asks, as finishing twice is
+				// harmless and an outage answers the same to every client.
+				await revoker.revokeFamily(parsed.id);
+				return "done" as const;
+			}
 			// Another client's token is left alone but answered the same, so it learns nothing.
-			if (liveOf(kept)?.clientId !== client.id) return "done" as const;
+			if (live.clientId !== client.id) return "done" as const;
 			await revoker.revokeFamily(parsed.id);
 			return "written" as const;
 		},
@@ -148,6 +174,11 @@ export async function participantOver(c: BuildContext<Settings>) {
 		closing: async (session: { readonly id: string }) => {
 			for (const { member } of await stores.sessionFamilies.members(session.id)) {
 				await revoker.revokeFamily(member);
+			}
+			// Those its cap pushed out whose revocation never got through: revoked here, then settled.
+			for (const member of await stores.sessionFamilies.awaiting(session.id)) {
+				await revoker.revokeFamily(member);
+				await stores.sessionFamilies.settled(session.id, member);
 			}
 		},
 	};

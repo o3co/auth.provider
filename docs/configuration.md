@@ -345,8 +345,8 @@ From `@mod/login-password`.
 | `login-password.attempts` | integer (1–100) | `20` |  |  |  | Login attempts allowed per source in each window, within bounds that keep guessing slow. |
 | `login-password.window` | string | `15m` |  |  |  | The window `attempts` is counted over, from 1m to 1d. |
 | `login-password.account-attempts` | integer (1–100) | `10` |  |  |  | Failed attempts allowed at one identifier, from any source, before each next one waits. |
-| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d. |
-| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out. |
+| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d, and no shorter than `account-max-wait`. |
+| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h and no longer than `account-window`: the wait doubles to it, never locking out. |
 
 ## mail
 
@@ -556,7 +556,8 @@ From `@mod/redis`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to. |
+| `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to, with no query: each option is its own setting. |
+| `redis.address-family` | ipv4 \| ipv6 |  |  |  |  | The address family the host's name resolves to: ipv4 or ipv6; either when unset. |
 | `redis.prefix` | string | `store` |  |  |  | What every key the store writes begins with. |
 | `redis.connect-timeout` | string | `2s` |  |  |  | How long connecting to Redis may take, at least 100ms. |
 | `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |
@@ -600,6 +601,7 @@ From `@mod/rp-logout`.
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
 | `rp-logout.confirm-within` | string | `5m` |  |  |  | How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page. |
+| `rp-logout.error-page` | string |  |  |  |  | Where a browser's refused logout request is sent, with `error` and `error_description` in its query: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, every refusal is answered as JSON. |
 | `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
 | `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 

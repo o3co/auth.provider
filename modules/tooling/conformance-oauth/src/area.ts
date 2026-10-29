@@ -105,6 +105,8 @@ export type OauthPart = {
 	readonly jwtBearer?: { readonly issuers: readonly TrustedIssuerScene[] } | false;
 	/** The provider's metadata document (RFC 8414, OpenID Connect Discovery). */
 	readonly discovery?: boolean;
+	/** `false`, a scene about the authorization endpoint's absence (`authorize`), which the area never composes itself. */
+	readonly authorize?: false;
 	/** No access token for a user whose account does not state the email verified; clients' own tokens still issue. */
 	readonly verifiedEmail?: true;
 	/** How the requests rate limit answers while the store fails; store-fault scenes let them by unless this says closed. */

@@ -22,6 +22,7 @@
 - Help escapes `\` and line feed, and label values also escape `"`, so no value breaks its line.
 - The body holds only the series `metrics` gives and the process defaults, so no request's path or query reaches it.
 - A wrong `path` refuses boot without showing the value, and so does a missing `metrics`.
+- The path is public: it is the scrape route's name, so a route refusal at boot (two routes on one path) names it.
 - A gauge whose read fails or is late has no series, and the scrape still answers `200`.
 - The process defaults are counted in one registry per process, from boot on.
 - Each instance publishes only its own counts, so the module is safe on multiple instances.

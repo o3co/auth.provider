@@ -1,5 +1,6 @@
 import { defineModule, type LogFields, Unavailable } from "@mod/kernel";
 import { canonicalAddress, type Message, mail, preparer, preparerTakes } from "@mod/mail";
+import { isFloor, tlsOptions } from "@mod/tls-options";
 import { RelayFailure, relayOver } from "./relay/relay.ts";
 import { section } from "./section.ts";
 
@@ -9,12 +10,19 @@ function logged(failure: unknown): LogFields {
 	return { stage: failure.stage, ...failure.codes };
 }
 
-/** The SMTP sender: each send is one connection to the operator's relay. It takes what mail's preparer takes, and nothing of its own. */
+/** The SMTP sender: each send is one connection to the operator's relay. It takes what mail's preparer takes, and tls-options' floor. */
 export default defineModule(
-	{ name: "mail-smtp", section, replicaSafe: true, takes: preparerTakes },
+	{ name: "mail-smtp", section, replicaSafe: true, takes: [...preparerTakes, tlsOptions] },
 	(m) => [
 		m.provide(mail).by(async (c) => {
 			const prepare = await preparer(c);
+			const floor = await c.get(tlsOptions);
+			if (!isFloor(floor)) {
+				c.refuse(
+					"mail-smtp",
+					"the TLS floor is not one tls-options made: provide it from @mod/tls-options",
+				);
+			}
 			const { host, port, security, from, user, password } = c.section;
 			if (security === "none") c.log.warn("mail-smtp.plaintext");
 			const deliver = relayOver({
@@ -25,6 +33,7 @@ export default defineModule(
 				account:
 					user !== undefined && password !== undefined ? { user, pass: password } : undefined,
 				deadlineMs: c.section.deadline,
+				floor,
 			});
 			const most = c.section["concurrent-sends"];
 			// Sends on this host now; each holds a connection until its answer or its deadline.
