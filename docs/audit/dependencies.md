@@ -243,13 +243,13 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/url-setting` |
+| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/tls-options`, `@mod/url-setting` |
 
 ### store-redis
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/redis` | adapter | `@mod/kernel`, `@mod/store` |
+| `@mod/redis` | adapter | `@mod/kernel`, `@mod/store`, `@mod/tls-options` |
 
 ### templates
 

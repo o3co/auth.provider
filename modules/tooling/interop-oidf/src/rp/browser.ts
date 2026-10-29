@@ -140,7 +140,8 @@ export function browser(trusted: Readonly<Record<string, string>>) {
 				if (next === undefined || !going.follow(next)) {
 					return { url: url.href, ...answer, hops };
 				}
-				if (hops.length >= mostHops) {
+				const followed = hops.length - 1;
+				if (followed >= mostHops) {
 					throw new Error(`more than ${mostHops} redirects from ${start}`);
 				}
 				url = next;

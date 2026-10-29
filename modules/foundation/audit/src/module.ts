@@ -91,6 +91,8 @@ export default defineModule(
 				}
 			}
 			if (refusals.length > 0) c.refuseAll(refusals);
+			// On every boot: the operator stated that events go nowhere.
+			if (named.length === 0) c.log.warn("audit events go nowhere", { receivers: "none" });
 			const max = c.section["max-pending"];
 			/** One receiver's events under way, lost since boot, and lost since it last took one. */
 			const lanes = named.map((name) => ({
