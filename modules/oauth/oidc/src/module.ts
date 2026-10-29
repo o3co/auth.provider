@@ -72,6 +72,13 @@ export default defineModule(
 				);
 			}
 			if (alg !== requiredAlg) c.log.warn("oidc.id_token_alg_not_rs256", { alg });
+			// Not refused: a rotation to another algorithm publishes its key as the next one first.
+			const next = signer.nextAlgorithm();
+			if (next !== undefined && next !== alg) {
+				c.log.warn("oidc.next_key_alg_differs", {
+					reason: `keys.next signs with ${next}, not oidc.id-token-alg's ${alg}: when it becomes keys.signing, set id-token-alg to ${next} with it`,
+				});
+			}
 			return alg;
 		}),
 		m.contribute(metadataSections).by(async (c) => clientSectionOf(await c.get(idTokenAlg))),

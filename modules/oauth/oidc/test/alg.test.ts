@@ -1,10 +1,11 @@
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
 import { clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
 import { contract, defineModule } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { keysConfig } from "@mod/keys/testing";
 import { describe, expect, it } from "vitest";
 import { booted, makers, published } from "./parts.ts";
 
@@ -150,6 +151,45 @@ describe("a deployment whose ID tokens are not signed with RS256", () => {
 	it("is not warned where it signs with RS256, the default", async () => {
 		const recording = recordingLog();
 		await booted({ runtime: quietRuntime({ log: recording.log }) });
+		expect(recording.lines().filter((line) => line.level === "warn")).toEqual([]);
+	});
+});
+
+describe("a ring whose next key signs with another algorithm than ID tokens are", () => {
+	const nextOf = (alg: "EdDSA" | "RS256", pair: { publicKey: KeyObject }) => ({
+		kid: "next",
+		alg,
+		"public-key": pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+	});
+
+	it("boots, warning each start of the change to make with its promotion, by the algorithms' names alone", async () => {
+		const recording = recordingLog();
+		const next = nextOf("EdDSA", generateKeyPairSync("ed25519"));
+		const app = await booted({
+			runtime: quietRuntime({ log: recording.log }),
+			config: { ...keysConfig({ next }) },
+		});
+		app.get(makers);
+		app.get(published);
+		expect(recording.lines().filter((line) => line.level === "warn")).toEqual([
+			{
+				level: "warn",
+				event: "oidc.next_key_alg_differs",
+				fields: {
+					reason:
+						"keys.next signs with EdDSA, not oidc.id-token-alg's RS256: when it becomes keys.signing, set id-token-alg to EdDSA with it",
+				},
+			},
+		]);
+	});
+
+	it("is not warned of where the next key signs with the same", async () => {
+		const recording = recordingLog();
+		const next = nextOf("RS256", generateKeyPairSync("rsa", { modulusLength: 2048 }));
+		await booted({
+			runtime: quietRuntime({ log: recording.log }),
+			config: { ...keysConfig({ next }) },
+		});
 		expect(recording.lines().filter((line) => line.level === "warn")).toEqual([]);
 	});
 });
