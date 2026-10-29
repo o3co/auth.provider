@@ -30,7 +30,7 @@ export const section = z
 			.array(z.union([z.string().regex(app, "an Android app origin of this form"), origin]))
 			.min(1)
 			.describe(
-				"The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins.",
+				"The origins ceremonies may come from, matched exactly: https web origins (http only on localhost, with `kernel.environment = development`), or Android app origins.",
 			),
 		"top-origins": z
 			.array(origin)
