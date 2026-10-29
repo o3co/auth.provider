@@ -80,8 +80,12 @@ export async function readsScalarsFromEnv(target: string, modules: readonly stri
 			.map(([key, value]) => [envOf(key), String(value)]),
 	);
 	const readme = await read(target, "README.md");
-	for (const [key] of scalars) {
-		expect(readme).toContain(`| \`${key}\` | \`${envOf(key)}\` |`);
+	for (const [key, value] of scalars) {
+		// A value of several lines is never in .env, as its row says.
+		const env = severalLines(value)
+			? `\`${envOf(key)}\` (process environment only, never .env)`
+			: `\`${envOf(key)}\``;
+		expect(readme).toContain(`| \`${key}\` | ${env} |`);
 	}
 }
 
