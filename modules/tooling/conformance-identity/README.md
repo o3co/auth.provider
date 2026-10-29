@@ -13,7 +13,7 @@
 - On a pattern's app that takes users from a ledger (`users-http`), a fake ledger holds the scene's users and answers their upstream links by `upstream-url`; a scene with users a ledger cannot hold (a bcrypt hash) is left out as the app's alternative.
 - On a pattern's app that keeps mfa's witness at a ledger (`mfa-witness-http`), a fake ledger keeps it for every scene, its own ledger or none: whether a subject is enrolled and by which token, the first mark, withdrawing it by its token alone, and clearing it.
 - On a pattern's app composing `verified-email`, a scene that states none of its users' email verified or not has each stated verified, with an address.
-- On a pattern's app composing `verified-email`, a user stated either way is given an address where the scene gave none, as `users` keeps the statement only beside one.
+- In every scene on the new target, and in a fake ledger, a user stated either way is given an address where the scene gave none (its identifier at `users.example`), as `users` keeps the statement only beside one.
 
 ## Not here
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`). Key parts (`conformance-keys`).
@@ -22,6 +22,8 @@
 - Area `identity` and the shape of its parts (public origin, users, a user ledger over HTTP, return destination and attempt limits)
 - The need for a user ledger over HTTP
 - The need for a user ledger over HTTP beside users in the settings
+- The need for a ledger that revokes subjects over HTTP (`ledgerRevocation`), which the legacy build cannot meet
+- The need for a recent-authentication window (`recentAuthenticationWindow`), which the legacy build cannot meet
 - The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run, named to the evidence as `@mod/conformance-identity#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
