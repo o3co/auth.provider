@@ -132,6 +132,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **Left to you:**
   - Keeping the configuration files and environment that hold secrets readable only by the app.
   - Setting `kernel.environment = development` only to try the provider on one machine. Production still takes plain http on a loopback host for an upstream identity provider's browser endpoints, and loopback and private-use redirect and logout URIs for clients.
+  - Setting `mail.accept-unsent` only where nothing need be mailed: the logging-only sender sends nothing, so no code or link mailed reaches its user.
 
 ## Secrets and logs
 
@@ -227,7 +228,11 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **ID-JAGs (`jwt-bearer`, an entry's `profile = "id-jag"`, opt-in, preview):** an ID-JAG is taken by its issuer's profile entry alone; every other way an assertion goes refuses one by its header's type before anything is verified, so none is taken by rules that would not hold its client or scope. Each is presented by the confidential client its `client_id` names, its scope and resources a ceiling beside its issuer's and the client's allowance, checked again before its `jti` is used up, and its `cnf` key proved by DPoP alone, whose proofs the endpoint checks before the grant runs. Its audience is this server's issuer alone. The metadata names the profile, never the issuers taking it.
 - **A JWT bearer grant naming no client (`jwt-bearer`, an entry's `client`, opt-in):** the assertion is the request's only credential, for the one registered client with no credentials its entry names. Its entry boots only with `conditions`, with its subjects bound by a link or a key's thumbprint, or with its keys contributed by a module that answers each signer's own keys alone (`perSigner: true`, as `signer-keys-http` declares): `accept-any-subject` cannot stand in. The entry and its client are bound both ways, so no other client takes its assertions and it takes no other's, and a request naming no client is answered alike for whatever fails before its subject is taken.
 - **An upstream's UserInfo (`idp-oidc`, `read-userinfo`, opt-in):** read once a login's id_token holds, with its access token as a Bearer credential, over https alone whatever `outbound` takes for the IdP. It only completes the profile the id_token leaves out (`email`, `name`, `picture`); it never names the user, who is found by the IdP and the id_token's `sub` alone, and never says how or when they logged in. An answer naming another `sub` refuses the login and none of its values is used.
-- **Left to you:** mapping an upstream value to a local amr in `federation.idps.<name>.upstream-amr` (to `mfa`, say) trusts that IdP's claim for the amr, and for any acr it meets (such as `urn:o3co:acr:mfa`); a login whose amr holds `mfa` passes the local second factor unasked. Map only what you trust the IdP to have checked.
+- **Left to you:**
+  - Mapping an upstream value to a local amr in `federation.idps.<name>.upstream-amr` (to `mfa`, say) trusts that IdP's claim for the amr, and for any acr it meets (such as `urn:o3co:acr:mfa`); a login whose amr holds `mfa` passes the local second factor unasked. Map only what you trust the IdP to have checked.
+  - Setting an OpenID Connect IdP's `accept-missing-iss` only for one that never sends `iss`: its callbacks are then taken without their issuer checked (RFC 9207), and each start warns `idp-oidc.iss_not_required`.
+  - Setting a trusted issuer's `accept-any-subject`, or a public client's `sections.jwt-bearer.accept-unbound`, only where what the entries above say it takes is accepted.
+  - Setting a trusted issuer's `accept-key-set-elsewhere` only for a host you trust as the issuer: its key set is then fetched from that host, over https still.
 
 ## Outbound requests
 
@@ -243,6 +248,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so). The proxy's own name is resolved by `outbound`, within the request's deadline.
   - Names resolve in helper processes that take none of the environment but the resolver's own variables, and answer addresses alone (`outbound.resolution = helper`, the default). A helper is started only in the one form guard G26 lets through.
   - What goes to a `plain-internal` pair, passwords, tokens and credentials among it, is in the clear: name only peers on a network trusted against reading and changing it (each boot warns `outbound.plain_internal`).
+  - A `plain-loopback` pair is reached at loopback addresses alone, so what goes to it stays on the host: name only a peer of your own there, such as a sidecar; what it sends on is yours.
   - Name a pair in `outbound.plain-ipv4` only where its IPv4 answers are the ones to reach, as ECS Service Connect's are: the name's IPv6 answers are not used.
   - An upstream certificate's revocation: `outbound` checks the chain and the name alone. Have the egress proxy or the platform check it, or accept that a revoked certificate is taken.
   - Network egress filtering is still expected.
@@ -256,6 +262,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Keeping a lagging replica from being promoted.
   - The replicas' own persistence.
   - Leaving the server's settings as they were at boot.
+  - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them.
 
 ## Audit
 
