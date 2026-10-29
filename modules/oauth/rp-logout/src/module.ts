@@ -23,9 +23,7 @@ const shared = contract<Notices>("rp-logout.notices");
 /** The one handler both methods of the route share, built once. */
 const ending = contract<Handler>("rp-logout.ending");
 /** The confirmation's two handlers, built once. */
-const confirming = contract<{ readonly show: Handler; readonly take: Handler }>(
-	"rp-logout.confirming",
-);
+const confirming = contract<Awaited<ReturnType<typeof confirmFrom>>>("rp-logout.confirming");
 
 /** The logout's own requests per source, which every route that may sign a confirmation is counted with. */
 const counted = (c: { readonly section: Settings }) =>
@@ -81,7 +79,7 @@ export default defineModule(
 			if (ends.length > 1) return c.refuse(name, "more than one upstream end of session");
 			return endingFrom(c, ends[0]);
 		}),
-		m.provide(confirming).by(async (c) => confirmFrom(c, (await c.collect(upstreamEnds))[0])),
+		m.provide(confirming).by(async (c) => confirmFrom(c, (await c.collect(upstreamEnds))[0], path)),
 		// The confirmation of a logout started without a hint (OpenID Connect RP-Initiated Logout 1.0 §2).
 		m.contribute(routes).by(async (c) => ({
 			method: "GET",
