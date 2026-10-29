@@ -285,7 +285,7 @@ export const coverage: Coverage = {
 		{
 			key: "jwt-bearer.max-assertion-lifetime",
 			weakens:
-				"past the default hour, up to a day: a jwt-bearer assertion is taken that far ahead or back",
+				"past the default hour, up to a day: a jwt-bearer assertion is taken with its `exp` that far ahead, and its `exp` no further from its `iat`",
 		},
 		{
 			key: "federation.idps.<name>.secret-lifetime",
