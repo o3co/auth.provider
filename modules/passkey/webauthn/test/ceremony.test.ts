@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { ceremoniesFor, challengeOf } from "../src/ceremony/ceremony.ts";
+import { algorithmNames, ceremoniesFor, challengeOf } from "../src/ceremony/ceremony.ts";
 import type { Credential, Verification } from "../src/contract.ts";
 import {
 	type CreationOptions,
@@ -15,6 +15,7 @@ const rp = {
 	origins: [testOrigin],
 	topOrigins: ["https://shell.example"],
 	timeoutMs: 120_000,
+	algorithms: algorithmNames,
 };
 const start = 1_000_000;
 let now = start;
@@ -384,6 +385,53 @@ describe("request and assertion", () => {
 		expect(await judge(authenticator.get(options, framed))).toBe("top-origin");
 		const listed = { ...at, crossOrigin: true, topOrigin: "https://shell.example" };
 		expect(await judge(authenticator.get(options, listed))).toBe("asserted");
+	});
+});
+
+describe("the algorithms the relying party takes", () => {
+	/** The ceremonies of a relying party taking these algorithms alone. */
+	const taking = (...algorithms: (typeof algorithmNames)[number][]) =>
+		ceremoniesFor({ ...rp, algorithms }, random, () => now);
+	/** A credential a relying party taking these algorithms attests, or its refusal. */
+	async function attestedBy(c: ReturnType<typeof taking>, overlook = false) {
+		const { options, challenge } = creation("preferred", c);
+		const response = softwareAuthenticator().create(options, at, { overlook });
+		return c.attest(response, challenge, handle, "preferred");
+	}
+	/** The credential asserted at a relying party taking these algorithms, or its refusal. */
+	async function assertedBy(c: ReturnType<typeof taking>) {
+		const { authenticator, credential } = await made();
+		const { options, challenge } = c.request([credential], "preferred");
+		return c.assert(
+			authenticator.get(options as RequestOptions, at),
+			challenge,
+			credential,
+			"preferred",
+		);
+	}
+
+	it("offers the algorithms it takes, in their order, and only those", () => {
+		const offered = (c: ReturnType<typeof taking>) =>
+			(creation("preferred", c).options.pubKeyCredParams ?? []).map((p) => p.alg);
+		expect(offered(ceremonies)).toEqual([-8, -7, -257]);
+		expect(offered(taking("ES256"))).toEqual([-7]);
+		expect(offered(taking("RS256", "ES256"))).toEqual([-257, -7]);
+	});
+
+	it("registers and asserts a credential of the one algorithm it takes", async () => {
+		const es256 = taking("ES256");
+		expect(await attestedBy(es256)).toMatchObject({ kind: "attested" });
+		expect(await assertedBy(es256)).toMatchObject({ kind: "asserted" });
+	});
+
+	it("registers no credential of an algorithm it does not take: the browser finds none offered, and a client that overlooks it is refused", async () => {
+		const eddsa = taking("EdDSA");
+		await expect(attestedBy(eddsa)).rejects.toMatchObject({ name: "NotSupportedError" });
+		expect(reasonOf(await attestedBy(eddsa, true))).toBe("algorithm");
+	});
+
+	it("refuses an assertion by a credential registered with an algorithm it no longer takes", async () => {
+		expect(reasonOf(await assertedBy(taking("EdDSA", "RS256")))).toBe("algorithm");
 	});
 });
 

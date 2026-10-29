@@ -733,9 +733,9 @@ jobs:
   # develop where the pull request touches what they test with: the harnesses, the shared front and
   # tunnel, the conformance driver, the checklist, and the pins they hold (the suite's in
   # interop-oidf, the libraries' in interop-clients). A pull request to develop that touches a
-  # provider module (anything under modules/ but tooling) or the federation scenes, and nothing of
-  # the harness, runs the suite's relying party plan alone: it drives the whole provider, upstream
-  # login included. Not on a push to develop.
+  # provider module (anything under modules/ but tooling) runs every suite plan, the OP's and the
+  # relying party's, as a module can serve either side; one touching the federation scenes alone
+  # runs the relying party plan alone. Not on a push to develop.
   interop-due:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
@@ -771,9 +771,9 @@ jobs:
           all=$(touches "^modules/tooling/(interop-oidf|conformance)/|$shared")
           # Read whole, not by grep -q: one stopping at its first line would cut the pipe before it ends.
           provider=$([ -n "$(grep -E '^modules/' <<<"$changed" | grep -vE '^modules/tooling/' || true)" ] && echo true || echo false)
+          # The federation scenes build the relying party's side alone; the provider's modules reach both.
           scenes=$(touches '^modules/tooling/conformance-federation/')
-          rp=$([ "$provider" = true ] || [ "$scenes" = true ] && echo true || echo false)
-          if [ "$all" = true ]; then scope=all; elif [ "$rp" = true ]; then scope=rp; else scope=none; fi
+          if [ "$all" = true ] || [ "$provider" = true ]; then scope=all; elif [ "$scenes" = true ]; then scope=rp; else scope=none; fi
           echo "oidf=$([ "$scope" != none ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "oidf-scope=$scope" >> "$GITHUB_OUTPUT"
           echo "clients=$(touches "^modules/tooling/interop-clients/|$shared")" >> "$GITHUB_OUTPUT"

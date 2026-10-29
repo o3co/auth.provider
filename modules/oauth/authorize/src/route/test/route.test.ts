@@ -8,6 +8,7 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { redirectsFor } from "@mod/redirect-uris/testing";
 import { describe, expect, it } from "vitest";
 import { type Decision, recorded as refused } from "../../decision.ts";
+import type { Flow } from "../../flow/flow.ts";
 import { routeWith } from "../route.ts";
 
 const callback = "https://app.example/cb";
@@ -23,8 +24,7 @@ const nocode: Client = {
 
 /** The route over a flow that refuses the client a recorded refusal, as one without the code grant. */
 function route(
-	flow: () => Promise<Decision> = async () =>
-		refused("unauthorized_client", "grant_type_not_allowed"),
+	flow: Flow = async () => refused("unauthorized_client", "grant_type_not_allowed"),
 	find = async (id: string) => (id === nocode.id ? nocode : undefined),
 ) {
 	const recorded: AuditRecord[] = [];
@@ -125,7 +125,11 @@ describe("route: an OpenID Connect request", () => {
 	/** A client that registered no redirect URI. */
 	const bare: Client = { ...nocode, id: "bare", section: <T>() => ({ "redirect-uris": [] }) as T };
 	const find = async (id: string) => ({ nocode, bare })[id as "nocode" | "bare"];
-	const issued = route(async () => ({ kind: "code", code: "c1", subject: "alice" }), find);
+	// The flow answers a refusal of the request's form as it does for a browser logged in.
+	const issued = route(
+		async ({ refused }) => refused ?? { kind: "code", code: "c1", subject: "alice" },
+		find,
+	);
 	/** The query an OpenID request sends, with these values set and those named in `left` left out. */
 	const oidc = (extra: Record<string, string> = {}, ...left: string[]) => {
 		const sent = new Map([...query, ["scope", ["openid read"]], ["state", ["s1"]]]);
@@ -177,6 +181,27 @@ describe("route: an OpenID Connect request", () => {
 		expect(await sentBack(issued.answer, oidc({ nonce: "n".repeat(2049) }))).toEqual(
 			refused("invalid_request"),
 		);
+	});
+
+	it("hands a repeated or too long parameter's refusal to the flow, and answers one the flow keeps at the endpoint by 400 [rfc9700-4.11.2-b]", async () => {
+		const handed: (Decision | undefined)[] = [];
+		const kept = route(async ({ refused }) => {
+			handed.push(refused);
+			return { kind: "answer", error: "invalid_request", description: "parameter too long" };
+		}, find);
+		const repeated = oidc();
+		repeated.set("nonce", ["n1", "n2"]);
+		await kept.answer(testRequest({ query: repeated }));
+		const answered = await kept.answer(testRequest({ query: oidc({ nonce: "n".repeat(2049) }) }));
+		expect(handed).toEqual([
+			{ kind: "refuse", error: "invalid_request", description: "repeated parameter" },
+			{ kind: "refuse", error: "invalid_request", description: "parameter too long" },
+		]);
+		expect([answered.status, answered.headers?.location, answered.body]).toEqual([
+			400,
+			undefined,
+			{ json: { error: "invalid_request", error_description: "parameter too long" } },
+		]);
 	});
 
 	it("puts no token in what it sends back, a code or a refusal, in the query alone [oidc-core-16.4-a]", async () => {
