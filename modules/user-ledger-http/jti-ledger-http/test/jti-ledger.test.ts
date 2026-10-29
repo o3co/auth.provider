@@ -13,6 +13,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import jtiLedgerHttp from "../src/module.ts";
 
@@ -95,7 +96,7 @@ const collector = defineModule(
 async function open(section: unknown = settings()) {
 	const logged = recordingLog();
 	const app = await assemble({
-		modules: [outboundModule, jtiLedgerHttp, collector],
+		modules: [outboundModule, tlsOptionsForTests, jtiLedgerHttp, collector],
 		config: {
 			...kernelConfig(),
 			outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
@@ -234,7 +235,7 @@ describe("jti-ledger-http", () => {
 
 it("takes all it names", async () => {
 	const unused = await takesUnused({
-		modules: [outboundModule, jtiLedgerHttp, collector],
+		modules: [outboundModule, tlsOptionsForTests, jtiLedgerHttp, collector],
 		config: {
 			...kernelConfig(),
 			"jti-ledger-http": settings({ "consume-url": "https://ledger.example/c" }),
