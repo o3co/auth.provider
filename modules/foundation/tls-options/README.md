@@ -1,7 +1,7 @@
 # tls-options
 
 ## Responsibilities
-- Owns the floor of the provider's own TLS connections as a client (outbound, mail-smtp, redis): the least version and the suites they take.
+- Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take.
 
 ## Not here
 - Trust (`ca`, which certificates are believed): each caller's. Which destinations may be reached: `outbound-policy`. Ending TLS for the provider's own listeners: the deployment's front.
