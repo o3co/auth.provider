@@ -1,8 +1,13 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
+import {
+	browser as heldBrowser,
+	letInByRecovery,
+	running as runningWith,
+} from "@mod/conformance-second-factor/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { codeScene } from "../../main.ts";
+import { type CodeScene, codeScene } from "../../main.ts";
 import { browserAt } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
@@ -20,7 +25,7 @@ const app: ClientScene = {
 	redirectUris: [callback],
 	firstParty: true,
 };
-const scene = codeScene({
+const parts: CodeScene = {
 	issuer,
 	keys: {
 		signing: {
@@ -32,7 +37,8 @@ const scene = codeScene({
 	},
 	clients: [app],
 	users: [{ identifier: "alice", password: "correct horse battery" }],
-});
+};
+const scene = codeScene(parts);
 
 let running: Started;
 let base = "";
@@ -112,4 +118,43 @@ describe("password logins meeting a client's demand for a fresh login", () => {
 			expect(await errorOf(back)).toBe("login_required");
 		},
 	);
+});
+
+describe("a password login a second factor holds for longer than max_age", () => {
+	const s = runningWith(
+		codeScene({
+			...parts,
+			mfa: { mode: "optional" },
+			users: [{ identifier: "dana", password: "correct horse battery" }],
+		}),
+	);
+	/** Asks for a code from a browser that keeps its own cookies; answers where it is sent. */
+	const ask = async (b: ReturnType<typeof heldBrowser>, query: string) => {
+		const res = await fetch(`${s.at.base}/oauth/authorize?${query}`, {
+			redirect: "manual",
+			headers: {
+				"x-forwarded-proto": "https",
+				"x-forwarded-for": "198.51.100.30",
+				"x-forwarded-host": new URL(issuer).host,
+				cookie: [...b.jar].map(([k, v]) => `${k}=${v}`).join("; "),
+			},
+		});
+		return new URL(res.headers.get("location") ?? "", issuer);
+	};
+
+	it("counts max_age from when the second factor lets the login in, not from the password", async () => {
+		const { codes } = await s.enrol("dana");
+		const b = heldBrowser(() => s.at.base);
+		const sent = await ask(b, new URLSearchParams(request({ max_age: "1" })).toString());
+		const back = sent.searchParams.get("redirect_to") ?? "";
+		// The page logs in, then the browser follows the return, as the other scenes here do.
+		const login = await b.login("dana");
+		expect(login.status).toBe(403);
+		// The second factor takes longer than max_age allows after the password.
+		await new Promise((resolve) => setTimeout(resolve, 1500));
+		const done = await letInByRecovery(b, String(login.body.transaction), codes[0] ?? "");
+		expect(done.status).toBe(200);
+		const answered = await ask(b, new URL(back, issuer).search.slice(1));
+		expect(answered.searchParams.has("code")).toBe(true);
+	});
 });
