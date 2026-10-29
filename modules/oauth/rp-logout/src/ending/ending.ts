@@ -6,9 +6,9 @@ import { type IdTokenHints, idTokenHints } from "@mod/oidc";
 import { sessions } from "@mod/session";
 import { type Closed, type Closing, closingFrom, closingTakes } from "../closing/closing.ts";
 import { type CarriedRequest, carriedParam, confirmPath } from "../confirm/confirm.ts";
-import type { UpstreamEnd } from "../contract.ts";
+import type { LogoutReturn, UpstreamEnd } from "../contract.ts";
 import { frontChannelPage, returnUrl } from "../page/page.ts";
-import { registration } from "../registration/registration.ts";
+import { returnsTo } from "../registration/registration.ts";
 import type { Settings } from "../section.ts";
 
 export interface EndingParts {
@@ -19,6 +19,7 @@ export interface EndingParts {
 	readonly confirm: {
 		carry(request: CarriedRequest): Promise<string>;
 		carried(token: string | undefined): Promise<CarriedRequest | undefined>;
+		current(request: Pick<CarriedRequest, "client" | "back">): Promise<LogoutReturn>;
 	};
 	/** The logout's own path, which a hinted `POST` sends the browser on to as a `GET`. */
 	readonly path: string;
@@ -85,9 +86,7 @@ export function endingOver(p: EndingParts) {
 	const returnOf = async (id: string | undefined, asked: string | undefined) => {
 		if (!asked) return undefined;
 		if (id === undefined) return false;
-		const client = await p.clients.find(id);
-		const listed = client?.section(registration)["post-logout-redirect-uris"] ?? [];
-		return listed.includes(asked) ? asked : false;
+		return returnsTo(await p.clients.find(id), asked) ? asked : false;
 	};
 	/** On to `to`, carrying `token` where there is one. */
 	const onTo = (to: string, token?: string): HttpResponse => {
@@ -187,7 +186,13 @@ export function endingOver(p: EndingParts) {
 		if (hinted.some((name) => request.query.single(name) !== undefined)) return carriedWithOthers;
 		const carried = await p.confirm.carried(token);
 		if (!carried) return carriedNotValid;
-		return settled(request, carried, undefined, token);
+		// Its return is held to the client's registration as it is now, not as it was when carried.
+		return settled(
+			request,
+			{ ...carried, back: await p.confirm.current(carried) },
+			undefined,
+			token,
+		);
 	};
 	return async (request: HttpRequest): Promise<HttpResponse> => {
 		try {

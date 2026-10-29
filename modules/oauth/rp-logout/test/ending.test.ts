@@ -144,6 +144,46 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(true);
 	});
 
+	it("holds a carried request's return to the client's registration when it comes back: none where the client is gone or no longer registers it", async () => {
+		for (const name of ["the return unregistered", "the client gone"]) {
+			let returns: string[] | undefined = [back];
+			const source = defineModule(
+				{ takes: [], name: "moving-clients", replicaSafe: false },
+				(m) => [
+					m.contribute(clientSources).by(() => ({
+						find: async (id) =>
+							id === "moving" && returns !== undefined
+								? {
+										id,
+										kind: "public" as const,
+										method: "none",
+										sections: {
+											"rp-logout": { "post-logout-redirect-uris": returns },
+											authorize: { "redirect-uris": ["https://app.example/cb"] },
+										},
+									}
+								: undefined,
+					})),
+				],
+			);
+			const h = await serve({ extra: [source] });
+			const { session, cookie } = await h.login();
+			const hint = await h.hintFor(session.id, { aud: "moving", azp: "moving" });
+			const params = { id_token_hint: hint, post_logout_redirect_uri: back, state: "s" };
+			const posted = await h.call("POST", params, {}, false);
+			const request = new URL(posted.headers.location ?? "", issuer).searchParams.get("request");
+			returns = name === "the client gone" ? undefined : [`${back}/other`];
+			const out = await h.call("GET", { request: request ?? "" }, { cookie });
+			expect([name, out.status, out.headers.location, out.json]).toEqual([
+				name,
+				200,
+				undefined,
+				{ logged_out: true },
+			]);
+			expect([name, await h.stillOpen(session.id)]).toEqual([name, false]);
+		}
+	});
+
 	it("sends a carried request for a session the browser does not hold on to the confirmation with the same token, closing nothing", async () => {
 		const h = await serve();
 		const { session } = await h.login();

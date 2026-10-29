@@ -1,4 +1,5 @@
 import type { AuditRecord } from "@mod/audit";
+import type { Client } from "@mod/clients";
 import type { HttpRequest, HttpResponse } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { Unavailable } from "@mod/kernel";
@@ -38,6 +39,21 @@ function serve(
 		readonly issue?: () => { field: string; token: string; cookies: string[] };
 	} = {},
 ) {
+	let at = nowMs;
+	/** Each client and the returns it registers, as its record says at the time it is read. */
+	const returns = new Map<string, string[]>([["app", ["https://app.example/after"]]]);
+	const clientOf = (id: string): Client | undefined => {
+		const listed = returns.get(id);
+		if (listed === undefined) return undefined;
+		const section = { "post-logout-redirect-uris": listed };
+		return {
+			id,
+			kind: "confidential",
+			method: "client_secret_basic",
+			registered: true,
+			section: <T>() => section as T,
+		};
+	};
 	const closes: string[] = [];
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
@@ -66,6 +82,7 @@ function serve(
 		log: logged.log,
 	});
 	const confirm = confirmWith({
+		clients: { find: async (id) => clientOf(id) },
 		sessions: {
 			// The browser's cookie names its session's handle directly in these tests.
 			handleOf: async (request) => /session=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1],
@@ -80,10 +97,18 @@ function serve(
 		issuer,
 		confirmUrl,
 		logoutUrl,
-		now: () => nowMs,
+		now: () => at,
 		log: logged.log,
 	});
-	return { confirm, closes, recorded };
+	return {
+		confirm,
+		closes,
+		recorded,
+		returns,
+		advance: (ms: number) => {
+			at += ms;
+		},
+	};
 }
 
 const browser = (session: string | undefined, fields: Record<string, string | string[]> = {}) =>
@@ -298,7 +323,7 @@ describe("a request the logout carries", () => {
 
 	it("moves on to its return from the page saying the person is not signed in, where the browser holds no session", async () => {
 		const { confirm, closes } = serve();
-		const token = await confirm.carry({ sid: "s9", back });
+		const token = await confirm.carry({ sid: "s9", client: "app", back });
 		const answer = await confirm.show(shownWith(undefined, token));
 		expect(text(answer)).toContain("You are not signed in.");
 		expect(text(answer)).toContain('data-target="https://app.example/after?state=s+1"');
@@ -312,5 +337,47 @@ describe("a request the logout carries", () => {
 		const answer = await confirm.take(browser("s1", { confirmation }));
 		expect(text(answer)).toContain("You are logged out.");
 		expect(text(answer)).not.toContain("data-target");
+	});
+
+	it("goes back to no return the client no longer registers, or whose client is gone, on the page without a session and after the close alike", async () => {
+		const changes: Record<string, (returns: Map<string, string[]>) => void> = {
+			"the return unregistered": (returns) => returns.set("app", ["https://app.example/other"]),
+			"the client gone": (returns) => returns.delete("app"),
+		};
+		for (const [name, change] of Object.entries(changes)) {
+			const { confirm, closes, returns } = serve();
+			const token = await confirm.carry({ sid: "s9", client: "app", back });
+			const page = text(await confirm.show(shownWith("s1", token)));
+			const confirmation = /name="confirmation" value="([^"]+)"/.exec(page)?.[1] ?? "";
+			change(returns);
+			const alone = text(await confirm.show(shownWith(undefined, token)));
+			const taken = text(await confirm.take(browser("s1", { confirmation })));
+			expect([name, alone.includes("data-target"), taken.includes("data-target")]).toEqual([
+				name,
+				false,
+				false,
+			]);
+			expect([name, taken.includes("You are logged out."), closes]).toEqual([name, true, ["s1"]]);
+		}
+	});
+
+	it("keeps the client in the confirmation, and its time no longer than the carried request's, however late the page is shown", async () => {
+		const { confirm, advance } = serve();
+		const token = await confirm.carry({ sid: "s9", client: "app", back });
+		advance(120_000);
+		const page = text(await confirm.show(shownWith("s1", token)));
+		const confirmation = /name="confirmation" value="([^"]+)"/.exec(page)?.[1] ?? "";
+		expect(await keys.verify(confirmation, "logout-confirm+jwt")).toEqual({
+			kind: "valid",
+			claims: {
+				iss: issuer,
+				aud: confirmUrl,
+				sid: "s1",
+				exp: nowS + 300,
+				client: "app",
+				back: back.postLogoutRedirectUri,
+				state: "s 1",
+			},
+		});
 	});
 });

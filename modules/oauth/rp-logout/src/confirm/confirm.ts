@@ -1,3 +1,4 @@
+import { type Client, clients } from "@mod/clients";
 import { type FormTokens, formTokens } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Loads, noStore } from "@mod/http";
 import { endpointOrigin, issuer } from "@mod/issuer";
@@ -8,33 +9,29 @@ import { type Closing, closingFrom, closingTakes } from "../closing/closing.ts";
 import type { LogoutReturn, UpstreamEnd } from "../contract.ts";
 import { frontChannelPage, loggedOutPage, returnUrl } from "../page/page.ts";
 import type { Settings } from "../section.ts";
+import {
+	type Carried,
+	carriedClaims,
+	carriedFrom,
+	carriedParam,
+	carriedWith,
+	heldClaims,
+} from "./carried/carried.ts";
+
+export { type CarriedRequest, carriedParam } from "./carried/carried.ts";
 
 /** Where a person confirms a logout that `ending` could not close without asking. */
 export const confirmPath = "/oauth/logout/confirm";
-/** The parameter a carried request goes in, to the logout's `GET` and to this page. */
-export const carriedParam = "request";
 
 /** The kind of the token that binds a confirmation to the session it was shown for. */
 const confirmationType = "logout-confirm+jwt";
 /** How long a confirmation page may be answered. */
 const confirmationSeconds = 300;
-/** The kind of the token a carried request is. */
-const carriedType = "logout-request+jwt";
-/** How long the browser has to follow a carried request. */
-const carriedSeconds = 300;
-
-/**
- * A logout `ending` checked and carries on in the browser's URL: the session the hint names, its
- * client, and the return the client registered with its `state`. It closes nothing by itself.
- */
-export interface CarriedRequest {
-	readonly sid: string;
-	readonly client?: string;
-	readonly back: LogoutReturn;
-}
 
 export interface ConfirmParts {
 	readonly sessions: { handleOf(request: HttpRequest): Promise<string | undefined> };
+	/** The client records a carried return is held to, as they are when it is used. */
+	readonly clients: { find(id: string): Promise<Client | undefined> };
 	/** The close the hinted logout shares. */
 	readonly closing: Closing;
 	readonly keys: Pick<Keys, "sign" | "verify">;
@@ -48,12 +45,6 @@ export interface ConfirmParts {
 	readonly now: () => number;
 	readonly log: Log;
 }
-
-/** A checked return, as a token's claims carry it: the return and its `state`, each where there is one. */
-const backClaims = (back: LogoutReturn) => ({
-	...(back.postLogoutRedirectUri === undefined ? {} : { back: back.postLogoutRedirectUri }),
-	...(back.state === undefined ? {} : { state: back.state }),
-});
 
 const escaped = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const repeated = jsonAnswer(400, {
@@ -94,52 +85,20 @@ export function confirmWith(p: ConfirmParts) {
 	const host = new URL(p.issuer).host;
 
 	const seconds = () => Math.floor(p.now() / 1000);
-	/** Claims this module signed, of `type`, for `audience` and not yet expired; none otherwise. */
-	const claimsOf = async (token: string | undefined, type: string, audience: string) => {
-		if (!token) return undefined;
-		const verified = await p.keys.verify(token, type);
-		if (verified.kind !== "valid") return undefined;
-		// keys checks the signature, the type and the key alone; the claims are this module's to check.
-		const { iss, aud, exp } = verified.claims;
-		if (iss !== p.issuer || aud !== audience) return undefined;
-		if (typeof exp !== "number" || !Number.isFinite(exp) || exp <= seconds()) return undefined;
-		return verified.claims;
-	};
-	/** The return a token carries, read back only as strings; none where it carries none. */
-	const backOf = (claims: Readonly<Record<string, unknown>> | undefined): LogoutReturn => {
-		const back = typeof claims?.back === "string" ? claims.back : undefined;
-		const state = typeof claims?.state === "string" ? claims.state : undefined;
-		if (back === undefined) return {};
-		return { postLogoutRedirectUri: back, ...(state === undefined ? {} : { state }) };
-	};
-
-	/** A request `ending` checked, signed to be carried in the browser's URL. */
-	const carry = (request: CarriedRequest): Promise<string> => {
-		const at = { iss: p.issuer, aud: p.logoutUrl, exp: seconds() + carriedSeconds };
-		const client = request.client === undefined ? {} : { client: request.client };
-		return p.keys.sign(
-			{ ...at, sid: request.sid, ...client, ...backClaims(request.back) },
-			carriedType,
-		);
-	};
-	/** The request a token carries, where this module signed it for the logout and its time holds. */
-	const carried = async (token: string | undefined): Promise<CarriedRequest | undefined> => {
-		const claims = await claimsOf(token, carriedType, p.logoutUrl);
-		const sid = claims?.sid;
-		if (typeof sid !== "string" || sid === "") return undefined;
-		const client = typeof claims?.client === "string" ? { client: claims.client } : {};
-		return { sid, ...client, back: backOf(claims) };
-	};
+	const carrying = carriedWith(p);
+	const { read, current } = carrying;
 
 	/** The confirmation page for `handle`: the person's choice, the form's CSRF token and the binding. */
 	const asking = async (
 		request: HttpRequest,
 		handle: string,
-		back: LogoutReturn,
+		carried: Carried,
 	): Promise<HttpResponse> => {
-		const exp = seconds() + confirmationSeconds;
+		// A confirmation carrying a return lasts no longer than the request it came from.
+		const fresh = seconds() + confirmationSeconds;
+		const exp = carried.back.postLogoutRedirectUri === undefined ? fresh : (carried.exp ?? fresh);
 		const confirmation = await p.keys.sign(
-			{ iss: p.issuer, aud: p.confirmUrl, sid: handle, exp, ...backClaims(back) },
+			{ iss: p.issuer, aud: p.confirmUrl, sid: handle, exp, ...carriedClaims(carried) },
 			confirmationType,
 		);
 		const csrf = p.forms.issue(request);
@@ -147,30 +106,31 @@ export function confirmWith(p: ConfirmParts) {
 		return page(html, { cookies: csrf.cookies, loads: { forms: "self" } });
 	};
 
-	/** The session the confirmation was shown for and the return it carries, where it is valid. */
+	/** The session the confirmation was shown for and what it carries, where it is valid. */
 	const boundTo = async (confirmation: string | undefined) => {
-		const claims = await claimsOf(confirmation, confirmationType, p.confirmUrl);
+		const claims = await heldClaims(p, confirmation, confirmationType, p.confirmUrl);
 		const sid = claims?.sid;
 		if (typeof sid !== "string" || sid === "") return undefined;
-		return { sid, back: backOf(claims) };
+		return { sid, ...carriedFrom(claims) };
 	};
 
 	const show = async (request: HttpRequest): Promise<HttpResponse> => {
 		// A request not carried by a token of this module's, or one past its time, is none: no return.
-		const back = (await carried(request.query.single(carriedParam)))?.back ?? {};
+		const found: Carried = (await read(request.query.single(carriedParam))) ?? { back: {} };
 		const handle = await p.sessions.handleOf(request);
-		if (handle === undefined) return notSignedIn(back);
-		return asking(request, handle, back);
+		if (handle === undefined) return notSignedIn(await current(found));
+		return asking(request, handle, found);
 	};
 
 	const take = async (request: HttpRequest): Promise<HttpResponse> => {
 		if (request.fields.repeated().length > 0) return repeated;
 		const bound = await boundTo(request.fields.single("confirmation"));
 		const handle = await p.sessions.handleOf(request);
-		if (handle === undefined) return notSignedIn(bound?.back ?? {});
+		if (handle === undefined) return notSignedIn(bound ? await current(bound) : {});
 		// Another session than the one the page was shown for, or no valid binding: asked again, nothing closed.
-		if (bound?.sid !== handle) return asking(request, handle, bound?.back ?? {});
-		const { back } = bound;
+		if (bound?.sid !== handle) return asking(request, handle, bound ?? { back: {} });
+		// Held to the registration now, before the close hands it on to the upstream's end of session too.
+		const back = await current(bound);
 		const closed = await closing(request, { sid: handle, back });
 		if (closed.kind === "unavailable") return unavailable;
 		if (closed.kind === "pending")
@@ -199,7 +159,8 @@ export function confirmWith(p: ConfirmParts) {
 				return unavailable;
 			}
 		};
-	return { carry, carried, show: guarded(show), take: guarded(take) };
+	const { carry, carried } = carrying;
+	return { carry, carried, current, show: guarded(show), take: guarded(take) };
 }
 
 /** What `confirmFrom` takes from the composition. */
@@ -217,6 +178,7 @@ export async function confirmFrom(
 	const origin = endpointOrigin(named);
 	return confirmWith({
 		sessions: await c.get(sessions),
+		clients: await c.get(clients),
 		closing: await closingFrom(c, upstream),
 		keys: await c.get(keys),
 		forms: await c.get(formTokens),
