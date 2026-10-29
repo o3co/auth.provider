@@ -21,7 +21,7 @@
 - `checklist/decisions.md` and `checklist/notes.md`: the decisions a `deviates:` or an exception names, and the notes a `note:` names, each once, in the form its file's head gives. The report writes the notes in its README, linked from each item's Note cell.
 - A test names the items it checks in its title, as `[<id>]`; a `describe` names them for every test in it.
 - `pnpm --filter @mod/spec-checklist run report` writes the report to `docs/compliance`: a page per spec, each item with its role, and a README of fixed text; `run summary` prints the summary over every spec, by spec and by role, which is not kept; `run check` prints every finding; `run ledger <spec> <text file>` compares a ledger with the spec's plain text.
-- `readChecklist` (the items, ledgers and decisions as written) and `exceptionProblems` (the `exceptions` card).
+- `readChecklist` (the items, ledgers, decisions and notes as written) and `exceptionProblems` (the `exceptions` card).
 - `./testing`: `evidenceReporter`, a vitest reporter writing a run's results for `run compliance`; `run expected`, `run plan` and `run compliance` (the `evidence` card).
 
 ## Invariants
