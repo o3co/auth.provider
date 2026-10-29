@@ -147,7 +147,8 @@ describe("a password login a second factor holds for longer than max_age", () =>
 		const b = heldBrowser(() => s.at.base);
 		const sent = await ask(b, new URLSearchParams(request({ max_age: "1" })).toString());
 		const back = sent.searchParams.get("redirect_to") ?? "";
-		const login = await b.login("dana", { redirect_to: back });
+		// The page logs in, then the browser follows the return, as the other scenes here do.
+		const login = await b.login("dana");
 		expect(login.status).toBe(403);
 		// The second factor takes longer than max_age allows after the password.
 		await new Promise((resolve) => setTimeout(resolve, 1500));
