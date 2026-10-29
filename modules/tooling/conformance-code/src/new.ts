@@ -20,9 +20,9 @@ onNew(codeArea, (part, scene) => {
 		],
 		store: "volatile",
 		...(part.without ? { without: part.without } : {}),
+		// The scene alone chooses the document hosts: a trial's allow beside allow-any-host refuses boot.
+		...(part.documents ? { whole: ["clients-cimd"] } : {}),
 		config: {
-			// The claims parameter is taken, as a deployment that runs 0.19 on every host takes it.
-			"claims-selection": { mode: "on" },
 			// A code that comes again must revoke what it gave.
 			tokens: { revocation: "denylist" },
 			authorize: {
@@ -34,7 +34,16 @@ onNew(codeArea, (part, scene) => {
 			// Without its page, consent cannot ask.
 			...(part.withoutConsent ? {} : { consent: { page: `${origin}/consent` } }),
 			...(part.acr ? { acr: { values: part.acr.values } } : {}),
-			...(part.documents ? { "clients-cimd": part.documents } : {}),
+			...(part.documents
+				? {
+						"clients-cimd": {
+							...(part.documents.allow ? { allow: part.documents.allow } : {}),
+							...(part.documents.anyHost ? { "allow-any-host": true } : {}),
+							...(part.documents.deny ? { deny: part.documents.deny } : {}),
+							...(part.documents.scopes ? { scopes: part.documents.scopes } : {}),
+						},
+					}
+				: {}),
 			// The back channel reaches the allowed origins alone, those on plain http at loopback as such;
 			// the documents' hosts stay within reach beside them.
 			...(part.logout

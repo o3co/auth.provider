@@ -32,6 +32,7 @@ export async function ledgerParty(held: {
 					...(u.subject ? { subject: u.subject } : {}),
 					...(email === undefined ? {} : { email }),
 					...(u.emailVerified === undefined ? {} : { emailVerified: u.emailVerified }),
+					...(u.name ? { name: u.name } : {}),
 					...(u.upstream ? { upstream: u.upstream } : {}),
 				};
 			}),

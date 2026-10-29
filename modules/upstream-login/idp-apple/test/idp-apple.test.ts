@@ -119,7 +119,9 @@ async function open(
 	};
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound", takes: [] }, (m) => [m.provide(outbound).by(() => stub)]),
+			defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(outbound).by(() => stub),
+			]),
 			externalJwtModule,
 		],
 		config: kernelConfig(),
@@ -427,9 +429,15 @@ describe("idp-apple", () => {
 		expect(later.payload.iat).toBe(seconds + 150);
 	});
 
-	it("refuses a callback naming another issuer before its code is used, and takes one naming none [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
+	it("refuses a callback naming another issuer before its code is used, comparing it code point by code point, and takes one naming none [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b] [oidc-discovery-5-c]", async () => {
 		const { upstream, asked } = await open(async () => granted());
-		for (const iss of ["", "appleid.apple.com", `${issuer}/`, "https://evil.example"]) {
+		for (const iss of [
+			"",
+			"appleid.apple.com",
+			`${issuer}/`,
+			issuer.toUpperCase(),
+			"https://evil.example",
+		]) {
 			expect(await outcome(upstream.exchange(exchange({ iss }))), iss).toBe("refused");
 		}
 		expect(asked).toEqual([]);
@@ -568,13 +576,13 @@ describe("idp-apple", () => {
 		};
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "outbound", takes: [] }, (m) => [
+				defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 					m.provide(outbound).by(() => unused),
 					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpApple,
-				defineModule({ name: "types", takes: [idpTypes] }, (m) => [
+				defineModule({ name: "types", replicaSafe: true, takes: [idpTypes] }, (m) => [
 					m.provide(types).by((c) => c.collect(idpTypes)),
 				]),
 			],

@@ -8,8 +8,8 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `authorize.granted` | `client`, `source`, `response_type` | a code is given, with the subject and `response_type` `code` |
-| `authorize.rejected` | `client`, `source`, `reason`, `policy` | a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name) |
+| `authorize.granted` | `client`, `source`, `response_type` | a code is given, with the subject and `response_type` `code`, and `source` only where `request-source` determined it |
+| `authorize.rejected` | `client`, `source`, `reason`, `policy` | a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name), and `source` only where `request-source` determined it |
 
 ## @mod/clients
 

@@ -3,7 +3,7 @@ import { type NewPart, onNew, type PatternPart } from "@mod/conformance";
 import bcrypt from "bcryptjs";
 import { type IdentityPart, identityArea, type LedgerScene } from "./area.ts";
 import { ledgerParty, unledgered } from "./ledger.ts";
-import { statedWhereJudged } from "./pattern.ts";
+import { addressOf, statedWhereJudged } from "./pattern.ts";
 
 /** A scrypt hash in the users module's form, with the least work it allows. */
 function scryptHash(password: string): string {
@@ -61,20 +61,25 @@ const setUp = (part: IdentityPart): NewPart => ({
 			...(part.corsOrigins ? { "cors-origins": part.corsOrigins } : {}),
 		},
 		users: {
-			registered: part.users.map((u) => ({
-				identifier: u.identifier,
-				...(u.subject ? { subject: u.subject } : {}),
-				"password-hash": u.bcrypt ? bcrypt.hashSync(u.password, 4) : scryptHash(u.password),
-				...(u.upstream ? { upstream: [u.upstream] } : {}),
-				...(u.email || u.emailVerified !== undefined
-					? {
-							attributes: {
-								...(u.email ? { email: u.email } : {}),
-								...(u.emailVerified === undefined ? {} : { email_verified: u.emailVerified }),
-							},
-						}
-					: {}),
-			})),
+			registered: part.users.map((u) => {
+				// Its own address, or one made up where only its verification is said, as the ledger does.
+				const email = u.emailVerified === undefined ? u.email : addressOf(u);
+				return {
+					identifier: u.identifier,
+					...(u.subject ? { subject: u.subject } : {}),
+					"password-hash": u.bcrypt ? bcrypt.hashSync(u.password, 4) : scryptHash(u.password),
+					...(u.upstream ? { upstream: [u.upstream] } : {}),
+					...(email || u.name
+						? {
+								attributes: {
+									...(email ? { email } : {}),
+									...(u.emailVerified === undefined ? {} : { email_verified: u.emailVerified }),
+									...(u.name ? { name: u.name } : {}),
+								},
+							}
+						: {}),
+				};
+			}),
 		},
 		"login-gates": { "return-targets": part.login?.returnTargets ?? [] },
 		"login-password": {

@@ -4,6 +4,7 @@ import { clients, metadataSections } from "@mod/clients";
 import { routes, site } from "@mod/http";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { sessions } from "@mod/session";
+import { loopbackPagesRefused } from "@mod/url-setting";
 import { askKey, storedOf } from "./ask.ts";
 import { clientCopy, clientSection } from "./client-section.ts";
 import { consents } from "./contract.ts";
@@ -25,57 +26,70 @@ const isRange = (range: readonly string[]) =>
 /** What its provision and its routes take; each is taken whatever the section says. */
 const takes = [grantStore, askStore, site, sessions, clients, audit];
 
-export default defineModule({ name: "consent", section, takes }, (m) => [
-	m.contribute(metadataSections).by(() => clientSection),
-	m.contribute(documentCopies).by(() => clientCopy),
-	m.provide(consents).by(async (c) => {
-		const grants = await c.get(grantStore);
-		const asks = await c.get(askStore);
-		const origin = (await c.get(site)).origin;
-		if (origin === undefined) return c.refuse("consent", "a public origin is required");
-		/** Destinations are https URLs on this deployment's own origin; the caller made them. */
-		const onOrigin = (url: string) => httpsUrl(url)?.origin === origin;
-		const { page } = c.section;
-		return {
-			granted: async (clientId, subject) => rangeOf(await grants.read(grantKey(clientId, subject))),
-			covers: async (clientId, subject, range) => {
-				const record = await grants.read(grantKey(clientId, subject));
-				const known = new Set(rangeOf(record));
-				return record !== undefined && range.every((r) => known.has(r));
-			},
-			grant: async (clientId, subject, range) => {
-				const key = grantKey(clientId, subject);
-				const widen = (record: StoredGrant) => ({ value: grantOf([...rangeOf(record), ...range]) });
-				if (await grants.update(key, widen)) return;
-				if ((await grants.save(key, grantOf(range), "endless")) === "created") return;
-				// Another request saved it first: widen what it saved.
-				if (!(await grants.update(key, widen))) throw new Unavailable("consent");
-			},
-			asking: page !== undefined,
-			ask: async (session, asked) => {
-				if (page === undefined) throw new TypeError("consent: no consent page is set to ask on");
-				if (!onOrigin(asked.onAccept) || !onOrigin(asked.onDeny)) {
-					throw new TypeError("consent: destinations must be https URLs on the public origin");
-				}
-				if (!isRange(asked.range)) {
-					throw new TypeError("consent: a range is distinct strings without spaces or controls");
-				}
-				const challenge = Buffer.from(c.random.bytes(32)).toString("base64url");
-				const lifetimeMs = c.section["challenge-lifetime"] * 1000;
-				const record = storedOf({
-					...asked,
-					range: [...asked.range],
-					subject: session.context.subject,
-					deadline: c.clock.now() + lifetimeMs,
-				});
-				const saved = await asks.save(askKey(session.id, challenge), record, lifetimeMs);
-				if (saved !== "created") throw new Unavailable("consent");
-				const sent = new URL(page);
-				sent.searchParams.set("challenge", challenge);
-				return sent.href;
-			},
-		};
-	}),
-	m.contribute(routes).by(showRoute),
-	m.contribute(routes).by(answerRoute),
-]);
+export default defineModule(
+	{
+		name: "consent",
+		replicaSafe: true,
+		section,
+		// A page on the operator's own machine over plain http is for trying the app, never a deployment.
+		refusedInProduction: (s) => loopbackPagesRefused({ page: s.page }),
+		takes,
+	},
+	(m) => [
+		m.contribute(metadataSections).by(() => clientSection),
+		m.contribute(documentCopies).by(() => clientCopy),
+		m.provide(consents).by(async (c) => {
+			const grants = await c.get(grantStore);
+			const asks = await c.get(askStore);
+			const origin = (await c.get(site)).origin;
+			if (origin === undefined) return c.refuse("consent", "a public origin is required");
+			/** Destinations are https URLs on this deployment's own origin; the caller made them. */
+			const onOrigin = (url: string) => httpsUrl(url)?.origin === origin;
+			const { page } = c.section;
+			return {
+				granted: async (clientId, subject) =>
+					rangeOf(await grants.read(grantKey(clientId, subject))),
+				covers: async (clientId, subject, range) => {
+					const record = await grants.read(grantKey(clientId, subject));
+					const known = new Set(rangeOf(record));
+					return record !== undefined && range.every((r) => known.has(r));
+				},
+				grant: async (clientId, subject, range) => {
+					const key = grantKey(clientId, subject);
+					const widen = (record: StoredGrant) => ({
+						value: grantOf([...rangeOf(record), ...range]),
+					});
+					if (await grants.update(key, widen)) return;
+					if ((await grants.save(key, grantOf(range), "endless")) === "created") return;
+					// Another request saved it first: widen what it saved.
+					if (!(await grants.update(key, widen))) throw new Unavailable("consent");
+				},
+				asking: page !== undefined,
+				ask: async (session, asked) => {
+					if (page === undefined) throw new TypeError("consent: no consent page is set to ask on");
+					if (!onOrigin(asked.onAccept) || !onOrigin(asked.onDeny)) {
+						throw new TypeError("consent: destinations must be https URLs on the public origin");
+					}
+					if (!isRange(asked.range)) {
+						throw new TypeError("consent: a range is distinct strings without spaces or controls");
+					}
+					const challenge = Buffer.from(c.random.bytes(32)).toString("base64url");
+					const lifetimeMs = c.section["challenge-lifetime"] * 1000;
+					const record = storedOf({
+						...asked,
+						range: [...asked.range],
+						subject: session.context.subject,
+						deadline: c.clock.now() + lifetimeMs,
+					});
+					const saved = await asks.save(askKey(session.id, challenge), record, lifetimeMs);
+					if (saved !== "created") throw new Unavailable("consent");
+					const sent = new URL(page);
+					sent.searchParams.set("challenge", challenge);
+					return sent.href;
+				},
+			};
+		}),
+		m.contribute(routes).by(showRoute),
+		m.contribute(routes).by(answerRoute),
+	],
+);

@@ -1,4 +1,4 @@
-import { configFiles, filled, kernel, refusedPart } from "../project.ts";
+import { configFiles, filled, type KeysWritten, kernel, refusedPart } from "../project.ts";
 
 /**
  * The app's entries besides `start`, each for an app that composes its package: the same modules,
@@ -37,13 +37,6 @@ const entries: readonly {
 		},
 	},
 	{
-		script: "revoke-constrained-families",
-		file: "src/revoke-constrained-families.ts",
-		template: "revoke-constrained-families.ts.template",
-		runs: "@mod/claims-revocation",
-		fill: { contract: "constrainedFamilyRevocation" },
-	},
-	{
 		script: "unclaimed-factors",
 		file: "src/unclaimed-factors.ts",
 		template: "unclaimed-factors.ts.template",
@@ -60,6 +53,7 @@ export async function entriesOf(
 	modules: readonly string[],
 	importOf: (name: string) => string,
 	run: (file: string) => string,
+	keys?: KeysWritten,
 ) {
 	const called = entries.filter((entry) => modules.includes(entry.runs));
 	const files: Record<string, string> = {};
@@ -74,7 +68,7 @@ export async function entriesOf(
 		};
 		const shared = {
 			...fill,
-			refused: await refusedPart(),
+			refused: await refusedPart(keys),
 			guard: await filled("guard.ts.part", {}),
 			reads: modules.map((name) => `import("${importOf(name)}/module")`).join(", "),
 		};

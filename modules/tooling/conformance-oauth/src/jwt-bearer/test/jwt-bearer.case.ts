@@ -31,8 +31,8 @@ const scene = (withGrant: boolean) =>
 			},
 		},
 		// Without the grant composed, no client may be allowed it: boot refuses a grant nothing serves.
-		// Other is allowed no grant, so not this one, and the scene needs no other grant composed.
-		clients: [client("app", withGrant ? [grantType] : []), client("other", [])],
+		// Other is allowed the client credentials grant, not this one, so the endpoint has a grant either way.
+		clients: [client("app", withGrant ? [grantType] : []), client("other", ["client_credentials"])],
 		...(withGrant
 			? {
 					jwtBearer: {
@@ -148,6 +148,28 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 			const res = await post(base, { grant_type: grantType, assertion: a });
 			expect([res.status, res.body.error]).toEqual([400, "invalid_grant"]);
 		}
+	});
+
+	it("checks the client credentials sent beside the assertion, refusing a request whose credentials fail [rfc7523-3.1-a]", async () => {
+		const sent = (credentials: Record<string, string>) =>
+			fetch(`${base}/oauth/token`, {
+				method: "POST",
+				headers: { "content-type": "application/x-www-form-urlencoded" },
+				body: new URLSearchParams({
+					grant_type: grantType,
+					assertion: assertion({}),
+					...credentials,
+				}),
+			}).then(async (res) => [res.status, ((await res.json()) as { error?: string }).error]);
+		expect(await sent({ client_id: "app", client_secret: "wrong" })).toEqual([
+			401,
+			"invalid_client",
+		]);
+		expect(
+			await sent({ client_id: "nobody", client_secret: "app-secret-0123456789abcdef" }),
+		).toEqual([401, "invalid_client"]);
+		const accepted = (await post(base, { grant_type: grantType, assertion: assertion({}) })).status;
+		expect(accepted).toBe(200);
 	});
 
 	it("refuses a replayed assertion", async () => {

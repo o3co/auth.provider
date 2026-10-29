@@ -63,7 +63,7 @@ const wideCaps: Limits = { maxBytes: 65_536, timeoutMs: 5_000 };
 
 /** Outbound as a test stand-in: it records each request and answers from the script, under the caps given. */
 const outboundStandIn = (caps: Limits = wideCaps, lookups?: number) =>
-	defineModule({ name: "outbound", takes: [] }, (m) => [
+	defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async (url, request, narrower) => {
 				sent.push({ url, request, narrower });
@@ -84,7 +84,7 @@ const allowanceSection: Section<unknown> = {
 
 /** The owners' sections, and their copies from a document, as client-documents collects them. */
 const ownersOf = (sections: readonly Section<unknown>[], copies: readonly DocumentCopy[]) =>
-	defineModule({ name: "owners", takes: [] }, (m) => [
+	defineModule({ name: "owners", replicaSafe: false, takes: [] }, (m) => [
 		...sections.map((one) => m.contribute(metadataSections).by(() => one)),
 		...copies.map((one) => m.contribute(documentCopies).by(() => one)),
 	]);
@@ -94,14 +94,15 @@ const owners = ownersOf([redirects, clientSection, allowanceSection], [redirects
 
 /** Token-endpoint as a test stand-in: only the grant types it says are composed. */
 const tokenEndpointStandIn = (composed: readonly string[]) =>
-	defineModule({ name: "token-endpoint", takes: [] }, (m) => [
+	defineModule({ name: "token-endpoint", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(composedGrants).by(() => new Set(composed)),
 	]);
 
 const items = contract<readonly { name: string; value: unknown }[]>("test.metadata");
-const collector = defineModule({ name: "test-collector", takes: [metadata] }, (m) => [
-	m.provide(items).by((c) => c.collect(metadata)),
-]);
+const collector = defineModule(
+	{ name: "test-collector", replicaSafe: true, takes: [metadata] },
+	(m) => [m.provide(items).by((c) => c.collect(metadata))],
+);
 
 async function boot(
 	settings: Record<string, unknown> = {},
@@ -130,7 +131,12 @@ async function boot(
 		config: {
 			...kernelConfig(),
 			clients: { registered: options.registered ?? [] },
-			"clients-cimd": { scopes: ["openid", "read"], ...settings },
+			// Any host, unless the test names the hosts.
+			"clients-cimd": {
+				scopes: ["openid", "read"],
+				...(settings.allow === undefined ? { "allow-any-host": true } : {}),
+				...settings,
+			},
 		},
 		runtime: quietRuntime({ clock: { now: () => now }, log: recording.log }),
 	};
@@ -140,7 +146,11 @@ async function boot(
 		find: (given = id) => app.get(clients).find(given),
 		supported: () =>
 			app.get(items).find((item) => item.name === "client_id_metadata_document_supported")?.value,
-		lines: recording.lines,
+		/** What was logged past the start's warning of any host taken. */
+		lines: () => recording.lines().filter((line) => line.event !== "clients-cimd.any_host_allowed"),
+		/** What the start warned of the hosts. */
+		warned: () =>
+			recording.lines().filter((line) => line.event === "clients-cimd.any_host_allowed"),
 	};
 }
 
@@ -327,14 +337,17 @@ describe("clients-cimd: a refused document", () => {
 	});
 
 	it("is none and forgotten, as a failed fetch, when checking its record throws", async () => {
-		const throwing = defineModule({ name: "throwing-owner", takes: [] }, (m) => [
-			m.contribute(metadataSections).by(() => ({
-				name: "throwing",
-				schema: z.unknown().transform(() => {
-					throw new Error("unreadable");
-				}),
-			})),
-		]);
+		const throwing = defineModule(
+			{ name: "throwing-owner", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(metadataSections).by(() => ({
+					name: "throwing",
+					schema: z.unknown().transform(() => {
+						throw new Error("unreadable");
+					}),
+				})),
+			],
+		);
 		const app = await boot({}, { extra: [throwing] });
 		expect(await app.find()).toBeUndefined();
 		expect(await app.find()).toBeUndefined();
@@ -491,6 +504,11 @@ describe("clients-cimd: the operator's section", () => {
 			{ allow: [`${"a".repeat(64)}.example`] },
 			"clients-cimd.allow.0",
 		],
+		[
+			"offline_access in the ceiling",
+			{ scopes: ["openid", "offline_access"] },
+			"clients-cimd.scopes.1",
+		],
 		["a size of zero", { "max-size": "0B" }, "clients-cimd.max-size"],
 		["no concurrency", { "max-concurrent": 0 }, "clients-cimd.max-concurrent"],
 	])("refuses boot for %s", async (_, settings, where) => {
@@ -525,6 +543,37 @@ describe("clients-cimd: the operator's section", () => {
 			},
 		]);
 		await expect(boot({}, { lookups: 1 })).resolves.toBeDefined();
+	});
+
+	it("refuses boot where the operator names no document host and does not take any [rfc9700-4.11.2-c]", async () => {
+		for (const settings of [{ "allow-any-host": false }, { allow: [] }]) {
+			const error = await boot(settings).catch((e: unknown) => e);
+			expect(error, JSON.stringify(settings)).toBeInstanceOf(BootRefused);
+			expect((error as BootRefused).refusals).toEqual([
+				{
+					where: "clients-cimd.allow",
+					reason:
+						"is empty: name the hosts a client id's document may come from, or set clients-cimd.allow-any-host",
+				},
+			]);
+		}
+	});
+
+	it("takes any host deny leaves where allow-any-host is set, warning at every start, and never beside allow", async () => {
+		const any = await boot({ "allow-any-host": true });
+		expect(any.warned()).toEqual([
+			{ level: "warn", event: "clients-cimd.any_host_allowed", fields: {} },
+		]);
+		expect(await any.find()).toMatchObject({ id });
+		expect(sent.map((one) => one.narrower?.hosts)).toEqual([undefined]);
+		expect((await boot({ allow: ["app.example"] })).warned()).toEqual([]);
+		const error = await boot({ "allow-any-host": true, allow: ["app.example"] }).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals).toEqual([
+			{ where: "clients-cimd.allow-any-host", reason: "is set beside allow: keep one of them" },
+		]);
 	});
 
 	it("boots with the size and the timeout at outbound's cap or below it", async () => {
@@ -629,6 +678,7 @@ describe("clients-cimd: times and sizes in the section", () => {
 	it("reads an empty section with the defaults it had", () => {
 		expect(section.parse({})).toEqual({
 			allow: [],
+			"allow-any-host": false,
 			deny: [],
 			scopes: [],
 			audiences: [],

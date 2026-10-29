@@ -90,6 +90,31 @@ export async function readRecord(
 	return { client };
 }
 
+/** What the composed methods break of their contract, each where and why: boot refuses any. */
+export function methodIssues(methods: readonly AuthMethod[]): { where: string; reason: string }[] {
+	return methods.flatMap((method) => {
+		const where = `clients.methods.${method.name}`;
+		const algorithms = method.signingAlgorithms;
+		// The JWS algorithm none, not the method named none: discovery names every signing algorithm.
+		const unsigned = (algorithms ?? []).some((alg) => alg.toLowerCase() === "none")
+			? [{ where, reason: "names the JWS algorithm none among its signing algorithms" }]
+			: [];
+		// An assertion is signed or MACed (RFC 7521 §5.2), so a method taking one names how.
+		const unnamed =
+			method.assertion === true && (algorithms ?? []).length === 0
+				? [
+						{
+							where,
+							reason: "names no signing algorithms, though it authenticates by an assertion",
+						},
+					]
+				: algorithms?.length === 0
+					? [{ where, reason: "names an empty list of signing algorithms" }]
+					: [];
+		return [...unsigned, ...unnamed];
+	});
+}
+
 export function registry(
 	registered: ReadonlyMap<string, Client>,
 	sources: readonly ClientSource[],

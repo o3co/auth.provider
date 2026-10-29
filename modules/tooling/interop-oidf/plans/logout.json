@@ -281,15 +281,28 @@
 					]
 				},
 				{
-					"comment": "the provider takes no logout without a hint",
+					"comment": "the provider asks the person to confirm a logout without a hint, on its own page, and never returns from it; the suite asks for the question",
 					"match": "{ORIGIN}/oauth/logout*",
 					"tasks": [
 						{
-							"task": "Expect the provider's own answer",
-							"match": "{ORIGIN}/oauth/logout*",
+							"task": "Show the question asked, then confirm the logout",
+							"match": "{ORIGIN}/oauth/logout/confirm*",
 							"commands": [
-								["wait", "xpath", "//*", 10, "invalid_request", "update-image-placeholder"]
+								[
+									"wait",
+									"xpath",
+									"//*",
+									10,
+									"Do you want to log out of",
+									"update-image-placeholder"
+								],
+								["click", "xpath", "//button[@type='submit']"]
 							]
+						},
+						{
+							"task": "Expect the provider's logged-out page",
+							"match": "{ORIGIN}/oauth/logout/confirm*",
+							"commands": [["wait", "xpath", "//*", 10, "You are logged out"]]
 						}
 					]
 				}
@@ -318,14 +331,19 @@
 					]
 				},
 				{
-					"comment": "the provider takes no logout without a hint",
+					"comment": "the provider asks the person to confirm a logout without a hint, on its own page, and never returns from it",
 					"match": "{ORIGIN}/oauth/logout*",
 					"tasks": [
 						{
-							"task": "Expect the provider's own answer",
-							"match": "{ORIGIN}/oauth/logout*",
+							"task": "Confirm the logout",
+							"match": "{ORIGIN}/oauth/logout/confirm*",
+							"commands": [["click", "xpath", "//button[@type='submit']"]]
+						},
+						{
+							"task": "Expect the provider's logged-out page",
+							"match": "{ORIGIN}/oauth/logout/confirm*",
 							"commands": [
-								["wait", "xpath", "//*", 10, "invalid_request", "update-image-placeholder"]
+								["wait", "xpath", "//*", 10, "You are logged out", "update-image-placeholder"]
 							]
 						}
 					]
@@ -355,14 +373,19 @@
 					]
 				},
 				{
-					"comment": "the provider takes no logout without a hint",
+					"comment": "the provider asks the person to confirm a logout without a hint, on its own page, and never returns from it",
 					"match": "{ORIGIN}/oauth/logout*",
 					"tasks": [
 						{
-							"task": "Expect the provider's own answer",
-							"match": "{ORIGIN}/oauth/logout*",
+							"task": "Confirm the logout",
+							"match": "{ORIGIN}/oauth/logout/confirm*",
+							"commands": [["click", "xpath", "//button[@type='submit']"]]
+						},
+						{
+							"task": "Expect the provider's logged-out page",
+							"match": "{ORIGIN}/oauth/logout/confirm*",
 							"commands": [
-								["wait", "xpath", "//*", 10, "invalid_request", "update-image-placeholder"]
+								["wait", "xpath", "//*", 10, "You are logged out", "update-image-placeholder"]
 							]
 						}
 					]

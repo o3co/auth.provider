@@ -114,7 +114,7 @@ function ties(during: () => void = () => {}) {
 		open,
 		short,
 		joined,
-		module: defineModule({ name: "ties", takes: [] }, (m) => [
+		module: defineModule({ name: "ties", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(tokenTies).by(() => family),
 			m.provide(sessions).by(() =>
 				stubSessions({
@@ -132,7 +132,7 @@ function ties(during: () => void = () => {}) {
 			),
 		]),
 		/** session-tokens in memory: its tie, and recording what token-endpoint tells it. */
-		recording: defineModule({ name: "recording", takes: [] }, (m) => [
+		recording: defineModule({ name: "recording", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(tokenTies).by(() => session),
 			m.contribute(sessionIssuances).by(() => ({
 				issued: async (handle, issued) => {
@@ -160,7 +160,7 @@ const outsideAnswer = {
 };
 
 /** A binding kind that writes `jkt`, so tokens bound by it verify. */
-const dpopKind = defineModule({ name: "dpop-kind", takes: [] }, (m) => [
+const dpopKind = defineModule({ name: "dpop-kind", replicaSafe: true, takes: [] }, (m) => [
 	m
 		.contribute(senderBindings)
 		.by(() => ({ member: "jkt", tokenType: "DPoP", read: async () => ({ kind: "absent" }) })),
@@ -214,7 +214,7 @@ async function serve(
 			dpopKind,
 			...(verifier
 				? [
-						defineModule({ name: "outside", takes: [] }, (m) => [
+						defineModule({ name: "outside", replicaSafe: false, takes: [] }, (m) => [
 							m.contribute(exchangeVerifiers).by(() => verifier),
 						]),
 					]
@@ -285,7 +285,7 @@ const tieModule = (
 	name: string,
 	answer: (id: string) => TokenTieAnswer | Promise<TokenTieAnswer>,
 ) =>
-	defineModule({ name: `tie-${name}`, takes: [] }, (m) => [
+	defineModule({ name: `tie-${name}`, replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(tokenTies).by(() => ({ name, tieOf: async (id) => answer(id) })),
 	]);
 
@@ -346,6 +346,24 @@ describe("token-exchange", () => {
 			"invalid_target",
 			"resource is not the audience issued",
 		]);
+	});
+
+	it("refuses a resource that is not an absolute URI, or carries a fragment, before it is compared with the audience [rfc8693-2.1-a] [rfc8693-2.1-b]", async () => {
+		const s = await serve();
+		const subject = subjectOf((await s.issue({ audience: [api] })).token);
+		for (const resource of [new URL(api).host, "/v1", `${api}\t`]) {
+			expect(said(await s.exchange("app", { ...subject, resource })), resource).toEqual([
+				"invalid_target",
+				"resource is not an absolute URI",
+			]);
+		}
+		expect(said(await s.exchange("app", { ...subject, resource: `${api}#part` }))).toEqual([
+			"invalid_target",
+			"resource carries a fragment",
+		]);
+		expect(await s.exchange("app", { ...subject, resource: api })).toMatchObject({
+			kind: "issued",
+		});
 	});
 
 	it("takes an actor only where the subject token's may_act names it", async () => {
@@ -438,7 +456,7 @@ describe("token-exchange: refusals", () => {
 	});
 
 	it("reads its own resource where a rule refuses one to a grant that takes no audience", async () => {
-		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				untargeted: ({ param }) =>
@@ -611,7 +629,7 @@ describe("token-exchange: a verifier's answer", () => {
 
 	it("issues through the issuance policies, refusing as they say", async () => {
 		const asked: IssuanceRequest[] = [];
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -636,7 +654,7 @@ describe("token-exchange: a verifier's answer", () => {
 
 	it("tells the issuance policies the session the subject token was issued in", async () => {
 		const asked: IssuanceRequest[] = [];
-		const watching = defineModule({ name: "watching", takes: [] }, (m) => [
+		const watching = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -655,7 +673,7 @@ describe("token-exchange: a verifier's answer", () => {
 
 	it("tells them the session of a subject token that is in a family too, and refuses one whose session ended", async () => {
 		const asked: IssuanceRequest[] = [];
-		const watching = defineModule({ name: "watching", takes: [] }, (m) => [
+		const watching = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -928,53 +946,67 @@ describe("token-exchange: the lifetime asked", () => {
 	const lifetimeOf = (outcome: GrantOutcome) =>
 		outcome.kind === "issued" ? outcome.body.expires_in : said(outcome);
 
-	it("issues for a shorter expires_in, and for the usual lifetime when it is left out or empty [rfc8693-2.2.1-d]", async () => {
+	it("issues for a shorter o3co_expires_in, and for the usual lifetime when it is left out or empty, the grant's own parameters being RFC 8693's registered ones and o3co_expires_in an RFC 6749 §8.2 vendor extension [rfc8693-2.2.1-d] [rfc6749-8.3-a]", async () => {
 		const s = await serve();
 		const subject = subjectOf((await s.issue()).token);
-		const shorter = await s.exchange("app", { ...subject, expires_in: "60" });
+		const shorter = await s.exchange("app", { ...subject, o3co_expires_in: "60" });
 		expect(lifetimeOf(shorter)).toBe(60);
 		expect((await s.issued(shorter)).expiresAt).toBe(Math.floor(now / 1000) * 1000 + 60_000);
 		expect(lifetimeOf(await s.exchange("app", subject))).toBe(3600);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "" }))).toBe(3600);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "" }))).toBe(3600);
 	});
 
-	it("cuts a longer expires_in to the operator's cap, and to the subject token's expiry", async () => {
+	it("cuts a longer o3co_expires_in to the operator's cap, and to the subject token's expiry", async () => {
 		const s = await serve({ settings: { "max-lifetime": "10m" } });
 		const subject = subjectOf((await s.issue()).token);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "7200" }))).toBe(600);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "9999999999" }))).toBe(600);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "7200" }))).toBe(600);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "9999999999" }))).toBe(
+			600,
+		);
 		expect(lifetimeOf(await s.exchange("app", subject))).toBe(600);
 		const uncapped = await serve();
 		const own = subjectOf((await uncapped.issue()).token);
-		expect(lifetimeOf(await uncapped.exchange("app", { ...own, expires_in: "7200" }))).toBe(3600);
+		expect(lifetimeOf(await uncapped.exchange("app", { ...own, o3co_expires_in: "7200" }))).toBe(
+			3600,
+		);
 		const short = await serve({ verifier: outside(() => outsideAnswer) });
-		const outsider = { ...subjectOf("outside", outsideType), expires_in: "600" };
+		const outsider = { ...subjectOf("outside", outsideType), o3co_expires_in: "600" };
 		expect(lifetimeOf(await short.exchange("app", outsider))).toBe(60);
+	});
+
+	it("reads a request's expires_in, registered for answers alone, as an unknown parameter that asks nothing", async () => {
+		const s = await serve();
+		const subject = subjectOf((await s.issue()).token);
+		for (const value of ["60", "abc"]) {
+			expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: value }))).toBe(3600);
+		}
 	});
 
 	it("lets a cap above tokens' lifetime extend the lifetime asked, never one left out", async () => {
 		const lasting = outside(() => ({ ...outsideAnswer, expiresAt: now + 86_400_000 }));
 		const s = await serve({ verifier: lasting, settings: { "max-lifetime": "2h" } });
 		const subject = subjectOf("outside", outsideType);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "5400" }))).toBe(5400);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "9000" }))).toBe(7200);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "5400" }))).toBe(5400);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "9000" }))).toBe(7200);
 		expect(lifetimeOf(await s.exchange("app", subject))).toBe(3600);
 	});
 
-	it("refuses an expires_in that is not a whole number of seconds from two, before the tokens", async () => {
+	it("refuses an o3co_expires_in that is not a whole number of seconds from two, before the tokens, its syntax defined [rfc6749-8.2-a]", async () => {
 		const s = await serve();
 		const subject = subjectOf((await s.issue()).token);
 		const malformed = [
 			"invalid_request",
-			"expires_in must be a whole number of seconds from 2, in ASCII digits",
+			"o3co_expires_in must be a whole number of seconds from 2, in ASCII digits",
 		];
 		// One second, its iat cut to the second, would leave a token less than a second.
 		for (const value of ["abc", "0", "1", "-60", "1.5", "1e3", " 60", "+60", "12345678901"]) {
-			expect(said(await s.exchange("app", { ...subject, expires_in: value }))).toEqual(malformed);
+			expect(said(await s.exchange("app", { ...subject, o3co_expires_in: value }))).toEqual(
+				malformed,
+			);
 		}
 		const forged = subjectOf("forged");
-		expect(said(await s.exchange("app", { ...forged, expires_in: "0" }))).toEqual(malformed);
-		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "2" }))).toBe(2);
+		expect(said(await s.exchange("app", { ...forged, o3co_expires_in: "0" }))).toEqual(malformed);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, o3co_expires_in: "2" }))).toBe(2);
 	});
 
 	it("refuses a cap that is not a whole number of seconds from two to a day, names no unit, or goes by its name in seconds, at boot", async () => {
@@ -1047,6 +1079,9 @@ describe("token-exchange: what any verifier may answer", () => {
 			"invalid_target",
 			"resource is not the audience issued",
 		]);
+		expect(
+			said(await s.exchange("app", { ...outsider, audience: api, resource: `${api}#part` })),
+		).toEqual(["invalid_target", "resource carries a fragment"]);
 	});
 
 	it("uses a once-only token up after it is checked twice and the policies admit it, issuing only once", async () => {
@@ -1087,7 +1122,7 @@ describe("token-exchange: what any verifier may answer", () => {
 	});
 
 	it("leaves a once-only token unused when the policies refuse or a check cannot tell", async () => {
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) =>

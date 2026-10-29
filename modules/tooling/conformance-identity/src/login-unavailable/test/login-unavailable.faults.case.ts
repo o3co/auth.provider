@@ -1,10 +1,12 @@
 import {
 	confirmation,
+	type Deployed,
 	type Instance,
 	instanceOf,
 	type Match,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	runIdOf,
@@ -12,24 +14,14 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	type Answer,
-	attemptFrom,
-	cookieIndexed,
-	loginAt,
-	nextSource,
-	on,
-	said,
-	sessionRecord,
-} from "../../faults/test/faults.ts";
+import { type Answer, loginAt, nextSource, on, said } from "../../faults/test/faults.ts";
+import { attemptFrom, cookieIndexed, sessionRecord } from "../../faults/test/wire.ts";
 
 // Each fault comes once the attempt is counted and the login holds its first session write: earlier,
 // the attempt limit refuses first (attempts-unavailable's scenes), and the session is never reached.
 
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
-/** Every store operation, a script; not the handshake each new connection makes, nor the confirming connection's rounds (`ROLE`, `INFO`, its `SET`, `WAIT`). */
-const operations: Match = { request: (c) => c.name === "EVAL", succeeded: () => true };
 
 /**
  * The answer under the fault: the session could not be opened (`temporarily_unavailable`, not the
@@ -64,8 +56,9 @@ async function noSessionOpened(i: Instance, from: number) {
 	expect(successes(i, cookieIndexed).filter((e) => e.at > from)).toEqual([]);
 }
 
-/** Healed: the instance is ready, and a new login opens a session. */
-async function healed(i: Instance) {
+/** Healed: the topology has recovered and the instance is ready, and a new login opens a session. */
+async function healed(d: Deployed, i: Instance) {
+	await recovered(d);
 	await ready(i);
 	expect(said(await loginAt(i, nextSource()))).toEqual([200, undefined, true]);
 }
@@ -90,7 +83,7 @@ describe("password login opening no session while the store cannot answer", () =
 			await ready(a);
 			expect(a.relay.executions(sessionRecord).some((e) => e.at > resumed)).toBe(true);
 			await noSessionOpened(a, stalled);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -110,7 +103,7 @@ describe("password login opening no session while the store cannot answer", () =
 				a.relay.executions(sessionRecord).some((e) => e.at > stalled && e.at < answer.at),
 			).toBe(true);
 			await noSessionOpened(a, stalled);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -126,13 +119,14 @@ describe("password login opening no session while the store cannot answer", () =
 			held.release();
 			const answer = await asked.finally(() => clearInterval(cutting));
 			expect(said(answer)).toEqual(unopened);
-			// No store operation reached Redis from the first cut to the answer: over the record's
-			// patience, connections reopen and their handshakes may land before the next cut.
-			expect(a.relay.executions(operations).filter((e) => e.at > cut && e.at < answer.at)).toEqual(
-				[],
-			);
+			// No session was indexed under a cookie from the first cut to the answer: the index is the write
+			// that makes a session reachable. Cuts 20 ms apart cannot stop a command getting through on a
+			// connection just opened, and records' resend of the record may land so and write it; the
+			// record alone opens no session. The index itself may get through, rarely, and the login then
+			// succeed: that is the fault not taking, not the guarantee broken.
+			expect(successes(a, cookieIndexed).filter((e) => e.at > cut && e.at < answer.at)).toEqual([]);
 			await noSessionOpened(a, cut);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -152,7 +146,7 @@ describe("password login opening no session while the store cannot answer", () =
 			const first = a.relay.executions(sessionRecord).find((e) => e.at > released);
 			expect(first?.at).toBeGreaterThan(released + 1_000);
 			await noSessionOpened(a, released);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -177,7 +171,7 @@ describe("password login opening no session while the store cannot answer", () =
 				a.relay.executions(sessionRecord).filter((e) => e.at > released && e.at < answer.at),
 			).toEqual([]);
 			await noSessionOpened(a, released);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -206,7 +200,7 @@ describe("password login opening no session while the store cannot answer", () =
 			const at = answer.at;
 			expect(successes(a, sessionRecord).filter((e) => e.at > from && e.at < at)).toEqual([]);
 			await noSessionOpened(a, from);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -227,8 +221,10 @@ describe("password login opening no session while the store cannot answer", () =
 			a.relay.switchUpstream(moved.upstream());
 			const from = performance.now();
 			a.relay.reset("operations");
-			await reconnected(a, moved.upstream());
+			// Watched before the wait for the new connection: the held record is resent as it opens, and
+			// its round may be done before reconnected returns.
 			const confirmed = a.relay.observe(confirmation({ replicas: 1 }));
+			await reconnected(a, moved.upstream());
 			const wait = await confirmed;
 			const answer = await asked;
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
@@ -243,7 +239,7 @@ describe("password login opening no session while the store cannot answer", () =
 			expect(said(answer)).toEqual(unopened);
 			a.relay.reset("confirming");
 			await noSessionOpened(a, from);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 
@@ -287,7 +283,7 @@ describe("password login opening no session while the store cannot answer", () =
 				await annotate("answered temporarily_unavailable");
 			}
 			await replicasOnline(d);
-			await healed(a);
+			await healed(d, a);
 		});
 	});
 });

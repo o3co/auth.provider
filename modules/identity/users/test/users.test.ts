@@ -26,7 +26,7 @@ import {
 } from "../src/testing.ts";
 
 /** The IdP names the registered users below link through, as a federation would declare them. */
-const named = defineModule({ name: "test-idps", takes: [] }, (m) => [
+const named = defineModule({ name: "test-idps", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(upstreamNames).by(() => ({
 		declaredBy: "test-idps",
 		names: ["example", "corp:eu", "idp", "i"].map((name) => ({
@@ -178,6 +178,9 @@ it("refuses to start on an attribute value users does not accept, naming the att
 		["picture", "http://pic.example/a.png"],
 		["picture", "https://PIC.example/a.png"],
 		["email", "a@victim.test/x"],
+		["email", "a..b@example.com"],
+		["email", "josé@example.com"],
+		["name", ""],
 		["name", "Al\u202Eice"],
 		["groups", ["admins", "st\u0000aff"]],
 		["email_verified", "true"],
@@ -205,6 +208,23 @@ it("refuses to start on an attribute value users does not accept, naming the att
 		kind: "user",
 		user: { subject: "s-a", attributes: accepted },
 	});
+});
+
+it("refuses to start on an email's verification without the email, as a ledger's is left out", async () => {
+	for (const verified of [true, false]) {
+		const attributes = { name: "Alice", email_verified: verified };
+		const refused = (await boot([testUser("a", "p", { attributes })]).catch(
+			(error) => error,
+		)) as BootRefused;
+		expect(refused.refusals, String(verified)).toEqual([
+			{
+				where: "users.registered.0.attributes.email_verified",
+				reason: "only beside the user's email",
+			},
+		]);
+	}
+	const beside = { email: "alice@example.com", email_verified: false };
+	await expect(boot([testUser("a", "p", { attributes: beside })])).resolves.toBeDefined();
 });
 
 it("links an upstream identity as its IdP's name and upstream subject, matched exactly, and once", async () => {

@@ -34,17 +34,22 @@ function serving(table: Record<string, Uint8Array>, missing: number, sent: Sent[
 			return { status: body ? 200 : missing, headers: new Map(), body: body ?? new Uint8Array() };
 		},
 	};
-	return defineModule({ name: "signed-material", takes: [] }, (m) => [
+	return defineModule({ name: "signed-material", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(signedOutbound).by(() => outbound),
 	]);
 }
 
 const published = contract<readonly MetadataItem[]>("published");
 const kindNames = contract<readonly (string | undefined)[]>("kind-names");
-const reader = defineModule({ name: "reader", takes: [metadata, senderBindings] }, (m) => [
-	m.provide(published).by((c) => c.collect(metadata)),
-	m.provide(kindNames).by(async (c) => (await c.collect(senderBindings)).map((kind) => kind.name)),
-]);
+const reader = defineModule(
+	{ name: "reader", replicaSafe: true, takes: [metadata, senderBindings] },
+	(m) => [
+		m.provide(published).by((c) => c.collect(metadata)),
+		m
+			.provide(kindNames)
+			.by(async (c) => (await c.collect(senderBindings)).map((kind) => kind.name)),
+	],
+);
 
 async function boot(
 	section: unknown,
@@ -157,7 +162,7 @@ describe("mtls", () => {
 		});
 		expect(await listing.bindingOf(revoked, [intermediate])).toMatchObject({
 			kind: "refused",
-			error: "invalid_certificate",
+			error: "invalid_client",
 		});
 		const resource = { kind: "resource", token: "t" } as const;
 		expect(await listing.bindingOf(revoked, [intermediate], resource)).toMatchObject({
@@ -205,7 +210,7 @@ describe("mtls", () => {
 		);
 		expect(await ocsp.bindingOf(client, [intermediate])).toMatchObject({
 			kind: "refused",
-			error: "invalid_certificate",
+			error: "invalid_client",
 		});
 	});
 

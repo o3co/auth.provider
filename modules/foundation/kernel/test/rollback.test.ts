@@ -13,7 +13,7 @@ import { quietRuntime, recordingLog } from "../src/testing.ts";
 import { refusalsOf } from "./refusals.ts";
 
 const single = kernelConfig();
-const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+const refusing = defineModule({ name: "refusing", replicaSafe: true, takes: [] }, (m) => [
 	m.provide(contract<void>("refused")).by((c) => c.refuse("refusing", "refused on purpose")),
 ]);
 /** A module providing `name`, after its dependency where it has one, its stop hook as `stop`. */
@@ -23,12 +23,15 @@ const holding = (
 	after?: { readonly contract: ReturnType<typeof contract<void>> },
 ) => {
 	const handle = contract<void>(name);
-	const module = defineModule({ name, takes: after ? [after.contract] : [] }, (m) => [
-		m.provide(handle).by(async (c) => {
-			if (after) await c.get(after.contract);
-			c.onStop(() => stop(c));
-		}),
-	]);
+	const module = defineModule(
+		{ name, replicaSafe: false, takes: after ? [after.contract] : [] },
+		(m) => [
+			m.provide(handle).by(async (c) => {
+				if (after) await c.get(after.contract);
+				c.onStop(() => stop(c));
+			}),
+		],
+	);
 	return { module, contract: handle };
 };
 
@@ -54,7 +57,7 @@ describe("an assembly refused after its builds", () => {
 
 	it("runs the hook a build registered before refusing itself", async () => {
 		let stopped = false;
-		const own = defineModule({ name: "own", takes: [] }, (m) => [
+		const own = defineModule({ name: "own", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<void>("own")).by((c) => {
 				c.onStop(() => {
 					stopped = true;
@@ -84,7 +87,7 @@ describe("an assembly refused after its builds", () => {
 			given.where = "changed";
 			given.reason = "after rollback";
 		});
-		const giving = defineModule({ name: "giving", takes: [] }, (m) => [
+		const giving = defineModule({ name: "giving", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<void>("giving")).by((c) => c.refuseAll([given])),
 		]);
 		const refusals = await refusalsOf(
@@ -108,7 +111,7 @@ describe("an assembly refused after its builds", () => {
 	it("still refuses late references and readiness while it rolls back", async () => {
 		const asked: string[] = [];
 		const other = contract<void>("other");
-		const lateTaker = defineModule({ name: "late-taker", takes: [] }, (m) => [
+		const lateTaker = defineModule({ name: "late-taker", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(other).by(() => {}),
 			m.provide(contract<void>("late-taker")).by((c) => {
 				const later = c.late(other);
@@ -194,14 +197,14 @@ describe("an assembly refused after its builds", () => {
 		let sawAbort = false;
 		let calledAborted: boolean | undefined;
 		// Registered first, so called last: after the deadline.
-		const after = defineModule({ name: "after", takes: [] }, (m) => [
+		const after = defineModule({ name: "after", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<void>("after")).by((c) => {
 				c.onStop((signal) => {
 					calledAborted = signal.aborted;
 				});
 			}),
 		]);
-		const hanging = defineModule({ name: "hanging", takes: [] }, (m) => [
+		const hanging = defineModule({ name: "hanging", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<void>("hanging")).by((c) => {
 				c.onStop((signal) => {
 					signal.addEventListener("abort", () => {
@@ -263,7 +266,7 @@ describe("an assembly refused before it builds", () => {
 		);
 		const shared = contract<void>("shared");
 		const twice = (name: string) =>
-			defineModule({ name, takes: [] }, (m) => [
+			defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 				m.provide(shared).by((c) => {
 					c.onStop(() => {
 						stopped.push(name);

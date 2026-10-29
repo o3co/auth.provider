@@ -6,7 +6,7 @@ import resourceIndicators from "../src/module.ts";
 
 /** The rules composed, as token-endpoint collects them. */
 const composed = contract<readonly TargetRule[]>("test.composed-rules");
-const probe = defineModule({ name: "probe", takes: [targetRules] }, (m) => [
+const probe = defineModule({ name: "probe", replicaSafe: true, takes: [targetRules] }, (m) => [
 	m.provide(composed).by((c) => c.collect(targetRules)),
 ]);
 let rule: TargetRule;
@@ -46,6 +46,34 @@ describe("resource-indicators", () => {
 		});
 	});
 
+	it("refuses a resource that is not an absolute URI, or carries a fragment, whatever audience is registered [rfc8707-2-a] [rfc8707-2-b]", () => {
+		// Every value here is registered: the form is refused before any audience is compared.
+		const anywhere = (resource: string) =>
+			rule.target({
+				param: (name) => (name === "resource" ? resource : undefined),
+				audience,
+				within: () => true,
+			});
+		for (const resource of ["a.example", "/api", "api", "https://a.example/ x"]) {
+			expect(anywhere(resource), resource).toEqual({
+				kind: "error",
+				error: "invalid_target",
+				description: "resource is not an absolute URI",
+			});
+		}
+		for (const resource of ["https://a.example/#x", "urn:example:a#"]) {
+			expect(anywhere(resource), resource).toEqual({
+				kind: "error",
+				error: "invalid_target",
+				description: "resource carries a fragment",
+			});
+		}
+		expect(anywhere("urn:example:api")).toEqual({
+			kind: "audience",
+			audience: ["urn:example:api"],
+		});
+	});
+
 	it("refuses a resource the issuance may not have, telling a fixed text rather than the value", () => {
 		expect(verdictFor({ resource: "https://c.example" })).toEqual(refused);
 	});
@@ -72,9 +100,14 @@ describe("resource-indicators", () => {
 	});
 
 	it("compares the resource as a string, never as a URI it would normalize", () => {
-		for (const resource of ["HTTPS://B.EXAMPLE", "https://b.example/", "https://b.example\t"]) {
+		for (const resource of ["HTTPS://B.EXAMPLE", "https://b.example/"]) {
 			expect(verdictFor({ resource }), JSON.stringify(resource)).toEqual(refused);
 		}
+		// A tab URL parsing would strip is no URI as written, refused before any comparison.
+		expect(verdictFor({ resource: "https://b.example\t" })).toEqual({
+			...refused,
+			description: "resource is not an absolute URI",
+		});
 	});
 });
 

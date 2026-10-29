@@ -7,6 +7,7 @@ import {
 	defineModule,
 	isUnavailable,
 	kernelConfig,
+	readConfigured,
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -191,7 +192,7 @@ async function open(world: World = {}) {
 	});
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound", takes: [] }, (m) => [
+			defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(outbound).by(() => stub.outbound),
 			]),
 			externalJwtModule,
@@ -336,6 +337,30 @@ describe("idp-oidc", () => {
 	it("refuses at boot a description that names another issuer, one only starting with it included [oidc-discovery-4.3-b] [oidc-discovery-4.3-c] [oidc-discovery-7.2-a]", async () => {
 		for (const named of ["https://other.example", `${issuer}/`, `${issuer}/tenant`]) {
 			await expect(open({ description: { issuer: named } }), named).rejects.toThrow(
+				/another issuer/,
+			);
+		}
+	});
+
+	it("compares the description's issuer once its JSON escaping is removed, code point by code point [oidc-discovery-5-a] [oidc-discovery-5-c]", async () => {
+		/** A description written by hand, its issuer as the text gives it. */
+		const describedAs = (issuerText: string) => () => ({
+			status: 200,
+			headers: new Map(),
+			body: new TextEncoder().encode(
+				`{"issuer":"${issuerText}","authorization_endpoint":"${issuer}/authorize","token_endpoint":"${issuer}/token","jwks_uri":"${issuer}/jwks"}`,
+			),
+		});
+		// The same code points, escaped: the issuer it names is ours.
+		for (const escaped of [
+			"https:\\/\\/idp.example",
+			"https://idp.\\u0065xample",
+			"\\u0068ttps://idp.example",
+		]) {
+			await expect(open({ describes: describedAs(escaped) }), escaped).resolves.toBeDefined();
+		}
+		for (const other of ["https://idp.\\u0045xample", "https://idp.example\\/"]) {
+			await expect(open({ describes: describedAs(other) }), other).rejects.toThrow(
 				/another issuer/,
 			);
 		}
@@ -511,6 +536,34 @@ describe("idp-oidc", () => {
 			[`${issuer}/a`, `${issuer}/a`],
 			[`${issuer}/out`, `${issuer}/out`],
 		]);
+	});
+
+	it("compares an id_token's nonce with the login's code point by code point, unescaped and never normalized [oidc-discovery-5-a] [oidc-discovery-5-b] [oidc-discovery-5-c]", async () => {
+		const composed = "caf\u00e9";
+		const decomposed = "cafe\u0301";
+		/** An id_token whose payload is written by hand, its nonce as the text gives it. */
+		const writtenWith = async (nonceText: string) => {
+			const t = Math.floor(now / 1000);
+			const payload = `{"iss":"${issuer}","sub":"u-alice","aud":"client","iat":${t},"exp":${t + 300},"nonce":"${nonceText}"}`;
+			return new CompactSign(new TextEncoder().encode(payload))
+				.setProtectedHeader({ alg: "RS256", kid: rsa.jwk.kid as string })
+				.sign(rsa.privateKey);
+		};
+		const loggedIn = async (token: string, nonce: string) => {
+			const { upstream } = await open({ token: () => granted(token) });
+			return outcome(upstream.exchange(codeExchange({ nonce })));
+		};
+		expect(await loggedIn(await idToken({ nonce: composed }), composed)).toMatchObject({
+			subject: "u-alice",
+		});
+		// Its JSON escaping removed, the escaped nonce is the same code points.
+		expect(await loggedIn(await writtenWith("caf\\u00e9"), composed)).toMatchObject({
+			subject: "u-alice",
+		});
+		// Canonically equal, but other code points: neither side is normalized.
+		expect(await loggedIn(await idToken({ nonce: decomposed }), composed)).toBe("refused");
+		expect(await loggedIn(await idToken({ nonce: composed }), decomposed)).toBe("refused");
+		expect(await loggedIn(await idToken({ nonce: "CAF\u00c9" }), composed)).toBe("refused");
 	});
 
 	it("logs in at an issuer named on plain http, comparing its iss as written", async () => {
@@ -866,43 +919,62 @@ describe("idp-oidc", () => {
 		expect(sent?.request.credential).toBeUndefined();
 	});
 
-	it("refuses an answer from another issuer before using its code, and one without iss where iss is asked [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
+	it("refuses an answer from another issuer before using its code, and one without iss unless the operator accepts its absence [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
 		const token = await idToken();
 		const { upstream, asked } = await answering(token);
-		for (const iss of ["https://evil.example", ""]) {
-			expect(await outcome(upstream.exchange(codeExchange({ iss }))), iss).toBe("refused");
+		for (const iss of ["https://evil.example", "", undefined]) {
+			expect(await outcome(upstream.exchange(codeExchange({ iss }))), String(iss)).toBe("refused");
 		}
 		expect(asked.some((a) => a.url === `${issuer}/token`)).toBe(false);
-		expect(await outcome(upstream.exchange(codeExchange({ iss: undefined })))).toMatchObject({
-			subject: "u-alice",
-		});
-		const asking: Record<string, Omit<World, "token">> = {
-			"the description offers iss": {
-				description: { authorization_response_iss_parameter_supported: true },
-			},
-			"the operator requires iss": { settings: { "require-iss": true } },
-		};
-		for (const [label, world] of Object.entries(asking)) {
-			const strict = await answering(token, world);
-			expect(await outcome(strict.upstream.exchange(codeExchange({ iss: undefined }))), label).toBe(
+		const accepting = await answering(token, { settings: { "accept-missing-iss": true } });
+		// Accepting a missing iss takes no other: a wrong or empty one is refused before its code is used.
+		for (const iss of ["https://evil.example", ""]) {
+			expect(await outcome(accepting.upstream.exchange(codeExchange({ iss }))), iss).toBe(
 				"refused",
 			);
 		}
+		expect(accepting.asked.some((a) => a.url === `${issuer}/token`)).toBe(false);
+		expect(
+			await outcome(accepting.upstream.exchange(codeExchange({ iss: undefined }))),
+		).toMatchObject({ subject: "u-alice" });
+		const offering = await answering(token, {
+			settings: { "accept-missing-iss": true },
+			description: { authorization_response_iss_parameter_supported: true },
+		});
+		expect(await outcome(offering.upstream.exchange(codeExchange({ iss: undefined })))).toBe(
+			"refused",
+		);
 	});
 
-	it("warns at boot when neither the operator nor the description requires iss", async () => {
+	it("warns at every start where the operator accepts a missing iss the description does not offer", async () => {
+		const accepting = { "accept-missing-iss": true };
 		const notRequired = [{ event: "idp-oidc.iss_not_required", fields: { idp: "corp" } }];
-		expect((await open()).warned).toEqual(notRequired);
-		expect((await open({ settings: givenEndpoints })).warned).toEqual(notRequired);
-		const asking: Record<string, World> = {
+		expect((await open({ settings: accepting })).warned).toEqual(notRequired);
+		expect((await open({ settings: { ...givenEndpoints, ...accepting } })).warned).toEqual(
+			notRequired,
+		);
+		const required: Record<string, World> = {
+			"by default": {},
+			"without discovery": { settings: givenEndpoints },
 			"the description offers iss": {
+				settings: accepting,
 				description: { authorization_response_iss_parameter_supported: true },
 			},
-			"the operator requires iss": { settings: { "require-iss": true } },
 		};
-		for (const [label, world] of Object.entries(asking)) {
+		for (const [label, world] of Object.entries(required)) {
 			expect((await open(world)).warned, label).toEqual([]);
 		}
+	});
+
+	it("refuses 0.18's require-iss as an unknown key, naming it, read as federation reads an IdP's settings", () => {
+		const read = readConfigured(settingsOf(asymmetric, policyRefusing()), {
+			issuer,
+			"client-id": "client",
+			"client-secret": "s",
+			"require-iss": true,
+		});
+		expect(read).toEqual({ issues: [expect.objectContaining({ path: [] })] });
+		expect("issues" in read && read.issues[0]?.message).toMatch(/"require-iss"/);
 	});
 
 	it("refuses an id_token that does not hold [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [oidc-discovery-7.2-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
@@ -915,6 +987,9 @@ describe("idp-oidc", () => {
 			"another issuer": { token: () => idToken({ iss: "https://evil.example" }) },
 			"another audience": { token: () => idToken({ aud: "someone" }) },
 			"many audiences, no azp": { token: () => idToken({ aud: ["client", "x"] }) },
+			"another audience, the client authorized": {
+				token: () => idToken({ aud: ["client", "x"], azp: "client" }),
+			},
 			"azp not the client": { token: () => idToken({ aud: "client", azp: "x" }) },
 			"another nonce": { token: () => idToken({ nonce: "other" }) },
 			"no subject": { token: () => idToken({ sub: "" }) },
@@ -939,10 +1014,8 @@ describe("idp-oidc", () => {
 		}
 		const { upstream } = await answering(await idToken());
 		expect(await outcome(upstream.exchange(codeExchange({ nonce: "x" })))).toBe("refused");
-		for (const aud of [["client", "x"], ["client"]]) {
-			const listed = await idToken({ aud, ...(aud.length > 1 ? { azp: "client" } : {}) });
-			expect(await exchanged(listed), aud.join()).toMatchObject({ subject: "u-alice" });
-		}
+		const listed = await idToken({ aud: ["client"] });
+		expect(await exchanged(listed)).toMatchObject({ subject: "u-alice" });
 	});
 
 	it("takes by default one algorithm for each kind of key, PS256 only where the operator names it [oidc-core-3.1.3.7-i]", async () => {
@@ -1304,13 +1377,13 @@ describe("idp-oidc", () => {
 		const recorded = recordingLog();
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "outbound", takes: [] }, (m) => [
+				defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 					m.provide(outbound).by(() => stub.outbound),
 					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpOidc,
-				defineModule({ name: "types", takes: [idpTypes] }, (m) => [
+				defineModule({ name: "types", replicaSafe: true, takes: [idpTypes] }, (m) => [
 					m.provide(types).by((c) => c.collect(idpTypes)),
 				]),
 			],
@@ -1321,7 +1394,12 @@ describe("idp-oidc", () => {
 			app.get(types).find((type) => type.type === "oidc"),
 			"the oidc type",
 		);
-		const base = { issuer, "client-id": "client", "client-secret": "s" };
+		const base = {
+			issuer,
+			"client-id": "client",
+			"client-secret": "s",
+			"accept-missing-iss": true,
+		};
 		expect(oidc.settings.safeParse({ ...base, algorithms: ["HS256"] }).success).toBe(false);
 		await oidc.open(oidc.settings.parse(base), {
 			idp: "corp",
@@ -1384,7 +1462,7 @@ describe("idp-oidc", () => {
 			expect(asked()).toEqual([]);
 		});
 
-		it("asks UserInfo by GET with the access token as a Bearer credential, completing the id_token's profile [oidc-core-5.3.1-a]", async () => {
+		it("asks UserInfo by GET with the access token as a Bearer credential in no body, completing the id_token's profile [oidc-core-5.3.1-a] [rfc6750-2.2-c]", async () => {
 			const { upstream, asked } = await withUserinfo(
 				() =>
 					json({

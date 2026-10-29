@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -8,12 +10,15 @@ const root = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
 interface Step {
 	readonly id?: string;
 	readonly name?: string;
+	readonly if?: string;
+	readonly shell?: string;
 	readonly env?: Readonly<Record<string, string>>;
 	readonly uses?: string;
 	readonly run?: string;
 	readonly with?: Readonly<Record<string, unknown>>;
 }
 interface Job {
+	readonly if?: string;
 	readonly outputs?: Readonly<Record<string, string>>;
 	readonly strategy?: { readonly matrix?: Readonly<Record<string, unknown>> };
 	readonly steps: readonly Step[];
@@ -55,6 +60,79 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		);
 	});
 
+	it("run on a pull request to develop every area and its fault scenes where its files may reach a scene, else none, no pattern, and pass where nothing was planned", () => {
+		const plan = job("conformance-plan");
+		expect(plan.if).toContain("github.event_name == 'pull_request'");
+		expect(plan.if).not.toContain("github.base_ref == 'main'");
+		// The change is read against the base, whose history the checkout holds.
+		expect(checkout("conformance-plan")?.with?.["fetch-depth"]).toBe(0);
+		const step = plan.steps.find((s) => s.id === "plan");
+		expect(step?.env).toMatchObject({
+			EVENT: expr("github.event_name"),
+			BASE: expr("github.base_ref"),
+		});
+		const lines = (step?.run ?? "").split("\n").map((l) => l.trim());
+		for (const line of [
+			'if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then',
+			`changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\\n") | map(select(. != ""))')`,
+			'reaches=$(jq -c "$REACHES" <<<"$changed")',
+			'if [ "$reaches" != true ]; then',
+			"areas='[]'",
+			"faults='[]'",
+			"patterns='[]'",
+		]) {
+			expect(lines).toContain(line);
+		}
+		// The judgement itself, run as the step runs it: by the paths alone, as an area names no module it composes.
+		const reaches = (files: readonly string[]) =>
+			execFileSync("jq", ["-c", String(step?.env?.REACHES)], {
+				input: JSON.stringify(files),
+				encoding: "utf8",
+			}).trim();
+		const cases: readonly (readonly [readonly string[], string])[] = [
+			[[], "false"],
+			[["docs/compliance/guarantee.md", "docs/audit/cards.md"], "false"],
+			[["modules/tooling/spec-checklist/checklist/guarantee.md"], "false"],
+			[["modules/tooling/spec-checklist/test/repo.test.ts", "docs/compliance/rfc6749.md"], "false"],
+			// The evidence reporter every area's run holds.
+			[["modules/tooling/spec-checklist/src/evidence/reporter.ts"], "true"],
+			// A module an area composes, which no area names as a dependency.
+			[["modules/identity/login-password/src/login.ts"], "true"],
+			[["modules/store-redis/redis/src/redis-store.ts"], "true"],
+			[["modules/tooling/conformance-device/src/area.ts"], "true"],
+			[["modules/tooling/conformance/src/fault-scene/fault-scene.ts"], "true"],
+			// Files of no package: the lockfile, the root's settings, the workflows.
+			[["pnpm-lock.yaml"], "true"],
+			[["package.json"], "true"],
+			[[".github/workflows/ci.yml"], "true"],
+			[["docs/compliance/guarantee.md", "modules/oauth/code-grant/src/grant.ts"], "true"],
+			// A file moved out of a module into the docs: without renames, both its paths are read.
+			[["docs/notes/grant.ts", "modules/oauth/code-grant/src/grant.ts"], "true"],
+		];
+		for (const [files, answer] of cases) expect([files, reaches(files)]).toEqual([files, answer]);
+		// A job with nothing planned is skipped, as a matrix of none cannot run.
+		const planned = (list: string) => `needs.conformance-plan.outputs.${list} != '[]'`;
+		expect(job("legacy-build").if).toContain(planned("areas"));
+		expect(job("conformance-area").if).toContain(planned("areas"));
+		expect(job("conformance-faults").if).toContain(planned("faults"));
+		expect(job("conformance-pattern").if).toContain(planned("patterns"));
+		// The gate runs on every pull request, and takes a job skipped with nothing planned as passed.
+		const gate = job("conformance");
+		expect(gate.if).toContain("github.event_name == 'pull_request'");
+		const check = gate.steps[0];
+		expect(check?.env).toMatchObject({
+			PLANNED_AREAS: expr("needs.conformance-plan.outputs.areas"),
+			PLANNED_PATTERNS: expr("needs.conformance-plan.outputs.patterns"),
+			PLANNED_FAULTS: expr("needs.conformance-plan.outputs.faults"),
+		});
+		expect(check?.run).toContain(
+			'if [ "$planned" = "[]" ] && [ "$result" = skipped ]; then continue; fi',
+		);
+		expect(check?.run).toContain(
+			'"legacy-build $PLANNED_AREAS $LEGACY" "conformance-area $PLANNED_AREAS $AREAS" "conformance-pattern $PLANNED_PATTERNS $PATTERNS" "conformance-faults $PLANNED_FAULTS $FAULTS"',
+		);
+	});
+
 	it("run each area's fault scenes as a fault run, which skips none, and fail conformance where they did not pass", () => {
 		const faults = job("conformance-faults");
 		const scenes = faults.steps.find((s) => s.name === "Fault scenes");
@@ -67,7 +145,40 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			steps: readonly Step[];
 		};
 		expect(gate.needs).toContain("conformance-faults");
-		expect(gate.steps.map((s) => s.run).join("\n")).toContain("needs.conformance-faults.result");
+		expect(gate.steps.map((s) => s.env?.FAULTS)).toContain(expr("needs.conformance-faults.result"));
+	});
+
+	it("run conformance's deployment tests that move an instance's clock in one leg of the fault job, failing rather than skipping or matching none, and reporting no evidence", () => {
+		const steps = job("conformance-faults").steps;
+		const clock = steps.find((s) => s.name === "Deployment tests with a moved clock");
+		expect(clock?.if).toBe(expr("!cancelled() && strategy.job-index == 0"));
+		expect(clock?.env?.CONFORMANCE_FAULTS).toBe("1");
+		// The whole script, so no other config or name filter leaves the clock's tests out unseen, and the
+		// count of those that passed, as a filter matching nothing passes with every test skipped.
+		const tests = "modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts";
+		// The count is the deployment's tests a fault run never skips, those that move a clock.
+		const held =
+			readFileSync(join(root, tests), "utf8").split("it.runIf(faultRun || hostLibfaketime())(")
+				.length - 1;
+		expect(held).toBeGreaterThan(0);
+		expect(clock?.run).toBe(
+			[
+				"set -euo pipefail",
+				`pnpm exec vitest run --config vitest.integration.config.ts ${tests} -t clock --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/clock-tests.json"`,
+				`jq -e '.numPassedTests >= ${held}' "$RUNNER_TEMP/clock-tests.json" > /dev/null || {`,
+				`  echo "the clock step did not pass the ${held} deployment clock tests it holds" >&2`,
+				"  exit 1",
+				"}",
+				"",
+			].join("\n"),
+		);
+		expect(clock?.shell).toBe("bash");
+		expect(clock?.env?.SPEC_EVIDENCE_DIR).toBeUndefined();
+		// After the step that takes the library and the one that finds it moves Node's clock.
+		const at = (name: string) => steps.findIndex((s) => s.name === name);
+		expect(at("Deployment tests with a moved clock")).toBeGreaterThan(
+			at("The library moves Node's clock here"),
+		);
 	});
 
 	it("take the interop matrices from `run plan` in interop-due, which fixes their commit", () => {
@@ -83,6 +194,295 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		expect(job("interop-clients").strategy?.matrix?.library).toBe(
 			expr("fromJSON(needs.interop-due.outputs.libraries)"),
 		);
+	});
+
+	it("run every suite plan where a pull request to develop touches the harness, and the relying party plan alone where it touches a provider module or the federation scenes", () => {
+		const due = job("interop-due");
+		const script = (id: string) => due.steps.find((s) => s.id === id)?.run ?? "";
+		const dir = mkdtempSync(join(tmpdir(), "ci-oidf-"));
+		try {
+			// git answers the files a test names, read from a file: an environment string is capped at
+			// 128 KiB on Linux, below what a large pull request names. pnpm answers every plan the checklist has.
+			const changedFile = join(dir, "changed");
+			writeFileSync(
+				join(dir, "git"),
+				'#!/bin/sh\ncase "$1" in diff) tr " " "\\n" < "$CHANGED_FILE" ;; *) echo head ;; esac\n',
+				{ mode: 0o755 },
+			);
+			writeFileSync(
+				join(dir, "pnpm"),
+				'#!/bin/sh\necho \'["basic","config","rp-initiated-logout","rp"]\'\n',
+				{ mode: 0o755 },
+			);
+			const outputs = (changed: string, more: Record<string, string> = {}) => {
+				const out = join(dir, "out");
+				writeFileSync(out, "");
+				writeFileSync(changedFile, changed);
+				const env = {
+					...process.env,
+					PATH: `${dir}:${process.env.PATH}`,
+					GITHUB_OUTPUT: out,
+					EVENT: "pull_request",
+					BASE: "develop",
+					CHANGED_FILE: changedFile,
+					...more,
+				};
+				const ran = spawnSync("bash", ["-c", script("due")], { env, encoding: "utf8" });
+				expect(ran.error).toBeUndefined();
+				expect(ran.status, ran.stderr).toBe(0);
+				const read = () =>
+					Object.fromEntries(
+						readFileSync(out, "utf8")
+							.trim()
+							.split("\n")
+							.map((line) => line.split(/=(.*)/s).slice(0, 2)),
+					);
+				const scope = read()["oidf-scope"] ?? "";
+				const planned = spawnSync("bash", ["-c", script("plan")], {
+					env: { ...env, SCOPE: scope },
+					encoding: "utf8",
+				});
+				expect(planned.error).toBeUndefined();
+				expect(planned.status, planned.stderr).toBe(0);
+				const all = read();
+				return { oidf: all.oidf, scope: all["oidf-scope"], plans: all["oidf-plans"] };
+			};
+			const every = '["basic","config","rp-initiated-logout","rp"]';
+			// A provider module, however far from upstream login (external-jwt is two steps from federation).
+			for (const file of [
+				"modules/upstream-login/idp-oidc/src/upstream.ts",
+				"modules/foundation/external-jwt/src/module.ts",
+				"modules/oauth/authorize/src/module.ts",
+				"modules/scaffold/create-app/src/patterns/sso-federated.ts",
+				"modules/tooling/conformance-federation/src/new.ts",
+			]) {
+				expect(outputs(file), file).toEqual({ oidf: "true", scope: "rp", plans: '["rp"]' });
+			}
+			for (const file of [
+				"modules/tooling/interop-oidf/src/rp/scene.ts",
+				"modules/tooling/conformance/src/drivers/app.ts",
+				"modules/tooling/spec-checklist/src/main.ts",
+			]) {
+				expect(outputs(file), file).toEqual({ oidf: "true", scope: "all", plans: every });
+			}
+			// Both sides: every plan, the relying party's among them.
+			expect(
+				outputs(
+					"modules/upstream-login/idp-oidc/README.md modules/tooling/interop-oidf/src/rp/scene.ts",
+				),
+			).toEqual({ oidf: "true", scope: "all", plans: every });
+			// A pull request touching more than a pipe holds: the provider module first, tooling after it.
+			const many = Array.from(
+				{ length: 3000 },
+				(_, i) => `modules/tooling/conformance-oauth/src/file-${i}.ts`,
+			);
+			expect(outputs(["modules/oauth/authorize/src/module.ts", ...many].join(" "))).toEqual({
+				oidf: "true",
+				scope: "rp",
+				plans: '["rp"]',
+			});
+			// Docs alone, or tooling the suite does not run: no suite plan.
+			for (const file of [
+				"docs/migration.md",
+				"README.md",
+				"modules/tooling/conformance-oauth/src/new.ts",
+			]) {
+				expect(outputs(file).oidf, file).toBe("false");
+			}
+			// A pull request to main, and the other events: every plan.
+			for (const more of [{ BASE: "main" }, { EVENT: "push" }, { EVENT: "schedule" }]) {
+				expect(
+					outputs("modules/upstream-login/idp-oidc/src/upstream.ts", more),
+					JSON.stringify(more),
+				).toEqual({ oidf: "true", scope: "all", plans: every });
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("count develop's merges from the commit the latest conformance run covers, a running one among them and no cancelled one, and take conformance as due where GitHub's API does not answer", () => {
+		const step = job("conformance-due").steps.find((s) => s.id === "count");
+		const lines = (step?.run ?? "").split("\n").map((l) => l.trim());
+		for (const line of [
+			`if ! runs=$(api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=develop&event=push&per_page=50" --jq ".workflow_runs[] | select(.id < $GITHUB_RUN_ID) | {id, status, conclusion, head_sha} | tojson"); then`,
+			`if ! jobs=$(api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --jq '[.jobs[] | {name, status, conclusion}]'); then`,
+			`last=$(jq -r --argjson jobs "$jobs" ". + {jobs: \\$jobs} | $COVERS" <<<"$described")`,
+			'done <<<"$runs"',
+			'echo "due=true" >> "$GITHUB_OUTPUT"',
+		]) {
+			expect(lines).toContain(line);
+		}
+		// What a run covers, judged as the step judges it, on runs in the shapes GitHub gives them.
+		const covers = (run: object) =>
+			execFileSync("jq", ["-r", String(step?.env?.COVERS)], {
+				input: JSON.stringify(run),
+				encoding: "utf8",
+			}).trim();
+		type Job = { name: string; status: string; conclusion: string | null };
+		const done = (name: string, conclusion: string): Job => ({
+			name,
+			status: "completed",
+			conclusion,
+		});
+		const running = (name: string, status = "in_progress"): Job => ({
+			name,
+			status,
+			conclusion: null,
+		});
+		const at = (status: string, conclusion: string | null, ...jobs: Job[]) => ({
+			status,
+			conclusion,
+			head_sha: "abc",
+			jobs,
+		});
+		const planned = done("conformance-plan", "success");
+		const cases: readonly (readonly [object, string])[] = [
+			// A run that planned and whose gate ran, passed or failed.
+			[at("completed", "success", planned, done("conformance", "success")), "abc"],
+			[at("completed", "failure", planned, done("conformance", "failure")), "abc"],
+			// A cancelled run: its gate still runs, sees the cancelled jobs and fails.
+			[at("completed", "cancelled", planned, done("conformance", "failure")), ""],
+			// A run whose plan failed, its gate failing for it: nothing ran.
+			[
+				at(
+					"completed",
+					"failure",
+					done("conformance-plan", "failure"),
+					done("conformance", "failure"),
+				),
+				"",
+			],
+			// A run not due.
+			[
+				at(
+					"completed",
+					"success",
+					done("conformance-plan", "skipped"),
+					done("conformance", "skipped"),
+				),
+				"",
+			],
+			// A run still running, its plan started or past: it found itself due.
+			[
+				at("in_progress", null, done("conformance-due", "success"), running("conformance-plan")),
+				"abc",
+			],
+			[at("in_progress", null, done("conformance-due", "success"), planned), "abc"],
+			// A run still running that is not due, or has not yet found whether it is: its plan not started.
+			[
+				at(
+					"in_progress",
+					null,
+					done("conformance-due", "success"),
+					done("conformance-plan", "skipped"),
+				),
+				"",
+			],
+			[
+				at(
+					"in_progress",
+					null,
+					done("conformance-due", "success"),
+					running("conformance-plan", "queued"),
+				),
+				"",
+			],
+			[
+				at("in_progress", null, running("conformance-due"), running("conformance-plan", "queued")),
+				"",
+			],
+			[at("queued", null), ""],
+		];
+		for (const [run, sha] of cases) expect([run, covers(run)]).toEqual([run, sha]);
+		// The API tried again where it does not answer, four times in all; the pauses left out.
+		const run = step?.run ?? "";
+		const api = run.slice(run.indexOf("api() {"), run.indexOf("}", run.indexOf("api() {")) + 1);
+		const dir = mkdtempSync(join(tmpdir(), "ci-api-"));
+		try {
+			writeFileSync(
+				join(dir, "gh"),
+				'#!/bin/sh\nn=$(cat "$COUNT" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$COUNT"\n[ "$n" -gt "$FAILS" ] && echo answered\n[ "$n" -gt "$FAILS" ]\n',
+				{ mode: 0o755 },
+			);
+			const tried = (fails: number) => {
+				const count = join(dir, `count-${fails}`);
+				const env = {
+					...process.env,
+					PATH: `${dir}:${process.env.PATH}`,
+					COUNT: count,
+					FAILS: String(fails),
+				};
+				const answer = spawnSync("bash", ["-c", `sleep() { :; }; ${api}; api x`], {
+					env,
+					encoding: "utf8",
+				});
+				return [answer.status, answer.stdout.trim(), readFileSync(count, "utf8").trim()];
+			};
+			expect(tried(2)).toEqual([0, "answered", "3"]);
+			expect(tried(9)).toEqual([1, "", "4"]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("read a pull request's moved file by both its paths, in interop-due and the conformance plan", () => {
+		const changedLine = (name: string, id: string) =>
+			(job(name).steps.find((s) => s.id === id)?.run ?? "")
+				.split("\n")
+				.map((l) => l.trim())
+				.find((l) => l.startsWith("changed=$(git diff")) ?? "";
+		expect(changedLine("conformance-plan", "plan")).toContain("--no-renames");
+		const line = changedLine("interop-due", "due");
+		// A plan moved out of interop-oidf: its old path names what the change touches there.
+		const dir = mkdtempSync(join(tmpdir(), "ci-moved-"));
+		// git as the scratch repository alone has it: no outer repository a hook names, no user's or
+		// system's settings (a global `diff.renames` would change what is read), no hooks.
+		const env = {
+			...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))),
+			GIT_CONFIG_GLOBAL: "/dev/null",
+			GIT_CONFIG_NOSYSTEM: "1",
+		};
+		const git = (...args: string[]) =>
+			execFileSync(
+				"git",
+				[
+					"-c",
+					"core.hooksPath=/dev/null",
+					"-c",
+					"user.name=ci",
+					"-c",
+					"user.email=ci@example.com",
+					...args,
+				],
+				{ cwd: dir, env },
+			);
+		try {
+			git("init", "-q");
+			mkdirSync(join(dir, "modules/tooling/interop-oidf/plans"), { recursive: true });
+			writeFileSync(join(dir, "modules/tooling/interop-oidf/plans/logout.json"), "{}\n");
+			git("add", ".");
+			git("commit", "-qm", "base");
+			git("branch", "origin/develop");
+			mkdirSync(join(dir, "docs"));
+			git("mv", "modules/tooling/interop-oidf/plans/logout.json", "docs/logout.json");
+			git("commit", "-qm", "moved");
+			const read = execFileSync(
+				"bash",
+				["-c", `set -euo pipefail; ${line}; printf '%s' "$changed"`],
+				{
+					cwd: dir,
+					env: { ...env, BASE: "develop" },
+					encoding: "utf8",
+				},
+			);
+			expect(read.split("\n").sort()).toEqual([
+				"docs/logout.json",
+				"modules/tooling/interop-oidf/plans/logout.json",
+			]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("check out the plan's commit in every conformance and interop job and in compliance", () => {

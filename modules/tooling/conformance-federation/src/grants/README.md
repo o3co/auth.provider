@@ -8,5 +8,8 @@ Internal module of `conformance-federation`: the scenes of federation grants.
 - Checks a connection that takes subsets of its scopes, and the lodging limit per client.
 - Checks a subject the ledger revokes: its grants and pending intents end, and another subject's stand.
 
+## Offers
+- `grantsScene` (the grants' scene at an upstream), `grantsAt` (what a scene does at a deployment reached at a base URL) and `upstreamAt`, for the area's fault scenes; `grantsTarget`, both on a target of its own.
+
 ## Depends on
 - The package's scene builder, browser and fake upstream; `conformance` (the target); `conformance-identity` (the need for the ledger's route); `conformance-oauth` (clients)

@@ -26,4 +26,8 @@ function settings(part: MtlsPart): string {
 onLegacy(mtlsArea, {
 	// The standalone build does not load mTLS; the composed entry adds it.
 	map: (part) => ({ settings: settings(part), extra: ["mtls"] }),
+	differs: [
+		// Ours refuses a certificate at issuance as RFC 6749's invalid_client; the legacy build answers invalid_certificate.
+		"certificate-refused-as-invalid-client",
+	],
 });

@@ -27,15 +27,15 @@ let stop = async () => {};
 afterEach(() => stop());
 
 const proving = (amr: string[]) =>
-	defineModule({ name: "proving", takes: [] }, (m) => [
+	defineModule({ name: "proving", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(amrSources).by(() => ({ name: "proving", amr })),
 	]);
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 const offering = (name: string, sets: string[][]) =>
-	defineModule({ name: `offers-${name}`, takes: [] }, (m) => [
+	defineModule({ name: `offers-${name}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(acrEntries).by(() => ({ acr: name, sets })),
 	]);
 
@@ -84,6 +84,13 @@ it("knows the asked acr the table holds, in the order asked, by exact name", asy
 	const { decided } = await serve(table, offers());
 	expect(decided.known("urn:t:none urn:t:aa urn:t:zz")).toEqual(["urn:t:aa", "urn:t:zz"]);
 	expect(decided.known("URN:T:AA constructor toString __proto__")).toEqual([]);
+});
+
+it("knows an acr only by its own code points, compared one by one: none normalized, recomposed or of another case [oidc-core-14-a] [oidc-core-14-b] [oidc-core-14-c]", async () => {
+	const { decided } = await serve({ "urn:t:café": [["pwd"]] }, offers());
+	expect(decided.known("urn:t:café")).toEqual(["urn:t:café"]);
+	// e and U+0301 is the same text to a reader, normalized, but other code points.
+	expect(decided.known("urn:t:café urn:t:CAFÉ urn:t:caf")).toEqual([]);
 });
 
 it("meets the first known acr whose one set the session holds whole", async () => {

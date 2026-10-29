@@ -37,7 +37,8 @@ function running(issuer: string, more: Partial<OauthPart> = {}) {
 				issuer,
 				keys,
 				clients: [
-					client("basic", "client_secret_basic"),
+					// The token endpoint's one grant, as it asks one composed.
+					client("basic", "client_secret_basic", ["client_credentials"]),
 					client("post", "client_secret_post"),
 					client("pub", "none"),
 				],
@@ -76,8 +77,9 @@ describe("the metadata document", () => {
 		expect(openid.body.issuer).toBe(issuer);
 	});
 
-	it("tells where the token, introspection and revocation endpoints are [rfc8414-2-c] [oidc-discovery-3-f]", async () => {
+	it("tells where the token, introspection and revocation endpoints are, the token endpoint over https [rfc8414-2-c] [oidc-discovery-3-f] [oidc-discovery-3-g]", async () => {
 		const { body } = await get("/.well-known/openid-configuration");
+		expect(new URL(String(body.token_endpoint)).protocol).toBe("https:");
 		expect(body).toMatchObject({
 			token_endpoint: `${issuer}/oauth/token`,
 			introspection_endpoint: `${issuer}/oauth/introspect`,
@@ -105,10 +107,16 @@ describe("the metadata document of a deployment with the client credentials gran
 });
 
 describe("the metadata document of a deployment without the JWT bearer grant", () => {
-	const get = running("https://issuer.example", { jwtBearer: false });
+	// The scene sets up the client credentials grant, as every token endpoint has one; a pattern's app
+	// may compose others beside it, so only what is set up and what is left out are read.
+	const get = running("https://issuer.example", {
+		jwtBearer: false,
+		clients: [client("svc", "client_secret_basic", ["client_credentials"])],
+	});
 
-	it("does not list a grant that is not set up", async () => {
+	it("lists the grant set up, and never the JWT bearer grant when it is not set up", async () => {
 		const { body } = await get("/.well-known/openid-configuration");
+		expect(body.grant_types_supported).toContain("client_credentials");
 		expect(body.grant_types_supported).not.toContain("urn:ietf:params:oauth:grant-type:jwt-bearer");
 	});
 });

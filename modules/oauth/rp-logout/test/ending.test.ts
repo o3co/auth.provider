@@ -10,7 +10,7 @@ import { entryRequirements } from "@mod/session-requirements";
 import { describe, expect, it } from "vitest";
 import { upstreamEnds } from "../src/contract.ts";
 import type { SessionClients } from "../src/store.ts";
-import { back, issuer, servedEach } from "./harness.ts";
+import { back, issuer, readEndingSessions, servedEach } from "./harness.ts";
 
 const serve = servedEach();
 const noCache = { "cache-control": "no-store", pragma: "no-cache" };
@@ -20,47 +20,6 @@ const noCache = { "cache-control": "no-store", pragma: "no-cache" };
  * calls them for any record it finds open, past its lifetime too: as session-lifecycle keeps them
  * while a record outlives its end (a host's clock behind another's, or a lifetime shortened since).
  */
-function readEndingSessions(lifetimeMs: number) {
-	return defineModule({ takes: [participants], name: "session" }, (m) => [
-		m.provide(sessions).by(async (c) => {
-			const closers = await c.collect(participants);
-			type Kept = { subject: string; openedAt: number; state: "open" | "closing" | "closed" };
-			const kept = new Map<string, Kept>();
-			const sessionOf = (id: string, r: Kept) => ({
-				id,
-				context: { subject: r.subject, amr: ["pwd"], authenticatedAt: r.openedAt },
-			});
-			return stubSessions({
-				complete: async (_request, facts) => {
-					const id = `s${kept.size + 1}`;
-					const r: Kept = { subject: facts.subject, openedAt: c.clock.now(), state: "open" };
-					kept.set(id, r);
-					return { session: sessionOf(id, r), cookies: [`session=${id}`] };
-				},
-				entryOf: async (id) => {
-					const r = kept.get(id);
-					if (r?.state !== "open") return { kind: "absent" };
-					if (r.openedAt + lifetimeMs <= c.clock.now()) {
-						r.state = "closed";
-						return { kind: "absent" };
-					}
-					return { kind: "entered", session: sessionOf(id, r), endsAt: r.openedAt + lifetimeMs };
-				},
-				close: async (id) => {
-					const r = kept.get(id);
-					if (!r) return { kind: "closed", cookies: [] };
-					const from = r.state;
-					if (r.state !== "closed") {
-						r.state = "closing";
-						for (const closer of closers) await closer.closing(sessionOf(id, r));
-						r.state = "closed";
-					}
-					return { kind: "closed", cookies: [], session: { id, subject: r.subject }, from };
-				},
-			});
-		}),
-	]);
-}
 
 describe("the logout a client starts", () => {
 	it("ends the session the hint names and clears the cookie of a browser in it", async () => {
@@ -100,12 +59,39 @@ describe("the logout a client starts", () => {
 		]);
 	});
 
-	it("refuses a request without a hint, with a hint it cannot verify, or one that names no session [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
+	it("sends a request without a hint to the person's confirmation, whatever return or client it names, reading and closing nothing", async () => {
+		const h = await serve();
+		const { session } = await h.login();
+		for (const [method, params] of [
+			["GET", {}],
+			["POST", {}],
+			["GET", { state: "s" }],
+			["POST", { state: "s", client_id: "app" }],
+			["GET", { post_logout_redirect_uri: back }],
+			// Neither the client nor its return is read: an unknown one goes to the confirmation too.
+			[
+				"POST",
+				{ post_logout_redirect_uri: "https://elsewhere.example/", client_id: "nobody", state: "s" },
+			],
+		] as const) {
+			const out = await h.call(method, params);
+			expect([method, params, out.status, out.headers.location]).toEqual([
+				method,
+				params,
+				303,
+				"/oauth/logout/confirm",
+			]);
+			expect(out.headers).toMatchObject(noCache);
+		}
+		expect(await h.stillOpen(session.id)).toBe(true);
+		expect(h.events).toEqual([]);
+	});
+
+	it("refuses a hint it cannot verify, or one that names no session [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const forged = (await h.hintFor(session.id)).replace(/\.[^.]+$/, ".AAAA");
 		const cases = [
-			["no hint", "POST", {}, "invalid_request"],
 			["a forged hint", "GET", { id_token_hint: forged }, "invalid_token"],
 			[
 				"another issuer's",
@@ -281,7 +267,7 @@ describe("the logout a client starts", () => {
 	});
 
 	it("answers a close left pending 503, clearing the cookie and recording it by its sid and source alone, never as a logout", async () => {
-		const unfinished = defineModule({ takes: [], name: "unfinished" }, (m) => [
+		const unfinished = defineModule({ takes: [], name: "unfinished", replicaSafe: true }, (m) => [
 			m.contribute(participants).by(() => ({
 				name: "unfinished",
 				closing: async () => {
@@ -311,7 +297,7 @@ describe("the logout a client starts", () => {
 
 	it("closes a session past its lifetime through its participants when its logout comes, as any close does", async () => {
 		const closing: string[] = [];
-		const watcher = defineModule({ takes: [], name: "watcher" }, (m) => [
+		const watcher = defineModule({ takes: [], name: "watcher", replicaSafe: false }, (m) => [
 			m.contribute(participants).by(() => ({
 				name: "watcher",
 				closing: async (session) => {
@@ -330,26 +316,52 @@ describe("the logout a client starts", () => {
 		expect(h.events.map((e) => e.kind)).toEqual(["logout.success"]);
 	});
 
-	it("answers a session already gone as logged out, with no event", async () => {
+	it("answers a hint whose session is gone as logged out, acting on nothing: no event, and no return though one is asked [oidc-rpinit-2-g]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const hint = await h.hintFor(session.id);
 		await h.call("POST", { id_token_hint: hint });
 		h.events.length = 0;
 		expect((await h.call("POST", { id_token_hint: hint })).json).toEqual({ logged_out: true });
+		const returned = await h.call("POST", {
+			id_token_hint: hint,
+			post_logout_redirect_uri: back,
+			state: "s",
+		});
+		expect([returned.status, returned.headers.location, returned.json]).toEqual([
+			200,
+			undefined,
+			{ logged_out: true },
+		]);
 		expect(h.events).toEqual([]);
+	});
+
+	it("passes over a parameter it does not read, an unsupported ui_locales included, sending a POST back by 303 [oidc-rpinit-2-c] [rfc9700-4.12-a]", async () => {
+		const h = await serve();
+		const { session } = await h.login();
+		const hint = await h.hintFor(session.id);
+		const sent = await h.call("POST", {
+			id_token_hint: hint,
+			ui_locales: "tlh-Piqd x-unknown",
+			post_logout_redirect_uri: back,
+		});
+		expect([sent.status, sent.headers.location]).toEqual([303, back]);
+		expect(await h.stillOpen(session.id)).toBe(false);
 	});
 
 	it("logs out a session short of a requirement to be used as any live one: recorded, closed, sent back", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ takes: [], name: "short-to-use" }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "mfa",
-				judges: ["use"],
-				admits: async () =>
-					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
-			})),
-		]);
+		const requirement = defineModule(
+			{ takes: [], name: "short-to-use", replicaSafe: false },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "mfa",
+					judges: ["use"],
+					admits: async () =>
+						short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+				})),
+			],
+		);
 		const h = await serve({ extra: [requirement] });
 		const { session } = await h.login();
 		const hint = await h.hintFor(session.id);
@@ -378,7 +390,7 @@ describe("the logout a client starts", () => {
 	});
 
 	it("passes on an error of the close's that is not Unavailable, recording no failed close", async () => {
-		const broken = defineModule({ takes: [], name: "session" }, (m) => [
+		const broken = defineModule({ takes: [], name: "session", replicaSafe: false }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
 					complete: async (_request, facts) => ({
@@ -499,7 +511,7 @@ it("leaves out a frame whose origin the page's policy cannot name, logging how m
 
 describe("the upstream's end of session", () => {
 	const ending = (seen: { open?: boolean }) =>
-		defineModule({ takes: [sessions], name: "upstream-end" }, (m) => [
+		defineModule({ takes: [sessions], name: "upstream-end", replicaSafe: false }, (m) => [
 			m.contribute(upstreamEnds).by(async (c) => {
 				const kept = await c.late(sessions);
 				return {
@@ -530,7 +542,7 @@ describe("the upstream's end of session", () => {
 	});
 
 	it("refuses to start with two", async () => {
-		const twice = defineModule({ takes: [], name: "upstream-end-2" }, (m) => [
+		const twice = defineModule({ takes: [], name: "upstream-end-2", replicaSafe: true }, (m) => [
 			m.contribute(upstreamEnds).by(() => ({ name: "other", at: async () => undefined })),
 		]);
 		await expect(serve({ extra: [ending({}), twice] })).rejects.toMatchObject({
@@ -539,8 +551,10 @@ describe("the upstream's end of session", () => {
 	});
 });
 
-it("publishes its endpoint and the front-channel and back-channel support [oidc-rpinit-2.1-a] [oidc-bcl-2.1-a]", async () => {
+it("publishes its endpoint, an https URL, and the front-channel and back-channel support [oidc-rpinit-2.1-a] [oidc-bcl-2.1-a] [oidc-rpinit-2.1-b]", async () => {
 	const h = await serve();
+	const endpoint = h.items.find((i) => i.name === "end_session_endpoint")?.value;
+	expect(new URL(String(endpoint)).protocol).toBe("https:");
 	expect(Object.fromEntries(h.items.map((i) => [i.name, i.value]))).toMatchObject({
 		end_session_endpoint: `${issuer}/oauth/logout`,
 		frontchannel_logout_supported: true,
@@ -550,14 +564,14 @@ it("publishes its endpoint and the front-channel and back-channel support [oidc-
 	});
 });
 
-it("publishes its endpoint on the issuer's origin where no public origin is written [oidc-rpinit-2.1-a]", async () => {
+it("publishes its endpoint on the issuer's origin where no public origin is written, https as the issuer is [oidc-rpinit-2.1-a] [oidc-rpinit-2.1-b]", async () => {
 	const h = await serve({ noPublicOrigin: true });
 	expect(h.items.find((i) => i.name === "end_session_endpoint")?.value).toBe(
 		`${issuer}/oauth/logout`,
 	);
 });
 
-it("refuses to start with a client whose return, front-channel or back-channel URL does not fit", async () => {
+it("refuses to start with a client whose return, front-channel or back-channel URL does not fit [oidc-bcl-2.2-a] [oidc-bcl-2.2-c]", async () => {
 	const cases = [
 		["a return with a fragment", "post-logout-redirect-uris", ["https://app.example/after#x"]],
 		["iss in a front channel", "frontchannel-logout-uri", "https://app.example/fc?ISS=1"],
@@ -565,6 +579,8 @@ it("refuses to start with a client whose return, front-channel or back-channel U
 		["a front channel not on the web", "frontchannel-logout-uri", "javascript:alert(1)"],
 		["a back channel not on the web", "backchannel-logout-uri", "ftp://app.example/bc"],
 		["a back channel with a space", "backchannel-logout-uri", " https://app.example/bc"],
+		["a back channel that is no absolute URI", "backchannel-logout-uri", "/bc"],
+		["a back channel with a fragment", "backchannel-logout-uri", "https://app.example/bc#x"],
 	] as const;
 	for (const [name, field, value] of cases) {
 		const refused = await serve({ sections: { app: { [field]: value } } }).catch((error) => error);
@@ -616,7 +632,7 @@ it("leaves out the frame of a client a source names whose front channel is at no
 		remote("https://remote.example/off", "https://elsewhere.example/fc"),
 		remote("https://remote.example/on", "https://remote.example/fc"),
 	];
-	const source = defineModule({ takes: [], name: "remote-clients" }, (m) => [
+	const source = defineModule({ takes: [], name: "remote-clients", replicaSafe: false }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id) => records.find((r) => r.id === id),
 		})),

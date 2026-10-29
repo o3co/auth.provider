@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import { claimsSelections, type Selection, selectionConsents } from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type Client, clients } from "@mod/clients";
@@ -55,12 +55,13 @@ import {
 	type AccessGrant,
 	type IssueLimits,
 	issuancePolicies,
+	referenceOf,
 	type Tokens,
 	tokens,
 } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { familyRevocation, lineage } from "../src/contract.ts";
+import { lineage } from "../src/contract.ts";
 import refreshModule from "../src/module.ts";
 import { liveFamily, toStored, toStoredRedemption } from "../src/record.ts";
 import { section } from "../src/section.ts";
@@ -103,7 +104,7 @@ function collecting<T>(name: string, point: ExtensionPoint<T>) {
 	const seen = contract<readonly T[]>(name);
 	return {
 		seen,
-		module: defineModule({ name, takes: [point] }, (m) => [
+		module: defineModule({ name, replicaSafe: false, takes: [point] }, (m) => [
 			m.provide(seen).by((c) => c.collect(point)),
 		]),
 	};
@@ -191,7 +192,6 @@ function assembly(options: Options = {}) {
 				confidentialClient({ id: "exchanger", sections: allowed([...both, exchangeType]) }),
 			]),
 			...codeGrantConfig(),
-			...claimsSelectionConfig({ mode: "on" }),
 			...refreshConfig({
 				lifetime: `${options.lifetime ?? 3600}s`,
 				"sweep-interval": "1s",
@@ -302,7 +302,7 @@ async function serve(options: Options = {}) {
 
 /** The scopes the subject agreed to, which a test may change. */
 const agreed = new Set(["read", "write"]);
-const judging = defineModule({ name: "judging", takes: [] }, (m) => [
+const judging = defineModule({ name: "judging", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(selectionConsents).by(() => ({
 		consented: async (_c: Client, _s: string, scope: string) => agreed.has(scope),
 	})),
@@ -356,7 +356,7 @@ const capturing = {
 /** Runs `during` once a code's token is issued, before the ID token, the additions and the hooks. */
 const meanwhile = (() => {
 	const state = { during: undefined as (() => void) | undefined };
-	const module = defineModule({ name: "meanwhile", takes: [] }, (m) => [
+	const module = defineModule({ name: "meanwhile", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(sessionRedemptions).by(() => ({
 			name: "meanwhile",
 			redeemed: async () => {
@@ -567,7 +567,7 @@ describe("a redemption whose selection runs out between its steps", () => {
 });
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
+const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -747,6 +747,40 @@ describe("refresh tokens", () => {
 		expect(read?.kind).toBe("issued");
 	});
 
+	it("keep no access token in refresh's own record and lists, a family's tokens by their reference alone [rfc6749-10.3-a]", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		const issued = [first.access_token ?? "", String(second.body.access_token)];
+		const ids: string[] = [];
+		const references: string[] = [];
+		for (const token of issued) {
+			const checked = await s.app.get(tokens).verifyAccess(token);
+			if (checked.kind !== "valid") throw new Error("not valid");
+			ids.push(checked.id);
+			references.push(referenceOf(checked));
+		}
+		const family = familyNameOf(first.refresh_token);
+		const listed = (await s.stores.byFamily.members(family)).map((m) => m.member);
+		// The family's record, each token's link to it, the family's tokens, the session's families, and
+		// what its redemption and the settle list were given.
+		const kept = JSON.stringify([
+			s.stores.given,
+			s.stores.kept.peek(family),
+			ids.map((id) => s.stores.links.peek(id)),
+			listed,
+			await s.stores.bySession.members(s.session.id),
+		]);
+		// The code's redemption was written, so its record is searched too.
+		expect(s.stores.given).toContainEqual([
+			expect.any(String),
+			expect.objectContaining({ family }),
+		]);
+		for (const token of issued) expect(kept).not.toContain(token);
+		// The family's tokens, each by its id and end, the reference tokens revokes by.
+		expect([...listed].sort()).toEqual([...references].sort());
+	});
+
 	it("record the family a reuse revokes, with its subject and client, and never a token", async () => {
 		const s = await serve();
 		const first = await s.redeem();
@@ -830,14 +864,17 @@ describe("refresh tokens", () => {
 
 	it("stop working while the session falls short of a requirement to be used, as a closed one does", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ name: "short-to-use", takes: [] }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "mfa",
-				judges: ["use"],
-				admits: async () =>
-					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
-			})),
-		]);
+		const requirement = defineModule(
+			{ name: "short-to-use", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "mfa",
+					judges: ["use"],
+					admits: async () =>
+						short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+				})),
+			],
+		);
 		const s = await serve({ extra: [requirement] });
 		const first = await s.redeem();
 		short.now = true;
@@ -911,7 +948,7 @@ describe("refresh tokens", () => {
 
 	it("issue nothing a contributed policy refuses, and leave the token usable once it allows again", async () => {
 		const denying = { on: false };
-		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -932,7 +969,7 @@ describe("refresh tokens", () => {
 
 	it("tell the policies a refresh continues a grant they already let through", async () => {
 		const seen: { grantType: string; continuing?: true }[] = [];
-		const watching = defineModule({ name: "watching", takes: [] }, (m) => [
+		const watching = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "watching",
 				judge: async (request) => {
@@ -1035,7 +1072,7 @@ describe("refresh tokens", () => {
 	/** Serves with the refresh addition at hand, and the redemptions codes started. */
 	const takingBack = async () => {
 		const redemptions: string[] = [];
-		const spy = defineModule({ name: "spy", takes: [] }, (m) => [
+		const spy = defineModule({ name: "spy", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(additions).by(() => ({
 				field: "spy",
 				issue: async (redeemed) => {
@@ -1516,34 +1553,4 @@ it("takes all its module names, its confidential clients' families bound or not"
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 		expect((await takesUnused(input))["refresh"], String(bindConfidential)).toBeUndefined();
 	}
-});
-
-describe("a family's revocation, asked by another module", () => {
-	it("ends the family and the access tokens it issued, and takes the same id again as done", async () => {
-		const s = await serve();
-		const first = await s.redeem();
-		const family = (await familyOf(s, first.redemption)) ?? "";
-		await s.app.get(familyRevocation).revoke(family);
-		await s.app.get(familyRevocation).revoke(family);
-		expect(await s.refresh(first.refresh_token)).toMatchObject({ status: 400 });
-		expect(await s.active(first.access_token)).toBe(false);
-		expect(liveFamily(await s.stores.kept.records.read(family))).toBeUndefined();
-	});
-
-	it("refuses an id refresh never names a family by, writing nothing", async () => {
-		const s = await serve();
-		// 16 bytes in base64url end in A, Q, g or w: any other last letter is no name refresh makes.
-		for (const id of [
-			"",
-			"x",
-			"a".repeat(22),
-			"a".repeat(23),
-			"a".repeat(21),
-			`${"a".repeat(21)}=`,
-			`${"a".repeat(20)}/A`,
-		]) {
-			await expect(s.app.get(familyRevocation).revoke(id), id).rejects.toThrow(TypeError);
-			expect(await s.stores.kept.records.read(id)).toBeUndefined();
-		}
-	});
 });

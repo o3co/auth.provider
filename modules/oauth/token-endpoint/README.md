@@ -12,7 +12,7 @@
 - Route `POST /oauth/token`: a form, JSON or no body (any other `415`); cross-origin requests from the operator's origins (`http`) may send `content-type` and `dpop`, and read `dpop-nonce`, `www-authenticate` and `retry-after`.
 - Provides `grants`' `composedGrants` (the grant types it dispatches to) and `targets`.
 - Where the token endpoint is: its absolute URL on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
-- `oauthError` and `authenticateClient`, for other OAuth endpoints too, as its internal module `answers` says.
+- `oauthError`, `errorDescription` and `authenticateClient`, for other OAuth endpoints too, as its internal module `answers` says.
 - For tests (`./testing`): `grantCaller` calls a contributed grant as the endpoint does once the client is in, the grant allowed and the binding read, beside `client-allowance`, refusing a mistyped parameter and asking the rule's `untargeted` first; `grantInput` is what it hands the grant.
 - `issuer`'s metadata items: `token_endpoint`, `grant_types_supported`, `token_endpoint_auth_methods_supported` and `token_endpoint_auth_signing_alg_values_supported` (left out when `clients` names none).
 - Audit events once the client is authenticated, with `client`, `source` (when determined) and `grant_type` (when dispatched to): `token.issued` (with `claims`, the names of the claims a grant added, never their values, as many as fit 2048 characters, and `claims_left` past that), and `token.issued.failure` with `reason` and `error` (the code answered); declared in `./audit-events`, listed in the audit event reference.
@@ -21,6 +21,7 @@
 - Operator section: `requests` per source in each window (1–100000, default 60) and `window` (1s–1d, default `1m`, written with its unit).
 
 ## Invariants
+- Boot is refused with no grant composed, so `grant_types_supported` is never empty: left out, a client would read it as `authorization_code` and `implicit` (RFC 8414 §2). A grant composed but allowed to no registered client opens no issuance.
 - An issued answer leaves `scope` out when a grant gives it empty, for every grant alike, the test caller too.
 - Requests are limited per source by `rate-limit`'s policy before any client is authenticated; over it, `429`.
 - A request naming no client goes to a grant that identifies its client only when `clients` refuses it as `no_credentials`, finds it `bare`, and its one `grant_type` names a grant with `identify`; any other refusal is answered as `authenticateClient` answers it. The grant's refusal to identify is its answer; a client identified that is not registered with no credentials (public, method `none`) is `503`. Past that, it is checked as an authenticated client.

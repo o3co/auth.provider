@@ -16,7 +16,7 @@ let stop = async () => {};
 afterEach(() => stop());
 
 const item = (name: string, value: unknown) =>
-	defineModule({ name: `item-${name}`, takes: [] }, (m) => [
+	defineModule({ name: `item-${name}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(metadata).by(() => ({ name, value })),
 	]);
 
@@ -138,7 +138,7 @@ it("refuses to start when two modules contribute one member", async () => {
 	expect(
 		await refused([
 			item("same", 1),
-			defineModule({ name: "again", takes: [] }, (m) => [
+			defineModule({ name: "again", replicaSafe: true, takes: [] }, (m) => [
 				m.contribute(metadata).by(() => ({ name: "same", value: 2 })),
 			]),
 		]),

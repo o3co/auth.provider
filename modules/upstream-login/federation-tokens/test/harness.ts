@@ -75,47 +75,50 @@ export async function harness(
 	const offered: Record<string, Offered> = { corp: options.offered ?? {}, other: {} };
 	/** Subjects whose sessions fall short of a requirement at use. */
 	const short = new Set<string>();
-	const stubs = defineModule({ name: "stubs", takes: [routes, upstreamLoginReceivers] }, (m) => [
-		m.provide(issuer).by(() => ({ url: "https://issuer.example" })),
-		m.provide(sessionTokens).by(() => ({
-			sessionOf: async (id) => {
-				const handle = bound.get(id);
-				return handle === undefined ? { kind: "unbound" } : { kind: "bound", handle };
-			},
-		})),
-		// As refresh's condition: a token whose family ended is revoked, in every check of it.
-		m.contribute(accessConditions).by(() => ({
-			name: "refresh",
-			holds: async ({ id }) => (families.get(id) === "ended" ? "revoked" : "holds"),
-		})),
-		m.provide(upstreams).by(() => ({ of: (idp) => offered[idp] })),
-		m.contribute(entryRequirements).by(() => ({
-			name: "test-short",
-			judges: ["use"],
-			admits: async (context) =>
-				short.has(context.subject)
-					? { kind: "short", answer: { error: "test_short" } }
-					: { kind: "admit" },
-		})),
-		m.contribute(clientSources).by(() => ({
-			find: async (id) => {
-				if (id === unreadable) throw new Unavailable("clients");
-				if (id !== named) return undefined;
-				const sections = { "federation-tokens": { receives: true } };
-				return { id, kind: "public", method: "none", sections };
-			},
-		})),
-		m.contribute(senderBindings).by(() => ({
-			member: dpop.member,
-			tokenType: dpop.tokenType,
-			read: async () => ({ kind: "bound", confirmation: dpop.confirmation }),
-		})),
-		m.provide(probed).by(async (c) => ({
-			route: (await c.collect(routes)).find((r) => r.path === "/oauth/federation/*") as Route,
-			receivers: await c.collect(upstreamLoginReceivers),
-			all: await c.collect(routes),
-		})),
-	]);
+	const stubs = defineModule(
+		{ name: "stubs", replicaSafe: false, takes: [routes, upstreamLoginReceivers] },
+		(m) => [
+			m.provide(issuer).by(() => ({ url: "https://issuer.example" })),
+			m.provide(sessionTokens).by(() => ({
+				sessionOf: async (id) => {
+					const handle = bound.get(id);
+					return handle === undefined ? { kind: "unbound" } : { kind: "bound", handle };
+				},
+			})),
+			// As refresh's condition: a token whose family ended is revoked, in every check of it.
+			m.contribute(accessConditions).by(() => ({
+				name: "refresh",
+				holds: async ({ id }) => (families.get(id) === "ended" ? "revoked" : "holds"),
+			})),
+			m.provide(upstreams).by(() => ({ of: (idp) => offered[idp] })),
+			m.contribute(entryRequirements).by(() => ({
+				name: "test-short",
+				judges: ["use"],
+				admits: async (context) =>
+					short.has(context.subject)
+						? { kind: "short", answer: { error: "test_short" } }
+						: { kind: "admit" },
+			})),
+			m.contribute(clientSources).by(() => ({
+				find: async (id) => {
+					if (id === unreadable) throw new Unavailable("clients");
+					if (id !== named) return undefined;
+					const sections = { "federation-tokens": { receives: true } };
+					return { id, kind: "public", method: "none", sections };
+				},
+			})),
+			m.contribute(senderBindings).by(() => ({
+				member: dpop.member,
+				tokenType: dpop.tokenType,
+				read: async () => ({ kind: "bound", confirmation: dpop.confirmation }),
+			})),
+			m.provide(probed).by(async (c) => ({
+				route: (await c.collect(routes)).find((r) => r.path === "/oauth/federation/*") as Route,
+				receivers: await c.collect(upstreamLoginReceivers),
+				all: await c.collect(routes),
+			})),
+		],
+	);
 	const input = {
 		modules: [
 			http,

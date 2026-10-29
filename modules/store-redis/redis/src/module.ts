@@ -187,7 +187,9 @@ async function durabilityProblems(
 	const persisted = appendonly === "yes" && appendfsync === "always";
 	if (persisted) return [];
 	const names = durable.map((s) => s.name).join(", ");
-	return [`the durable guarantee needs appendonly yes and appendfsync always: ${names}`];
+	return [
+		`set appendonly yes and appendfsync always on the server (docs/runbook.md, Redis), which the durable guarantee of these spaces needs: ${names}`,
+	];
 }
 
 /** What the server's settings fail to give the declared spaces, empty when everything holds; and the settings taken as declared. */
@@ -232,6 +234,26 @@ async function unmet(
 	};
 }
 
+/**
+ * What a failure is, by its code alone (`ECONNREFUSED`, `ENOTFOUND`, `NOAUTH`): a system error's
+ * code, the first word of a server's reply where it is one, or the error's class (`ParserError`);
+ * never the message, which may name a host or a key.
+ */
+function codeOf(error: unknown): string {
+	const word = /^[A-Z][A-Z0-9_]{1,31}$/;
+	const { code, message, name } = (error ?? {}) as {
+		code?: unknown;
+		message?: unknown;
+		name?: unknown;
+	};
+	if (typeof code === "string" && word.test(code)) return code;
+	const first = typeof message === "string" ? message.split(" ")[0] : undefined;
+	if (first !== undefined && word.test(first)) return first;
+	return typeof name === "string" && /^[A-Z][A-Za-z]{1,31}Error$/.test(name) && name !== "Error"
+		? name
+		: "unknown";
+}
+
 /** The two connections, open and checked, for the store and its probe alike. */
 const connections = contract<{
 	readonly client: Redis;
@@ -239,7 +261,9 @@ const connections = contract<{
 	readonly declared: readonly Space[];
 }>("redis.connections");
 
-export default defineModule({ name: "redis", section, takes: [spaces] }, (m) => [
+// Safe on many instances: it is the shared store, given the same `url` and `prefix` on each
+// (deployment-guarantees, Several instances).
+export default defineModule({ name: "redis", replicaSafe: true, section, takes: [spaces] }, (m) => [
 	m.provide(connections).by(async (c) => {
 		const client = new Redis(c.section.url, {
 			lazyConnect: true,
@@ -251,21 +275,30 @@ export default defineModule({ name: "redis", section, takes: [spaces] }, (m) => 
 			autoResendUnfulfilledCommands: false,
 			commandTimeout: c.section["command-timeout"],
 		});
-		client.on("error", () => c.log.warn("redis.error"));
+		// The last failure's code, which a refused connect tells only through its error events.
+		let lastCode = "unknown";
+		const failed = (error: unknown) => {
+			lastCode = codeOf(error);
+			c.log.warn("redis.error", { code: lastCode });
+		};
+		client.on("error", failed);
 		const confirmer = client.duplicate({
 			commandTimeout: c.section["replication-timeout"] + c.section["command-timeout"],
 		});
-		confirmer.on("error", () => c.log.warn("redis.error"));
+		confirmer.on("error", failed);
 		let checked: Awaited<ReturnType<typeof unmet>>;
 		const declared = await c.collect(spaces);
 		try {
 			await client.connect();
 			await confirmer.connect();
 			checked = await unmet(client, confirmer, declared, c.section);
-		} catch {
+		} catch (error) {
 			client.disconnect();
 			confirmer.disconnect();
-			return c.refuse("redis.url", "cannot connect to Redis, or cannot check its configuration");
+			return c.refuse(
+				"redis.url",
+				`cannot connect to Redis, or cannot check its configuration (${codeOf(error) === "unknown" ? lastCode : codeOf(error)})`,
+			);
 		}
 		if (checked.problems.length > 0) {
 			client.disconnect();

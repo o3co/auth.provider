@@ -117,11 +117,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `client-metadata` (`src/client-metadata`): what it contributes for clients' metadata.
   - `consent-decision` (`src/consent-decision`): whether a request needs the user's consent before its code.
   - `flow` (`src/flow`): the steps a request goes through once its redirect URI is trusted, up to its code.
+  - `hint` (`src/hint`): reading the `id_token_hint` request parameter (OpenID Connect Core §3.1.2.1).
   - `route` (`src/route`): the endpoint's requests and answers.
   - `step-up` (`src/step-up`): the acr a request asks for, and raising a session's authentication to meet it.
-- `@mod/claims-revocation` (feature, `modules/oauth/claims-revocation`): Revokes, before a deployment goes back to a release before 0.19, every refresh family whose kept selection holds constraints, which such a release would refresh without them. Bridges `claims-selection` (the families listed) and `refresh` (their revocation).
 - `@mod/claims-selection` (feature, `modules/oauth/claims-selection`): Decides which claim names a `claims` request parameter may release (OpenID Connect Core §5.5), by the client's allowance and the subject's consent, and keeps that selection and its value constraints for the code, the refresh family and each access token they give.
-  - `constrained` (`src/constrained`): the run over the families whose kept selection holds constraints, and the sweep of their list.
 - `@mod/client-allowance` (feature, `modules/oauth/client-allowance`): Decides what a client may be issued and may see: its grants, scopes and audiences.
 - `@mod/client-assertion` (feature, `modules/oauth/client-assertion`): Contributes `private_key_jwt` (RFC 7523) to `clients`: the client signs a JWT with one of its keys, used once.
   - `keys` (`src/keys`): the client metadata section that holds a client's keys for its assertions, and whether it is taken with a loose audience.
@@ -162,7 +161,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `lineage` (`src/lineage`): the families (`of`, `adopt`, `start`) behind the `lineage` contract and the `family` tie, and `tokens`' access condition on a family's end.
   - `settle` (`src/settle`): the stores, the revoker, and what revokes families from outside.
 - `@mod/resource-indicators` (feature, `modules/oauth/resource-indicators`): Contributes the rule for the audience a request asks for (RFC 8707) to `grants`' target rules: reads the `resource` parameter and narrows the audience issued to it, or refuses it where the grant takes no audience.
-- `@mod/rp-logout` (feature, `modules/oauth/rp-logout`): Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), the front-channel page (`page`) and back-channel notices (`notices`).
+- `@mod/rp-logout` (feature, `modules/oauth/rp-logout`): Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), a person's confirmation where no hint names the session (`confirm`), the close both share (`closing`), the pages it ends on (`page`) and back-channel notices (`notices`).
+  - `closing` (`src/closing`): the close a logout asks, the same whichever route asked it.
+  - `confirm` (`src/confirm`): the confirmation of a logout a client started without a hint (OpenID Connect RP-Initiated Logout 1.0 §2).
   - `ending` (`src/ending`): the logout a client starts (OpenID Connect RP-Initiated Logout 1.0).
   - `notices` (`src/notices`): back-channel notices that a session closed.
   - `page` (`src/page`): the front-channel page.
@@ -329,25 +330,42 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `documents` (`src/documents`): the scenes of clients whose id is the URL of their metadata document.
   - `faults` (`src/faults`): what the area's fault scenes share in the code flow's words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `fresh-login` (`src/fresh-login`): the scenes of a password login meeting a client's demand for a fresh login.
+  - `id-token` (`src/id-token`): the scenes of what an OpenID Connect request's ID token and authorization response carry, and of the authorization endpoint across origins.
   - `logout` (`src/logout`): the scenes of a logout a client starts.
+  - `redemption` (`src/redemption`): the scenes of redeeming a code or a refresh token issued for OpenID Connect at the token endpoint.
+  - `refresh-certificate` (`src/refresh-certificate`): the scenes of a public client's refresh family bound to the certificate its code was redeemed with.
   - `refresh-once` (`src/refresh-once`): the fault scenes of a refresh token rotated once (`guarantee-5-b`).
   - `resource` (`src/resource`): the scenes of resource indicators (RFC 8707) in the code flow.
   - `revocation` (`src/revocation`): the scenes of a subject the ledger revokes over HTTP.
+  - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, the session and tokens made before it (`guarantee-4-a`), the boundary written through the ledger's route.
   - `session-closing` (`src/session-closing`): the fault scenes of a closing session closed, every path for its tokens with it (`guarantee-1-a`).
+  - `space-lists` (`src/space-lists`): the scenes of the space-delimited lists the code flow writes and reads.
   - `store-rows` (`src/store-rows`): the fault scenes of a store that cannot write, by a code redeemed, and of a Redis set to evict keys (`guarantee-3-j`, `guarantee-3-k`).
+  - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a code (`guarantee-3-b`) or a refresh token (`guarantee-3-c`) while a dependency its decision waits on cannot answer.
   - `userinfo` (`src/userinfo`): the scenes of OpenID Connect's userinfo.
   - `verified-email` (`src/verified-email`): the scenes of refusing a token to a user whose email is not verified.
 - `@mod/conformance-device` (verification, `modules/tooling/conformance-device`): Owns the conformance scenes of the device area: device authorization, the verification interface and polling (RFC 8628), refusing an approval by a user whose email is not verified, and the audit events of the verification interface.
+  - `device-code-once` (`src/device-code-once`): the fault scenes of a device code decided and redeemed once (`guarantee-5-f`).
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, a device code approved before it (`guarantee-4-b`), the boundary written through the ledger's route.
+  - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a device code while the store cannot answer (`guarantee-3-e`).
 - `@mod/conformance-exchange` (verification, `modules/tooling/conformance-exchange`): Owns the conformance scenes of the exchange area: Token Exchange (RFC 8693), its success with and without an actor, the lifetime asked, and its refusals, among them a subject whose email is not verified.
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `id-token-once` (`src/id-token-once`): the fault scenes of an Apple id_token taken once, whether by the token exchange or as a JWT bearer assertion, in exchange-id-tokens' one record (`guarantee-5-j`).
+  - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, the exchange of a token given before it (`guarantee-4-e`), the boundary written through the ledger's route.
 - `@mod/conformance-federation` (verification, `modules/tooling/conformance-federation`): Owns the conformance scenes of the federation area: logging a browser in through an upstream OpenID Connect IdP, Google, Apple, or GitHub's OAuth, the audit events of those logins, and a start while the store fails.
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `freshness` (`src/freshness`): the scenes of a federation login meeting a client's demand for a fresh login.
   - `grants` (`src/grants`): the scenes of federation grants.
   - `held` (`src/held`): the scenes of a federation login that a gate holds.
   - `link` (`src/link`): the scenes of linking an upstream identity to the account logged in.
+  - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, a federation grant established before it, and of the exception where grants keep on subject revocation (`guarantee-4-c`), the boundary written through the ledger's route.
 - `@mod/conformance-front` (verification, `modules/tooling/conformance-front`): Puts an https front before a running app, as a deployment's proxy is, for a harness whose outside party (a conformance suite, a client library) reaches the app over https.
 - `@mod/conformance-identity` (verification, `modules/tooling/conformance-identity`): Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.
   - `attempts-unavailable` (`src/attempts-unavailable`): the fault scenes of password login's attempt limit letting no attempt by while the store cannot count (`guarantee-3-i`).
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `ledger-unavailable` (`src/ledger-unavailable`): the fault scenes of the ledger's subject revocation route answering done only once every step's dependency answered (`guarantee-3-l`).
+  - `lockout-holds` (`src/lockout-holds`): the fault scenes of password login's per-identifier count holding across a crash and a failover, each attempt counted once, the same on every instance (`guarantee-5-i`).
   - `login-unavailable` (`src/login-unavailable`): the fault scenes of password login opening no session while the store cannot answer (`guarantee-3-f`).
 - `@mod/conformance-keys` (verification, `modules/tooling/conformance-keys`): Owns the conformance scenes of the keys area: publishing the public key set, with no private part of a key and no shared secret in its answers, and boot refusals for key configuration.
 - `@mod/conformance-legacy` (verification, `modules/tooling/conformance-legacy`): Starts the legacy build for conformance scenes (location, how to start it, configuration file, preparation script).
@@ -358,12 +376,18 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `dpop-once` (`src/dpop-once`): the fault scenes of a DPoP proof's `jti` spent once (`guarantee-5-e`).
   - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
   - `jwt-bearer` (`src/jwt-bearer`): the scenes of the jwt-bearer grant.
+  - `requests-unavailable` (`src/requests-unavailable`): the fault scenes of the token endpoint's request limit letting no request by while the store cannot count, its fail mode closed (`guarantee-3-h`).
   - `revocation-unavailable` (`src/revocation-unavailable`): the fault scenes of the revocation endpoint answering done only once a token's revocation is kept (`guarantee-3-g`).
   - `token-unavailable` (`src/token-unavailable`): the fault scenes of the token endpoint issuing no token for a JWT bearer assertion while the store cannot answer (`guarantee-3-d`).
 - `@mod/conformance-ops` (verification, `modules/tooling/conformance-ops`): Owns the conformance scenes of operations: liveness, readiness, the metrics scrape and its dependency gauge, the log level, their boot refusals, and the security headers on every answer.
 - `@mod/conformance-passkey` (verification, `modules/tooling/conformance-passkey`): Owns the conformance scenes of the passkey area: registering a passkey from a session, and its refusals (no session, a second factor not recent, an origin or a frame not listed, a frame whose page is not reported, a challenge answered twice or past its lifetime, a credential id another account holds, a user not verified when required, the limit of passkeys per user, the store failing).
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `passkey-challenge-once` (`src/passkey-challenge-once`): the fault scenes of a passkey challenge used once (`guarantee-5-h`).
 - `@mod/conformance-recipes` (verification, `modules/tooling/conformance-recipes`): Keeps each recipe in the documents from going stale: a recipe's scene generates the app with the recipe's own command, starts it, and makes the recipe's requests over HTTP, as a user of the provider would.
 - `@mod/conformance-second-factor` (verification, `modules/tooling/conformance-second-factor`): Owns the conformance scenes of the second-factor area: second factor at login (by a form or a JSON body), enrollment, naming factors, step-up, lockout, a recovery code that lets in one login only when two use it at once, store failure, the audit events they record.
+  - `faults` (`src/faults`): what the area's fault scenes share in its words, its scene and the store writes a fault is about; the deployment, the waits and the repointing around a fault are `conformance`'s (`fault-scene`).
+  - `fence` (`src/fence`): the fault scenes of a subject's fence refusing, from another instance, a change to her second factors that her revocation overtook (`guarantee-4-d`), the revocation sent through the ledger's route.
+  - `recovery-code-once` (`src/recovery-code-once`): the fault scenes of a recovery code used once (`guarantee-5-g`).
 - `@mod/conformance-tunnel` (verification, `modules/tooling/conformance-tunnel`): Gives a harness's app a way out to a party on this machine that it may reach over https by its name alone: an HTTP CONNECT proxy on loopback, set as the app's `outbound.proxy`.
 - `@mod/distribution` (assembly, `modules/tooling/distribution`): Forms one distribution bundle per concern directory, whose members are the packages placed in it.
   - `fetched` (`src/fetched`): the packages of this version npm already holds, taken from the registry for a release run again.

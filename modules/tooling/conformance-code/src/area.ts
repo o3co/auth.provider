@@ -1,5 +1,6 @@
 import { type AreaScene, area, sceneOf } from "@mod/conformance";
 import {
+	type IdentityPart,
 	identityArea,
 	type LedgerScene,
 	type RevocationScene,
@@ -25,6 +26,8 @@ export interface CodePart {
 	/** Clients whose id is the URL of their metadata document, under the operator's hosts and scopes. */
 	readonly documents?: {
 		readonly allow?: readonly string[];
+		/** Any host `deny` leaves, where `allow` names none. */
+		readonly anyHost?: boolean;
 		readonly deny?: readonly string[];
 		readonly scopes?: readonly string[];
 	};
@@ -50,7 +53,8 @@ export interface CodeScene extends CodePart {
 	readonly users: readonly UserScene[];
 	/** Users answered from a ledger over HTTP. */
 	readonly ledger?: LedgerScene;
-	readonly login?: { readonly returnTargets?: readonly string[] };
+	/** What a login may do: where it may send the user back to, and how many attempts a sender gets. */
+	readonly login?: IdentityPart["login"];
 	readonly corsOrigins?: readonly string[];
 	/** Subjects the ledger revokes over HTTP, as the identity area sets it up. */
 	readonly revocations?: RevocationScene;

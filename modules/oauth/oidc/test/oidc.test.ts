@@ -1,6 +1,5 @@
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes, verify } from "node:crypto";
 import { claimsSelections } from "@mod/claims-selection";
-import { claimsSelectionConfig } from "@mod/claims-selection/testing";
 import type { IdTokenRequest } from "@mod/code-grant";
 import type { Assembly } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
@@ -52,7 +51,7 @@ const makerOf = (app: Assembly) => {
 };
 
 describe("the ID token", () => {
-	it("is signed with the core claims and the session [oidc-core-2-a] [oidc-core-2-b] [oidc-core-2-d] [oidc-core-2-e] [oidc-core-2-f] [oidc-core-2-g] [oidc-core-2-i] [oidc-core-2-n] [oidc-core-2-o] [oidc-core-15.1-e]", async () => {
+	it("is signed with the core claims and the session [oidc-core-2-a] [oidc-core-2-b] [oidc-core-2-d] [oidc-core-2-e] [oidc-core-2-f] [oidc-core-2-g] [oidc-core-2-i] [oidc-core-2-n] [oidc-core-2-o] [oidc-core-15.1-e] [oidc-core-7.4-b]", async () => {
 		const app = await booted({ runtime, config: { oidc: { "id-token-lifetime": "5m" } } });
 		const token = await makerOf(app).make(
 			request({
@@ -119,9 +118,27 @@ describe("the ID token", () => {
 		expect(known.payload.auth_time).toBe((now - 5000) / 1000);
 	});
 
-	it("names the JWT type, the algorithm keys signs with, and its key id in the header [oidc-core-10.1-d]", async () => {
+	it("names the JWT type, the algorithm keys signs with, and its key id in the header, and nothing else [oidc-core-10.1-d] [oidc-core-2-r]", async () => {
 		const { header } = decoded(await makerOf(await booted({ runtime })).make(request()));
 		expect([header.typ, header.alg, typeof header.kid]).toEqual(["JWT", "EdDSA", "string"]);
+		// No x5u, x5c, jku or jwk: the key is found by its kid in the published set alone.
+		expect(Object.keys(header).sort()).toEqual(["alg", "kid", "typ"]);
+	});
+
+	it("is signed with RS256 if the operator places an RS256 key, as the metadata then names [oidc-core-15.1-a]", async () => {
+		const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+		const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+		const signing = { kid: "r", alg: "RS256", "private-key": pem };
+		const app = await booted({ runtime, config: { keys: { signing } } });
+		const token = await makerOf(app).make(request());
+		const [head = "", body = "", signature = ""] = token.split(".");
+		expect(decoded(token).header.alg).toBe("RS256");
+		const signed = Buffer.from(`${head}.${body}`);
+		expect(verify("sha256", signed, publicKey, Buffer.from(signature, "base64url"))).toBe(true);
+		expect(app.get(published)).toContainEqual({
+			name: "id_token_signing_alg_values_supported",
+			value: ["RS256"],
+		});
 	});
 });
 
@@ -228,7 +245,7 @@ describe("the claims a code's selection asks of the ID token", () => {
 	const served = async () => {
 		const app = await booted({
 			runtime,
-			config: { ...usersConfig([registered]), ...claimsSelectionConfig({ mode: "on" }) },
+			config: { ...usersConfig([registered]) },
 			sessionsAs: sessionsOf({ h: loginOf("s-alice", "users") }),
 		});
 		const [hook] = app.get(hooks);
@@ -279,7 +296,7 @@ describe("the claims a code's selection asks of the ID token", () => {
 describe("issuer's metadata", () => {
 	const items = async () => (await booted({ runtime })).get(published);
 
-	it("names openid and the table's scopes as the scopes it supports [oidc-discovery-3-s] [rfc8414-2-f]", async () => {
+	it("names openid and the table's scopes as the scopes it supports, the ones OpenID Connect Core defines among them [oidc-discovery-3-s] [rfc8414-2-f] [oidc-discovery-3-u]", async () => {
 		expect(await items()).toContainEqual({
 			name: "scopes_supported",
 			value: ["openid", "profile", "email", "groups"],

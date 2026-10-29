@@ -11,7 +11,7 @@ const guaranteeFor: Record<keyof typeof revokedTokensNeeds, Guarantee> = {
 };
 const revoked: Space = { name: "tokens-store.revoked", guarantees: Object.values(guaranteeFor) };
 
-export default defineModule({ name: "tokens-store", takes: [store] }, (m) => [
+export default defineModule({ name: "tokens-store", replicaSafe: true, takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => revoked),
 	m.provide(revokedTokens).by(async (c) => {
 		const place = { store: await c.get(store), space: revoked, log: c.log, random: c.random };

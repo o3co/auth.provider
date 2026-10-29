@@ -44,14 +44,17 @@ const verified = (value: unknown) => ({ [userAttribute.emailVerified]: value });
 /** Tokens with the policy over a reader answering `answer`; `reads` lists each subject and handle read. */
 async function over(answer: () => Promise<AttributesAnswer>) {
 	const reads: (readonly [string, string | undefined])[] = [];
-	const reader = defineModule({ name: "subject-attributes", takes: [] }, (m) => [
-		m.provide(subjectAttributes).by(() => ({
-			of: async (subject, handle) => {
-				reads.push([subject, handle]);
-				return answer();
-			},
-		})),
-	]);
+	const reader = defineModule(
+		{ name: "subject-attributes", replicaSafe: false, takes: [] },
+		(m) => [
+			m.provide(subjectAttributes).by(() => ({
+				of: async (subject, handle) => {
+					reads.push([subject, handle]);
+					return answer();
+				},
+			})),
+		],
+	);
 	const input = {
 		modules: [tokensStandIn(), reader, verifiedEmail],
 		config: kernelConfig(),
@@ -138,7 +141,7 @@ describe("over users and the session's login", () => {
 		attributes: { source, values: { [userAttribute.emailVerified]: true } },
 	});
 	/** A ledger that cannot look users up by subject. */
-	const unanswering = defineModule({ name: "ledger", takes: [] }, (m) => [
+	const unanswering = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(ledgers).by(() => ({
 			verify: async () => ({ kind: "none" }),
 			bySubject: async () => ({ kind: "unanswerable" }),
@@ -151,7 +154,7 @@ describe("over users and the session's login", () => {
 				memoryUsersStores().module,
 				...parts.users,
 				secretHashModule,
-				defineModule({ name: "sessions", takes: [tokens] }, (m) => [
+				defineModule({ name: "sessions", replicaSafe: false, takes: [tokens] }, (m) => [
 					// Sessions that reach tokens as they are built, as a composition's closing tokens does.
 					m.provide(sessions).by(async (c) => {
 						await c.get(tokens);
@@ -174,7 +177,9 @@ describe("over users and the session's login", () => {
 		usersConfig([testUser("alice", "pw", { subject: "s-alice", attributes })]);
 
 	it("allows a registered user users states verified", async () => {
-		const app = await boot({ users: [usersModule], config: registered(verified(true)) });
+		// Beside the email, where users takes a verification.
+		const attributes = { email: "alice@example.com", ...verified(true) };
+		const app = await boot({ users: [usersModule], config: registered(attributes) });
 		expect(await app.get(tokens).admits(asked("session", "h1"))).toEqual({ kind: "allowed" });
 	});
 

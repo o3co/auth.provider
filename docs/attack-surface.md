@@ -9,9 +9,9 @@ Packages with a module the full template with every opt-in does not compose: `@m
 
 ## Routes
 
-54 routes (GET 21, POST 33); each is in [the route reference](routes.md).
+56 routes (GET 22, POST 34); each is in [the route reference](routes.md).
 
-- `HEAD` is answered for each `GET` that does not change state (15 of them), and for no other: a `GET` that changes state is never reached by `HEAD`.
+- `HEAD` is answered for each `GET` that does not change state (16 of them), and for no other: a `GET` that changes state is never reached by `HEAD`.
 - A CORS preflight (`OPTIONS` with `Access-Control-Request-Method`) is answered for the routes a path reaches that take cross-origin requests.
 
 `GET` routes that change state:
@@ -178,9 +178,11 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | Setting | From | Default | Weakens |
 |---|---|---|---|
 | `clients-cimd.allow` | `@mod/clients-cimd` | `[]` | clients name themselves by a metadata document fetched from these hosts |
+| `clients-cimd.allow-any-host` | `@mod/clients-cimd` | `false` | clients name themselves by a metadata document fetched from any host `deny` leaves |
 | `dpop.nonce.required` | `@mod/dpop` | `"never"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
 | `federation-grants.keep-on-subject-revocation` | `@mod/federation-grants` | `false` | an established grant answers only to the `delegations` boundary when a revocation asks to keep delegations |
 | `federation.idps` | `@mod/federation` | `{}` | each IdP's `upstream-amr` trusts its word for the local amr it maps, `mfa` among them; its `fresh-login-allowance` lets a login that far back count as fresh |
+| `federation.idps.<name>.accept-missing-iss` | `@mod/idp-oidc` | `false` | named so (`accept-*` and the like) |
 | `http.insecure-origin` | `@mod/http` | `false` | named so (`accept-*` and the like) |
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
@@ -216,4 +218,3 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 - [resetting a subject's passkeys](runbook.md#resetting-a-subjects-passkeys)
 - [filling the passkey witness's marks](runbook.md#filling-the-passkey-witnesss-marks)
 - [upgrading](runbook.md#upgrading)
-- [taking the claims parameter through an upgrade, and revoking its constrained refresh families before going back](runbook.md#the-claims-parameter-through-an-upgrade-and-back)

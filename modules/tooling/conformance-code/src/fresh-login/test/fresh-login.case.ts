@@ -79,7 +79,7 @@ const logInAgain = async () => {
 };
 
 describe("password logins meeting a client's demand for a fresh login", () => {
-	it("meets prompt=login only with a login after the demand, refusing a return without one [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m] [oidc-core-3.1.2.3-a] [oidc-core-3.1.2.3-b] [guarantee-2-a]", async () => {
+	it("meets prompt=login only with a login after the demand, refusing a return without one [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m] [oidc-core-3.1.2.3-a] [oidc-core-3.1.2.3-b] [guarantee-2-a] [oidc-core-15.1-b]", async () => {
 		await browser.login();
 		const stale = await sentToLogIn({ prompt: "login" });
 		expect(await errorOf(stale)).toBe("login_required");

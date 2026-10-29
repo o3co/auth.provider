@@ -11,7 +11,7 @@ import { section } from "../src/section.ts";
 let recorded = recordingLog();
 const lines = () => recorded.lines();
 const receiving = (name: string, receive: AuditReceiver["receive"]): Module =>
-	defineModule({ name: `receiver-${name}`, takes: [] }, (m) => [
+	defineModule({ name: `receiver-${name}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(auditReceivers).by(() => ({ name, receive })),
 	]);
 /** A composition naming `receivers`, with the receiving modules and settings a test adds. */
@@ -228,10 +228,10 @@ it("refuses to start without the statement, with an unknown name, or with a rece
 	await expect(boot(["log", "other"], { extra: [other] })).resolves.toBeDefined();
 });
 
-it("refuses a name no receiver has at its place in the list, never by the name", async () => {
+it("refuses a name no receiver has at its place in the list, never by the name, telling the names composed", async () => {
 	const refused = await boot(["log", "missing"]).catch((error: unknown) => error);
 	expect((refused as BootRefused).refusals).toEqual([
-		{ where: "audit.receivers.1", reason: "names no receiver" },
+		{ where: "audit.receivers.1", reason: "names no composed receiver (composed: log)" },
 	]);
 });
 

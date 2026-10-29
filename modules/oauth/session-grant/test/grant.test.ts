@@ -93,7 +93,7 @@ async function serve(options: Options = {}) {
 			},
 		})),
 	};
-	const stubs = defineModule({ name: "stubs", takes: [] }, (m) => [
+	const stubs = defineModule({ name: "stubs", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(originEvidence).by(() => ({
 			sameOrigin: (request) => request.headers.get("origin") === ours,
 		})),
@@ -110,7 +110,7 @@ async function serve(options: Options = {}) {
 			}),
 		),
 	]);
-	const telling = defineModule({ name: "telling", takes: [] }, (m) => [
+	const telling = defineModule({ name: "telling", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(sessionIssuances).by(() => ({
 			issued: async (session, issued) => {
 				recorded.set(referenceOf(issued), session);
@@ -220,22 +220,23 @@ describe("session-grant", () => {
 		});
 	});
 
-	it("refuses a request without same-origin evidence as unauthorized, before reading the session", async () => {
+	it("refuses a request without same-origin evidence with a registered code, invalid_grant, before reading the session [rfc6749-8.5-a]", async () => {
 		const s = await serve();
 		for (const origin of [null, "https://elsewhere.example"]) {
 			expect(await s.call("app", {}, origin)).toEqual({
 				kind: "error",
-				error: "unauthorized",
+				error: "invalid_grant",
 				description: "session is not authenticated",
-				status: 401,
 			});
 		}
 		expect(s.asked).toEqual([]);
 	});
 
-	it("refuses without a session as unauthorized, and names the requirement a session falls short of", async () => {
+	it("refuses without a session as invalid_grant, and names the requirement a session falls short of [rfc6749-8.5-a]", async () => {
 		const absent = await serve({ entry: { kind: "absent" } });
-		expect(await absent.call("app")).toMatchObject({ error: "unauthorized", status: 401 });
+		const refused = await absent.call("app");
+		expect(refused).toMatchObject({ error: "invalid_grant" });
+		expect(refused).not.toHaveProperty("status");
 		const short = await serve({
 			entry: { kind: "short", requirement: "mfa", answer: { error: "mfa_required" } },
 		});
@@ -263,7 +264,7 @@ describe("session-grant", () => {
 
 	it("issues through the issuance policies from the session entered, recording nothing they refuse", async () => {
 		const asked: IssuanceRequest[] = [];
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {
@@ -284,7 +285,7 @@ describe("session-grant", () => {
 
 	it("asks the issuance policies once for each token it issues", async () => {
 		const asked: IssuanceRequest[] = [];
-		const allowing = defineModule({ name: "allowing", takes: [] }, (m) => [
+		const allowing = defineModule({ name: "allowing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {

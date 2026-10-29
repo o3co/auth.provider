@@ -1,10 +1,12 @@
 import { auditStandIn } from "@mod/audit/testing";
 import claimsSelection from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import { type Clients, clients, metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
 import { sessionRedemptions } from "@mod/code-grant";
+import cookiesModule from "@mod/cookies/module";
+import { csrfStandIn } from "@mod/csrf/testing";
 import { type HttpResponse, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
@@ -28,7 +30,8 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { sessionStandIn, stubSessions } from "@mod/session/testing";
+import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import sessionRequirements from "@mod/session-requirements/module";
 import subjectAttributes from "@mod/subject-attributes/module";
@@ -70,6 +73,8 @@ export async function harness(
 		/** Leaves `http`'s public origin unwritten: the issuer alone names this provider. */
 		readonly noPublicOrigin?: true;
 		readonly sessionsModule?: Module;
+		/** `csrf` as an app composes it, in place of its stand-in. */
+		readonly csrfModule?: Module;
 		/** Makes rp-logout's session clients store fail as it says. */
 		readonly clientsDown?: UnavailableSwitch<SessionClients>;
 		/** Makes the client records fail as it says. */
@@ -85,20 +90,23 @@ export async function harness(
 	const recorded = auditStandIn();
 	const sent: Sent[] = [];
 	const answering = { answer: async (_url: string): Promise<number> => 200 };
-	const outside = defineModule({ takes: [], name: "outbound-stand-in" }, (m) => [
-		m.provide(outboundRefusals).by(() => ({ explained: (url) => options.refused?.(url) })),
-		m.provide(outbound).by(
-			(): Outbound => ({
-				fetch: async (url, request) => {
-					sent.push({ url, request });
-					const status = await answering.answer(url);
-					return { status, headers: new Map(), body: new Uint8Array() };
-				},
-			}),
-		),
-	]);
+	const outside = defineModule(
+		{ takes: [], name: "outbound-stand-in", replicaSafe: false },
+		(m) => [
+			m.provide(outboundRefusals).by(() => ({ explained: (url) => options.refused?.(url) })),
+			m.provide(outbound).by(
+				(): Outbound => ({
+					fetch: async (url, request) => {
+						sent.push({ url, request });
+						const status = await answering.answer(url);
+						return { status, headers: new Map(), body: new Uint8Array() };
+					},
+				}),
+			),
+		],
+	);
 	const reader = defineModule(
-		{ takes: [sessionRedemptions, routes, metadata], name: "reader" },
+		{ takes: [sessionRedemptions, routes, metadata], name: "reader", replicaSafe: true },
 		(m) => [
 			m.provide(probed).by(async (c) => {
 				const [redemption] = await c.collect(sessionRedemptions);
@@ -128,9 +136,10 @@ export async function harness(
 		}),
 	);
 	// redirect-uris' section, which the front-channel URL is judged against; authorize is not composed.
-	const redirectsSection = defineModule({ takes: [], name: "authorize-section" }, (m) => [
-		m.contribute(metadataSections).by(() => redirects),
-	]);
+	const redirectsSection = defineModule(
+		{ takes: [], name: "authorize-section", replicaSafe: true },
+		(m) => [m.contribute(metadataSections).by(() => redirects)],
+	);
 	const app = await assemble({
 		modules: [
 			http,
@@ -148,6 +157,8 @@ export async function harness(
 				? switchedModule(clientsModule, clients, options.clientRecordsDown)
 				: clientsModule,
 			redirectsSection,
+			cookiesModule,
+			options.csrfModule ?? csrfStandIn,
 			options.sessionsModule ?? sessionStandIn,
 			sessionRequirements,
 			sessionParticipants,
@@ -170,7 +181,6 @@ export async function harness(
 			...usersConfig([]),
 			...clientsConfig(registered),
 			...rpLogoutConfig({ "sweep-interval": "1s", ...options.settings }),
-			...claimsSelectionConfig(),
 		},
 		runtime,
 	});
@@ -230,9 +240,36 @@ export async function harness(
 			text: typeof body === "string" ? body : undefined,
 		};
 	};
+	/** A request to the confirmation's routes, as `call` makes one to the logout's. */
+	const confirming = async (
+		method: "GET" | "POST",
+		fields: Record<string, string>,
+		headers: Record<string, string> = {},
+	) => {
+		const route = seen.routes.find(
+			(r) => r.path === "/oauth/logout/confirm" && r.method === method,
+		);
+		const values = new Map(Object.entries(fields).map(([k, v]) => [k, [v]]));
+		const response = await route?.handle(
+			testRequest({
+				method,
+				path: "/oauth/logout/confirm",
+				headers: new Map(Object.entries(headers)),
+				...(method === "GET" ? { query: values } : { form: values }),
+			}),
+		);
+		return {
+			status: response?.status,
+			headers: response?.headers ?? {},
+			cookies: response?.cookies ?? [],
+			loads: response?.loads,
+			text: typeof response?.body === "string" ? response.body : undefined,
+		};
+	};
 	return {
 		app,
 		stores,
+		confirming,
 		events: recorded.events,
 		logs: logged.lines,
 		sent,
@@ -256,6 +293,56 @@ export async function harness(
 export type Harness = Awaited<ReturnType<typeof harness>>;
 
 /** Starts harnesses for a file's tests, each stopped after the test that started it. */
+/**
+ * Sessions that a read ends once past `lifetimeMs`, and whose close still finds the record open, as
+ * the lifecycle's do; a browser's cookie `session=<id>` names its session's handle.
+ */
+export function readEndingSessions(lifetimeMs: number) {
+	return defineModule({ takes: [participants], name: "session", replicaSafe: false }, (m) => [
+		m.provide(sessions).by(async (c) => {
+			const closers = await c.collect(participants);
+			type Kept = { subject: string; openedAt: number; state: "open" | "closing" | "closed" };
+			const kept = new Map<string, Kept>();
+			const sessionOf = (id: string, r: Kept) => ({
+				id,
+				context: { subject: r.subject, amr: ["pwd"], authenticatedAt: r.openedAt },
+			});
+			return stubSessions({
+				handleOf: async (request) => {
+					const id = /session=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
+					return id !== undefined && kept.has(id) ? id : undefined;
+				},
+				complete: async (_request, facts) => {
+					const id = `s${kept.size + 1}`;
+					const r: Kept = { subject: facts.subject, openedAt: c.clock.now(), state: "open" };
+					kept.set(id, r);
+					return { session: sessionOf(id, r), cookies: [`session=${id}`] };
+				},
+				entryOf: async (id) => {
+					const r = kept.get(id);
+					if (r?.state !== "open") return { kind: "absent" };
+					if (r.openedAt + lifetimeMs <= c.clock.now()) {
+						r.state = "closed";
+						return { kind: "absent" };
+					}
+					return { kind: "entered", session: sessionOf(id, r), endsAt: r.openedAt + lifetimeMs };
+				},
+				close: async (id) => {
+					const r = kept.get(id);
+					if (!r) return { kind: "closed", cookies: [] };
+					const from = r.state;
+					if (r.state !== "closed") {
+						r.state = "closing";
+						for (const closer of closers) await closer.closing(sessionOf(id, r));
+						r.state = "closed";
+					}
+					return { kind: "closed", cookies: [], session: { id, subject: r.subject }, from };
+				},
+			});
+		}),
+	]);
+}
+
 export function servedEach() {
 	const started: Harness[] = [];
 	afterEach(async () => {

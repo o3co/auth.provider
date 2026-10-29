@@ -114,7 +114,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -139,7 +139,7 @@ const code = defineModule({ name: "kind-code", takes: [] }, (m) => [
 	})),
 ]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
-const backup = defineModule({ name: "kind-backup", takes: [] }, (m) => [
+const backup = defineModule({ name: "kind-backup", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -176,7 +176,7 @@ const afterWrite = async <T>(write: Promise<T>) => {
 const factorStand = () => {
 	const stand = memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
 	const joint = updatingTogether(stand.records);
-	return defineModule({ name: "factor-store", takes: [] }, (m) => [
+	return defineModule({ name: "factor-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorStore).by(() =>
 			factorsDown.wrap({
 				save: (key: string, record: StoredFactors) =>

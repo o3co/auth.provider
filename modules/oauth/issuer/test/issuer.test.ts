@@ -80,10 +80,10 @@ it("names its endpoints on the issuer's origin: the public origin where one is w
 it("collects the items this server names itself by, refusing two contributions of one item or one of the issuer item", async () => {
 	const named = contract<readonly MetadataItem[]>("named");
 	const item = (module: string, name: string, value: unknown) =>
-		defineModule({ name: module, takes: [] }, (m) => [
+		defineModule({ name: module, replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(metadata).by(() => ({ name, value })),
 		]);
-	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 		m.provide(named).by((c) => c.collect(metadata)),
 	]);
 	const bootWith = (...modules: ReturnType<typeof item>[]) =>
@@ -128,6 +128,19 @@ it("takes a plain-http issuer only beside the same plain-http public origin, whi
 	]);
 	const plain = await boot("http://as.example", "http://as.example", "development");
 	expect(plain.get(issuer).url).toBe("http://as.example");
+});
+
+it("refuses an issuer on another origin than the public origin, saying to give it the same", async () => {
+	const refused = await boot("https://elsewhere.example", "https://as.example").catch(
+		(error: BootRefused) => error.refusals,
+	);
+	expect(refused).toEqual([
+		{
+			where: "issuer.url",
+			reason:
+				"the issuer origin differs from http.public-origin: give issuer.url the same scheme, host and port",
+		},
+	]);
 });
 
 it("refuses a plain-http issuer in a production deployment [oidc-discovery-3-a] [rfc8414-2-a] [rfc8414-3-b] [rfc9207-2-b]", async () => {

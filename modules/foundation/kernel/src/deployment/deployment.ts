@@ -44,7 +44,7 @@ function readRefusals(answer: unknown): { key: string; reason: string }[] | unde
 	return read;
 }
 
-/** On multiple instances, each module that declares itself unsafe there. */
+/** On multiple instances, each module that declares itself unsafe there, or declares nothing of them. */
 export function checkReplicas(
 	modules: readonly Module[],
 	sections: Map<Module, unknown>,
@@ -55,14 +55,20 @@ export function checkReplicas(
 	for (const module of modules) {
 		// A section that failed its schema is refused already; the declaration expects a checked one.
 		if (module.section !== undefined && !sections.has(module)) continue;
-		const safe = asked(
+		const safe = asked<boolean | "unsaid">(
 			module,
 			"replicaSafe",
 			sections.get(module),
 			{ value: readSafe, answer: readSafe },
-			true,
+			"unsaid",
 		);
-		if (safe === undefined) {
+		if (safe === "unsaid") {
+			// The type requires the declaration; a module that has none got past it, as JavaScript.
+			refusals.push({
+				where: module.name,
+				reason: "declares nothing about multiple instances: say replicaSafe",
+			});
+		} else if (safe === undefined) {
 			refusals.push({ where: module.name, reason: "its multi-instance check failed" });
 		} else if (!safe) {
 			refusals.push({

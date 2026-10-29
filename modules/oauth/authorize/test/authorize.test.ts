@@ -11,7 +11,7 @@ import {
 	selectionRecords,
 } from "@mod/claims-selection";
 import claimsSelectionModule from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
@@ -73,6 +73,7 @@ import { tokensStandIn } from "@mod/tokens/testing";
 import { loopbackPagesRefused } from "@mod/url-setting";
 import { afterEach, describe, expect, it } from "vitest";
 import declared from "../src/audit-events.ts";
+import { hintReaders } from "../src/contract.ts";
 import authorizeModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { authorizeConfig } from "../src/testing.ts";
@@ -119,13 +120,13 @@ async function serve(
 		asking?: boolean;
 		/** The deployment's environment, production unless a test tries a page on this machine. */
 		environment?: "production" | "development";
-		/** claims-selection's mode; on unless a test is about another. */
-		claims?: "off" | "draining" | "on";
+		/** The package's claims-parameter; true unless a test is about false. */
+		claimsParameter?: boolean;
 		/** claims-selection's store; the in-memory one unless a test makes it fail. */
 		selectionStore?: Module;
 	} = {},
 ) {
-	const proving = defineModule({ name: "proving", takes: [] }, (m) => [
+	const proving = defineModule({ name: "proving", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.contribute(amrSources)
 			.by(() => ({ name: "proving", amr: options.proves ?? ["pwd", "otp", "mfa"] })),
@@ -136,7 +137,7 @@ async function serve(
 		reauths: unavailableSwitch<ReauthStore>("reauth store"),
 		tokens: unavailableSwitch<Tokens>("tokens"),
 	};
-	const reauthStand = defineModule({ name: "reauth-store", takes: [] }, (m) => [
+	const reauthStand = defineModule({ name: "reauth-store", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.provide(reauthStore)
 			.by(() =>
@@ -182,6 +183,7 @@ async function serve(
 			claimsSelectionModule,
 			options.selectionStore ?? claimsSelectionInMemory().module,
 			scoping,
+			hinting,
 			...(options.extra ?? []),
 		],
 		config: {
@@ -243,10 +245,13 @@ async function serve(
 			]),
 			...(options.asking === false ? { consent: {} } : consentConfig()),
 			// Most scenes here are not about OpenID Connect, so they leave out openid.
-			...authorizeConfig({ "oidc-mode": "dual", ...options.authorize }),
+			...authorizeConfig({
+				"oidc-mode": "dual",
+				"claims-parameter": options.claimsParameter ?? true,
+				...options.authorize,
+			}),
 			...acrConfig(options.acr ?? {}),
 			...codeGrantConfig({ "code-lifetime": "1m", ...options.codeGrant }),
-			...claimsSelectionConfig({ mode: options.claims ?? "on" }),
 		},
 		runtime,
 	};
@@ -316,8 +321,21 @@ const claimScopeTable = new Map([
 	["email", "write"],
 	["groups", "admin"],
 ]);
-const scoping = defineModule({ name: "scoping", takes: [] }, (m) => [
+const scoping = defineModule({ name: "scoping", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => claimScopeTable.get(claim) })),
+]);
+
+/**
+ * The hint reader oidc would contribute, here a stand-in: `id:<subject>` is an ID token it issued
+ * naming that subject, expired or not, and any other none it takes.
+ */
+const hinting = defineModule({ name: "hinting", replicaSafe: false, takes: [] }, (m) => [
+	m.contribute(hintReaders).by(() => ({
+		read: async (hint: string) =>
+			hint.startsWith("id:")
+				? ({ kind: "subject", subject: hint.slice(3) } as const)
+				: ({ kind: "invalid" } as const),
+	})),
 ]);
 
 const request = (extra: Record<string, string> = {}) => ({
@@ -331,7 +349,7 @@ const request = (extra: Record<string, string> = {}) => ({
 });
 
 describe("authorize: trust in the redirect URI", () => {
-	it("answers locally until the client and an exactly registered redirect URI are known [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a]", async () => {
+	it("answers locally until the client and an exactly registered redirect URI are known [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a] [rfc6749-3.1.2.2-c] [rfc6749-10.1-b] [rfc6749-10.2-b] [rfc6749-10.14-a] [oidc-core-3.1.2.2-b]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		for (const params of [
@@ -351,7 +369,7 @@ describe("authorize: trust in the redirect URI", () => {
 		expect(loopback.at?.origin).toBe("http://127.0.0.1:9555");
 	});
 
-	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a]", async () => {
+	it("sends every other refusal back with state and iss [rfc6749-3.1.1-a] [rfc7636-4.4.1-a] [rfc7636-4.4.1-c] [rfc7636-7.2-a] [rfc6749-3.1-f] [rfc6749-4.1.2.1-c] [rfc6749-4.1.2.1-g] [rfc9207-2-a] [rfc6750-5.3-d] [oidc-core-3.1.2.2-b] [oidc-core-3.1.2.2-i] [rfc6749-10.14-a] [rfc6749-4.1.2.1-d]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const cases: [Record<string, string> | string, string][] = [
@@ -381,6 +399,7 @@ describe("authorize: trust in the redirect URI", () => {
 				res.at?.searchParams.get("state"),
 				res.at?.searchParams.get("iss"),
 			]).toEqual([error, "s1", issuer]);
+			expect(res.at?.searchParams.get("error")).toMatch(/^[\x20\x21\x23-\x5B\x5D-\x7E]+$/);
 		}
 		const twice = await authorize(`${new URLSearchParams(request())}&state=s2`, cookie);
 		expect([twice.at?.searchParams.get("error"), twice.at?.searchParams.has("state")]).toEqual([
@@ -388,6 +407,29 @@ describe("authorize: trust in the redirect URI", () => {
 			false,
 		]);
 	});
+});
+
+it("sends each PKCE refusal back by 302 as invalid_request with state and iss, its description telling why [rfc7636-4.4.1-b] [rfc7636-4.4.1-d]", async () => {
+	const { authorize, login } = await serve();
+	const cookie = await login();
+	for (const [extra, description] of [
+		[{ code_challenge: "" }, "PKCE with S256 is required"],
+		[{ code_challenge_method: "plain" }, "code_challenge_method is not supported: only S256"],
+		[{ code_challenge: "A".repeat(42) }, "code_challenge is malformed"],
+	] as const) {
+		const res = await authorize(request(extra), cookie);
+		const sent = ["error", "error_description", "state", "iss"].map((n) =>
+			res.at?.searchParams.get(n),
+		);
+		expect([res.status, `${res.at?.origin}${res.at?.pathname}`, ...sent]).toEqual([
+			302,
+			callback,
+			"invalid_request",
+			description,
+			"s1",
+			issuer,
+		]);
+	}
 });
 
 it("refuses a client not allowed the code grant with the token endpoint's words for it", async () => {
@@ -437,7 +479,7 @@ describe("authorize: session and consent", () => {
 		).toBe("/consent");
 	});
 
-	it("refuses a third party when consent cannot ask, after login, whatever it was granted", async () => {
+	it("refuses a third party when consent cannot ask, after login, whatever it was granted or the prompt asks [oidc-core-3.1.2.1-o]", async () => {
 		const { app, authorize, login, events } = await serve({ asking: false });
 		expect((await authorize(request({ client_id: "third" }))).at?.pathname).toBe("/login");
 		const cookie = await login();
@@ -559,10 +601,11 @@ describe("authorize: the section", () => {
 		]);
 	});
 
-	it("reads a section that holds only the login page with the defaults it had", () => {
+	it("reads a section that holds only the login page with the defaults it had, claims-parameter true", () => {
 		expect(section.parse(login)).toEqual({
 			...login,
 			"oidc-mode": "oidc-required",
+			"claims-parameter": true,
 			requests: 60,
 			window: 60,
 		});
@@ -571,9 +614,10 @@ describe("authorize: the section", () => {
 
 	it("contributes the redirect URIs' document copy to client-documents", async () => {
 		const seen = contract<readonly DocumentCopy[]>("test.copies-seen");
-		const probe = defineModule({ name: "copies-probe", takes: [documentCopies] }, (m) => [
-			m.provide(seen).by((c) => c.collect(documentCopies)),
-		]);
+		const probe = defineModule(
+			{ name: "copies-probe", replicaSafe: true, takes: [documentCopies] },
+			(m) => [m.provide(seen).by((c) => c.collect(documentCopies))],
+		);
 		const { app } = await serve({ extra: [probe] });
 		expect(app.get(seen)).toContain(redirectsCopy);
 	});
@@ -594,7 +638,7 @@ afterEach(() => {
 	recorded = [];
 });
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
+const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -643,7 +687,7 @@ describe("authorize: the audience a request asks for", () => {
 	});
 
 	it("sends a parameter the rule reads, sent twice, back as the rule says, and any other as invalid_request [rfc6749-3.1-f]", async () => {
-		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				repeated: (name) =>
@@ -671,9 +715,28 @@ describe("authorize: the audience a request asks for", () => {
 		expect(unruled.at?.searchParams.get("error")).toBe("invalid_request");
 	});
 
+	it("sends a rule's description back in RFC 6749's characters alone, any other shown as ? [rfc6749-4.1.2.1-e]", async () => {
+		const loud = defineModule({ name: "loud", replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(targetRules).by(() => ({
+				target: ({ audience }) => ({ kind: "audience", audience }),
+				repeated: () => ({
+					kind: "error",
+					error: "invalid_target",
+					description: 'one "resource", caf\u00e9\n\\',
+				}),
+			})),
+		]);
+		const query = new URLSearchParams(request({ client_id: "wide" }));
+		query.append("resource", "https://two");
+		query.append("resource", "https://api");
+		const s = await serve({ extra: [loud] });
+		const asked = await s.authorize(query.toString(), await s.login());
+		expect(asked.at?.searchParams.get("error_description")).toBe("one ?resource?, caf???");
+	});
+
 	it("asks the issuance policies for the audience asked, and gives their refusal before invalid_target", async () => {
 		const asked: IssuanceRequest[] = [];
-		const policy = defineModule({ name: "refusing-bob", takes: [] }, (m) => [
+		const policy = defineModule({ name: "refusing-bob", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "refusing-bob",
 				judge: async (request) => {
@@ -713,7 +776,7 @@ describe("authorize: the code grant", () => {
 		});
 	});
 
-	it("uses up a code on a wrong verifier, client or redirect URI, but not on a malformed request [rfc7636-4.6-b] [rfc7636-4.5-a] [rfc7636-4.4-a] [rfc9700-2.1.1-a] [rfc6749-4.1.3-c] [rfc6749-4.1.3-e]", async () => {
+	it("uses up a code on a wrong verifier, client or redirect URI, but not on a malformed request [rfc7636-4.6-b] [rfc7636-4.5-a] [rfc7636-4.4-a] [rfc9700-2.1.1-a] [rfc6749-4.1.3-c] [rfc6749-4.1.3-e] [rfc6749-10.2-b]", async () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const malformed = await codeOf(s, cookie);
@@ -806,7 +869,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect(v6.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("refuses or accepts each parameter as the rules say [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a]", async () => {
+	it("refuses or accepts each parameter as the rules say [rfc6749-4.1.2-a] [rfc6749-4.1.2-f] [rfc9207-2-a] [oidc-core-3.1.2.2-b] [rfc6749-10.14-a]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		const error = async (extra: Record<string, string>) =>
@@ -1050,7 +1113,7 @@ it("revokes a code's token when its session logs out later", async () => {
 
 it("adds an ID token through code-grant when the scope holds the maker's, with the code's facts [oidc-core-3.1.3.3-c] [oidc-core-3.1.3.2-f]", async () => {
 	const asked: IdTokenRequest[] = [];
-	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
+	const maker = defineModule({ name: "maker", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
 			scope: "openid",
 			make: async (r: IdTokenRequest) => {
@@ -1257,7 +1320,7 @@ it("hashes a re-authentication the same whatever the order of parameters or prom
 	expect(res.at?.pathname).not.toBe("/login");
 });
 
-it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it", async () => {
+it("meets an acr by the amr sets its table names, and sends a session that falls short to raise it [rfc6749-10.14-a]", async () => {
 	const s = await serve({
 		acr: { "urn:test:mfa": [["mfa"]] },
 		authorize: { "step-up-page": "https://as.example/mfa" },
@@ -1297,7 +1360,7 @@ it("meets an acr by the amr sets its table names, and sends a session that falls
 
 it("binds to the code the first acr met in the order asked, past any not met, or else the session's current acr", async () => {
 	const asked: IdTokenRequest[] = [];
-	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
+	const maker = defineModule({ name: "maker", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
 			scope: "openid",
 			make: async (r: IdTokenRequest) => {
@@ -1394,9 +1457,9 @@ describe("authorize: one trip to raise the authentication", () => {
 	});
 });
 
-it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a]", async () => {
+it("reads the acr a claims parameter asks for, refuses only an essential one unmet, and refuses one that is no object [oidc-core-5.5.1.1-b] [oidc-core-5.5.1-a] [rfc6749-10.14-a]", async () => {
 	const asked: IdTokenRequest[] = [];
-	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
+	const maker = defineModule({ name: "maker", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
 			scope: "openid",
 			make: async (r: IdTokenRequest) => {
@@ -1544,13 +1607,13 @@ describe("authorize: the claims a request names beyond its scope", () => {
 		expect(plain.at?.searchParams.has("code")).toBe(true);
 	});
 
-	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever the mode, before an acr it cannot know, and reads no sub without openid [oidc-core-5.5.1-b]", async () => {
+	it("issues a code only for the subject a sub value names, as login_required otherwise, whatever claims-parameter, before an acr it cannot know, and reads no sub without openid [oidc-core-5.5.1-b]", async () => {
 		type Served = Awaited<ReturnType<typeof serve>>;
 		const error = async (s: Served, claims: Record<string, unknown>, cookie: string) =>
 			(await s.authorize(asking(claimsOf(claims)), cookie)).at?.searchParams.get("error");
 		const unknown = { essential: true, value: "urn:test:unknown" };
-		for (const mode of ["on", "off", "draining"] as const) {
-			const s = await serve({ claims: mode });
+		for (const claimsParameter of [true, false]) {
+			const s = await serve({ claimsParameter });
 			const cookie = await s.login();
 			const oauth = { scope: "read", claims: claimsOf({ id_token: { sub: { value: "bob" } } }) };
 			expect((await s.authorize(request(oauth), cookie)).at?.searchParams.has("code")).toBe(true);
@@ -1568,21 +1631,29 @@ describe("authorize: the claims a request names beyond its scope", () => {
 		}
 	});
 
-	it("reads no names and keeps nothing unless on, and says it supports the claims parameter only when on", async () => {
+	it("reads no names and keeps nothing where claims-parameter is false, says it supports the claims parameter only where true, and warns at boot where false", async () => {
 		const published = contract<readonly MetadataItem[]>("published");
-		const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+		const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 			m.provide(published).by((c) => c.collect(metadata)),
 		]);
-		for (const mode of ["off", "draining", "on"] as const) {
-			const s = await serve({ claims: mode, extra: [reader] });
+		for (const claimsParameter of [true, false]) {
+			const from = logged.lines().length;
+			const s = await serve({ claimsParameter, extra: [reader] });
 			const cookie = await s.login();
 			const res = await s.authorize(asking(claimsOf({ userinfo: { name: null } })), cookie);
+			// Ignored where false: the request is not refused, and the code is given with nothing kept.
+			expect(res.at?.searchParams.has("code"), String(claimsParameter)).toBe(true);
 			const kept = await selectionOf(s, res.at?.searchParams.get("code"));
-			expect(kept === undefined, mode).toBe(mode !== "on");
+			expect(kept === undefined, String(claimsParameter)).toBe(!claimsParameter);
 			const supported = s.app
 				.get(published)
 				.find((item) => item.name === "claims_parameter_supported");
-			expect(supported?.value, mode).toBe(mode === "on" ? true : undefined);
+			expect(supported?.value, String(claimsParameter)).toBe(claimsParameter ? true : undefined);
+			const warned = logged
+				.lines()
+				.slice(from)
+				.filter((l) => l.event === "authorize.claims_parameter_off");
+			expect(warned.length, String(claimsParameter)).toBe(claimsParameter ? 0 : 1);
 			await stop();
 		}
 	});
@@ -1628,7 +1699,7 @@ it("asks a session whose authentication time is unknown to log in again for an e
 
 it("offers a contributed acr unless the operator's table names the same acr", async () => {
 	const offered = (acr: string) =>
-		defineModule({ name: `offers-${acr}`, takes: [] }, (m) => [
+		defineModule({ name: `offers-${acr}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(acrEntries).by(() => ({ acr, sets: [["mfa"]] })),
 		]);
 	const s = await serve({
@@ -1652,7 +1723,7 @@ it("offers a contributed acr unless the operator's table names the same acr", as
 
 it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer [rfc9207-2.3-c] [rfc9700-2.1.1-c] [rfc9700-2.1.1-d] [rfc8414-2-b] [rfc8414-2-g] [oidc-discovery-3-d] [oidc-discovery-3-v]", async () => {
 	const published = contract<readonly MetadataItem[]>("published");
-	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 		m.provide(published).by((c) => c.collect(metadata)),
 	]);
 	const { app } = await serve({ extra: [reader] });
@@ -1735,7 +1806,7 @@ describe("authorize: openid in the request", () => {
 		).toBe(false);
 	});
 
-	it("refuses a request that does not name openid itself with invalid_scope, sent back [oidc-core-3.1.2.2-a]", async () => {
+	it("refuses a request that does not name openid itself with invalid_scope, sent back [oidc-core-3.1.2.2-a] [oidc-core-3.1.2.2-c]", async () => {
 		const { authorize, login } = await serve(required);
 		const cookie = await login();
 		const refused = [false, "invalid_scope", "s1", issuer];
@@ -1841,7 +1912,7 @@ describe("authorize: audit events", () => {
 describe("authorize: the issuance policies", () => {
 	/** A policy that refuses bob, as one would a user whose email is not verified, and keeps what it was asked. */
 	const refusingBob = (asked: IssuanceRequest[], down = false) =>
-		defineModule({ name: "refusing-bob", takes: [] }, (m) => [
+		defineModule({ name: "refusing-bob", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "refusing-bob",
 				judge: async (request) => {
@@ -1963,6 +2034,52 @@ describe("authorize: the issuance policies", () => {
 				.map((line) => line.fields),
 		).toEqual([{ what: "refusing-bob", route: "/oauth/authorize" }]);
 		expect(events).toEqual([]);
+	});
+});
+
+describe("authorize: an id_token_hint", () => {
+	const hinted = (hint: string, extra: Record<string, string> = {}) =>
+		request({ scope: "openid read", id_token_hint: hint, ...extra });
+	const error = (res: { at: URL | undefined }) => res.at?.searchParams.get("error");
+
+	it("issues a code only for the End-User the hint names, as login_required for another whose session there is, prompt=none or not [oidc-core-3.1.2.1-u] [oidc-core-3.1.2.2-d] [oidc-core-3.1.2.2-e]", async () => {
+		const { authorize, login } = await serve();
+		const alice = await login("alice");
+		expect((await authorize(hinted("id:alice"), alice)).at?.searchParams.has("code")).toBe(true);
+		for (const extra of [{}, { prompt: "none" }, { prompt: "consent" }]) {
+			const res = await authorize(hinted("id:bob", extra), alice);
+			expect([error(res), res.at?.searchParams.has("code")], JSON.stringify(extra)).toEqual([
+				"login_required",
+				false,
+			]);
+		}
+	});
+
+	it("sends a request whose hint names an End-User with no session to log in, and refuses it under prompt=none, as login_required [oidc-core-3.1.2.1-u]", async () => {
+		const { authorize } = await serve();
+		const sent = await authorize(hinted("id:bob"));
+		expect(sent.at?.origin + (sent.at?.pathname ?? "")).toBe("https://as.example/login");
+		expect(error(await authorize(hinted("id:bob", { prompt: "none" })))).toBe("login_required");
+	});
+
+	it("asks the hint's End-User and a claims request's sub alike: a code only where both name the session's", async () => {
+		const { authorize, login } = await serve();
+		const alice = await login("alice");
+		const claims = (sub: string) => JSON.stringify({ id_token: { sub: { value: sub } } });
+		expect(error(await authorize(hinted("id:alice", { claims: claims("bob") }), alice))).toBe(
+			"login_required",
+		);
+		expect(error(await authorize(hinted("id:bob", { claims: claims("alice") }), alice))).toBe(
+			"login_required",
+		);
+		const both = await authorize(hinted("id:alice", { claims: claims("alice") }), alice);
+		expect(both.at?.searchParams.has("code")).toBe(true);
+	});
+
+	it("reads no hint in a request without openid", async () => {
+		const { authorize, login } = await serve();
+		const oauth = request({ scope: "read", id_token_hint: "id:bob" });
+		expect((await authorize(oauth, await login("alice"))).at?.searchParams.has("code")).toBe(true);
 	});
 });
 

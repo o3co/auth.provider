@@ -8,28 +8,17 @@ import {
 	type Node,
 	type Reply,
 	ready,
-	replicasOnline,
+	recovered,
 	startDeployment,
-	storeWrite,
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	type Code,
-	codeAt,
-	codeUse,
-	faultScene,
-	on,
-	prefix,
-	redeemAt,
-	said,
-} from "../../faults/test/faults.ts";
+import { type Code, codeAt, faultScene, on, redeemAt, said } from "../../faults/test/faults.ts";
+import { codeRecord, codeUse } from "../../faults/test/wire.ts";
 
 const refused = [400, "invalid_grant"];
 const issued = [200, "Bearer"];
 const unavailable = [503, "temporarily_unavailable"];
-/** Any write to a code's record, which a redemption makes before it uses the code up. */
-const codeRecord = storeWrite({ prefix, space: "code-grant-store.codes" });
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The control: with no fault, a code is used up by one write that succeeds, and a token given. */
@@ -119,7 +108,7 @@ describe("nothing issued while the store cannot write, and a request after it ca
 			expect(none || refusedWrite(a, since, isNoReplicas) !== undefined).toBe(true);
 			expect(successes(a, codeUse(c))).toEqual([]);
 			await ok(replica, "REPLICAOF", primary.name, "6379");
-			await replicasOnline(d);
+			await recovered(d);
 			await redeemedOnce(a, c);
 		});
 	});
@@ -150,7 +139,7 @@ describe("nothing issued while the store cannot write, and a request after it ca
 			// there, before the code was used.
 			expect(successes(a, codeRecord).some((e) => e.at > since)).toBe(true);
 			expect(successes(a, codeUse(c))).toEqual([]);
-			await replicasOnline(d);
+			await recovered(d);
 			await redeemedOnce(a, c);
 		});
 	});
@@ -172,7 +161,7 @@ describe("nothing issued while the store cannot write, and a request after it ca
 			expect(answer.body.access_token).toBeUndefined();
 			expect(refusedWrite(a, since, isNoReplicas)).toBeDefined();
 			expect(successes(a, codeUse(c))).toEqual([]);
-			await until(primary, "min_slaves_good_slaves", String(replicas.length));
+			await recovered(d);
 			await redeemedOnce(a, c);
 		});
 	});

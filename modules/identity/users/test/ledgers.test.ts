@@ -33,7 +33,9 @@ function fakeLedger(calls: string[] = []): Ledger {
 }
 
 const ledgerModule = (ledger: Ledger, name = "test-ledger") =>
-	defineModule({ name, takes: [] }, (m) => [m.contribute(ledgers).by(() => ledger)]);
+	defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
+		m.contribute(ledgers).by(() => ledger),
+	]);
 
 const boot = (
 	modules: ReturnType<typeof ledgerModule>[],
@@ -89,7 +91,14 @@ describe("users ledgers", () => {
 		const one = ledgerModule(fakeLedger());
 		const two = ledgerModule(fakeLedger(), "other-ledger");
 		await expect(boot([one, two])).rejects.toBeInstanceOf(BootRefused);
-		await expect(boot([one], [testUser("bob", "p")])).rejects.toBeInstanceOf(BootRefused);
+		const both = await boot([one], [testUser("bob", "p")]).catch((error: BootRefused) => error);
+		expect((both as BootRefused).refusals).toEqual([
+			{
+				where: "users.registered",
+				reason:
+					"users are registered while a user ledger is contributed: take users.registered out, the ledger holding the users",
+			},
+		]);
 		await expect(boot([one])).resolves.toBeDefined();
 	});
 
@@ -249,7 +258,7 @@ describe("users ledgers", () => {
 	it("leaves out only an attribute whose value users does not accept, logging its name but never its value", async () => {
 		const attributes = {
 			name: "Alice",
-			email: "a@victim.test/x",
+			email: "a..b@victim.test",
 			email_verified: "true",
 			picture: "javascript:alert(1)",
 			groups: ["admins"],
@@ -279,6 +288,23 @@ describe("users ledgers", () => {
 		for (const value of ["victim", "javascript", "\u202E", "true"]) {
 			expect(JSON.stringify(recorded.lines())).not.toContain(value);
 		}
+	});
+
+	it("leaves out an email's verification with an email it leaves out, so none is kept without its email", async () => {
+		const attributes = { name: "Alice", email: "a..b@example.com", email_verified: true };
+		const recorded = recordingLog();
+		const u = await usersOf(
+			answering({ kind: "user", user: { subject: "s-alice", attributes } }),
+			recorded,
+		);
+		expect(await u.bySubject("s-alice")).toEqual({
+			kind: "user",
+			user: { subject: "s-alice", attributes: { name: "Alice" } },
+		});
+		expect(recorded.lines().map((line) => line.fields.attribute)).toEqual([
+			"email",
+			"email_verified",
+		]);
 	});
 
 	it("logs an attribute's name with no control or format character, and at most 200 characters", async () => {

@@ -26,7 +26,7 @@ const grants: Section<{ allowed: string[] }> = {
 	name: "grants",
 	schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
 };
-const grantsModule = defineModule({ name: "grants-owner", takes: [] }, (m) => [
+const grantsModule = defineModule({ name: "grants-owner", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(metadataSections).by(() => grants),
 ]);
 
@@ -55,7 +55,7 @@ async function boot(extra: readonly Module[] = [], list = registered): Promise<C
 }
 
 const method = (name: string, parts: Partial<AuthMethod> = {}) =>
-	defineModule({ name, takes: [] }, (m) => [
+	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(authMethods).by(() => ({
 			name,
 			claimed: () => undefined,
@@ -64,7 +64,7 @@ const method = (name: string, parts: Partial<AuthMethod> = {}) =>
 		})),
 	]);
 const source = (find: (id: string) => unknown) =>
-	defineModule({ name: "source", takes: [] }, (m) => [
+	defineModule({ name: "source", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id: string) => find(id) as ClientRecord | undefined,
 		})),
@@ -139,7 +139,7 @@ describe("clients", () => {
 		});
 	});
 
-	it("refuses each way the credentials do not fit the client [rfc6749-2.3-b] [rfc6749-2.2-a] [rfc6749-2.3.2-a] [oidc-core-3.1.3.1-a]", async () => {
+	it("refuses each way the credentials do not fit the client [rfc6749-2.3-b] [rfc6749-2.2-a] [rfc6749-2.3.2-a] [oidc-core-3.1.3.1-a] [rfc9700-2.5-a]", async () => {
 		const c = await boot();
 		expect(await outcome(c, basic("conf", "nope"), {})).toMatchObject({
 			reason: "bad_credentials",
@@ -160,7 +160,7 @@ describe("clients", () => {
 		expect(await outcome(c, {}, { client_id: ["conf"] })).toMatchObject({ reason: "wrong_method" });
 	});
 
-	it("refuses a confidential client whose method is none [rfc6749-2.2-a]", async () => {
+	it("refuses a confidential client whose method is none, never taking it as public [rfc6749-2.2-a] [rfc6749-2.1-a]", async () => {
 		const c = await boot([], [{ id: "conf-none", kind: "confidential", method: "none" }]);
 		expect(await outcome(c, {}, { client_id: ["conf-none"] })).toMatchObject({
 			reason: "bad_credentials",
@@ -185,7 +185,7 @@ describe("clients", () => {
 
 	describe("a section's boot check", () => {
 		const checked = (seen: unknown[], holders: unknown[] = []) =>
-			defineModule({ name: "checked-owner", takes: [] }, (m) => [
+			defineModule({ name: "checked-owner", replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(metadataSections).by(() => ({
 					name: "checked",
 					schema: z.strictObject({ allowed: z.array(z.string()).default([]) }),
@@ -314,6 +314,7 @@ describe("clients", () => {
 	it("marks a refusal an assertion method is part of, with the challenges of the methods tried", async () => {
 		const assertion = method("test_assertion", {
 			assertion: true,
+			signingAlgorithms: ["ES256"],
 			// Any part of it sent: the request uses the assertion.
 			claimed: (r) =>
 				r.form.get("test_assertion")?.[0] ?? (r.form.has("test_assertion_type") ? "" : undefined),
@@ -730,6 +731,50 @@ describe("clients", () => {
 		expect(c.signingAlgorithms()).toEqual(["ES256", "RS256", "EdDSA"]);
 	});
 
+	it("refuses at boot a method signing with the JWS algorithm none, in any case, so discovery's *_auth_signing_alg_values_supported never names none [rfc8414-2-j] [rfc8414-2-m] [rfc8414-2-o]", async () => {
+		// The three discovery fields read the registry's signingAlgorithms() alone, so a registry that cannot hold none never lists it.
+		for (const alg of ["none", "NONE", "None"]) {
+			const refused = await refusalsOf(
+				boot([method("signer", { signingAlgorithms: ["ES256", alg] })]),
+			);
+			expect(
+				refused.map((r) => [r.where, r.reason]),
+				alg,
+			).toEqual([
+				["clients.methods.signer", "names the JWS algorithm none among its signing algorithms"],
+			]);
+		}
+		// The authentication method named none, a public client's, still composes.
+		const c = await boot();
+		expect(c.methods()).toContain("none");
+		expect(c.signingAlgorithms()).toEqual([]);
+	});
+
+	it("refuses at boot an assertion method naming no signing algorithms, so discovery names the algorithms of every assertion method it lists [rfc8414-2-h]", async () => {
+		// Without the list, and with an empty one.
+		for (const named of [{}, { signingAlgorithms: [] }]) {
+			const refused = await refusalsOf(boot([method("asserted", { assertion: true, ...named })]));
+			expect(
+				refused.map((r) => [r.where, r.reason]),
+				JSON.stringify(named),
+			).toEqual([
+				[
+					"clients.methods.asserted",
+					"names no signing algorithms, though it authenticates by an assertion",
+				],
+			]);
+		}
+		const c = await boot([method("asserted", { assertion: true, signingAlgorithms: ["ES256"] })]);
+		expect(c.signingAlgorithms()).toEqual(["ES256"]);
+	});
+
+	it("refuses at boot a method naming an empty list of signing algorithms", async () => {
+		const refused = await refusalsOf(boot([method("signer", { signingAlgorithms: [] })]));
+		expect(refused.map((r) => [r.where, r.reason])).toEqual([
+			["clients.methods.signer", "names an empty list of signing algorithms"],
+		]);
+	});
+
 	it("says whether the operator registered a client, or a source named it", async () => {
 		const remote = { kind: "public", method: "none", sections: {} };
 		const c = await boot([source((id) => (id === "remote" ? { id, ...remote } : undefined))]);
@@ -751,7 +796,7 @@ describe("clients", () => {
 
 	it("asks the sources in turn until one names the client", async () => {
 		const remote = { kind: "public" as const, method: "none", sections: {} };
-		const later = defineModule({ name: "later", takes: [] }, (m) => [
+		const later = defineModule({ name: "later", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(clientSources).by(() => ({
 				find: async (id: string) => (id === "later" ? { id, ...remote } : undefined),
 			})),

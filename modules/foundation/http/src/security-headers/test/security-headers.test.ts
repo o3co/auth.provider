@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 async function serveWith(list: readonly Route[]) {
-	const handlers = defineModule({ name: "handlers", takes: [] }, (m) =>
+	const handlers = defineModule({ name: "handlers", replicaSafe: false, takes: [] }, (m) =>
 		list.map((route) => m.contribute(routes).by(() => declared(route))),
 	);
 	const app = await assemble({
@@ -91,7 +91,7 @@ describe("security headers", () => {
 		{ method: "GET", path: "/void", handle: () => undefined as never },
 	];
 
-	it("go on every answer, whatever answers it, with the route's own headers kept [rfc9700-4.16-a] [rfc9700-4.16-b] [rfc9700-4.16-d] [oidc-core-3.1.2.3-e]", async () => {
+	it("go on every answer, whatever answers it, with the route's own headers kept [rfc9700-4.16-a] [rfc9700-4.16-b] [rfc9700-4.16-d] [rfc9700-4.16-e] [oidc-core-3.1.2.3-e]", async () => {
 		const base = await serveWith(answering);
 		const asked: [string, RequestInit, number][] = [
 			["/page", {}, 200],

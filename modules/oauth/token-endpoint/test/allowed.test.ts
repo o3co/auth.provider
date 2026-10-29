@@ -16,7 +16,7 @@ const quiet = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n).fill(1) },
 });
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
@@ -93,7 +93,13 @@ it("publishes as grant_types_supported only the grants composed, client_credenti
 	const supported = async (modules: Module[]) =>
 		(await boot(modules)).get(published).find((item) => item.name === "grant_types_supported")
 			?.value;
-	expect(await supported([])).toEqual([]);
 	expect(await supported([clientCredentialsModule])).toEqual(["client_credentials"]);
 	expect(tokenEndpoint.name).toBe("token-endpoint");
+});
+
+it("refuses to boot with no grant composed, so grant_types_supported is never empty", async () => {
+	expect(await refusals(boot([]))).toEqual([
+		"token-endpoint: no grant is composed: compose one, or leave the token endpoint out",
+	]);
+	expect(await refusals(boot([clientCredentialsModule]))).toEqual([]);
 });

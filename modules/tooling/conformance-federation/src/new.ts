@@ -45,6 +45,7 @@ function settingsOf(idp: IdpScene): Record<string, unknown> {
 				...client,
 				...(idp.readUserinfo ? { "read-userinfo": true } : {}),
 				...(idp.endpointHosts ? { "endpoint-hosts": idp.endpointHosts } : {}),
+				...(idp.acceptMissingIss ? { "accept-missing-iss": true } : {}),
 				...(idp.scopes ? { scopes: idp.scopes } : {}),
 			};
 	}
@@ -70,6 +71,7 @@ const grantsSection = (at: GrantsPart) => ({
 		]),
 	),
 	...(at.lodges ? { lodges: at.lodges.limit, "lodge-window": `${at.lodges.windowSeconds}s` } : {}),
+	...(at.keepOnSubjectRevocation ? { "keep-on-subject-revocation": true } : {}),
 });
 
 const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): NewPart => ({

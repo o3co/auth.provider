@@ -11,36 +11,34 @@
 ## Offers
 - Route `/oauth/authorize` (GET; a POST is a `303` to the GET with the same parameters, which reads the session)
 - Both methods take other sites' requests, with the reason declared: a request arrives as the client's navigation and only starts what the user's own login and consent complete.
+- Extension point `hintReaders`, where the module that issues ID tokens judges an `id_token_hint` (`hint`'s card)
 - Contribution of the return path `/oauth/authorize` to `login-gates`
 - Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`), `claims_parameter_supported` (`true` while `claims-selection` is `on`); to `claims-selection`'s consent judge, as for scope
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`, and of its document copy to `client-documents`
-- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host, never in production) by `url-setting`, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
-- Audit events (to `audit`, declared in `./audit-events`):
-  - `authorize.granted` when a code is given, with the subject, `client` and `response_type` `code`.
-  - `authorize.rejected` on a refusal decided for the client or its consent, with no subject, and `client` and `reason`.
-  - `reason` is `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name.
-  - `source` only when `request-source` determined it.
-  - Never the code, `state`, the redirect URI or the scope.
-  - Nothing for a malformed request, an unknown client or an unknown redirect URI.
-  - Nothing for unavailable either: a warning naming only what and the route, `http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after.
+- Operator section:
+  - `login-page`: the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked.
+  - `step-up-page`: the page that raises authentication. Optional.
+  - Both pages are https URLs (http only on a loopback host, never in production) by `url-setting`.
+  - `oidc-mode`: `oidc-required` or `dual`.
+  - `requests` (requests per source in each window, over both methods) and `window`.
+  - `claims-parameter`, true by default: a claims request's names and value constraints are taken, and discovery says `claims_parameter_supported`. False ignores them and warns at boot `authorize.claims_parameter_off`; what else a claims request asks still holds, as `claims-request` and `flow` say.
+- Audit events to `audit`: declared in `./audit-events`, listed in the audit event reference. Never the code, `state`, the redirect URI or the scope; none for a malformed request, an unknown client or redirect URI, nor for unavailable, which only warns, naming what and the route (`http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after).
 - Test configuration builders (`./testing`)
 
 ## Invariants
 - Requests are limited per source by `rate-limit`'s policy, declared on both routes and counted together; over it, `429`.
 - The return destination from login, step-up and consent is built from the `http` public origin, not from request headers.
 - A redirect URI is taken when it matches a registered one by `redirect-uris`' rule. PKCE is required of every client, by S256 only.
-- Prompt words are `none`, `login`, `consent` and `select_account`, and `none` stands alone. Under `prompt=none` nothing is shown: a needed login, step-up or consent is refused (`login_required`, `interaction_required`, `consent_required`).
+- Prompt words are `none`, `login`, `consent` and `select_account`, and `none` stands alone; `select_account` is refused with `account_selection_required`, no page letting the End-User choose an account. Under `prompt=none` nothing is shown: a needed login, step-up or consent is refused (`login_required`, `interaction_required`, `consent_required`).
 - An acr is asked by `acr_values`, or by `claims`' `acr` of `id_token` or `userinfo`, counting only those `acr` knows; `claims` of no shape `claims-request` takes is `invalid_request`. The code carries the first asked acr the session meets; a session that falls short goes to the `step-up-page` once. One voluntary and unmet goes on with the session's current acr, if any; an essential one is refused (`step-up`'s card).
 - Under `oidc-mode` `oidc-required`, a request whose own `scope` does not name `openid` is `invalid_scope`, even when the client's default scope holds it. Under `dual`, a request without `openid` gets the scope it asks or the client's default.
+- OpenID Connect's offline access is not offered: `offline_access` in any authorization request is dropped, not refused, and the request goes on without it, whatever the client is allowed (OpenID Connect Core §11). A request left with nothing is `invalid_scope`, never given the client's default.
 - A client that is not first-party, once logged in, is refused with `unauthorized_client` while `consent` is not `asking`. Next, before consent, `tokens`' issuance policies are asked for the code's access token (`authorization_code`, the session); a refusal is `access_denied` with the policy's description.
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
 - Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: the routes' declared `503` `temporarily_unavailable`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
 - A fresh login that `prompt=login` or `max_age` demands counts only through a `reauth` record, made for the whole request when the browser is sent to log in and taken by that request. A session whose authentication time `session` answers as unknown meets neither, nor an essential `auth_time`, so a login is asked again.
-- Back from its login (its record taken) with a session still not new enough, its authentication time unknown or known, a request is refused with `login_required`, never sent to log in again.
-- A request carrying a re-authentication record that is not its own (spent, unknown, or made for other parameters, a demand taken out of it included) is refused with `login_required`.
+- In an OpenID Connect request, the End-User an `id_token_hint` names is the only one a code may be for: another session's is `login_required`, as `claims`' `sub` is (the hint's reading: `hint`'s card).
 - The login page is told the `prompt=login` and `max_age` a request asked, beside `redirect_to`, to hand to a login it starts elsewhere (an upstream's), so that login is new too.
-
-- OpenID Connect's alone: a `claims` `sub` not the session's subject is `login_required`, in any mode; while `claims-selection` is `on`, names asked beyond the scope are kept for the code first, else `temporarily_unavailable`.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `url-setting`, `clients`, `client-documents`, `redirect-uris`, `reauth`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `claims-selection`, `rate-limit`, `audit`

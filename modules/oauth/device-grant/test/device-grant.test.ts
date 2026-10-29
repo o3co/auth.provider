@@ -89,12 +89,12 @@ const allowed = (grants: string[]) =>
 	allowancesFor({ grants, scopes: ["read", "write"], "default-scopes": ["read"] });
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
 /** What records a token issued in a session to it, as session-tokens does where composed. */
-const recording = defineModule({ name: "recording", takes: [] }, (m) => [
+const recording = defineModule({ name: "recording", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(sessionIssuances).by(() => ({ issued: async () => {} })),
 ]);
 
@@ -112,7 +112,7 @@ function assembly(
 	};
 	/** Time that passes before the next rewrite of a device reads it, as when the store is slow. */
 	let stall = 0;
-	const stores = defineModule({ name: "device-stores", takes: [] }, (m) => [
+	const stores = defineModule({ name: "device-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(deviceStore).by(() =>
 			down.devices.wrap({
 				...kept.devices,
@@ -185,10 +185,18 @@ async function serve(...given: Parameters<typeof assembly>) {
 			},
 			body,
 		});
+		const text = await res.text();
 		return {
 			status: res.status,
 			headers: res.headers,
-			body: (await res.json().catch(() => ({}))) as Record<string, string>,
+			text,
+			body: (() => {
+				try {
+					return JSON.parse(text) as Record<string, string>;
+				} catch {
+					return {} as Record<string, string>;
+				}
+			})(),
 		};
 	};
 	const post = (path: string, form: Record<string, string> | string[][], headers = {}) =>
@@ -247,7 +255,7 @@ async function serve(...given: Parameters<typeof assembly>) {
 }
 
 describe("device authorization", () => {
-	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d]", async () => {
+	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d] [rfc8628-5.1-a]", async () => {
 		const s = await serve();
 		const given = await s.authorize();
 		expect(given.status).toBe(200);
@@ -280,16 +288,77 @@ describe("device authorization", () => {
 		]);
 	});
 
+	it("refuses a request that names no client and authenticates none [rfc8628-3.1-a]", async () => {
+		const s = await serve();
+		for (const form of [{}, { scope: "read" }]) {
+			const asked = await s.post("/oauth/device_authorization", form);
+			expect([asked.status, asked.body.error], JSON.stringify(form)).toEqual([
+				401,
+				"invalid_client",
+			]);
+		}
+	});
+
+	it("reads a parameter sent empty as one not sent, and passes over one it does not know [rfc8628-3.1-b] [rfc8628-3.1-c]", async () => {
+		const s = await serve();
+		for (const form of [
+			{ scope: "" },
+			{ resource: "" },
+			{ scope: "", resource: "" },
+			{ ui_locales: "fr" },
+			{ x_vendor: "1" },
+		]) {
+			const asked = await s.authorize("tv", form);
+			expect(asked.status, JSON.stringify(form)).toBe(200);
+		}
+		// Each empty one is read as not sent, through to the token: the client's default scope, the issuer's audience.
+		const cookie = await s.login();
+		const issuedFor = async (form: Record<string, string>) => {
+			const { code, user } = await s.started("tv", form);
+			await s.verify(cookie, { action: "approve", user_code: user });
+			now += 5_000;
+			const issued = (await s.poll(code)) as Record<string, string>;
+			const checked = await s.app.get(tokens).verifyAccess(String(issued.access_token));
+			if (checked.kind !== "valid") throw new Error(checked.reason);
+			return checked.grant;
+		};
+		const unsent = await issuedFor({});
+		expect(unsent).toMatchObject({ scope: ["read"], audience: [origin] });
+		for (const form of [{ scope: "" }, { resource: "" }, { scope: "", resource: "" }]) {
+			const grant = await issuedFor(form);
+			expect([grant.scope, grant.audience], JSON.stringify(form)).toEqual([
+				unsent.scope,
+				unsent.audience,
+			]);
+		}
+	});
+
+	it("writes each parameter of its answer once, the page's address with the code in too [rfc8628-3.1-e]", async () => {
+		for (const settings of [{}, { "complete-uri": true }]) {
+			const given = await (await serve(settings)).authorize();
+			expect(given.status).toBe(200);
+			// Read from the raw body, since parsing would keep one of two.
+			const names = [...given.text.matchAll(/"([^"\\]+)":/g)].map((match) => match[1]);
+			expect(names, JSON.stringify(settings)).toEqual([...new Set(names)]);
+			expect(names.length, JSON.stringify(settings)).toBe(Object.keys(given.body).length);
+			if ("complete-uri" in settings) expect(names).toContain("verification_uri_complete");
+		}
+	});
+
 	it("answers an assertion beside another method invalid_client, as the token endpoint does, and two other methods invalid_request", async () => {
 		// A method saying it authenticates by an assertion: what makes the refusal the assertion's.
-		const assertionMethod = defineModule({ name: "test-assertion", takes: [] }, (m) => [
-			m.contribute(authMethods).by(() => ({
-				name: "test_assertion",
-				assertion: true,
-				claimed: (request) => request.fields.single("test_assertion"),
-				verify: async () => false,
-			})),
-		]);
+		const assertionMethod = defineModule(
+			{ name: "test-assertion", replicaSafe: true, takes: [] },
+			(m) => [
+				m.contribute(authMethods).by(() => ({
+					name: "test_assertion",
+					assertion: true,
+					signingAlgorithms: ["ES256"],
+					claimed: (request) => request.fields.single("test_assertion"),
+					verify: async () => false,
+				})),
+			],
+		);
 		const s = await serve({}, [assertionMethod]);
 		const secret = { client_id: "tv", client_secret: clientSecret("tv") };
 		const beside = await s.post("/oauth/device_authorization", { ...secret, test_assertion: "tv" });
@@ -300,7 +369,7 @@ describe("device authorization", () => {
 	});
 
 	it("refuses a resource where the composed rule refuses one to what takes no audience", async () => {
-		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				untargeted: ({ param }) =>
@@ -360,7 +429,7 @@ describe("device authorization", () => {
 
 	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
 	// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
-	it("makes each device code of 32 fresh random bytes [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c]", async () => {
+	it("makes each device code of 32 fresh random bytes [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc8628-5.2-a]", async () => {
 		const s = await serve();
 		const codes = [(await s.authorize()).body.device_code, (await s.authorize()).body.device_code];
 		for (const code of codes) expect(drawn).toContain(code);
@@ -543,7 +612,7 @@ describe("polling", () => {
 
 	it("issues nothing a contributed policy refuses, and leaves the approved code to a later poll", async () => {
 		const denying = { on: false };
-		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -568,7 +637,7 @@ describe("polling", () => {
 
 	it("refuses and records an approval a contributed policy refuses, before keeping it, as 0.17 refused an unverified email", async () => {
 		const denying = { on: true, description: "not now" };
-		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -610,7 +679,7 @@ describe("polling", () => {
 
 	it("asks the issuance policies with the approving session, at approval and at the poll", async () => {
 		const asked: (string | undefined)[] = [];
-		const policy = defineModule({ name: "watching", takes: [] }, (m) => [
+		const policy = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "watching",
 				judge: async (request) => {
@@ -657,14 +726,17 @@ describe("polling", () => {
 
 	it("issues nothing while the approving session falls short of a requirement to be used, as a closed one", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ name: "short-to-use", takes: [] }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "mfa",
-				judges: ["use"],
-				admits: async () =>
-					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
-			})),
-		]);
+		const requirement = defineModule(
+			{ name: "short-to-use", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "mfa",
+					judges: ["use"],
+					admits: async () =>
+						short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+				})),
+			],
+		);
 		const s = await serve({}, [requirement]);
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });
@@ -675,7 +747,7 @@ describe("polling", () => {
 	it("answers no token issued while the approving session closed", async () => {
 		let asked = 0;
 		let close = async () => {};
-		const closing = defineModule({ name: "closing", takes: [] }, (m) => [
+		const closing = defineModule({ name: "closing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "closing",
 				judge: async () => {
@@ -877,7 +949,7 @@ describe("verification", () => {
 		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
 	});
 
-	it("counts every decision a subject tries, so codes cannot be guessed", async () => {
+	it("counts every decision a subject tries, so codes cannot be guessed: by default 8 letters of 20, living 10 minutes, 5 tries a subject each window [rfc8628-5.1-a]", async () => {
 		const s = await serve({ attempts: 2 });
 		const cookie = await s.login();
 		for (let i = 0; i < 2; i++) {
@@ -907,7 +979,7 @@ describe("verification", () => {
 	});
 
 	it("asks the session's entry requirements at use for an approval, and at none for the rest", async () => {
-		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "fresh",
 				judges: ["use"],

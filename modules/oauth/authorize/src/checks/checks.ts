@@ -38,9 +38,12 @@ export function checkRequest(
 		return recorded("unauthorized_client", "grant_type_not_allowed", description);
 	}
 	const challenge = one("code_challenge");
-	if (!challenge || !challengeShape.test(challenge) || one("code_challenge_method") !== "S256") {
-		return refusal("invalid_request", "PKCE with S256 is required");
-	}
+	if (!challenge) return refusal("invalid_request", "PKCE with S256 is required");
+	// RFC 7636 §4.3: a method left out is plain, which is not taken either.
+	if (one("code_challenge_method") !== "S256")
+		return refusal("invalid_request", "code_challenge_method is not supported: only S256");
+	if (!challengeShape.test(challenge))
+		return refusal("invalid_request", "code_challenge is malformed");
 	const nonce = one("nonce");
 	if (nonce !== undefined && nonce.length > 256)
 		return refusal("invalid_request", "nonce too long");
@@ -48,6 +51,8 @@ export function checkRequest(
 	if ([...prompt].some((p) => !prompts.has(p)) || (prompt.has("none") && prompt.size > 1)) {
 		return refusal("invalid_request", "bad prompt");
 	}
+	// OpenID Connect Core §3.1.2.1: no page lets the End-User choose an account, so a choice asked cannot be had.
+	if (prompt.has("select_account")) return refusal("account_selection_required");
 	const maxAgeText = one("max_age");
 	if (maxAgeText !== undefined && !/^\d{1,9}$/.test(maxAgeText))
 		return refusal("invalid_request", "bad max_age");
@@ -60,6 +65,9 @@ export function checkRequest(
 	};
 }
 
+/** OpenID Connect's offline access, which is not offered: the word's one meaning here. */
+const offline = "offline_access";
+
 /**
  * The scope and audience the client may be issued for the requested scope. With `openid`
  * required, the request itself must name it; a client's default does not count.
@@ -70,7 +78,16 @@ export function checkScope(
 	issuer: string,
 	openidRequired: boolean,
 ) {
-	const allowed = clientAllowance.allowedIssuance(client, scope, issuer);
+	// Offline access is not offered, so nothing permits it: the request goes on without the word
+	// (OpenID Connect Core §11), whatever the client and whether or not the authorization request names openid. A request that
+	// named it alone asked nothing else, and is refused rather than given the client's default.
+	const named = clientAllowance.parseScope(scope);
+	const kept = named?.filter((word) => word !== offline);
+	if (kept?.length === 0 && named?.includes(offline)) {
+		return refusal("invalid_scope", "offline_access is not offered");
+	}
+	const asked = kept === undefined ? scope : kept.join(" ");
+	const allowed = clientAllowance.allowedIssuance(client, asked, issuer);
 	if (allowed.kind === "allowed") {
 		const named = clientAllowance.parseScope(scope) ?? [];
 		return openidRequired && !named.includes("openid")

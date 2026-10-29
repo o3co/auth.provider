@@ -6,6 +6,12 @@ import { issuer, keptNotices, servedEach, settled, until } from "./harness.ts";
 
 const serve = servedEach();
 
+/** Whether `ready` holds, the test's clock moved a sweep's interval each look, so each failed try's wait is over by the next sweep. */
+const passing = (h: { advance(ms: number): void }, ready: boolean) => {
+	if (!ready) h.advance(1000);
+	return ready;
+};
+
 it("posts each client of a closing session a logout token, however the session closes [oidc-bcl-2.4-a] [oidc-bcl-2.4-b] [oidc-bcl-2.4-c] [oidc-bcl-2.4-d] [oidc-bcl-2.4-e] [oidc-bcl-2.4-f] [oidc-bcl-2.4-g] [oidc-bcl-2.4-h] [oidc-bcl-2.4-i] [oidc-bcl-2.4-j] [oidc-bcl-2.4-k] [oidc-bcl-2.4-m]", async () => {
 	const h = await serve();
 	const { session } = await h.login();
@@ -63,7 +69,7 @@ it("keeps a notice the client could not take yet, and the sweep delivers it", as
 	await h.app.get(sessions).close(session.id);
 	await until(() => h.sent.length > 0);
 	expect(await keptNotices(h)).toHaveLength(1);
-	await until(() => h.sent.length >= 4, 6000);
+	await until(() => passing(h, h.sent.length >= 4), 6000);
 	await settled(h);
 	expect([h.sent.length, await keptNotices(h)]).toEqual([4, []]);
 	expect(h.logs().filter((l) => l.event === "rp-logout.notices_kept")).toContainEqual(
@@ -97,6 +103,21 @@ it.each([
 	await until(() => h.sent.length > 0);
 	await settled(h, 500);
 	expect([h.sent.length, await keptNotices(h)]).toEqual([1, []]);
+});
+
+it("posts to a back channel with a query as registered, adding nothing to it [oidc-bcl-2.2-b]", async () => {
+	const h = await serve({
+		sections: { app: { "backchannel-logout-uri": "https://app.example/bc?tenant=a&x=1" } },
+	});
+	const { session } = await h.login();
+	await h.redeemed(session.id, "app");
+	await h.app.get(sessions).close(session.id);
+	await until(() => h.sent.length > 0);
+	expect(h.sent.map((s) => s.url)).toEqual(["https://app.example/bc?tenant=a&x=1"]);
+	expect([...new URLSearchParams(String(h.sent[0]?.request?.body)).keys()]).toEqual([
+		"logout_token",
+	]);
+	await settled(h, 500);
 });
 
 it("gives up a notice past its time, without sending it again", async () => {
@@ -137,7 +158,7 @@ it("sends a notice tried again with the same token id, so the client can tell a 
 	const { session } = await h.login();
 	await h.redeemed(session.id, "app");
 	await h.app.get(sessions).close(session.id);
-	await until(() => h.sent.length >= 2, 6000);
+	await until(() => passing(h, h.sent.length >= 2), 6000);
 	const ids = await Promise.all(
 		h.sent.map(async (s) => {
 			const token = new URLSearchParams(String(s.request?.body)).get("logout_token") ?? "";

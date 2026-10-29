@@ -18,7 +18,7 @@ import {
 	secretPost,
 	secretSection,
 } from "./methods.ts";
-import { clientRecord, readRecord, registry } from "./registry.ts";
+import { clientRecord, methodIssues, readRecord, registry } from "./registry.ts";
 
 const section = z
 	.strictObject({
@@ -75,6 +75,9 @@ const secrets = contract<SecretChecker>("clients.secrets");
 export default defineModule(
 	{
 		name: "clients",
+		// Safe on many instances given the same registered clients on each (deployment-guarantees, Several
+		// instances).
+		replicaSafe: true,
 		section,
 		takes: [authMethods, metadataSections, clientSources, secretCheckers],
 	},
@@ -115,15 +118,18 @@ export default defineModule(
 			if (issues.length > 0) return c.refuseAll(issues);
 			return found;
 		}),
-		m
-			.provide(clients)
-			.by(async (c) =>
-				registry(
-					await c.get(registered),
-					await c.collect(clientSources),
-					await c.collect(authMethods),
-					byName(await c.collect(metadataSections)),
-				),
-			),
+		m.provide(clients).by(async (c) => {
+			const methods = await c.collect(authMethods);
+			// Refused before the registered clients are read: assembly builds `registered` on its own all
+			// the same, so its refusals are reported with these in the one boot.
+			const issues = methodIssues(methods);
+			if (issues.length > 0) return c.refuseAll(issues);
+			return registry(
+				await c.get(registered),
+				await c.collect(clientSources),
+				methods,
+				byName(await c.collect(metadataSections)),
+			);
+		}),
 	],
 );

@@ -31,14 +31,17 @@ const released = async (attributes: Record<string, unknown>, scope: readonly str
 /** As `released`, from a users that hands over its attributes unchecked, so oidc's own checks are what is seen. */
 const unchecked = async (attributes: Record<string, unknown>, scope: readonly string[]) => {
 	// Named users and taking any section, so it stands where users is configured.
-	const standIn = defineModule({ name: "users", section: z.unknown(), takes: [] }, (m) => [
-		m.provide(users).by(
-			() =>
-				({
-					bySubject: async (subject: string) => ({ kind: "user", user: { subject, attributes } }),
-				}) as unknown as Users,
-		),
-	]);
+	const standIn = defineModule(
+		{ name: "users", replicaSafe: true, section: z.unknown(), takes: [] },
+		(m) => [
+			m.provide(users).by(
+				() =>
+					({
+						bySubject: async (subject: string) => ({ kind: "user", user: { subject, attributes } }),
+					}) as unknown as Users,
+			),
+		],
+	);
 	return (await boot({}, standIn)).get(releasedClaims).of("s-alice", scope);
 };
 
@@ -66,9 +69,11 @@ describe("the claim table", () => {
 	});
 
 	it("reads email_verified from users' attribute of that name alone", async () => {
-		const verified = { [userAttribute.emailVerified]: true };
-		expect(await released(verified, ["email"])).toEqual({ email_verified: true });
-		expect(await released({ emailVerified: true }, ["email"])).toEqual({});
+		// Beside the email, where users takes a verification.
+		const email = "alice@example.com";
+		const verified = { email, [userAttribute.emailVerified]: true };
+		expect(await released(verified, ["email"])).toEqual({ email, email_verified: true });
+		expect(await released({ email, emailVerified: true }, ["email"])).toEqual({ email });
 	});
 
 	it("releases groups for groups", async () => {
@@ -108,12 +113,18 @@ describe("the claim table", () => {
 		]);
 	});
 
-	it("lists in claims_supported every claim it releases", async () => {
+	it("lists in claims_supported every claim it releases, each OpenID Connect's or one registered beside them [oidc-core-5.1.2-a]", async () => {
 		const app = await boot(full);
 		const all = await app.get(releasedClaims).of("s-alice", ["profile", "email", "groups"]);
 		const supported = app.get(published).find((item) => item.name === "claims_supported");
 		expect(Object.keys(all)).toHaveLength(5);
 		expect(supported?.value).toEqual(expect.arrayContaining(Object.keys(all)));
+		// The table is fixed: OpenID Connect Core's standard claims, and groups, registered for JWTs
+		// (RFC 7643's attribute, in IANA's JSON Web Token Claims registry).
+		const standard = ["sub", "name", "picture", "email", "email_verified"];
+		for (const claim of (supported?.value ?? []) as string[]) {
+			expect([...standard, "groups"], claim).toContain(claim);
+		}
 	});
 
 	it("counts only whole scope words, so a word joined by a tab or other blank releases nothing", async () => {
@@ -129,7 +140,7 @@ describe("released claims", () => {
 
 	it("reads the attributes from users on each request", async () => {
 		let name = "Alice";
-		const ledger = defineModule({ name: "ledger", takes: [] }, (m) => [
+		const ledger = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(ledgers).by(() => ({
 				verify: async () => ({ kind: "none" }),
 				bySubject: async (subject) => ({

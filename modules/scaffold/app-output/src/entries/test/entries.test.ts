@@ -10,7 +10,6 @@ import { entriesOf } from "../contract.ts";
 const fakes: Record<string, Record<string, string>> = {
 	"fake-kernel": {
 		"index.js": `
-import { appendFileSync } from "node:fs";
 const mark = Symbol.for("@mod/kernel.boot-refused");
 export class BootRefused extends Error {
 	constructor(refusals) { super("refused"); this.refusals = refusals; this[mark] = true; }
@@ -42,9 +41,9 @@ export async function assemble({ runtime }) {
 	if (process.env.REFUSE_MANY) throw new BootRefused(Array.from({ length: Number(process.env.REFUSE_MANY) }, (_, i) => ({ where: \`at.\${i}\`, reason: "r".repeat(100) })));
 	// Without the script's own runtime, the composed sink would write this line.
 	(runtime?.log ?? { warn: (event) => process.stdout.write(\`LOG \${event}\\n\`) }).warn("fake.assembled");
-	const { backfill, candidates, revocation } = await import("fake-witnessing");
+	const { backfill, candidates } = await import("fake-witnessing");
 	const resealer = { reseal: async () => Array.from({ length: Number(process.env.HOLDERS ?? 1) }, (_, i) => ({ name: \`holder-\${i}-\${"h".repeat(100)}\`, resealed: 0, left: 0 })) };
-	const asked = { resetCandidates: candidates, resealing: resealer, constrainedFamilyRevocation: revocation };
+	const asked = { resetCandidates: candidates, resealing: resealer };
 	// Where a test signals the app: kept alive once started, each stop told and slow.
 	const signalled = process.env.SIGNALLED !== undefined;
 	let alive;
@@ -54,7 +53,6 @@ export async function assemble({ runtime }) {
 		process.stdout.write("started\\n");
 	};
 	const stop = async () => {
-		if (process.env.TELL_STOP) appendFileSync(process.env.SEEN, '"stopped"\\n');
 		if (!signalled) return;
 		process.stdout.write("stopping\\n");
 		await new Promise((resolve) => setTimeout(resolve, 300));
@@ -78,18 +76,6 @@ export const witnessBackfill = "witnessBackfill";
 export const passkeyBackfill = "passkeyBackfill";
 export const resetCandidates = "resetCandidates";
 export const resealing = "resealing";
-export const constrainedFamilyRevocation = "constrainedFamilyRevocation";
-const failed = (n) => ({ shards: n, reads: 0, revocations: n, removals: 0 });
-export const revocation = {
-	run: async () => {
-		const asked = process.env.REVOCATION ?? "clean";
-		if (asked === "on") return { kind: "not-draining", mode: "on" };
-		if (asked === "odd") return { kind: "a later release's" };
-		if (asked === "down") throw Object.assign(new Error("down for fam-secret"), { name: "Unavailable" });
-		if (asked === "boom") throw new Error("secret of fam-secret");
-		return { kind: "run", revoked: 2, expired: 1, failed: failed(asked === "failing" ? 1 : 0) };
-	},
-};
 export const candidates = {
 	unclaimed: async (subject) => {
 		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
@@ -472,48 +458,4 @@ it("stops the app once on a second signal that comes while it stops, waiting for
 		"stopping",
 		"stopped",
 	]);
-});
-
-it("revokes the constrained families, telling only the counts, exit 0 where none failed, 1 where one did, and stops the app", async () => {
-	const run = await script("@mod/claims-revocation", "src/revoke-constrained-families.ts");
-	const clean = await run("", { TELL_STOP: "1" });
-	expect(clean.stdout).toBe(
-		"revoked 2 expired 1 failed shards 0 reads 0 revocations 0 removals 0\n",
-	);
-	expect(clean.stderr).toBe(
-		"wait the longest access token lifetime and two minutes more before going back\n",
-	);
-	expect(clean.status).toBe(0);
-	expect(clean.seen).toEqual(["stopped"]);
-	const failing = await run("", { REVOCATION: "failing", TELL_STOP: "1" });
-	expect(failing.stdout).toBe(
-		"revoked 2 expired 1 failed shards 1 reads 0 revocations 1 removals 0\n",
-	);
-	expect(failing.stderr).toBe("run revoke-constrained-families again\n");
-	expect(failing.status).toBe(1);
-	expect(failing.seen).toEqual(["stopped"]);
-});
-
-it("revokes nothing outside draining, exit 2, and fails an answer it does not know, an outage and an unexpected error by kind alone", async () => {
-	const run = await script("@mod/claims-revocation", "src/revoke-constrained-families.ts");
-	const on = await run("", { REVOCATION: "on" });
-	expect(on.stdout).toBe("");
-	expect(on.stderr).toBe(
-		"not draining: set claims-selection.mode = draining on every instance first\n",
-	);
-	expect(on.status).toBe(2);
-	for (const [asked, line] of [
-		["odd", "failed: an answer this script does not know"],
-		["down", "failed: unavailable: run revoke-constrained-families again"],
-		["boom", "failed: the run stopped on an unexpected error"],
-	] as const) {
-		const done = await run("", { REVOCATION: asked, TELL_STOP: "1" });
-		expect(done.stdout, asked).toBe("");
-		expect(done.stderr, asked).toBe(`${line}\n`);
-		expect(done.stderr, asked).not.toContain("secret");
-		expect(done.status, asked).toBe(1);
-		expect(done.seen, asked).toEqual(["stopped"]);
-	}
-	const refused = await run("", { REFUSE: "1" });
-	expect(refused.status).toBe(78);
 });

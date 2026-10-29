@@ -24,6 +24,9 @@ const name = (cn: string) => {
 	const typesAndValues = [new pkijs.AttributeTypeAndValue({ type: "2.5.4.3", value })];
 	return new pkijs.RelativeDistinguishedNames({ typesAndValues });
 };
+/** A time as RFC 5280 writes it: UTCTime through 2049, GeneralizedTime from 2050. */
+const timeOf = (ms: number) =>
+	new pkijs.Time({ type: new Date(ms).getUTCFullYear() < 2050 ? 0 : 1, value: new Date(ms) });
 /** An extension holding this ASN.1 value. */
 const raw = (extnID: string, value: asn1js.AsnType | ArrayBuffer, critical = false) =>
 	new pkijs.Extension({
@@ -100,8 +103,8 @@ export async function issue(spec: Issuing): Promise<Issued> {
 	c.serialNumber = new asn1js.Integer({ value: spec.serial ?? ++serials });
 	c.subject = name(spec.cn);
 	c.issuer = name(spec.issuerName ?? spec.by?.cn ?? spec.cn);
-	c.notBefore.value = new Date(spec.notBefore ?? Date.now() - 60_000);
-	c.notAfter.value = new Date(spec.notAfter ?? Date.now() + 86_400_000);
+	c.notBefore = timeOf(spec.notBefore ?? Date.now() - 60_000);
+	c.notAfter = timeOf(spec.notAfter ?? Date.now() + 86_400_000);
 	const extensions: pkijs.Extension[] = [];
 	if (!spec.bare) {
 		const basic = new pkijs.BasicConstraints({
@@ -201,16 +204,8 @@ export async function crlOf(spec: Revoking): Promise<Uint8Array> {
 	const crl = new pkijs.CertificateRevocationList();
 	crl.version = 1;
 	crl.issuer = name(spec.issuer ?? spec.by.cn);
-	crl.thisUpdate = new pkijs.Time({
-		type: 0,
-		value: new Date(spec.thisUpdate ?? Date.now() - 60_000),
-	});
-	if (spec.nextUpdate !== null) {
-		crl.nextUpdate = new pkijs.Time({
-			type: 0,
-			value: new Date(spec.nextUpdate ?? Date.now() + 3_600_000),
-		});
-	}
+	crl.thisUpdate = timeOf(spec.thisUpdate ?? Date.now() - 60_000);
+	if (spec.nextUpdate !== null) crl.nextUpdate = timeOf(spec.nextUpdate ?? Date.now() + 3_600_000);
 	const unknown = () => unknownCritical("1.3.6.1.4.1.99999.2");
 	const onEntry = [
 		...(spec.criticalEntryExtension ? [unknown()] : []),
@@ -220,7 +215,7 @@ export async function crlOf(spec: Revoking): Promise<Uint8Array> {
 		(issued) =>
 			new pkijs.RevokedCertificate({
 				userCertificate: issued.certificate.serialNumber,
-				revocationDate: new pkijs.Time({ type: 0, value: new Date(Date.now() - 60_000) }),
+				revocationDate: timeOf(Date.now() - 60_000),
 				...(onEntry.length > 0
 					? { crlEntryExtensions: new pkijs.Extensions({ extensions: onEntry }) }
 					: {}),

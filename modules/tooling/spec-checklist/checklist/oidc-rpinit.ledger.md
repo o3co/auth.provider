@@ -25,7 +25,7 @@
 - 2 #9 SHOULD: oidc-rpinit-2-f
 - 2 #10 SHOULD: oidc-rpinit-2-g
 - 2 #11 SHOULD: oidc-rpinit-2-h
-- 2 #12 MUST: oidc-rpinit-2-i
+- 2 #12 MUST: oidc-rpinit-2-i, oidc-rpinit-2-n
 - 2 #13 MUST: oidc-rpinit-2-j
 - 2.1 #1 MUST: oidc-rpinit-2.1-a
 - 2.1 #2 REQUIRED: oidc-rpinit-2.1-a

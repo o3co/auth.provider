@@ -6,7 +6,7 @@ import { type Form, serve } from "./serve.ts";
 describe("revocation", () => {
 	/** A contributed kind answering each token from `answers` (else unknown), noting each try in `tried`. */
 	const kind = (hint: string, answers: Record<string, Revoked>, tried: string[] = []): Module =>
-		defineModule({ name: `kind-${hint}`, takes: [] }, (m) => [
+		defineModule({ name: `kind-${hint}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(revocableKinds).by(
 				(): RevocableKind => ({
 					hint,
@@ -56,6 +56,25 @@ describe("revocation", () => {
 		});
 		expect(unknownHint.status).toBe(200);
 		expect(await s.active(other)).toBe(false);
+	});
+
+	it("tries each kind once at most for a request, whatever hint it sends [rfc7009-5-b]", async () => {
+		const tried: string[] = [];
+		const s = await serve({ extra: [kind("refresh_token", {}, tried)] });
+		const hints = [
+			"refresh_token",
+			"access_token",
+			"id_token",
+			"x".repeat(4000),
+			"",
+			"refresh_token ",
+		];
+		for (const token_type_hint of hints) {
+			const before = tried.length;
+			const answer = await s.post("/oauth/revoke", "app", { token: "unknown", token_type_hint });
+			expect(answer.status, token_type_hint).toBe(200);
+			expect(tried.length - before, token_type_hint).toBe(1);
+		}
 	});
 
 	it("tries a contributed kind first when hinted, and after access tokens otherwise", async () => {

@@ -3,7 +3,6 @@ import {
 	failover,
 	type Instance,
 	instanceOf,
-	keysOf,
 	type Match,
 	ready,
 	reconnected,
@@ -14,29 +13,14 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import {
-	codeAt,
-	faultScene,
-	on,
-	redeemAt,
-	refreshAt,
-	rotationFrom,
-	said,
-} from "../../faults/test/faults.ts";
+import { familyAt, faultScene, on, refreshAt, said } from "../../faults/test/faults.ts";
+import { familyRead, isStoreOperation, rotationFrom, sessionRead } from "../../faults/test/wire.ts";
 
 const scene = faultScene({ refresh: {} });
 const refused = [400, "invalid_grant"];
 const issued = [200, "Bearer"];
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
-
-/** A family's first refresh token, from a code the instance gives and redeems. */
-async function familyAt(i: Instance): Promise<string> {
-	const answer = await redeemAt(i, await codeAt(i));
-	const token = answer.body.refresh_token;
-	if (typeof token !== "string") throw new Error(`no refresh token: ${answer.status}`);
-	return token;
-}
 
 /** The refresh token an answer gave, which must have given one. */
 const next = (answer: { body: Readonly<Record<string, unknown>> }) => {
@@ -75,7 +59,7 @@ describe("a refresh token rotated once under faults", () => {
 			const drop = a.relay.dropReplyTo(rotationFrom(token));
 			const answer = await refreshAt(a, token);
 			const dropped = await drop.first;
-			expect(dropped.collateral.filter((x) => x.command.name === "EVAL")).toEqual([]);
+			expect(dropped.collateral.filter((x) => isStoreOperation(x.command))).toEqual([]);
 			expect(said(answer)).toEqual(issued);
 			const effects = successes(a, rotationFrom(token));
 			expect(effects.length).toBeGreaterThan(1);
@@ -120,7 +104,7 @@ describe("a refresh token rotated once under faults", () => {
 		});
 	});
 
-	it("never takes a family's record confirmed on a server other than the one that answered it [guarantee-5-b] {fault:Fs}", async () => {
+	it("never rotates a family whose session's entry is confirmed on a server other than the one that answered it [guarantee-5-b] {fault:Fs}", async () => {
 		await on({ name: "refresh-once-fs", scene, replicas: 3 }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
@@ -142,12 +126,21 @@ describe("a refresh token rotated once under faults", () => {
 			const wait = await confirmed;
 			const upstreamOf = (id: number) => a.relay.connections().find((x) => x.id === id)?.upstream;
 			const sent = a.relay.executions(anything).slice(from);
-			// The first call on the family's record ran on the new primary, on a connection to it ...
-			const family = (e: (typeof sent)[number]) =>
-				keysOf(e.command).some((k) => k.space === "refresh-store.families");
-			const first = sent.find((e) => e.at < wait.at && family(e));
-			expect(first && runIdOf(first.reply)).toBe(newId);
-			expect(first && upstreamOf(first.connection)).toEqual(moved.upstream());
+			// The family's record was read on the new primary, then the session's entry, whose read is
+			// confirmed: it ran on the new primary, on a connection to it ...
+			const family = sent.find((e) => e.at < wait.at && familyRead.request(e.command));
+			expect(family && runIdOf(family.reply)).toBe(newId);
+			// This refresh's: the first entry read on the family read's connection after it.
+			const entry = sent.find(
+				(e) =>
+					family !== undefined &&
+					e.connection === family.connection &&
+					e.at > family.at &&
+					e.at < wait.at &&
+					sessionRead.request(e.command),
+			);
+			expect(entry && runIdOf(entry.reply)).toBe(newId);
+			expect(entry && upstreamOf(entry.connection)).toEqual(moved.upstream());
 			// ... and its confirmation passed on the old one, on a connection still to it.
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
 			const info = sent.findLast(

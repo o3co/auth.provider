@@ -13,6 +13,7 @@ const itemsChecked = contract<readonly MetadataItem[]>("issuer.items");
 export default defineModule(
 	{
 		name: "issuer",
+		replicaSafe: true,
 		section,
 		// Tokens and the discovery document would name a plain-http issuer, open to being changed.
 		refusedInProduction: (s) =>
@@ -42,7 +43,7 @@ export default defineModule(
 			if (publicOrigin !== undefined && new URL(url).origin !== publicOrigin) {
 				return c.refuse(
 					"issuer.url",
-					"the issuer origin differs from this deployment's public origin",
+					"the issuer origin differs from http.public-origin: give issuer.url the same scheme, host and port",
 				);
 			}
 			return Object.freeze({ url });

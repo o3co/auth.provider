@@ -50,7 +50,14 @@ async function provingIn(c: Context) {
 }
 
 export default defineModule(
-	{ name: "mfa-binding-proof", section, takes: [bindingProofs, factorReading, seal] },
+	{
+		name: "mfa-binding-proof",
+		// Safe on many instances given the same seal key and clocks in step on each (deployment-guarantees, Several
+		// instances).
+		replicaSafe: true,
+		section,
+		takes: [bindingProofs, factorReading, seal],
+	},
 	(m) => [
 		m.provide(bindingProof).by(async (c) => {
 			const p = await provingIn(c);

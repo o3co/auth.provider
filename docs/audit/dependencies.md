@@ -153,7 +153,6 @@ flowchart LR
 |---|---|---|
 | `@mod/acr` | feature | `@mod/issuer`, `@mod/kernel`, `@mod/login-gates` |
 | `@mod/authorize` | feature | `@mod/acr`, `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/consent`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/login-gates`, `@mod/rate-limit`, `@mod/reauth`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/token-endpoint`, `@mod/tokens`, `@mod/url-setting` |
-| `@mod/claims-revocation` | feature | `@mod/claims-selection`, `@mod/kernel`, `@mod/refresh` |
 | `@mod/claims-selection` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/kernel` |
 | `@mod/client-allowance` | feature | `@mod/clients`, `@mod/kernel` |
 | `@mod/client-assertion` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/token-endpoint`, `@mod/url-setting` |
@@ -167,17 +166,17 @@ flowchart LR
 | `@mod/exchange-id-tokens` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/kernel`, `@mod/subject-revocation`, `@mod/token-exchange`, `@mod/users` |
 | `@mod/grants` | feature | `@mod/clients`, `@mod/http`, `@mod/kernel`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/issuer` | feature | `@mod/http`, `@mod/kernel`, `@mod/url-setting` |
-| `@mod/jwt-bearer` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/external-jwt`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/sender-binding`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/users` |
+| `@mod/jwt-bearer` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/external-jwt`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/resource-indicators`, `@mod/sender-binding`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/users` |
 | `@mod/jwt-bearer-id-tokens` | feature | `@mod/exchange-id-tokens`, `@mod/jwt-bearer`, `@mod/kernel` |
 | `@mod/jwt-bearer-users` | feature | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/users` |
 | `@mod/logout` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session` |
 | `@mod/mfa-acr` | feature | `@mod/acr`, `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading` |
-| `@mod/oidc` | feature | `@mod/claims-selection`, `@mod/code-grant`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/subject-attributes`, `@mod/users` |
+| `@mod/oidc` | feature | `@mod/authorize`, `@mod/claims-selection`, `@mod/code-grant`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/reauth` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/redirect-uris` | feature | `@mod/client-documents`, `@mod/clients` |
 | `@mod/refresh` | feature | `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |
 | `@mod/resource-indicators` | feature | `@mod/grants`, `@mod/kernel` |
-| `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants` |
+| `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/csrf`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants` |
 | `@mod/sender-binding` | feature | `@mod/clients`, `@mod/http`, `@mod/issuer`, `@mod/kernel` |
 | `@mod/session-grant` | feature | `@mod/client-allowance`, `@mod/csrf`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/session`, `@mod/tokens` |
 | `@mod/session-tokens` | feature | `@mod/grants`, `@mod/kernel`, `@mod/session`, `@mod/session-participants`, `@mod/tokens` |
@@ -185,7 +184,7 @@ flowchart LR
 | `@mod/token-control` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/rate-limit`, `@mod/request-source`, `@mod/token-endpoint`, `@mod/tokens` |
 | `@mod/token-denylist` | feature | `@mod/kernel` |
 | `@mod/token-endpoint` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/rate-limit`, `@mod/request-source`, `@mod/sender-binding`, `@mod/tokens` |
-| `@mod/token-exchange` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/tokens` |
+| `@mod/token-exchange` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/resource-indicators`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/tokens` | feature | `@mod/added-claims`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/sender-binding`, `@mod/token-denylist` |
 | `@mod/userinfo` | feature | `@mod/claims-selection`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/oidc`, `@mod/sender-binding`, `@mod/session`, `@mod/session-tokens`, `@mod/tokens` |
 | `@mod/verified-email` | feature | `@mod/client-credentials`, `@mod/kernel`, `@mod/subject-attributes`, `@mod/tokens`, `@mod/users` |

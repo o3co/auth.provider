@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { type Grant, type GrantInput, grants, tokenTies } from "../src/contract.ts";
 
 const echo = (name: string, grantType = "urn:test:echo") =>
-	defineModule({ name, takes: [] }, (m) => [
+	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType,
 			readsAmbient: "none",
@@ -11,7 +11,7 @@ const echo = (name: string, grantType = "urn:test:echo") =>
 		})),
 	]);
 const types = contract<readonly string[]>("types");
-const reader = defineModule({ name: "reader", takes: [grants] }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [grants] }, (m) => [
 	m.provide(types).by(async (c) => (await c.collect(grants)).map((g) => g.grantType)),
 ]);
 
@@ -25,11 +25,11 @@ it("takes one grant for each grant type, and refuses boot when two name the same
 
 it("takes any number of token ties, one for each name, and refuses boot when two share one", async () => {
 	const tie = (module: string, name: string) =>
-		defineModule({ name: module, takes: [] }, (m) => [
+		defineModule({ name: module, replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(tokenTies).by(() => ({ name, tieOf: async () => ({ kind: "none" as const }) })),
 		]);
 	const names = contract<readonly string[]>("names");
-	const read = defineModule({ name: "tie-reader", takes: [tokenTies] }, (m) => [
+	const read = defineModule({ name: "tie-reader", replicaSafe: true, takes: [tokenTies] }, (m) => [
 		m.provide(names).by(async (c) => (await c.collect(tokenTies)).map((t) => t.name)),
 	]);
 	const boot = (...modules: ReturnType<typeof tie>[]) =>
@@ -45,7 +45,7 @@ it("takes any number of token ties, one for each name, and refuses boot when two
 it("lets a grant identify the client of a request naming none, and hands what it identified back to it", async () => {
 	// What the grant checked, as it would carry it: the endpoint never reads it.
 	const checked = { signer: "s" };
-	const identifying = defineModule({ name: "identifying", takes: [] }, (m) => [
+	const identifying = defineModule({ name: "identifying", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType: "urn:test:identifying",
 			readsAmbient: "none",
@@ -60,9 +60,10 @@ it("lets a grant identify the client of a request naming none, and hands what it
 		})),
 	]);
 	const found = contract<Grant>("found");
-	const read = defineModule({ name: "identifying-reader", takes: [grants] }, (m) => [
-		m.provide(found).by(async (c) => (await c.collect(grants))[0] as Grant),
-	]);
+	const read = defineModule(
+		{ name: "identifying-reader", replicaSafe: true, takes: [grants] },
+		(m) => [m.provide(found).by(async (c) => (await c.collect(grants))[0] as Grant)],
+	);
 	const grant = (await assemble({ modules: [identifying, read], config: kernelConfig() })).get(
 		found,
 	);

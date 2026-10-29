@@ -16,17 +16,17 @@ The generated README lists every key the app reads and where each is written. Th
 
 ## Make a signing key
 
-The app signs its tokens with this key (the `keys` card). This prints a new Ed25519 key as PKCS8 PEM:
+The app signs its tokens with this key (the `keys` card). This prints a new RSA key of 2048 bits as PKCS8 PEM, for RS256, which every OpenID Connect client can check:
 
 <!-- generated:signing-key -->
 ```sh
-node -e 'console.log(require("node:crypto").generateKeyPairSync("ed25519").privateKey.export({format:"pem",type:"pkcs8"}).trim())'
+node -e 'console.log(require("node:crypto").generateKeyPairSync("rsa",{modulusLength:2048}).privateKey.export({format:"pem",type:"pkcs8"}).trim())'
 ```
 <!-- end generated -->
 
 ## Hash a password
 
-Users listed in the configuration keep a bcrypt or scrypt hash of their password, never the password (the `users` and `secret-hash` cards). This reads a password on standard input and prints its scrypt hash; type the password, then press Ctrl-D:
+Users listed in the configuration keep a bcrypt or scrypt hash of their password, never the password (the `users` and `secret-hash` cards). This reads a password on standard input and prints its scrypt hash; type the password and press Enter, then Ctrl-D:
 
 <!-- generated:password-hash -->
 ```sh
@@ -49,12 +49,11 @@ http {
 }
 authorize.login-page = "http://localhost:8080/login"
 tokens.revocation = denylist
-claims-selection.mode = on
 store.accept-volatile = true
 audit.receivers = [log]
 keys.signing {
   kid = signing-1
-  alg = EdDSA
+  alg = RS256
   private-key = """-----BEGIN PRIVATE KEY-----
 <the key the script printed>
 -----END PRIVATE KEY-----"""
@@ -77,9 +76,10 @@ clients.registered = [
 ```
 <!-- end generated -->
 
+- Paste only the lines between `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` in the printed key. The block above already has these markers, and a key with two of each is refused.
 - `http.insecure-origin = true` lets the public origin be plain http, for trying the app on your machine only (the `http` card). A deployment uses https.
+- `kernel.environment = development` lets the app start with that plain-http origin and plain-http login page. Production is the default, and it refuses both (the `kernel` card).
 - With no `consent.page`, no user is asked for consent, and only a first-party client is served: `my-app` is marked `first-party` (the `consent` card).
-- `claims-selection.mode = on` takes the `claims` request parameter, which every deployment states; the `claims-selection` card says when it is `off` or `draining` instead.
 - The login page at `authorize.login-page` is yours to serve; the [login page guide](login-page.md) says what it sends. The steps below make its requests directly.
 - `my-app` is a public client: it authenticates with PKCE alone (the `clients` card). Its redirect URI is matched by exact string (the `redirect-uris` card of `authorize`).
 

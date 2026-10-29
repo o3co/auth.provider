@@ -76,6 +76,9 @@ function undeclaredLinks(
 export default defineModule(
 	{
 		name: "users",
+		// Safe on many instances given the same registered users on each (deployment-guarantees, Several
+		// instances); the rest it keeps is behind the store's interfaces or an outside ledger.
+		replicaSafe: true,
 		section,
 		takes: [secretCheckers, contactStore, ledgers, linkStore, upstreamNames],
 	},
@@ -91,7 +94,7 @@ export default defineModule(
 			if (ledger && c.section.registered.length > 0) {
 				return c.refuse(
 					"users.registered",
-					"users are registered while a user ledger is contributed",
+					"users are registered while a user ledger is contributed: take users.registered out, the ledger holding the users",
 				);
 			}
 			// This assembly's checkers, which share its limit on checks under way.

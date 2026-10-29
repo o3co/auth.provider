@@ -97,7 +97,9 @@ async function open(world: { token?: Handler; settings?: Record<string, unknown>
 	};
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound", takes: [] }, (m) => [m.provide(outbound).by(() => stub)]),
+			defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(outbound).by(() => stub),
+			]),
 			externalJwtModule,
 		],
 		config: kernelConfig(),
@@ -401,13 +403,14 @@ describe("idp-google", () => {
 		expect(await profileOf({})).toBeUndefined();
 	});
 
-	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless iss is not asked [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b]", async () => {
+	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless iss is not asked, comparing it code point by code point [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b] [oidc-discovery-5-c]", async () => {
 		const { upstream, asked } = await open({ token: async () => granted() });
 		for (const iss of [
 			undefined,
 			"",
 			"accounts.google.com",
 			`${issuer}/`,
+			issuer.toUpperCase(),
 			"https://evil.example",
 		]) {
 			expect(await outcome(upstream.exchange(exchange({ iss }))), String(iss)).toBe("refused");
@@ -439,6 +442,10 @@ describe("idp-google", () => {
 				aud: ["client", "other"],
 				azp: "other",
 			}),
+			"another audience beside the client, the client authorized": await idToken({
+				aud: ["client", "other"],
+				azp: "client",
+			}),
 			"an empty subject": await idToken({ sub: "" }),
 			"no issue time": await idToken({ iat: undefined }),
 			"an unreadable login time": await idToken({ auth_time: "yesterday" }),
@@ -462,9 +469,7 @@ describe("idp-google", () => {
 		expect(await exchangedWith(await idToken({ iat: seconds + 31 }))).toBe("refused");
 	});
 
-	it("accepts an id_token for two audiences with this client as azp, or naming another client of the project as azp", async () => {
-		const shared = await idToken({ aud: ["client", "other"], azp: "client" });
-		expect(await exchangedWith(shared)).toMatchObject({ subject: "g-alice" });
+	it("accepts an id_token naming another client of the project as azp, for this client alone", async () => {
 		// Cross-client identity: Google names another client of the project as azp.
 		const crossClient = await idToken({ azp: "android-client" });
 		expect(await exchangedWith(crossClient)).toMatchObject({ subject: "g-alice" });

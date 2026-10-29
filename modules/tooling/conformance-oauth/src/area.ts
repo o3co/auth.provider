@@ -18,6 +18,8 @@ export interface ClientScene {
 	readonly grants: readonly string[];
 	/** Every token it is issued must be sender-bound (`sender-binding`'s `required`); for scenes the legacy build is not asked. */
 	readonly bindingRequired?: boolean;
+	/** The binding kinds a required binding must be of, by the names operators give them (such as dpop); unwritten, any. Read only beside `bindingRequired`. */
+	readonly bindingKinds?: readonly string[];
 	readonly scopes: readonly string[];
 	readonly defaultScopes?: readonly string[];
 	readonly audiences?: readonly string[];
@@ -91,8 +93,8 @@ export type TrustedIssuerScene = (
 	};
 };
 
-/** Clients, the token endpoint and what is offered beside it. */
-export interface OauthPart {
+/** Clients, the token endpoint and what is offered beside it; DPoP nonces named only beside DPoP. */
+export type OauthPart = {
 	readonly issuer: string;
 	readonly clients: readonly ClientScene[];
 	/** Token introspection (RFC 7662) for the clients. */
@@ -101,8 +103,6 @@ export interface OauthPart {
 	readonly revocation?: boolean;
 	/** Issuers whose JWT assertions the jwt-bearer grant trusts; absent means no such grant, `false` a scene about that. */
 	readonly jwtBearer?: { readonly issuers: readonly TrustedIssuerScene[] } | false;
-	/** Sender-constrained tokens by DPoP (RFC 9449) at the token endpoint; `false`, a scene about their absence. */
-	readonly dpop?: boolean;
 	/** The provider's metadata document (RFC 8414, OpenID Connect Discovery). */
 	readonly discovery?: boolean;
 	/** No access token for a user whose account does not state the email verified; clients' own tokens still issue. */
@@ -110,7 +110,18 @@ export interface OauthPart {
 	/** How the requests rate limit answers while the store fails; store-fault scenes let them by unless this says closed. */
 	readonly rateLimitWhileStoreFails?: "open" | "closed";
 	readonly resourceIndicators?: boolean;
-}
+} & (
+	| {
+			/** Sender-constrained tokens by DPoP (RFC 9449) at the token endpoint; `false`, a scene about their absence. */
+			readonly dpop?: false;
+			readonly dpopNonce?: never;
+	  }
+	| {
+			readonly dpop: true;
+			/** The token endpoint asks a nonce of each proof (RFC 9449 §8). Read only beside dpop. */
+			readonly dpopNonce?: true;
+	  }
+);
 
 export const oauthArea = area<OauthPart>("oauth");
 

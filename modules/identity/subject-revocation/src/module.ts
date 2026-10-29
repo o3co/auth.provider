@@ -11,7 +11,7 @@ import { followedBy } from "./followers.ts";
 import { boundaryStore } from "./store.ts";
 
 export default defineModule(
-	{ name: "subject-revocation", takes: [boundaryStore, revocationFollowers] },
+	{ name: "subject-revocation", replicaSafe: true, takes: [boundaryStore, revocationFollowers] },
 	(m) => [
 		m.provide(revocations).by(async (c): Promise<Revocations> => {
 			const boundaries = await c.get(boundaryStore);

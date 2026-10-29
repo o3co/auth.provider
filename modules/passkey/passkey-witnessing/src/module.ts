@@ -7,7 +7,11 @@ import { passkeyBackfill } from "./contract.ts";
 import { witnessingOver } from "./witnessing.ts";
 
 export default defineModule(
-	{ name: "passkey-witnessing", takes: [audit, passkeyReading, passkeyWitnesses] },
+	{
+		name: "passkey-witnessing",
+		replicaSafe: true,
+		takes: [audit, passkeyReading, passkeyWitnesses],
+	},
 	(m) => [
 		m.contribute(passkeyWitnessing).by(async (c) => {
 			const [witness, ...more] = await c.collect(passkeyWitnesses);

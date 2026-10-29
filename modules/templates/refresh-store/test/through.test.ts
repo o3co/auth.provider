@@ -1,6 +1,6 @@
 import { auditStandIn } from "@mod/audit/testing";
 import claimsSelectionModule from "@mod/claims-selection/module";
-import { claimsSelectionConfig, claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
@@ -31,10 +31,13 @@ import wiring from "../src/module.ts";
 const runtime = quietRuntime();
 const seen = contract<readonly Addition[]>("additions-seen");
 const pins = contract<readonly RedemptionHook[]>("pins-seen");
-const reader = defineModule({ name: "reader", takes: [additions, redemptionHooks] }, (m) => [
-	m.provide(seen).by((c) => c.collect(additions)),
-	m.provide(pins).by((c) => c.collect(redemptionHooks)),
-]);
+const reader = defineModule(
+	{ name: "reader", replicaSafe: true, takes: [additions, redemptionHooks] },
+	(m) => [
+		m.provide(seen).by((c) => c.collect(additions)),
+		m.provide(pins).by((c) => c.collect(redemptionHooks)),
+	],
+);
 
 /** The real refresh over this wiring, starting families as a code's redemption would. */
 async function boot() {
@@ -73,7 +76,6 @@ async function boot() {
 			...issuerConfig({ url: "https://as.example" }),
 			...clientsConfig([confidentialClient({ id: "app", sections: allowed })]),
 			...refreshConfig(),
-			...claimsSelectionConfig(),
 		},
 		runtime,
 	});

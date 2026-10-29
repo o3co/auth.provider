@@ -61,6 +61,24 @@ Every answer is never cached.
 
 After a `200`, the browser holds the session cookie, and the authorization endpoint it returns to goes on to consent or straight to the client.
 
+## Adding passkey login to the app
+
+Passkey login is opt-in: no pattern composes it. Add it when you generate the app, beside your pattern and choices:
+
+```sh
+npx @o3co/create-auth-provider my-provider --pattern simple-web --add @mod/login-passkey
+```
+
+It brings the passkey store (`passkeys`), the routes a signed-in user registers passkeys with (`passkey-registration`), and WebAuthn (`webauthn`, with its store). Then set:
+
+- `webauthn.rp-id`, `webauthn.rp-name` and `webauthn.origins`: the domain passkeys are bound to (each origin's host, or a domain they lie under), the name an authenticator shows, and the origins your page calls WebAuthn from, matched exactly. The generated README lists them.
+- With users from your ledger over HTTP (`--axis @mod/users=@mod/users-http`), `users-http.subject-url`. A passkey names its subject, not a username, so the login looks the user up by subject (`POST {"subject"}`, as the `users-http` card says): without it, every passkey login answers `503`.
+
+What a passkey login changes and the settings that tune it (`login-passkey.counts-as-mfa`, `login-passkey.password`) are in [the runbook](runbook.md#passkey-logins-into-a-session). Two more opt-ins are added the same way, each described there:
+
+- `@mod/passkey-witness-http`, to keep at your ledger which subjects hold a passkey. Refusing passwords of passkey holders needs it ([the runbook](runbook.md#keeping-the-passkey-witness-at-the-ledger)).
+- `@mod/passkey-reset`, for an operator to reset a user's passkeys from your own code ([the runbook](runbook.md#resetting-a-subjects-passkeys)).
+
 ## A login with a passkey
 
 Where `login-passkey` is composed, the page can offer a passkey beside the password. It makes two requests of its own, both carrying the CSRF token as the password login does.
@@ -94,6 +112,7 @@ The transaction's identifier never goes in a URL; only this `GET` takes it from 
 
 ## Related
 
+- The page a client that is not first-party sends the user to after the login is [your consent page](consent-page.md).
 - Each setting named here is in the [configuration reference](configuration.md).
 - What the provider guarantees about sessions, cookies and CSRF is in the [security model](security-model.md#browsers-sessions-cookies-and-csrf).
 - The module cards of `login-password`, `csrf` and `login-gates` hold the full contract, under `modules/identity/` in the repository, and `login-passkey`'s and `passkey-registration`'s under `modules/passkey/`.

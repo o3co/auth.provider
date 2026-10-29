@@ -60,13 +60,22 @@ it("refuses an empty or unparsable public origin or CORS origin at boot, never t
 });
 
 it("refuses a plain-http public origin unless it is accepted explicitly, and then says cookies cannot be secure", async () => {
-	await expect(boot({ "public-origin": "http://as.example" })).rejects.toThrow(BootRefused);
+	const unaccepted = await boot({ "public-origin": "http://as.example" }).catch(
+		(error: BootRefused) => error.refusals,
+	);
+	expect(unaccepted).toEqual([
+		{
+			where: "http.public-origin",
+			reason:
+				"an http public origin needs http.insecure-origin = true, and kernel.environment = development",
+		},
+	]);
 	const plain = { "public-origin": "http://as.example", "insecure-origin": true };
 	const app = await boot(plain, { environment: "development" });
 	expect(app.get(site).secureCookies).toBe(false);
 });
 
-it("refuses the plain-http public origin it accepts in a production deployment", async () => {
+it("refuses the plain-http public origin it accepts in a production deployment, so the endpoints named on it are https [oidc-core-1.2-a] [rfc7009-2-d] [rfc7662-2-a]", async () => {
 	const plain = { "public-origin": "http://as.example", "insecure-origin": true };
 	const refused = await boot(plain).catch((error: BootRefused) => error.refusals);
 	expect(refused).toEqual([

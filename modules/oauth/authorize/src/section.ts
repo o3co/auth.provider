@@ -6,12 +6,12 @@ const page = urlSetting({ schemes: ["https"], loopbackHttp: true });
 
 export const section = z.strictObject({
 	"login-page": page.describe(
-		"The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host).",
+		"The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host, with `kernel.environment = development`).",
 	),
 	"step-up-page": page
 		.optional()
 		.describe(
-			"Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host).",
+			"Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host, with `kernel.environment = development`).",
 		),
 	/** Whether every request names `openid` in its own scope (`dual` also serves plain OAuth clients). */
 	"oidc-mode": z
@@ -19,6 +19,12 @@ export const section = z.strictObject({
 		.prefault("oidc-required")
 		.describe(
 			"oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default.",
+		),
+	"claims-parameter": z
+		.boolean()
+		.prefault(true)
+		.describe(
+			"Whether the claims request parameter's names and value constraints are taken, and discovery says it is supported. False ignores them, and boot warns; the sub asked, the acr, an essential auth_time and the parameter's form still hold, as do the scope's claims and the selections already kept.",
 		),
 	requests: z
 		.number()

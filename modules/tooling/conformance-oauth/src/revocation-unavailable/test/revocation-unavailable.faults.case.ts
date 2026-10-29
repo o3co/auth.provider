@@ -1,11 +1,13 @@
 import {
 	confirmation,
+	type Deployed,
 	type Instance,
 	instanceOf,
 	keysOf,
 	type Match,
 	ready,
 	reconnected,
+	recovered,
 	replicasOnline,
 	repointed,
 	runIdOf,
@@ -54,8 +56,9 @@ async function control(i: Instance) {
 	expect(await activeAt(i, token)).toBe(false);
 }
 
-/** Healed: the instance is ready, the token revoked again is answered done and inactive, as is a new, active one. */
-async function healed(i: Instance, token: string) {
+/** Healed: the topology has recovered and the instance is ready, the token revoked again is answered done and inactive, as is a new, active one. */
+async function healed(d: Deployed, i: Instance, token: string) {
+	await recovered(d);
 	await ready(i);
 	const fresh = await issuedAt(i);
 	expect(await activeAt(i, fresh)).toBe(true);
@@ -81,7 +84,7 @@ describe("a revocation route answering done only once its revocation is kept", (
 			expect(i.relay.executions(anything).filter((e) => e.at > stalled && e.at < resumed)).toEqual(
 				[],
 			);
-			await healed(i, token);
+			await healed(d, i, token);
 		});
 	});
 
@@ -105,7 +108,7 @@ describe("a revocation route answering done only once its revocation is kept", (
 			await ready(i);
 			expect(i.relay.executions(revocationOf(token))).toEqual([]);
 			expect(await activeAt(i, token)).toBe(true);
-			await healed(i, token);
+			await healed(d, i, token);
 		});
 	});
 
@@ -123,7 +126,7 @@ describe("a revocation route answering done only once its revocation is kept", (
 			expect(i.relay.executions(anything).filter((e) => e.at > cut && e.at < answer.at)).toEqual(
 				[],
 			);
-			await healed(i, token);
+			await healed(d, i, token);
 		});
 	});
 
@@ -144,7 +147,7 @@ describe("a revocation route answering done only once its revocation is kept", (
 			expect(read?.at).toBeGreaterThan(answer.at);
 			expect(i.relay.executions(revocationOf(token))).toEqual([]);
 			expect(await activeAt(i, token)).toBe(true);
-			await healed(i, token);
+			await healed(d, i, token);
 		});
 	});
 
@@ -165,7 +168,7 @@ describe("a revocation route answering done only once its revocation is kept", (
 			expect(
 				i.relay.executions(revocationOf(token)).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
-			await healed(i, token);
+			await healed(d, i, token);
 		});
 	});
 
@@ -199,7 +202,7 @@ describe("a revocation route answering done only once its revocation is kept", (
 					.filter((e) => e.command.name === "EVAL" && e.at > paused && e.at < held),
 			).toEqual([]);
 			expect(i.relay.executions(revocationOf(token))).toEqual([]);
-			await healed(i, token);
+			await healed(d, i, token);
 		});
 	});
 
@@ -233,7 +236,7 @@ describe("a revocation route answering done only once its revocation is kept", (
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
 			unavailable(answer);
 			i.relay.reset("confirming");
-			await healed(i, token);
+			await healed(d, i, token);
 		});
 	});
 
@@ -274,7 +277,7 @@ describe("a revocation route answering done only once its revocation is kept", (
 				await annotate("answered temporarily_unavailable");
 			}
 			await replicasOnline(d);
-			await healed(i, token);
+			await healed(d, i, token);
 		});
 	});
 });

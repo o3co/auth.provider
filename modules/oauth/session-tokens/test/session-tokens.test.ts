@@ -60,9 +60,10 @@ afterEach(() => stop());
 
 /** What modules contribute to `token-endpoint`'s session issuances, read back after assembly. */
 const told = contract<readonly SessionIssuance[]>("told");
-const telling = defineModule({ name: "telling", takes: [sessionIssuances] }, (m) => [
-	m.provide(told).by((c) => c.collect(sessionIssuances)),
-]);
+const telling = defineModule(
+	{ name: "telling", replicaSafe: true, takes: [sessionIssuances] },
+	(m) => [m.provide(told).by((c) => c.collect(sessionIssuances))],
+);
 /** Records a token as token-endpoint does: by telling session-tokens it was issued from a session. */
 const recording =
 	(app: { get<T>(c: Contract<T>): T }) =>
@@ -341,7 +342,7 @@ it("revokes every token the place pushes out, and keeps the record", async () =>
 });
 
 it("leaves the session closing when tokens answers that it cannot revoke after all", async () => {
-	const refusing = defineModule({ name: "tokens", takes: [] }, (m) => [
+	const refusing = defineModule({ name: "tokens", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(tokens).by(
 			() =>
 				({
@@ -357,7 +358,7 @@ it("leaves the session closing when tokens answers that it cannot revoke after a
 
 it("fails the record at the first pushed-out token tokens cannot revoke, as closing does", async () => {
 	const asked: string[] = [];
-	const refusing = defineModule({ name: "tokens", takes: [] }, (m) => [
+	const refusing = defineModule({ name: "tokens", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(tokens).by(
 			() =>
 				({
@@ -394,6 +395,23 @@ it("records a token token-endpoint tells of as issued from a session, so closing
 	expect(await s.t.verifyAccess(token.token)).toEqual({ kind: "invalid", reason: "revoked" });
 });
 
+it("keeps no access token in session-tokens' own index and lists, a token by its id and reference alone [rfc6749-10.3-a]", async () => {
+	const s = await boot();
+	// Each is told with the issued token itself in hand, as token-endpoint holds it.
+	const issued = [await s.issue(), await s.issue()];
+	const listed = (await s.issued.sets.members(s.session.id)).map((m) => m.member);
+	// The session's references, those awaiting, each token's entry in the index and the listed sessions.
+	const kept = JSON.stringify([
+		listed,
+		await s.issued.sets.awaiting(s.session.id),
+		await Promise.all(issued.map((token) => s.issued.records.read(token.id))),
+		await s.issued.pendingListed(),
+	]);
+	for (const { token } of issued) expect(kept).not.toContain(token);
+	// The session's tokens, each by its id and end, the reference tokens revokes by.
+	expect([...listed].sort()).toEqual(issued.map((token) => referenceOf(token)).sort());
+});
+
 it("answers the session a recorded token was issued for, and unbound for any other", async () => {
 	const s = await boot();
 	const a = await s.issue();
@@ -405,7 +423,7 @@ it("answers the session a recorded token was issued for, and unbound for any oth
 
 it("ties a token to its session as `session` while the session lets it in, and joins one issued from it only then, recording nothing", async () => {
 	let short = false;
-	const judge = defineModule({ name: "judge", takes: [] }, (m) => [
+	const judge = defineModule({ name: "judge", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(entryJudge).by(() => ({
 			judge: async () =>
 				short
@@ -414,9 +432,10 @@ it("ties a token to its session as `session` while the session lets it in, and j
 		})),
 	]);
 	const tied = contract<readonly TokenTie[]>("ties");
-	const reader = defineModule({ name: "tie-reader", takes: [tokenTies] }, (m) => [
-		m.provide(tied).by((c) => c.collect(tokenTies)),
-	]);
+	const reader = defineModule(
+		{ name: "tie-reader", replicaSafe: true, takes: [tokenTies] },
+		(m) => [m.provide(tied).by((c) => c.collect(tokenTies))],
+	);
 	const s = await boot({ extra: [judge, reader] });
 	expect(s.app.get(tied).map((t) => t.name)).toEqual(["session"]);
 	const [tie] = s.app.get(tied) as [TokenTie];
@@ -515,9 +534,10 @@ it("sweeps every 30s unless set, taking a time only with its unit and in whole s
 
 it("takes all its module names, its ties read or not", async () => {
 	const tied = contract<unknown>("ties");
-	const reader = defineModule({ name: "tie-reader", takes: [tokenTies] }, (m) => [
-		m.provide(tied).by((c) => c.collect(tokenTies)),
-	]);
+	const reader = defineModule(
+		{ name: "tie-reader", replicaSafe: true, takes: [tokenTies] },
+		(m) => [m.provide(tied).by((c) => c.collect(tokenTies))],
+	);
 	for (const extra of [[], [reader]]) {
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 		expect(

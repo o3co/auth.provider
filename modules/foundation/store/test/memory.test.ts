@@ -147,10 +147,10 @@ it("starts a new window at its reset time, and refuses every hit under a limit o
 	expect(await s.count(key("zero"), { ms: 1000, limit: 1 })).toMatchObject({ count: 1 });
 });
 
-const durable = defineModule({ name: "durable-owner", takes: [] }, (m) => [
+const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable"] })),
 ]);
-const replicated = defineModule({ name: "replicated-owner", takes: [] }, (m) => [
+const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "copied", guarantees: ["replicated"] })),
 ]);
 
