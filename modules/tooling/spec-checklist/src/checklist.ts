@@ -14,9 +14,9 @@ export interface Item {
 	readonly strength: Strength;
 	readonly text: string;
 	readonly mark?: Mark;
-	/** The items of an earlier spec this one updates. */
 	/** The shared note it points to, by its id in `checklist/notes.md`. */
 	readonly note?: string;
+	/** The items of an earlier spec this one updates. */
 	readonly updates: readonly string[];
 	/** The role of the server's the requirement binds. */
 	readonly role: Role;
