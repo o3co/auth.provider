@@ -2,6 +2,7 @@ import { assemble, BootRefused, defineModule, kernelConfig, Unavailable } from "
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { expect, it } from "vitest";
 import { externalJwt } from "../src/contract.ts";
 import externalJwtModule from "../src/module.ts";
@@ -9,7 +10,7 @@ import { testSigner } from "../src/testing.ts";
 
 it("offers verifiers to a composition with outbound, knowing the asymmetric algorithms only", async () => {
 	const app = await assemble({
-		modules: [outboundModule, externalJwtModule],
+		modules: [outboundModule, tlsOptionsForTests, externalJwtModule],
 		config: { ...kernelConfig(), outbound: {} },
 	});
 	const jwt = app.get(externalJwt);
@@ -105,7 +106,7 @@ it("refuses a section outside its bounds", async () => {
 	]) {
 		await expect(
 			assemble({
-				modules: [outboundModule, externalJwtModule],
+				modules: [outboundModule, tlsOptionsForTests, externalJwtModule],
 				config: { ...kernelConfig(), outbound: {}, "external-jwt": refused },
 			}),
 			JSON.stringify(refused),
