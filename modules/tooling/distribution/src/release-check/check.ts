@@ -10,7 +10,7 @@ import { outsideScene } from "../outside-scene/contract.ts";
 import { packedOf, packRelease, zodOf } from "../release/contract.ts";
 import { releaseOf } from "../workspace.ts";
 import { sweptRun } from "./containers/container.ts";
-import { tarballsToCheck } from "./given/given.ts";
+import { packBuilt, tarballsToCheck } from "./given/given.ts";
 import { helperScene } from "./helpers.ts";
 import { dockerMissing, images, overridesFile } from "./image.ts";
 
@@ -39,15 +39,16 @@ const scratch = mkdtempSync(join(tmpdir(), "release-check-"));
 // The tarballs named, as the release publishes them; else built and packed as the release packs them, the index sealed in between.
 const packed = tarballsToCheck(
 	process.argv[2],
-	(into) => {
-		const { problems: unbuilt } = buildBundles({
-			bundles: readBundles(root),
-			release: releaseOf(root) ?? { version: workspace.version },
-			out,
-			licenseFile: join(root, "LICENSE"),
-		});
-		return unbuilt.length > 0 ? { problems: unbuilt } : packRelease(root, into);
-	},
+	packBuilt(
+		() =>
+			buildBundles({
+				bundles: readBundles(root),
+				release: releaseOf(root) ?? { version: workspace.version },
+				out,
+				licenseFile: join(root, "LICENSE"),
+			}),
+		(into) => packRelease(root, into),
+	),
 	scratch,
 );
 if ("problems" in packed) {
