@@ -9,16 +9,20 @@ export async function succeeded(res: Response, what: string): Promise<Record<str
 	return (text ? JSON.parse(text) : {}) as Record<string, unknown>;
 }
 
-/** A browser behind the deployment's proxy, holding one login's session cookie. */
+/**
+ * A browser behind the deployment's proxy, holding one login's session cookie, from `source`: one
+ * address unless a scene's browsers are to be counted apart from the others' per source.
+ */
 export function browserAt(
 	base: () => string,
 	issuer: string,
 	user: { username: string; password: string },
+	source = "198.51.100.20",
 ) {
 	let cookie = "";
 	const headers = (extra: Record<string, string> = {}) => ({
 		"x-forwarded-proto": "https",
-		"x-forwarded-for": "198.51.100.20",
+		"x-forwarded-for": source,
 		"x-forwarded-host": new URL(issuer).host,
 		...extra,
 	});

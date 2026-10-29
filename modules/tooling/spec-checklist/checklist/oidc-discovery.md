@@ -69,6 +69,7 @@
   out-of-scope: the JWK Set carries no `x5c` (`keys`' key set).
 - **oidc-discovery-3-p** MUST NOT: the JWK Set holds private or symmetric key values.
 - **oidc-discovery-3-q** SHOULD: the discovery document carries `registration_endpoint`.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-discovery-3-r** MUST: `registration_endpoint` uses the `https` scheme.
   out-of-scope: dynamic client registration is not offered: no route takes a registration and the metadata carries no `registration_endpoint`.
 - **oidc-discovery-3-s** SHOULD: the discovery document carries `scopes_supported`.
@@ -76,7 +77,9 @@
 - **oidc-discovery-3-u** SHOULD: `scopes_supported` lists the scopes OpenID Connect Core defines that the OP supports.
 - **oidc-discovery-3-v** MUST: the discovery document carries `response_types_supported`.
 - **oidc-discovery-3-w** MUST: a Dynamic OpenID Provider supports the response types `code`, `id_token` and `id_token token`.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-discovery-3-x** MUST: a Dynamic OpenID Provider supports the grant types `authorization_code` and `implicit`.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-discovery-3-y** MUST: the discovery document carries `subject_types_supported`.
 - **oidc-discovery-3-z** MUST: the discovery document carries `id_token_signing_alg_values_supported`.
 - **oidc-discovery-3-aa** MUST: `id_token_signing_alg_values_supported` includes `RS256`.

@@ -9,6 +9,8 @@ export type Decision =
 			/** The issuance policy that refused, recorded with its reason. */
 			readonly policy?: string;
 	  }
+	/** Refused at the endpoint, never sent back: a refusal whose login the request is too long to reach. */
+	| { readonly kind: "answer"; readonly error: string; readonly description?: string }
 	/** The browser goes to another page first: to log in, to raise its authentication, or to consent. */
 	| { readonly kind: "send"; readonly to: string }
 	| { readonly kind: "code"; readonly code: string; readonly subject: string };

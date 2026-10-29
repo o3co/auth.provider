@@ -78,39 +78,43 @@ export function routeWith({
 		const back = (params: Record<string, string>) =>
 			answerTo(redirectUri, { ...params, state, iss: issuer });
 		const reply = (d: Decision) =>
-			found(
-				302,
-				d.kind === "send"
-					? d.to
-					: back(
-							d.kind === "code"
-								? { code: d.code }
-								: {
-										error: d.error,
-										// Held to RFC 6749's characters, as the token endpoint's: a rule or policy may say anything.
-										...(d.description
-											? { error_description: errorDescription(d.description) }
-											: {}),
-									},
-						),
-			);
-		if (repeated.length > 0) {
-			// A parameter the rule reads, sent twice, is the rule's to answer (RFC 8707 §2's invalid_target).
-			const ruled = repeated.map((name) => rule.repeated?.(name)).find((r) => r !== undefined);
-			return reply(
-				ruled
+			d.kind === "answer"
+				? oauthError(400, d.error, d.description)
+				: found(
+						302,
+						d.kind === "send"
+							? d.to
+							: back(
+									d.kind === "code"
+										? { code: d.code }
+										: {
+												error: d.error,
+												// Held to RFC 6749's characters, as the token endpoint's: a rule or policy may say anything.
+												...(d.description
+													? { error_description: errorDescription(d.description) }
+													: {}),
+											},
+								),
+					);
+		// The form's refusals are read here and answered by the flow, which logs the browser in first.
+		// A parameter the rule reads, sent twice, is the rule's to answer (RFC 8707 §2's invalid_target).
+		const ruled = repeated.map((name) => rule.repeated?.(name)).find((r) => r !== undefined);
+		const refused =
+			repeated.length > 0
+				? ruled
 					? refusal(ruled.error, ruled.description)
-					: refusal("invalid_request", "repeated parameter"),
-			);
-		}
-		if (tooLong.length > 0 || (stateText !== undefined && state === undefined)) {
-			return reply(refusal("invalid_request", "parameter too long"));
-		}
+					: refusal("invalid_request", "repeated parameter")
+				: tooLong.length > 0 || (stateText !== undefined && state === undefined)
+					? refusal("invalid_request", "parameter too long")
+					: undefined;
 		const params = new Map([...source].map(([name, values]) => [name, values[0] ?? ""]));
 		const from = determinedSource(request);
 		const by = { client: client.id, ...(from === undefined ? {} : { source: from }) };
 		try {
-			const decided = await flow({ client, redirectUri, one, params, request });
+			const decided = await flow({
+				...{ client, redirectUri, one, params, request },
+				...(refused ? { refused } : {}),
+			});
 			if (decided.kind === "code") {
 				const attributes = { ...by, response_type: "code" };
 				audited.record("authorize.granted", { subject: decided.subject, attributes });

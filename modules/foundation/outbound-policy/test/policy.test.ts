@@ -114,7 +114,13 @@ describe("admitUrl", () => {
 		).toBe("not-allowed");
 	});
 
-	it("reaches plain http only at a named loopback host and port", () => {
+	it("reaches plain http only at a named loopback host and port, and at none by default, the pair at loopback addresses alone, so it stays on the host; a plain-internal pair is the operator's declared exception, and signed material, a CRL or an OCSP answer (RFC 6960) its signature holds, is outside, as the security model's Outbound requests say [oidc-core-16.17-c] [oidc-discovery-7.1-b] [rfc6750-5.3-e]", () => {
+		expect(url("http://localhost:8080/")).toBe("scheme");
+		expect(url("http://idp.example/")).toBe("scheme");
+		const reach = (list: readonly string[]) =>
+			reasonOf(() => admitAddresses(list, { loopback: true, internal: false }));
+		expect(reach(["127.0.0.1", "::1"])).toBe("admitted");
+		expect(reach(["127.0.0.1", "10.0.0.1"])).toBe("special-address");
 		const policy = { plainLoopback: ["LOCALHOST.:8080"] };
 		const admitted = admitUrl("http://localhost:8080/", { ...open, ...policy });
 		expect([admitted.plain, admitted.loopback]).toEqual([true, true]);

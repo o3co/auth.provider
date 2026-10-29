@@ -196,7 +196,7 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		);
 	});
 
-	it("run every suite plan where a pull request to develop touches the harness, and the relying party plan alone where it touches a provider module or the federation scenes", () => {
+	it("run every suite plan where a pull request to develop touches the harness or a provider module, and the relying party plan alone where it touches the federation scenes alone", () => {
 		const due = job("interop-due");
 		const script = (id: string) => due.steps.find((s) => s.id === id)?.run ?? "";
 		const dir = mkdtempSync(join(tmpdir(), "ci-oidf-"));
@@ -248,17 +248,19 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 				return { oidf: all.oidf, scope: all["oidf-scope"], plans: all["oidf-plans"] };
 			};
 			const every = '["basic","config","rp-initiated-logout","rp"]';
-			// A provider module, however far from upstream login (external-jwt is two steps from federation).
+			// The federation scenes alone: the relying party plan, as they build its side alone.
+			expect(outputs("modules/tooling/conformance-federation/src/new.ts")).toEqual({
+				oidf: "true",
+				scope: "rp",
+				plans: '["rp"]',
+			});
+			// A provider module, whichever side it serves, the harness and the shared tooling: every plan.
 			for (const file of [
 				"modules/upstream-login/idp-oidc/src/upstream.ts",
 				"modules/foundation/external-jwt/src/module.ts",
 				"modules/oauth/authorize/src/module.ts",
+				"modules/oauth/logout/src/module.ts",
 				"modules/scaffold/create-app/src/patterns/sso-federated.ts",
-				"modules/tooling/conformance-federation/src/new.ts",
-			]) {
-				expect(outputs(file), file).toEqual({ oidf: "true", scope: "rp", plans: '["rp"]' });
-			}
-			for (const file of [
 				"modules/tooling/interop-oidf/src/rp/scene.ts",
 				"modules/tooling/conformance/src/drivers/app.ts",
 				"modules/tooling/spec-checklist/src/main.ts",
@@ -278,8 +280,8 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			);
 			expect(outputs(["modules/oauth/authorize/src/module.ts", ...many].join(" "))).toEqual({
 				oidf: "true",
-				scope: "rp",
-				plans: '["rp"]',
+				scope: "all",
+				plans: every,
 			});
 			// Docs alone, or tooling the suite does not run: no suite plan.
 			for (const file of [
