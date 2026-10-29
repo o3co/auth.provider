@@ -601,6 +601,7 @@ From `@mod/rp-logout`.
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
 | `rp-logout.confirm-within` | string | `5m` |  |  |  | How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page. |
+| `rp-logout.error-page` | string |  |  |  |  | Where a browser's refused logout request is sent, with `error` and `error_description` in its query: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, every refusal is answered as JSON. |
 | `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
 | `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
