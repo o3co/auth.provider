@@ -1,4 +1,5 @@
 import { connect, createServer, Socket } from "node:net";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { expect, it } from "vitest";
 import { mailboxOf, RelayFailure, relayOver } from "../relay.ts";
 
@@ -38,6 +39,7 @@ it("under none, sends nothing when the connected peer is not loopback", async ()
 			security: "none",
 			from: { name: "", address: "noreply@example.test" },
 			deadlineMs: 1000,
+			floor: testTlsOptions,
 		},
 		elsewhere,
 	);
@@ -61,6 +63,7 @@ it("gives up on a connection that never opens at the connecting deadline, a quar
 			security: "starttls",
 			from: { name: "", address: "noreply@example.test" },
 			deadlineMs: 400,
+			floor: testTlsOptions,
 		},
 		silent,
 	);
