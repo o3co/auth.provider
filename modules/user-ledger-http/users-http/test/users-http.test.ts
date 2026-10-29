@@ -21,6 +21,7 @@ import {
 	policySettings,
 } from "@mod/outbound-policy";
 import secretHashModule from "@mod/secret-hash/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { ledgerContract, memoryUsersStores, testUser, usersContract } from "@mod/users/testing";
@@ -149,6 +150,7 @@ const boot = (
 	assemble({
 		modules: [
 			outboundModule,
+			tlsOptionsForTests,
 			usersModule,
 			secretHashModule,
 			memoryUsersStores().module,
@@ -821,6 +823,7 @@ describe("users-http looking a user up by subject", () => {
 			assemble({
 				modules: [
 					outboundModule,
+					tlsOptionsForTests,
 					usersModule,
 					secretHashModule,
 					memoryUsersStores().module,
@@ -874,6 +877,7 @@ describe("users-http looking a user up by subject", () => {
 				await takesUnused({
 					modules: [
 						outboundModule,
+						tlsOptionsForTests,
 						usersModule,
 						secretHashModule,
 						memoryUsersStores().module,
