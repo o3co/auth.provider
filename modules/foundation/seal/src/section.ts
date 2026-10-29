@@ -18,7 +18,9 @@ const entry = z.strictObject({
 		.describe("What the key seals and opens with: aes-256-gcm, the default and only one."),
 	key: z
 		.string()
-		.describe("The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values."),
+		.describe(
+			"The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values.",
+		),
 });
 /** A key's bytes are held to its algorithm's size, by `keys`' rule for a secret's bytes. */
 const sized = <T extends typeof entry>(shape: T) =>
