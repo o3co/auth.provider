@@ -12,5 +12,6 @@ Internal module of `outbound`: the options each TLS connection outbound makes ta
 - `Tls` (`floor`, required, the `tlsOptions` outbound takes; `ca`, a test's authorities) and `tlsOf` (a `Tls`) → the options a connection takes.
 
 ## Invariants
+- The floor is one `tls-options` made (`isFloor`), checked once, at `outboundOver`: another, a copy however alike included, throws `NotTheFloor` there, and the module refuses boot at `outbound`, saying to provide it from `@mod/tls-options`.
 - The floor's own keys (`minVersion`, `ciphers`) are copied last, over the test's authorities: nothing a caller passes loosens them, and no other key rides in with them.
 - A server offering only what the floor leaves out (an older TLS, the RSA key exchange, CBC) is `unreachable`, directly and through the proxy alike.

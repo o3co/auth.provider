@@ -12,7 +12,7 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
-import { tlsOptions } from "@mod/tls-options";
+import { isFloor, tlsOptions } from "@mod/tls-options";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 import {
@@ -155,6 +155,13 @@ interface Paths {
 	readonly lookupsOf: NonNullable<OutboundLimits["lookupsOf"]>;
 }
 
+/** A floor not tls-options' own handed to `outboundOver`: the composition is wrong, not a setting. */
+export class NotTheFloor extends TypeError {
+	constructor() {
+		super("the TLS floor is not one tls-options made: provide it from @mod/tls-options");
+	}
+}
+
 /** The outbound paths over a resolver; the module passes the system's, a test its own. */
 /** `deadlineOf` makes a request's one deadline; a test gives one it fires itself. */
 export function outboundOver(
@@ -167,6 +174,8 @@ export function outboundOver(
 	/** In this process, the lookups at once; else as the settings and the threadpool give. */
 	lookupsAtOnce?: number,
 ): Paths {
+	// A copy of the floor, or another's value, may carry a weaker one: tls-options' own alone is taken.
+	if (!isFloor(tls.floor)) throw new NotTheFloor();
 	const pools =
 		typeof lookupsIn === "function"
 			? inProcessPools(settings, lookupsIn, lookupsAtOnce)
@@ -245,6 +254,15 @@ export default defineModule(
 	(m) => [
 		m.provide(paths).by(async (c) => {
 			const tls = { floor: await c.get(tlsOptions) };
+			/** The paths over these lookups, a floor not tls-options' own refusing boot as composed wrong. */
+			const over = (lookups: LookupPools | Lookup) => {
+				try {
+					return outboundOver(c.section, lookups, tls);
+				} catch (error) {
+					if (error instanceof NotTheFloor) return c.refuse("outbound", error.message);
+					throw error;
+				}
+			};
 			const { proxy } = c.section;
 			// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
 			const plainInternal = c.section["plain-internal"].length;
@@ -263,7 +281,7 @@ export default defineModule(
 					`${present.join(", ")} is set and never read: write outbound.proxy, or declare direct-despite-proxy`,
 				);
 			}
-			if (c.section.resolution === "in-process") return outboundOver(c.section, systemLookup, tls);
+			if (c.section.resolution === "in-process") return over(systemLookup);
 			// Each pool's helper is started here; a refused start ends both before boot is refused.
 			const shares = lookupShares({ maxLookups: maxLookupsOf(c.section) });
 			const poolOf = (pool: string, size: number) =>
@@ -282,7 +300,7 @@ export default defineModule(
 				);
 			}
 			const [ownPool, outsidePool] = started as [ResolverPool, ResolverPool?];
-			return outboundOver(c.section, { own: ownPool, outside: outsidePool ?? noPool, shares }, tls);
+			return over({ own: ownPool, outside: outsidePool ?? noPool, shares });
 		}),
 		// One set of counts for both paths.
 		m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),

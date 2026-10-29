@@ -15,8 +15,8 @@ const anyPublic = policyOf(policySettings.parse({ "allow-any-public": true }));
 const limits = { maxBytes: 1000, timeoutMs: 2000 };
 const offers: readonly Offer[] = ["tls1.1", "static-rsa", "cbc", "ecdhe-aead", "tls1.3"];
 
-/** Each peer, and how many handshakes it refused: a refusal there, not another failure. */
-const servers = new Map<Offer, { server: Server; port: number; ca: string; refused: number }>();
+/** Each peer, and the code of each handshake it refused: a refusal there, not another failure. */
+const servers = new Map<Offer, { server: Server; port: number; ca: string; refused: string[] }>();
 /** A proxy taking CONNECT to the port it is asked for on loopback. */
 let proxy: Server;
 let proxyPort = 0;
@@ -26,9 +26,14 @@ beforeAll(async () => {
 		const { server: options, ca } = await peerOptions(offer);
 		const server = createTlsServer(options, (_req, res) => res.end("{}"));
 		await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-		const peer = { server, port: (server.address() as AddressInfo).port, ca, refused: 0 };
-		server.on("tlsClientError", () => {
-			peer.refused += 1;
+		const peer = {
+			server,
+			port: (server.address() as AddressInfo).port,
+			ca,
+			refused: [] as string[],
+		};
+		server.on("tlsClientError", (error: NodeJS.ErrnoException) => {
+			peer.refused.push(error.code ?? error.message);
 		});
 		servers.set(offer, peer);
 	}
@@ -89,13 +94,13 @@ it("holds every connection to tls-options' floor, directly and through a proxy [
 		const refusals = Object.fromEntries(
 			offers.map((offer) => [offer, servers.get(offer)?.refused]),
 		);
-		for (const peer of servers.values()) peer.refused = 0;
+		for (const peer of servers.values()) peer.refused = [];
 		expect(refusals, way).toEqual({
-			"tls1.1": 1,
-			"static-rsa": 1,
-			cbc: 1,
-			"ecdhe-aead": 0,
-			"tls1.3": 0,
+			"tls1.1": ["ERR_SSL_UNSUPPORTED_PROTOCOL"],
+			"static-rsa": ["ERR_SSL_NO_SHARED_CIPHER"],
+			cbc: ["ERR_SSL_NO_SHARED_CIPHER"],
+			"ecdhe-aead": [],
+			"tls1.3": [],
 		});
 		expect(outcomes, way).toEqual({
 			"tls1.1": "unreachable",

@@ -1,4 +1,4 @@
-import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
 	type OutboundRefusals,
@@ -7,11 +7,12 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
-import { tlsOptionsForTests } from "@mod/tls-options/testing";
+import { tlsOptions } from "@mod/tls-options";
+import { testTlsOptions, tlsOptionsForTests } from "@mod/tls-options/testing";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import { type Narrower, outbound, signedOutbound } from "../src/contract.ts";
-import outboundModule, { section } from "../src/module.ts";
+import outboundModule, { NotTheFloor, outboundOver, section } from "../src/module.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -231,6 +232,26 @@ it("refuses boot without tls-options, naming it: no TLS connection goes without 
 	expect((refused as BootRefused).refusals).toEqual([
 		{ where: "outbound", reason: "no module provides tls-options" },
 	]);
+});
+
+it("refuses boot on a floor that is not tls-options' own, however alike, and takes none in its paths", async () => {
+	const copied = { ...testTlsOptions };
+	const another = defineModule({ name: "tls-options", replicaSafe: true, takes: [] }, (m) => [
+		m.provide(tlsOptions).by(() => copied),
+	]);
+	const refused = await assemble({
+		modules: [outboundModule, another],
+		config: { ...kernelConfig(), outbound: {} },
+	}).catch((error: unknown) => error);
+	expect((refused as BootRefused).refusals).toEqual([
+		{
+			where: "outbound",
+			reason: "the TLS floor is not one tls-options made: provide it from @mod/tls-options",
+		},
+	]);
+	expect(() => outboundOver(section.parse({}), async () => [], { floor: copied })).toThrow(
+		NotTheFloor,
+	);
 });
 
 it("boots on many instances, holding nothing they would need to share", async () => {
