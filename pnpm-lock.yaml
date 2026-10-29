@@ -306,6 +306,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../tls-options
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../url-setting
@@ -1063,6 +1066,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -1419,6 +1425,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
@@ -1529,6 +1538,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
@@ -1611,6 +1623,9 @@ importers:
       '@mod/subject-revocation-store':
         specifier: workspace:*
         version: link:../../templates/subject-revocation-store
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
@@ -4816,6 +4831,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4844,6 +4862,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4875,6 +4896,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4906,6 +4930,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       jose:
         specifier: 6.2.13
         version: 6.2.13
@@ -5059,6 +5086,10 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
 
   modules/user-ledger-http/ledger-wire:
     devDependencies:
@@ -5096,6 +5127,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -5127,6 +5161,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -5182,6 +5219,9 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../../oauth/token-endpoint
@@ -5256,6 +5296,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
