@@ -401,6 +401,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `carried` (`src/release-check/carried`): which package managers an app's image holds.
   - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
   - `given` (`src/release-check/given`): which tarballs the release check holds to.
+  - `helpers` (`src/release-check/helpers`): the helpers scene, the resolver's helper processes in an app's image, run as a deployment constrains them.
   - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
   - `release-listed` (`src/release-listed`): where the release publishes, the tarballs held to those its lists of what it ships were made of.
   - `release-notes` (`src/release-notes`): the release's notes, from the version's section of the changelog.

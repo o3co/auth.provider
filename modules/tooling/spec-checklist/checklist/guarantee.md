@@ -51,7 +51,7 @@
   faults: Pu, Pd, R, L, S, F, C
 - **guarantee-3-i** MUST NOT: an attempt limit lets an attempt pass while its store cannot count, whatever `rate-limit.fail-mode` is.
   faults: Pu, Pd, R, L, S, F, Fs, C
-- **guarantee-3-j** MUST NOT: anything is issued while the store cannot write, and a request made after it can write again passes.
+- **guarantee-3-j** MUST NOT: a grant that keeps in the store what it issues or what issuing spends (a code redeemed, a refresh family rotated, a device code used, a JWT bearer assertion's or an exchanged id_token's use) issues anything while the store cannot write, and a request made after it can write again passes.
   faults: M, R0, Wt, Nr
 - **guarantee-3-k** MUST NOT: the provider boots on a Redis set to evict keys.
   faults: Ev
