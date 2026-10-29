@@ -24,7 +24,7 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - What the upstream says is read once: a part that cannot be read refuses the answer, never counts as absent.
 - An entry that does not open is removed.
 - A refresh asks for the granted scope.
-- A refresh answer narrower than the grant is kept; one with no scope means the grant; a wider or unreadable one changes nothing.
+- A refresh answer narrower than the grant is kept; one with no scope means the grant; a wider or unreadable one is refused, its access token neither kept nor handed.
 - A record is written for what is left of its session, and not at all once the session lets nobody in at `use`: closed, ended, revoked, or short of a requirement.
 - A login's tokens are checked against their session once written; when it closed or fell short of a requirement meanwhile, they are withdrawn.
 
