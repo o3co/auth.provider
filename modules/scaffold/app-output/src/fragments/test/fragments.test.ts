@@ -2,6 +2,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
+	applicationConf,
 	envExample,
 	fragmentsIn,
 	fragmentsOf,
@@ -131,4 +132,19 @@ it("writes a quoted key with a dot in the local layer's example as that one key,
 		.join("\n");
 	expect(fragmentsOf([{ from: "copy", text: `${copy}\n` }])).toEqual(fragments);
 	expect(writtenOf(fragments).map((w) => w.key)).toEqual(['s."a.b"', 's.c."d.e"', "s.plain"]);
+});
+
+it("writes a choice a shipped fragment gives, oidc's ID token algorithm, in no live line: a copy sets it only once the operator uncomments it", async () => {
+	const fragments = await fragmentsIn(
+		shipped().filter((dir) => dir.endsWith(join("oauth", "oidc"))),
+	);
+	expect(fragments).toHaveLength(1);
+	const lines = (text: string) =>
+		text.split("\n").filter((line) => line.includes("OIDC_ID_TOKEN_ALG"));
+	expect(lines(envExample(settingsOf(fragments)))).toEqual(["# OIDC_ID_TOKEN_ALG=RS256"]);
+	expect(localConfExample(fragments)).not.toMatch(/^[^#].*id-token-alg/m);
+	// Read from env alone, so with no variable the file sets nothing.
+	expect(lines(applicationConf(fragments))).toEqual([
+		expect.stringMatching(/^\tid-token-alg = \$\{\?OIDC_ID_TOKEN_ALG\}$/),
+	]);
 });

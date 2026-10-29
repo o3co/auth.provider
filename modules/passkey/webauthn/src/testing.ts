@@ -1,13 +1,21 @@
 import { createHash, generateKeyPairSync, type KeyObject, randomBytes, sign } from "node:crypto";
 import type { z } from "zod";
+import { algorithmNames, ceremoniesFor, type RelyingParty } from "./ceremony/ceremony.ts";
 import type { section } from "./section.ts";
 
 export type WebauthnSettings = z.input<typeof section>;
 
 export const testOrigin = "https://rp.example";
 
-/** The ceremonies over a relying party, randomness and a clock a test gives, as the module builds them. */
-export { ceremoniesFor as testCeremonies } from "./ceremony/ceremony.ts";
+/**
+ * The ceremonies over a relying party, randomness and a clock a test gives, as the module builds
+ * them; a relying party naming no algorithms takes the section's default, every one.
+ */
+export const testCeremonies = (
+	rp: Omit<RelyingParty, "algorithms"> & Partial<Pick<RelyingParty, "algorithms">>,
+	random: (n: number) => Uint8Array,
+	now: () => number,
+) => ceremoniesFor({ algorithms: algorithmNames, ...rp }, random, now);
 
 /** The webauthn part of a test's configuration: a relying party at `rp.example`. */
 export function webauthnConfig(settings: Partial<WebauthnSettings> = {}) {

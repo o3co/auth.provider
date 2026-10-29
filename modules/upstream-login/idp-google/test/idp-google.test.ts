@@ -432,6 +432,20 @@ describe("idp-google", () => {
 		expect(lenient.asked.filter((a) => a.url === endpoints["token-endpoint"])).toHaveLength(1);
 	});
 
+	it("takes an id_token under the algorithms its settings name, RS256 alone by default", async () => {
+		const signed = await idToken({}, elliptic);
+		expect(await exchangedWith(signed)).toBe("refused");
+		const { upstream } = await open({
+			token: async () => granted({ id_token: signed }),
+			settings: { algorithms: ["ES256"] },
+		});
+		expect(await upstream.exchange(exchange())).toMatchObject({ subject: "g-alice" });
+		const client = { "client-id": "c", "client-secret": "s" };
+		for (const algorithms of [["HS256"], ["none"], []]) {
+			expect(settings.safeParse({ ...client, algorithms }).success, String(algorithms)).toBe(false);
+		}
+	});
+
 	it("refuses an id_token that does not hold for this client and login [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
 		const cases = {
 			"an unpublished key": await idToken({}, stranger),

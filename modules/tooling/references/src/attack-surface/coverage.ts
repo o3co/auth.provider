@@ -141,6 +141,11 @@ export const coverage: Coverage = {
 		{ key: "mtls.revocation.mode", weakens: "`disabled`: no certificate's revocation is checked" },
 		{ key: "kernel.environment", weakens: "`development`: plain-http origins and pages are taken" },
 		{
+			key: "oidc.id-token-alg",
+			weakens:
+				"other than `RS256`: the metadata lists no `RS256` (OpenID Connect Discovery 1.0 §3), and a relying party that registers no algorithm, so expects `RS256`, gets ID tokens signed with this one",
+		},
+		{
 			key: "dpop.nonce.required",
 			weakens: "`never`: no nonce is asked, so a proof made ahead is taken within its window",
 		},

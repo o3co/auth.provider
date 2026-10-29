@@ -35,8 +35,8 @@ Routes that take other sites' requests, by their reason:
 | POST | `/oauth/federation-grants/*` | `@mod/federation-grants` | A confidential client's own call, authenticated as that client; it reads no cookie. |
 | POST | `/oauth/federation/*` | `@mod/federation-tokens` | A client's own call, authenticated as that client; it reads no cookie. |
 | POST | `/oauth/introspect` | `@mod/token-control` | A resource server's call, authenticated as a client; it reads no cookie. |
-| GET | `/oauth/logout` | `@mod/rp-logout` | RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names. |
-| POST | `/oauth/logout` | `@mod/rp-logout` | RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names. |
+| GET | `/oauth/logout` | `@mod/rp-logout` | RP-initiated logout is a navigation from the RP's site by design; without asking, it closes only the session the browser holds, where a hint the provider signed names it. |
+| POST | `/oauth/logout` | `@mod/rp-logout` | RP-initiated logout is a navigation from the RP's site by design; without asking, it closes only the session the browser holds, where a hint the provider signed names it. |
 | POST | `/oauth/revoke` | `@mod/token-control` | It reads no cookie: revoking needs the token itself, which a public client may revoke for itself (RFC 7009). |
 | POST | `/oauth/token` | `@mod/token-endpoint` | Authorization is per grant; a grant that reads a cookie declares it and checks the origin itself. |
 | POST | `/oauth/userinfo` | `@mod/userinfo` | The access token comes in the Authorization header, never a cookie, and it only reads. |
@@ -193,6 +193,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `mtls.mode` | `@mod/mtls` |  | `self-signed`: any certificate that parses binds, with no revocation |
 | `mtls.revocation.mode` | `@mod/mtls` |  | `disabled`: no certificate's revocation is checked |
 | `mtls.revocation.on-unavailable` | `@mod/mtls` |  | named so (`accept-*` and the like) |
+| `oidc.id-token-alg` | `@mod/oidc` | `"RS256"` | other than `RS256`: the metadata lists no `RS256` (OpenID Connect Discovery 1.0 §3), and a relying party that registers no algorithm, so expects `RS256`, gets ID tokens signed with this one |
 | `outbound.allow-any-public` | `@mod/outbound` | `false` | any public host is reached by name, not only those `outbound.allow` lists |
 | `outbound.internal-hosts` | `@mod/outbound` | `[]` | URLs of the operator's own configuration reach private addresses at these hosts |
 | `outbound.plain-internal` | `@mod/outbound` | `[]` | plain http to these pairs, readable and changeable on the way |

@@ -91,7 +91,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 9. **A browser route that changes state needs CSRF or origin evidence.**
    - Kept by: `csrf`'s policy, marked `own-site` in `http.marks`; a route declares whether it changes state and, without such a policy, why it takes other sites' requests, and `http` checks the declarations at boot.
    - Scenes: identity (login and logout without evidence), device (the verification interface), federation (the grant question, a link started from another site), code ("session grant: refusals").
-   - Declared exceptions: the route reference's "Other sites" reasons, among them RP-initiated logout, a navigation from the client's site that closes only the session a hint the provider signed names, which code ("a logout the client starts") checks. No scene checks the boot check itself.
+   - Declared exceptions: the route reference's "Other sites" reasons, among them RP-initiated logout, a navigation from the client's site that closes without asking only the session the browser holds, where a hint the provider signed names it; any other logout asks the person on the provider's own page, under `csrf`'s policy. Code ("a logout the client starts") checks both. No scene checks the boot check itself.
 10. **A `POST` taken before authentication is limited per source.**
     - Kept by: `rate-limit`'s policies, marked `per-source`; a route without one declares why it counts no source.
     - Scenes: oauth ("limits requests to the token endpoint per source"), identity (login attempts per sender), passkey ("passkey login: the options' limit"), ops (the operations routes and request counting).
@@ -155,7 +155,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Making the proxy strip or overwrite `X-Forwarded-For`, the forwarded scheme and the client-certificate header that clients send.
   - Bounding upload rates and connections per client in front. The app bounds a request's headers and the whole request (`http.headers-timeout`, `http.request-timeout`) and the connections it holds (`http.max-connections`), all clients together.
   - Synchronizing host clocks.
-  - Accepting that RP-initiated logout by GET with a recent `id_token_hint` closes a session without asking.
+  - Accepting that RP-initiated logout with a recent `id_token_hint` closes without asking the session the browser holds, where the hint names that session.
   - The [runbook's list](runbook.md#before-you-deploy) of what the deployment must provide.
 
 ## Browsers: sessions, cookies and CSRF
@@ -281,5 +281,6 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Stored secrets (TOTP secrets, the upstream tokens `federation-tokens` keeps, delegated credentials) are sealed by `seal`, with AES-256-GCM; a held login's upstream tokens too, where the default `upstream-handoff-seal` is composed.
 - **Left to you:**
   - Rotating keys as the [runbook](runbook.md#rotating-the-signing-key) describes.
+  - Writing `oidc.id-token-alg` other than `RS256`, with a `keys.signing` key of that algorithm. The metadata then lists no `RS256` (OpenID Connect Discovery 1.0 §3), and a relying party that registered no algorithm, and so expects `RS256`, gets ID tokens signed with yours; each start warns of it.
   - The strength of a sealing of your own, contributed to `upstream-handoff`'s `handoffSealing` in place of `upstream-handoff-seal`.
   - Retiring a sealing key only after a `reseal` run that exited 0, as the [runbook](runbook.md#rotating-the-sealing-key) describes. A value a removed key still sealed becomes unavailable until the key is put back.

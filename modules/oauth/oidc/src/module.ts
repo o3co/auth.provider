@@ -1,12 +1,15 @@
 import { hintReaders } from "@mod/authorize";
 import { claimScopes, claimsSelections } from "@mod/claims-selection";
+import { documentCopies } from "@mod/client-documents";
+import { metadataSections } from "@mod/clients";
 import { idTokens } from "@mod/code-grant";
 import { issuer, metadata } from "@mod/issuer";
-import { defineModule, setting } from "@mod/kernel";
-import { keys } from "@mod/keys";
+import { contract, defineModule, setting } from "@mod/kernel";
+import { isVerifyAlgorithm, keys } from "@mod/keys";
 import { type SubjectAttributes, subjectAttributes } from "@mod/subject-attributes";
 import { userAttribute } from "@mod/users";
 import { z } from "zod";
+import { clientCopyOf, clientSectionOf, requiredAlg } from "./alg.ts";
 import { claimsOf, scopeOfClaim, tableClaims, tableScopes } from "./claims/table.ts";
 import { idTokenHints, type ReleasedClaims, releasedClaims } from "./contract.ts";
 import { hintReaderOf, hintsOver } from "./hints.ts";
@@ -17,7 +20,17 @@ const section = z.strictObject({
 		.pipe(z.number().int().min(60).max(86_400))
 		.prefault("1h")
 		.describe("How long an ID token lasts: a duration with a unit, e.g. 1h."),
+	"id-token-alg": z
+		.string()
+		.refine(isVerifyAlgorithm, "a JWS algorithm")
+		.prefault(requiredAlg)
+		.describe(
+			"The JWS algorithm ID tokens are signed with, which `keys` must sign with: RS256 unless written. Another warns at each start, as OpenID Connect Discovery 1.0 §3 has RS256 listed.",
+		),
 });
+
+/** The algorithm ID tokens are signed with, the operator's, checked against keys once each boot. */
+const idTokenAlg = contract<string>("oidc.id-token-alg");
 
 const nothing = Object.freeze({});
 
@@ -44,6 +57,27 @@ export default defineModule(
 		takes: [subjectAttributes, keys, issuer, claimsSelections],
 	},
 	(m) => [
+		m.provide(idTokenAlg).by(async (c) => {
+			const signer = await c.get(keys);
+			// ID tokens are checked by others with the public key; a shared secret could forge them.
+			if (!signer.asymmetric()) {
+				return c.refuse("oidc", "ID tokens need an asymmetric signing key");
+			}
+			const signed = signer.algorithm();
+			const alg = c.section["id-token-alg"];
+			if (alg !== signed) {
+				return c.refuse(
+					"oidc.id-token-alg",
+					`keys signs with ${signed}, not oidc.id-token-alg's ${alg}: add an ${alg} key as keys.signing, or set id-token-alg to ${signed}`,
+				);
+			}
+			if (alg !== requiredAlg) c.log.warn("oidc.id_token_alg_not_rs256", { alg });
+			return alg;
+		}),
+		m.contribute(metadataSections).by(async (c) => clientSectionOf(await c.get(idTokenAlg))),
+		m
+			.contribute(documentCopies)
+			.by(async (c) => clientCopyOf(clientSectionOf(await c.get(idTokenAlg)))),
 		m.provide(releasedClaims).by(async (c) => releasedOver(await c.get(subjectAttributes))),
 		m
 			.provide(idTokenHints)
@@ -54,11 +88,9 @@ export default defineModule(
 				hintReaderOf(hintsOver({ keys: await c.get(keys), issuer: (await c.get(issuer)).url })),
 			),
 		m.contribute(idTokens).by(async (c) => {
+			// Every client's ID tokens: a client naming another algorithm is refused by its section.
+			await c.get(idTokenAlg);
 			const signer = await c.get(keys);
-			// ID tokens are checked by others with the public key; a shared secret could forge them.
-			if (!signer.asymmetric()) {
-				return c.refuse("oidc", "ID tokens need an asymmetric signing key");
-			}
 			const issuerUrl = (await c.get(issuer)).url;
 			const lifetime = c.section["id-token-lifetime"];
 			const released = releasedOver(await c.get(subjectAttributes));
@@ -107,7 +139,7 @@ export default defineModule(
 		// ID tokens are signed with keys' current key alone.
 		m.contribute(metadata).by(async (c) => ({
 			name: "id_token_signing_alg_values_supported",
-			value: [(await c.get(keys)).algorithm()],
+			value: [await c.get(idTokenAlg)],
 		})),
 	],
 );

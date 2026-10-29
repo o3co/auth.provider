@@ -20,6 +20,7 @@
   - `step-up-page`: the page that raises authentication. Optional.
   - Both pages are https URLs (http only on a loopback host, never in production) by `url-setting`.
   - `oidc-mode`: `oidc-required` or `dual`.
+  - `login-url-limit`: the longest login URL sent, 8KiB unless set.
   - `requests` (requests per source in each window, over both methods) and `window`.
   - `claims-parameter`, true by default: a claims request's names and value constraints are taken, and discovery says `claims_parameter_supported`. False ignores them and warns at boot `authorize.claims_parameter_off`; what else a claims request asks still holds, as `claims-request` and `flow` say.
 - Audit events to `audit`: declared in `./audit-events`, listed in the audit event reference. Never the code, `state`, the redirect URI or the scope; none for a malformed request, an unknown client or redirect URI, nor for unavailable, which only warns, naming what and the route (`http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after).
@@ -35,10 +36,9 @@
 - OpenID Connect's offline access is not offered: `offline_access` in any authorization request is dropped, not refused, and the request goes on without it, whatever the client is allowed (OpenID Connect Core §11). A request left with nothing is `invalid_scope`, never given the client's default.
 - A client that is not first-party, once logged in, is refused with `unauthorized_client` while `consent` is not `asking`. Next, before consent, `tokens`' issuance policies are asked for the code's access token (`authorization_code`, the session); a refusal is `access_denied` with the policy's description.
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
-- Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: the routes' declared `503` `temporarily_unavailable`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
+- Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: the routes' declared `503` `temporarily_unavailable`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`; a browser with no session logs in before an error goes back, but for `prompt=none` (RFC 9700 §4.11.2).
 - A fresh login that `prompt=login` or `max_age` demands counts only through a `reauth` record, made for the whole request when the browser is sent to log in and taken by that request. A session whose authentication time `session` answers as unknown meets neither, nor an essential `auth_time`, so a login is asked again.
 - In an OpenID Connect request, the End-User an `id_token_hint` names is the only one a code may be for: another session's is `login_required`, as `claims`' `sub` is (the hint's reading: `hint`'s card).
-- The login page is told the `prompt=login` and `max_age` a request asked, beside `redirect_to`, to hand to a login it starts elsewhere (an upstream's), so that login is new too.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `url-setting`, `clients`, `client-documents`, `redirect-uris`, `reauth`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `claims-selection`, `rate-limit`, `audit`

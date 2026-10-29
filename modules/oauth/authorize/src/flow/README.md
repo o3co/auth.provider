@@ -17,10 +17,12 @@ Internal module of `authorize`: the steps a request goes through once its redire
   - A decision: a refusal, a page to go to, or the code and its subject.
 
 ## Invariants
-- The order: a denial coming back from consent, the request's form, acr_values and `claims`, the scope, the `id_token_hint`, taking the re-authentication record, the session's entry and freshness, the step-up, a client consent cannot serve, the issuance policies, consent, the audience asked, the code.
+- The order: a refusal `route` read in the form, a denial coming back from consent, the request's form, acr_values and `claims`, the scope, the `id_token_hint`, taking the re-authentication record, the session's entry and freshness, the step-up, a client consent cannot serve, the issuance policies, consent, the audience asked, the code.
 - `tokens`' `admits` is asked as the code's exchange will ask: the subject, the client, the scope, the audience asked (the default while it is refused), the session's amr and authentication time (marked when it is unknown), the met acr, grant type `authorization_code` and the session. A refusal is `access_denied` with the policy's description, recorded with the policy's name and reason.
 - Without a session fresh enough, the browser goes to the login page with `redirect_to` back to the endpoint, without the old record's name and carrying a new re-authentication record when `prompt=login`, `max_age` or an essential `auth_time` was asked; `prompt=login` and `max_age` themselves go beside `redirect_to`.
-- A request that names a re-authentication record it cannot take (spent, unknown, or another request's) is refused with `login_required`, before its session is read.
+- A request that names a re-authentication record it cannot take (spent, unknown, or another request's) is refused with `login_required`.
+- Each refusal before the session (RFC 9700 §4.11.2) goes back only to a browser logged in: one without a session goes to the login page first, `redirect_to` the request with every value sent, repeats included, so it comes back to the same refusal. A silent request (`prompt=none`) is answered at once.
+- A login URL past the package's `login-url-limit` is not sent, on either way to the login page: the refusal, or `invalid_request` for a request otherwise taken, is answered at the endpoint, `400` with nothing sent back.
 - A request back from its login, its record taken, whose session is still not new enough (its authentication time unknown, or known and before the asking), is refused with `login_required`, not sent to log in again.
 - The audience asked is read before the issuance policies, so they judge the code's audience; its refusal (`invalid_target`) goes back with `state` and `iss`, unrecorded and with no code, only after consent and the policies.
 - Each step returns its decision as data; only `route` builds answers.
