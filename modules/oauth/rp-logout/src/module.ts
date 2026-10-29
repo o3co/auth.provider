@@ -107,7 +107,7 @@ export default defineModule(
 				// It closes the session even on a GET, so a HEAD is not answered as one.
 				...(method === "GET" ? { changesState: true } : {}),
 				crossSite:
-					"RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names.",
+					"RP-initiated logout is a navigation from the RP's site by design; without asking, it closes only the session the browser holds, where a hint the provider signed names it.",
 				// Counted before any hint is checked, which reads keys and the store.
 				uses: [counted(c)],
 				handle: await c.get(ending),
