@@ -118,6 +118,23 @@ describe("exchange-id-tokens", () => {
 		).toEqual(["issued"]);
 	});
 
+	it("takes an id_token under the algorithms its kind's settings name, RS256 alone by default", async () => {
+		const es256 = await elliptic.sign(googleClaims());
+		expect(said(await (await serve()).exchange("android-app", es256))).toEqual(failed);
+		const widened = await serve({
+			...settings,
+			google: { ...settings.google, algorithms: ["ES256"] },
+		});
+		expect(said(await widened.exchange("android-app", es256))).toEqual(["issued"]);
+		const rs256 = await google.sign(googleClaims());
+		expect(said(await widened.exchange("android-app", rs256))).toEqual(failed);
+		for (const algorithms of [["HS256"], []]) {
+			await expect(
+				boot({ ...settings, google: { ...settings.google, algorithms } }),
+			).rejects.toBeInstanceOf(BootRefused);
+		}
+	});
+
 	it("refuses an upstream subject users links to no one, and an id_token from before the subject's revocation, by the clock skew", async () => {
 		const s = await serve();
 		expect(

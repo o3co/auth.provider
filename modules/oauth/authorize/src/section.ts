@@ -13,6 +13,13 @@ export const section = z.strictObject({
 		.describe(
 			"Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host, with `kernel.environment = development`).",
 		),
+	"login-url-limit": setting
+		.size("B")
+		.pipe(z.number().int().min(2048).max(65_536))
+		.prefault("8KiB")
+		.describe(
+			"The longest login URL a browser is sent to, `redirect_to` and all: a size with a unit, from 2KiB to 64KiB. A request whose login URL would be longer is answered here, `400`, nothing sent back.",
+		),
 	/** Whether every request names `openid` in its own scope (`dual` also serves plain OAuth clients). */
 	"oidc-mode": z
 		.enum(["oidc-required", "dual"])

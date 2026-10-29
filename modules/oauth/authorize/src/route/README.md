@@ -14,7 +14,8 @@ Internal module of `authorize`: the endpoint's requests and answers.
 
 ## Invariants
 - Parameter lengths are capped (state 512, others 2048). Before the redirect URI is trusted, errors go out as `token-endpoint`'s OAuth error responses.
-- Once it is trusted, a repeated or too long parameter is `invalid_request` (a repeated one the composed rule reads, as its `repeated` answers), and unavailable becomes the refusal `temporarily_unavailable`.
+- Once it is trusted, a repeated or too long parameter is `invalid_request` (a repeated one the composed rule reads, as its `repeated` answers), handed to the flow to answer; unavailable becomes the refusal `temporarily_unavailable`.
+- A decision kept at the endpoint (`answer`) is `token-endpoint`'s OAuth error response, `400`, never a redirect.
 - Unavailable before trust is left to `http`, which answers it as declared and warns once, `http.unavailable`; after trust, it leaves one warning `authorize.unavailable`; either names only what was unavailable and the route.
 - What is recorded comes from the decision itself: the subject of a code, the reason of a refusal that carries one, and the refusing policy's name.
 

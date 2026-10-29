@@ -1,3 +1,4 @@
+import { algorithmsSetting, knownAlgorithms } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
 import {
 	browsedRefusalText,
@@ -50,6 +51,9 @@ const section = clientSetting
 		"jwks-uri": endpoint
 			.prefault("https://appleid.apple.com/auth/keys")
 			.describe("Where the keys that sign Apple's id_tokens are read; Apple's own unless named."),
+		algorithms: algorithmsSetting(knownAlgorithms, ["RS256"]).describe(
+			"The algorithms Apple's id_tokens may be signed with: asymmetric ones only, RS256 by default, the one Apple signs with.",
+		),
 		"clock-skew": setting
 			.duration("s")
 			.pipe(z.number().int().min(0).max(300))
