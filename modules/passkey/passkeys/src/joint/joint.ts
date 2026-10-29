@@ -211,7 +211,7 @@ export function jointOver(store: PasskeyStore, holder: KeptRecords["holder"], no
 		 * What the subject holds after a write that emptied its list left `emptied`, in one read that
 		 * writes nothing: a `passkey` or a `pending` one listed; `none` where the holder is that one at
 		 * that fence or later and every listed record reads as none of the subject's; else `unsure`.
-		 * A holder that changes between its two reads is read from the start once more.
+		 * A holder that changes between its two reads, its handle, list or fence, is read from the start once more.
 		 */
 		afterRemoval: async (
 			subject: string,
@@ -231,7 +231,8 @@ export function jointOver(store: PasskeyStore, holder: KeptRecords["holder"], no
 					}
 				}
 				const again = await holder(subject);
-				if (again?.handle !== first.handle || again.fence !== first.fence) continue;
+				const listed = again?.credentials.join("\n") === first.credentials.join("\n");
+				if (again?.handle !== first.handle || again.fence !== first.fence || !listed) continue;
 				if (held !== "none") return held;
 				const same = first.handle === emptied.handle && first.fence >= emptied.fence;
 				return same && !missing ? "none" : "unsure";
