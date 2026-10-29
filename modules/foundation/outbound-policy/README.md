@@ -8,7 +8,7 @@
 - Sending, resolving names, connecting, the proxy and the answers: `outbound`, which owns the operator's section `outbound` and applies this policy to every request. What a destination means to a feature: the caller's.
 
 ## Offers
-- `outbound.refusals`: at boot, why the policy refuses a URL and what to set, `<reason>: <what to set>` (the `outbound` keys `policySettings` takes, `outbound.plain-ipv4`, or the URL to write otherwise), naming keys alone and never the URL's host, port or other value; nothing when the policy lets it through.
+- `outbound.refusals`: at boot, why the policy refuses a URL and what to set, `<reason>: <what to set>` (the `outbound` destination keys `policySettings` takes, `outbound.plain-ipv4`, or the URL to write otherwise), naming keys alone and never the URL's host, port or other value; nothing when the policy lets it through.
   - It resolves no name and sends nothing, so a caller sending credentials can refuse boot on a destination it could never reach; a name passes on its name, an address in the URL is checked at once. A host the caller's own narrowing leaves out is told as no key to set.
   - Its `plainInternal`: whether a URL is taken as plain http to a `plain-internal` pair for the caller's own `internal` URL; absent, it is read as no.
   - Its `browsedRefusal`: why a URL the browser is sent to is refused: plain http other than at a loopback name or as `plainInternal` takes it; absent, plain http is refused.
