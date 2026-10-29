@@ -17,6 +17,7 @@ import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { CompactSign, EncryptJWT, FlattenedSign, type JWTPayload, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
@@ -103,6 +104,7 @@ async function boot({
 		modules: [
 			http,
 			outboundModule,
+			tlsOptionsForTests,
 			externalJwtModule,
 			clientsModule,
 			secretHashModule,
