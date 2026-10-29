@@ -52,7 +52,7 @@
 - A failed refresh answers the same for 30 seconds without asking the upstream: kept in each process, by session, IdP and a hash of the access token.
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `clients`, `redirect-uris`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, and through its internal modules `tokens`, `sender-binding`, `refresh`, `session-tokens`, `seal`
+- `kernel`, `http`, `request-source`, `clients`, `redirect-uris`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, and through its internal modules `tokens`, `sender-binding`, `session-tokens`, `seal`
 
 ## Vocabulary
 - receiver: a client the operator lets receive upstream tokens.

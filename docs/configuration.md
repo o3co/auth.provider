@@ -345,8 +345,8 @@ From `@mod/login-password`.
 | `login-password.attempts` | integer (1–100) | `20` |  |  |  | Login attempts allowed per source in each window, within bounds that keep guessing slow. |
 | `login-password.window` | string | `15m` |  |  |  | The window `attempts` is counted over, from 1m to 1d. |
 | `login-password.account-attempts` | integer (1–100) | `10` |  |  |  | Failed attempts allowed at one identifier, from any source, before each next one waits. |
-| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d. |
-| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out. |
+| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d, and no shorter than `account-max-wait`. |
+| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h and no longer than `account-window`: the wait doubles to it, never locking out. |
 
 ## mail
 
@@ -556,7 +556,8 @@ From `@mod/redis`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to. |
+| `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to, with no query: each option is its own setting. |
+| `redis.address-family` | ipv4 \| ipv6 |  |  |  |  | The address family the host's name resolves to: ipv4 or ipv6; either when unset. |
 | `redis.prefix` | string | `store` |  |  |  | What every key the store writes begins with. |
 | `redis.connect-timeout` | string | `2s` |  |  |  | How long connecting to Redis may take, at least 100ms. |
 | `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |

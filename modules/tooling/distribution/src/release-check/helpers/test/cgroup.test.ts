@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { DockerFailed } from "../../containers/docker.ts";
 import { pidsCurrent } from "../cgroup.ts";
-import { DockerFailed } from "../containers/docker.ts";
 
 const reading =
 	(files: Readonly<Record<string, string>>) =>

@@ -58,7 +58,7 @@ describe("the algorithm ID tokens are signed with", () => {
 		expect(await signed(edDsa)).toBe("EdDSA");
 	});
 
-	it("refuses to start where keys does not sign with it, by the algorithms' names, giving both ways out", async () => {
+	it("refuses to start where keys does not sign with it, by the settings' paths alone, giving both ways out", async () => {
 		const refused = (config: Record<string, unknown>) =>
 			expect(booted({ runtime, config })).rejects.toMatchObject({
 				refusals: [{ where: "oidc.id-token-alg", reason: expect.any(String) }],
@@ -70,7 +70,7 @@ describe("the algorithm ID tokens are signed with", () => {
 				{
 					where: "oidc.id-token-alg",
 					reason:
-						"keys signs with EdDSA, not oidc.id-token-alg's RS256: add an RS256 key as keys.signing, or set id-token-alg to EdDSA",
+						"keys.signing.alg is not oidc.id-token-alg: give keys.signing a key of the algorithm oidc.id-token-alg names, or set oidc.id-token-alg to keys.signing.alg",
 				},
 			],
 		});
@@ -94,7 +94,7 @@ describe("the algorithm a client registers for its ID tokens [oidc-core-10.1-a]"
 		expect(algOf((await maker?.make(request)) ?? "")).toBe("EdDSA");
 	});
 
-	it("refuses to start where a registered client names another, by its place and the algorithm alone", async () => {
+	it("refuses to start where a registered client names another, by its place and the setting's path alone", async () => {
 		const registered = publicClient({
 			id: "the-client",
 			sections: { oidc: { "id-token-alg": "EdDSA" } },
@@ -104,7 +104,7 @@ describe("the algorithm a client registers for its ID tokens [oidc-core-10.1-a]"
 			refusals: [
 				{
 					where: "clients.registered.0.sections.oidc.id-token-alg",
-					reason: "ID tokens are signed with RS256 alone",
+					reason: "ID tokens are signed with oidc.id-token-alg alone",
 				},
 			],
 		});

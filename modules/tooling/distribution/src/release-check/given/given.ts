@@ -30,3 +30,16 @@ export function tarballsToCheck(
 		? { problems: [`${dir}: holds no tarball to check`] }
 		: { dir, tarballs };
 }
+
+type Packed = { readonly tarballs: readonly string[] } | { readonly problems: readonly string[] };
+
+/**
+ * The release's own tarballs, where none are given: the bundles built, then packed into `into`; a
+ * build with problems stops it before anything is packed.
+ */
+export const packBuilt =
+	(build: () => { readonly problems: readonly string[] }, pack: (into: string) => Packed) =>
+	(into: string): Packed => {
+		const { problems } = build();
+		return problems.length > 0 ? { problems } : pack(into);
+	};

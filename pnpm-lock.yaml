@@ -3491,6 +3491,9 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
@@ -3513,6 +3516,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       ioredis:
         specifier: 5.11.1
         version: 5.11.1
@@ -4478,6 +4484,16 @@ importers:
       yaml:
         specifier: 2.9.1
         version: 2.9.1
+    devDependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
 
   modules/tooling/guard:
     dependencies:

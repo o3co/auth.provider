@@ -12,11 +12,12 @@ Internal module of `references`: the attack surface reference, what reaches the 
 
 ## Offers
 - `attackSurfaceIn` (root) → what the reference is made from; `attackSurfaceOf` → the reference; `attackSurfaceFile`.
-- The naming rules: `secretByName` (a last segment that names a secret, or ends in one), `looseningByName` (`accept-*`, `insecure-*`, `fail-mode`, `on-unavailable`, `durability`, `replication`, `subject-check`), `looseningCandidate`, `destinationByName`; `answersHead` (a `GET` that does not change state).
+- The naming rules: `secretByName` (a last segment that names a secret, or ends in one), `looseningByName` (`accept-*`, `insecure-*`, `fail-mode`, `on-unavailable`, `durability`, `replication`, `subject-check`), `looseningCandidate`, `destinationCandidate` (a last segment holding `host`, `api`, `issuer`, `server` or `discovery`), `destinationByName`; `answersHead` (a `GET` that does not change state).
 
 ## Invariants
 - The reference is one composition on its defaults, and says so; a list is what modules declare, never a proof.
 - Every setting the candidate rule or the security model names as a choice (written with a value, or under "Left to you") is classified: by a naming rule, or in the coverage as weakening or not, secret or not.
+- Every setting the destination candidate rule names is classified: by `destinationByName`, or in the coverage as naming a destination or not.
 - Every setting, route and runbook section the coverage names is in the workspace.
 
 ## Depends on

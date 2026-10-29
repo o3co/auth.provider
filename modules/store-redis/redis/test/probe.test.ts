@@ -9,6 +9,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces } from "@mod/store";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 import { fakeRedis } from "./fake-redis.ts";
@@ -41,7 +42,7 @@ async function boot(port: number, extra: readonly Module[] = []) {
 		}),
 	]);
 	app = await assemble({
-		modules: [redisModule, asker, ...extra],
+		modules: [redisModule, tlsOptionsForTests, asker, ...extra],
 		config: { ...kernelConfig(), redis: { url: `redis://127.0.0.1:${port}` } },
 		runtime: quietRuntime({
 			clock: { now: () => 0 },
@@ -73,7 +74,7 @@ it("refuses to start where it cannot connect, by the failure's code alone", asyn
 	const port = await redis.listen();
 	redis.down();
 	const refused = await assemble({
-		modules: [redisModule],
+		modules: [redisModule, tlsOptionsForTests],
 		config: { ...kernelConfig(), redis: { url: `redis://127.0.0.1:${port}` } },
 		runtime: quietRuntime(),
 	}).catch((error: { refusals?: unknown }) => error.refusals);

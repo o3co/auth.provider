@@ -12,6 +12,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/store": "workspace:*",
+		"@mod/tls-options": "workspace:*",
 		"ioredis": "5.11.1",
 		"zod": "4.6.7"
 	},

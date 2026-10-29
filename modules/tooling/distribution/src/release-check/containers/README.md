@@ -6,7 +6,7 @@ Internal module of `release-check`: the docker client, and each container a chec
 - Runs docker commands within a time, sorting how each fails, and runs each container under one deadline, removing it at the end however its work ends.
 
 ## Not here
-- What a container is for: building, installing, booting an app, and what a scene looks at in it (`release-check`'s images and scenes). Reading the cgroup (`release-check`'s `cgroup`).
+- What a container is for: building, installing, booting an app, and what a scene looks at in it (`release-check`'s images and scenes). Reading the cgroup (`helpers`).
 
 ## Offers
 - `docker` (args, ms, `merged`?, `signal`?) → what it wrote, trimmed; or `DockerFailed`, its `kind` one of `absent` (no such container or object), `timeout` (the client killed past its time), `unstarted` (no client), `failed` (any other, with what it `told` and `wrote`, both in its message, and its `code`).

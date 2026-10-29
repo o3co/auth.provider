@@ -76,6 +76,7 @@
 - **oidc-discovery-3-t** MUST: the OP supports the `openid` scope.
 - **oidc-discovery-3-u** SHOULD: `scopes_supported` lists the scopes OpenID Connect Core defines that the OP supports.
 - **oidc-discovery-3-v** MUST: the discovery document carries `response_types_supported`.
+  note: N-response-types
 - **oidc-discovery-3-w** MUST: a Dynamic OpenID Provider supports the response types `code`, `id_token` and `id_token token`.
   out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-discovery-3-x** MUST: a Dynamic OpenID Provider supports the grant types `authorization_code` and `implicit`.
