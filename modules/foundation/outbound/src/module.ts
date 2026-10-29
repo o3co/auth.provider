@@ -176,6 +176,11 @@ export function outboundOver(
 ): Paths {
 	// A copy of the floor, or another's value, may carry a weaker one: tls-options' own alone is taken.
 	if (!isFloor(tls.floor)) throw new NotTheFloor();
+	// What was checked is what is sent: the caller's object, changed later, is never read again.
+	const checked: Tls = Object.freeze({
+		floor: tls.floor,
+		...(tls.ca === undefined ? {} : { ca: tls.ca }),
+	});
 	const pools =
 		typeof lookupsIn === "function"
 			? inProcessPools(settings, lookupsIn, lookupsAtOnce)
@@ -208,7 +213,7 @@ export function outboundOver(
 			takesIpv4(settings["plain-ipv4"], admitted) ? 4 : undefined,
 		);
 		return requestPlace(() =>
-			send(admitted, sent, limits, resolving, policy, route, tls, deadlineOf),
+			send(admitted, sent, limits, resolving, policy, route, checked, deadlineOf),
 		);
 	};
 	return {
