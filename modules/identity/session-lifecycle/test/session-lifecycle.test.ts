@@ -242,6 +242,27 @@ describe("session authentication time", () => {
 		expect(raised?.cookies[0]).toBe(jar.write("session", secretIn(raised?.cookies[0]), 3595));
 	});
 
+	it("takes a login naming its authentication time the opening as authenticated when the session opens, known", async () => {
+		const recorded = recordingLog();
+		const { s, stores } = await boot({}, [], { log: recorded.log });
+		const done = await s.complete(testRequest(), {
+			...facts(),
+			authenticatedAt: "opening" as never,
+		});
+		expect(done.session.context.authenticatedAt).toBe(now);
+		expect(stores.kept.peek(done.session.id)).toMatchObject({
+			format: 2,
+			openedAt: now,
+			authenticatedAt: now,
+		});
+		expect(stores.kept.peek(done.session.id)).not.toHaveProperty("authenticatedAtUnknown");
+		expect(
+			recorded.lines().filter((l) => l.event.startsWith("session-lifecycle.authentication")),
+		).toEqual([]);
+		const named = s.complete(testRequest(), { ...facts(), authenticatedAt: "now" as never });
+		await expect(named).rejects.toThrow(TypeError);
+	});
+
 	it("refuses, before opening anything, a login whose authentication time is no time, never naming it", async () => {
 		const { s } = await boot();
 		for (const at of [-1, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
