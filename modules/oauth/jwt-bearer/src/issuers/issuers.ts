@@ -195,7 +195,7 @@ export const issuersSetting = z
 	.array(issuerEntry)
 	.prefault([])
 	.describe(
-		"The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`.",
+		"The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. An entry's keys are `issuer`, `keys` or `jwks-uri` (with `accept-key-set-elsewhere`), `subject`, `upstream`, `subject-is-key-thumbprint`, `self-issued-prefix`, `conditions`, `accept-any-subject`, `ceiling`, `max-assertion-lifetime`, `clock-skew`, `profile`, `client` and `algorithms`; `jwt-bearer`'s internal module `issuers` says what each takes.",
 	);
 
 /** A trusted issuer that takes self-issued signers: the prefix of their names, and its place. */
