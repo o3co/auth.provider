@@ -96,12 +96,17 @@ export const clientPlans = {
 	},
 } as const satisfies Record<string, ClientPlanDefinition>;
 
-/** The runs the package's evidence comes from, as `spec-checklist` lists the runs a CI run must report: one job of the kind `oidf-plan` per plan, a gate run. */
+/** The file a plan's vitest runs, and the only one its evidence run reports. */
+const planFile = (name: string) => `runs/${name}.test.ts`;
+
+/** The runs the package's evidence comes from, as `spec-checklist` lists the runs a CI run must report: one job of the kind `oidf-plan` per plan, on its own file, a gate run. */
 export const evidenceRuns = [...Object.keys(plans), ...Object.keys(clientPlans)].map((name) => ({
 	entry: `@mod/interop-oidf#${name}`,
 	kind: "oidf-plan",
 	matrix: name,
-	// Its tests name no item yet, so a release stops on each that failed, whatever it names.
+	// An item a plan's file names is looked for in that plan's run alone.
+	files: planFile(name),
+	// A release stops on each of its tests that failed, whatever items it names.
 	gate: true,
 }));
 
@@ -120,7 +125,7 @@ export function planCommands(
 			"run",
 			"--config",
 			run in clientPlans ? "vitest.rp.config.ts" : "vitest.config.ts",
-			`runs/${run}.test.ts`,
+			planFile(run),
 		],
 		run,
 	}));
