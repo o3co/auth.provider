@@ -162,7 +162,7 @@ describe("mtls", () => {
 		});
 		expect(await listing.bindingOf(revoked, [intermediate])).toMatchObject({
 			kind: "refused",
-			error: "invalid_certificate",
+			error: "invalid_client",
 		});
 		const resource = { kind: "resource", token: "t" } as const;
 		expect(await listing.bindingOf(revoked, [intermediate], resource)).toMatchObject({
@@ -210,7 +210,7 @@ describe("mtls", () => {
 		);
 		expect(await ocsp.bindingOf(client, [intermediate])).toMatchObject({
 			kind: "refused",
-			error: "invalid_certificate",
+			error: "invalid_client",
 		});
 	});
 

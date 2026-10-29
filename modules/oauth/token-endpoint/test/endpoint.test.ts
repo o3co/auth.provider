@@ -408,16 +408,34 @@ describe("token endpoint", () => {
 		).toEqual(expect.arrayContaining(["dpop-nonce", "www-authenticate", "retry-after"]));
 	});
 
-	it("limits requests per source before any client is authenticated [rfc6749-2.3.1-c] [guarantee-10-a]", async () => {
-		const post = await serve([], { settings: { requests: 2, window: "2m" } });
+	it("limits requests per source before any client is authenticated, answering 429 rate_limited from the rate-limit policy before the endpoint, bound to no token type, parameter or grant (as its 503 when it cannot count), the codes its grants answer being registered [rfc6749-2.3.1-c] [guarantee-10-a] [rfc6749-8.5-a]", async () => {
+		let handled = 0;
+		const counting = defineModule({ name: "counting", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(grants).by(() => ({
+				grantType: "urn:test:echo",
+				readsAmbient: "none",
+				handle: async () => {
+					handled += 1;
+					return { kind: "error", error: "invalid_grant" };
+				},
+			})),
+		]);
+		const post = await serve([counting], {
+			settings: { requests: 2, window: "2m" },
+			clients: [echoClients.echo()],
+		});
 		const wrong = () => post({ grant_type: "client_credentials" }, "basic", { secret: "wrong" });
 		expect([(await wrong()).status, (await wrong()).status]).toEqual([401, 401]);
-		const limited = await post({ grant_type: "client_credentials" }, "basic");
+		const before = events.length;
+		const limited = await post({ grant_type: "urn:test:echo" }, "echo");
 		expect([limited.status, limited.headers.get("retry-after"), limited.body]).toEqual([
 			429,
 			"120",
 			{ error: "rate_limited" },
 		]);
+		// Answered before the endpoint: no grant ran, and no grant's issuance or refusal was recorded.
+		expect(handled).toBe(0);
+		expect(events.slice(before).filter((e) => e.kind.startsWith("token."))).toEqual([]);
 	});
 
 	it("answers credentials a method finds malformed as a malformed request", async () => {

@@ -48,12 +48,18 @@ const isRefusal = (value: object): value is Refusal => "kind" in value && value.
 
 /** A presented token must outlive the exchange by this much, or it is refused as expired. */
 const expiryMarginMs = 1000;
-/** A lifetime asked in `expires_in`: 1 to 10 ASCII digits, from 2. */
+/**
+ * The request parameter asking a lifetime. RFC 6749 registers `expires_in` for answers alone, so the
+ * one this provider adds carries its prefix (RFC 6749 §8.2); a request's `expires_in` is unknown, read
+ * as nothing.
+ */
+const lifetimeParam = "o3co_expires_in";
+/** A lifetime asked in `o3co_expires_in`: 1 to 10 ASCII digits, from 2. */
 const lifetimeShape = /^[0-9]{1,10}$/;
 /** The shortest lifetime `tokens` issues: one second, its iat cut to the second, leaves less than one. */
 const minLifetimeSeconds = 2;
 
-/** `expires_in` in seconds; none when left out or empty, NaN when malformed or under two. */
+/** `o3co_expires_in` in seconds; none when left out or empty, NaN when malformed or under two. */
 const askedLifetime = (value: string | undefined): number | undefined => {
 	if (value === undefined || value === "") return undefined;
 	const seconds = lifetimeShape.test(value) ? Number(value) : 0;
@@ -236,9 +242,11 @@ export function exchangeGrant(parts: Parts): Grant {
 			if (client.kind !== "confidential" && !parts.publicExchange(client)) {
 				return { kind: "error", error: "invalid_client", status: 401 };
 			}
-			const asked = askedLifetime(param("expires_in"));
+			const asked = askedLifetime(param(lifetimeParam));
 			if (Number.isNaN(asked)) {
-				return refused("expires_in must be a whole number of seconds from 2, in ASCII digits");
+				return refused(
+					`${lifetimeParam} must be a whole number of seconds from 2, in ASCII digits`,
+				);
 			}
 			const requested = param("requested_token_type");
 			if (requested !== undefined && requested !== accessTokenType) {

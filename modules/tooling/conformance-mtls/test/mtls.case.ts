@@ -5,6 +5,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { crlOf, type Issued, issue, ocspAnswer, pemOf, thumbprintOf } from "../src/authority.ts";
 import { type MtlsPart, mtlsScene } from "../src/main.ts";
 
+/** The code a certificate refused at issuance is answered with, by the target. */
+const refusedCertificate = areaTarget().differs("certificate-refused-as-invalid-client")
+	? "invalid_certificate"
+	: "invalid_client";
+
 const issuer = "https://issuer.example";
 const header = "x-client-cert";
 const signing = generateKeyPairSync("ed25519");
@@ -208,10 +213,10 @@ mtls("certificates under PKI, revocation by CRL", () => {
 	it("refuses a certificate its CRL lists, or one from another authority", async () => {
 		const revoked = await authority.client({ crl: "revoked" });
 		const listed = await at.token(pemHeader(revoked));
-		expect([listed.status, listed.body.error]).toEqual([400, "invalid_certificate"]);
+		expect([listed.status, listed.body.error]).toEqual([400, refusedCertificate]);
 		const stranger = await issue({ cn: "client", by: await issue({ cn: "root", ca: true }) });
 		const foreign = await at.token(pemHeader(stranger));
-		expect([foreign.status, foreign.body.error]).toEqual([400, "invalid_certificate"]);
+		expect([foreign.status, foreign.body.error]).toEqual([400, refusedCertificate]);
 	});
 
 	it("answers unavailable while the CRL cannot be fetched, when told to reject", async () => {
@@ -244,7 +249,7 @@ mtls("certificates under PKI, revocation by OCSP", () => {
 		for (const says of ["revoked", "unknown", "without nonce"] as const) {
 			const issued = await authority.client({ ocsp: says });
 			const answer = await at.token(pemHeader(issued));
-			expect([answer.status, answer.body.error], says).toEqual([400, "invalid_certificate"]);
+			expect([answer.status, answer.body.error], says).toEqual([400, refusedCertificate]);
 		}
 	});
 
@@ -278,7 +283,7 @@ mtls("certificates under PKI, revocation by OCSP and then CRL", () => {
 		for (const crl of ["good", "revoked"] as const) {
 			const issued = await authority.client({ ocsp: "unknown", crl });
 			const answer = await at.token(pemHeader(issued));
-			expect([answer.status, answer.body.error], crl).toEqual([400, "invalid_certificate"]);
+			expect([answer.status, answer.body.error], crl).toEqual([400, refusedCertificate]);
 		}
 	});
 });

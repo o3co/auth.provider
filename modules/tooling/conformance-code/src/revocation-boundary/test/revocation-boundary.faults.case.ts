@@ -214,7 +214,7 @@ async function refusedAt(i: Instance, m: Made) {
 	expect(await activeAt(i, m.access)).toBe(false);
 	expect(await activeAt(i, m.sessionToken)).toBe(false);
 	const granted = await sessionGrantAt(i, m.cookie);
-	expect([granted.status, granted.body.error]).toEqual([401, "unauthorized"]);
+	expect([granted.status, granted.body.error]).toEqual([400, "invalid_grant"]);
 }
 
 /** Another user's login is untouched at the instance. */

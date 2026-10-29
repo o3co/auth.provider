@@ -28,5 +28,7 @@ onLegacy(exchangeArea, {
 		// refusal of an unverified subject is invalid_request.
 		"email-gate-without-subject-lookup",
 		"email-refusal-code-exchange",
+		// Ours takes the lifetime asked as o3co_expires_in (RFC 6749 §8.2); the legacy build reads expires_in.
+		"lifetime-asked-as-expires-in",
 	],
 });
