@@ -55,6 +55,8 @@ function serve(
 		};
 	};
 	const closes: string[] = [];
+	/** The return the upstream's end of session was handed, on each close. */
+	const upstreamBacks: unknown[] = [];
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
 	const closing = closingWith({
@@ -77,7 +79,13 @@ function serve(
 		upstream:
 			options.upstream === undefined
 				? undefined
-				: { name: "upstream", at: async () => options.upstream },
+				: {
+						name: "upstream",
+						at: async (_session, back) => {
+							upstreamBacks.push(back);
+							return options.upstream;
+						},
+					},
 		audit: { record: (e) => void recorded.push(e) },
 		log: logged.log,
 	});
@@ -105,6 +113,7 @@ function serve(
 		closes,
 		recorded,
 		returns,
+		upstreamBacks,
 		advance: (ms: number) => {
 			at += ms;
 		},
@@ -379,5 +388,20 @@ describe("a request the logout carries", () => {
 				state: "s 1",
 			},
 		});
+	});
+
+	it("hands the upstream's end of session the return only while its client still registers it", async () => {
+		for (const [name, registered] of [
+			["registered", true],
+			["unregistered since", false],
+		] as const) {
+			const { confirm, returns, upstreamBacks } = serve({ upstream: "https://idp.example/end" });
+			const token = await confirm.carry({ sid: "s9", client: "app", back });
+			const page = text(await confirm.show(shownWith("s1", token)));
+			const confirmation = /name="confirmation" value="([^"]+)"/.exec(page)?.[1] ?? "";
+			if (!registered) returns.set("app", ["https://app.example/other"]);
+			await confirm.take(browser("s1", { confirmation }));
+			expect([name, upstreamBacks]).toEqual([name, [registered ? back : {}]]);
+		}
 	});
 });
