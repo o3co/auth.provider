@@ -88,6 +88,14 @@ export const coverage: Coverage = {
 			key: "keys.previous",
 			holds: "a previous signing key, which may be given as its private PEM",
 		},
+		{
+			key: "keys.previous.<i>.public-key",
+			holds: "a previous signing key, which may be given as its private PEM",
+		},
+		{
+			key: "users.registered.<i>.password-hash",
+			holds: "a registered user's password hash, which a guess can be tried against offline",
+		},
 		{ key: "seal.previous", holds: "the previous sealing keys" },
 	],
 	notSecrets: [
@@ -129,6 +137,171 @@ export const coverage: Coverage = {
 				"an established grant answers only to the `delegations` boundary when a revocation asks to keep delegations",
 		},
 		{ key: "tokens.revocation", weakens: "`unsupported`: nothing issued can be revoked" },
+		{
+			key: "mfa-binding-proof.mode",
+			weakens: "`never`: a first counting factor binds with no binding proof asked",
+		},
+		{
+			key: "webauthn.top-origins",
+			weakens: "each page named may frame a ceremony, in another origin's page",
+		},
+		{
+			key: "mfa-webauthn.user-verification",
+			weakens:
+				"`discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes",
+		},
+		{
+			key: "passkeys.user-verification",
+			weakens:
+				"`discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes",
+		},
+		{
+			key: "acr.values",
+			weakens:
+				"an acr met by a weak amr set: a login with only that is taken for the acr, so a step-up asking it asks no more",
+		},
+		{
+			key: "device-grant.attempts",
+			weakens: "raised, up to 100: more guesses at a user code in each window",
+		},
+		{
+			key: "device-grant.attempts-window",
+			weakens: "shortened: the guesses `attempts` allows come back sooner",
+		},
+		{
+			key: "login-password.attempts",
+			weakens: "raised, up to 100: more password guesses from one source in each window",
+		},
+		{
+			key: "login-password.account-attempts",
+			weakens:
+				"raised, up to 100: more failed guesses at one identifier before each next one waits",
+		},
+		{
+			key: "login-passkey.attempts",
+			weakens: "raised, up to 100: more requests from one source in each window",
+		},
+		{
+			key: "mfa-flows.attempts-per-transaction",
+			weakens: "raised, up to 10: more second-factor guesses in one transaction",
+		},
+		{
+			key: "sections.consent.first-party",
+			weakens:
+				"`true`: that client's users are never asked for consent; taken only for a client the operator registered",
+		},
+		{
+			key: "sections.token-exchange.others-tokens",
+			weakens: "`true`: the client may exchange subject and actor tokens that name another client",
+		},
+		{
+			key: "sections.token-exchange.public-exchange",
+			weakens: "`true`: the client may exchange while public, authenticating nothing",
+		},
+		{
+			key: "sections.federation-tokens.receives",
+			weakens: "`true`: the client is handed its sessions' upstream tokens",
+		},
+		{
+			key: "federation-grants-connect.identity-check",
+			weakens: "`none`: a callback whose upstream account another user holds is not refused",
+		},
+		{
+			key: "jwt-bearer.issuers.<i>.client",
+			weakens:
+				"a request naming no client is taken as this public client, its assertions alone identifying it; warned at boot",
+		},
+		{
+			key: "jwt-bearer.issuers.<i>.self-issued-prefix",
+			weakens:
+				"any signer whose contributed key's thumbprint follows this prefix in `iss` and `sub` is taken as this issuer",
+		},
+		{
+			key: "mfa-flows.lockout.threshold",
+			weakens:
+				"raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all",
+		},
+		{
+			key: "mfa-flows.lockout.budget",
+			weakens:
+				"raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all",
+		},
+		{
+			key: "mfa-flows.lockout.hard-limit",
+			weakens:
+				"raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all",
+		},
+		{
+			key: "mfa-flows.lockout.backoff",
+			weakens:
+				"shortened: holds after failed second-factor guesses end sooner, so more guesses go through",
+		},
+		{
+			key: "mfa-flows.lockout.max-backoff",
+			weakens:
+				"shortened: holds after failed second-factor guesses end sooner, so more guesses go through",
+		},
+		{
+			key: "mfa-flows.lockout.budget-window",
+			weakens:
+				"shortened: holds after failed second-factor guesses end sooner, so more guesses go through",
+		},
+		{
+			key: "mfa-flows.lockout.memory",
+			weakens:
+				"shortened: holds after failed second-factor guesses end sooner, so more guesses go through",
+		},
+		{
+			key: "refresh.lifetime",
+			weakens:
+				"past the default day, up to 365 days: a leaked refresh token family is used that long",
+		},
+		{
+			key: "session-lifecycle.lifetime",
+			weakens: "past the default hour, up to 30 days: a session and its cookie are taken that long",
+		},
+		{
+			key: "oidc.id-token-lifetime",
+			weakens: "past the default hour: a relying party may take an ID token that long",
+		},
+		{
+			key: "federation-grants.max-lifetime",
+			weakens:
+				"past the default 30 days, up to 365: a federation grant answers that long from its activation",
+		},
+		{
+			key: "federation-tokens.max-lifetime",
+			weakens: "past the default day, up to 365: an upstream's token is taken to live that long",
+		},
+		{
+			key: "external-jwt.key-set-max-age",
+			weakens:
+				"past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it",
+		},
+		{
+			key: "client-assertion.max-lifetime",
+			weakens: "past the default hour, up to a day: a client assertion is taken that long",
+		},
+		{
+			key: "jwt-bearer.max-assertion-lifetime",
+			weakens:
+				"past the default hour, up to a day: a jwt-bearer assertion is taken that far ahead or back",
+		},
+		{
+			key: "federation.idps.<name>.secret-lifetime",
+			weakens:
+				"past the default five minutes, up to half a year: a signed client secret, if leaked, is used that long",
+		},
+		{
+			key: "device-grant.code-lifetime",
+			weakens:
+				"past the default ten minutes, up to an hour: a user code can be guessed and a device code used that long",
+		},
+		{
+			key: "exchange-id-tokens.max-age",
+			weakens:
+				"past the default ten minutes, up to an hour: an older id_token is taken for an exchange",
+		},
 		{
 			key: "tokens.subject-check",
 			weakens:
