@@ -115,7 +115,7 @@ flowchart LR
 | `@mod/seal` | foundation | `@mod/kernel`, `@mod/keys` |
 | `@mod/secret-hash` | foundation | `@mod/kernel` |
 | `@mod/store` | foundation | `@mod/kernel` |
-| `@mod/tls-options` | foundation | none |
+| `@mod/tls-options` | foundation | `@mod/kernel` |
 | `@mod/url-setting` | foundation | none |
 
 ### identity
