@@ -1,17 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { checklistFindings, parseDecisions, parseItems, parseLedger } from "../src/checklist.ts";
+import {
+	checklistFindings,
+	parseDecisions,
+	parseItems,
+	parseLedger,
+	parseNotes,
+} from "../src/checklist.ts";
 
 const items = (body: string) => `# RFC 9999: Example\n\n${body}`;
 const ledger = (rows: string) =>
 	`# RFC 9999 ledger\n\n- source: https://example.org/rfc9999.txt\n- version: RFC 9999\n- sha256: ${"a".repeat(64)}\n\n${rows}`;
 
 /** The findings of one spec's items and ledger, with the decisions given. */
-function findings(itemText: string, ledgerText: string, decisions = "# Decisions\n") {
+function findings(
+	itemText: string,
+	ledgerText: string,
+	decisions = "# Decisions\n",
+	notes = "# Notes\n",
+) {
 	const parsed = parseItems("rfc9999", itemText);
 	const read = parseLedger("rfc9999", ledgerText);
 	return checklistFindings({
 		specs: [{ spec: "rfc9999", title: parsed.title, items: parsed.items, ledger: read.ledger }],
 		decisions: parseDecisions(decisions).decisions,
+		notes: parseNotes(notes).notes,
 		parsing: [...parsed.findings, ...read.findings],
 	}).map((f) => f.detail);
 }
@@ -291,6 +303,38 @@ describe("decisions", () => {
 		expect(read.findings.map((f) => f.detail)).toEqual([
 			"D-1: is written twice",
 			"not a decision: - **D-2** yesterday: x",
+		]);
+	});
+});
+
+describe("notes", () => {
+	const notes =
+		"# Notes\n\n- **N-https** Production holds to https; outside it, http where declared.\n";
+
+	it("takes a note an item points to, written once in the notes", () => {
+		const text = items("## 4 X\n\n- **rfc9999-4-a** MUST: a\n  note: N-https\n");
+		expect(parseItems("rfc9999", text).items[0]?.note).toBe("N-https");
+		expect(findings(text, ledger("- 4 #1 MUST: rfc9999-4-a\n"), undefined, notes)).toEqual([]);
+		expect(parseNotes(notes).notes.get("N-https")).toEqual({
+			id: "N-https",
+			text: "Production holds to https; outside it, http where declared.",
+		});
+	});
+
+	it("refuses a note the notes do not hold, two notes on an item, and a line of the notes that is none", () => {
+		const text = items(
+			"## 4 X\n\n- **rfc9999-4-a** MUST: a\n  note: N-other\n- **rfc9999-4-b** MUST: b\n  note: N-https\n  note: N-https\n",
+		);
+		const rows = ledger("- 4 #1 MUST: rfc9999-4-a\n- 4 #2 MUST: rfc9999-4-b\n");
+		expect(findings(text, rows, undefined, notes)).toEqual([
+			"rfc9999-4-b: has more than one note line",
+			"rfc9999-4-a: its note N-other is in no notes",
+		]);
+		expect(
+			parseNotes("# Notes\n\n- N-https without its mark\n- **N-x** one\n- **N-x** two\n").findings,
+		).toEqual([
+			{ where: "checklist/notes.md", detail: "not a note: - N-https without its mark" },
+			{ where: "checklist/notes.md", detail: "N-x: is written twice" },
 		]);
 	});
 });

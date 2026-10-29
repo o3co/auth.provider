@@ -36,7 +36,7 @@ if (command === "report") {
 	const c = readChecklist();
 	const w = workspaceTests(root);
 	if (heldToRules(c, w)) {
-		const files = reportFiles(c.specs, w.tests, updatedByOf(c));
+		const files = reportFiles(c.specs, w.tests, updatedByOf(c), c.notes);
 		mkdirSync(reportDir, { recursive: true });
 		for (const [name, text] of files) writeFileSync(join(reportDir, name), text);
 		say(`spec-checklist: wrote ${files.size} files to docs/compliance`);

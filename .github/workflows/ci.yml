@@ -1038,6 +1038,9 @@ jobs:
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
+      # As the release writes them: a version without its changelog section stops here, before the tag.
+      - name: The version's notes
+        run: pnpm release:notes "$(jq -r .version package.json)" "$RUNNER_TEMP/release-notes.md"
       - run: pnpm release:check
       - name: Each tarball ships the root LICENSE
         run: |
