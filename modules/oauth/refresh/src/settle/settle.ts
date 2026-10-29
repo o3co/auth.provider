@@ -131,8 +131,16 @@ export async function revocableOver(c: BuildContext<Settings>) {
 			if (!parsed) return "unknown" as const;
 			const kept = fromStored(await stores.families.read(parsed.id));
 			if (!kept) return "unknown" as const;
+			const live = liveOf(kept);
+			if (!live) {
+				// The mark may stand over a revocation stopped halfway, its access tokens not yet revoked,
+				// and names no client: finished before it is answered, whoever asks, as finishing twice is
+				// harmless and an outage answers the same to every client.
+				await revoker.revokeFamily(parsed.id);
+				return "done" as const;
+			}
 			// Another client's token is left alone but answered the same, so it learns nothing.
-			if (liveOf(kept)?.clientId !== client.id) return "done" as const;
+			if (live.clientId !== client.id) return "done" as const;
 			await revoker.revokeFamily(parsed.id);
 			return "written" as const;
 		},

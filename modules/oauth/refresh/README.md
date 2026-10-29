@@ -11,7 +11,7 @@
 ## Offers
 - Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or marks that none may start.
 - A `tokens` access condition: a token whose family has ended is revoked, before the sweep revokes it.
-- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same.
+- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same, and a family already marked revoked is finished before it is answered.
 - A participant for closing a session.
 - `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end; a token issued from it is adopted.
 - Contract `lineage`: `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.
