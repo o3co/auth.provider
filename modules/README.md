@@ -7,6 +7,7 @@ What each module contains is described by that module's contract card (each modu
 |---|---|---|
 | Generic rules for module definitions, contracts, extension points, and contributions | contract | kernel |
 | Loading configuration sections and boot refusal | contract | kernel |
+| Reading an app's configuration files into one tree for `assemble`, and the 0.17 variables the environment sets that no file reads | contract | config-files |
 | Lifecycle (start, drain, stop) | contract | kernel |
 | Declaration of multi-instance safety, and the deployment shape | contract / setting | kernel |
 | "Unavailable" | vocabulary | kernel |
@@ -87,10 +88,12 @@ What each module contains is described by that module's contract card (each modu
 | Wiring mfa's store interface to records | wiring | mfa-store |
 | Wiring mfa-flows' store interface to records | wiring | mfa-flows-store |
 | Wiring users' store interfaces to records | wiring | users-store |
-| Wiring webauthn's store interfaces to records | wiring | webauthn-store |
+| Wiring passkeys' store interfaces to records | wiring | webauthn-store |
 | Wiring federation-tokens' store interfaces to records | wiring | federation-tokens-store |
 | Wiring federation-grants' store interfaces to records' records, records under a secret and keyed sets | wiring | federation-grants-store |
 | Wiring rp-logout's store interfaces to records | wiring | rp-logout-store |
+| Wiring jwt-bearer's store interface to records | wiring | jwt-bearer-store |
+| Wiring exchange-id-tokens' store interface to records | wiring | exchange-id-tokens-store |
 | What a feature needs from the store, and its records' contents | contract / vocabulary | the feature that defines the store interface |
 | Space names, and the guarantees a space declares for those needs | vocabulary / setting | the wiring that declares the space |
 | Redis implementation of store | contract implementation / setting | redis |
@@ -104,6 +107,7 @@ What each module contains is described by that module's contract card (each modu
 | The words of the wire spoken with the operator's HTTP ledgers (the user ledger's and the witness ledgers' calls): bodies, answers' schemas, statuses, the fakes' routes | vocabulary | ledger-wire |
 | Logging in through an upstream IdP (start and callback) | contract | federation |
 | Linking an upstream identity to the account a browser is logged in as (start and callback) | contract | federation |
+| The continuation named `link` of federation's round trip: linking the upstream identity to the browser's account at its request | contribution | federation-link |
 | What an opened upstream is to the provider: its authorization URL, code exchange and what its login says | contract | upstreams |
 | Opening the configured IdPs through their types, as `upstreams`' default | contract implementation | federation |
 | One authorization round trip to an upstream: its state, nonce, verifier and cookie, kept and taken once at its callback | contract | upstream-round-trip |
@@ -155,6 +159,8 @@ What each module contains is described by that module's contract card (each modu
 | Login completion gates, and resuming a held login | extension point kind / contract | login-gates |
 | Telling the caller that a held login it asked for has opened | extension point kind | login-gates |
 | Declarations of the amr values this deployment can produce, and judging whether they can be produced | extension point kind / contract | login-gates |
+| The password login endpoint (verified by users, logged in through login-gates, the time the password was verified as the login's time) | route | login-password |
+| The session logout endpoint | route | logout |
 | Participants when a session closes, and the one order they are called in | extension point kind | session-participants |
 | Each subject's live sessions, and closing them when the subject is revoked | contract | session |
 | Closing a revoked subject's live sessions (a follower of subject-revocation) | contribution | session-lifecycle |
@@ -166,8 +172,10 @@ What each module contains is described by that module's contract card (each modu
 | Each amr value, and the declaration that it can be produced | vocabulary | the module that supplies that value |
 | CSRF checks on a route | policy | csrf |
 | Issuing, verifying, revoking access tokens | contract | tokens |
+| Access tokens revoked before their end (the ids kept), and its store interface | data / contract | token-denylist |
 | issuer | contract / setting | issuer |
 | scope, audience, actor | vocabulary | tokens |
+| The claims a grant adds to its access token: their shape, the names reserved, the limits, and the one walker that checks and copies a set | contract / vocabulary | added-claims |
 | Records of access tokens issued per session, cleaning them up when the session closes, the link between an access token and its session | contract | session-tokens |
 | Recording each access token issued from a session, as `grants`' session issuances tell of it | contribution | session-tokens |
 | The claim names a `claims` request releases beyond its scope, by allowance and consent, and their value constraints, kept for the code, the redemption, the refresh family and each access token | contract | claims-selection |
@@ -191,6 +199,7 @@ What each module contains is described by that module's contract card (each modu
 | The session grant: an access token for the user of the browser's session, recorded to that session | grant contribution | session-grant |
 | The client credentials grant | grant contribution | client-credentials |
 | Sender binding (binding kinds, reading a request's binding, the shape of a binding), admitting a request presenting a token at a resource | extension point kind / contract | sender-binding |
+| DPoP proofs (RFC 9449) as a binding kind, each proof's `jti` spent once | contribution / setting | dpop |
 | Certificate-bound tokens: the `x5t#S256` binding kind, certificate path validation and revocation checking, trust anchors | contribution / setting | mtls |
 | Extra checks added to access token verification | extension point kind | tokens |
 | The check of subject revocation on access tokens, and stating there is none | extension point kind / setting | tokens |
@@ -213,6 +222,7 @@ What each module contains is described by that module's contract card (each modu
 | The acr table, and judging which acr values are known and which are satisfied | contract / setting | acr |
 | acr table entries | extension point kind | acr |
 | Contributed acr names and the amr values that satisfy them | vocabulary | the module that contributes that entry |
+| The acr a second factor meets, as an entry of acr's table | contribution | mfa-acr |
 | Recording and redeeming authorization codes, code revocation | contract / setting | code-grant |
 | ID token producers | extension point kind | code-grant |
 | Additions issued with the redemption response | extension point kind | code-grant |
@@ -234,6 +244,8 @@ What each module contains is described by that module's contract card (each modu
 | Binding a new second factor: beginning it, its first proof, writing it | contract | mfa-binding |
 | Managing a user's factors: naming, removing, clearing them, the recovery codes, the fence | contract | mfa-managing |
 | Second factor transactions, contributions to the login completion gate and to step-up, the enrollment routes and their seam, lockout numbers | contract / setting / data | mfa-flows |
+| Judging a session against second factors: mfa's entry requirement for using a session and for changing credentials, and whether a second factor was proved recently | contract | mfa-entry |
+| Moving a revoked subject's fence in mfa, so no binding begun before a revocation binds once it is complete | contribution | mfa-revocation |
 | Binding a new second factor: enrollment, its binding proof, the recovery codes shown | contribution | mfa-enrollment |
 | An operator's reset of a subject's second factors | contract | mfa-reset |
 | A reset's parts: what a module holds that an operator's reset removes beside the second factors | extension point kind | mfa-reset |
@@ -241,16 +253,23 @@ What each module contains is described by that module's contract card (each modu
 | A subject's own release of their second-factor lockout, after a proof guessing cannot beat | route | mfa-flows |
 | A session's management of its own factors (listing, naming and removing them, reissuing recovery codes), and its request budget | route / setting | mfa-management |
 | Each second factor kind | contribution | the module that contributes that kind |
+| TOTP (RFC 6238) as a second factor kind | contribution | mfa-totp |
+| Recovery codes as a second factor kind | contribution | mfa-recovery |
 | Proofs asked before a first second factor, and when they are asked | extension point kind / contract / setting | mfa-binding-proof |
 | What `begin` asks before a subject's first counting factor | extension point kind | mfa-extensions |
 | The enrollment witness: who remembers, apart from mfa's store, that a subject holds a counting factor, and its promises | extension point kind / contract | mfa-witness |
 | The enrollment witness kept at the operator's HTTP ledger, its request shape, deadline and credential | contribution / setting | mfa-witness-http |
+| The passkey witness: who remembers, apart from passkeys' store, that a subject holds a passkey, and its promises | extension point kind / contract | passkey-witness |
 | The passkey witness kept at the operator's HTTP ledger, its request shape, deadline and credential | contribution / setting | passkey-witness-http |
 | Keeping the enrollment witness in line with mfa's counting factors, and filling a missing mark | contribution / contract | mfa-witnessing |
+| Keeping the passkey witness's mark in line with passkeys, and filling a missing mark (`passkeyBackfill`) | contribution / contract | passkey-witnessing |
 | WebAuthn ceremonies (options and when their challenge ends, verifying responses, the signature count, the user handle) | contract | webauthn |
-| Passkeys (each subject's user handle and credentials), assertions by them, registering them for a subject, reading a credential and making a user handle | contract / setting / data | webauthn |
+| Passkeys (each subject's user handle and credentials), assertions by them, registering them for a subject, reading a credential and making a user handle | contract / setting / data | passkeys |
 | Registering passkeys from a session (the registration routes), and their request budget | route / setting | passkey-registration |
 | Logging in with a passkey (the grant `urn:o3co:oauth:grant-type:webauthn`, its request options), and the amr it gives | grant contribution / contract / setting | webauthn-login |
+| Logging into a browser session with a passkey (its options and assertion routes), and refusing a password login of a subject holding one where the operator says so | route / contribution / setting | login-passkey |
+| An operator's reset of a subject's passkeys, and the passkeys' step of mfa-reset's parts | contract | passkey-reset |
+| Having an operator's reset of second factors remove the subject's passkeys too | contribution | mfa-reset-passkeys |
 | WebAuthn as a second factor (the subject's user handle for it, its amr, the name an authenticator shows) | contribution / setting | mfa-webauthn |
 | A code by mail as a second factor, how a code is mailed to the account's address, and the mail purposes of both below | contribution / setting / contract | mfa-email |
 | The proof of the account's address before a first binding (`account-email`), by mfa-email's rules | contribution | mfa-email-proof |
@@ -258,12 +277,30 @@ What each module contains is described by that module's contract card (each modu
 | Budget numbers and invariant checks | setting | guard |
 | Kind names, their order, and which way a dependency between kinds may point | vocabulary / contract | kinds |
 | The checks each kind gets | setting | guard |
+| Reading the workspace's packages, imports and public surfaces, and the checks of how packages depend on one another and what they import | contract | guard-imports |
 | Conformance test base | contract | conformance |
 | Running each pattern's conformance areas on its app, and leaving out as `not-in-pattern` the scenes it cannot hold | contract | conformance |
+| The local layer that boots a generated app for a test or a conformance run, from each composed module's trial file | contract | trial |
+| An https front before a running app, for a harness's outside party | contract | conformance-front |
+| A way out from a harness's app to a party on this machine by its name alone (an HTTP CONNECT proxy on loopback, as `outbound.proxy`) | contract | conformance-tunnel |
 | Starting the legacy build, and registering legacy set-ups | contract | conformance-legacy |
 | Fake HTTP ledgers for tests and conformance scenes (the user ledger, mfa's and passkeys' witness ledgers) | contract | ledger-fakes |
 | The checklist of the specifications' requirements on the authorization server and the ledger of their sources, which tests name which, the checklist report, and whether an accepted difference may be taken | contract / data | spec-checklist |
 | Each area's scene terms, scenes, set-ups for legacy and new | vocabulary / contribution | each area's conformance module |
+| The scenes of the code flow area (the authorization endpoint, consent, code redemption, refresh, acr, the session grant, a logout the client starts) | vocabulary / contribution | conformance-code |
+| The scenes of the device area (RFC 8628) | vocabulary / contribution | conformance-device |
+| The scenes of the exchange area (RFC 8693) | vocabulary / contribution | conformance-exchange |
+| The scenes of the federation area (logging in through an upstream IdP) | vocabulary / contribution | conformance-federation |
+| The scenes of the identity area (password login, logout, the user ledger over HTTP) | vocabulary / contribution | conformance-identity |
+| The scenes of the keys area (the public key set, key configuration) | vocabulary / contribution | conformance-keys |
+| The scenes of the mTLS area (certificate-bound tokens) | vocabulary / contribution | conformance-mtls |
+| The scenes of the OAuth endpoints area (client credentials, introspection, revocation, jwt-bearer, DPoP, the metadata document) | vocabulary / contribution | conformance-oauth |
+| The scenes of operations (liveness, readiness, metrics, the log level, the security headers) | vocabulary / contribution | conformance-ops |
+| The scenes of the passkey area (registration, login with a passkey) | vocabulary / contribution | conformance-passkey |
+| The scenes of the second-factor area | vocabulary / contribution | conformance-second-factor |
+| Each recipe's scene, kept from going stale: generating its app, making its requests, writing the exchanges into the recipe | contribution | conformance-recipes |
+| Running the provider against independent client libraries, and the differences accepted with each | contract / data | interop-clients |
+| Running the OpenID Foundation's conformance suite against the provider, and the expected entries a test's result may take | contract / data | interop-oidf |
 | Repo layout (where packages go) | setting | the workspace definition |
 | Generating a project: the command, the plan, and where the packages come from (the workspace or a bundle's index) | contract | create-app |
 | A generated project's files (a listed app, or a deployment of full or a pattern: the module list, configuration gathered from the modules' fragments, env and local examples, Dockerfile, README) | template | app-output |
