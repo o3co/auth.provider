@@ -76,14 +76,22 @@ it("takes a challenge lifetime from 10s to 10m, written with its unit", () => {
 	]);
 });
 
-it("frames nothing and keeps a challenge 2m where nothing is set", () => {
+it("frames nothing, keeps a challenge 2m and takes every algorithm where nothing is set", () => {
 	expect(parsed({}).data).toEqual({
 		"rp-id": "rp.example",
 		"rp-name": "RP",
 		origins: ["https://rp.example"],
 		"top-origins": [],
 		"challenge-lifetime": 120,
+		algorithms: ["EdDSA", "ES256", "RS256"],
 	});
+});
+
+it("takes the algorithms named, in their order, and refuses none, one it cannot verify, or one named twice", () => {
+	expect(parsed({ algorithms: ["RS256", "ES256"] }).data?.algorithms).toEqual(["RS256", "ES256"]);
+	for (const algorithms of [[], ["ES384"], ["es256"], [-7], ["ES256", "ES256"]]) {
+		expect(parsed({ algorithms }).success, JSON.stringify(algorithms)).toBe(false);
+	}
 });
 
 it("refuses the keys passkeys keeps now, naming each", () => {
