@@ -14,10 +14,10 @@ npx @o3co/create-auth-provider my-provider --pattern simple-web --axis @mod/stor
 
 Set what the generated README asks for, among them:
 
-- `mfa.mode` stays `required`, its default, so every login asks for a second factor (the `mfa` card).
+- Leave `mfa.mode` at its default, `required`, so every login asks for a second factor (the `mfa` card).
 - The seal key, which seals each user's TOTP secret (the `seal` card).
-- Your ledger's `users-http.verify-url` and `users-http.credential` (the `users-http` card), and its host in `outbound.allow` (the `outbound` card). Write no `users.registered`: the users come from the ledger, and boot refuses both.
-- The Redis URL (the `redis` card). On one local Redis, set `redis.replication = none`, since the example's `replicas` asks for replicas, and run the server with `appendonly yes` and `appendfsync always` ([runbook: Redis](runbook.md#redis)).
+- Your ledger's `users-http.verify-url` and `users-http.credential` (the `users-http` card), and its host in `outbound.allow` (the `outbound` card). Do not set `users.registered`: users come from the ledger, and boot is refused where both are set.
+- The Redis URL (the `redis` card). For a single local Redis server, set `redis.replication = none`, since the example's `replicas` requires replicas, and run the server with `appendonly yes` and `appendfsync always` ([runbook: Redis](runbook.md#redis)).
 
 Every key is in the [configuration reference](configuration.md). The second factor's routes are in the [route reference](routes.md), and the cards of `mfa-flows` and its internal modules say what each answers (the two enrollment routes, the `mfa-enrollment` card).
 

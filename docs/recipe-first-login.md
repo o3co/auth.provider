@@ -26,7 +26,7 @@ node -e 'console.log(require("node:crypto").generateKeyPairSync("rsa",{modulusLe
 
 ## Hash a password
 
-Users listed in the configuration keep a bcrypt or scrypt hash of their password, never the password (the `users` and `secret-hash` cards). This reads a password on standard input and prints its scrypt hash; type the password, then press Ctrl-D:
+Users listed in the configuration keep a bcrypt or scrypt hash of their password, never the password (the `users` and `secret-hash` cards). This reads a password on standard input and prints its scrypt hash; type the password and press Enter, then Ctrl-D:
 
 <!-- generated:password-hash -->
 ```sh
@@ -76,9 +76,9 @@ clients.registered = [
 ```
 <!-- end generated -->
 
-- Paste only the lines between the printed key's `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----`: the block above already has them, and a key with two of each is refused.
+- Paste only the lines between `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` in the printed key. The block above already has these markers, and a key with two of each is refused.
 - `http.insecure-origin = true` lets the public origin be plain http, for trying the app on your machine only (the `http` card). A deployment uses https.
-- `kernel.environment = development` lets boot take that plain-http origin and the plain-http login page; a production deployment, the default, refuses both (the `kernel` card).
+- `kernel.environment = development` lets the app start with that plain-http origin and plain-http login page. Production is the default, and it refuses both (the `kernel` card).
 - With no `consent.page`, no user is asked for consent, and only a first-party client is served: `my-app` is marked `first-party` (the `consent` card).
 - The login page at `authorize.login-page` is yours to serve; the [login page guide](login-page.md) says what it sends. The steps below make its requests directly.
 - `my-app` is a public client: it authenticates with PKCE alone (the `clients` card). Its redirect URI is matched by exact string (the `redirect-uris` card of `authorize`).
