@@ -27,14 +27,20 @@ export interface EndingParts {
 	/** The close the confirmation shares. */
 	readonly closing: Closing;
 	readonly issuer: string;
+	/** The deployment's page a browser's refused request is sent to; none, and every refusal is JSON. */
+	readonly errorPage?: string;
 	readonly now: () => number;
 	readonly log: Log;
 }
 
 const loggedOut = (cookies: readonly string[]) =>
 	jsonAnswer(200, { logged_out: true }, { cookies });
-const refused = (error: string, description: string) =>
-	jsonAnswer(400, { error, error_description: description });
+/** A refusal of the request, answered as JSON, or on the deployment's error page to a browser where it has one. */
+interface Refusal {
+	readonly error: string;
+	readonly description: string;
+}
+const refused = (error: string, description: string): Refusal => ({ error, description });
 const unverified = refused("invalid_token", "id_token_hint verification failed");
 const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
 const repeated = refused("invalid_request", "repeated parameter");
@@ -51,6 +57,7 @@ const carriedWithOthers = refused(
 	"request is sent with other logout parameters",
 );
 const carriedNotValid = refused("invalid_request", "request is not valid");
+const sessionless = refused("invalid_request", "id_token_hint names no session");
 /** What a hinted request names; none comes beside a carried request. */
 const hinted = ["id_token_hint", "client_id", "post_logout_redirect_uri", "state"];
 /** A hint issued longer ago than this is refused, by GET or POST, as a logout another site may have started. */
@@ -88,6 +95,16 @@ export function endingOver(p: EndingParts) {
 		if (id === undefined) return false;
 		return returnsTo(await p.clients.find(id), asked) ? asked : false;
 	};
+	/** A refusal: to a browser, on to the error page where the deployment has one, its words in the query; else JSON. */
+	const refuse = (request: HttpRequest, refusal: Refusal): HttpResponse => {
+		if (p.errorPage === undefined || !wantsPage(request)) {
+			return jsonAnswer(400, { error: refusal.error, error_description: refusal.description });
+		}
+		const location = new URL(p.errorPage);
+		location.searchParams.set("error", refusal.error);
+		location.searchParams.set("error_description", refusal.description);
+		return { status: 303, headers: { ...noStore, location: location.href } };
+	};
 	/** On to `to`, carrying `token` where there is one. */
 	const onTo = (to: string, token?: string): HttpResponse => {
 		const location =
@@ -120,7 +137,7 @@ export function endingOver(p: EndingParts) {
 	const end = async (request: HttpRequest): Promise<HttpResponse> => {
 		const values = request.method === "GET" ? request.query : request.fields;
 		// A value sent twice reads as none: refused first, so no check is passed by sending it twice.
-		if (values.repeated().length > 0) return repeated;
+		if (values.repeated().length > 0) return refuse(request, repeated);
 		const token = request.method === "GET" ? values.single(carriedParam) : undefined;
 		if (token !== undefined) return resumed(request, token);
 		const hint = values.single("id_token_hint");
@@ -132,16 +149,16 @@ export function endingOver(p: EndingParts) {
 		}
 		const checked = await p.hints.check(hint);
 		if (checked.kind === "sessionless") {
-			return refused("invalid_request", "id_token_hint names no session");
+			return refuse(request, sessionless);
 		}
-		if (checked.kind === "invalid") return unverified;
-		if (p.now() - checked.issuedAt > confirmAfterMs) return unverified;
+		if (checked.kind === "invalid") return refuse(request, unverified);
+		if (p.now() - checked.issuedAt > confirmAfterMs) return refuse(request, unverified);
 		// A client_id beside the hint names the client the token was issued to, or the request is refused.
 		const named = values.single("client_id");
-		if (named && named !== checked.client) return mismatched;
+		if (named && named !== checked.client) return refuse(request, mismatched);
 		const state = values.single("state") || undefined;
 		const back = await returnOf(checked.client, values.single("post_logout_redirect_uri"));
-		if (back === false) return unregistered;
+		if (back === false) return refuse(request, unregistered);
 		const carried: CarriedRequest = {
 			sid: checked.session,
 			...(checked.client === undefined ? {} : { client: checked.client }),
@@ -183,9 +200,10 @@ export function endingOver(p: EndingParts) {
 	};
 	/** A carried request coming back as a GET: alone, it is checked as the confirmation checks it, and settled. */
 	const resumed = async (request: HttpRequest, token: string): Promise<HttpResponse> => {
-		if (hinted.some((name) => request.query.single(name) !== undefined)) return carriedWithOthers;
+		if (hinted.some((name) => request.query.single(name) !== undefined))
+			return refuse(request, carriedWithOthers);
 		const carried = await p.confirm.carried(token);
-		if (!carried) return carriedNotValid;
+		if (!carried) return refuse(request, carriedNotValid);
 		// Its return is held to the client's registration as it is now, not as it was when carried.
 		return settled(
 			request,
@@ -224,6 +242,7 @@ export async function endingFrom(
 		clients: await c.get(clients),
 		closing: await closingFrom(c, upstream),
 		issuer: (await c.get(issuer)).url,
+		...(c.section["error-page"] === undefined ? {} : { errorPage: c.section["error-page"] }),
 		now: c.clock.now,
 		log: c.log,
 	});

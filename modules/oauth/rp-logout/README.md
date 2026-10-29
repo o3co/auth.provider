@@ -42,7 +42,7 @@
 - A client gone or without a back-channel URL settles it.
 
 ## Depends on
-- `audit`, `clients`, `code-grant`, `csrf`, `http`, `issuer`, `kernel`, `keys`, `oidc`, `outbound`, `outbound-policy`, `rate-limit`, `redirect-uris`, `request-source` (the source), `session`, `session-participants`
+- `audit`, `clients`, `code-grant`, `csrf`, `http`, `issuer`, `kernel`, `keys`, `oidc`, `outbound`, `outbound-policy`, `rate-limit`, `redirect-uris`, `request-source` (the source), `session`, `session-participants`, `url-setting` (the error page's form)
 
 ## Vocabulary
 - notice: one client to tell that a session closed, until it is given up.
