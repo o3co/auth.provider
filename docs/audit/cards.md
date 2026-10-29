@@ -65,6 +65,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `credential` (`src/credential`): how a request's credential is sent, and the headers a caller may not write.
   - `lookups` (`src/lookups`): name lookups shared among those asking a name at once, each waiting until its own deadline, and how many run at once.
   - `resolver-process` (`src/resolver-process`): name lookups run as the system runs them, in a helper process of their own, ended where no one waits on them.
+  - `tls` (`src/tls`): the options each TLS connection outbound makes takes.
 - `@mod/outbound-policy` (foundation, `modules/foundation/outbound-policy`): Owns the destination policy: where an outbound request may go, at which addresses, with what credential, and how far it may run, judged from the operator's settings without sending anything.
 - `@mod/rate-limit` (foundation, `modules/foundation/rate-limit`): Counts uses in windows on `store`, and locks keys out after failures (backoff, a budget in a window, a hard limit, forgetting a quiet run).
 - `@mod/records` (capability, `modules/foundation/records`): Provides records that know no feature: keyed records, records under a secret, deferred work, and keyed sets.
@@ -72,6 +73,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/seal` (foundation, `modules/foundation/seal`): Seals and opens stored data with authenticated encryption, by each key's algorithm (AES-256-GCM), under a key ring read at boot.
 - `@mod/secret-hash` (foundation, `modules/foundation/secret-hash`): Checks a secret against a stored bcrypt or scrypt hash, with the same work whether or not there is a hash to check against; knows no feature.
 - `@mod/store` (foundation, `modules/foundation/store`): Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation, not safe on many instances.
+- `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take.
 - `@mod/url-setting` (foundation, `modules/foundation/url-setting`): Decides which configured URLs boot, for every module that takes one by `urlSetting`, and when a section's own check of the URLs it holds may read them.
 
 ## identity

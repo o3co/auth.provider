@@ -18,6 +18,7 @@ import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import tokenExchange from "@mod/token-exchange/module";
@@ -92,6 +93,7 @@ function assembly(
 			grantCaller,
 			clientAllowanceModule,
 			outboundModule,
+			tlsOptionsForTests,
 			externalJwtModule,
 			subjectRevocationStandIn,
 			usersModule,

@@ -13,6 +13,7 @@ import {
 } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import type { OutboundRefusals } from "@mod/outbound-policy";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { beforeAll, describe, expect, it } from "vitest";
 import { settingsOf } from "../src/settings.ts";
@@ -238,9 +239,11 @@ describe("idp-google", () => {
 	});
 
 	it("takes the endpoints the browser goes to over plain http only at a loopback name, refusing another at its key", () => {
-		const paths = outboundOver(outboundSection.parse({ "allow-any-public": true }), async () => [
-			"93.184.216.34",
-		]);
+		const paths = outboundOver(
+			outboundSection.parse({ "allow-any-public": true }),
+			async () => ["93.184.216.34"],
+			{ floor: testTlsOptions },
+		);
 		const { explained, plainInternal, browsedRefusal } = paths;
 		const policy: OutboundRefusals = { explained, plainInternal, browsedRefusal };
 		const keysOf = (more: Record<string, unknown>) =>

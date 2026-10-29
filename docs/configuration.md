@@ -716,6 +716,15 @@ From `@mod/subject-revocation-http`.
 | `subject-revocation-http.requests` | integer (1–100000) | `600` |  |  |  | Authenticated requests allowed per source in each window, from 1 to 100000. |
 | `subject-revocation-http.window` | string | `1m` |  |  |  | The window a source's authenticated requests are counted in: a duration with a unit, from 1s to 1h, e.g. 1m. |
 
+## tls-options
+
+From `@mod/tls-options`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `tls-options.min-version` | TLSv1.2 \| TLSv1.3 | `TLSv1.2` |  |  |  | The least TLS version the provider's own connections take: TLSv1.2 or TLSv1.3. |
+| `tls-options.suites` | list of TLS_AES_256_GCM_SHA384 \| TLS_CHACHA20_POLY1305_SHA256 \| TLS_AES_128_GCM_SHA256 \| ECDHE-ECDSA-AES128-GCM-SHA256 \| ECDHE-RSA-AES128-GCM-SHA256 \| ECDHE-ECDSA-AES256-GCM-SHA384 \| ECDHE-RSA-AES256-GCM-SHA384 \| ECDHE-ECDSA-CHACHA20-POLY1305 \| ECDHE-RSA-CHACHA20-POLY1305 | `["TLS_AES_256_GCM_SHA384","TLS_CHACHA20_POLY1305_SHA256","TLS_AES_128_GCM_SHA256","ECDHE-ECDSA-AES128-GCM-SHA256","ECDHE-RSA-AES128-GCM-SHA256","ECDHE-ECDSA-AES256-GCM-SHA384","ECDHE-RSA-AES256-GCM-SHA384","ECDHE-ECDSA-CHACHA20-POLY1305","ECDHE-RSA-CHACHA20-POLY1305"]` |  |  |  | The suites they take, among TLS 1.3's and TLS 1.2's ECDHE with AES-GCM or ChaCha20-Poly1305: every one by default. |
+
 ## token-control
 
 From `@mod/token-control`.

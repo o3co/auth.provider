@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { setDefaultAutoSelectFamily } from "node:net";
 import { isUnavailable } from "@mod/kernel";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
@@ -56,7 +57,7 @@ const over = (resolve: Lookup, settings: Record<string, unknown> = {}, lookups?:
 			...settings,
 		}),
 		resolve,
-		{},
+		{ floor: testTlsOptions },
 		AbortSignal.timeout,
 		lookups,
 	);

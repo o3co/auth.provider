@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { credentialPolicy } from "@mod/outbound-policy";
+import { testTlsOptions, tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { credentialHeaderRefusal, DestinationRefused } from "../../contract.ts";
 import outboundModule, { outboundOver, section } from "../../module.ts";
@@ -30,6 +31,7 @@ const over = () =>
 			"plain-internal": ["ledger.internal:9092"],
 		}),
 		resolve,
+		{ floor: testTlsOptions },
 	);
 const secret = "Bearer s3cr3t-0123456789";
 /** What a refusal says, apart from what it is. */
@@ -207,7 +209,7 @@ it("answers at boot why a credential must not go to a set of URLs: more than one
 
 it("offers the same answer at boot as outbound.credentials", async () => {
 	const app = await assemble({
-		modules: [outboundModule],
+		modules: [outboundModule, tlsOptionsForTests],
 		config: {
 			...kernelConfig(),
 			outbound: { "allow-any-public": true, "direct-despite-proxy": true },

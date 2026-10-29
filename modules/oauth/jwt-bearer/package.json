@@ -37,6 +37,7 @@
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*",
+		"@mod/tls-options": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"vitest": "5.0.5"
 	},
