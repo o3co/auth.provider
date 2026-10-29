@@ -112,6 +112,17 @@ describe.each(named)("the pattern %s", (name) => {
 			/`http\.public-origin` and `issuer\.url` to `http:\/\/localhost:8080`, `http\.insecure-origin` to `true`, and `kernel\.environment` to `development`/,
 		);
 		expect(readme).toContain("`create-auth-provider --list`");
+		expect(readme).toContain("with `openssl rand -base64 32`");
+		// Codes and refresh tokens must be revocable, so `unsupported` is for an app issuing neither.
+		expect(readme).toContain(
+			"An app that issues no codes and no refresh tokens (`a2a`) may write `unsupported`",
+		);
+		if (name === "simple-web") {
+			expect(readme).toContain("With its default axes it needs no outside system");
+			expect(readme).toContain(
+				"With a user ledger (`--axis @mod/users=@mod/users-http`), write none",
+			);
+		}
 		expect(readme).toMatch(
 			/A first login, step by step: https:\/\/github\.com\/o3co\/auth\.provider\/blob\/v[^/]+\/docs\/recipe-first-login\.md/,
 		);
