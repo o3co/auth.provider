@@ -1,7 +1,7 @@
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
-import { describe, expect, it, vi } from "vitest";
-import { isFloor, type TlsOptions, tlsOptions } from "../src/contract.ts";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { heldToFloor, isFloor, type TlsOptions, tlsOptions } from "../src/contract.ts";
 import tlsOptionsModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { type Handshake, handshakeWith, type Offer, tlsOptionsFor } from "../src/testing.ts";
@@ -100,7 +100,39 @@ describe("the section's options", () => {
 			false,
 			false,
 		]);
-		expect(Object.keys(made)).toEqual(["minVersion", "ciphers"]);
+		expect(Object.keys(made)).toEqual(["minVersion", "ciphers", "rejectUnauthorized"]);
+	});
+
+	it("hold a caller's options to the floor, its own keys last over whatever the caller passed", () => {
+		const floor = tlsOptionsFor({});
+		const loosened = {
+			minVersion: "TLSv1",
+			ciphers: "ALL:@SECLEVEL=0",
+			rejectUnauthorized: false,
+			ca: "the caller's authority",
+		} as const;
+		expect(heldToFloor(floor, loosened)).toEqual({
+			ca: "the caller's authority",
+			minVersion: "TLSv1.2",
+			ciphers: floor.ciphers,
+			rejectUnauthorized: true,
+		});
+		// What it gives is the caller's options, no floor; a floor copied by hand is refused.
+		expect(isFloor(heldToFloor(floor, {}))).toBe(false);
+		const copied = { ...floor } as TlsOptions;
+		expect(() => heldToFloor(copied, {})).toThrow(TypeError);
+	});
+
+	it("check the peer's certificate where NODE_TLS_REJECT_UNAUTHORIZED is 0, which bare options do not", async () => {
+		vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
+		const held = heldToFloor(tlsOptionsFor({}), {});
+		expect(await handshakeWith({}, "tls1.3", false)).toMatchObject({ kind: "agreed" });
+		expect(await handshakeWith(held, "tls1.3", false)).toMatchObject({
+			kind: "refused",
+			code: "DEPTH_ZERO_SELF_SIGNED_CERT",
+		});
+		// The caller's own authority is still believed.
+		expect(await handshakeWith(held, "tls1.3")).toMatchObject({ kind: "agreed" });
 	});
 
 	it("are a floor however many copies of the package are loaded", async () => {
@@ -149,6 +181,33 @@ describe("the section's options", () => {
 			said.map((message) => ["suites", message]),
 		);
 	});
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+it("warns at every boot where NODE_TLS_REJECT_UNAUTHORIZED is 0, naming the variable alone", async () => {
+	const warned = async (value: string) => {
+		vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", value);
+		const recording = recordingLog();
+		await assemble({
+			modules: [tlsOptionsModule],
+			config: kernelConfig(),
+			runtime: quietRuntime({ log: recording.log }),
+		});
+		return recording.lines().filter((line) => line.event.startsWith("tls-options."));
+	};
+	expect(await warned("0")).toEqual([
+		{
+			level: "warn",
+			event: "tls-options.reject_unauthorized_ignored",
+			fields: {
+				variable: "NODE_TLS_REJECT_UNAUTHORIZED",
+				reason:
+					"the provider's own connections check certificates; trust a private authority by NODE_EXTRA_CA_CERTS",
+			},
+		},
+	]);
+	expect(await warned("1")).toEqual([]);
 });
 
 it("gives its options frozen, as its section reads them", async () => {
