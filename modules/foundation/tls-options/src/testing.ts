@@ -10,6 +10,15 @@ import {
 	type TlsOptions,
 } from "node:tls";
 import { promisify } from "node:util";
+import { optionsOf } from "./contract.ts";
+import tlsOptionsModule from "./module.ts";
+import { section } from "./section.ts";
+
+/** For tests: the module, its section left to its defaults, to compose wherever a module takes `tlsOptions`. */
+export const tlsOptionsForTests = tlsOptionsModule;
+
+/** For tests: the options the section's defaults give, for a function taking them directly. */
+export const testTlsOptions = optionsOf(section.parse({}));
 
 /** A key and its self-signed certificate for localhost, the certificate its own authority. */
 interface Certificate {
