@@ -355,11 +355,11 @@ it("installs the dependencies in a stage of their own, with pnpm through a pinne
 	expect(runtime).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
 });
 
-it("builds on Node 24's latest, so a build takes its security fixes", async () => {
+it("builds on one minor of Node 24, so a build takes its patches and never a new minor", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
 	const docker = await read(target, "Dockerfile");
-	expect(docker).toMatch(/^FROM node:24-alpine AS base$/m);
+	expect(docker).toMatch(/^FROM node:24\.22-alpine AS base$/m);
 	expect(docker).not.toContain("@sha256:");
 });
 

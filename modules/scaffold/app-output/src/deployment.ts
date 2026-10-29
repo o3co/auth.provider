@@ -32,10 +32,10 @@ const paths = {
 };
 
 /**
- * Node 24's latest, neither patch nor digest pinned: each build takes Node's security fixes, at the
- * cost of a build that may differ from the last.
+ * One minor of Node 24: each build takes its patches, Node's security fixes among them, and never a new
+ * minor; the operator moves to the minor that holds a fix released only there.
  */
-const nodeImage = "node:24-alpine";
+const nodeImage = "node:24.22-alpine";
 /** The corepack that gives the image the manifest's pnpm; pinned, so a build never takes the latest. */
 const corepack = "0.36.0";
 /** http's default port: the image changes only the interface it listens on. */
@@ -264,7 +264,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["nod
 `
 		: "";
 	return `# syntax=docker/dockerfile:1
-# Node 24's latest, so a build takes its security fixes; corepack pinned; pnpm is the manifest's packageManager.
+# One Node 24 minor, so a build takes its security fixes; move to the minor that holds a newer one. corepack pinned; pnpm is the manifest's packageManager.
 FROM ${nodeImage} AS base
 RUN npm install --global corepack@${corepack} && corepack enable
 WORKDIR /app
