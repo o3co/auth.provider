@@ -644,8 +644,8 @@ describe("jwt-bearer", () => {
 
 	it("refuses an assertion issued longer ago than the longest lifetime and the allowance", async () => {
 		const s = await serve();
-		const at = (iat: number) => assertion({ ...base, iat });
-		expect(errorOf(await s.grant(await at(now / 1000 - 3600 - 30)))).toBe("issued");
+		const at = (iat: number, exp = base.exp) => assertion({ ...base, iat, exp });
+		expect(errorOf(await s.grant(await at(now / 1000 - 1800, now / 1000 + 1800)))).toBe("issued");
 		expect(errorOf(await s.grant(await at(now / 1000 - 3600 - 31)))).toBe("invalid_grant");
 	});
 
