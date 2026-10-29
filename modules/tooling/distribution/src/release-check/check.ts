@@ -11,7 +11,7 @@ import { packedOf, packRelease, zodOf } from "../release/contract.ts";
 import { releaseOf } from "../workspace.ts";
 import { sweptRun } from "./containers/container.ts";
 import { tarballsToCheck } from "./given/given.ts";
-import { helperScene } from "./helpers.ts";
+import { helperScene } from "./helpers/helpers.ts";
 import { dockerMissing, images, overridesFile } from "./image.ts";
 
 /**
