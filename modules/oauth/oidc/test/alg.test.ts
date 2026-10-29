@@ -69,7 +69,7 @@ describe("the algorithm ID tokens are signed with", () => {
 				{
 					where: "oidc.id-token-alg",
 					reason:
-						"keys signs with EdDSA, not oidc.id-token-alg's RS256: add an RS256 key, or set id-token-alg to EdDSA",
+						"keys signs with EdDSA, not oidc.id-token-alg's RS256: add an RS256 key as keys.signing, or set id-token-alg to EdDSA",
 				},
 			],
 		});

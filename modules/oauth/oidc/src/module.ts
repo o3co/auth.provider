@@ -68,7 +68,7 @@ export default defineModule(
 			if (alg !== signed) {
 				return c.refuse(
 					"oidc.id-token-alg",
-					`keys signs with ${signed}, not oidc.id-token-alg's ${alg}: add an ${alg} key, or set id-token-alg to ${signed}`,
+					`keys signs with ${signed}, not oidc.id-token-alg's ${alg}: add an ${alg} key as keys.signing, or set id-token-alg to ${signed}`,
 				);
 			}
 			if (alg !== requiredAlg) c.log.warn("oidc.id_token_alg_not_rs256", { alg });
