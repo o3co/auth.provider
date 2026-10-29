@@ -150,6 +150,23 @@ describe("keys", () => {
 		);
 	});
 
+	it("names the algorithm the next key will sign with, and none where the ring has no next key", async () => {
+		const coming = generateKeyPairSync("rsa", { modulusLength: 2048 })
+			.privateKey.export({ format: "pem", type: "pkcs8" })
+			.toString();
+		const withNext = await boot({
+			...rotated(),
+			next: { kid: "next", alg: "RS256", "public-key": coming },
+		});
+		expect([withNext.app.get(keys).algorithm(), withNext.app.get(keys).nextAlgorithm()]).toEqual([
+			"EdDSA",
+			"RS256",
+		]);
+		await stop();
+		const without = await boot(rotated());
+		expect(without.app.get(keys).nextAlgorithm()).toBeUndefined();
+	});
+
 	it("takes a previous key written as a private PEM for its public half alone", async () => {
 		const { app, base } = await boot(rotated(old.priv));
 		const byOld = await signedBy(old.priv, "old", JSON.stringify({ sub: "a" }));

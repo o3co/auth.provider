@@ -12,6 +12,8 @@ export interface Keys {
 	asymmetric(): boolean;
 	/** The JWS `alg` signatures are made with (the current signing key's). */
 	algorithm(): string;
+	/** The JWS `alg` the next key will sign with, when the ring has one. */
+	nextAlgorithm(): string | undefined;
 	/** The path on `http`'s origin the public key set is published at. */
 	keySetPath(): string;
 	sign(claims: Readonly<Record<string, unknown>>, typ: string): Promise<string>;

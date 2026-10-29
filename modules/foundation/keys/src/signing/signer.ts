@@ -114,6 +114,7 @@ export function signer(ring: Ring, now: () => number, log: Log): Omit<Keys, "key
 		},
 		asymmetric: () => ring.signing.alg !== "HS256",
 		algorithm: () => ring.signing.alg,
+		nextAlgorithm: () => ring.next?.alg,
 	};
 }
 
