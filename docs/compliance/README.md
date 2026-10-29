@@ -11,3 +11,10 @@ An item's role is the role of the server's it binds: `as` the authorization serv
 The checklist binds a production deployment (`kernel.environment = production`, the default). What only a development deployment allows, such as a plain-http public origin by `http.insecure-origin`, is outside it: a production deployment refuses a plain-http origin or issuer at boot, as the security model's Boot section (`docs/security-model.md`) tells.
 
 The summary over every specification, by specification and by role, is not kept here: `pnpm --filter @mod/spec-checklist run summary` prints it from the checklist as it stands.
+
+## Notes
+
+Notes several items point to, from their Note cell:
+
+- <a id="n-https"></a>**N-https**: Held for a production deployment (`kernel.environment = production`, the default), which refuses a plain-http public origin and issuer at boot: there the URL is https. Outside production, a deployment that declares `http.insecure-origin = true` may serve it over plain http, for trying the provider on one machine.
+- <a id="n-least-privilege"></a>**N-least-privilege**: Held for what the provider issues: a token's scope stays within what the client is allowed (`client-allowance`), and its audience is narrowed by a resource indicator (`resource-indicators`). What a resource server takes a token for is its own.
