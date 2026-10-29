@@ -10,9 +10,9 @@ Internal module of `outbound`: the options each TLS connection outbound makes ta
 
 ## Offers
 - `noteHandshake` (a failure, the error behind it) and `handshakeCodeOf` (a failure): what refused the handshake (its TLS alert, RFC 8446 §6, or an `ERR_SSL_*` code), kept beside the failure, never on it; callers see the failure alone.
-- `Tls` (`floor`, required, the `tlsOptions` outbound takes; `ca`, a test's authorities) and `tlsOf` (a `Tls`) → the options a connection takes.
+- `Tls` (`floor`, required, the `tlsOptions` outbound takes; `ca`, a test's authorities) and `tlsOf` (a `Tls`) → the options a connection takes: the test's authorities, held to the floor by `tls-options`' `heldToFloor`.
 
 ## Invariants
 - The floor is one `tls-options` made (`isFloor`), checked once, at `outboundOver`: another, a copy however alike included, throws `NotTheFloor` there, and the module refuses boot at `outbound`, saying to provide it from `@mod/tls-options`.
-- The floor's own keys (`minVersion`, `ciphers`) are copied last, over the test's authorities: nothing a caller passes loosens them, and no other key rides in with them.
+- The floor's own keys, which `tls-options` alone names, are copied last, over the test's authorities: nothing a caller passes loosens them, and no other key rides in with them. The destination's certificate is checked, whatever `NODE_TLS_REJECT_UNAUTHORIZED` says.
 - A server offering only what the floor leaves out (an older TLS, the RSA key exchange, CBC) is `unreachable`, directly and through the proxy alike.
