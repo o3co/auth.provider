@@ -29,7 +29,7 @@
 
 - **guarantee-2-a** MUST: a request with `prompt=login` is met only by an authentication made for it, by `reauth`'s record, which `authorize` makes for the request and takes once.
 - **guarantee-2-b** MUST: a request with `max_age` is met only by an authentication within it, and an authentication time `session` does not know never counts as fresh.
-- **guarantee-2-c** MUST: through an upstream, a login counts as fresh only where the time the upstream reports for it is within its fresh login allowance, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default): for `prompt=login`, no further back than the allowance before the demand, compared in whole seconds; for `max_age`, where `auth_time + allowance + max_age >= now`, compared to the millisecond.
+- **guarantee-2-c** MUST: through an upstream, the callback takes a login only where the time the upstream reports for it is within its fresh login allowance, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default): for `prompt=login`, no further back than the allowance before the demand, compared in whole seconds; for `max_age`, where `auth_time + allowance + max_age >= now`, compared to the millisecond. The session keeps the upstream's time, lifted to the round trip's start where it is within the allowance before the start's second, and the ID token's `auth_time` is that time; the code is issued only where that time is within `max_age` then, with no allowance added (guarantee 2-b), and a later request in the same session is measured from it the same way.
 
 ## 3 A dependency that cannot answer never grants anything.
 
