@@ -348,7 +348,7 @@ describe("private_key_jwt", () => {
 		await expect(c.authenticate(presenting(await sign(claims())))).rejects.toSatisfy(isUnavailable);
 	});
 
-	it("bounds the assertion's times by the lifetime cap and the clock allowance [rfc7523-3-m] [rfc7521-5.2-j] [rfc7523-3-o] [rfc7521-5.2-l] [rfc7523-3-q]", async () => {
+	it("bounds the assertion's times by the lifetime cap and the clock allowance, taking none on or after its exp but within the configured clock-skew (RFC 7519 §4.1.4's leeway) [rfc7523-3-m] [rfc7521-5.2-j] [rfc7523-3-o] [rfc7521-5.2-l] [rfc7523-3-q] [oidc-core-9-m]", async () => {
 		const { c } = await boot();
 		const at = (extra: Record<string, unknown>) => tried(c, extra);
 		expect(await at({ exp: seconds() - 29 })).toBe("app");

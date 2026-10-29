@@ -44,6 +44,16 @@ import { type SessionClients, sessionClients } from "../src/store.ts";
 import { type RpLogoutSettings, rpLogoutConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
+/** What a request to a route answered, as the tests read it. */
+export interface Called {
+	readonly status: number | undefined;
+	readonly headers: Readonly<Record<string, string>>;
+	readonly cookies: readonly string[];
+	readonly loads: HttpResponse["loads"];
+	readonly json: Record<string, unknown> | undefined;
+	readonly text: string | undefined;
+}
+
 export const issuer = "https://as.example";
 export const back = "https://app.example/after";
 
@@ -210,11 +220,27 @@ export async function harness(
 			"JWT",
 		);
 	};
+	/**
+	 * A request to the logout. A `303` on to the logout's own `GET`, as a hinted `POST` answers, is
+	 * followed with the same headers, as a browser follows it, unless `follow` is false.
+	 */
 	const call = async (
 		method: "GET" | "POST",
 		/** Each parameter's value, or its values where it is sent more than once. */
 		params: Record<string, string | readonly string[]>,
 		headers: Record<string, string> = {},
+		follow = true,
+	): Promise<Called> => {
+		const called = await once(method, params, headers);
+		const location = called.headers.location;
+		if (!follow || called.status !== 303 || !location?.startsWith("/oauth/logout?")) return called;
+		const query = Object.fromEntries(new URL(location, issuer).searchParams);
+		return call("GET", query, headers, follow);
+	};
+	const once = async (
+		method: "GET" | "POST",
+		params: Record<string, string | readonly string[]>,
+		headers: Record<string, string>,
 	) => {
 		const route = seen.routes.find((r) => r.path === "/oauth/logout" && r.method === method);
 		const values = new Map(
