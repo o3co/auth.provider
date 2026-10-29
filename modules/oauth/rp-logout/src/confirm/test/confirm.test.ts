@@ -1,4 +1,5 @@
 import type { AuditRecord } from "@mod/audit";
+import type { Client } from "@mod/clients";
 import type { HttpRequest, HttpResponse } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { Unavailable } from "@mod/kernel";
@@ -10,6 +11,7 @@ import { confirmPath, confirmWith } from "../confirm.ts";
 
 const issuer = "https://as.example";
 const confirmUrl = `${issuer}${confirmPath}`;
+const logoutUrl = `${issuer}/oauth/logout`;
 const nowMs = 1_800_000_000_000;
 const nowS = Math.floor(nowMs / 1000);
 
@@ -35,9 +37,28 @@ function serve(
 		readonly close?: (id: string) => Promise<CloseOutcome>;
 		readonly upstream?: string;
 		readonly issue?: () => { field: string; token: string; cookies: string[] };
+		/** The package's `confirm-within`, in seconds; 300 unless a test is about it. */
+		readonly within?: number;
 	} = {},
 ) {
+	let at = nowMs;
+	/** Each client and the returns it registers, as its record says at the time it is read. */
+	const returns = new Map<string, string[]>([["app", ["https://app.example/after"]]]);
+	const clientOf = (id: string): Client | undefined => {
+		const listed = returns.get(id);
+		if (listed === undefined) return undefined;
+		const section = { "post-logout-redirect-uris": listed };
+		return {
+			id,
+			kind: "confidential",
+			method: "client_secret_basic",
+			registered: true,
+			section: <T>() => section as T,
+		};
+	};
 	const closes: string[] = [];
+	/** The return the upstream's end of session was handed, on each close. */
+	const upstreamBacks: unknown[] = [];
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
 	const closing = closingWith({
@@ -60,11 +81,18 @@ function serve(
 		upstream:
 			options.upstream === undefined
 				? undefined
-				: { name: "upstream", at: async () => options.upstream },
+				: {
+						name: "upstream",
+						at: async (_session, back) => {
+							upstreamBacks.push(back);
+							return options.upstream;
+						},
+					},
 		audit: { record: (e) => void recorded.push(e) },
 		log: logged.log,
 	});
 	const confirm = confirmWith({
+		clients: { find: async (id) => clientOf(id) },
 		sessions: {
 			// The browser's cookie names its session's handle directly in these tests.
 			handleOf: async (request) => /session=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1],
@@ -78,10 +106,21 @@ function serve(
 		},
 		issuer,
 		confirmUrl,
-		now: () => nowMs,
+		logoutUrl,
+		withinSeconds: options.within ?? 300,
+		now: () => at,
 		log: logged.log,
 	});
-	return { confirm, closes, recorded };
+	return {
+		confirm,
+		closes,
+		recorded,
+		returns,
+		upstreamBacks,
+		advance: (ms: number) => {
+			at += ms;
+		},
+	};
 }
 
 const browser = (session: string | undefined, fields: Record<string, string | string[]> = {}) =>
@@ -96,6 +135,14 @@ const shown = (session: string | undefined): HttpRequest =>
 		method: "GET",
 		path: confirmPath,
 		headers: new Map(session === undefined ? [] : [["cookie", `session=${session}`]]),
+	});
+/** The page's GET carrying `request`, as the logout sends the browser to it. */
+const shownWith = (session: string | undefined, request: string): HttpRequest =>
+	testRequest({
+		method: "GET",
+		path: confirmPath,
+		headers: new Map(session === undefined ? [] : [["cookie", `session=${session}`]]),
+		query: new Map([["request", [request]]]),
 	});
 const text = (answer: HttpResponse) => String(answer.body);
 
@@ -238,5 +285,143 @@ describe("the confirmation of a logout a client started without a hint", () => {
 		const answer = await confirm.take(browser("s1", { confirmation: [valid("s1"), valid("s1")] }));
 		expect(answer.status).toBe(400);
 		expect(closes).toEqual([]);
+	});
+});
+
+describe("a request the logout carries", () => {
+	const back = { postLogoutRedirectUri: "https://app.example/after", state: "s 1" };
+	const carriedOf = (claims: Record<string, unknown>) => signed(claims, "logout-request+jwt");
+
+	it("is signed as its own kind for the logout endpoint, with the session, client, return and state, and read back only as signed", async () => {
+		const { confirm } = serve();
+		const token = await confirm.carry({ sid: "s9", client: "app", back });
+		expect(await keys.verify(token, "logout-request+jwt")).toEqual({
+			kind: "valid",
+			claims: {
+				iss: issuer,
+				aud: logoutUrl,
+				exp: nowS + 300,
+				sid: "s9",
+				client: "app",
+				back: back.postLogoutRedirectUri,
+				state: "s 1",
+			},
+		});
+		expect(await confirm.carried(token)).toEqual({ sid: "s9", client: "app", back });
+		const held = { iss: issuer, aud: logoutUrl, exp: nowS + 300, sid: "s9" };
+		const refused: Record<string, string> = {
+			"a confirmation": signed(held),
+			"the confirmation's audience": carriedOf({ ...held, aud: confirmUrl }),
+			"another issuer": carriedOf({ ...held, iss: "https://other.example" }),
+			"at its exp": carriedOf({ ...held, exp: nowS }),
+			"no session": carriedOf({ ...held, sid: "" }),
+			"not signed": "not-a-token",
+		};
+		for (const [name, token] of Object.entries(refused)) {
+			expect(await confirm.carried(token), name).toBeUndefined();
+		}
+	});
+
+	it("brings its return to the page, moving on to it with its state once the person agrees, closing the browser's session and never the one it names [oidc-rpinit-2-n]", async () => {
+		const { confirm, closes } = serve();
+		const token = await confirm.carry({ sid: "s9", client: "app", back });
+		const page = text(await confirm.show(shownWith("s1", token)));
+		const confirmation = /name="confirmation" value="([^"]+)"/.exec(page)?.[1] ?? "";
+		const answer = await confirm.take(browser("s1", { confirmation }));
+		expect(closes).toEqual(["s1"]);
+		expect(answer.headers?.location).toBeUndefined();
+		expect(text(answer)).toContain('data-target="https://app.example/after?state=s+1"');
+	});
+
+	it("moves on to its return from the page saying the person is not signed in, where the browser holds no session", async () => {
+		const { confirm, closes } = serve();
+		const token = await confirm.carry({ sid: "s9", client: "app", back });
+		const answer = await confirm.show(shownWith(undefined, token));
+		expect(text(answer)).toContain("You are not signed in.");
+		expect(text(answer)).toContain('data-target="https://app.example/after?state=s+1"');
+		expect(closes).toEqual([]);
+	});
+
+	it("asks without a return where the request does not read as one it signed", async () => {
+		const { confirm } = serve();
+		const page = text(await confirm.show(shownWith("s1", carriedOf({ sid: "s9", back: "x" }))));
+		const confirmation = /name="confirmation" value="([^"]+)"/.exec(page)?.[1] ?? "";
+		const answer = await confirm.take(browser("s1", { confirmation }));
+		expect(text(answer)).toContain("You are logged out.");
+		expect(text(answer)).not.toContain("data-target");
+	});
+
+	it("goes back to no return the client no longer registers, or whose client is gone, on the page without a session and after the close alike", async () => {
+		const changes: Record<string, (returns: Map<string, string[]>) => void> = {
+			"the return unregistered": (returns) => returns.set("app", ["https://app.example/other"]),
+			"the client gone": (returns) => returns.delete("app"),
+		};
+		for (const [name, change] of Object.entries(changes)) {
+			const { confirm, closes, returns } = serve();
+			const token = await confirm.carry({ sid: "s9", client: "app", back });
+			const page = text(await confirm.show(shownWith("s1", token)));
+			const confirmation = /name="confirmation" value="([^"]+)"/.exec(page)?.[1] ?? "";
+			change(returns);
+			const alone = text(await confirm.show(shownWith(undefined, token)));
+			const taken = text(await confirm.take(browser("s1", { confirmation })));
+			expect([name, alone.includes("data-target"), taken.includes("data-target")]).toEqual([
+				name,
+				false,
+				false,
+			]);
+			expect([name, taken.includes("You are logged out."), closes]).toEqual([name, true, ["s1"]]);
+		}
+	});
+
+	it("keeps the client in the confirmation, and its time no longer than the carried request's, however late the page is shown", async () => {
+		const { confirm, advance } = serve();
+		const token = await confirm.carry({ sid: "s9", client: "app", back });
+		advance(120_000);
+		const page = text(await confirm.show(shownWith("s1", token)));
+		const confirmation = /name="confirmation" value="([^"]+)"/.exec(page)?.[1] ?? "";
+		expect(await keys.verify(confirmation, "logout-confirm+jwt")).toEqual({
+			kind: "valid",
+			claims: {
+				iss: issuer,
+				aud: confirmUrl,
+				sid: "s1",
+				exp: nowS + 300,
+				client: "app",
+				back: back.postLogoutRedirectUri,
+				state: "s 1",
+			},
+		});
+	});
+
+	it("hands the upstream's end of session the return only while its client still registers it", async () => {
+		for (const [name, registered] of [
+			["registered", true],
+			["unregistered since", false],
+		] as const) {
+			const { confirm, returns, upstreamBacks } = serve({ upstream: "https://idp.example/end" });
+			const token = await confirm.carry({ sid: "s9", client: "app", back });
+			const page = text(await confirm.show(shownWith("s1", token)));
+			const confirmation = /name="confirmation" value="([^"]+)"/.exec(page)?.[1] ?? "";
+			if (!registered) returns.set("app", ["https://app.example/other"]);
+			await confirm.take(browser("s1", { confirmation }));
+			expect([name, upstreamBacks]).toEqual([name, [registered ? back : {}]]);
+		}
+	});
+
+	it("gives a carried request and a confirmation the time confirm-within sets, the confirmation never past the request's", async () => {
+		const { confirm, advance } = serve({ within: 120 });
+		const token = await confirm.carry({ sid: "s9", client: "app", back });
+		expect(await keys.verify(token, "logout-request+jwt")).toMatchObject({
+			claims: { exp: nowS + 120 },
+		});
+		advance(60_000);
+		const carriedPage = text(await confirm.show(shownWith("s1", token)));
+		const carriedBound = /name="confirmation" value="([^"]+)"/.exec(carriedPage)?.[1] ?? "";
+		const plainPage = text(await confirm.show(shown("s1")));
+		const plainBound = /name="confirmation" value="([^"]+)"/.exec(plainPage)?.[1] ?? "";
+		expect([
+			await keys.verify(carriedBound, "logout-confirm+jwt"),
+			await keys.verify(plainBound, "logout-confirm+jwt"),
+		]).toMatchObject([{ claims: { exp: nowS + 120 } }, { claims: { exp: nowS + 60 + 120 } }]);
 	});
 });

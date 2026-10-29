@@ -83,6 +83,9 @@ onLegacy(codeArea, {
 		// Ours asks the person to confirm a logout without a hint, on a page of its own, and never returns
 		// from it, whatever return the request names; the legacy build refuses one without a hint.
 		"logout-confirmed-without-hint",
+		// Ours asks the person where a hint names a session the browser does not hold, or none, and carries
+		// a hinted POST on to its GET; the legacy build closes the session the hint names.
+		"logout-asked-for-another-session",
 		// Ours issues a code only for the End-User an id_token_hint names, and refuses one it did not
 		// issue; the legacy build reads no hint at authorization.
 		"authorize-reads-id-token-hint",

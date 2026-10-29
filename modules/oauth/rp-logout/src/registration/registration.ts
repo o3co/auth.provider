@@ -38,6 +38,10 @@ export const framable = (registered: Registration, client: Client): boolean => {
 	return uri === undefined || redirectsAt(client, new URL(uri).origin);
 };
 
+/** Whether `client`, as its record says now, registers `uri` exactly as a return; none for no client. */
+export const returnsTo = (client: Client | undefined, uri: string): boolean =>
+	client?.section(registration)["post-logout-redirect-uris"].includes(uri) ?? false;
+
 export const registration: Section<Registration> = {
 	name: "rp-logout",
 	schema: z.strictObject({
