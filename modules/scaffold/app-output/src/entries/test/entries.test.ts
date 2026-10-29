@@ -434,28 +434,35 @@ it("hands on every holder reseal tells before it exits, though standard output i
 	expect(done.status).toBe(0);
 }, 60_000);
 
-it("stops the app once on a second signal that comes while it stops, waiting for the first stop", async () => {
-	const { target } = await script("@mod/seal", "src/main.ts");
-	const child = spawn(process.execPath, ["src/main.ts"], {
-		cwd: target,
-		env: { ...process.env, SIGNALLED: "1" },
-	});
-	const exited = new Promise<[number | null, string | null]>((resolve) =>
-		child.once("exit", (code, signal) => resolve([code, signal])),
-	);
-	let output = "";
-	child.stdout.on("data", (chunk) => {
-		output += chunk;
-		if (output.endsWith("started\n")) child.kill("SIGTERM");
-		if (output.endsWith("stopping\n")) child.kill("SIGINT");
-	});
-	child.stderr.on("data", (chunk) => {
-		output += chunk;
-	});
-	expect(await exited, output).toEqual([0, null]);
-	expect(output.split("\n").filter((l) => l !== "" && !l.startsWith("LOG "))).toEqual([
-		"started",
-		"stopping",
-		"stopped",
-	]);
-});
+it.each([
+	["SIGTERM", "SIGINT"],
+	["SIGTERM", "SIGTERM"],
+	["SIGINT", "SIGINT"],
+] as const)(
+	"stops the app once on a second signal that comes while it stops, waiting for the first stop (%s, then %s)",
+	async (first, second) => {
+		const { target } = await script("@mod/seal", "src/main.ts");
+		const child = spawn(process.execPath, ["src/main.ts"], {
+			cwd: target,
+			env: { ...process.env, SIGNALLED: "1" },
+		});
+		const exited = new Promise<[number | null, string | null]>((resolve) =>
+			child.once("exit", (code, signal) => resolve([code, signal])),
+		);
+		let output = "";
+		child.stdout.on("data", (chunk) => {
+			output += chunk;
+			if (output.endsWith("started\n")) child.kill(first);
+			if (output.endsWith("stopping\n")) child.kill(second);
+		});
+		child.stderr.on("data", (chunk) => {
+			output += chunk;
+		});
+		expect(await exited, output).toEqual([0, null]);
+		expect(output.split("\n").filter((l) => l !== "" && !l.startsWith("LOG "))).toEqual([
+			"started",
+			"stopping",
+			"stopped",
+		]);
+	},
+);
