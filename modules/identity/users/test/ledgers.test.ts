@@ -258,7 +258,7 @@ describe("users ledgers", () => {
 	it("leaves out only an attribute whose value users does not accept, logging its name but never its value", async () => {
 		const attributes = {
 			name: "Alice",
-			email: "a@victim.test/x",
+			email: "a..b@victim.test",
 			email_verified: "true",
 			picture: "javascript:alert(1)",
 			groups: ["admins"],
@@ -288,6 +288,23 @@ describe("users ledgers", () => {
 		for (const value of ["victim", "javascript", "\u202E", "true"]) {
 			expect(JSON.stringify(recorded.lines())).not.toContain(value);
 		}
+	});
+
+	it("leaves out an email's verification with an email it leaves out, so none is kept without its email", async () => {
+		const attributes = { name: "Alice", email: "a..b@example.com", email_verified: true };
+		const recorded = recordingLog();
+		const u = await usersOf(
+			answering({ kind: "user", user: { subject: "s-alice", attributes } }),
+			recorded,
+		);
+		expect(await u.bySubject("s-alice")).toEqual({
+			kind: "user",
+			user: { subject: "s-alice", attributes: { name: "Alice" } },
+		});
+		expect(recorded.lines().map((line) => line.fields.attribute)).toEqual([
+			"email",
+			"email_verified",
+		]);
 	});
 
 	it("logs an attribute's name with no control or format character, and at most 200 characters", async () => {

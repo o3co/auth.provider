@@ -4,6 +4,7 @@ import {
 	isAttributeValue,
 	isWellFormedSubject,
 	type Ledger,
+	userAttribute,
 	type Verified,
 } from "../contract.ts";
 import { none, type UserSource, unanswerable } from "../registered.ts";
@@ -22,12 +23,19 @@ function copyOf(given: unknown): unknown {
 /** A name the ledger wrote, safe for one log field. */
 const loggable = (name: string) => [...name.replace(/[\p{Cc}\p{Cf}]/gu, "")].slice(0, 200).join("");
 
-/** The attributes whose values users accepts; each other is left out, logged by name and never by value. */
+/**
+ * The attributes whose values users accepts; each other is left out, logged by name and never by
+ * value. An email's verification goes with the email, so it is left out with one left out.
+ */
 function acceptedOf(attributes: Record<string, unknown>, log: Log): Record<string, unknown> {
-	const accepted = (name: string, value: unknown) => {
-		if (isAttributeValue(name, value)) return true;
+	const dropped = (name: string) => {
 		log.warn("users.attribute_dropped", { attribute: loggable(name) });
 		return false;
+	};
+	const emailKept = isAttributeValue(userAttribute.email, attributes[userAttribute.email]);
+	const accepted = (name: string, value: unknown) => {
+		if (name === userAttribute.emailVerified && !emailKept) return dropped(name);
+		return isAttributeValue(name, value) || dropped(name);
 	};
 	return Object.fromEntries(
 		Object.entries(attributes).filter(([name, value]) => accepted(name, value)),

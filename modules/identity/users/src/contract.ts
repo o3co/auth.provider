@@ -28,6 +28,19 @@ export interface UserAttributes {
 const isPlainText = (value: unknown): value is string =>
 	typeof value === "string" && !/[\p{Cc}\p{Cf}]/u.test(value);
 
+/** Plain text that holds more than blanks, so a claim drawn from it is never empty. */
+const isNamedText = (value: unknown): value is string => isPlainText(value) && /\S/u.test(value);
+
+/** RFC 5322's atext: the ASCII letters, digits and the marks a dot-atom may hold. */
+const atext = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+";
+/** An LDH label of at most 63 characters, neither starting nor ending with a hyphen. */
+const ldhLabel = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
+/** RFC 5322's addr-spec in ASCII: a dot-atom local part, at a domain of LDH labels. */
+const addrSpec = new RegExp(`^${atext}(?:\\.${atext})*@${ldhLabel}(?:\\.${ldhLabel})*$`);
+
+/** An address mail takes that is also RFC 5322's addr-spec, as an `email` claim must be (OpenID Connect Core §5.1). */
+const isEmailClaim = (value: unknown): value is string => isAddress(value) && addrSpec.test(value);
+
 /** An https URL that reads back as given: no blank character, and its parsed form unchanged. */
 function isPictureUrl(value: unknown): boolean {
 	if (!isPlainText(value) || /\s/u.test(value)) return false;
@@ -36,9 +49,9 @@ function isPictureUrl(value: unknown): boolean {
 }
 
 const attributeRules = new Map<string, (value: unknown) => boolean>([
-	[userAttribute.email, isAddress],
+	[userAttribute.email, isEmailClaim],
 	[userAttribute.emailVerified, (value) => typeof value === "boolean"],
-	[userAttribute.name, isPlainText],
+	[userAttribute.name, isNamedText],
 	[userAttribute.picture, isPictureUrl],
 	[userAttribute.groups, (value) => Array.isArray(value) && value.every(isPlainText)],
 ]);
