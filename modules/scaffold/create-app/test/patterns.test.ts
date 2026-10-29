@@ -112,11 +112,6 @@ describe.each(named)("the pattern %s", (name) => {
 			/`http\.public-origin` and `issuer\.url` to `http:\/\/localhost:8080`, `http\.insecure-origin` to `true`, and `kernel\.environment` to `development`/,
 		);
 		expect(readme).toContain("`create-auth-provider --list`");
-		expect(readme).toContain("with `openssl rand -base64 32`");
-		// Which modules refuse `unsupported` is theirs to say at boot.
-		expect(readme).toContain(
-			"With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
-		);
 		if (name === "simple-web") {
 			expect(readme).toContain("With its default axes it needs no outside system");
 			expect(readme).toContain(

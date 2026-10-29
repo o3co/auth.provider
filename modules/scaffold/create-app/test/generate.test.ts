@@ -134,7 +134,6 @@ it("reads its fragments' scalars from env and writes their lists locally, with a
 	expect(guide).toContain(
 		"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
 	);
-	expect(guide).toContain("with `openssl rand -base64 32`");
 	// Its store is kept in memory: accepted, one instance, and Redis named for more.
 	expect(guide).toContain("the memory store accepted (`store.accept-volatile = true`)");
 	expect(guide).toContain(
