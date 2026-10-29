@@ -64,7 +64,7 @@ export function reauthsWith({ store, clock, random }: ReauthsParts): Reauths {
 			if (maxAgeMs === undefined) return true;
 			// max_age=0, which no login's age meets, is met by the record, as prompt=login is.
 			if (maxAgeMs === 0) return recorded;
-			// Measured now, as the request is decided: a record never stands for an age past it.
+			// Measured now, when asked: a record never stands for an age past it.
 			return clock.now() - authenticatedAt <= maxAgeMs;
 		},
 	};
