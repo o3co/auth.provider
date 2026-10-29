@@ -22,14 +22,14 @@
 
 ## 1 Closing a session closes every path for the tokens issued from it.
 
-- **guarantee-1-a** MUST: a session left closing, with participants not yet done, is closed by its logout or a later sweep, and once closed no path is left open for the tokens issued from it, but for a session the cap pushed out and a store outage kept from closing (design.md's Decisions): no participants, no back-channel notice; a logout that cannot finish answers `503`, never logged out.
+- **guarantee-1-a** MUST: a session left closing, with participants not yet done, is closed by its logout or a later sweep, and once closed no path is left open for the tokens issued from it, but for a session the cap pushed out while a store outage kept it from closing, declared in design.md's Decisions: it ends without its participants or a back-channel notice, and its access tokens live until they expire, at most to the session's own end; a logout that cannot finish answers `503`, never logged out.
   faults: Lr, Lx, F, Fs, C, K, H2
 
 ## 2 `prompt=login` and `max_age` are met only by a fresh authentication.
 
 - **guarantee-2-a** MUST: a request with `prompt=login` is met only by an authentication made for it, by `reauth`'s record, which `authorize` makes for the request and takes once.
 - **guarantee-2-b** MUST: a request with `max_age` is met only by an authentication within it, and an authentication time `session` does not know never counts as fresh.
-- **guarantee-2-c** MUST: through an upstream, a login counts as fresh only where the time the upstream reports for it is within its fresh login allowance, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default): for `prompt=login`, no further back than the allowance before the demand, compared in whole seconds; for `max_age`, where `auth_time + allowance + max_age >= now`, compared to the millisecond. The session keeps the upstream's time, lifted within the allowance to the round trip's start, and the ID token's `auth_time` is that time; a later request in the same session is measured from it without the allowance.
+- **guarantee-2-c** MUST: through an upstream, a login counts as fresh only where the time the upstream reports for it is within its fresh login allowance, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default): for `prompt=login`, no further back than the allowance before the demand, compared in whole seconds; for `max_age`, where `auth_time + allowance + max_age >= now`, compared to the millisecond.
 
 ## 3 A dependency that cannot answer never grants anything.
 
@@ -105,7 +105,7 @@
 
 ## 8 Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.
 
-- **guarantee-8-a** MUST NOT: a refusal at boot shows a setting's value; it names the setting by its key path. A contribution's name (a route's method and path, a receiver's name) is named as its own; a name is never a secret.
+- **guarantee-8-a** MUST NOT: a refusal at boot shows a setting's value; it names the setting by its key path, and a contribution by its name (a route's method and path, a receiver's name), even where a setting chose the name (`metrics-prometheus.path`); a name is never a secret.
 - **guarantee-8-b** MUST NOT: a log line carries a secret, credential, token, request body or header value, but for header values from a fixed set.
 - **guarantee-8-c** MUST NOT: an audit event carries a token or a secret.
 - **guarantee-8-d** MUST NOT: an answer carries a secret, but for tokens and codes to the one they are issued to, and a secret a registration shows once to its owner.
