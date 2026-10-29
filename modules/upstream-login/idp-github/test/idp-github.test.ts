@@ -2,6 +2,7 @@ import { isUnavailable, Unavailable } from "@mod/kernel";
 import type { Narrower, Outbound, OutboundRequest, OutboundResponse } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import type { OutboundRefusals } from "@mod/outbound-policy";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
 import { settingsOf } from "../src/settings.ts";
@@ -185,6 +186,7 @@ describe("idp-github", () => {
 					timeout: "300ms",
 				}),
 				async () => ["10.0.0.5"],
+				{ floor: testTlsOptions },
 			);
 		for (const [internal, expected] of [
 			[[], "refused"],
@@ -249,7 +251,9 @@ describe("idp-github", () => {
 	it("takes the authorization endpoint over plain http only where outbound's policy for the browser does, refusing it at its key", () => {
 		const both = { "client-id": "cid", "client-secret": "sec" };
 		const refusalsOver = (more: Record<string, unknown>): OutboundRefusals => {
-			const paths = outboundOver(outboundSection.parse(more), async () => ["10.0.0.5"]);
+			const paths = outboundOver(outboundSection.parse(more), async () => ["10.0.0.5"], {
+				floor: testTlsOptions,
+			});
 			const { explained, plainInternal, browsedRefusal } = paths;
 			return { explained, plainInternal, browsedRefusal };
 		};
