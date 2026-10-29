@@ -3,7 +3,7 @@
 ## Responsibilities
 - Assembles modules: checks what they take, builds every provision and contribution, resolving contracts at once, then checks late references. Owns the generic rules of extension points, collecting contributions in module order.
 - Loads configuration and gives each module only its own section, checked and frozen. With even one boot refusal, nothing is served.
-- Runs the lifecycle (start, periodic tasks, stop within a drain deadline) and answers readiness (internal module `lifecycle`, whose card holds their invariants). Provides the clock, randomness and log.
+- Runs the lifecycle (start, periodic tasks, stop within a drain deadline) and answers readiness (internal module `lifecycle`, whose card holds their invariants).
 - Additions to this module go through a human gate.
 
 ## Not here
@@ -16,7 +16,7 @@
 - Build context: the runtime, `section`, `environment`, `get`, `collect`, `late` (a function giving a contract's interface once assembly succeeds), `readinessReport`, `onStart`, `onStop`, `every`, `refuse` and `refuseAll`.
 - `readinessReport(deadlineMs)`: runs every probe (a contributed check of one resource, keyed by name at `probes`) at once, joining a check still running, and gives each probe's name and whether it passed. `ready` only if all pass within the caller's deadline; once stop begins, `unready` with all down. A check is aborted once no caller waits.
 - `every(intervalMs, task)`: runs `task(signal)` from start at a whole interval of ms from 1 to 2^31−1, never two at once; a failed run is logged and the next follows; stop aborts a running one and waits for it.
-- Refusals and outages (internal module `refusal`): `BootRefused`, `BuildRefused` (a library's refusal from inside a factory) and `Unavailable`, each told by a mark every copy of the kernel shares, its `is` never throwing.
+- Refusals and outages (internal module `refusal`): `BootRefused`, `BuildRefused` (a library's refusal from inside a factory) and `Unavailable`, each told by a mark every copy of the kernel shares: `BootRefused.is`, `BuildRefused.is` and `isUnavailable`, none throwing.
 - `deepFreeze` freezes a value from outside once, to the leaves. `sameSecret` compares two secrets (strings as UTF-8, or bytes) in constant time when their byte lengths match, and answers false otherwise.
 - Runtime contracts (internal module `runtime`, whose card holds the log's invariants): clock, randomness, and a log with one method per level (trace to fatal). Sinks come from `logSinks` (any number).
 - Section `kernel` (`deployment`, `environment`, `logging.level`, `stop-deadline`), its schema `kernelSection` and `kernelConfig`: internal module `config`.
