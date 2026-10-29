@@ -10,13 +10,15 @@ import { booted, makers, published } from "./parts.ts";
 
 const runtime = quietRuntime();
 
-const rsaSigning = () => ({
-	kid: "r",
-	alg: "RS256",
-	"private-key": generateKeyPairSync("rsa", { modulusLength: 2048 })
+const edSigning = () => ({
+	kid: "e",
+	alg: "EdDSA",
+	"private-key": generateKeyPairSync("ed25519")
 		.privateKey.export({ type: "pkcs8", format: "pem" })
 		.toString(),
 });
+/** A deployment that signs with EdDSA, as the operator writes it. */
+const edDsa = { keys: { signing: edSigning() }, oidc: { "id-token-alg": "EdDSA" } };
 
 const copies = contract<readonly DocumentCopy[]>("copies");
 const copiesSeen = defineModule(
@@ -45,40 +47,48 @@ const request = {
 	redemption: "r-test",
 };
 
-describe("the algorithm the operator fixes", () => {
-	it("is the one keys signs with, unset or written the same [oidc-core-10.1-a]", async () => {
-		for (const config of [{}, { oidc: { "id-token-alg": "EdDSA" } }]) {
+describe("the algorithm ID tokens are signed with", () => {
+	it("is RS256 unless the operator writes another, which keys then signs with [oidc-core-10.1-a]", async () => {
+		const signed = async (config: Record<string, unknown>) => {
 			const [maker] = (await booted({ runtime, config })).get(makers);
-			expect(algOf((await maker?.make(request)) ?? "")).toBe("EdDSA");
-		}
+			return algOf((await maker?.make(request)) ?? "");
+		};
+		expect(await signed({})).toBe("RS256");
+		expect(await signed(edDsa)).toBe("EdDSA");
 	});
 
-	it("refuses to start where keys does not sign with it, naming the algorithm keys signs with", async () => {
+	it("refuses to start where keys does not sign with it, by the algorithms' names, giving both ways out", async () => {
+		const refused = (config: Record<string, unknown>) =>
+			expect(booted({ runtime, config })).rejects.toMatchObject({
+				refusals: [{ where: "oidc.id-token-alg", reason: expect.any(String) }],
+			});
 		await expect(
-			booted({ runtime, config: { oidc: { "id-token-alg": "RS256" } } }),
+			booted({ runtime, config: { keys: { signing: edSigning() } } }),
 		).rejects.toMatchObject({
 			refusals: [
 				{
 					where: "oidc.id-token-alg",
 					reason:
-						"keys signs ID tokens with EdDSA: set keys.signing.alg to this one, or leave this unset",
+						"keys signs with EdDSA, not oidc.id-token-alg's RS256: add an RS256 key, or set id-token-alg to EdDSA",
 				},
 			],
 		});
+		await refused({ oidc: { "id-token-alg": "ES256" } });
+		await refused({ oidc: { "id-token-alg": "none" } });
 	});
 });
 
 describe("the algorithm a client registers for its ID tokens [oidc-core-10.1-a]", () => {
-	it("is keys' algorithm when the client registers none", async () => {
+	it("is the deployment's when the client registers none", async () => {
 		const app = await withClients([publicClient({ id: "c" })]);
 		const [maker] = app.get(makers);
-		expect(algOf((await maker?.make(request)) ?? "")).toBe("EdDSA");
+		expect(algOf((await maker?.make(request)) ?? "")).toBe("RS256");
 		expect((await app.get(clients).find("c"))?.registered).toBe(true);
 	});
 
-	it("is the one it registers, where that is keys' algorithm", async () => {
+	it("is the one it registers, where that is the deployment's", async () => {
 		const registered = publicClient({ id: "c", sections: { oidc: { "id-token-alg": "EdDSA" } } });
-		const app = await withClients([registered]);
+		const app = await withClients([registered], edDsa);
 		const [maker] = app.get(makers);
 		expect(algOf((await maker?.make(request)) ?? "")).toBe("EdDSA");
 	});
@@ -86,14 +96,14 @@ describe("the algorithm a client registers for its ID tokens [oidc-core-10.1-a]"
 	it("refuses to start where a registered client names another, by its place and the algorithm alone", async () => {
 		const registered = publicClient({
 			id: "the-client",
-			sections: { oidc: { "id-token-alg": "RS256" } },
+			sections: { oidc: { "id-token-alg": "EdDSA" } },
 		});
 		const refused = withClients([registered]);
 		await expect(refused).rejects.toMatchObject({
 			refusals: [
 				{
 					where: "clients.registered.0.sections.oidc.id-token-alg",
-					reason: "ID tokens are signed with EdDSA alone",
+					reason: "ID tokens are signed with RS256 alone",
 				},
 			],
 		});
@@ -117,8 +127,8 @@ describe("the algorithm a client registers for its ID tokens [oidc-core-10.1-a]"
 			} as const;
 		};
 		const check = app.get(clients).checkRecord;
-		expect(await check(recordOf("EdDSA"))).toBeUndefined();
-		for (const alg of ["RS256", "none", 256]) {
+		expect(await check(recordOf("RS256"))).toBeUndefined();
+		for (const alg of ["EdDSA", "none", 256]) {
 			expect(await check(recordOf(alg)), String(alg)).toEqual([
 				{ path: "sections.oidc.id-token-alg" },
 			]);
@@ -129,7 +139,7 @@ describe("the algorithm a client registers for its ID tokens [oidc-core-10.1-a]"
 describe("a deployment whose ID tokens are not signed with RS256", () => {
 	it("is warned of it once each boot, by the algorithm's name alone [oidc-discovery-3-aa]", async () => {
 		const recording = recordingLog();
-		const app = await booted({ runtime: quietRuntime({ log: recording.log }) });
+		const app = await booted({ runtime: quietRuntime({ log: recording.log }), config: edDsa });
 		app.get(makers);
 		app.get(published);
 		expect(recording.lines().filter((line) => line.level === "warn")).toEqual([
@@ -137,12 +147,9 @@ describe("a deployment whose ID tokens are not signed with RS256", () => {
 		]);
 	});
 
-	it("is not warned where keys signs with RS256", async () => {
+	it("is not warned where it signs with RS256, the default", async () => {
 		const recording = recordingLog();
-		await booted({
-			runtime: quietRuntime({ log: recording.log }),
-			config: { keys: { signing: rsaSigning() } },
-		});
+		await booted({ runtime: quietRuntime({ log: recording.log }) });
 		expect(recording.lines().filter((line) => line.level === "warn")).toEqual([]);
 	});
 });

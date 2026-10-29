@@ -5,7 +5,7 @@ import { metadataSections } from "@mod/clients";
 import { idTokens } from "@mod/code-grant";
 import { issuer, metadata } from "@mod/issuer";
 import { contract, defineModule, setting } from "@mod/kernel";
-import { keys } from "@mod/keys";
+import { isVerifyAlgorithm, keys } from "@mod/keys";
 import { type SubjectAttributes, subjectAttributes } from "@mod/subject-attributes";
 import { userAttribute } from "@mod/users";
 import { z } from "zod";
@@ -22,14 +22,14 @@ const section = z.strictObject({
 		.describe("How long an ID token lasts: a duration with a unit, e.g. 1h."),
 	"id-token-alg": z
 		.string()
-		.min(1)
-		.optional()
+		.refine(isVerifyAlgorithm, "a JWS algorithm")
+		.prefault(requiredAlg)
 		.describe(
-			"The JWS algorithm ID tokens are signed with, held to the one `keys` signs with: unset, that one.",
+			"The JWS algorithm ID tokens are signed with, which `keys` must sign with: RS256 unless written. Another warns at each start, as OpenID Connect Discovery 1.0 §3 has RS256 listed.",
 		),
 });
 
-/** The algorithm ID tokens are signed with, checked once each boot. */
+/** The algorithm ID tokens are signed with, the operator's, checked against keys once each boot. */
 const idTokenAlg = contract<string>("oidc.id-token-alg");
 
 const nothing = Object.freeze({});
@@ -63,12 +63,12 @@ export default defineModule(
 			if (!signer.asymmetric()) {
 				return c.refuse("oidc", "ID tokens need an asymmetric signing key");
 			}
-			const alg = signer.algorithm();
-			const fixed = c.section["id-token-alg"];
-			if (fixed !== undefined && fixed !== alg) {
+			const signed = signer.algorithm();
+			const alg = c.section["id-token-alg"];
+			if (alg !== signed) {
 				return c.refuse(
 					"oidc.id-token-alg",
-					`keys signs ID tokens with ${alg}: set keys.signing.alg to this one, or leave this unset`,
+					`keys signs with ${signed}, not oidc.id-token-alg's ${alg}: add an ${alg} key, or set id-token-alg to ${signed}`,
 				);
 			}
 			if (alg !== requiredAlg) c.log.warn("oidc.id_token_alg_not_rs256", { alg });

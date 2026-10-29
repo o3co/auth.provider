@@ -1,0 +1,3 @@
+oidc {
+	id-token-alg = RS256
+}

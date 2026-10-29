@@ -120,12 +120,12 @@ describe("the ID token", () => {
 
 	it("names the JWT type, the algorithm keys signs with, and its key id in the header, and nothing else [oidc-core-10.1-d] [oidc-core-2-r]", async () => {
 		const { header } = decoded(await makerOf(await booted({ runtime })).make(request()));
-		expect([header.typ, header.alg, typeof header.kid]).toEqual(["JWT", "EdDSA", "string"]);
+		expect([header.typ, header.alg, typeof header.kid]).toEqual(["JWT", "RS256", "string"]);
 		// No x5u, x5c, jku or jwk: the key is found by its kid in the published set alone.
 		expect(Object.keys(header).sort()).toEqual(["alg", "kid", "typ"]);
 	});
 
-	it("is signed with RS256 if the operator places an RS256 key, as the metadata then names [oidc-core-15.1-a]", async () => {
+	it("is signed with RS256, the default, by the RS256 key the operator places, as the metadata names [oidc-core-15.1-a]", async () => {
 		const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 		const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 		const signing = { kid: "r", alg: "RS256", "private-key": pem };
@@ -164,7 +164,7 @@ it("takes a lifetime of whole seconds from 60 to 86400, refusing to start with a
 
 describe("the section", () => {
 	it("reads the ID token's lifetime as an operator writes it, with a unit", async () => {
-		expect(oidc.section?.parse({ "id-token-lifetime": "30m" })).toEqual({
+		expect(oidc.section?.parse({ "id-token-lifetime": "30m" })).toMatchObject({
 			"id-token-lifetime": 1800,
 		});
 		const app = await booted({ runtime, config: { oidc: { "id-token-lifetime": "30m" } } });
@@ -187,8 +187,8 @@ describe("the section", () => {
 		expect(read?.error?.issues).toMatchObject([{ params: { problem: "missing-unit" } }]);
 	});
 
-	it("reads an empty section as an hour", () => {
-		expect(oidc.section?.parse({})).toEqual({ "id-token-lifetime": 3600 });
+	it("reads an empty section as an hour, signed with RS256", () => {
+		expect(oidc.section?.parse({})).toEqual({ "id-token-lifetime": 3600, "id-token-alg": "RS256" });
 	});
 });
 
@@ -317,7 +317,7 @@ describe("issuer's metadata", () => {
 	it("names the algorithm ID tokens are signed with [oidc-discovery-3-z]", async () => {
 		expect(await items()).toContainEqual({
 			name: "id_token_signing_alg_values_supported",
-			value: ["EdDSA"],
+			value: ["RS256"],
 		});
 	});
 });

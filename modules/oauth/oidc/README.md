@@ -4,7 +4,7 @@
 - Makes the ID token (a contribution to `code-grant`'s ID token makers, for the `openid` scope).
 - Holds the fixed claim table (which claims each scope releases) and maps a user's attributes through it (`src/claims/`).
 - Answers the claims released for a subject and scope; userinfo reads claims only through this.
-- Holds the algorithm ID tokens are signed with to the one `keys` signs with: the operator's and each client's.
+- Holds the algorithm ID tokens are signed with, the operator's, to the one `keys` signs with, and each client's to it.
 
 ## Not here
 - Judging the authentication context and its level (the caller passes them). Signing (`keys`). When to issue an ID token (`code-grant`).
@@ -18,7 +18,7 @@
 - A contribution to `claims-selection`'s table of claim scopes: each table claim's scope, none outside the table
 - A section for `clients` (`oidc`: `id-token-alg`), and its copy from a metadata document's `id_token_signed_response_alg` for `client-documents`
 - `issuer`'s metadata items: `scopes_supported` (`openid` and the table's scopes), `claims_supported` (`sub` and the table's claims), `subject_types_supported` (`public` only), `id_token_signing_alg_values_supported` (the algorithm `keys` signs with)
-- Operator section: `id-token-lifetime` (a duration written with a unit, `1m`–`1d` in whole seconds; default `1h`), `id-token-alg` (unset: the algorithm `keys` signs with)
+- Operator section: `id-token-lifetime` (a duration written with a unit, `1m`–`1d` in whole seconds; default `1h`), `id-token-alg` (a JWS algorithm; default `RS256`)
 
 ## Invariants
 - Only the table's claims are released; an attribute outside it, a value of another type, or a nested object never is.
@@ -28,8 +28,8 @@
 - Scope words joined by a tab or another blank release nothing.
 - Attributes are read on each request through `subject-attributes`, from any source it answers with: `users`, or else the session's login. `email_verified` is released only from what `subject-attributes` answers as vouched for by `users`, never from an upstream's login. When neither can say, or the subject has no user, no claims are released; a `users` or `session` failure is unavailable, never an empty answer.
 - Refuses at boot unless the `keys` signer uses an asymmetric key (with a shared secret, any RP that knows it could forge tokens).
-- Every ID token is signed with the algorithm `keys` signs with. Boot is refused at `oidc.id-token-alg` where it names another; a client's `id-token-alg` naming another is refused by its section, at boot at a registered client's place, by the algorithm's name alone, and for any other when its record is read.
-- Where that algorithm is not `RS256`, which OpenID Connect Discovery 1.0 §3 has `id_token_signing_alg_values_supported` include, each boot warns `oidc.id_token_alg_not_rs256` with the algorithm's name alone.
+- Every ID token is signed with `oidc.id-token-alg`, `RS256` unless written: boot is refused there, by the algorithms' names, where `keys` signs with another. A client's `id-token-alg` naming another is refused by its section, at boot at a registered client's place, by the algorithm's name alone, and for any other when its record is read.
+- An `oidc.id-token-alg` written other than `RS256`, which OpenID Connect Discovery 1.0 §3 has `id_token_signing_alg_values_supported` include, warns `oidc.id_token_alg_not_rs256` at each boot, with the algorithm's name alone.
 - The ID token's `typ` is the standard `JWT`. Telling token kinds apart is the receiver's check of its own kind, not this spelling.
 - A hint is taken only as an ID token `keys` verifies under `JWT`, from `issuer`'s URL, with a subject, `iat` and `exp`, whatever its `exp` (OpenID Connect RP-Initiated Logout 1.0 §2: an expired hint is still taken); its audience is not pinned. Its client is `azp` when the audience names it, else the one audience.
 - `auth_time` never exceeds `iat` (so clock skew cannot put it later).
