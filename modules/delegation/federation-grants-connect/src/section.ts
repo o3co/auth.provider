@@ -9,17 +9,17 @@ export const section = z.strictObject({
 	page: page
 		.optional()
 		.describe(
-			"The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host). Connections refuse boot without it.",
+			"The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host, with `kernel.environment = development`). Connections refuse boot without it.",
 		),
 	"login-page": page
 		.optional()
 		.describe(
-			"Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host).",
+			"Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host, with `kernel.environment = development`).",
 		),
 	"step-up-page": page
 		.optional()
 		.describe(
-			"Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host).",
+			"Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host, with `kernel.environment = development`).",
 		),
 	"identity-check": z
 		.enum(["required", "none"])
