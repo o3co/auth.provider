@@ -1,4 +1,5 @@
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { expect, it, vi } from "vitest";
 
 const stopped: string[] = [];
@@ -17,7 +18,7 @@ vi.mock("../src/resolver-process/contract.ts", async (actual) => ({
 it("refuses boot where a helper does not start, ending every pool, however often asked", async () => {
 	const { default: outboundModule } = await import("../src/module.ts");
 	const refused = await assemble({
-		modules: [outboundModule],
+		modules: [outboundModule, tlsOptionsForTests],
 		config: { ...kernelConfig(), outbound: {} },
 	}).catch((error: unknown) => error);
 	expect(BootRefused.is(refused)).toBe(true);

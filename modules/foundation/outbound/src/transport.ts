@@ -225,8 +225,8 @@ export async function send(
 	limits: Limits,
 	resolve: Resolver,
 	policy: Pick<Policy, "admitAddresses">,
-	route?: Route,
-	tls: Tls = {},
+	route: Route | undefined,
+	tls: Tls,
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
 ): Promise<OutboundResponse> {
 	const signal = deadlineOf(limits.timeoutMs);

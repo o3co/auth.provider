@@ -2,6 +2,7 @@ import { createServer as createPlainServer, type IncomingMessage, type Server } 
 import { createServer as createTlsServer } from "node:https";
 import { type AddressInfo, connect, type Socket } from "node:net";
 import { isUnavailable } from "@mod/kernel";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import type { OutboundUnavailable } from "../src/contract.ts";
@@ -110,6 +111,7 @@ const noResolving = async (host: string): Promise<readonly string[]> => {
 };
 const paths = (settings: Record<string, unknown>) =>
 	outboundOver(section.parse({ allow: ["idp.example.test"], ...settings }), noResolving, {
+		floor: testTlsOptions,
 		ca: authority,
 	});
 const viaProxy = () =>
@@ -121,7 +123,7 @@ it("tries each address of the proxy's name, an IPv6 one that does not answer bef
 	const out = outboundOver(
 		section.parse({ allow: ["idp.example.test"], proxy: `http://proxy.test:${proxyPort}` }),
 		async () => ["::1", "127.0.0.1"],
-		{ ca: authority },
+		{ floor: testTlsOptions, ca: authority },
 	);
 	expect((await out.fetch(at("/.well-known/openid-configuration"))).status).toBe(200);
 });
@@ -177,7 +179,7 @@ it("sends plain http to a plain-internal pair directly, resolving it itself, nev
 			"plain-internal": [pair],
 		}),
 		linkLocal,
-		{ ca: authority },
+		{ floor: testTlsOptions, ca: authority },
 	);
 	const url = `http://${pair}/verify`;
 	// The name resolves to a link-local address, which a plain-internal pair never reaches: resolved here, not by the proxy.
@@ -205,7 +207,7 @@ it("checks a destination written as an address against that address, never the p
 	const out = outboundOver(
 		section.parse({ "allow-any-public": true, proxy: `http://127.0.0.1:${proxyPort}` }),
 		noResolving,
-		{ ca: addressAuthority },
+		{ floor: testTlsOptions, ca: addressAuthority },
 	);
 	const reached = async (server: "proxy" | "public") => {
 		upstreamPort = byAddress[server].port;
@@ -235,7 +237,7 @@ it("checks the server's certificate over the tunnel: its name the host asked for
 	const untrusted = outboundOver(
 		section.parse({ allow: ["idp.example.test"], ...proxied }),
 		noResolving,
-		{},
+		{ floor: testTlsOptions },
 	);
 	expect(await reached(untrusted, at("/jwks"))).toBe("unreachable");
 	expect(asked.map((a) => a.target)).toEqual([
@@ -253,7 +255,7 @@ it("asks the proxy for a destination written as an address as written, never its
 			"internal-hosts": ["10.0.0.1"],
 		}),
 		noResolving,
-		{ ca: addressAuthority },
+		{ floor: testTlsOptions, ca: addressAuthority },
 	);
 	const url = "https://[::ffff:a00:1]:8443/";
 	await out.fetch(url, {}, { internal: configuredUrl(url) }).catch(() => undefined);

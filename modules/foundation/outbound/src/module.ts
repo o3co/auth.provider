@@ -12,6 +12,7 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
+import { tlsOptions } from "@mod/tls-options";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 import {
@@ -161,7 +162,7 @@ export function outboundOver(
 	/** The pools to resolve in; a lookup function, as a test gives, runs in this process. */
 	lookupsIn: LookupPools | Lookup,
 	/** The floor every TLS connection holds to, and a test's authorities. */
-	tls: Tls = {},
+	tls: Tls,
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
 	/** In this process, the lookups at once; else as the settings and the threadpool give. */
 	lookupsAtOnce?: number,
@@ -239,59 +240,63 @@ function inProcessPools(
 
 const paths = contract<Paths>("outbound.paths");
 
-export default defineModule({ name: "outbound", section, replicaSafe: true, takes: [] }, (m) => [
-	m.provide(paths).by(async (c) => {
-		const { proxy } = c.section;
-		// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
-		const plainInternal = c.section["plain-internal"].length;
-		if (plainInternal > 0) c.log.warn("outbound.plain_internal", { count: plainInternal });
-		if (proxy !== undefined) {
-			const host = new URL(proxy).hostname;
-			c.log.warn("outbound.proxy_checks_addresses", { host });
-			if (c.section["proxy-authorization"] && !isLoopbackAddress(host)) {
-				c.log.warn("outbound.proxy_credentials_in_clear", { host });
+export default defineModule(
+	{ name: "outbound", section, replicaSafe: true, takes: [tlsOptions] },
+	(m) => [
+		m.provide(paths).by(async (c) => {
+			const tls = { floor: await c.get(tlsOptions) };
+			const { proxy } = c.section;
+			// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
+			const plainInternal = c.section["plain-internal"].length;
+			if (plainInternal > 0) c.log.warn("outbound.plain_internal", { count: plainInternal });
+			if (proxy !== undefined) {
+				const host = new URL(proxy).hostname;
+				c.log.warn("outbound.proxy_checks_addresses", { host });
+				if (c.section["proxy-authorization"] && !isLoopbackAddress(host)) {
+					c.log.warn("outbound.proxy_credentials_in_clear", { host });
+				}
 			}
-		}
-		const present = proxyVariables.filter((name) => (process.env[name] ?? "") !== "");
-		if (proxy === undefined && present.length > 0 && !c.section["direct-despite-proxy"]) {
-			c.refuse(
-				"outbound",
-				`${present.join(", ")} is set and never read: write outbound.proxy, or declare direct-despite-proxy`,
-			);
-		}
-		if (c.section.resolution === "in-process") return outboundOver(c.section, systemLookup);
-		// Each pool's helper is started here; a refused start ends both before boot is refused.
-		const shares = lookupShares({ maxLookups: maxLookupsOf(c.section) });
-		const poolOf = (pool: string, size: number) =>
-			resolverPool({ pool, size, warn: c.log.warn, now: () => c.clock.now() });
-		const started: ResolverPool[] = [poolOf("own", shares.own)];
-		if (shares.outside > 0) started.push(poolOf("outside", shares.outside));
-		const stopAll = () => Promise.all(started.map((pool) => pool.stop())).then(() => {});
-		c.onStop(stopAll);
-		try {
-			await Promise.all(started.map((pool) => pool.start()));
-		} catch {
-			await stopAll();
-			c.refuse(
-				"outbound.resolution",
-				"the resolver's helper process did not start: allow it to start, or set resolution = in-process",
-			);
-		}
-		const [ownPool, outsidePool] = started as [ResolverPool, ResolverPool?];
-		return outboundOver(c.section, { own: ownPool, outside: outsidePool ?? noPool, shares });
-	}),
-	// One set of counts for both paths.
-	m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
-	m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
-	m.provide(outboundRefusals).by(async (c) => {
-		const { explained, plainInternal, browsedRefusal } = await c.get(paths);
-		return { explained, plainInternal, browsedRefusal };
-	}),
-	m.provide(credentialPolicy).by(async (c) => ({
-		refusalOf: (await c.get(paths)).credentialRefusalOf,
-	})),
-	m.provide(outboundLimits).by(async (c) => {
-		const { limitsOf, lookupsOf } = await c.get(paths);
-		return { of: limitsOf, lookupsOf };
-	}),
-]);
+			const present = proxyVariables.filter((name) => (process.env[name] ?? "") !== "");
+			if (proxy === undefined && present.length > 0 && !c.section["direct-despite-proxy"]) {
+				c.refuse(
+					"outbound",
+					`${present.join(", ")} is set and never read: write outbound.proxy, or declare direct-despite-proxy`,
+				);
+			}
+			if (c.section.resolution === "in-process") return outboundOver(c.section, systemLookup, tls);
+			// Each pool's helper is started here; a refused start ends both before boot is refused.
+			const shares = lookupShares({ maxLookups: maxLookupsOf(c.section) });
+			const poolOf = (pool: string, size: number) =>
+				resolverPool({ pool, size, warn: c.log.warn, now: () => c.clock.now() });
+			const started: ResolverPool[] = [poolOf("own", shares.own)];
+			if (shares.outside > 0) started.push(poolOf("outside", shares.outside));
+			const stopAll = () => Promise.all(started.map((pool) => pool.stop())).then(() => {});
+			c.onStop(stopAll);
+			try {
+				await Promise.all(started.map((pool) => pool.start()));
+			} catch {
+				await stopAll();
+				c.refuse(
+					"outbound.resolution",
+					"the resolver's helper process did not start: allow it to start, or set resolution = in-process",
+				);
+			}
+			const [ownPool, outsidePool] = started as [ResolverPool, ResolverPool?];
+			return outboundOver(c.section, { own: ownPool, outside: outsidePool ?? noPool, shares }, tls);
+		}),
+		// One set of counts for both paths.
+		m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
+		m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
+		m.provide(outboundRefusals).by(async (c) => {
+			const { explained, plainInternal, browsedRefusal } = await c.get(paths);
+			return { explained, plainInternal, browsedRefusal };
+		}),
+		m.provide(credentialPolicy).by(async (c) => ({
+			refusalOf: (await c.get(paths)).credentialRefusalOf,
+		})),
+		m.provide(outboundLimits).by(async (c) => {
+			const { limitsOf, lookupsOf } = await c.get(paths);
+			return { of: limitsOf, lookupsOf };
+		}),
+	],
+);
