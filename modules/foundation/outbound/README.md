@@ -11,6 +11,7 @@
 ## Offers
 - `outbound`: fetch a URL with a request and a narrower, answering status, headers and body, or throwing a destination refusal or unavailable with its failure. `isOutboundUnavailable` tells that unavailable by its mark, not its class, so a second bundled copy's is told too.
 - `outbound.signed`: the same for signed material, with the narrower's hosts always named.
+- `credentialHeaderRefusal` (`credential`'s): why a credential may not go as a header named so.
 - `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` (`plainInternal` and `browsedRefusal` too), `outbound.credentials` and `outbound.limits` from the section; reading an answer as JSON (one frozen UTF-8 object, at the status named, `200` by default).
 - Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, `max-lookups`, `resolution`, the proxy, `direct-hosts` (a host list, as `outbound-policy` reads one) and `plain-ipv4`; its keys are in the configuration reference.
 
@@ -23,7 +24,7 @@
 - Every TLS connection, direct or through the proxy's tunnel, takes `tls-options`' floor, spread last over its own options: a server offering only an older TLS, the RSA key exchange or CBC is `unreachable`.
 - One deadline, the policy's limit, covers resolving (or the tunnel), connecting, the headers and the body; the body is cut at the policy's size.
 - A request past `max-concurrent` is unavailable at once, and each request gives its place back however it ends. Name lookups count apart: `max-lookups` at once (four unless set, never more than `max-concurrent`); one more is unavailable at once.
-- Names resolve as the system does, hosts file included: by default (`resolution`: `helper`) in helper processes, ended once no one waits on them, a helper that does not start refusing boot; with `in-process`, here, no deadline stopping one and half the threadpool at most resolving. See the internal modules `resolver-process` and `lookups`.
+- Names resolve as the system does, hosts file included: by default (`resolution`: `helper`) in helper processes, a helper that does not start refusing boot; with `in-process`, here, no deadline stopping one. See the internal modules `resolver-process` and `lookups`.
 - Of those lookups, names a caller marks `outsideChosen` resolve in a pool of their own, its share as `lookups` says, so an outside party's slow names never hold every lookup. `outbound.limits` answers each caller's share (`lookupsOf`), so a caller given none refuses boot.
 - A `proxy` (an http origin alone, as the URL parser writes it, without credentials; `proxy-authorization` apart) carries every https request, but to `direct-hosts` (list internal hosts there too), by CONNECT with TLS to the destination inside. Then outbound resolves no name but the proxy's own, as one of the deployment's lookups: it checks the name and any address in the URL; the proxy checks where a name resolves (boot warns so). A refused tunnel is `proxy-refused`.
 - Boot warns that `proxy-authorization` goes in the clear unless the proxy is a loopback address written as one (`address-reach`'s `isLoopbackAddress`), judged as written.
