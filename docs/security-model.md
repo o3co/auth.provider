@@ -38,6 +38,8 @@ Every guarantee here rests on what the deployment does. Each section's "Left to 
 - **Its configuration and its credentials are its own.** The configuration files and environment that hold secrets are readable only by the app, and whoever writes them is trusted; each ledger's `credential` is known only to the app and that ledger.
 - **What it asks of it is in place.** The runbook's [Before you deploy](runbook.md#before-you-deploy) lists what the deployment must provide.
 
+Every setting that weakens a guarantee, its default and what it loosens, is listed in Attack surface's [Settings that weaken a guarantee](attack-surface.md#settings-that-weaken-a-guarantee); a promise names only the choices that change its own statement.
+
 ## Promises across modules
 
 Each promise below holds across every module composed. Each names what keeps it (a contract, a check at boot, a guard rule) and the conformance scenes that test it, by area and scene; where no scene tests a part yet, it says so. An exception is never silent: it is a declaration, in a package manifest or on a route, and the [route reference](routes.md) lists the routes' reasons.
@@ -45,7 +47,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 1. **Closing a session closes every path for the tokens issued from it.**
    - Kept by: `session-participants`' participants, which `session-lifecycle` calls on every close through `session`'s `closingParticipants`, refusing to boot without it; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
    - Scenes: code ("tokens and logout", "a logout the client starts", "telling the session's clients", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
-   - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out.
+   - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out. That `503` answers a request naming the session, by its cookie or by RP-initiated logout's hint, however often it is sent again; `/session/logout` sent again from a browser whose cookie the first answer cleared names no session and is answered `200`, as with no cookie, while the sweep finishes the close and the session's tokens end then.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
    - A session that ends by its lifetime leaves no token past it: each token issued from a session expires no later than the session's end, as the lifetime in force when it is issued sets it.
    - One exception: shortening `session-lifecycle.lifetime` ends the sessions it now covers when they are next read, without their participants, and the tokens issued before then keep their earlier expiry.
@@ -72,8 +74,8 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that declares itself unsafe on several instances (`store`, the store kept in memory, and `mail`, which only logs mail) or that declares nothing of them. A declaration is its author's word, which the kernel never checks: a module of your own that keeps what is used once in its own process and declares itself safe breaks this promise, unrefused.
    - Does not hold where the operator accepts losing what was used: with a store that does not persist (`store.accept-volatile`), a restart forgets it; with `redis.durability = none`, a crash can lose the latest writes, spent assertion and proof ids and lockout records among them; with `redis.replication = none`, a failover would lose writes.
    - Upgrading from rc.1 leaves a window in which JWT bearer assertions spent and id_tokens exchanged under rc.1 are not seen, as [From 0.18.0-rc.1](migration.md#from-0180-rc1) says.
-   - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once").
-   - No scene yet for an exchanged id_token used twice. Which scenes run two instances, and under which faults, is in [Guarantees by deployment](deployment-guarantees.md#several-instances).
+   - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once"), exchange ("an id_token exchanged once, by the token exchange or as a JWT bearer assertion, under faults").
+   - Which scenes run two instances, and under which faults, is in [Guarantees by deployment](deployment-guarantees.md#several-instances).
 6. **A token bound to a key or a certificate is never used as a bearer token.**
    - Kept by: `sender-binding`, which refuses a bound token presented in another scheme.
    - Scenes: code (userinfo with a DPoP-bound token and with an mTLS-bound one, "refresh: binding a public client's family"), exchange ("token exchange: a binding washed off").
@@ -263,6 +265,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - The replicas' own persistence.
   - Leaving the server's settings as they were at boot.
   - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them.
+  - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear, and boot neither refuses it nor warns.
 
 ## Audit
 
