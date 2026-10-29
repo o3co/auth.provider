@@ -124,3 +124,38 @@ describe("the flow: the way to the login page", () => {
 		]);
 	});
 });
+
+describe("the flow: an outage before the session is found", () => {
+	/** Where an answer went: the endpoint's own status, or the page or redirect URI and its error. */
+	const went = (res: Awaited<ReturnType<Awaited<ReturnType<typeof serve>>["authorize"]>>) =>
+		res.at
+			? [`${res.at.origin}${res.at.pathname}`, res.at.searchParams.get("error")]
+			: [res.status, JSON.parse(res.text).error];
+
+	it("answers an outage before a session is found at the endpoint by 503, nothing sent back, a silent request's too [rfc9700-4.11.2-b]", async () => {
+		const { authorize, down } = await serve();
+		down.reauths.unavailable("save", "update");
+		const answers = [
+			await authorize(request({ reauth: "x".repeat(43) })),
+			await authorize(request({ reauth: "x".repeat(43), prompt: "none" })),
+			await authorize(request({ prompt: "login" })),
+		];
+		expect(answers.map(went)).toEqual([
+			[503, "temporarily_unavailable"],
+			[503, "temporarily_unavailable"],
+			[503, "temporarily_unavailable"],
+		]);
+		expect(answers.map((res) => res.location)).toEqual(["", "", ""]);
+	});
+
+	it("sends an outage back to the redirect URI as temporarily_unavailable once a session is found [rfc9700-4.11.2-b]", async () => {
+		const { authorize, down, login } = await serve();
+		const old = await login();
+		advance(120_000);
+		down.reauths.unavailable("save", "update");
+		expect(went(await authorize(request({ prompt: "login" }), old))).toEqual([
+			callback,
+			"temporarily_unavailable",
+		]);
+	});
+});
