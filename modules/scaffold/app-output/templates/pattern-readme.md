@@ -64,7 +64,7 @@ Each module's card, as installed, is the truth about it: what it does, its route
 ## Values the operator decides
 
 - `kernel.deployment`: {{deployment}}
-- `tokens.revocation`: `denylist`. An app that issues no codes and no refresh tokens (`a2a`) may write `unsupported`, to answer revocation as unsupported; one that issues either refuses it.
+- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.
 - `audit.receivers`: the names of the audit receivers composed: {{receivers}}.
 
 Write secrets, such as the signing key, in `.env` or the local layer only; neither goes into git or the image.
