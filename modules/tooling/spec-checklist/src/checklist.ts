@@ -15,6 +15,8 @@ export interface Item {
 	readonly text: string;
 	readonly mark?: Mark;
 	/** The items of an earlier spec this one updates. */
+	/** The shared note it points to, by its id in `checklist/notes.md`. */
+	readonly note?: string;
 	readonly updates: readonly string[];
 	/** The role of the server's the requirement binds. */
 	readonly role: Role;
@@ -96,13 +98,15 @@ export interface Spec {
 export interface Checklist {
 	readonly specs: readonly Spec[];
 	readonly decisions: ReadonlyMap<string, Decision>;
+	/** The notes items point to, by id; none where the checklist has no notes file. */
+	readonly notes?: ReadonlyMap<string, Note>;
 	/** What reading the files found. */
 	readonly parsing: readonly Finding[];
 }
 
 const section = "(?:\\d+|[A-Z])(?:\\.\\d+)*";
 const itemLine = /^- \*\*(\S+?)\*\* (MUST NOT|MUST|SHOULD NOT|SHOULD): (\S.*)$/;
-const markLine = /^ {2}(out-of-scope|deviates|noncompliant|updates|role|faults): (\S.*)$/;
+const markLine = /^ {2}(out-of-scope|deviates|noncompliant|updates|role|faults|note): (\S.*)$/;
 const heading = new RegExp(`^## (${section}) \\S`);
 
 export function parseItems(spec: string, text: string) {
@@ -197,7 +201,9 @@ export function parseItems(spec: string, text: string) {
 				roled = true;
 				if (roles.includes(value as Role)) last.role = value as Role;
 				else found(`${last.id}: its role ${value} is none of ${roles.join(", ")}`);
-			} else if (kind === "updates" && updated) found(`${last.id}: has more than one updates line`);
+			} else if (kind === "note" && last.note) found(`${last.id}: has more than one note line`);
+			else if (kind === "note") last.note = value;
+			else if (kind === "updates" && updated) found(`${last.id}: has more than one updates line`);
 			else if (kind === "updates") {
 				last.updates = value.split(",").map((s) => s.trim());
 				updated = true;
@@ -312,6 +318,27 @@ export function parseDecisions(text: string) {
 	return { decisions, findings };
 }
 
+/** A note several items point to, written once: `- **N-<name>** <text>`. */
+export interface Note {
+	readonly id: string;
+	readonly text: string;
+}
+
+export function parseNotes(text: string) {
+	const findings: Finding[] = [];
+	const notes = new Map<string, Note>();
+	for (const line of text.split("\n")) {
+		if (!line.startsWith("- ")) continue;
+		const n = /^- \*\*(N-[a-z0-9-]+)\*\* (\S.*)$/.exec(line);
+		const [, id = "", what = ""] = n ?? [];
+		const where = "checklist/notes.md";
+		if (!n) findings.push({ where, detail: `not a note: ${line}` });
+		else if (notes.has(id)) findings.push({ where, detail: `${id}: is written twice` });
+		else notes.set(id, { id, text: what });
+	}
+	return { notes, findings };
+}
+
 /** Every finding over the read checklist: its marks, its updates, and each ledger against its items. */
 export function checklistFindings(c: Checklist): Finding[] {
 	const findings = [...c.parsing];
@@ -327,6 +354,7 @@ export function checklistFindings(c: Checklist): Finding[] {
 			at("deviates is for a SHOULD alone; a MUST not met is noncompliant");
 		if (i.mark?.kind === "noncompliant" && classOf(i.strength) === "SHOULD")
 			at("noncompliant is for a MUST alone");
+		if (i.note !== undefined && !c.notes?.has(i.note)) at(`its note ${i.note} is in no notes`);
 		if (i.mark?.kind === "deviates" && !c.decisions.has(i.mark.decision))
 			at(`names the decision ${i.mark.decision}, which the decisions do not hold`);
 		for (const u of i.updates) {

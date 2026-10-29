@@ -78,3 +78,23 @@ describe("reportFiles", () => {
 		);
 	});
 });
+
+describe("notes", () => {
+	it("points an item's note cell at the note, written once in the README's notes", () => {
+		const noted = parseItems(
+			"rfc9999",
+			"# RFC 9999: Example\n## 4 X\n- **rfc9999-4-a** MUST: a\n  note: N-https\n",
+		);
+		const notes = new Map([["N-https", { id: "N-https", text: "Production holds to https." }]]);
+		const files = reportFiles(
+			[{ spec: "rfc9999", title: noted.title, items: noted.items, ledger: undefined }],
+			new Map(),
+			new Map(),
+			notes,
+		);
+		expect(files.get("rfc9999.md")).toContain("| [N-https](README.md#n-https) |");
+		const readme = files.get("README.md") ?? "";
+		expect(readme).toContain('- <a id="n-https"></a>**N-https**: Production holds to https.');
+		expect(readme.split("Production holds to https.").length).toBe(2);
+	});
+});
