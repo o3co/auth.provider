@@ -29,6 +29,8 @@ export interface IdpScene {
 	readonly scopes?: readonly string[];
 	/** OpenID Connect only: hosts besides the issuer's its described endpoints may be on. */
 	readonly endpointHosts?: readonly string[];
+	/** OpenID Connect only: takes a callback without `iss` from an IdP that never sends it (`accept-missing-iss`). */
+	readonly acceptMissingIss?: true;
 	/** Apple only: what signs the client's secret (all three, unless a scene means to leave some out). */
 	readonly signing?: {
 		readonly teamId?: string;

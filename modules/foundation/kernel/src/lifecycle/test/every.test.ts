@@ -18,7 +18,7 @@ describe("every", () => {
 			.map((line) => line.event);
 	const runtime = quietRuntime({ log: recorded.log });
 	const withTask = (intervalMs: number, task: (signal: AbortSignal) => Promise<void>) =>
-		defineModule({ name: "p", takes: [] }, (m) => [
+		defineModule({ name: "p", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(probe).by((c) => {
 				c.every(intervalMs, task);
 				return {};

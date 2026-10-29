@@ -1,3 +1,4 @@
+import type { HintReader } from "@mod/authorize";
 import type { Keys } from "@mod/keys";
 import type { Hint, IdTokenHints } from "./contract.ts";
 
@@ -26,3 +27,16 @@ export function hintsOver(p: { keys: Keys; issuer: string }): IdTokenHints {
 		},
 	};
 }
+
+/**
+ * authorize's reading of a hint, in its words: the subject of an ID token `check` takes, an expired
+ * one included; any other, one naming no session among them, invalid.
+ */
+export const hintReaderOf = (hints: IdTokenHints): HintReader => ({
+	read: async (hint) => {
+		const checked = await hints.check(hint);
+		return checked.kind === "valid"
+			? { kind: "subject", subject: checked.subject }
+			: { kind: "invalid" };
+	},
+});

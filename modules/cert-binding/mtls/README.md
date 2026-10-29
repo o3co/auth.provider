@@ -23,7 +23,7 @@
 - A certificate the proxy forwarded unreadable is refused.
 - Self-signed: any certificate that parses binds.
 - PKI: a path to an anchor whose revocation is confirmed binds.
-- A refusal answers `invalid_certificate` at issuance and `invalid_token` at a resource (RFC 8705 §3); its reason is only logged.
+- A refusal answers `invalid_client` at issuance, a code RFC 6749 §5.2 registers, and `invalid_token` at a resource (RFC 8705 §3); its reason is only logged.
 - An outage answers unavailable under `on-unavailable` reject, and binds with a warning under allow.
 - Boot is refused when `client-certificate` names no form certificates are forwarded in.
 - Revocation material is fetched through `outbound.signed`, from the named hosts alone, read as `outbound` reads a host list (`.name` for the name and the names under it).

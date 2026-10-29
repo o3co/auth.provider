@@ -163,4 +163,16 @@ describe("federation-grants' section: a connection's resource", () => {
 			).toMatchObject([{ path: ["connections", "cal", "resource"] }]);
 		}
 	});
+
+	it("refuses the section where the resource sent upstream carries a fragment or a query [rfc8707-2-e]", () => {
+		for (const [resource, message] of [
+			["https://api.example/v1#part", "resource must carry no fragment"],
+			["https://api.example/v1#", "resource must carry no fragment"],
+			["https://api.example/v1?tenant=a", "resource must carry no query"],
+		] as const) {
+			expect(section.safeParse(withResource(resource)).error?.issues, resource).toMatchObject([
+				{ path: ["connections", "cal", "resource"], message },
+			]);
+		}
+	});
 });

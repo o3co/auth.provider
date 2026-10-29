@@ -50,11 +50,11 @@ describe("reading the client's certificate", () => {
 		});
 	});
 
-	it("refuses a certificate the proxy forwarded unreadable, under either mode", async () => {
+	it("refuses a certificate the proxy forwarded unreadable, under either mode, with the registered invalid_client at issuance [rfc6749-8.5-a]", async () => {
 		for (const checking of [under().checking, under({ kind: "valid" }).checking]) {
 			expect(await readCertificate({ kind: "malformed" }, issuance, checking)).toMatchObject({
 				kind: "refused",
-				error: "invalid_certificate",
+				error: "invalid_client",
 			});
 		}
 	});
@@ -69,7 +69,7 @@ describe("reading the client's certificate", () => {
 		const { read, logged } = under();
 		expect(await read()).toEqual({
 			kind: "refused",
-			error: "invalid_certificate",
+			error: "invalid_client",
 			description: "certificate refused",
 		});
 		expect(logged).toEqual(["mtls.certificate_refused"]);
@@ -83,7 +83,7 @@ describe("reading the client's certificate", () => {
 			const refusing = under(checked, "allow");
 			expect(await refusing.read()).toMatchObject({
 				kind: "refused",
-				error: "invalid_certificate",
+				error: "invalid_client",
 			});
 			expect(refusing.logged).toEqual(["mtls.certificate_refused"]);
 		}

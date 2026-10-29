@@ -70,7 +70,7 @@ const signedWith = async (signer: Awaited<ReturnType<typeof boot>>["signer"], ex
 describe("claims a grant adds to its access token", () => {
 	it("signs them into the payload and reads them back frozen, naming them in name order", async () => {
 		const { t } = await boot();
-		const claims = { "https://example.com/b": [1, { c: null }], a: "x" };
+		const claims = { "https://example.com/b": [1, { c: false }], a: "x" };
 		const issued = await t.issue({ grant: { ...grant, claims }, grantType: "test" });
 		if (issued.kind !== "issued") throw new Error(issued.policy);
 		expect(issued.access.addedClaims).toEqual(["a", "https://example.com/b"]);
