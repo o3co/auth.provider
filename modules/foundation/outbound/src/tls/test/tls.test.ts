@@ -3,6 +3,7 @@ import { createServer as createTlsServer } from "node:https";
 import { type AddressInfo, connect, type Socket } from "node:net";
 import { isUnavailable } from "@mod/kernel";
 import { policyOf, policySettings } from "@mod/outbound-policy";
+import { heldToFloor } from "@mod/tls-options";
 import { type Offer, peerOptions, testTlsOptions } from "@mod/tls-options/testing";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 // The contract first, as the package loads it: transport and credential import each other through it.
@@ -130,12 +131,10 @@ it("checks the destination's certificate where NODE_TLS_REJECT_UNAUTHORIZED is 0
 });
 
 it("holds the test's authorities to the floor, and takes no copy of one", () => {
-	expect(tlsOf({ floor: testTlsOptions, ca: "test authority" })).toEqual({
-		ca: "test authority",
-		minVersion: testTlsOptions.minVersion,
-		ciphers: testTlsOptions.ciphers,
-		rejectUnauthorized: true,
-	});
+	// The floor's own keys are tls-options' to name.
+	expect(tlsOf({ floor: testTlsOptions, ca: "test authority" })).toEqual(
+		heldToFloor(testTlsOptions, { ca: "test authority" }),
+	);
 	const loosened = { ...testTlsOptions, rejectUnauthorized: false, ca: "another" };
 	expect(() => tlsOf({ floor: loosened, ca: "test authority" })).toThrow(TypeError);
 });
