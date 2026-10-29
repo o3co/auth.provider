@@ -487,25 +487,29 @@ it("passes the user's attributes from users' answer to the session, under the so
 	expect((await app.get(sessions).enter(request))?.context).not.toHaveProperty("attributes");
 });
 
-it("reports the time it verified the password as the login's authentication time", async () => {
+it("names the session's opening as the login's authentication time, so a gate's wait never ages it", async () => {
 	const seen: unknown[] = [];
+	let passedAt = 0;
 	const gate = defineModule({ name: "gate", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "watching",
 			hold: async (_request, facts) => {
 				seen.push(facts.authenticatedAt);
+				await new Promise((resolve) => setTimeout(resolve, 20));
+				passedAt = Date.now();
 				return { kind: "pass" as const };
 			},
 		})),
 	]);
-	const { login } = await serve({ extra: [gate] });
-	const before = Date.now();
-	expect((await login(right)).status).toBe(200);
-	const after = Date.now();
-	const [at] = seen;
-	expect(typeof at).toBe("number");
-	expect(at as number).toBeGreaterThanOrEqual(before);
-	expect(at as number).toBeLessThanOrEqual(after);
+	const { app, login } = await serve({ extra: [gate] });
+	const res = await login(right);
+	expect(res.status).toBe(200);
+	expect(seen).toEqual(["opening"]);
+	const cookie = res.headers.getSetCookie()[0] ?? "";
+	const request = testRequest({ headers: new Map([["cookie", cookie.split(";")[0] ?? ""]]) });
+	const context = (await app.get(sessions).enter(request))?.context;
+	expect(context?.authenticatedAt).toBeGreaterThanOrEqual(passedAt);
+	expect(context).not.toHaveProperty("authenticatedAtUnknown");
 });
 
 describe("login-password attempts per account", () => {
