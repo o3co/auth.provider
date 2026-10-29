@@ -9,6 +9,7 @@ Internal module of `outbound`: the options each TLS connection outbound makes ta
 - What the floor is, and its section: `tls-options`. Which destinations are reached: `outbound-policy`.
 
 ## Offers
+- `noteHandshake` (a failure, the error behind it) and `handshakeCodeOf` (a failure): what refused the handshake (its TLS alert, RFC 8446 §6, or an `ERR_SSL_*` code), kept beside the failure, never on it; callers see the failure alone.
 - `Tls` (`floor`, required, the `tlsOptions` outbound takes; `ca`, a test's authorities) and `tlsOf` (a `Tls`) → the options a connection takes.
 
 ## Invariants

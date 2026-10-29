@@ -17,7 +17,7 @@ import {
 	type OutboundResponse,
 	OutboundUnavailable,
 } from "./contract.ts";
-import { type Tls, tlsOf } from "./tls/tls.ts";
+import { noteHandshake, type Tls, tlsOf } from "./tls/tls.ts";
 
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
@@ -70,7 +70,10 @@ const failedAs = (error: unknown, signal: AbortSignal) => {
 	if (isOutboundUnavailable(error)) return error;
 	if (signal.aborted) return unavailable("timeout");
 	const code = (error as { code?: unknown } | undefined)?.code;
-	return unavailable(code === "HPE_HEADER_OVERFLOW" ? "too-large" : "unreachable");
+	return noteHandshake(
+		unavailable(code === "HPE_HEADER_OVERFLOW" ? "too-large" : "unreachable"),
+		error,
+	);
 };
 
 /** The address the URL names, as written, never as the IPv4 address it may carry; none for a name. */
