@@ -13,10 +13,11 @@ export interface FloorKeys {
 	readonly rejectUnauthorized: true;
 }
 
-/** What a TLS connection takes, as `node:tls` takes it, made only by tls-options from its section. */
+/**
+ * The floor of a TLS connection, made only by tls-options from its section. Its keys are named by no
+ * type a caller reads: a caller holds its own options to it by `heldToFloor`.
+ */
 export interface TlsOptions {
-	readonly minVersion: "TLSv1.2" | "TLSv1.3";
-	readonly ciphers: string;
 	readonly [madeFromSection]: true;
 }
 
@@ -25,7 +26,7 @@ export type HeldToFloor<T> = Omit<T, keyof FloorKeys> & FloorKeys;
 
 /**
  * The floor of every TLS connection the provider makes as a client, as the section sets it, frozen.
- * A caller checks it with `isFloor`, then copies its keys last over its own options, so nothing
+ * A caller checks it with `isFloor`, then holds its own options to it by `heldToFloor`, so nothing
  * the caller passes loosens it.
  */
 export const tlsOptions = contract<TlsOptions>("tls-options");

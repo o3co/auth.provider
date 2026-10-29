@@ -21,13 +21,18 @@ function outcomeOf(met: Handshake): string {
 	if (alert === 40 && peerCode === "ERR_SSL_NO_SHARED_CIPHER") return "refused: suite";
 	return `other: ${met.code} (alert ${alert}) / ${peerCode}`;
 }
-/** Each peer's handshake under `options`. */
-const kinds = async (options: TlsOptions) =>
+/** Each peer's handshake under a client held to `floor`. */
+const kinds = async (floor: TlsOptions) =>
 	Object.fromEntries(
 		await Promise.all(
-			offers.map(async (offer) => [offer, outcomeOf(await handshakeWith(options, offer))] as const),
+			offers.map(
+				async (offer) =>
+					[offer, outcomeOf(await handshakeWith(heldToFloor(floor, {}), offer))] as const,
+			),
 		),
 	);
+/** The suites the section takes by default, as a floor names them. */
+const defaultSuites = section.parse({}).suites.join(":");
 
 describe("the TLS peers a client's options are held against", () => {
 	it("each offers the one version and suite it says", async () => {
@@ -81,17 +86,19 @@ describe("the section's options", () => {
 		});
 		// TLS 1.3 alone refuses a TLS 1.2 peer in its handshake.
 		const only13 = tlsOptionsFor({ "min-version": "TLSv1.3", suites: ["TLS_AES_128_GCM_SHA256"] });
-		expect(outcomeOf(await handshakeWith(only13, "ecdhe-aead"))).toBe("refused: version");
+		expect(outcomeOf(await handshakeWith(heldToFloor(only13, {}), "ecdhe-aead"))).toBe(
+			"refused: version",
+		);
 	});
 
 	it("are a floor only as tls-options made them: a spread, an assigned copy, a cast or a frozen value written elsewhere is none", () => {
 		// @ts-expect-error A weaker floor written by hand is no TlsOptions.
 		const written: TlsOptions = { minVersion: "TLSv1.2", ciphers: "ALL:@SECLEVEL=0" };
 		const made = tlsOptionsFor({});
-		const spread: TlsOptions = { ...made, ciphers: "ALL:@SECLEVEL=0" };
+		const spread: TlsOptions = { ...made, ...{ ciphers: "ALL:@SECLEVEL=0" } };
 		const assigned: TlsOptions = Object.assign({}, made, { minVersion: "TLSv1.1" });
-		const cast = { minVersion: "TLSv1.2", ciphers: made.ciphers } as TlsOptions;
-		const frozen = Object.freeze({ minVersion: "TLSv1.2", ciphers: made.ciphers });
+		const cast = { minVersion: "TLSv1.2", ciphers: defaultSuites } as unknown as TlsOptions;
+		const frozen = Object.freeze({ minVersion: "TLSv1.2", ciphers: defaultSuites });
 		expect([made, written, spread, assigned, cast, frozen].map(isFloor)).toEqual([
 			true,
 			false,
@@ -114,7 +121,7 @@ describe("the section's options", () => {
 		expect(heldToFloor(floor, loosened)).toEqual({
 			ca: "the caller's authority",
 			minVersion: "TLSv1.2",
-			ciphers: floor.ciphers,
+			ciphers: defaultSuites,
 			rejectUnauthorized: true,
 		});
 		// What it gives is the caller's options, no floor; a floor copied by hand is refused.
