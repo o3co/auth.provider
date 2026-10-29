@@ -360,7 +360,7 @@ describe("private_key_jwt", () => {
 		expect(await at({ exp: undefined })).toBe("bad_credentials");
 		expect(await at({ iat: seconds() + 30 })).toBe("app");
 		expect(await at({ iat: seconds() + 31 })).toBe("bad_credentials");
-		expect(await at({ iat: seconds() - 3630 })).toBe("app");
+		expect(await at({ iat: seconds() - 1800, exp: seconds() + 1800 })).toBe("app");
 		expect(await at({ iat: seconds() - 3631 })).toBe("bad_credentials");
 		expect(await at({ nbf: seconds() + 30 })).toBe("app");
 		expect(await at({ nbf: seconds() + 31 })).toBe("bad_credentials");
