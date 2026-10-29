@@ -5,7 +5,7 @@ import { tlsOptions } from "@mod/tls-options";
 import { type Offer, peerOptions, testTlsOptions } from "@mod/tls-options/testing";
 import { Redis } from "ioredis";
 import { afterAll, expect, it } from "vitest";
-import { clientDebugs, clientOptions } from "../src/client-options.ts";
+import { clientDebugs, clientOptions, inTheClear } from "../src/client/client.ts";
 import redisModule from "../src/module.ts";
 
 const offers: readonly Offer[] = ["tls1.1", "static-rsa", "cbc", "ecdhe-aead", "tls1.3"];
@@ -135,4 +135,17 @@ it("finds the client's ioredis:redis log turned on by DEBUG as the debug library
 	];
 	expect(on.filter((debug) => !clientDebugs(debug))).toEqual([]);
 	expect(off.filter((debug) => clientDebugs(debug))).toEqual([]);
+});
+
+it("finds a redis URL off this host in the clear, and neither rediss nor a loopback host by its name", () => {
+	const clear = ["redis://redis.internal:6379", "redis://10.0.0.5", "redis://[2001:db8::1]:6379"];
+	const not = [
+		"rediss://redis.internal:6379",
+		"redis://localhost:6379",
+		"redis://127.0.0.1:6379",
+		"redis://[::1]:6379",
+		"redis://cache.localhost",
+	];
+	expect(clear.filter((url) => !inTheClear(url))).toEqual([]);
+	expect(not.filter((url) => inTheClear(url))).toEqual([]);
 });

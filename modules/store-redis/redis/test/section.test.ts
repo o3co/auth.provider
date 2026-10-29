@@ -146,6 +146,24 @@ it("warns at every boot where DEBUG turns on the client's own debug log, with no
 	expect(await debugWarned("express:*")).toEqual([]);
 });
 
+it("warns at every boot where redis.url reaches Redis in the clear off this host, telling neither host nor URL", async () => {
+	const plaintext = async (url: string) => {
+		const { warned } = await refusalOf({ url, "connect-timeout": "100ms" });
+		expect(JSON.stringify(warned), url).not.toContain("s3cr3t");
+		expect(JSON.stringify(warned), url).not.toContain("192.0.2.1");
+		return warned.filter((line) => line.event === "redis.plaintext");
+	};
+	expect(await plaintext("redis://user:s3cr3t-pass@192.0.2.1:6379")).toEqual([
+		{
+			level: "warn",
+			event: "redis.plaintext",
+			fields: { reason: "the connection to Redis is not encrypted" },
+		},
+	]);
+	expect(await plaintext(`redis://user:s3cr3t-pass@127.0.0.1:${refusedPort}`)).toEqual([]);
+	expect(await plaintext("rediss://user:s3cr3t-pass@192.0.2.1:6379")).toEqual([]);
+});
+
 it("refuses boot without telling the URL's password, in the refusal or in a warning", async () => {
 	const url = `redis://user:s3cr3t-pass@127.0.0.1:${refusedPort}`;
 	const { refused, warned } = await refusalOf({ url, "connect-timeout": "100ms" });

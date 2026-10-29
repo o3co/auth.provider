@@ -3,7 +3,7 @@ import { type Space, spaces, store } from "@mod/store";
 import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
 import { z } from "zod";
-import { clientDebugs, clientOptions, queryRefusal } from "./client-options.ts";
+import { clientDebugs, clientOptions, inTheClear, queryRefusal } from "./client/client.ts";
 import { redisProbe } from "./probe.ts";
 import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
 
@@ -281,6 +281,10 @@ export default defineModule({ name: "redis", replicaSafe: true, section, takes }
 	m.provide(connections).by(async (c) => {
 		// On every boot: the client's own debug log writes AUTH's password; no value is told here.
 		if (clientDebugs(process.env.DEBUG)) c.log.warn("redis.client_debug_log", {});
+		// On every boot: what the store keeps, and the URL's password, go in the clear; no host is told.
+		if (inTheClear(c.section.url)) {
+			c.log.warn("redis.plaintext", { reason: "the connection to Redis is not encrypted" });
+		}
 		const floor = await c.get(tlsOptions);
 		if (!isFloor(floor)) {
 			return c.refuse(
