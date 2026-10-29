@@ -20,6 +20,7 @@
 - Store interfaces: families, redemptions, token links, each session's families, each family's access tokens, the families to revoke; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
 
 ## Invariants
+- A refresh token is `<family>.<secret>`: the family's name, 16 random bytes, and the secret, 32 random bytes, each in base64url, 66 characters in all (RFC 6749 §5.1 asks its size be documented).
 - Only a family's current token is usable, and each use swaps it for a new one. Any other token of the family is reuse and revokes the family; so is the loser of two concurrent uses.
 - A token with anything after it, another client's token, and one without the family's binding are refused without spending it.
 - A family's end is fixed when it starts; no access token from it outlives it, nor the family's session, where it has one. Each one carries the amr, authentication time and acr the family started with; a time not known when it started is stated by none. None carries claims a grant added to the access token its family began with: a family keeps none.
