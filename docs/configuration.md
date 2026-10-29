@@ -485,6 +485,7 @@ From `@mod/oidc`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `oidc.id-token-lifetime` | string | `1h` |  |  |  | How long an ID token lasts: a duration with a unit, e.g. 1h. |
+| `oidc.id-token-alg` | string | `RS256` |  | `OIDC_ID_TOKEN_ALG` | `RS256` | The JWS algorithm ID tokens are signed with, which `keys` must sign with: RS256 unless written. Another warns at each start, as OpenID Connect Discovery 1.0 §3 has RS256 listed. |
 
 ## outbound
 
@@ -874,6 +875,14 @@ From `@mod/jwt-bearer`.
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `sections.jwt-bearer.accept-unbound` | boolean | `false` |  | Lets this public client present a delegated issuer's assertion that names no key (no digest in its nonce) without proving one by DPoP: for apps already sent out that make no DPoP key. A leaked assertion can then be used once, before its owner, until it ages out, and the token is bound to no key. Each is logged; one naming a key is proved still. Read for registered clients only. |
+
+### sections.oidc
+
+From `@mod/oidc`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.oidc.id-token-alg` | string |  |  | The JWS algorithm the client's ID tokens are signed with (`id_token_signed_response_alg`): the one `keys` signs with, the default; another is refused. |
 
 ### sections.rp-logout
 

@@ -193,6 +193,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `mtls.mode` | `@mod/mtls` |  | `self-signed`: any certificate that parses binds, with no revocation |
 | `mtls.revocation.mode` | `@mod/mtls` |  | `disabled`: no certificate's revocation is checked |
 | `mtls.revocation.on-unavailable` | `@mod/mtls` |  | named so (`accept-*` and the like) |
+| `oidc.id-token-alg` | `@mod/oidc` | `"RS256"` | other than `RS256`: the metadata lists no `RS256` (OpenID Connect Discovery 1.0 §3), and a relying party that registers no algorithm, so expects `RS256`, gets ID tokens signed with this one |
 | `outbound.allow-any-public` | `@mod/outbound` | `false` | any public host is reached by name, not only those `outbound.allow` lists |
 | `outbound.internal-hosts` | `@mod/outbound` | `[]` | URLs of the operator's own configuration reach private addresses at these hosts |
 | `outbound.plain-internal` | `@mod/outbound` | `[]` | plain http to these pairs, readable and changeable on the way |

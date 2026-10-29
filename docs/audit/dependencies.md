@@ -171,7 +171,7 @@ flowchart LR
 | `@mod/jwt-bearer-users` | feature | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/users` |
 | `@mod/logout` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session` |
 | `@mod/mfa-acr` | feature | `@mod/acr`, `@mod/kernel`, `@mod/mfa`, `@mod/mfa-extensions`, `@mod/mfa-reading` |
-| `@mod/oidc` | feature | `@mod/authorize`, `@mod/claims-selection`, `@mod/code-grant`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/subject-attributes`, `@mod/users` |
+| `@mod/oidc` | feature | `@mod/authorize`, `@mod/claims-selection`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/subject-attributes`, `@mod/users` |
 | `@mod/reauth` | feature | `@mod/kernel`, `@mod/session` |
 | `@mod/redirect-uris` | feature | `@mod/client-documents`, `@mod/clients` |
 | `@mod/refresh` | feature | `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |

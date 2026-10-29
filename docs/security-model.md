@@ -281,5 +281,6 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Stored secrets (TOTP secrets, the upstream tokens `federation-tokens` keeps, delegated credentials) are sealed by `seal`, with AES-256-GCM; a held login's upstream tokens too, where the default `upstream-handoff-seal` is composed.
 - **Left to you:**
   - Rotating keys as the [runbook](runbook.md#rotating-the-signing-key) describes.
+  - Writing `oidc.id-token-alg` other than `RS256`, with a `keys.signing` key of that algorithm. The metadata then lists no `RS256` (OpenID Connect Discovery 1.0 §3), and a relying party that registered no algorithm, and so expects `RS256`, gets ID tokens signed with yours; each start warns of it.
   - The strength of a sealing of your own, contributed to `upstream-handoff`'s `handoffSealing` in place of `upstream-handoff-seal`.
   - Retiring a sealing key only after a `reseal` run that exited 0, as the [runbook](runbook.md#rotating-the-sealing-key) describes. A value a removed key still sealed becomes unavailable until the key is put back.
