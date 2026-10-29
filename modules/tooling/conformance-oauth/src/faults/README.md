@@ -4,11 +4,14 @@ Internal module of `conformance-oauth`: what the area's fault scenes share in it
 
 ## Responsibilities
 - Gives the JWT bearer grant's scene on the Redis store, one client trusting one issuer, and runs a scene on a deployment of its own on that scene unless it names another; client credentials' scene for a client authenticating by its key (`private_key_jwt`); client credentials with DPoP, for a client binding its tokens to its holder's key; and client credentials with revocation and introspection, for a client allowed its tokens' resource. Every scene signs with one provider key.
+- The JWT bearer grant's scene lets requests by uncounted while the store fails, unless a scene asks the request limit closed (`rateLimitWhileStoreFails: "closed"`).
 - Signs an assertion of that issuer, or of that client to authenticate, or a DPoP proof of the holder's key, each with a `jti` of its own, and sends it to an instance's token endpoint; issues the revoking client a token, revokes it, and asks introspection whether it is active.
 - Names an assertion's spend as the relay matches it: its record placed under the issuer's and the `jti`'s name in `jwt-bearer-store.spent`, under the client's and the `jti`'s in `client-assertion-store.spent`, or a proof's under its key's thumbprint and its `jti` in `dpop-store.spent`; and a token's revocation, its `jti` kept in `tokens-store.revoked`.
+- Names, in `test/wire.ts`, the token endpoint's count of a request in `rate-limit.windows`, and what the grant's decision sends once a request passed its limit: the subject's boundary read and the assertion's spend.
 
 ## Offers
 - `faultScene`, `keyedScene`, `dpopScene`, `revocationScene`, `on` (`conformance`'s, on `faultScene` by default), `assertion`, `clientAssertion`, `proof`, `grantAt`, `authenticatedAt`, `provenAt`, `issuedAt`, `revokedAt`, `activeAt`, `said`, `spendOf`, `clientSpendOf`, `proofSpendOf`, `revocationOf`, and the scenes' `issuer`, `upstream`, `prefix`, `grantType` and clients `app`, `keyed`, `holding` and `owner`.
+- From `test/wire.ts`: `requestCounted` and `grantDecision`.
 
 ## Invariants
 - Each assertion and proof has a `jti` of its own, so a match on its spend never takes another's.

@@ -39,13 +39,15 @@ const section = z.strictObject({
 		.duration("s")
 		.pipe(z.number().int().min(60).max(86_400))
 		.prefault("1h")
-		.describe("How long an identifier's run of failed attempts is remembered, from 1m to 1d."),
+		.describe(
+			"How long an identifier's run of failed attempts is remembered, from 1m to 1d, and no shorter than `account-max-wait`.",
+		),
 	"account-max-wait": setting
 		.duration("s")
 		.pipe(z.number().int().min(1).max(3600))
 		.prefault("5m")
 		.describe(
-			"The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out.",
+			"The longest an identifier waits between attempts, from 1s to 1h and no longer than `account-window`: the wait doubles to it, never locking out.",
 		),
 });
 

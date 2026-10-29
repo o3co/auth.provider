@@ -177,7 +177,7 @@ flowchart LR
 | `@mod/redirect-uris` | feature | `@mod/client-documents`, `@mod/clients` |
 | `@mod/refresh` | feature | `@mod/audit`, `@mod/claims-selection`, `@mod/client-allowance`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/session-participants`, `@mod/subject-revocation`, `@mod/token-control`, `@mod/tokens` |
 | `@mod/resource-indicators` | feature | `@mod/grants`, `@mod/kernel` |
-| `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/csrf`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants` |
+| `@mod/rp-logout` | feature | `@mod/audit`, `@mod/clients`, `@mod/code-grant`, `@mod/csrf`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/oidc`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/rate-limit`, `@mod/redirect-uris`, `@mod/request-source`, `@mod/session`, `@mod/session-participants`, `@mod/url-setting` |
 | `@mod/sender-binding` | feature | `@mod/clients`, `@mod/http`, `@mod/issuer`, `@mod/kernel` |
 | `@mod/session-grant` | feature | `@mod/client-allowance`, `@mod/csrf`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/session`, `@mod/tokens` |
 | `@mod/session-tokens` | feature | `@mod/grants`, `@mod/kernel`, `@mod/session`, `@mod/session-participants`, `@mod/tokens` |
@@ -243,13 +243,13 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/url-setting` |
+| `@mod/mail-smtp` | adapter | `@mod/address-reach`, `@mod/kernel`, `@mod/mail`, `@mod/tls-options`, `@mod/url-setting` |
 
 ### store-redis
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/redis` | adapter | `@mod/kernel`, `@mod/store` |
+| `@mod/redis` | adapter | `@mod/kernel`, `@mod/store`, `@mod/tls-options` |
 
 ### templates
 

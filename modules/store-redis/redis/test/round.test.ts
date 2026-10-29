@@ -9,6 +9,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces } from "@mod/store";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 import { fakeRedis } from "./fake-redis.ts";
@@ -41,7 +42,7 @@ async function boot(port: number, replication?: "replicas" | "none") {
 		}),
 	]);
 	app = await assemble({
-		modules: [redisModule, asker, ...(replication ? [replicated] : [])],
+		modules: [redisModule, tlsOptionsForTests, asker, ...(replication ? [replicated] : [])],
 		config: {
 			...kernelConfig(),
 			redis: { url: `redis://127.0.0.1:${port}`, ...(replication ? { replication } : {}) },

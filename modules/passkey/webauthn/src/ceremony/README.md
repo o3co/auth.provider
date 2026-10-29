@@ -10,6 +10,7 @@ Internal module of `webauthn`: the WebAuthn ceremonies, over a pinned version of
 
 ## Offers
 - `ceremoniesFor` (relying party, randomness, clock) → the package's `Ceremonies`. No library type crosses it.
+- `algorithmNames`: the algorithms a credential may use (`EdDSA`, `ES256`, `RS256`), by the names `keys` gives them; the package's `algorithms` setting takes from them, all of them by default.
 - `challengeOf` (response) → the challenge the client data names, read by the library's decoder, the one that verifies it.
 
 ## Invariants

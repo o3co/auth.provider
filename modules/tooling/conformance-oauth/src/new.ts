@@ -129,6 +129,7 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 			"@mod/subject-revocation",
 		],
 		without: [
+			...(part.authorize === false ? ["@mod/authorize"] : []),
 			...(part.dpop === false ? ["@mod/dpop"] : []),
 			...(part.jwtBearer === false ? ["@mod/jwt-bearer"] : []),
 			...(part.resourceIndicators === false ? ["@mod/resource-indicators"] : []),

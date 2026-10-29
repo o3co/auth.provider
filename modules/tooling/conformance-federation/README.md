@@ -25,6 +25,7 @@
 - Area `federation` and the shape of its part
 - Scene builder (builds the key, identity, OAuth, code-flow and federation parts from the form written in a scene)
 - The needs `grantsLoginPage`, `linkStepUpPage` and `readsUserinfo`, which the legacy target cannot meet
+- `landedStatus`: the status a callback lands its browser with, 303 (RFC 9700 §4.12), or 302 where the target differs
 - The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run, named to the evidence as `@mod/conformance-federation#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants

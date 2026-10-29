@@ -1,7 +1,7 @@
 import type { Client } from "@mod/clients";
 import { Unavailable } from "@mod/kernel";
 import type { Binding } from "@mod/sender-binding";
-import { allowanceMs, type Family, hashOf, toStored } from "../record.ts";
+import { allowanceMs, type Family, hashOf, liveFamily, toStored } from "../record.ts";
 import type { Revoker, Stores } from "../settle/settle.ts";
 
 export type Random = (n: number) => Uint8Array;
@@ -46,6 +46,15 @@ export function founding(
 				throw new Unavailable("refresh");
 			}
 			await revoker.recordAccess(id, access);
+			// Read back by a change, as rotation does: a revocation that came meanwhile, its cap's
+			// push-out say, issues nothing, and its token is revoked with the family.
+			const written = await stores.families.update(id, (stored) =>
+				liveFamily(stored)?.current === family.current ? { value: stored } : undefined,
+			);
+			if (liveFamily(written?.after)?.current !== family.current) {
+				await revoker.revokeFamily(id);
+				throw new Unavailable("refresh");
+			}
 			return `${id}.${first}`;
 		},
 	};

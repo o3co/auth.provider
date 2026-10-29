@@ -44,6 +44,9 @@ onLegacy(codeArea, {
 		"store-fault:session-grant",
 	],
 	differs: [
+		// Ours answers a POST to the authorization endpoint with a 303 to the GET with the same
+		// parameters, where the session's SameSite=Lax cookie is read; the legacy build reads the form in place.
+		"authorize-post-read-in-place",
 		// A fresh login a client asks for: max_age=0 asks a new one, and a return that dropped its demand is refused.
 		"max-age-zero-asks-a-new-login",
 		"return-keeps-its-demand",

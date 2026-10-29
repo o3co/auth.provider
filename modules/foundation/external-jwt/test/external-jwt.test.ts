@@ -360,9 +360,20 @@ describe("claims", () => {
 	it("refuses a token that lives, or was issued, longer than the caller allows", async () => {
 		const at = seconds(now);
 		const rules = { maxLifetimeMs: 3_600_000 };
-		expect((await signed(fresh({ exp: at + 3630 }), rules)).kind).toBe("valid");
-		expect(await signed(fresh({ exp: at + 3631 }), rules)).toEqual(signedInvalid("too-long"));
-		expect((await signed(fresh({ iat: at - 3630 }), rules)).kind).toBe("valid");
+		// Its `exp` ahead, with the caller's skew, where it names no `iat`.
+		const noIat = { iat: undefined };
+		expect((await signed(fresh({ ...noIat, exp: at + 3630 }), rules)).kind).toBe("valid");
+		expect(await signed(fresh({ ...noIat, exp: at + 3631 }), rules)).toEqual(
+			signedInvalid("too-long"),
+		);
+		// Its `exp` less its `iat`, with no skew: each within reach, the two further apart than allowed.
+		expect((await signed(fresh({ iat: at - 1800, exp: at + 1800 }), rules)).kind).toBe("valid");
+		expect(await signed(fresh({ iat: at - 1801, exp: at + 1800 }), rules)).toEqual(
+			signedInvalid("too-long"),
+		);
+		expect(await signed(fresh({ iat: at - 1810, exp: at + 1810 }), rules)).toEqual(
+			signedInvalid("too-long"),
+		);
 		expect(await signed(fresh({ iat: at - 3631 }), rules)).toEqual(signedInvalid("too-long"));
 		expect((await signed(fresh({ exp: at + 86_400 }))).kind).toBe("valid");
 	});

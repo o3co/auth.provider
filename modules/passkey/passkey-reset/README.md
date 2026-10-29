@@ -15,7 +15,7 @@
 - Audit event (declared in `./audit-events`): `passkey.reset` once a run gets past its input, finished or not: `by` `operator`, `count` once the removal answered, `sessions`, `sessionsAgain` once it was tried, `complete`, and `requestedBy` when given.
 
 ## Invariants
-- A subject that is not a non-empty string, or a requester that is not 1 to 256 well-formed characters, is refused with a RangeError before anything is done.
+- A subject that is not a non-empty well-formed string, or a requester that is not 1 to 256 well-formed characters, is refused with a RangeError before anything is done.
 - Only the sessions boundary moves (`keepDelegations`). A run that cannot move the first boundary, or whose revocation leaves a session open, stops there; once it moved, the second boundary is tried whatever the removal did.
 - The run answers the first step that failed, unless a failure at any step is not unavailable: that one is thrown, once the run is recorded.
 - `takenBy` binds modules, not who composes them: the embedder's own code can take `passkeyResetPart`, and is trusted to run it only under `mfa-reset`'s boundaries.
