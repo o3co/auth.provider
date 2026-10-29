@@ -35,20 +35,21 @@ if (missing) {
 	process.exit(1);
 }
 
-const { problems: unbuilt } = buildBundles({
-	bundles: readBundles(root),
-	release: releaseOf(root) ?? { version: workspace.version },
-	out,
-	licenseFile: join(root, "LICENSE"),
-});
-if (unbuilt.length > 0) {
-	for (const problem of unbuilt) console.error(problem);
-	process.exit(1);
-}
-
 const scratch = mkdtempSync(join(tmpdir(), "release-check-"));
-// The tarballs named, as the release publishes them; else packed as the release packs them, the index sealed in between.
-const packed = tarballsToCheck(process.argv[2], (into) => packRelease(root, into), scratch);
+// The tarballs named, as the release publishes them; else built and packed as the release packs them, the index sealed in between.
+const packed = tarballsToCheck(
+	process.argv[2],
+	(into) => {
+		const { problems: unbuilt } = buildBundles({
+			bundles: readBundles(root),
+			release: releaseOf(root) ?? { version: workspace.version },
+			out,
+			licenseFile: join(root, "LICENSE"),
+		});
+		return unbuilt.length > 0 ? { problems: unbuilt } : packRelease(root, into);
+	},
+	scratch,
+);
 if ("problems" in packed) {
 	for (const problem of packed.problems) console.error(problem);
 	process.exit(1);
