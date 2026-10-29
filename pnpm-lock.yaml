@@ -408,6 +408,9 @@ importers:
       '@mod/outbound-policy':
         specifier: workspace:*
         version: link:../outbound-policy
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../tls-options
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../url-setting

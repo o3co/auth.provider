@@ -10,6 +10,7 @@ import type { LookupFunction, Socket } from "node:net";
 import { isIP, connect as plainConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { type Admitted, DestinationRefused, type Limits, type Policy } from "@mod/outbound-policy";
+import { tlsOptions } from "@mod/tls-options";
 import {
 	isOutboundUnavailable,
 	type OutboundFailure,
@@ -191,6 +192,7 @@ async function viaProxy(
 			host: admitted.host,
 			...(literal ? {} : { servername: admitted.host }),
 			...trust,
+			...tlsOptions,
 		});
 	return { carry: { agent }, release: () => socket.destroy() };
 }
@@ -214,7 +216,12 @@ async function atCheckedAddress(
 	const literal = isIP(admitted.host) !== 0;
 	const agent = new TlsAgent({ keepAlive: false });
 	agent.createConnection = () =>
-		tlsConnect({ ...at, ...(literal ? {} : { servername: admitted.host }), ...trust });
+		tlsConnect({
+			...at,
+			...(literal ? {} : { servername: admitted.host }),
+			...trust,
+			...tlsOptions,
+		});
 	return { carry: { agent }, release: () => {} };
 }
 
