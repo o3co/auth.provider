@@ -28,6 +28,7 @@ import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { tokensStandIn } from "@mod/tokens/testing";
@@ -103,7 +104,7 @@ const collector = defineModule(
 async function open(section: unknown = settings(), allow = ["127.0.0.1"]) {
 	const logged = recordingLog();
 	const app = await assemble({
-		modules: [outboundModule, signerKeysHttp, collector],
+		modules: [outboundModule, tlsOptionsForTests, signerKeysHttp, collector],
 		config: {
 			...kernelConfig(),
 			outbound: { allow, "plain-loopback": [pair] },
@@ -275,7 +276,7 @@ it("takes outbound's credential policy only with a credential, its takes naming 
 	const unused = async (section: unknown) =>
 		(
 			await takesUnused({
-				modules: [outboundModule, signerKeysHttp, collector],
+				modules: [outboundModule, tlsOptionsForTests, signerKeysHttp, collector],
 				config: {
 					...kernelConfig(),
 					outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
@@ -310,6 +311,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 				grantCaller,
 				clientAllowanceModule,
 				outboundModule,
+				tlsOptionsForTests,
 				externalJwtModule,
 				simulatedStore().module,
 				subjectRevocationStandIn,

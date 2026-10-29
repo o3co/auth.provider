@@ -1,3 +1,4 @@
+import { algorithmsSetting, knownAlgorithms } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
 import { z } from "zod";
 
@@ -38,6 +39,9 @@ const upstream = (name: Kind) =>
 				.record(z.string().min(1), client)
 				.refine((map) => Object.keys(map).length > 0, "names at least one client")
 				.describe("This provider's client IDs, each with the id_tokens it may exchange."),
+			algorithms: algorithmsSetting(knownAlgorithms, ["RS256"]).describe(
+				`The algorithms ${name === "apple" ? "Apple's" : "Google's"} id_tokens may be signed with: asymmetric ones only, RS256 by default.`,
+			),
 		})
 		.optional()
 		.describe(`Takes ${name === "apple" ? "Apple's" : "Google's"} id_tokens when written.`);

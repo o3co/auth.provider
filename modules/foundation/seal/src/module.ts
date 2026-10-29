@@ -1,14 +1,14 @@
 import { createCipheriv, createDecipheriv } from "node:crypto";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { type Opened, type Resealed, resealers, resealing, seal } from "./contract.ts";
-import { keyId, section } from "./section.ts";
+import { type Algorithm, algorithms, keyId, section } from "./section.ts";
 
-const algorithm = "aes-256-gcm";
-const tagLength = 16;
-/** id.iv.body.tag: a 12-byte IV and a 16-byte tag, each as base64url. */
+/** id.iv.body.tag, each part base64url; the IV's and the tag's sizes are the key's algorithm's. */
 const sealedShape = new RegExp(
-	`^(${keyId.source.slice(1, -1)})\\.([A-Za-z0-9_-]{16})\\.([A-Za-z0-9_-]*)\\.([A-Za-z0-9_-]{22})$`,
+	`^(${keyId.source.slice(1, -1)})\\.([A-Za-z0-9_-]+)\\.([A-Za-z0-9_-]*)\\.([A-Za-z0-9_-]+)$`,
 );
+/** Sizes some algorithm writes, checked before the key is looked up, as a fixed shape was. */
+const written = Object.values(algorithms);
 const base64url = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64url");
 /** The bytes of a part written in its one form; a decoder drops a last character's spare bits. */
 const bytesOf = (part: string) => {
@@ -24,15 +24,20 @@ export default defineModule(
 		m.provide(seal).by((c) => {
 			const { current, next, previous } = c.section;
 			const opening = [current, ...(next ? [next] : []), ...previous];
-			const ring = new Map(opening.map((k) => [k.id, Buffer.from(k.key, "base64")]));
+			const ring = new Map(
+				opening.map((k) => [k.id, { bytes: Buffer.from(k.key, "base64"), algorithm: k.algorithm }]),
+			);
 			const currentId = current.id;
 			// Only a past key's values are stale: next is newer than current, as hosts move it up in turn.
 			const pastIds = new Set(previous.map((k) => k.id));
-			const currentKey = ring.get(currentId) as Buffer;
+			const sealing = ring.get(currentId) as { bytes: Buffer; algorithm: Algorithm };
+			const sizes = algorithms[sealing.algorithm];
 			return Object.freeze({
 				seal: (plain: string, context: string) => {
-					const iv = c.random.bytes(12);
-					const cipher = createCipheriv(algorithm, currentKey, iv, { authTagLength: tagLength });
+					const iv = c.random.bytes(sizes.ivBytes);
+					const cipher = createCipheriv(sealing.algorithm, sealing.bytes, iv, {
+						authTagLength: sizes.tagBytes,
+					});
 					cipher.setAAD(bound(currentId, context));
 					const body = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
 					return `${currentId}.${base64url(iv)}.${base64url(body)}.${base64url(cipher.getAuthTag())}`;
@@ -43,11 +48,15 @@ export default defineModule(
 					const [, id = "", ...encoded] = parts;
 					const [iv, body, tag] = encoded.map(bytesOf);
 					if (!iv || !body || !tag) return { kind: "refused" };
+					const fits = (a: (typeof written)[number]) =>
+						iv.length === a.ivBytes && tag.length === a.tagBytes;
+					if (!written.some(fits)) return { kind: "refused" };
 					const key = ring.get(id);
 					if (!key) throw new Unavailable("seal");
+					if (!fits(algorithms[key.algorithm])) return { kind: "refused" };
 					try {
-						const decipher = createDecipheriv(algorithm, key, iv, {
-							authTagLength: tagLength,
+						const decipher = createDecipheriv(key.algorithm, key.bytes, iv, {
+							authTagLength: algorithms[key.algorithm].tagBytes,
 						});
 						decipher.setAAD(bound(id, context));
 						decipher.setAuthTag(tag);

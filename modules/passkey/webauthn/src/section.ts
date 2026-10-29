@@ -1,5 +1,6 @@
 import { setting } from "@mod/kernel";
 import { z } from "zod";
+import { algorithmNames } from "./ceremony/ceremony.ts";
 
 /** An origin as a browser serializes it: https, or http on localhost; a domain, never an IP literal. */
 const origin = z.string().refine((entry) => {
@@ -43,6 +44,14 @@ export const section = z
 			.pipe(z.number().int().min(10).max(600))
 			.prefault("2m")
 			.describe("How long a ceremony's challenge can be answered, from 10s to 10m."),
+		algorithms: z
+			.array(z.enum(algorithmNames))
+			.min(1)
+			.refine((names) => new Set(names).size === names.length, "names each algorithm once")
+			.prefault([...algorithmNames])
+			.describe(
+				"The signature algorithms a passkey may use, offered at registration in this order: EdDSA, ES256 or RS256, at least one. A passkey of one left out can no longer sign in.",
+			),
 	})
 	// An entry that is no URL is the origins' own refusal: this never reads one, whether or not zod
 	// runs it past a field that failed.

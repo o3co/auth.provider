@@ -13,6 +13,7 @@ import {
 } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import type { OutboundRefusals } from "@mod/outbound-policy";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { beforeAll, describe, expect, it } from "vitest";
 import { settingsOf } from "../src/settings.ts";
@@ -238,9 +239,11 @@ describe("idp-google", () => {
 	});
 
 	it("takes the endpoints the browser goes to over plain http only at a loopback name, refusing another at its key", () => {
-		const paths = outboundOver(outboundSection.parse({ "allow-any-public": true }), async () => [
-			"93.184.216.34",
-		]);
+		const paths = outboundOver(
+			outboundSection.parse({ "allow-any-public": true }),
+			async () => ["93.184.216.34"],
+			{ floor: testTlsOptions },
+		);
 		const { explained, plainInternal, browsedRefusal } = paths;
 		const policy: OutboundRefusals = { explained, plainInternal, browsedRefusal };
 		const keysOf = (more: Record<string, unknown>) =>
@@ -427,6 +430,20 @@ describe("idp-google", () => {
 			expect(await outcome(lenient.upstream.exchange(exchange({ iss }))), iss).toBe("refused");
 		}
 		expect(lenient.asked.filter((a) => a.url === endpoints["token-endpoint"])).toHaveLength(1);
+	});
+
+	it("takes an id_token under the algorithms its settings name, RS256 alone by default", async () => {
+		const signed = await idToken({}, elliptic);
+		expect(await exchangedWith(signed)).toBe("refused");
+		const { upstream } = await open({
+			token: async () => granted({ id_token: signed }),
+			settings: { algorithms: ["ES256"] },
+		});
+		expect(await upstream.exchange(exchange())).toMatchObject({ subject: "g-alice" });
+		const client = { "client-id": "c", "client-secret": "s" };
+		for (const algorithms of [["HS256"], ["none"], []]) {
+			expect(settings.safeParse({ ...client, algorithms }).success, String(algorithms)).toBe(false);
+		}
 	});
 
 	it("refuses an id_token that does not hold for this client and login [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {

@@ -25,6 +25,7 @@ import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { issuancePolicies, tokens } from "@mod/tokens";
@@ -157,6 +158,7 @@ function assembly(
 			grantCaller,
 			clientAllowanceModule,
 			outboundModule,
+			tlsOptionsForTests,
 			externalJwtModule,
 			simulatedStore().module,
 			subjectRevocationStandIn,

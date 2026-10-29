@@ -1,10 +1,20 @@
 import type { Loads } from "@mod/http";
+import type { LogoutReturn } from "../contract.ts";
 
 /** A client to tell in a frame, and whether it asked for the session. */
 export interface Frame {
 	readonly uri: string;
 	readonly withSession: boolean;
 }
+
+/** The client's return with its `state`, where there is one: where the browser goes once logged out. */
+export const returnUrl = (back: LogoutReturn): string | undefined => {
+	if (back.postLogoutRedirectUri === undefined) return undefined;
+	if (back.state === undefined) return back.postLogoutRedirectUri;
+	const url = new URL(back.postLogoutRedirectUri);
+	url.searchParams.set("state", back.state);
+	return url.href;
+};
 
 /** The frames get this long to load before the browser moves on. */
 const delayMs = 2000;
@@ -39,11 +49,16 @@ export function frontChannelPage(
  * The page a logout ends on where no client is framed: it says the user is logged out, and moves the
  * browser on to `next` at once by the front-channel page's one script, or stays, with no script.
  */
-export function loggedOutPage(at: { readonly next?: string | undefined }): {
+export function loggedOutPage(at: {
+	readonly next?: string | undefined;
+	/** Says the person was not signed in, where no session was there to close. */
+	readonly notSignedIn?: true;
+}): {
 	readonly html: string;
 	readonly loads: Loads;
 } {
-	return pageOf("", [], at.next, 0);
+	const words = at.notSignedIn ? "You are not signed in." : "You are logged out.";
+	return pageOf("", [], at.next, 0, words);
 }
 
 /** The page: the words that say the user is logged out, the frames, and the move on where there is one. */
@@ -52,6 +67,7 @@ function pageOf(
 	origins: readonly string[],
 	next: string | undefined,
 	delay: number,
+	words = "You are logged out.",
 ): { readonly html: string; readonly loads: Loads } {
 	const moving =
 		next === undefined
@@ -61,6 +77,6 @@ function pageOf(
 					script: `<script>${script}</script>`,
 					scripts: [script],
 				};
-	const html = `<!doctype html><html><head><meta charset="utf-8"><title>Logged out</title></head><body${moving.attributes}><h1>Logged out</h1><p>You are logged out.</p>${iframes}${moving.script}</body></html>`;
+	const html = `<!doctype html><html><head><meta charset="utf-8"><title>Logged out</title></head><body${moving.attributes}><h1>Logged out</h1><p>${words}</p>${iframes}${moving.script}</body></html>`;
 	return { html, loads: { frames: [...origins], scripts: moving.scripts } };
 }

@@ -14,6 +14,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { SignJWT } from "jose";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -62,6 +63,7 @@ async function boot(section: Record<string, unknown>, reach = true) {
 		modules: [
 			http,
 			outboundModule,
+			tlsOptionsForTests,
 			externalJwtModule,
 			clientsModule,
 			secretHashModule,

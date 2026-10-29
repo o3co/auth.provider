@@ -36,6 +36,7 @@ import senderBindingModule from "@mod/sender-binding/module";
 import { type SimulatedStore, simulatedStore } from "@mod/store/testing";
 import revocationModule from "@mod/subject-revocation/module";
 import revocationStore from "@mod/subject-revocation-store/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import tokenEndpoint from "@mod/token-endpoint/module";
 import tokenExchange from "@mod/token-exchange/module";
 import { type Tokens, tokens } from "@mod/tokens";
@@ -230,6 +231,7 @@ async function serve(
 			usersModule,
 			memoryUsersStores().module,
 			outboundModule,
+			tlsOptionsForTests,
 			externalJwtModule,
 			tokenExchange,
 			checks.module,

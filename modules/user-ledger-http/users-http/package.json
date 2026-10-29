@@ -20,6 +20,7 @@
 	},
 	"devDependencies": {
 		"@mod/secret-hash": "workspace:*",
+		"@mod/tls-options": "workspace:*",
 		"vitest": "5.0.5"
 	}
 }
