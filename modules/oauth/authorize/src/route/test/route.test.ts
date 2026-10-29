@@ -61,7 +61,25 @@ it("records the request's source only when http determined it", async () => {
 	]);
 });
 
-it("answers Unavailable once the redirect URI is trusted by sending temporarily_unavailable back, warning what and the route", async () => {
+it("answers an outage the flow found before the session at the endpoint by 503, nothing sent back, warning what and the route [rfc9700-4.11.2-b]", async () => {
+	const before = route(async () => ({ kind: "unavailable", what: "reauth store" }));
+	const sent = await before.answer(testRequest({ query }));
+	expect([sent.status, sent.headers?.location, sent.body]).toEqual([
+		503,
+		undefined,
+		{ json: { error: "temporarily_unavailable" } },
+	]);
+	expect(before.lines()).toEqual([
+		{
+			level: "warn",
+			event: "authorize.unavailable",
+			fields: { what: "reauth store", route: "/oauth/authorize" },
+		},
+	]);
+	expect(before.recorded).toEqual([]);
+});
+
+it("answers Unavailable the flow throws, once its session is found, by sending temporarily_unavailable back, warning what and the route", async () => {
 	const after = route(async (): Promise<never> => {
 		throw new Unavailable("reauth store");
 	});

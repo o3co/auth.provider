@@ -1,7 +1,7 @@
 import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import type { Client } from "@mod/clients";
 import { type Codes, codeGrantType, codes } from "@mod/code-grant";
-import type { BuildContext, Clock } from "@mod/kernel";
+import { type BuildContext, type Clock, isUnavailable } from "@mod/kernel";
 import { type Reauths, reauths as reauthsContract } from "@mod/reauth";
 import { type Sessions, sessions } from "@mod/session";
 import { type IssuanceRefused, type Tokens, tokens } from "@mod/tokens";
@@ -111,8 +111,7 @@ export function flowWith(parts: FlowParts): Flow {
 		return { kind: "answer", error, ...(description ? { description } : {}) };
 	};
 
-	// RFC 9700 §4.11.2: a refusal goes back only to a browser logged in, but for a silent request. The
-	// request comes back from its login with every value sent, repeats included, to be refused again.
+	// RFC 9700 §4.11.2: a refusal goes back only to a browser logged in, but for a silent request.
 	const loggedInFirst = async (refused: Decision, { request }: Trusted): Promise<Decision> => {
 		// Silent by any prompt sent, repeated or too long: such a request never shows a page.
 		const silent = [...request.query].some(
@@ -154,7 +153,8 @@ export function flowWith(parts: FlowParts): Flow {
 		return { kind: "read", checked, allowed, claims, subs, asked } as const;
 	};
 
-	return async (trusted) => {
+	/** The request decided, `found` marked once its session is: an outage before then is never sent back. */
+	const decided = async (trusted: Trusted, found: { session: boolean }): Promise<Decision> => {
 		const { client, redirectUri, one, params, request } = trusted;
 		const read = trusted.refused ?? (await readOf(trusted));
 		if (read.kind !== "read") return loggedInFirst(read, trusted);
@@ -191,6 +191,7 @@ export function flowWith(parts: FlowParts): Flow {
 
 		const session = await entered.enter(request);
 		if (!session) return toLogin();
+		found.session = true;
 		if (!reauths.fresh(need, session.context, taken)) {
 			// Back from its login with a session still not new enough: another trip would bring the same.
 			if (taken) return refusal("login_required");
@@ -257,6 +258,16 @@ export function flowWith(parts: FlowParts): Flow {
 			await selections.keepForCode(issued.redemptionOf(code), selection, issued.lifetimeMs());
 		}
 		return { kind: "code", code, subject: session.context.subject };
+	};
+
+	return async (trusted) => {
+		const found = { session: false };
+		try {
+			return await decided(trusted, found);
+		} catch (error) {
+			if (!isUnavailable(error) || found.session) throw error;
+			return { kind: "unavailable", what: error.what };
+		}
 	};
 }
 
