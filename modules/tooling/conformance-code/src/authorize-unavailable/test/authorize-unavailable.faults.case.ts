@@ -48,8 +48,10 @@ async function authorize(browser: ReturnType<typeof browserOn>) {
 	};
 }
 
-/** The client's answer under the fault: a redirect to it with temporarily_unavailable, and no code. */
-const unavailable = { status: 302, code: undefined, error: "temporarily_unavailable" };
+/** The answer to a fault before the browser's session is found: the endpoint's own 503, nothing sent back. */
+const unanswered = { status: 503, code: undefined, error: undefined };
+/** The client's answer to a fault once the session is found: a redirect with temporarily_unavailable, no code. */
+const sentBack = { status: 302, code: undefined, error: "temporarily_unavailable" };
 const shape = (a: Awaited<ReturnType<typeof authorize>>) => ({
 	status: a.status,
 	code: a.code,
@@ -84,7 +86,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			const answer = await authorize(browser);
 			const resumed = performance.now();
 			a.relay.resume();
-			expect(shape(answer)).toEqual(unavailable);
+			expect(shape(answer)).toEqual(unanswered);
 			// Nothing reached Redis while cut: the read it sent then is answered only once resumed.
 			expect(a.relay.executions(anything).filter((e) => e.at > stalled && e.at < resumed)).toEqual(
 				[],
@@ -107,7 +109,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			const answer = await authorize(browser);
 			const resumed = performance.now();
 			a.relay.resume();
-			expect(shape(answer)).toEqual(unavailable);
+			expect(shape(answer)).toEqual(unanswered);
 			// Its read reached Redis, which answered it before the endpoint gave up; the answer was held.
 			expect(a.relay.executions(cookieRead).some((e) => e.at > stalled && e.at < answer.at)).toBe(
 				true,
@@ -128,7 +130,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			a.relay.reset("all");
 			const cutting = setInterval(() => a.relay.reset("all"), 20);
 			const answer = await authorize(browser).finally(() => clearInterval(cutting));
-			expect(shape(answer)).toEqual(unavailable);
+			expect(shape(answer)).toEqual(unanswered);
 			// Nothing reached Redis from the first cut to the answer.
 			expect(a.relay.executions(anything).filter((e) => e.at > cut && e.at < answer.at)).toEqual(
 				[],
@@ -149,7 +151,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			a.relay.delay(1_500, "both");
 			const answer = await authorize(browser);
 			a.relay.delay(0, "both");
-			expect(shape(answer)).toEqual(unavailable);
+			expect(shape(answer)).toEqual(unanswered);
 			// Its read was answered only after the endpoint had given up on it.
 			await ready(a);
 			const read = a.relay.executions(cookieRead).find((e) => e.at > delayed);
@@ -159,7 +161,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 		});
 	});
 
-	it("gives no code while Redis is too slow to run commands [guarantee-3-a] {fault:S}", async () => {
+	it("gives no code while Redis is too slow to run commands, answering at the endpoint before the session is found [guarantee-3-a] {fault:S}", async () => {
 		await on({ name: "authorize-unavailable-s" }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
@@ -171,13 +173,33 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			const woke = awake.then(() => performance.now());
 			await asleep;
 			const answer = await authorize(browser);
-			expect(shape(answer)).toEqual(unavailable);
+			expect(shape(answer)).toEqual(unanswered);
 			// The endpoint answered while Redis slept, before any read of it was answered.
 			expect(answer.at).toBeLessThan(await woke);
 			expect(
 				a.relay.executions(cookieRead).filter((e) => e.at > asking && e.at < answer.at),
 			).toEqual([]);
 			expect(successes(a, codeKept).length).toBe(kept);
+			await healed(d, a);
+		});
+	});
+
+	it("gives no code while Redis is too slow to keep the code, sending temporarily_unavailable back once the session is found [guarantee-3-a] {fault:S}", async () => {
+		await on({ name: "authorize-unavailable-s-found" }, async (d) => {
+			const a = instanceOf(d);
+			await control(a);
+			const browser = await loggedInAt(a);
+			// The code's write held, its session read answered, then Redis put to sleep under it, past
+			// the write's patience of 10 s, so no resend lands.
+			const holding = a.relay.hold(codeKept);
+			const asked = authorize(browser);
+			const held = await holding;
+			const { asleep, awake } = d.topology.sleep(d.topology.primary(), 15);
+			await asleep;
+			held.release();
+			const answer = await asked;
+			expect(shape(answer)).toEqual(sentBack);
+			await awake;
 			await healed(d, a);
 		});
 	});
@@ -201,7 +223,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			});
 			repointed(d);
 			await replicasOnline(d);
-			expect(answer && shape(answer)).toEqual(unavailable);
+			expect(answer && shape(answer)).toEqual(unanswered);
 			expect(successes(a, codeKept).length).toBe(kept);
 			await healed(d, a);
 		});
@@ -236,7 +258,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			expect(read && runIdOf(read.reply)).toBe(newId);
 			expect(read && upstreamOf(read.connection)).toEqual(moved.upstream());
 			expect(upstreamOf(wait.connection)).toEqual(old.upstream());
-			expect(shape(answer)).toEqual(unavailable);
+			expect(shape(answer)).toEqual(unanswered);
 			expect(successes(a, codeKept).length).toBe(kept);
 			a.relay.reset("confirming");
 			await healed(d, a);
@@ -276,7 +298,7 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 				expect(given.every((e) => e.at > restarted && runIdOf(e.reply) === runId)).toBe(true);
 				await annotate("given a code kept on Redis started again");
 			} else {
-				expect(shape(answer)).toEqual(unavailable);
+				expect(shape(answer)).toEqual(sentBack);
 				await annotate("answered temporarily_unavailable");
 			}
 			await replicasOnline(d);
