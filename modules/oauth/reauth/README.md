@@ -21,7 +21,7 @@
 - Taking rewrites the record as taken; it counts only when that rewrite found it untaken and made for the same request. A name that is not 43 base64url characters is not looked up.
 - A login whose authentication time `session` answers as unknown is never fresh: it meets no record, no `max_age` and no need for a known time.
 - A login meets a record when its authentication time is the record's moment or later, compared to the millisecond.
-- `prompt=login` and `max_age` are checked each on its own, and a request asking both is held to both: `prompt=login` and `max_age=0` by the record; any other `max_age` by the login's age when asked, on `kernel`'s clock (`authorize` asks as it issues the code), which no record stands for, so a return from a step-up or an upstream past it is not fresh.
+- `prompt=login` and `max_age` are checked each on its own, and a request asking both is held to both: `prompt=login` and `max_age=0` by the record; any other `max_age` by the login's age when asked, on `kernel`'s clock (`authorize` asks immediately before it issues the code), which no record stands for, so a return from a step-up or an upstream past it is not fresh.
 
 ## Data
 - Re-authentication record, per name, through the store interface, written in format 1: the time a login counts from, a hash of the request, whether it is the step-up round trip, and whether it was taken. Checked on every read; one of another format or shape reads as none, and eviction only means logging in again.
