@@ -16,10 +16,12 @@ const section = clientSetting.extend({
 		.describe(
 			"`offline` asks for a refresh token, so Google shows its consent screen at every login; `online` asks none.",
 		),
-	"require-iss": z
+	"accept-missing-iss": z
 		.boolean()
-		.prefault(true)
-		.describe("Asks every callback for `iss`, which Google says it always sends."),
+		.prefault(false)
+		.describe(
+			"Takes a callback without `iss`, which Google says it always sends; warned of at every start.",
+		),
 	"authorization-endpoint": endpoint
 		.prefault("https://accounts.google.com/o/oauth2/v2/auth")
 		.describe("Where the browser is sent to log in at Google; Google's own unless named."),
