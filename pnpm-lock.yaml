@@ -1538,6 +1538,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
