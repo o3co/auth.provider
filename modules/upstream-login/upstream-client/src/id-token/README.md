@@ -20,8 +20,8 @@ Internal module of `upstream-client`: reading an upstream's OpenID Connect id_to
 - Given the access token, an `at_hash` it gives is the left half of that token's digest by the signature's algorithm (SHA-2 by size; SHA-512 for Ed25519, SHAKE256 for Ed448; `EdDSA`, whose key's curve is not known here, takes a half of either); one that is not, or not text, refuses. Without one, the id_token is read as before.
 - The profile is `email`, `name` and `picture` where they are text; the email is verified only by an `email_verified` value the type names.
 - Every refusal is `UpstreamRefused`; unavailable names the type's `what`.
-
-## Depends on
-- `external-jwt` (the signature and times), `federation` (the login's words), `kernel` (what is unavailable, the clock)
 - A UserInfo answer is taken only as a JSON object of a 200 as `application/json` whose `sub` is exactly the id_token's; any other, a signed or encrypted one among them, refuses, and none of its values is used. Its profile is `email`, `name` and `picture` where they are text that is not empty, the email verified only by the boolean `true`.
 - The completed profile takes each claim the id_token's checked claims give, however they give it, from the id_token, and UserInfo's only where they give none; the email goes with the verification of the answer that gave it.
+
+## Depends on
+- `external-jwt` (the signature and times), `upstreams` (the login's words), `outbound` (the UserInfo answer as read), `kernel` (what is unavailable, the clock)

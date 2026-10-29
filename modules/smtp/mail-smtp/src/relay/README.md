@@ -13,8 +13,9 @@ Internal module of `mail-smtp`: one SMTP conversation per send, over a pinned `n
 
 ## Invariants
 - Before STARTTLS, only EHLO and STARTTLS are sent in the clear.
+- Each connection's TLS checks the certificate, then takes the floor's own `minVersion` and `ciphers` last, read once when the relay is made.
 - Connecting (the TLS handshake too, under `tls`) and the greeting get a quarter of the deadline each, a silence half; the whole send ends at the deadline.
-- A `RelayFailure` keeps no text from the relay or the library, and no cause.
+- A `RelayFailure` keeps no text from the relay or the library, and no cause; of a refused handshake, only the TLS alert's number.
 
 ## Depends on
-- `nodemailer` (SMTP connection, message composer, address parser); `address-reach` (`isLoopbackAddress`, for the peer under `none`).
+- `nodemailer` (SMTP connection, message composer, address parser); `tls-options` (the floor's type); `address-reach` (`isLoopbackAddress`, for the peer under `none`).

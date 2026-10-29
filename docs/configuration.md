@@ -243,8 +243,10 @@ From `@mod/http`.
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
 | `http.insecure-origin` | boolean | `false` |  | `HTTP_INSECURE_ORIGIN` | `false` | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it, and only with `kernel.environment = development`, as a production deployment refuses it. |
 | `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  | when `http.client-certificate` is set |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
-| `http.client-certificate.header` | string | `client-cert` when `http.client-certificate` is set |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
-| `http.client-certificate.chain-header` | string | `client-cert-chain` when `http.client-certificate` is set |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
+| `http.client-certificate.header` | string | `client-cert` when `http.client-certificate` is set and `http.client-certificate.dialect` is `rfc9440` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.header` | string |  | when `http.client-certificate` is set and `http.client-certificate.dialect` is `pem` |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.header` | string | `x-forwarded-client-cert` when `http.client-certificate` is set and `http.client-certificate.dialect` is `xfcc` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.chain-header` | string | `client-cert-chain` when `http.client-certificate` is set and `http.client-certificate.dialect` is `rfc9440` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
 | `http.headers-timeout` | string | `10s` |  |  |  | How long a client may take to send a request's headers, from 1s to 1m, such as 10s; past it the request is answered 408 and its connection closed. |
 | `http.request-timeout` | string | `30s` |  |  |  | How long a client may take to send a whole request, its body included, from 1s to 5m and no less than headers-timeout, such as 30s; past it the request is answered 408 and its connection closed. |
 | `http.max-connections` | integer (1–1000000) | `10000` |  |  |  | The most connections held open at once, from 1 to 1000000; one past it is closed as it arrives. |
@@ -308,8 +310,8 @@ From `@mod/keys`.
 |---|---|---|---|---|---|---|
 | `keys.signing.kid` | string |  | yes | `KEYS_SIGNING_KID` | `signing-1` | The key id tokens signed with this key carry, unique in the ring. |
 | `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `RS256` | The algorithm the provider signs with. |
-| `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
-| `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
+| `keys.signing.private-key` | string |  | when `keys.signing.alg` is `EdDSA`, `ES256` or `RS256` | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
+| `keys.signing.secret` | string |  | when `keys.signing.alg` is `HS256` |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
 | `keys.signing.secret-encoding` | hex \| base64 \| utf8 |  |  |  |  | How `secret` is read: `hex`, `base64` (strict) or `utf8`, the text's own bytes, as 0.17 and policy-verifier read it; a value not of the reading named is refused. Unset, hex or else base64. |
 | `keys.next.kid` | string |  | when `keys.next` is set |  |  | The key id of the key that signs next, unique in the ring. |
 | `keys.next.alg` | EdDSA \| ES256 \| RS256 |  | when `keys.next` is set |  |  | The algorithm the next key will sign with. |
@@ -345,8 +347,8 @@ From `@mod/login-password`.
 | `login-password.attempts` | integer (1–100) | `20` |  |  |  | Login attempts allowed per source in each window, within bounds that keep guessing slow. |
 | `login-password.window` | string | `15m` |  |  |  | The window `attempts` is counted over, from 1m to 1d. |
 | `login-password.account-attempts` | integer (1–100) | `10` |  |  |  | Failed attempts allowed at one identifier, from any source, before each next one waits. |
-| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d. |
-| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out. |
+| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d, and no shorter than `account-max-wait`. |
+| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h and no longer than `account-window`: the wait doubles to it, never locking out. |
 
 ## mail
 
@@ -462,21 +464,21 @@ From `@mod/mtls`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mtls.mode` | self-signed \| pki |  | yes | `MTLS_MODE` | `self-signed` | How a client certificate binds: `self-signed` binds any certificate that parses; `pki` checks a path to an anchor. |
-| `mtls.anchors` | list of string |  |  |  |  | The trust anchors, as PEM text holding one certificate each. |
-| `mtls.max-intermediates` | integer (0–14) | `4` |  |  |  | At most this many certificates between the leaf and an anchor. |
-| `mtls.min-rsa-bits` | integer (2048–16384) | `2048` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
-| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | when `mtls.revocation` is set |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
-| `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
-| `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
-| `mtls.revocation.nonce` | boolean | `true` when `mtls.revocation` is set |  |  |  | Whether an OCSP request carries a nonce. |
-| `mtls.revocation.skew` | string | `5m` when `mtls.revocation` is set |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
-| `mtls.revocation.ocsp-fresh` | string | `10m` when `mtls.revocation` is set |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
-| `mtls.revocation.crl-ttl` | string | `1h` when `mtls.revocation` is set |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
-| `mtls.revocation.failure-lifetime` | string | `30s` when `mtls.revocation` is set |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
-| `mtls.revocation.crl-entries` | integer (1–65536) | `256` when `mtls.revocation` is set |  |  |  | How many CRLs are kept. |
-| `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` when `mtls.revocation` is set |  |  |  | How many OCSP answers are kept. |
-| `mtls.revocation.timeout` | string | `3s` when `mtls.revocation` is set |  |  |  | How long one fetch may take, from 1ms to 1m. |
-| `mtls.revocation.max-fetches` | integer (1–64) | `4` when `mtls.revocation` is set |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
+| `mtls.anchors` | list of string |  | when `mtls.mode` is `pki` |  |  | The trust anchors, as PEM text holding one certificate each. |
+| `mtls.max-intermediates` | integer (0–14) | `4` when `mtls.mode` is `pki` |  |  |  | At most this many certificates between the leaf and an anchor. |
+| `mtls.min-rsa-bits` | integer (2048–16384) | `2048` when `mtls.mode` is `pki` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
+| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | when `mtls.mode` is `pki` |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
+| `mtls.revocation.on-unavailable` | reject \| allow |  | when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
+| `mtls.revocation.hosts` | list of string |  | when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
+| `mtls.revocation.nonce` | boolean | `true` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | Whether an OCSP request carries a nonce. |
+| `mtls.revocation.skew` | string | `5m` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
+| `mtls.revocation.ocsp-fresh` | string | `10m` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
+| `mtls.revocation.crl-ttl` | string | `1h` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
+| `mtls.revocation.failure-lifetime` | string | `30s` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
+| `mtls.revocation.crl-entries` | integer (1–65536) | `256` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many CRLs are kept. |
+| `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many OCSP answers are kept. |
+| `mtls.revocation.timeout` | string | `3s` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long one fetch may take, from 1ms to 1m. |
+| `mtls.revocation.max-fetches` | integer (1–64) | `4` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
 
 ## oidc
 
@@ -556,7 +558,8 @@ From `@mod/redis`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to. |
+| `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to, with no query: each option is its own setting. |
+| `redis.address-family` | ipv4 \| ipv6 |  |  |  |  | The address family the host's name resolves to: ipv4 or ipv6; either when unset. |
 | `redis.prefix` | string | `store` |  |  |  | What every key the store writes begins with. |
 | `redis.connect-timeout` | string | `2s` |  |  |  | How long connecting to Redis may take, at least 100ms. |
 | `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |
@@ -600,6 +603,7 @@ From `@mod/rp-logout`.
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
 | `rp-logout.confirm-within` | string | `5m` |  |  |  | How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page. |
+| `rp-logout.error-page` | string |  |  |  |  | Where a browser's refused logout request is sent, with `error` and `error_description` in its query: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, every refusal is answered as JSON. |
 | `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
 | `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 

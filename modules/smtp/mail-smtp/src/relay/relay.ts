@@ -1,5 +1,6 @@
 import { connect as netConnect, type Socket } from "node:net";
 import { isLoopbackAddress } from "@mod/address-reach";
+import type { TlsOptions } from "@mod/tls-options";
 import addressparser from "nodemailer/lib/addressparser";
 import MailComposer from "nodemailer/lib/mail-composer";
 import SMTPConnection from "nodemailer/lib/smtp-connection";
@@ -22,6 +23,8 @@ export interface RelaySettings {
 	readonly account?: { readonly user: string; readonly pass: string } | undefined;
 	/** For the whole send; connecting and the greeting get a quarter each, a silence half. */
 	readonly deadlineMs: number;
+	/** The floor every TLS connection holds to (`tls-options`): its own keys, copied last. */
+	readonly floor: TlsOptions;
 }
 
 /** What one send carries: one address, already checked and in mail's canonical form, and the rendered text. */
@@ -157,14 +160,20 @@ function quit(connection: SMTPConnection, ms: number): Promise<void> {
 }
 
 /**
- * One connection per send, never reused. The certificate is always checked against `host`
- * (TLS 1.2 or later); `starttls` sends nothing more when STARTTLS is missing or fails.
+ * One connection per send, never reused. The certificate is always checked against `host`, at the
+ * floor's versions and suites; `starttls` sends nothing more when STARTTLS is missing or fails.
  */
 export function relayOver(
 	settings: RelaySettings,
 	open: Open = (host, port) => netConnect({ host, port }),
 ): (letter: Letter) => Promise<"sent" | "limited"> {
 	const { host, port, security, deadlineMs } = settings;
+	// The floor read once, its own keys alone and last, so nothing loosens it.
+	const tls = Object.freeze({
+		rejectUnauthorized: true,
+		minVersion: settings.floor.minVersion,
+		ciphers: settings.floor.ciphers,
+	});
 	const stepMs = Math.max(1, Math.floor(deadlineMs / 4));
 	const converse = async (held: Held, to: string, message: Buffer) => {
 		const socket = await openSocket(settings, open, stepMs, held);
@@ -175,7 +184,8 @@ export function relayOver(
 			secure: security === "tls",
 			requireTLS: security === "starttls",
 			ignoreTLS: security === "none",
-			tls: { minVersion: "TLSv1.2", rejectUnauthorized: true },
+			// A copy per connection: the library may write into what it is given.
+			tls: { ...tls },
 			connectionTimeout: stepMs,
 			greetingTimeout: stepMs,
 			socketTimeout: stepMs * 2,

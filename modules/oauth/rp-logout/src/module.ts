@@ -6,6 +6,7 @@ import { contract, defineModule } from "@mod/kernel";
 import { outboundRefusals } from "@mod/outbound-policy";
 import { requestsPerSource } from "@mod/rate-limit";
 import { participants } from "@mod/session-participants";
+import { loopbackPagesRefused } from "@mod/url-setting";
 import { confirmFrom, confirmPath, confirmTakes } from "./confirm/confirm.ts";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom, endingTakes } from "./ending/ending.ts";
@@ -37,6 +38,7 @@ export default defineModule(
 		name,
 		section,
 		replicaSafe: true,
+		refusedInProduction: (s) => loopbackPagesRefused({ "error-page": s["error-page"] }),
 		takes: [
 			upstreamEnds,
 			outboundRefusals,

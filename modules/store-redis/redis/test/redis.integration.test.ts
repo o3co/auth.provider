@@ -11,6 +11,7 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces, store } from "@mod/store";
 import { contractSpaces, overwrite, storeContract } from "@mod/store/testing";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 
@@ -190,7 +191,7 @@ async function open(
 	replication: string | null = "replicas",
 ) {
 	const app = await assemble({
-		modules: [redisModule, ...extra],
+		modules: [redisModule, tlsOptionsForTests, ...extra],
 		config: {
 			...kernelConfig({ deployment: "multi" }),
 			redis: { url: through, prefix, ...(replication ? { replication } : {}) },
@@ -588,7 +589,7 @@ describe("redis", () => {
 		try {
 			await waitFor(() => pings(old));
 			const app = assemble({
-				modules: [redisModule],
+				modules: [redisModule, tlsOptionsForTests],
 				config: { ...kernelConfig(), redis: { url: `redis://127.0.0.1:${port}` } },
 			});
 			await expect(app).rejects.toBeInstanceOf(BootRefused);
@@ -634,7 +635,7 @@ describe("redis", () => {
 
 	it("refuses to start when the server cannot be reached", async () => {
 		const app = assemble({
-			modules: [redisModule],
+			modules: [redisModule, tlsOptionsForTests],
 			config: {
 				...kernelConfig(),
 				redis: { url: `redis://127.0.0.1:${await freePort()}` },
@@ -661,7 +662,7 @@ describe("one server alone, as configured with replication none", () => {
 			lone.push(id);
 			await waitFor(() => pings(id));
 			const app = await assemble({
-				modules: [redisModule, replicatedOnly],
+				modules: [redisModule, tlsOptionsForTests, replicatedOnly],
 				config: {
 					...kernelConfig(),
 					redis: { url: `redis://127.0.0.1:${port}`, prefix: "alone", replication: "none" },
@@ -689,7 +690,7 @@ describe("a Redis 7.0 server", () => {
 		docker("exec", old, "redis-cli", "acl", "setuser", "u", "on", ">pw", "~*", "&*", "+@all");
 		docker("exec", old, "redis-cli", "acl", "setuser", "u", "-hset", "(+hset ~other:*)");
 		const refused = await assemble({
-			modules: [redisModule],
+			modules: [redisModule, tlsOptionsForTests],
 			config: { ...kernelConfig(), redis: { url: oldUrl, prefix: "old" } },
 		}).catch((error) => error);
 		expect(refused).toBeInstanceOf(BootRefused);
@@ -716,7 +717,7 @@ describe("settings the server will not show", () => {
 	]);
 	const boot = (redis: object, through = blockedUrl, recorded = recordingLog()) =>
 		assemble({
-			modules: [redisModule, kept],
+			modules: [redisModule, tlsOptionsForTests, kept],
 			config: { ...kernelConfig(), redis: { url: through, prefix: `d${++opened}`, ...redis } },
 			runtime: quietRuntime({ log: recorded.log }),
 		});

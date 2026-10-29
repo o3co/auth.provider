@@ -94,6 +94,8 @@ onLegacy(oauthArea, {
 		"assertion-audience-beside-issuer",
 		// For an issuer with a path, the OpenID document is also served at the root.
 		"discovery-at-root-for-path-issuer",
+		// Without an authorization endpoint, response_types_supported is still published, as [].
+		"response-types-without-authorization-endpoint",
 		// jwt-bearer refuses an unverified email with the description it gives an unknown subject.
 		"email-refusal-description",
 		"resource-repeated",

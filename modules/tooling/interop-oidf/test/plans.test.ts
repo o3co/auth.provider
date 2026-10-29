@@ -36,9 +36,19 @@ describe("the plans the package runs, one evidence run each", () => {
 				entry: `@mod/interop-oidf#${name}`,
 				kind: "oidf-plan",
 				matrix: name,
+				files: `runs/${name}.test.ts`,
 				gate: true,
 			})),
 		);
+	});
+
+	it("names in each evidence run the one file its plan's vitest runs, so another plan's items are not looked for in it", () => {
+		for (const { run, args } of planCommands([])) {
+			const evidence = evidenceRuns.find((r) => r.entry === `@mod/interop-oidf#${run}`);
+			expect(evidence?.files).toBe(args.at(-1));
+			const others = evidenceRuns.filter((r) => r !== evidence);
+			expect(others.filter((r) => args.at(-1)?.endsWith(r.files))).toEqual([]);
+		}
 	});
 
 	it("keeps the plans' records where they are named, and in a directory it makes and names otherwise", async () => {

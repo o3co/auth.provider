@@ -3,7 +3,7 @@
 ## Responsibilities
 - Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front; and its relying party plan, the provider's federation login as the suite's OP's client, on the `sso-federated` pattern's app.
 - Reports each suite test as a vitest test, its result excused only by an expected entry the checklist lets it take.
-- Its internal modules for the suite: `suite` starts and stops it, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time.
+- Its internal modules for the suite: `suite` starts and stops it, `api` reaches its API trusting its certificate alone, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time.
 - Its internal modules for the provider: `scene` is the app's scene, `login` is the login page, `pkce` gives PKCE to requests that carry none; `rp` is the app as a relying party, the harness's browser and its checks of a sign-in.
 - Its internal modules for the results: `expected` judges the expected entries, `results` reads each test's outcome, `review` reads the pages the suite left for a person's review, `report` reports a plan's run as tests.
 - Its internal modules for a run: `lifecycle` holds what every plan run has (its directories, its deadline, its stops), `harness` runs an OP plan, `drive` drives a relying party plan's tests over the suite's API, `client-plan` runs a relying party plan.
@@ -15,7 +15,7 @@
 ## Offers
 - `pnpm --filter @mod/interop-oidf run plan [<plan>...]`: runs the plans named, every plan where none is, each in a vitest of its own named by its evidence run (`SPEC_EVIDENCE_RUN`) (Docker, `git`, `openssl` and Python 3.9 or later on the path).
 - `plans/logout.json`: the logout plans' configuration, with the browser's steps through the provider's logout and the suite's overrides for the logouts the provider answers itself.
-- `run evidence-runs`: the runs the package's evidence comes from, as JSON: `{ entry: "@mod/interop-oidf#<plan>", kind: "oidf-plan", matrix: "<plan>", gate: true }`, one per plan: a gate run, so a release stops on each of its tests that failed, whatever items it names.
+- `run evidence-runs`: the runs the package's evidence comes from, as JSON: `{ entry: "@mod/interop-oidf#<plan>", kind: "oidf-plan", matrix: "<plan>", files: "runs/<plan>.test.ts", gate: true }`, one per plan, on the file its vitest runs, so an item that file names is looked for in that plan's run alone: a gate run, so a release stops on each of its tests that failed, whatever items it names.
 - `suite-pin.json`: the suite's release tag, the commit the tag must name, and the Python packages its scripts run on, each at one version.
 - `clientPlans` in `src/plans.ts`: the relying party plan, its variant, and each of its tests declared run or not run; `runs/rp.test.ts`, the app's side of each test run beside the suite's word, under the checklist items they show together.
 - `plans/op.json`: the plans' configuration, which the harness fills at run time (origin, alias, secrets, user).

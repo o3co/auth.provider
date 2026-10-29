@@ -47,7 +47,7 @@ export function consentDecisionWith({ consents: kept }: ConsentDecisionParts): C
 			const page = await kept.ask(session, {
 				clientId: client.id,
 				range: scope,
-				onAccept: again(["reauth", "max_age", "prompt:login", "prompt:consent"]),
+				onAccept: again(["reauth", "prompt:login", "prompt:consent"]),
 				onDeny: again(["reauth"], [["consent_denied", "1"]]),
 			});
 			return { kind: "send", to: page };

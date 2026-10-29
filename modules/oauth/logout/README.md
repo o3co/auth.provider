@@ -16,6 +16,7 @@
 - The route counts no source, with the reason declared: it closes only the requester's own session, so there is nothing to guess or spend.
 - `session` closes the session the request's cookie points to, whatever its state, and the cookie is cleared, on a pending close too. Without a cookie it does nothing and answers `200`.
 - A pending close, or `session` unavailable, answers `503` `temporarily_unavailable`. No answer is cached.
+- A request sent again after a pending close cleared the cookie names no session, so it is answered `200`, as with no cookie: the sweep finishes the close, and the session's tokens end then. The cookie stays cleared, so the browser is not held at a close it cannot finish.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `session`, `csrf`, `audit`

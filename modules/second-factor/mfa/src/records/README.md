@@ -7,12 +7,12 @@ Internal module of `mfa`: how the factor lists and the claims on unique values a
 - Seals again, for `seal`'s resealers, the secrets a `previous` key sealed.
 
 ## Not here
-- What the factors decide: `mfa`'s `factors`. Sealing itself: `seal`.
+- What the factors decide: `mfa`'s `factorDecisions` (`Decisions`), provided as `factorReading`, `factorBinding` and `factorManaging`. Sealing itself: `seal`.
 
 ## Offers
 - `factorRecords` (store): a subject's list, and a decision written over the list it read, or over the list and a claim on a unique value as one; whether a unique value is taken.
 - `resealerOver` (store, seal): the resealer `mfa` contributes.
-- `sealContext`, `listKeyOf`, `storedList`, `factorsOf`, `subjectOf`: the keys, contexts and record shapes the two share.
+- `sealContext`, `listKeyOf`, `storedList`, `factorsOf`, `fencesOf`, `subjectOf`: the keys, contexts and record shapes the two share. `claimKeyOf` (kind, value): the key of a claim on a unique value.
 
 ## Invariants
 - A factor list's record holds its subject, so its secrets can be sealed again; the store's key is the subject's hash.
