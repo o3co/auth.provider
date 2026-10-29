@@ -5,7 +5,8 @@ import { tlsOptions } from "@mod/tls-options";
 import { type Offer, peerOptions, testTlsOptions } from "@mod/tls-options/testing";
 import { Redis } from "ioredis";
 import { afterAll, expect, it } from "vitest";
-import redisModule, { clientOptions } from "../src/module.ts";
+import { clientOptions } from "../src/client-options.ts";
+import redisModule from "../src/module.ts";
 
 const offers: readonly Offer[] = ["tls1.1", "static-rsa", "cbc", "ecdhe-aead", "tls1.3"];
 const settings = (url: string) => ({
@@ -55,6 +56,13 @@ async function handshake(port: number): Promise<string> {
 	client.disconnect();
 	return outcome;
 }
+
+it("passes the client the address family only when set", () => {
+	expect(clientOptions(settings("redis://h:1"), testTlsOptions)).not.toHaveProperty("family");
+	const of = (family: "ipv4" | "ipv6") =>
+		clientOptions({ ...settings("redis://h:1"), "address-family": family }, testTlsOptions).family;
+	expect([of("ipv4"), of("ipv6")]).toEqual([4, 6]);
+});
 
 it("passes the client no TLS over redis, and over rediss the floor's own keys alone", () => {
 	expect(clientOptions(settings("redis://127.0.0.1:6379"), testTlsOptions)).not.toHaveProperty(

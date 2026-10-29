@@ -13,7 +13,7 @@
 - Composition definition only: the `store` contract's implementation.
 - The probe `redis` at `kernel`'s `probes`, which PINGs both connections and checks again what boot checked of the server, logging `redis.settings_unmet` with what no longer holds when that changes.
 - Operator section:
-  - `url` (`redis` or `rediss`), `prefix` (lower-case letters, digits and `-`; default `store`).
+  - `url` (`redis` or `rediss`; no query: boot names the setting for each option), `address-family` (`ipv4` or `ipv6`; either when unset), `prefix` (lower-case letters, digits and `-`; default `store`).
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
   - `replication`: `replicas` or `none`, required when a space needs replicated or confirmed reads.
   - `durability`: `none`, or unset.

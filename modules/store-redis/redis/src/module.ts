@@ -1,13 +1,24 @@
 import { contract, defineModule, probes, setting } from "@mod/kernel";
 import { type Space, spaces, store } from "@mod/store";
-import { isFloor, type TlsOptions, tlsOptions } from "@mod/tls-options";
-import { Redis, type RedisOptions } from "ioredis";
+import { isFloor, tlsOptions } from "@mod/tls-options";
+import { Redis } from "ioredis";
 import { z } from "zod";
+import { clientOptions, queryRefusal } from "./client-options.ts";
 import { redisProbe } from "./probe.ts";
 import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
 
 const section = z.strictObject({
-	url: z.url({ protocol: /^rediss?$/ }).describe("The Redis server to connect to."),
+	url: z
+		.url({ protocol: /^rediss?$/ })
+		.superRefine((url, ctx) => {
+			const refused = queryRefusal(url);
+			if (refused !== undefined) ctx.addIssue({ code: "custom", message: refused });
+		})
+		.describe("The Redis server to connect to, with no query: each option is its own setting."),
+	"address-family": z
+		.enum(["ipv4", "ipv6"])
+		.optional()
+		.describe("The address family the host's name resolves to: ipv4 or ipv6; either when unset."),
 	prefix: z
 		.string()
 		.regex(/^[a-z0-9-]+$/)
@@ -253,28 +264,6 @@ function codeOf(error: unknown): string {
 	return typeof name === "string" && /^[A-Z][A-Za-z]{1,31}Error$/.test(name) && name !== "Error"
 		? name
 		: "unknown";
-}
-
-/**
- * The client's options. Over `rediss`, TLS holds to `floor`, its own keys alone and last; over
- * `redis` there is no TLS, which the client would take up for any `tls` given.
- */
-export function clientOptions(s: z.output<typeof section>, floor: TlsOptions): RedisOptions {
-	const tls =
-		new URL(s.url).protocol === "rediss:"
-			? { tls: { minVersion: floor.minVersion, ciphers: floor.ciphers } }
-			: {};
-	return {
-		lazyConnect: true,
-		connectTimeout: s["connect-timeout"],
-		maxRetriesPerRequest: 0,
-		enableOfflineQueue: false,
-		// A command whose reply was lost must not be sent again on a new connection: a resent
-		// WAIT would confirm nothing, and a resent script would run twice.
-		autoResendUnfulfilledCommands: false,
-		commandTimeout: s["command-timeout"],
-		...tls,
-	};
 }
 
 /** The two connections, open and checked, for the store and its probe alike. */

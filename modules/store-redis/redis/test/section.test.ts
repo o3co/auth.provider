@@ -69,6 +69,32 @@ it("refuses boot on a URL that is not redis or rediss, a prefix of other charact
 	}
 });
 
+it("refuses boot at redis.url on a URL with a query, naming where each option is written instead and never a value", async () => {
+	const reasons = async (url: string) => {
+		const { refused } = await refusalOf({ url });
+		expect(refused, url).toBeInstanceOf(BootRefused);
+		const { refusals } = refused as BootRefused;
+		expect(
+			refusals.map((r) => r.where),
+			url,
+		).toEqual(["redis.url"]);
+		return refusals[0]?.reason;
+	};
+	const lead = "redis.url carries no query: write each option as its own setting: ";
+	const tls =
+		"tls as rediss:// with the tls-options section, the server's authority in the platform's store";
+	expect(await reasons("rediss://127.0.0.1:6379?tls=x")).toBe(`${lead}${tls}`);
+	expect(await reasons("rediss://127.0.0.1:6379?tls=RedisCloudFixed")).toBe(`${lead}${tls}`);
+	expect(await reasons("redis://127.0.0.1:6379?tls=1")).toBe(`${lead}${tls}`);
+	expect(
+		await reasons("redis://127.0.0.1:6379?autoResendUnfulfilledCommands=true&family=6&db=2"),
+	).toBe(
+		`${lead}autoResendUnfulfilledCommands is not taken; family as redis.address-family (ipv4 or ipv6); db as the URL's path (/2)`,
+	);
+	const secret = await reasons("redis://127.0.0.1:6379?password=s3cr3t-pass&x%3As3cr3t=1");
+	expect(secret).toBe(`${lead}password in the URL (user:password@host); an option is not taken`);
+});
+
 it("refuses boot without telling the URL's password, in the refusal or in a warning", async () => {
 	const url = `redis://user:s3cr3t-pass@127.0.0.1:${refusedPort}`;
 	const { refused, warned } = await refusalOf({ url, "connect-timeout": "100ms" });
