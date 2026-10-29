@@ -45,6 +45,7 @@ function settingsOf(idp: IdpScene): Record<string, unknown> {
 				...client,
 				...(idp.readUserinfo ? { "read-userinfo": true } : {}),
 				...(idp.endpointHosts ? { "endpoint-hosts": idp.endpointHosts } : {}),
+				...(idp.acceptMissingIss ? { "accept-missing-iss": true } : {}),
 				...(idp.scopes ? { scopes: idp.scopes } : {}),
 			};
 	}

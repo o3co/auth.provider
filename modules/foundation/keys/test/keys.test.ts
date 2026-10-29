@@ -39,6 +39,17 @@ async function boot(keysSection: unknown, http_: Record<string, unknown> = {}) {
 	return { app, base: `http://127.0.0.1:${app.get(listening).port()}` };
 }
 
+/** The refusals of a boot on the section, where and why. */
+async function refusalsAt(keysSection: unknown) {
+	try {
+		await boot(keysSection);
+	} catch (error) {
+		if (error instanceof BootRefused) return error.refusals;
+		throw error;
+	}
+	throw new Error("expected a refusal");
+}
+
 async function refusedAt(keysSection: unknown): Promise<string[]> {
 	try {
 		await boot(keysSection);
@@ -275,6 +286,19 @@ describe("keys", () => {
 		for (const [name, [section, where]] of Object.entries(cases)) {
 			expect(await refusedAt(section), name).toEqual([where]);
 		}
+	});
+
+	it("says of a key not of its alg's kind which alg it is to match, and to write a key of that kind", async () => {
+		const signing = { kid: "k", alg: "EdDSA", "private-key": current.priv };
+		const told = (alg: string) =>
+			`not readable as a key of the kind ${alg} names: write a PEM key of that kind (the example's REPLACE- placeholder is none)`;
+		expect(await refusalsAt({ signing: { ...signing, alg: "ES256" } })).toEqual([
+			{ where: "keys.signing.private-key", reason: told("keys.signing.alg") },
+		]);
+		const previous = { kid: "p", alg: "ES256", "expires-at": "2027-01-01T00:00:00Z" };
+		expect(
+			await refusalsAt({ signing, previous: [{ ...previous, "public-key": current.pub }] }),
+		).toEqual([{ where: "keys.previous.0.public-key", reason: told("keys.previous.0.alg") }]);
 	});
 
 	it("refuses in its section a signing key not written as PEM, as its fragment's placeholder is, and takes the test builder's", () => {

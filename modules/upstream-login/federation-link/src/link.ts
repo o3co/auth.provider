@@ -70,9 +70,9 @@ interface Recorded {
 	readonly userAgent?: string | undefined;
 }
 
-/** Where a link lands, with its cookies. */
-const sent = (location: string, cookies: readonly string[]): HttpResponse => ({
-	status: 302,
+/** Where a link lands, with its cookies: `303`, as RFC 9700 §4.12 asks after a callback that may carry the user's credentials. */
+const landed = (location: string, cookies: readonly string[]): HttpResponse => ({
+	status: 303,
 	headers: { ...noStore, location },
 	cookies,
 });
@@ -192,7 +192,7 @@ export function linkWith(p: LinkParts): UpstreamContinuation {
 			}
 			const closedAfter = await closedSince(joined);
 			if (closedAfter) return closedAfter;
-			return sent(lands, cleared);
+			return landed(lands, cleared);
 		},
 	};
 }

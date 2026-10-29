@@ -531,10 +531,18 @@ describe("redis", () => {
 		}
 	});
 
-	it("refuses durable spaces when the server does not persist", async () => {
+	it("refuses durable spaces when the server does not persist, saying first what to set", async () => {
 		cli(container, "config", "set", "appendonly", "no");
 		try {
-			await expect(open()).rejects.toBeInstanceOf(BootRefused);
+			const refused = await open().catch((error: BootRefused) => error.refusals);
+			expect(refused).toEqual([
+				{
+					where: "redis",
+					reason: expect.stringMatching(
+						/^set appendonly yes and appendfsync always on the server \(docs\/runbook\.md, Redis\), which the durable guarantee of these spaces needs: /,
+					),
+				},
+			]);
 		} finally {
 			cli(container, "config", "set", "appendonly", "yes");
 		}

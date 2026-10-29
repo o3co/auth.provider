@@ -19,6 +19,7 @@ import {
 	consentDecisionTakes,
 } from "../consent-decision/consent-decision.ts";
 import { type Again, type Decision, refusal } from "../decision.ts";
+import { type HintCheck, hintCheckOver, hintCheckTakes } from "../hint/hint.ts";
 import type { Settings } from "../section.ts";
 import { type StepUp, stepUpOver, stepUpTakes } from "../step-up/step-up.ts";
 
@@ -68,6 +69,8 @@ export interface FlowParts extends Place {
 	readonly consent: ConsentDecision;
 	/** The audience a request asks for (`checks`, by `token-endpoint`'s composed rule). */
 	readonly target: TargetCheck;
+	/** The End-User an `id_token_hint` names (`hint`, by the reader contributed). */
+	readonly hint: HintCheck;
 }
 
 /** Decides for a trusted request: a refusal, a page to go to, or the code and its subject. */
@@ -76,7 +79,7 @@ export type Flow = (trusted: Trusted) => Promise<Decision>;
 export function flowWith(parts: FlowParts): Flow {
 	const { issuer, self, sessions: entered, codes: issued, clock, loginPage } = parts;
 	const { reauths, stepUp, consent, openidRequired, tokens: issuance, target: targetOf } = parts;
-	const { selections, claimsParameter } = parts;
+	const { selections, claimsParameter, hint: hintOf } = parts;
 	const urlWith = (params: Iterable<readonly [string, string]>) =>
 		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
 
@@ -98,9 +101,13 @@ export function flowWith(parts: FlowParts): Flow {
 				? noClaims
 				: claimsAsked(claimsText, naming ? selections.scopeOf : undefined, oidc);
 		if (claims === "malformed") return refusal("invalid_request", "claims is malformed");
+		// An id_token_hint, OpenID Connect's alone, asks a sub as a claims request does.
+		const hinted = oidc ? await hintOf(one("id_token_hint")) : { kind: "hint" as const };
+		if (hinted.kind !== "hint") return hinted;
+		const subs = hinted.subject === undefined ? claims.subs : [...claims.subs, [hinted.subject]];
 		const asked = stepUp.asked(one, params, claims);
 		// A sub asked is checked first, once the session is known: an acr refusal waits for it.
-		if (asked.kind !== "asked" && claims.subs.length === 0) return asked;
+		if (asked.kind !== "asked" && subs.length === 0) return asked;
 
 		const without = (...names: string[]) => {
 			const kept = new Map(params);
@@ -142,7 +149,7 @@ export function flowWith(parts: FlowParts): Flow {
 			return toLogin();
 		}
 		// A sub asked by value names the only user the code may be for (OpenID Connect Core §3.1.2.2).
-		if (!claims.subs.every((values) => values.includes(session.context.subject))) {
+		if (!subs.every((values) => values.includes(session.context.subject))) {
 			return refusal("login_required");
 		}
 		if (asked.kind !== "asked") return asked;
@@ -215,6 +222,7 @@ export const flowTakes = [
 	...stepUpTakes,
 	...consentDecisionTakes,
 	...targetCheckTakes,
+	...hintCheckTakes,
 ];
 
 /** The steps over the contracts the assembly gives, each step built by its own module. */
@@ -234,5 +242,6 @@ export async function flowOver(c: BuildContext<Settings>, place: Place): Promise
 		stepUp: await stepUpOver(c, reauths),
 		consent: await consentDecisionOver(c),
 		target: await targetCheckOver(c),
+		hint: await hintCheckOver(c),
 	});
 }

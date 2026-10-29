@@ -1,6 +1,11 @@
 import { contract } from "@mod/kernel";
 
-export { authenticateClient, oauthError, refusedAuthenticationAnswer } from "./answers/answers.ts";
+export {
+	authenticateClient,
+	errorDescription,
+	oauthError,
+	refusedAuthenticationAnswer,
+} from "./answers/answers.ts";
 
 /** Where the token endpoint answers, absolute on the origin `issuer` names its endpoints on. */
 export interface TokenEndpointLocation {

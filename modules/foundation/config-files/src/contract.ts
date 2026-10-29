@@ -101,7 +101,13 @@ async function layersOf(files: readonly string[], env: Record<string, string>): 
 	const layers: Config[] = [];
 	for (const file of files) {
 		const text = await readFile(file, "utf8").catch(() => {
-			throw new BootRefused([{ where: file, reason: "cannot read the configuration file" }]);
+			throw new BootRefused([
+				{
+					where: file,
+					reason:
+						"cannot read the configuration file: create it, or leave it out of the files the app reads",
+				},
+			]);
 		});
 		try {
 			layers.push(parse(text, { env, baseDir: dirname(file) }));

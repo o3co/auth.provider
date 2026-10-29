@@ -69,6 +69,7 @@ export const section = z
 		path: ["headers-timeout"],
 	})
 	.refine((s) => !s["public-origin"]?.startsWith("http:") || s["insecure-origin"], {
-		message: "an http public origin needs insecure-origin set explicitly",
+		message:
+			"an http public origin needs http.insecure-origin = true, and kernel.environment = development",
 		path: ["public-origin"],
 	});

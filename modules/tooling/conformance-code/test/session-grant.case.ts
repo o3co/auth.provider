@@ -6,6 +6,10 @@ import { type CodeScene, codeScene } from "../src/main.ts";
 import { backChannel, browserAt } from "../src/testing.ts";
 
 const issuer = "https://issuer.example";
+/** How a session grant with no session to use is refused, by the target. */
+const noSession = areaTarget().differs("session-grant-invalid-grant")
+	? [401, "unauthorized"]
+	: [400, "invalid_grant"];
 const api = "https://api.example";
 const pair = generateKeyPairSync("ed25519");
 // Each client names its audience and an empty default scope, so both targets issue alike.
@@ -168,14 +172,14 @@ describe("session grant", () => {
 		expect(await browser.logout()).toBe(200);
 		expect((await introspect(issued.body.access_token ?? "")).active).toBe(false);
 		const again = await sessionGrant({ ...asBff, cookie });
-		expect([again.status, again.body.error]).toEqual([401, "unauthorized"]);
+		expect([again.status, again.body.error]).toEqual(noSession);
 	});
 });
 
 describe("session grant: refusals", () => {
-	it("refuses a request without a session as unauthorized", async () => {
+	it("refuses a request without a session as invalid_grant [rfc6749-8.5-a]", async () => {
 		const res = await sessionGrant({ ...asBff, cookie: "" });
-		expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);
+		expect([res.status, res.body.error]).toEqual(noSession);
 	});
 
 	it("refuses a client not allowed the grant [rfc6749-5.2-a]", async () => {
@@ -187,7 +191,7 @@ describe("session grant: refusals", () => {
 		"refuses a request from another origin as unauthorized [guarantee-9-a]",
 		async () => {
 			const res = await sessionGrant({ ...asBff, origin: "https://elsewhere.example" });
-			expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);
+			expect([res.status, res.body.error]).toEqual(noSession);
 		},
 	);
 
@@ -195,7 +199,7 @@ describe("session grant: refusals", () => {
 		"refuses a request without same-origin evidence as unauthorized [guarantee-9-a]",
 		async () => {
 			const res = await sessionGrant({ ...asBff, origin: null });
-			expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);
+			expect([res.status, res.body.error]).toEqual(noSession);
 		},
 	);
 

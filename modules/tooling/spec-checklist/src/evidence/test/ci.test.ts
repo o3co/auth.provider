@@ -196,6 +196,111 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		);
 	});
 
+	it("run every suite plan where a pull request to develop touches the harness, and the relying party plan alone where it touches a provider module or the federation scenes", () => {
+		const due = job("interop-due");
+		const script = (id: string) => due.steps.find((s) => s.id === id)?.run ?? "";
+		const dir = mkdtempSync(join(tmpdir(), "ci-oidf-"));
+		try {
+			// git answers the files a test names, read from a file: an environment string is capped at
+			// 128 KiB on Linux, below what a large pull request names. pnpm answers every plan the checklist has.
+			const changedFile = join(dir, "changed");
+			writeFileSync(
+				join(dir, "git"),
+				'#!/bin/sh\ncase "$1" in diff) tr " " "\\n" < "$CHANGED_FILE" ;; *) echo head ;; esac\n',
+				{ mode: 0o755 },
+			);
+			writeFileSync(
+				join(dir, "pnpm"),
+				'#!/bin/sh\necho \'["basic","config","rp-initiated-logout","rp"]\'\n',
+				{ mode: 0o755 },
+			);
+			const outputs = (changed: string, more: Record<string, string> = {}) => {
+				const out = join(dir, "out");
+				writeFileSync(out, "");
+				writeFileSync(changedFile, changed);
+				const env = {
+					...process.env,
+					PATH: `${dir}:${process.env.PATH}`,
+					GITHUB_OUTPUT: out,
+					EVENT: "pull_request",
+					BASE: "develop",
+					CHANGED_FILE: changedFile,
+					...more,
+				};
+				const ran = spawnSync("bash", ["-c", script("due")], { env, encoding: "utf8" });
+				expect(ran.error).toBeUndefined();
+				expect(ran.status, ran.stderr).toBe(0);
+				const read = () =>
+					Object.fromEntries(
+						readFileSync(out, "utf8")
+							.trim()
+							.split("\n")
+							.map((line) => line.split(/=(.*)/s).slice(0, 2)),
+					);
+				const scope = read()["oidf-scope"] ?? "";
+				const planned = spawnSync("bash", ["-c", script("plan")], {
+					env: { ...env, SCOPE: scope },
+					encoding: "utf8",
+				});
+				expect(planned.error).toBeUndefined();
+				expect(planned.status, planned.stderr).toBe(0);
+				const all = read();
+				return { oidf: all.oidf, scope: all["oidf-scope"], plans: all["oidf-plans"] };
+			};
+			const every = '["basic","config","rp-initiated-logout","rp"]';
+			// A provider module, however far from upstream login (external-jwt is two steps from federation).
+			for (const file of [
+				"modules/upstream-login/idp-oidc/src/upstream.ts",
+				"modules/foundation/external-jwt/src/module.ts",
+				"modules/oauth/authorize/src/module.ts",
+				"modules/scaffold/create-app/src/patterns/sso-federated.ts",
+				"modules/tooling/conformance-federation/src/new.ts",
+			]) {
+				expect(outputs(file), file).toEqual({ oidf: "true", scope: "rp", plans: '["rp"]' });
+			}
+			for (const file of [
+				"modules/tooling/interop-oidf/src/rp/scene.ts",
+				"modules/tooling/conformance/src/drivers/app.ts",
+				"modules/tooling/spec-checklist/src/main.ts",
+			]) {
+				expect(outputs(file), file).toEqual({ oidf: "true", scope: "all", plans: every });
+			}
+			// Both sides: every plan, the relying party's among them.
+			expect(
+				outputs(
+					"modules/upstream-login/idp-oidc/README.md modules/tooling/interop-oidf/src/rp/scene.ts",
+				),
+			).toEqual({ oidf: "true", scope: "all", plans: every });
+			// A pull request touching more than a pipe holds: the provider module first, tooling after it.
+			const many = Array.from(
+				{ length: 3000 },
+				(_, i) => `modules/tooling/conformance-oauth/src/file-${i}.ts`,
+			);
+			expect(outputs(["modules/oauth/authorize/src/module.ts", ...many].join(" "))).toEqual({
+				oidf: "true",
+				scope: "rp",
+				plans: '["rp"]',
+			});
+			// Docs alone, or tooling the suite does not run: no suite plan.
+			for (const file of [
+				"docs/migration.md",
+				"README.md",
+				"modules/tooling/conformance-oauth/src/new.ts",
+			]) {
+				expect(outputs(file).oidf, file).toBe("false");
+			}
+			// A pull request to main, and the other events: every plan.
+			for (const more of [{ BASE: "main" }, { EVENT: "push" }, { EVENT: "schedule" }]) {
+				expect(
+					outputs("modules/upstream-login/idp-oidc/src/upstream.ts", more),
+					JSON.stringify(more),
+				).toEqual({ oidf: "true", scope: "all", plans: every });
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("count develop's merges from the commit the latest conformance run covers, a running one among them and no cancelled one, and take conformance as due where GitHub's API does not answer", () => {
 		const step = job("conformance-due").steps.find((s) => s.id === "count");
 		const lines = (step?.run ?? "").split("\n").map((l) => l.trim());

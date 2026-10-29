@@ -361,7 +361,7 @@ describe("consent: the page", () => {
 });
 
 describe("consent: the answer", () => {
-	it("records the grant on acceptance and sends the user on by 303; a resend gets the same answer, the other decision none [rfc9700-2.1-c]", async () => {
+	it("records the grant on acceptance and sends the user on by 303; a resend gets the same answer, the other decision none [rfc9700-2.1-c] [rfc9700-4.12-a]", async () => {
 		const { pendingFor, given } = await serve();
 		const alice = await pendingFor("alice");
 		const accepted = await alice.answer("accept");
@@ -609,6 +609,18 @@ describe("consent's records", () => {
 });
 
 describe("consent's sections", () => {
+	it("takes a consent page on the operator's own machine over plain http, as authorize's login page, which production refuses", () => {
+		const local = "http://127.0.0.1:3000/consent";
+		expect(section.safeParse({ page: local }).success).toBe(true);
+		expect(section.safeParse({ page: "http://acme.example/consent" }).success).toBe(false);
+		const refused = consentModule.refusedInProduction;
+		expect(refused?.(section.parse({ page: local }))).toEqual([
+			{ key: "page", reason: expect.stringContaining("set kernel.environment = development") },
+		]);
+		expect(refused?.(section.parse({ page: "https://as.example/consent" }))).toEqual([]);
+		expect(refused?.(section.parse({}))).toEqual([]);
+	});
+
 	it("takes first-party only from clients the operator registered", async () => {
 		const client = (registered: boolean, value: unknown) => ({
 			id: "c",

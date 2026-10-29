@@ -1,0 +1,3 @@
+clients-cimd {
+	allow = ["documents.example.invalid"]
+}

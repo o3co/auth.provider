@@ -15,19 +15,22 @@ describe("takesUnused, a test's view of the takes no factory took", () => {
 	const keys = contract<string>("keys");
 	const revoked = contract<string>("revoked");
 	const steps = extensionPoint<string>("steps", { multiplicity: "many" });
-	const provider = defineModule({ name: "provider", takes: [] }, (m) => [
+	const provider = defineModule({ name: "provider", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(keys).by(() => "k"),
 		m.provide(revoked).by(() => "r"),
 		m.contribute(steps).by(() => "s"),
 	]);
 
 	it("names each declared handle no factory took, by module, and none it took", async () => {
-		const stale = defineModule({ name: "stale", takes: [keys, revoked, steps] }, (m) => [
-			m.provide(contract<string>("used")).by(async (c) => {
-				await c.collect(steps);
-				return c.get(keys);
-			}),
-		]);
+		const stale = defineModule(
+			{ name: "stale", replicaSafe: false, takes: [keys, revoked, steps] },
+			(m) => [
+				m.provide(contract<string>("used")).by(async (c) => {
+					await c.collect(steps);
+					return c.get(keys);
+				}),
+			],
+		);
 		expect(await takesUnused({ modules: [provider, stale], config: single })).toEqual({
 			stale: ["revoked"],
 		});
@@ -37,6 +40,7 @@ describe("takesUnused, a test's view of the takes no factory took", () => {
 		const tokens = defineModule(
 			{
 				name: "tokens",
+				replicaSafe: true,
 				section: z.object({ revocation: z.enum(["denylist", "family"]) }),
 				takes: (s) => (s.revocation === "denylist" ? [keys, revoked] : [keys]),
 			},
@@ -54,7 +58,7 @@ describe("takesUnused, a test's view of the takes no factory took", () => {
 
 	it("stops the assembly it built before it answers, so what a factory opened is closed", async () => {
 		const held = { opened: 0, closed: 0 };
-		const pool = defineModule({ name: "pool", takes: [] }, (m) => [
+		const pool = defineModule({ name: "pool", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<string>("pool")).by((c) => {
 				held.opened += 1;
 				c.onStop(() => {
@@ -68,7 +72,7 @@ describe("takesUnused, a test's view of the takes no factory took", () => {
 	});
 
 	it("counts what the assembly took alone, never a take a stop hook makes after", async () => {
-		const stopping = defineModule({ name: "stopping", takes: [keys] }, (m) => [
+		const stopping = defineModule({ name: "stopping", replicaSafe: true, takes: [keys] }, (m) => [
 			m.provide(contract<string>("closing")).by((c) => {
 				c.onStop(async () => {
 					await c.get(keys);
@@ -82,13 +86,13 @@ describe("takesUnused, a test's view of the takes no factory took", () => {
 	});
 
 	it("leaves out a module that took all it names, and refuses as the boot does", async () => {
-		const older = defineModule({ name: "older", takes: [] }, (m) => [
+		const older = defineModule({ name: "older", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(contract<string>("o")).by(() => "o"),
 		]);
 		expect(await takesUnused({ modules: [provider, older], config: single })).toEqual({});
 		await expect(
 			takesUnused({
-				modules: [defineModule({ name: "needy", takes: [contract("gone")] })],
+				modules: [defineModule({ name: "needy", replicaSafe: true, takes: [contract("gone")] })],
 				config: single,
 			}),
 		).rejects.toSatisfy(BootRefused.is);

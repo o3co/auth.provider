@@ -12,7 +12,7 @@
 - Route `POST /oauth/token`: a form, JSON or no body (any other `415`); cross-origin requests from the operator's origins (`http`) may send `content-type` and `dpop`, and read `dpop-nonce`, `www-authenticate` and `retry-after`.
 - Provides `grants`' `composedGrants` (the grant types it dispatches to) and `targets`.
 - Where the token endpoint is: its absolute URL on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
-- `oauthError` and `authenticateClient`, for other OAuth endpoints too, as its internal module `answers` says.
+- `oauthError`, `errorDescription` and `authenticateClient`, for other OAuth endpoints too, as its internal module `answers` says.
 - For tests (`./testing`): `grantCaller` calls a contributed grant as the endpoint does once the client is in, the grant allowed and the binding read, beside `client-allowance`, refusing a mistyped parameter and asking the rule's `untargeted` first; `grantInput` is what it hands the grant.
 - `issuer`'s metadata items: `token_endpoint`, `grant_types_supported`, `token_endpoint_auth_methods_supported` and `token_endpoint_auth_signing_alg_values_supported` (left out when `clients` names none).
 - Audit events once the client is authenticated, with `client`, `source` (when determined) and `grant_type` (when dispatched to): `token.issued` (with `claims`, the names of the claims a grant added, never their values, as many as fit 2048 characters, and `claims_left` past that), and `token.issued.failure` with `reason` and `error` (the code answered); declared in `./audit-events`, listed in the audit event reference.

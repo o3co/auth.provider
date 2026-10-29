@@ -12,10 +12,12 @@ Internal module of `kernel`: reading each module's section, and the kernel's own
 - Section `kernel`: `deployment` (`single` or `multi`, no default), `environment` (`production` or `development`, default `production`), `logging.level` (a level or `silent`, default `info`) and `stop-deadline` (`1s` to `1h` in whole seconds, default `30s`; an orchestrator's grace period must be longer).
   - `kernelSection` is its schema, with a description of each key for operators; the kernel reads the section through it as a module's is read.
   - `kernelConfig` builds it, single (and so production) unless told otherwise.
-- `KernelSettings`; `readSections` (modules, configuration, refusals) → the kernel's settings and each module's frozen section. `readConfigured` (schema, value) → the value read as a section is, or each `Issue`.
+- `KernelSettings`; `readSections` (modules, configuration, refusals) → the kernel's settings, those of its `deployment` and `environment` a refused kernel section does not hold validly (`unsure`), and each module's frozen section. `readConfigured` (schema, value) → the value read as a section is, or each `Issue`.
 
 ## Invariants
 - A section is read as the HOCON library's typed getters read it; a refusal names the key path, never the value. A section for no module, a module without a section given one, and a duplicate module name are refused.
+- A refused kernel section stands in with the `deployment` and `environment` it holds validly (an unwritten `environment` is `production`), so the checks that read them are asked as written; one it does not hold validly is `unsure`, and its check is not asked.
+- A refusal says how to put it right where its words would leave the operator guessing: an unset `deployment` is `required, and not set: single or multi`, and a section for no module is to be taken out, or its module composed.
 - A module's schema that throws as it reads its section (any value, one whose reading throws too) refuses that section by the module's name (`its schema failed as it read the section`), keeping none of what it threw; so does a schema error telling no issue, and an issue of another shape is that refusal in its place, so a failed section is never passed over without one.
 
 ## Depends on

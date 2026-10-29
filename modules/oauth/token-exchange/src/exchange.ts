@@ -3,6 +3,7 @@ import { clientAllowance } from "@mod/client-allowance";
 import type { Client } from "@mod/clients";
 import type { Grant, GrantInput, GrantOutcome, TokenTie } from "@mod/grants";
 import { Unavailable } from "@mod/kernel";
+import { resourceRefusal } from "@mod/resource-indicators";
 import { type Binding, carried } from "@mod/sender-binding";
 import type { Actor, IssuedAccess, Tokens } from "@mod/tokens";
 import { verified } from "./answer.ts";
@@ -48,12 +49,18 @@ const isRefusal = (value: object): value is Refusal => "kind" in value && value.
 
 /** A presented token must outlive the exchange by this much, or it is refused as expired. */
 const expiryMarginMs = 1000;
-/** A lifetime asked in `expires_in`: 1 to 10 ASCII digits, from 2. */
+/**
+ * The request parameter asking a lifetime. RFC 6749 registers `expires_in` for answers alone, so the
+ * one this provider adds carries its prefix (RFC 6749 §8.2); a request's `expires_in` is unknown, read
+ * as nothing.
+ */
+const lifetimeParam = "o3co_expires_in";
+/** A lifetime asked in `o3co_expires_in`: 1 to 10 ASCII digits, from 2. */
 const lifetimeShape = /^[0-9]{1,10}$/;
 /** The shortest lifetime `tokens` issues: one second, its iat cut to the second, leaves less than one. */
 const minLifetimeSeconds = 2;
 
-/** `expires_in` in seconds; none when left out or empty, NaN when malformed or under two. */
+/** `o3co_expires_in` in seconds; none when left out or empty, NaN when malformed or under two. */
 const askedLifetime = (value: string | undefined): number | undefined => {
 	if (value === undefined || value === "") return undefined;
 	const seconds = lifetimeShape.test(value) ? Number(value) : 0;
@@ -146,6 +153,9 @@ export function exchangeGrant(parts: Parts): Grant {
 			return refused("audience is not one the client may be issued", "invalid_target");
 		}
 		const resource = param("resource");
+		// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
+		const malformed = resource ? resourceRefusal(resource) : undefined;
+		if (malformed) return refused(malformed, "invalid_target");
 		if (resource && resource !== audience) {
 			return refused("resource is not the audience issued", "invalid_target");
 		}
@@ -170,6 +180,9 @@ export function exchangeGrant(parts: Parts): Grant {
 			return refused("audience is not one the subject token and the client hold", "invalid_target");
 		}
 		const resource = param("resource");
+		// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
+		const malformed = resource ? resourceRefusal(resource) : undefined;
+		if (malformed) return refused(malformed, "invalid_target");
 		if (resource && resource !== audience) {
 			return refused("resource is not the audience issued", "invalid_target");
 		}
@@ -236,9 +249,11 @@ export function exchangeGrant(parts: Parts): Grant {
 			if (client.kind !== "confidential" && !parts.publicExchange(client)) {
 				return { kind: "error", error: "invalid_client", status: 401 };
 			}
-			const asked = askedLifetime(param("expires_in"));
+			const asked = askedLifetime(param(lifetimeParam));
 			if (Number.isNaN(asked)) {
-				return refused("expires_in must be a whole number of seconds from 2, in ASCII digits");
+				return refused(
+					`${lifetimeParam} must be a whole number of seconds from 2, in ASCII digits`,
+				);
 			}
 			const requested = param("requested_token_type");
 			if (requested !== undefined && requested !== accessTokenType) {

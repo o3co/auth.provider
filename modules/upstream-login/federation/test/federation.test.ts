@@ -318,7 +318,7 @@ describe("federation", () => {
 		// Read, it is not lengthened: it ends where the first start put it.
 		now += 30_000;
 		const answered = await s.callback(`code=good&state=${first.state}`, first.cookie);
-		expect(answered.status).toBe(302);
+		expect(answered.status).toBe(303);
 		// A link from another site is still refused before anything else.
 		const linking = await s.get(`${base}/corp?link=1`, first.cookie, {
 			"sec-fetch-site": "cross-site",
@@ -419,7 +419,7 @@ describe("federation", () => {
 			const before = s.events.length;
 			const back = await s.callback(`code=good&state=${state}&iss=https://idp.example`, cookie);
 			// Alice holds that identity already: it ends in the link, which records nothing for it, never a login.
-			expect(back.status).toBe(302);
+			expect(back.status).toBe(303);
 			expect(s.events.slice(before).filter((e) => e.kind.startsWith("federation.login."))).toEqual(
 				[],
 			);
@@ -528,7 +528,7 @@ describe("federation", () => {
 			`code=good&state=${state}&iss=https://idp.example`,
 			`${session}; ${cookie}`,
 		);
-		expect([back.status, back.location]).toEqual([302, `${origin}/`]);
+		expect([back.status, back.location]).toEqual([303, `${origin}/`]);
 		expect(back.cookies.filter((c) => !c.includes("federation.corp="))).toEqual([]);
 		expect(s.events.slice(before).filter((e) => e.kind.startsWith("federation.login."))).toEqual(
 			[],
@@ -587,7 +587,7 @@ describe("federation", () => {
 			`code=good&state=${started.state}&iss=https://idp.example`,
 			started.cookie,
 		);
-		expect([back.status, back.location]).toEqual([302, `${origin}/`]);
+		expect([back.status, back.location]).toEqual([303, `${origin}/`]);
 		const [exchange] = s.asked.exchanges;
 		expect(exchange?.iss).toBe("https://idp.example");
 		expect(
@@ -637,7 +637,7 @@ describe("federation", () => {
 		expect((await s.begin("?redirect_to=https://evil.example/")).status).toBe(400);
 		const target = `${origin}/oauth/authorize?client_id=app`;
 		const back = await s.roundTrip("code=good", `?redirect_to=${encodeURIComponent(target)}`);
-		expect([back.status, back.location]).toEqual([302, target]);
+		expect([back.status, back.location]).toEqual([303, target]);
 	});
 
 	it("takes a transaction only with its own state, once, so a request from elsewhere cannot spend it [rfc9700-2.1-d] [rfc9700-2.1-g] [rfc9700-4.2.4-b] [rfc9700-4.7.1-c]", async () => {
@@ -661,7 +661,7 @@ describe("federation", () => {
 		expect(wrong.cookies).toEqual([]);
 		expect((await s.callback(`code=good&state=${started.state}`, "")).status).toBe(400);
 		const back = await s.callback(`code=good&state=${started.state}`, started.cookie);
-		expect(back.status).toBe(302);
+		expect(back.status).toBe(303);
 		// Once taken, the transaction's cookie is cleared with the answer.
 		expect(back.cookies).toContain(clearedOf(started.cookie));
 		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(400);
@@ -683,7 +683,7 @@ describe("federation", () => {
 			started.cookie.replace("federation.corp", "federation.other"),
 		);
 		expect(elsewhere.status).toBe(400);
-		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(302);
+		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(303);
 	});
 
 	it("takes no transaction from its cookie sent twice, and leaves it for the browser's own callback", async () => {
@@ -692,7 +692,7 @@ describe("federation", () => {
 		const query = `code=good&state=${started.state}`;
 		const twice = await s.callback(query, `${started.cookie}; ${started.cookie}`);
 		expect([twice.status, twice.body]).toEqual([400, { error: "invalid_state" }]);
-		expect((await s.callback(query, started.cookie)).status).toBe(302);
+		expect((await s.callback(query, started.cookie)).status).toBe(303);
 	});
 
 	it("ends a transaction at its lifetime", async () => {
@@ -751,7 +751,7 @@ describe("federation", () => {
 		});
 		// Alice's subject logs in as alice, whatever profile comes with it.
 		const back = await s.roundTrip("code=alice");
-		expect(back.status).toBe(302);
+		expect(back.status).toBe(303);
 		expect(await s.amrOf(back.cookies)).toContain("fed");
 		// Another subject giving alice's email, name, username and phone is no one linked.
 		const impostor = await s.roundTrip("code=impostor");
@@ -818,11 +818,11 @@ describe("federation", () => {
 		expect(await prompted("none")).toBe(401);
 		expect(await prompted("before")).toBe(401);
 		// The upstream's clock may be behind ours by the allowance its type gives.
-		expect(await prompted("skewed")).toBe(302);
-		expect(await prompted("edge")).toBe(302);
-		expect(await prompted("after")).toBe(302);
+		expect(await prompted("skewed")).toBe(303);
+		expect(await prompted("edge")).toBe(303);
+		expect(await prompted("after")).toBe(303);
 		// Any other prompt asks nothing of the upstream login.
-		expect((await s.roundTrip("code=before", "?prompt=consent")).status).toBe(302);
+		expect((await s.roundTrip("code=before", "?prompt=consent")).status).toBe(303);
 		expect(s.asked.starts.at(-1)?.prompt).toBeUndefined();
 	});
 
@@ -838,7 +838,7 @@ describe("federation", () => {
 		});
 		const prompted = async (code: string) =>
 			(await s.roundTrip(`code=${code}`, "?prompt=login")).status;
-		expect(await prompted("same-second")).toBe(302);
+		expect(await prompted("same-second")).toBe(303);
 		expect(await prompted("second-before")).toBe(401);
 	});
 
@@ -856,12 +856,12 @@ describe("federation", () => {
 		};
 		expect(await aged("none", 0)).toEqual([401, { error: "login_required" }]);
 		expect(await aged("old", 60)).toEqual([401, { error: "login_required" }]);
-		expect((await aged("recent", 60))[0]).toBe(302);
+		expect((await aged("recent", 60))[0]).toBe(303);
 		// Asked to log in again, an upstream that never says when the user did cannot satisfy it.
 		const again = await s.roundTrip("code=none", "?prompt=login");
 		expect([again.status, again.body]).toEqual([401, { error: "login_required" }]);
 		// Without prompt or max age, the upstream need not say when it logged in.
-		expect((await s.roundTrip("code=none")).status).toBe(302);
+		expect((await s.roundTrip("code=none")).status).toBe(303);
 	});
 
 	describe("a fresh login's allowance, set for each IdP apart from its clock allowance", () => {
@@ -882,10 +882,10 @@ describe("federation", () => {
 			const status = async (code: string, query: string) =>
 				(await s.roundTrip(`code=${code}`, query)).status;
 			// Both lie within the type's 30 s: only the allowance set tells them apart.
-			expect(await status("within", "?prompt=login")).toBe(302);
+			expect(await status("within", "?prompt=login")).toBe(303);
 			expect(await status("beyond", "?prompt=login")).toBe(401);
 			// A max age is compared in milliseconds, the allowance added.
-			expect(await status("aged", "?max_age=60")).toBe(302);
+			expect(await status("aged", "?max_age=60")).toBe(303);
 			expect(await status("older", "?max_age=60")).toBe(401);
 		});
 
@@ -901,11 +901,11 @@ describe("federation", () => {
 				),
 			});
 			const back = await s.roundTrip("code=same-second", "?prompt=login");
-			expect(back.status).toBe(302);
+			expect(back.status).toBe(303);
 			expect((await s.contextOf(back.cookies))?.authenticatedAt).toBe(now);
 			expect((await s.roundTrip("code=second-before", "?prompt=login")).status).toBe(401);
 			// A time ahead of ours, which the type's clock allowance passes, is taken as the upstream says.
-			expect((await s.roundTrip("code=ahead", "?prompt=login")).status).toBe(302);
+			expect((await s.roundTrip("code=ahead", "?prompt=login")).status).toBe(303);
 			expect((await s.roundTrip("code=unsaid", "?prompt=login")).status).toBe(401);
 		});
 
@@ -927,7 +927,7 @@ describe("federation", () => {
 				return [back.status, back.body];
 			};
 			// The user is linked through corp alone: other's refusal is its allowance's, before the user is looked up.
-			expect((await at("corp"))[0]).toBe(302);
+			expect((await at("corp"))[0]).toBe(303);
 			expect(await at("other")).toEqual([401, { error: "login_required" }]);
 		});
 
@@ -997,7 +997,7 @@ describe("federation", () => {
 		});
 		const attributesOf = async (code: string) => {
 			const back = await s.roundTrip(`code=${code}`);
-			expect(back.status).toBe(302);
+			expect(back.status).toBe(303);
 			return (await s.contextOf(back.cookies))?.attributes;
 		};
 		const source = loginSource.upstream("corp");
@@ -1101,7 +1101,7 @@ describe("federation", () => {
 		);
 	});
 
-	it("takes an answer in form_post only by POST, behind a cross-site cookie, and one in a query only by GET", async () => {
+	it("takes an answer in form_post only by POST, behind a cross-site cookie, landing it by 303 so the browser follows by GET, and one in a query only by GET [rfc9700-4.12-a]", async () => {
 		const s = await serve({
 			federation: {
 				idps: {
@@ -1126,7 +1126,8 @@ describe("federation", () => {
 			error: "repeated_parameter",
 		});
 		const back = await s.post(`${base}/corp/callback`, `code=good&state=${state}`, cookie);
-		expect(back.status).toBe(302);
+		// The posted answer carried the code: 303, never 307 or 308, which would post it again.
+		expect([back.status, back.location]).toEqual([303, `${origin}/`]);
 		expect((await s.post(`${base}/plain/callback`, "code=good&state=x")).status).toBe(405);
 		expect((await s.post(`${base}/corp`, "")).status).toBe(405);
 	});
@@ -1418,7 +1419,7 @@ describe("upstream tokens", () => {
 		const told = receivers(["b", "a"]);
 		const s = await serve({ answers, receivers: told.modules });
 		const back = await s.roundTrip("code=tokens");
-		expect(back.status).toBe(302);
+		expect(back.status).toBe(303);
 		expect(told.told.map((t) => [t.receiver, t.idp, t.session.context.subject])).toEqual([
 			["a", "corp", "alice"],
 			["b", "corp", "alice"],
@@ -1489,7 +1490,7 @@ describe("upstream tokens", () => {
 	it("keeps the login open when a receiver fails, telling the others and logging it by name and kind", async () => {
 		const told = receivers(["a", "b"], ["a"]);
 		const s = await serve({ answers, receivers: told.modules });
-		expect((await s.roundTrip("code=tokens")).status).toBe(302);
+		expect((await s.roundTrip("code=tokens")).status).toBe(303);
 		expect(told.told.map((t) => t.receiver)).toEqual(["a", "b"]);
 		expect(logged()).toContain(
 			'upstream-handoff.receiver_failed {"receiver":"a","kind":"RangeError"}',

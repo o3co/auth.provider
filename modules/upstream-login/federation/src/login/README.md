@@ -14,7 +14,7 @@ Internal module of `federation`: the login a round trip ends in when no continua
 ## Invariants
 - The local user is found by the IdP's name and the upstream subject only; none is `401 unknown_user`. A login a gate refuses is answered alike, `401 unknown_user`, and recorded failed with the reason `refused`. The amr is `fed` plus the mapped upstream values, once each.
 - The session gets the upstream profile's email (verified only where the type says so), name and picture under `login-attributes`' source name for the IdP, nothing else of it.
-- Success is a 302 to the round trip's return target or the landing. A held login carries that same return in its `done`, and is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
+- Success is a 303 to the round trip's return target or the landing, so the browser follows a posted answer by GET (RFC 9700 §4.12). A held login carries that same return in its `done`, and is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
 - `loginIn` refuses boot for a `held-page` off the public origin. `heldPageRefused` (the settings) → the production check's refusal of a `held-page` on a loopback host, which the package declares.
 
 ## Depends on

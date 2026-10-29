@@ -14,11 +14,11 @@ export interface Parts {
 	readonly issuer: string;
 }
 
-const unauthorized: GrantOutcome = {
+// RFC 6749 §5.2's code for a grant its holder cannot use, here a session not shown to be the caller's.
+const notAuthenticated: GrantOutcome = {
 	kind: "error",
-	error: "unauthorized",
+	error: "invalid_grant",
 	description: "session is not authenticated",
-	status: 401,
 };
 const noLongerEntered: GrantOutcome = {
 	kind: "error",
@@ -61,9 +61,9 @@ export function sessionGrant(parts: Parts): Grant {
 		readsAmbient: "cookie",
 		handle: async ({ request, client, param, issue }) => {
 			// The cookie rides on requests from other sites too, so it alone proves nothing.
-			if (!parts.evidence.sameOrigin(request)) return unauthorized;
+			if (!parts.evidence.sameOrigin(request)) return notAuthenticated;
 			const entry = await parts.sessions.enterFor(request, "use");
-			if (entry.kind === "absent") return unauthorized;
+			if (entry.kind === "absent") return notAuthenticated;
 			if (entry.kind === "short") return stepUp(entry.requirement);
 			const allowed = clientAllowance.allowedIssuance(client, param("scope"), parts.issuer);
 			if (allowed.kind === "error") return allowed;

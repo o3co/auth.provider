@@ -35,7 +35,7 @@ describe("a connection in the browser, through the assembled module", () => {
 		expect(h.location(again).origin).toBe("https://up.example");
 	});
 
-	it("ends the intent a start the upstream refuses, and sends the browser back to the client", async () => {
+	it("ends the intent a start the upstream refuses, and sends the browser back to the client by 303 [rfc9700-4.12-a]", async () => {
 		const h = await harness();
 		h.script.startRefused = true;
 		const flow = await h.started();
