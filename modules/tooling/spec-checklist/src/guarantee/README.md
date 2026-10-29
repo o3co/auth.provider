@@ -16,7 +16,8 @@ Internal module of `spec-checklist`: the vocabulary and the source of the `guara
 ## Invariants
 - The section `## Promises across modules` is there once, CRLF read as LF; each top-level list entry is `N. **<title>**`, numbered 1, 2, …, the title to the line's last `**`, kept as written (punctuation and code spans). Any other top-level entry (another marker, an empty one, no bold, a title past its line, words after it), an indented numbered entry, an empty section: each is a finding. A promise's explanations are its indented bullets and lines, not read.
 - Each section of the guarantee file is a promise's number with its title word for word, in order, once; every promise has an item; a ledger for the guarantee file is a finding.
-- A guarantee's test marks each fault it brings in its title, `{fault:<name>}`. A title reserves `{fault` and `{faults` not followed by a letter: each is a mark, to the next `}` or the title's end, well formed only as `{fault:<name>}` of a fault named once; any other is a finding, and so is a mark in a title that names no guarantee.
+- A guarantee item is MUST or MUST NOT, takes `noncompliant` alone of the marks, and one `faults:` line at most.
+- A guarantee's test marks each fault it brings in its title, `{fault:<name>}`. A title reserves `{fault` and `{faults` not followed by a letter: each is a mark, to the next `}` or the title's end, well formed only as `{fault:<name>}` of a fault named once; any other is a finding, and so is a mark in a title that names no guarantee. A title's fault marks bind to every guarantee it names, whose `faults` lines must name them.
 - The boundaries the fault scenes check (the clocks' drift as written, a lagging replica's promotion) are no fault a guarantee names.
 
 ## Depends on

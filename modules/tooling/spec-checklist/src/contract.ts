@@ -8,6 +8,7 @@ export type {
 	Ledger,
 	LedgerRow,
 	Mark,
+	Note,
 	Role,
 	Spec,
 } from "./checklist.ts";

@@ -3,6 +3,7 @@
 ## 1.2 Terminology
 
 - **oidc-core-1.2-a** MUST: the UserInfo endpoint's URL uses the `https` scheme.
+  note: N-https
 - **oidc-core-1.2-b** MUST: a Request URI o3co's RP sends is one the authorization server can retrieve.
   role: rp
   out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
@@ -10,6 +11,7 @@
 ## 2 ID Token
 
 - **oidc-core-2-a** MUST: an ID token carries `iss`, the issuer identifier: an `https` URL with no query or fragment.
+  note: N-https
 - **oidc-core-2-b** MUST: an ID token carries `sub`.
 - **oidc-core-2-c** MUST NOT: `sub` exceeds 255 ASCII characters.
 - **oidc-core-2-d** MUST: an ID token carries `aud`.

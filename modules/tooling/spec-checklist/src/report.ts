@@ -1,4 +1,4 @@
-import { type Item, roles, type Spec } from "./checklist.ts";
+import { type Item, type Note, roles, type Spec } from "./checklist.ts";
 import { classOf } from "./ids.ts";
 
 /** A test that names an item: its package, its file in the package, and its title. */
@@ -103,6 +103,7 @@ export function reportFiles(
 	specs: readonly Spec[],
 	tests: ReadonlyMap<string, readonly TestRef[]>,
 	updatedBy: ReadonlyMap<string, readonly string[]>,
+	notes: ReadonlyMap<string, Note> = new Map(),
 ): Map<string, string> {
 	const files = new Map<string, string>();
 	files.set(
@@ -122,6 +123,18 @@ export function reportFiles(
 			"",
 			"The summary over every specification, by specification and by role, is not kept here: `pnpm --filter @mod/spec-checklist run summary` prints it from the checklist as it stands.",
 			"",
+			...(notes.size > 0
+				? [
+						"## Notes",
+						"",
+						"Notes several items point to, from their Note cell:",
+						"",
+						...[...notes.values()].map(
+							(n) => `- <a id="${n.id.toLowerCase()}"></a>**${n.id}**: ${n.text}`,
+						),
+						"",
+					]
+				: []),
 		].join("\n"),
 	);
 	for (const s of specs) {
@@ -137,6 +150,7 @@ export function reportFiles(
 									: mark.issue,
 						]
 					: []),
+				...(i.note !== undefined ? [`[${i.note}](README.md#${i.note.toLowerCase()})`] : []),
 				...(i.updates.length > 0 ? [`updates ${i.updates.join(", ")}`] : []),
 				...(i.faults ? [`faults: ${i.faults.join(", ")}`] : []),
 				...(i.faults && unmarkedFaults(i, tests.get(i.id) ?? []).length > 0
