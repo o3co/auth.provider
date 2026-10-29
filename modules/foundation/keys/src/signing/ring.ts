@@ -11,6 +11,8 @@ export interface RingKey {
 
 export interface Ring {
 	readonly signing: RingKey;
+	/** The key that signs next, published among `publicKeys` too. */
+	readonly next?: RingKey;
 	/** Keys safe to publish: the signing key's public half (unless HS256), the previous keys and the next. */
 	readonly publicKeys: readonly RingKey[];
 }
@@ -71,10 +73,10 @@ export function readRing(section: Section): Ring | { readonly unreadable: string
 		});
 	}
 	const coming = section.next;
-	if (coming !== undefined) {
-		const key = parsed(() => createPublicKey(coming["public-key"]));
-		if (!key || !keyTypes[coming.alg](key)) return { unreadable: "next.public-key" };
-		publicKeys.push({ kid: coming.kid, alg: coming.alg, key });
-	}
-	return { signing, publicKeys };
+	if (coming === undefined) return { signing, publicKeys };
+	const key = parsed(() => createPublicKey(coming["public-key"]));
+	if (!key || !keyTypes[coming.alg](key)) return { unreadable: "next.public-key" };
+	const next = { kid: coming.kid, alg: coming.alg, key };
+	publicKeys.push(next);
+	return { signing, next, publicKeys };
 }
