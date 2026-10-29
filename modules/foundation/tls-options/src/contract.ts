@@ -42,7 +42,9 @@ export const isFloor: (value: unknown) => value is TlsOptions = isMarked;
 /**
  * The caller's `options` with the floor's own keys copied last over them, so nothing the caller passes
  * loosens it, whatever keys the floor comes to hold. It throws a TypeError for a value `isFloor`
- * refuses: a caller checks the floor at boot, and this holds the line again at each use.
+ * refuses (a caller checks the floor at boot, and this holds the line again at each use), and for
+ * options carrying a key `node:tls` would take past the floor: `secureContext`, `secureProtocol`,
+ * `secureOptions`, `checkServerIdentity` or `pskCallback`.
  */
 export const heldToFloor: <T extends object>(floor: TlsOptions, options: T) => HeldToFloor<T> =
 	heldTo;

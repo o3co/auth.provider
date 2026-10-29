@@ -124,6 +124,18 @@ describe("the section's options", () => {
 			ciphers: defaultSuites,
 			rejectUnauthorized: true,
 		});
+		// Nor any key that would take the connection past the floor, whatever its value.
+		for (const key of [
+			"secureContext",
+			"secureProtocol",
+			"secureOptions",
+			"checkServerIdentity",
+			"pskCallback",
+		]) {
+			expect(() => heldToFloor(floor, { [key]: undefined }), key).toThrow(
+				`options held to the TLS floor take none of ${key}, which would loosen it`,
+			);
+		}
 		// What it gives is the caller's options, no floor; a floor copied by hand is refused.
 		expect(isFloor(heldToFloor(floor, {}))).toBe(false);
 		const copied = { ...floor } as TlsOptions;
@@ -152,6 +164,27 @@ describe("the section's options", () => {
 		Object.freeze(older);
 		expect(isFloor(older)).toBe(false);
 		expect(() => heldToFloor(older as unknown as TlsOptions, {})).toThrow(TypeError);
+	});
+
+	it("are no floor where a key is inherited, hidden or behind a getter, as a spread would not copy it", () => {
+		const marked = (floor: object) => {
+			Object.defineProperty(floor, Symbol.for("@mod/tls-options.floor"), { value: true });
+			return Object.freeze(floor);
+		};
+		const keys = { minVersion: "TLSv1.2", ciphers: defaultSuites };
+		const inherited = marked(Object.assign(Object.create({ rejectUnauthorized: true }), keys));
+		const hidden = marked(
+			Object.defineProperty({ ...keys }, "rejectUnauthorized", { value: true, enumerable: false }),
+		);
+		let asked = 0;
+		const getter = marked(
+			Object.defineProperty({ ...keys }, "rejectUnauthorized", {
+				get: () => asked++ === 0,
+				enumerable: true,
+			}),
+		);
+		expect([inherited, hidden, getter].map(isFloor)).toEqual([false, false, false]);
+		expect(isFloor(marked({ ...keys, rejectUnauthorized: true }))).toBe(true);
 	});
 
 	it("are a floor however many copies of the package are loaded", async () => {
