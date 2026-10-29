@@ -131,7 +131,9 @@ it("reads its fragments' scalars from env and writes their lists locally, with a
 	await expect(readFile(join(target, "src", "witness-backfill.ts"), "utf8")).rejects.toThrow();
 	const guide = await readFile(join(target, "README.md"), "utf8");
 	expect(guide).toContain("from the modules listed: `@mod/tokens`.");
-	expect(guide).toContain("- `tokens.revocation`:");
+	expect(guide).toContain(
+		"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
+	);
 	// Its store is kept in memory: accepted, one instance, and Redis named for more.
 	expect(guide).toContain("the memory store accepted (`store.accept-volatile = true`)");
 	expect(guide).toContain(

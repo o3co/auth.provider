@@ -80,9 +80,8 @@ export async function readsScalarsFromEnv(target: string, modules: readonly stri
 			.map(([key, value]) => [envOf(key), String(value)]),
 	);
 	const readme = await read(target, "README.md");
-	for (const [key] of scalars) {
-		expect(readme).toContain(`| \`${key}\` | \`${envOf(key)}\` |`);
-	}
+	// Each scalar has its row; how a row of several lines reads is app-output's to test.
+	for (const [key] of scalars) expect(readme).toContain(`| \`${key}\` | \`${envOf(key)}\``);
 }
 
 /** The fragments' lists, and a value spanning sections, go to the local layer's example as comments only. */

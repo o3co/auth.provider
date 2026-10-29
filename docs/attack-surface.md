@@ -206,6 +206,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `sections.client-assertion.accept-loose-audience` | `@mod/client-assertion` | `false` | named so (`accept-*` and the like) |
 | `sections.jwt-bearer.accept-unbound` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
 | `store.accept-volatile` | `@mod/store` | `false` | named so (`accept-*` and the like) |
+| `tokens.access-token-lifetime` | `@mod/tokens` | `"1h"` | past the default hour, up to a day: a leaked access token, or one a resource server verifies itself after a revocation, is taken that long |
 | `tokens.revocation` | `@mod/tokens` |  | `unsupported`: nothing issued can be revoked |
 | `tokens.subject-check` | `@mod/tokens` |  | named so (`accept-*` and the like) |
 

@@ -8,7 +8,7 @@
 - The decisions up to issuing a code (`authorize`). The token format and how tokens are revoked (`tokens`). What the ID token holds (the maker).
 
 ## Offers
-- Code issuance, for `authorize` only: client, redirect URI, PKCE challenge, nonce, scope, audience, session handle, subject, optional acr met → code. It checks again the session enters at use with that subject, the client may use the grant with that scope and audience, and the challenge's shape; the authentication context comes from the session.
+- Code issuance, for `authorize` only: client, redirect URI, PKCE challenge, nonce, scope, audience, session handle, subject, optional acr met → code, 32 random bytes in base64url (43 characters). It checks again the session enters at use with that subject, the client may use the grant with that scope and audience, and the challenge's shape; the authentication context comes from the session.
 - A redemption's name from a code (`redemptionOf`): the name its record goes by, never the code; and how long a code lives (`lifetimeMs`).
 - A session closed or short since it was read throws `Unavailable`, for the caller to answer as it can; any other contradiction is a `TypeError`. `challengeShape` is offered for a request to be checked by.
 - The `authorization_code` grant (`codeGrantType`, taking its audience from the request) to `grants`' grant extension point, and the scope that asks for an ID token (the maker's, or none).

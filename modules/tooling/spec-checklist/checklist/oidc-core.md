@@ -3,6 +3,7 @@
 ## 1.2 Terminology
 
 - **oidc-core-1.2-a** MUST: the UserInfo endpoint's URL uses the `https` scheme.
+  note: N-https
 - **oidc-core-1.2-b** MUST: a Request URI o3co's RP sends is one the authorization server can retrieve.
   role: rp
   out-of-scope: o3co's RP sends no request object, by value or by reference: upstream-client's authorization URL carries `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state` and PKCE, and the IdP types add only `nonce`, `prompt`, `max_age`, `access_type`, `response_mode=form_post` and a delegation's `resource` (upstream-client's and the IdP types' cards).
@@ -10,6 +11,7 @@
 ## 2 ID Token
 
 - **oidc-core-2-a** MUST: an ID token carries `iss`, the issuer identifier: an `https` URL with no query or fragment.
+  note: N-https
 - **oidc-core-2-b** MUST: an ID token carries `sub`.
 - **oidc-core-2-c** MUST NOT: `sub` exceeds 255 ASCII characters.
 - **oidc-core-2-d** MUST: an ID token carries `aud`.
@@ -20,8 +22,11 @@
 - **oidc-core-2-i** MUST: an ID token carries `nonce`, the value the authentication request sent, where the request had one.
 - **oidc-core-2-j** SHOULD: the OP does nothing else with a `nonce` value.
 - **oidc-core-2-k** SHOULD: an `acr` value the OP issues is an absolute URI or a name registered under RFC 6711.
+  out-of-scope: acr names are the operator's, who names the acr table; boot does not hold them to a form, which would stop names such as `gold`.
 - **oidc-core-2-l** MUST NOT: an `acr` value that is a registered name is used with another meaning than its registered one.
+  out-of-scope: what an acr means is the operator's, who names the acr table; the provider gives no acr a meaning of its own.
 - **oidc-core-2-m** SHOULD: an `amr` value the OP issues is one registered in the IANA Authentication Method Reference Values registry.
+  deviates: D-10
 - **oidc-core-2-n** MUST: `azp`, where present, is the client ID of the party the ID token was issued to.
 - **oidc-core-2-o** MUST: an ID token is signed with JWS.
 - **oidc-core-2-p** MUST: an encrypted ID token is signed first, then encrypted, as a nested JWT.
@@ -42,20 +47,27 @@
 
 - **oidc-core-3.1.2.1-a** MUST: the authorization endpoint takes the authentication request by `GET` and by `POST`.
 - **oidc-core-3.1.2.1-b** SHOULD: the OP ignores scope values it does not understand.
+  deviates: D-11
 - **oidc-core-3.1.2.1-c** MUST: the OP refuses an authentication request without `response_type`.
 - **oidc-core-3.1.2.1-d** MUST: the OP refuses an authentication request without `client_id`.
 - **oidc-core-3.1.2.1-e** MUST: the OP refuses an authentication request without `redirect_uri`.
 - **oidc-core-3.1.2.1-f** MUST: `redirect_uri` exactly matches one the client pre-registered, by simple string comparison.
 - **oidc-core-3.1.2.1-g** SHOULD: with `display=page`, the OP shows its authentication and consent UI as a full user-agent page.
+  out-of-scope: the login, consent and other pages the End-User sees are the deployment's (CONCEPT.md: screens are the deployment's); the provider answers their APIs.
 - **oidc-core-3.1.2.1-h** SHOULD: with `display=popup`, the OP shows its authentication and consent UI as a popup.
+  out-of-scope: the login, consent and other pages the End-User sees are the deployment's (CONCEPT.md: screens are the deployment's); the provider answers their APIs.
 - **oidc-core-3.1.2.1-i** SHOULD: with `display=touch`, the OP shows its authentication and consent UI for a touch interface.
+  out-of-scope: the login, consent and other pages the End-User sees are the deployment's (CONCEPT.md: screens are the deployment's); the provider answers their APIs.
 - **oidc-core-3.1.2.1-j** SHOULD: with `display=wap`, the OP shows its authentication and consent UI for a feature phone.
+  out-of-scope: the login, consent and other pages the End-User sees are the deployment's (CONCEPT.md: screens are the deployment's); the provider answers their APIs.
 - **oidc-core-3.1.2.1-k** MUST NOT: with `prompt=none`, the OP shows an authentication or consent page.
 - **oidc-core-3.1.2.1-l** SHOULD: with `prompt=login`, the OP prompts the End-User to authenticate again.
 - **oidc-core-3.1.2.1-m** MUST: with `prompt=login`, an OP that cannot authenticate the End-User again returns an error.
 - **oidc-core-3.1.2.1-n** SHOULD: with `prompt=consent`, the OP asks the End-User's consent before returning information to the client.
+  deviates: D-9
 - **oidc-core-3.1.2.1-o** MUST: with `prompt=consent`, an OP that cannot obtain consent returns an error.
 - **oidc-core-3.1.2.1-p** SHOULD: with `prompt=select_account`, the OP prompts the End-User to select an account.
+  out-of-scope: an account selection page is the deployment's; the provider answers with the session it has.
 - **oidc-core-3.1.2.1-q** MUST: with `prompt=select_account`, an OP that cannot obtain the End-User's choice returns an error.
 - **oidc-core-3.1.2.1-r** MUST: where more time than `max_age` has passed since the End-User last authenticated, the OP attempts to actively authenticate the End-User again.
 - **oidc-core-3.1.2.1-s** MUST: where `max_age` was asked, the ID token carries `auth_time`.
@@ -110,6 +122,7 @@
 ## 3.1.2.6 Authentication Error Response
 
 - **oidc-core-3.1.2.6-a** SHOULD NOT: an error response returns parameters other than the error's and `state`.
+  deviates: D-11
 - **oidc-core-3.1.2.6-b** MUST NOT: the OP redirects the user agent to an invalid redirection URI.
 - **oidc-core-3.1.2.6-c** MUST: an error response carries `error`.
 - **oidc-core-3.1.2.6-d** MUST: an error response carries the `state` the request carried, where it carried one.
@@ -163,6 +176,7 @@
   role: rp
 - **oidc-core-3.1.3.7-g** SHOULD: where an IdP type uses an extension under which `azp` is present (idp-google: Google's cross-client identity), it validates `azp` as that extension says.
   role: rp
+  deviates: D-12
 - **oidc-core-3.1.3.7-h** SHOULD: where `azp` is present, upstream-client checks that it is the client's `client-id`.
   role: rp
 - **oidc-core-3.1.3.7-i** MUST: upstream-client validates the id_token's signature by JWS under the algorithm its `alg` header names, one of the IdP type's `algorithms` (external-jwt), and never takes TLS server validation in its place.
@@ -329,7 +343,9 @@
 - **oidc-core-5.1-a** SHOULD: a `profile` claim's page is about the End-User.
   out-of-scope: the claim is not released: claims come from the fixed claim table alone (`name`, `picture`, `email`, `email_verified`, `groups`; `oidc`'s card).
 - **oidc-core-5.1-b** MUST: a `picture` claim's URL refers to an image file.
+  out-of-scope: a `picture` is the user directory's value, released as held; what it refers to is the operator's.
 - **oidc-core-5.1-c** SHOULD: a `picture` claim's URL refers to a profile photo of the End-User.
+  out-of-scope: a `picture` is the user directory's value, released as held; what it refers to is the operator's.
 - **oidc-core-5.1-d** SHOULD: a `website` claim's page holds information published by or about the End-User.
   out-of-scope: the claim is not released: claims come from the fixed claim table alone (`name`, `picture`, `email`, `email_verified`, `groups`; `oidc`'s card).
 - **oidc-core-5.1-e** MUST: an `email` claim conforms to RFC 5322's addr-spec syntax.
@@ -356,12 +372,14 @@
 - **oidc-core-5.2-a** SHOULD: a language tag in a claim name is spelled in the character case it is registered with in the IANA Language Subtag Registry.
   out-of-scope: the OP writes no language tag: the fixed claim table holds untagged claims (`oidc`'s card).
 - **oidc-core-5.2-b** SHOULD: the OP reads language tags case-insensitively.
+  out-of-scope: no claim is released by language: language tags are never read, and each claim is released in the one form held.
 - **oidc-core-5.2-c** SHOULD: a claim's language tag is only as specific as needed.
   out-of-scope: the OP writes no language tag: the fixed claim table holds untagged claims (`oidc`'s card).
 - **oidc-core-5.2-d** SHOULD: where possible, the OP matches the claim locales asked with the claims it has.
   out-of-scope: the OP has no claim in more than one language or script to match with: the fixed claim table holds untagged claims (`oidc`'s card).
 - **oidc-core-5.2-e** SHOULD NOT: `claims_locales` naming locales the OP does not support makes the request an error.
 - **oidc-core-5.2-f** SHOULD: where the OP determines, by `claims_locales` or otherwise, that the End-User and client ask for claims in one set of languages and scripts, claims in that language and script are returned without language tags.
+  out-of-scope: no claim is released by language: `claims_locales` is never read, and each claim is released in the one form held.
 - **oidc-core-5.2-g** SHOULD: upstream-client's id-token reader can handle and use claims that carry language tags.
   role: rp
 
@@ -436,6 +454,7 @@
 ## 5.5.2 Languages and Scripts for Individual Claims
 
 - **oidc-core-5.5.2-a** SHOULD: a claim returned in another language or script than the one asked uses a language tag in its name.
+  out-of-scope: no claim is released in another language than the one form held, so no claim name carries a language tag.
 
 ## 5.6 Claim Types
 
@@ -632,7 +651,7 @@
 - **oidc-core-9-k** SHOULD: with `private_key_jwt`, the OP takes its token endpoint's URL as the JWT's audience.
   deviates: D-1
 - **oidc-core-9-l** MUST: with `private_key_jwt`, the OP takes a JWT once only, by its `jti`, unless reuse was negotiated with the client.
-- **oidc-core-9-m** MUST NOT: with `private_key_jwt`, the OP takes a JWT on or after its `exp`.
+- **oidc-core-9-m** MUST NOT: with `private_key_jwt`, the OP takes a JWT on or after its `exp`, beyond the small leeway for clock skew RFC 7523 §3 allows.
 - **oidc-core-9-n** MUST: with `private_key_jwt`, the OP refuses a JWT without `iss`, `sub`, `aud`, `jti` or `exp`.
 - **oidc-core-9-o** MUST: the OP ignores claims of a client authentication JWT it does not understand.
 - **oidc-core-9-p** MUST: the OP takes the client authentication JWT from `client_assertion` alone.
@@ -749,16 +768,24 @@
 ## 15.2 Mandatory to Implement Features for Dynamic OpenID Providers
 
 - **oidc-core-15.2-a** MUST: a dynamic OP supports the `id_token` response type.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-core-15.2-b** MUST: a dynamic OP that is not self-issued supports the `code` and `id_token token` response types.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-core-15.2-c** MUST: a dynamic OP supports Discovery.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-core-15.2-d** MUST: a dynamic OP supports Dynamic Client Registration.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-core-15.2-e** MUST: a dynamic OP that issues access tokens supports the UserInfo endpoint.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-core-15.2-f** MUST: a dynamic OP publishes its public keys as bare JWKs.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 - **oidc-core-15.2-g** MUST: a dynamic OP supports request objects retrieved by `request_uri`.
+  out-of-scope: the provider is no dynamic OpenID Provider: clients are registered by the operator or come by Client ID Metadata Documents, with no dynamic registration, and `code` is the only response type.
 
 ## 15.3 Discovery and Registration
 
 - **oidc-core-15.3-a** SHOULD: an OP meeting RPs without a pre-configured relationship does so by Discovery and Dynamic Client Registration.
+  deviates: D-11
 
 ## 16.3 Token Manufacture/Modification
 
@@ -772,6 +799,7 @@
 ## 16.7 Request Repudiation
 
 - **oidc-core-16.7-a** SHOULD: the OP validates the signature of a request a client signed, to check it came from that client.
+  out-of-scope: no request object is taken: `request` and `request_uri` are refused, each with its own code.
 
 ## 16.8 Access Token Redirect
 
@@ -785,16 +813,20 @@
 
 - **oidc-core-16.11-a** MUST NOT: upstream-client logs a user in through the implicit flow without extra mechanisms that let o3co tell the id_token and access token were issued for its use.
   role: rp
+  out-of-scope: upstream-client logs a user in by the code flow alone, never the implicit flow.
 
 ## 16.12 Timing Attack
 
 - **oidc-core-16.12-a** SHOULD NOT: the OP stops a signature's or a decryption's validation at the first error found.
+  out-of-scope: signature and decryption validation is the platform's cryptography (Node's crypto and jose), not the provider's code.
 - **oidc-core-16.12-b** SHOULD: the OP runs a signature's or a decryption's validation over every octet before answering.
+  out-of-scope: signature and decryption validation is the platform's cryptography (Node's crypto and jose), not the provider's code.
 
 ## 16.15 Issuer Identifier
 
 - **oidc-core-16.15-a** MUST: the issuer discovery returns exactly matches `iss` in the ID token.
 - **oidc-core-16.15-b** SHOULD: one host serves a single issuer, unless the host serves several tenants.
+  out-of-scope: how issuers are laid out over hosts is the operator's.
 
 ## 16.17 TLS Requirements
 
@@ -805,8 +837,11 @@
 ## 16.18 Lifetimes of Access Tokens and Refresh Tokens
 
 - **oidc-core-16.18-a** SHOULD: access tokens are single-use or very short-lived.
+  deviates: D-4
 - **oidc-core-16.18-b** SHOULD: the OP clearly identifies long-term grants to the user during authorization.
+  out-of-scope: the consent page is the deployment's; consent's API tells it the client and the range asked.
 - **oidc-core-16.18-c** SHOULD: the OP offers the End-User a way to revoke access tokens and refresh tokens granted to a client.
+  deviates: D-8
 
 ## 16.19 Symmetric Key Entropy
 
@@ -832,7 +867,9 @@
 ## 17.2 Data Access Monitoring
 
 - **oidc-core-17.2-a** SHOULD: the End-User can see the access log of their UserInfo.
+  out-of-scope: a page showing the End-User their records is the deployment's; the provider keeps no UserInfo access log for one.
 
 ## 17.3 Correlation
 
 - **oidc-core-17.3-a** SHOULD: pairwise pseudonymous identifiers are considered as `sub`.
+  deviates: D-11
