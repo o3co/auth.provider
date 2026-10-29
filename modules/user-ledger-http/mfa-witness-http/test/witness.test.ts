@@ -22,6 +22,7 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
 import { section } from "../src/section.ts";
@@ -135,7 +136,7 @@ const collector = defineModule(
 async function open(section: unknown = settings(), outbound: Record<string, unknown> = {}) {
 	const logged = recordingLog();
 	const app = await assemble({
-		modules: [outboundModule, witnessHttp, collector],
+		modules: [outboundModule, tlsOptionsForTests, witnessHttp, collector],
 		config: {
 			...kernelConfig(),
 			outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair, otherPair], ...outbound },
