@@ -239,7 +239,7 @@ Lists in CycloneDX ${config.cyclonedx} JSON, made by the release from the tarbal
 - \`entrance.cdx.json\`: \`create-auth-provider\`, the entrance an operator runs with npx to make the app, installed alone; its lock is \`entrance.pnpm-lock.yaml\`.
 - \`inside.cdx.json\`: the packages a published bundle holds inside one of its files, which no dependency tree shows, at the versions the files hold.
 - \`build-tools.cdx.json\`: the tools that build and check the release, the workspace's development dependencies; no operator installs them.
-- \`image.cdx.json\`: the image this release built from the app's Dockerfile, listed by syft (\`image.json\` names it, its id and syft's version). It is a reference: the Dockerfile takes Node 24's latest, so an operator's build of another day holds another Node. pnpm runs only in the image's build (its deps stage); the image starts the app with node, and holds no package manager but npm, the corepack and the yarn Node's image bundles taken out.
+- \`image.cdx.json\`: the image this release built from the app's Dockerfile, listed by syft (\`image.json\` names it, its id and syft's version). It is a reference: the Dockerfile takes one Node 24 minor at its latest patch, so an operator's build of another day may hold another Node patch. pnpm runs only in the image's build (its deps stage); the image starts the app with node, and holds no package manager but npm, the corepack and the yarn Node's image bundles taken out.
 - \`tarballs.json\`: each tarball published, its name, version and npm integrity, which the release's own components in the lists carry as their SHA-512.
 
 The release's own components are named as npm publishes them (\`pkg:npm/%40o3co/<name>@<version>\`), with the hash of the very tarball published.
