@@ -26,6 +26,8 @@ export interface CodePart {
 	/** Clients whose id is the URL of their metadata document, under the operator's hosts and scopes. */
 	readonly documents?: {
 		readonly allow?: readonly string[];
+		/** Any host `deny` leaves, where `allow` names none. */
+		readonly anyHost?: boolean;
 		readonly deny?: readonly string[];
 		readonly scopes?: readonly string[];
 	};

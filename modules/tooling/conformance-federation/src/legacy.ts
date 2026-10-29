@@ -93,6 +93,8 @@ onLegacy(federationArea, {
 	// The legacy Google type sends Google neither a request to log in again nor a max age. A login
 	// through Apple, which takes neither, is let in by the legacy build where ours refuses it.
 	differs: [
+		// A callback lands its browser by 302, a posted answer's too.
+		"federation-lands-by-302",
 		"google-freshness-not-forwarded",
 		"apple-freshness-login-required",
 		// Past the cap of pending intents for a client and user, the build refuses with 429.

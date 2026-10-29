@@ -190,11 +190,11 @@ it("refuses a start not shown to come from this origin, logging the IdP and what
 	]);
 });
 
-it("links the identity to the session's subject, hands the tokens to that session, and records it", async () => {
+it("links the identity to the session's subject, hands the tokens to that session, records it, and lands by 303 [rfc9700-4.12-a]", async () => {
 	const s = standIn();
 	const done = await s.link.complete(s.completing());
 	expect([done.status, done.headers?.location, done.cookies]).toEqual([
-		302,
+		303,
 		landing,
 		["federation.corp=; Max-Age=0"],
 	]);
@@ -219,7 +219,7 @@ it("links the identity to the session's subject, hands the tokens to that sessio
 it("lets the recorded session decide for a browser in none, as a posted answer carries no cookie", async () => {
 	const s = standIn();
 	s.set.entered = undefined;
-	expect((await s.link.complete(s.completing())).status).toBe(302);
+	expect((await s.link.complete(s.completing())).status).toBe(303);
 	expect(s.links).toHaveLength(1);
 });
 
@@ -239,7 +239,7 @@ it("lands where the round trip says, and hands nothing on when the upstream gave
 it("takes an identity the account holds already without a record, and refuses another account's, handing nothing on", async () => {
 	const s = standIn();
 	s.set.linked = "already";
-	expect((await s.link.complete(s.completing())).status).toBe(302);
+	expect((await s.link.complete(s.completing())).status).toBe(303);
 	expect(s.events).toEqual([]);
 	expect(s.joined).toEqual([["s1", "corp", "up-1"]]);
 	s.joined.length = 0;

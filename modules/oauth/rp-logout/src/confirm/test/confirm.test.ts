@@ -34,6 +34,7 @@ function serve(
 	options: {
 		readonly close?: (id: string) => Promise<CloseOutcome>;
 		readonly upstream?: string;
+		readonly issue?: () => { field: string; token: string; cookies: string[] };
 	} = {},
 ) {
 	const closes: string[] = [];
@@ -71,7 +72,9 @@ function serve(
 		closing,
 		keys,
 		forms: {
-			issue: () => ({ field: "csrf_token", token: "t".repeat(43), cookies: ["csrf=t"] }),
+			issue:
+				options.issue ??
+				(() => ({ field: "csrf_token", token: "t".repeat(43), cookies: ["csrf=t"] })),
 		},
 		issuer,
 		confirmUrl,
@@ -97,6 +100,16 @@ const shown = (session: string | undefined): HttpRequest =>
 const text = (answer: HttpResponse) => String(answer.body);
 
 describe("the confirmation of a logout a client started without a hint", () => {
+	it("writes every value into its page escaped, so none can break out of its attribute or add markup, rp-logout being the one module that writes HTML [rfc6749-10.14-b]", async () => {
+		const { confirm } = serve({
+			issue: () => ({ field: `f"><img src=x>`, token: `t'&<b>`, cookies: [] }),
+		});
+		const page = text(await confirm.show(shown("s1")));
+		expect(page).toContain(`name="f&#34;&#62;&#60;img src=x&#62;" value="t&#39;&#38;&#60;b&#62;"`);
+		expect(page).not.toContain("<img");
+		expect(page).not.toContain("<b>");
+	});
+
 	it("asks the person whether to log out, by a form bound to the session the browser holds", async () => {
 		const { confirm, closes } = serve();
 		const answer = await confirm.show(shown("s1"));

@@ -76,10 +76,13 @@ describe("id-jag: reading a verified ID-JAG", () => {
 			expect(readOf({ scope }), JSON.stringify(scope)).toEqual(malformed);
 	});
 
-	it("takes resources only as absolute URIs with no fragment (RFC 8707 §2)", () => {
+	it("takes resources only as absolute URIs with no fragment (RFC 8707 §2), read as resource-indicators reads one", () => {
 		for (const resource of [
 			"/relative",
 			"api.example",
+			// URL parsing would trim it; no URI is written so.
+			" https://api.example",
+			"https://b\u00fccher.example",
 			[],
 			["https://a.example", 5],
 			"https://api.example/x#a",

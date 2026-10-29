@@ -42,6 +42,7 @@
 - The password goes in the request body alone, never in a URL, a log line or an error.
 - A destination refused when sending, or no answer in time or size, is unavailable. A wrong `verify-url` makes verification unavailable, never "no such user", unless what answers there is a `401` without a Bearer challenge, which reads as none.
 - Boot reports never show the credential.
+- The credential is the ledger's service credential, an operator's trust assumption between the provider and its ledger, never an OAuth access token: no checklist item on access tokens applies to it.
 - A lookup's `404` or `410` is none only where its body says so: one without the word (a wrong URL, a gateway's unknown route, a ledger hiding itself) is unavailable, logged as `users-http.ledger_failed` with its status and `reason: "unmarked"`, never no such user.
 - The operator's ledger must do the same work for an unknown identifier as for a known one; this module sends the same one request either way.
 - Holds no state, so it is safe on multiple instances.

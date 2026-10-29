@@ -29,7 +29,7 @@ export async function signIn(
 	const location = callback.hops.at(-1)?.location;
 	return {
 		callback,
-		returned: callback.status === 302 && location !== undefined && location === target.href,
+		returned: callback.status === 303 && location !== undefined && location === target.href,
 	};
 }
 

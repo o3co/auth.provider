@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { federationScene } from "../src/main.ts";
+import { federationScene, landedStatus } from "../src/main.ts";
 import { type Browser, browser as openBrowser, probeClient } from "./browser.ts";
 import { fakeGithub } from "./github.ts";
 
@@ -71,7 +71,7 @@ describe.runIf(able)("federation through GitHub", () => {
 	it("logs a browser in by the user's numeric id, its token sent to the user lookup as a Bearer Authorization [rfc6750-2.1-b]", async () => {
 		const b = browser();
 		const back = await b.get(`${start}/callback?${await authorized(b, 583231)}`);
-		expect([back.status, back.location]).toEqual([302, landing]);
+		expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 		expect(await b.session()).toBe(true);
 	});
 

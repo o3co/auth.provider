@@ -1,5 +1,6 @@
 import { targetRules } from "@mod/grants";
 import { defineModule } from "@mod/kernel";
+import { resourceRefusal } from "./contract.ts";
 
 export default defineModule({ name: "resource-indicators", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
@@ -7,6 +8,9 @@ export default defineModule({ name: "resource-indicators", replicaSafe: true, ta
 			const resource = param("resource");
 			// An empty value asks nothing, as one left out.
 			if (!resource) return { kind: "audience", audience };
+			// RFC 8707 §2: an absolute URI without a fragment, or no audience at all, whatever is registered.
+			const malformed = resourceRefusal(resource);
+			if (malformed) return { kind: "error", error: "invalid_target", description: malformed };
 			// Compared as a string with what the issuance may have, never parsed as a URI (RFC 8707 §2):
 			// only an exact match narrows, so its form cannot widen anything.
 			if (within(resource)) return { kind: "audience", audience: [resource] };

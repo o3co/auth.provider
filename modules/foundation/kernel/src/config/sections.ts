@@ -110,11 +110,11 @@ export function readSections(
 	modules: readonly Module[],
 	config: unknown,
 	refusals: Refusal[],
-): { kernel: KernelSettings; sections: Map<Module, unknown> } {
+): { kernel: KernelSettings; unsure: ReadonlySet<Unsure>; sections: Map<Module, unknown> } {
 	const sections = new Map<Module, unknown>();
 	if (!isPlainObject(config)) {
 		refusals.push({ where: "config", reason: "the configuration root is not an object" });
-		return { kernel: refusedKernel(), sections };
+		return { ...refusedKernel(undefined), sections };
 	}
 	const names = new Set<string>();
 	for (const module of modules) {
@@ -126,10 +126,13 @@ export function readSections(
 	}
 	for (const key of Object.keys(config)) {
 		if (key !== KERNEL_SECTION && !names.has(key)) {
-			refusals.push({ where: key, reason: "section for a module that is not loaded" });
+			refusals.push({
+				where: key,
+				reason: "section for a module that is not loaded: take it out, or compose the module",
+			});
 		}
 	}
-	const kernel = readKernel(config[KERNEL_SECTION], refusals);
+	const { kernel, unsure } = readKernel(config[KERNEL_SECTION], refusals);
 	for (const module of modules) {
 		const raw = Object.hasOwn(config, module.name) ? config[module.name] : undefined;
 		if (module.section === undefined) {
@@ -141,7 +144,7 @@ export function readSections(
 		if ("issues" in result) refuseIssues(module.name, result.issues, refusals, raw);
 		else sections.set(module, deepFreeze(result.value));
 	}
-	return { kernel, sections };
+	return { kernel, unsure, sections };
 }
 
 /**
@@ -175,14 +178,32 @@ function refuseIssues(
 	}
 }
 
-function readKernel(raw: unknown, refusals: Refusal[]): KernelSettings {
+/** The kernel settings the deployment's checks read; one a refused section does not hold validly is unsure. */
+export type Unsure = "deployment" | "environment";
+
+function readKernel(
+	raw: unknown,
+	refusals: Refusal[],
+): { kernel: KernelSettings; unsure: ReadonlySet<Unsure> } {
 	const result = readSection(kernelSection, raw ?? null);
-	if (!("issues" in result)) return result.value;
+	if (!("issues" in result)) return { kernel: result.value, unsure: new Set() };
 	refuseIssues(KERNEL_SECTION, result.issues, refusals, raw);
-	return refusedKernel();
+	return refusedKernel(raw);
 }
 
-/** Stands in for a refused kernel section: boot is refused before any of it is used. */
-function refusedKernel(): KernelSettings {
-	return kernelSection.parse({ deployment: "single" });
+/**
+ * Stands in for a refused kernel section, boot being refused before any of it is used: it keeps the
+ * deployment and environment the section holds validly, so their checks are asked as written, and
+ * names the others unsure, whose checks are not asked.
+ */
+function refusedKernel(raw: unknown): { kernel: KernelSettings; unsure: ReadonlySet<Unsure> } {
+	const written = isPlainObject(raw) ? raw : {};
+	const unsure = new Set<Unsure>();
+	const kept: Partial<Record<Unsure, unknown>> = {};
+	for (const key of ["deployment", "environment"] as const) {
+		const read = kernelSection.shape[key].safeParse(written[key]);
+		if (read.success) kept[key] = read.data;
+		else unsure.add(key);
+	}
+	return { kernel: kernelSection.parse({ deployment: "single", ...kept }), unsure };
 }

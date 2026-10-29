@@ -21,7 +21,12 @@ const connection = z.strictObject({
 		.array(scope)
 		.min(1)
 		.refine((all) => all.includes("openid"), "scopes must hold openid"),
-	resource: z.url().optional(),
+	/** Sent upstream as written: an absolute URI with no fragment (RFC 8707 §2) and no query. */
+	resource: z
+		.url()
+		.refine((uri) => !uri.includes("#"), "resource must carry no fragment")
+		.refine((uri) => !uri.includes("?"), "resource must carry no query")
+		.optional(),
 	"max-access-token-lifetime": seconds(1, 86_400).describe(
 		"The longest an upstream access token may live to be kept: a duration with a unit, from 1s to 1d, e.g. 1h.",
 	),
