@@ -120,6 +120,7 @@ Settings that name where it reaches:
 | `issuer.url` | `@mod/issuer` |  | by its name |
 | `jti-ledger-http.consume-url` | `@mod/jti-ledger-http` |  | by its name |
 | `jwt-bearer.issuers` | `@mod/jwt-bearer` | `[]` | each trusted issuer's `jwks-uri`, where its key set is fetched |
+| `jwt-bearer.issuers.<i>.jwks-uri` | `@mod/jwt-bearer` |  | by its name |
 | `mail-smtp.host` | `@mod/mail-smtp` |  | the SMTP relay |
 | `mfa-witness-http.clear-url` | `@mod/mfa-witness-http` |  | by its name |
 | `mfa-witness-http.enroll-url` | `@mod/mfa-witness-http` |  | by its name |
@@ -165,6 +166,7 @@ Settings that name where it reaches:
 | `seal.current.key` | `@mod/seal` | by its name |
 | `seal.next.key` | `@mod/seal` | by its name |
 | `seal.previous` | `@mod/seal` | the previous sealing keys |
+| `seal.previous.<i>.key` | `@mod/seal` | by its name |
 | `sections.client-secret.hash` | `@mod/clients` | by its name |
 | `signer-keys-http.credential` | `@mod/signer-keys-http` | by its name |
 | `subject-revocation-http.credential` | `@mod/subject-revocation-http` | by its name |
@@ -184,11 +186,15 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `federation.idps` | `@mod/federation` | `{}` | each IdP's `upstream-amr` trusts its word for the local amr it maps, `mfa` among them; its `fresh-login-allowance` lets a login that far back count as fresh |
 | `federation.idps.<name>.accept-missing-iss` | `@mod/idp-oidc` | `false` | named so (`accept-*` and the like) |
 | `http.insecure-origin` | `@mod/http` | `false` | named so (`accept-*` and the like) |
+| `jwt-bearer.issuers.<i>.accept-any-subject` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
+| `jwt-bearer.issuers.<i>.accept-key-set-elsewhere` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
+| `login-passkey.counts-as-mfa` | `@mod/login-passkey` | `true` | `true` (the default): a passkey login whose user was verified meets a required second factor alone |
 | `login-passkey.password-exempt-group` | `@mod/login-passkey` |  | its members keep password logins where passkey holders are refused them |
 | `mail-smtp.security` | `@mod/mail-smtp` | `"starttls"` | `none`: no TLS, so the relay's authentication and the mail go in the clear, to a loopback relay only |
 | `mail.accept-unsent` | `@mod/mail` | `false` | named so (`accept-*` and the like) |
+| `mfa-email.adds-second-factor` | `@mod/mfa-email` | `false` | `true`: a code by mail meets a required second factor, so the mailbox does |
 | `mfa.mode` | `@mod/mfa` | `"required"` | below `required`, using a session needs no second factor |
 | `mtls.mode` | `@mod/mtls` |  | `self-signed`: any certificate that parses binds, with no revocation |
 | `mtls.revocation.mode` | `@mod/mtls` |  | `disabled`: no certificate's revocation is checked |
@@ -201,15 +207,16 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `outbound.plain-loopback` | `@mod/outbound` | `[]` | plain http to these loopback pairs |
 | `outbound.proxy` | `@mod/outbound` |  | the proxy, not `outbound`, resolves names and checks where they lead |
 | `outbound.resolution` | `@mod/outbound` | `"helper"` | `in-process`: names resolve in the app's own process, not in helpers that take none of its environment |
-| `rate-limit.fail-mode` | `@mod/rate-limit` | `"closed"` | named so (`accept-*` and the like) |
-| `redis.durability` | `@mod/redis` |  | named so (`accept-*` and the like) |
-| `redis.replication` | `@mod/redis` |  | named so (`accept-*` and the like) |
+| `rate-limit.fail-mode` | `@mod/rate-limit` | `"closed"` | `open`: while the store cannot count, a route's request limit lets every request through |
+| `redis.durability` | `@mod/redis` |  | `none`: a crash loses the latest writes, spent assertion and proof ids and lockout records among them |
+| `redis.replication` | `@mod/redis` |  | `none`: a failover loses writes, confirmed ones too |
 | `sections.client-assertion.accept-loose-audience` | `@mod/client-assertion` | `false` | named so (`accept-*` and the like) |
 | `sections.jwt-bearer.accept-unbound` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
 | `store.accept-volatile` | `@mod/store` | `false` | named so (`accept-*` and the like) |
+| `token-exchange.max-lifetime` | `@mod/token-exchange` |  | an exchanged token lives up to this, up to a day, past `tokens`' own lifetimes |
 | `tokens.access-token-lifetime` | `@mod/tokens` | `"1h"` | past the default hour, up to a day: a leaked access token, or one a resource server verifies itself after a revocation, is taken that long |
 | `tokens.revocation` | `@mod/tokens` |  | `unsupported`: nothing issued can be revoked |
-| `tokens.subject-check` | `@mod/tokens` |  | named so (`accept-*` and the like) |
+| `tokens.subject-check` | `@mod/tokens` |  | `none`: no module checks an access token's subject against its revocations, so a revoked subject's access tokens are taken until they expire |
 
 ## What the operator does by hand
 
