@@ -72,7 +72,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/seal` (foundation, `modules/foundation/seal`): Seals and opens stored data with authenticated encryption (AES-256-GCM) under a key ring read at boot.
 - `@mod/secret-hash` (foundation, `modules/foundation/secret-hash`): Checks a secret against a stored bcrypt or scrypt hash, with the same work whether or not there is a hash to check against; knows no feature.
 - `@mod/store` (foundation, `modules/foundation/store`): Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation, not safe on many instances.
-- `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client (outbound, mail-smtp, redis): the least version and the suites they take.
+- `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take.
 - `@mod/url-setting` (foundation, `modules/foundation/url-setting`): Decides which configured URLs boot, for every module that takes one by `urlSetting`, and when a section's own check of the URLs it holds may read them.
 
 ## identity
