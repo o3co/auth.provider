@@ -1,352 +1,38 @@
 import { createHash } from "node:crypto";
 import { acrEntries } from "@mod/acr";
-import acrModule from "@mod/acr/module";
-import { acrConfig } from "@mod/acr/testing";
-import type { AuditEvent } from "@mod/audit";
-import { auditStandIn } from "@mod/audit/testing";
-import {
-	claimScopes,
-	claimsSelections,
-	type SelectionRecords,
-	selectionRecords,
-} from "@mod/claims-selection";
-import claimsSelectionModule from "@mod/claims-selection/module";
+import { claimsSelections, type SelectionRecords, selectionRecords } from "@mod/claims-selection";
 import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
-import clientAllowanceModule from "@mod/client-allowance/module";
-import { allowancesFor } from "@mod/client-allowance/testing";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
-import clientsModule from "@mod/clients/module";
-import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import { codes, type IdTokenRequest, idTokens } from "@mod/code-grant";
-import codeGrantModule from "@mod/code-grant/module";
-import { codeGrantConfig } from "@mod/code-grant/testing";
-import codeGrantStore from "@mod/code-grant-store/module";
-import { consents, type StoredAsk, type StoredGrant } from "@mod/consent";
-import consentModule from "@mod/consent/module";
-import { consentConfig, consentStoresOn, firstPartyFor } from "@mod/consent/testing";
-import cookiesModule from "@mod/cookies/module";
-import { csrfStandIn } from "@mod/csrf/testing";
+import { consents } from "@mod/consent";
 import { targetRules } from "@mod/grants";
-import { listening } from "@mod/http";
-import http from "@mod/http/module";
-import { httpConfig, testRequest } from "@mod/http/testing";
+import { testRequest } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
-import issuerModule from "@mod/issuer/module";
-import { issuerConfig } from "@mod/issuer/testing";
-import {
-	assemble,
-	type BootRefused,
-	contract,
-	defineModule,
-	isUnavailable,
-	kernelConfig,
-	type Module,
-	Unavailable,
-} from "@mod/kernel";
-import {
-	quietRuntime,
-	recordingLog,
-	switchedModule,
-	takesUnused,
-	unavailableSwitch,
-} from "@mod/kernel/testing";
-import { amrSources } from "@mod/login-gates";
-import gatesModule from "@mod/login-gates/module";
-import rateLimitModule from "@mod/rate-limit/module";
+import { type BootRefused, contract, defineModule, Unavailable } from "@mod/kernel";
+import { switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
-import { type ReauthStore, reauthStore, type StoredReauth } from "@mod/reauth";
-import reauthModule from "@mod/reauth/module";
-import { memoryRecords } from "@mod/records/testing";
 import { redirects, redirectsCopy } from "@mod/redirect-uris";
-import { redirectsFor } from "@mod/redirect-uris/testing";
-import secretHashModule from "@mod/secret-hash/module";
-import { type Session, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
-import sessionParticipants from "@mod/session-participants/module";
-import bridgeModule from "@mod/session-tokens/module";
-import { sessionTokensInMemory } from "@mod/session-tokens/testing";
-import { simulatedStore } from "@mod/store/testing";
-import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
-import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { type IssuanceRequest, issuancePolicies, type Tokens, tokens } from "@mod/tokens";
-import { tokensStandIn } from "@mod/tokens/testing";
+import type { Session } from "@mod/session";
+import { type IssuanceRequest, issuancePolicies, tokens } from "@mod/tokens";
 import { loopbackPagesRefused } from "@mod/url-setting";
 import { afterEach, describe, expect, it } from "vitest";
-import declared from "../src/audit-events.ts";
-import { hintReaders } from "../src/contract.ts";
-import authorizeModule from "../src/module.ts";
 import { section } from "../src/section.ts";
-import { authorizeConfig } from "../src/testing.ts";
+import {
+	advance,
+	callback,
+	challenge,
+	eventsDeclared,
+	issuer,
+	logged,
+	now,
+	request,
+	serve,
+	stopServed,
+	verifier,
+	warnings,
+} from "./harness.ts";
 
-let now = 1_800_000_000_000;
-const logged = recordingLog();
-const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
-const warnings = () => logged.lines().filter((line) => line.event === "authorize.unavailable");
-let stop = async () => {};
-afterEach(() => stop());
-
-const issuer = "https://as.example";
-const callback = "https://app.example/cb";
-const verifier = "v".repeat(43);
-const challenge = createHash("sha256").update(verifier).digest("base64url");
-const client = (id: string, extra: Record<string, unknown> = {}, grants = ["authorization_code"]) =>
-	confidentialClient({
-		id,
-		sections: {
-			...allowancesFor({
-				grants,
-				scopes: ["openid", "read", "write"],
-				"default-scopes": ["read"],
-				audiences: ["https://api"],
-			}),
-			...redirectsFor([callback, "http://127.0.0.1:9000/cb"]),
-			...extra,
-		},
-	});
-
-async function serve(
-	options: {
-		revocable?: boolean;
-		codeGrant?: Record<string, unknown>;
-		authorize?: Record<string, unknown>;
-		/** The acr table, each acr and the amr sets that meet it. */
-		acr?: Record<string, string[][]>;
-		extra?: Module[];
-		/** The amr the deployment's ways of logging in declare. */
-		proves?: string[];
-		/** The rate-limit module; its stand-in never fails to count. */
-		rateLimit?: Module;
-		/** False leaves out the consent page, so consent cannot ask. */
-		asking?: boolean;
-		/** The deployment's environment, production unless a test tries a page on this machine. */
-		environment?: "production" | "development";
-		/** The package's claims-parameter; true unless a test is about false. */
-		claimsParameter?: boolean;
-		/** claims-selection's store; the in-memory one unless a test makes it fail. */
-		selectionStore?: Module;
-	} = {},
-) {
-	const proving = defineModule({ name: "proving", replicaSafe: false, takes: [] }, (m) => [
-		m
-			.contribute(amrSources)
-			.by(() => ({ name: "proving", amr: options.proves ?? ["pwd", "otp", "mfa"] })),
-	]);
-	const simulated = simulatedStore();
-	const reauths = memoryRecords<StoredReauth>(() => now, { shards: 1, perShard: 1 });
-	const down = {
-		reauths: unavailableSwitch<ReauthStore>("reauth store"),
-		tokens: unavailableSwitch<Tokens>("tokens"),
-	};
-	const reauthStand = defineModule({ name: "reauth-store", replicaSafe: false, takes: [] }, (m) => [
-		m
-			.provide(reauthStore)
-			.by(() =>
-				down.reauths.wrap({ save: reauths.records.create, update: reauths.records.change }),
-			),
-	]);
-	const consentStores = consentStoresOn({
-		grants: memoryRecords<StoredGrant>(() => now, { shards: 1, perShard: 1 }),
-		asks: memoryRecords<StoredAsk>(() => now, { shards: 1, perShard: 1 }),
-	});
-	const audit = auditStandIn();
-	recorded = audit.events;
-	// The composition as one value, for a test of what its modules take.
-	const input = {
-		modules: [
-			http,
-			switchedModule(tokensStandIn({ revocable: options.revocable ?? true }), tokens, down.tokens),
-			issuerModule,
-			clientsModule,
-			secretHashModule,
-			grantCaller,
-			clientAllowanceModule,
-			sessionStandIn,
-			sessionParticipants,
-			subjectRevocationStandIn,
-			consentModule,
-			consentStores,
-			csrfStandIn,
-			cookiesModule,
-			simulated.module,
-			bridgeModule,
-			sessionTokensInMemory().module,
-			codeGrantModule,
-			codeGrantStore,
-			authorizeModule,
-			reauthStand,
-			reauthModule,
-			options.rateLimit ?? rateLimitModule,
-			audit.module,
-			acrModule,
-			gatesModule,
-			proving,
-			claimsSelectionModule,
-			options.selectionStore ?? claimsSelectionInMemory().module,
-			scoping,
-			hinting,
-			...(options.extra ?? []),
-		],
-		config: {
-			...kernelConfig({ environment: options.environment ?? "production" }),
-			...httpConfig({ "trusted-proxies": ["127.0.0.1"], "public-origin": issuer }),
-			...issuerConfig({ url: issuer }),
-			...clientsConfig([
-				client("app", firstPartyFor(true)),
-				client("wide", {
-					...firstPartyFor(true),
-					...allowancesFor({
-						grants: ["authorization_code"],
-						scopes: ["read"],
-						"default-scopes": ["read"],
-						audiences: ["https://api", "https://two"],
-					}),
-				}),
-				client("third"),
-				client("nocode", firstPartyFor(true), ["client_credentials"]),
-				confidentialClient({
-					id: "nodefault",
-					sections: {
-						...allowancesFor({ grants: ["authorization_code"], scopes: ["read"] }),
-						...redirectsFor([callback]),
-						...firstPartyFor(true),
-					},
-				}),
-				confidentialClient({
-					id: "openid-default",
-					sections: {
-						...allowancesFor({
-							grants: ["authorization_code"],
-							scopes: ["openid", "read"],
-							"default-scopes": ["openid"],
-						}),
-						...redirectsFor([callback]),
-						...firstPartyFor(true),
-					},
-				}),
-				confidentialClient({
-					id: "empty",
-					sections: {
-						...allowancesFor({ grants: ["authorization_code"], scopes: [], "default-scopes": [] }),
-						...redirectsFor([callback]),
-					},
-				}),
-				publicClient({
-					id: "pub",
-					sections: {
-						...allowancesFor({
-							grants: ["authorization_code"],
-							scopes: ["read"],
-							"default-scopes": ["read"],
-						}),
-						...redirectsFor(["http://[::1]:7000/cb"]),
-						...firstPartyFor(true),
-					},
-				}),
-			]),
-			...(options.asking === false ? { consent: {} } : consentConfig()),
-			// Most scenes here are not about OpenID Connect, so they leave out openid.
-			...authorizeConfig({
-				"oidc-mode": "dual",
-				"claims-parameter": options.claimsParameter ?? true,
-				...options.authorize,
-			}),
-			...acrConfig(options.acr ?? {}),
-			...codeGrantConfig({ "code-lifetime": "1m", ...options.codeGrant }),
-		},
-		runtime,
-	};
-	const app = await assemble(input);
-	await app.start();
-	stop = () => app.stop(1000);
-	const base = `http://127.0.0.1:${app.get(listening).port()}`;
-	const opened = app.get(sessions);
-	const login = async (
-		subject = "alice",
-		amr = ["pwd"],
-		authenticatedAt: number | "unknown" = runtime.clock.now(),
-	) => {
-		const facts = { subject, amr, authenticatedAt };
-		const { cookies } = await opened.complete(testRequest(), facts);
-		return cookies[0]?.split(";")[0] ?? "";
-	};
-	const authorize = async (params: Record<string, string> | string, cookie = "") => {
-		const query = typeof params === "string" ? params : new URLSearchParams(params).toString();
-		const res = await fetch(`${base}/oauth/authorize?${query}`, {
-			redirect: "manual",
-			headers: { "x-forwarded-proto": "https", "x-forwarded-for": "198.51.100.1", cookie },
-		});
-		const location = res.headers.get("location") ?? "";
-		return {
-			status: res.status,
-			location,
-			at: location ? new URL(location) : undefined,
-			text: await res.text(),
-		};
-	};
-	/** Redeems a code through the grant harness, answering as the token endpoint would. */
-	const token = async (
-		form: Record<string, string>,
-		id = "app",
-	): Promise<{ status: number; body: Record<string, unknown> }> => {
-		const params = { grant_type: "authorization_code", ...form };
-		const outcome = await app
-			.get(grantCalls)
-			.call("authorization_code", id, params)
-			.catch((error: unknown) => {
-				if (isUnavailable(error)) return undefined;
-				throw error;
-			});
-		if (!outcome) return { status: 503, body: { error: "temporarily_unavailable" } };
-		if (outcome.kind === "issued") return { status: 200, body: { ...outcome.body } };
-		const described = outcome.description ? { error_description: outcome.description } : {};
-		return { status: 400, body: { error: outcome.error, ...described } };
-	};
-	return {
-		app,
-		input,
-		simulated,
-		down,
-		login,
-		authorize,
-		token,
-		opened,
-		base,
-		events: audit.events,
-	};
-}
-
-/** The claim scopes oidc would contribute, here a stand-in: groups' scope is one no client is allowed. */
-const claimScopeTable = new Map([
-	["name", "read"],
-	["email", "write"],
-	["groups", "admin"],
-]);
-const scoping = defineModule({ name: "scoping", replicaSafe: false, takes: [] }, (m) => [
-	m.contribute(claimScopes).by(() => ({ scopeOf: (claim: string) => claimScopeTable.get(claim) })),
-]);
-
-/**
- * The hint reader oidc would contribute, here a stand-in: `id:<subject>` is an ID token it issued
- * naming that subject, expired or not, and any other none it takes.
- */
-const hinting = defineModule({ name: "hinting", replicaSafe: false, takes: [] }, (m) => [
-	m.contribute(hintReaders).by(() => ({
-		read: async (hint: string) =>
-			hint.startsWith("id:")
-				? ({ kind: "subject", subject: hint.slice(3) } as const)
-				: ({ kind: "invalid" } as const),
-	})),
-]);
-
-const request = (extra: Record<string, string> = {}) => ({
-	response_type: "code",
-	client_id: "app",
-	redirect_uri: callback,
-	state: "s1",
-	code_challenge: challenge,
-	code_challenge_method: "S256",
-	...extra,
-});
+afterEach(() => stopServed());
 
 describe("authorize: trust in the redirect URI", () => {
 	it("answers locally until the client and an exactly registered redirect URI are known [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a] [rfc6749-3.1.2.2-c] [rfc6749-10.1-b] [rfc6749-10.2-b] [rfc6749-10.14-a] [oidc-core-3.1.2.2-b]", async () => {
@@ -447,19 +133,6 @@ it("refuses a client not allowed the code grant with the token endpoint's words 
 });
 
 describe("authorize: session and consent", () => {
-	it("sends a request without a session to the login page, with the way back from the public origin [rfc6749-3.1-a]", async () => {
-		const { authorize } = await serve();
-		const res = await authorize(request());
-		expect(res.status).toBe(302);
-		expect(`${res.at?.origin}${res.at?.pathname}`).toBe("https://as.example/login");
-		const back = new URL(res.at?.searchParams.get("redirect_to") ?? "");
-		expect(`${back.origin}${back.pathname}`).toBe(`${issuer}/oauth/authorize`);
-		expect(back.searchParams.get("client_id")).toBe("app");
-		expect((await authorize(request({ prompt: "none" }))).at?.searchParams.get("error")).toBe(
-			"login_required",
-		);
-	});
-
 	it("asks a third party for consent, and lets it through once granted [rfc6749-10.12-a]", async () => {
 		const { app, authorize, login } = await serve();
 		const cookie = await login();
@@ -511,7 +184,7 @@ describe("authorize: session and consent", () => {
 	it("asks for a newer login on prompt=login, and takes each re-authentication once", async () => {
 		const { authorize, login } = await serve();
 		const old = await login();
-		now += 10_000;
+		advance(10_000);
 		const asked = await authorize(request({ prompt: "login" }), old);
 		expect(asked.at?.pathname).toBe("/login");
 		const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
@@ -522,7 +195,7 @@ describe("authorize: session and consent", () => {
 		);
 		const again = await authorize(request({ prompt: "login" }), old);
 		const resumed = new URL(again.at?.searchParams.get("redirect_to") ?? "");
-		now += 1000;
+		advance(1000);
 		const fresh = await login();
 		expect((await authorize(resumed.search.slice(1), fresh)).at?.searchParams.has("code")).toBe(
 			true,
@@ -537,7 +210,7 @@ describe("authorize: session and consent", () => {
 it("counts a login made at the very time a re-authentication was asked", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 10_000;
+	advance(10_000);
 	const asked = await authorize(request({ prompt: "login" }), old);
 	const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
 	const fresh = await login();
@@ -547,7 +220,7 @@ it("counts a login made at the very time a re-authentication was asked", async (
 it("counts a login from the moment the re-authentication was asked, to the millisecond, not one before it in the same second", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 10_500;
+	advance(10_500);
 	const resumeOf = async () => {
 		const asked = await authorize(request({ prompt: "login" }), old);
 		return new URL(asked.at?.searchParams.get("redirect_to") ?? "").search.slice(1);
@@ -623,20 +296,7 @@ describe("authorize: the section", () => {
 	});
 });
 
-/** The audit events of the latest composition. */
-let recorded: readonly AuditEvent[] = [];
-// Every authorize event a test records is one the module declares, with attributes it declares.
-afterEach(() => {
-	for (const { kind, attributes } of recorded.filter((e) => e.kind.startsWith("authorize."))) {
-		const known: readonly string[] = declared[kind as keyof typeof declared]?.attributes ?? [];
-		expect(known, `${kind} is declared`).not.toEqual([]);
-		expect(
-			Object.keys(attributes ?? {}).filter((name) => !known.includes(name)),
-			kind,
-		).toEqual([]);
-	}
-	recorded = [];
-});
+afterEach(() => eventsDeclared());
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
 const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
@@ -804,7 +464,7 @@ describe("authorize: the code grant", () => {
 		const s = await serve();
 		const cookie = await s.login();
 		const late = await codeOf(s, cookie);
-		now += 61_000;
+		advance(61_000);
 		expect(
 			(await s.token({ code: late, redirect_uri: callback, code_verifier: verifier })).body.error,
 		).toBe("invalid_grant");
@@ -927,7 +587,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 		const theirs = await authorize(request({ client_id: "third", prompt: "login" }));
 		const stolen =
 			new URL(theirs.at?.searchParams.get("redirect_to") ?? "").searchParams.get("reauth") ?? "";
-		now += 10_000;
+		advance(10_000);
 		const victim = await login();
 		// Another request's record is refused outright, never counted and never sent round.
 		expect(
@@ -935,7 +595,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 				"error",
 			),
 		).toBe("login_required");
-		now += 1000;
+		advance(1000);
 		expect(
 			(await authorize(request({ max_age: "0", reauth: stolen }), victim)).at?.searchParams.get(
 				"error",
@@ -946,11 +606,11 @@ describe("authorize: what the reviews asked to pin down", () => {
 	it("asks for a newer login past max_age, and lets the resumed request through after one", async () => {
 		const { authorize, login } = await serve();
 		const old = await login();
-		now += 120_000;
+		advance(120_000);
 		const asked = await authorize(request({ max_age: "60" }), old);
 		expect(asked.at?.pathname).toBe("/login");
 		const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
-		now += 1000;
+		advance(1000);
 		const fresh = await login();
 		expect((await authorize(resume.search.slice(1), fresh)).at?.searchParams.has("code")).toBe(
 			true,
@@ -1083,10 +743,10 @@ describe("authorize: what the reviews asked to pin down", () => {
 it("binds a re-authentication to the whole request", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 10_000;
+	advance(10_000);
 	const asked = await authorize(request({ prompt: "login" }), old);
 	const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
-	now += 1000;
+	advance(1000);
 	const fresh = await login();
 	resume.searchParams.set("state", "changed");
 	expect((await authorize(resume.search.slice(1), fresh)).at?.searchParams.get("error")).toBe(
@@ -1157,7 +817,7 @@ it("records a re-authentication only when one is asked for", async () => {
 it("does not count a re-authentication made for the same client with another state or challenge", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 10_000;
+	advance(10_000);
 	const reauthFor = async () => {
 		const asked = await authorize(request({ prompt: "login" }), old);
 		return (
@@ -1166,7 +826,7 @@ it("does not count a re-authentication made for the same client with another sta
 	};
 	const first = await reauthFor();
 	const second = await reauthFor();
-	now += 1000;
+	advance(1000);
 	const fresh = await login();
 	expect(
 		(
@@ -1194,7 +854,7 @@ it("writes nothing for a plain request without a session, even when writes would
 it("refuses a request back with a re-authentication record its parameters no longer match, as when the demand was taken out of it", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 10_000;
+	advance(10_000);
 	for (const asked of [{ prompt: "login" }, { max_age: "5" }]) {
 		const sent = await authorize(request(asked), old);
 		const resume = new URL(sent.at?.searchParams.get("redirect_to") ?? "");
@@ -1216,47 +876,25 @@ it("refuses a request back with a re-authentication record its parameters no lon
 it("takes max_age=0 as a login new to this request: met by one made after the asking, refused without one", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 1000;
+	advance(1000);
 	const sent = await authorize(request({ max_age: "0" }), old);
 	expect([sent.at?.pathname, sent.at?.searchParams.get("max_age")]).toEqual(["/login", "0"]);
 	const resume = new URL(sent.at?.searchParams.get("redirect_to") ?? "").search.slice(1);
 	expect((await authorize(resume, old)).at?.searchParams.get("error")).toBe("login_required");
 	const second = await authorize(request({ max_age: "0" }), old);
 	const resumed = new URL(second.at?.searchParams.get("redirect_to") ?? "").search.slice(1);
-	now += 1000;
+	advance(1000);
 	const fresh = await login();
 	expect((await authorize(resumed, fresh)).at?.searchParams.has("code")).toBe(true);
-});
-
-it("tells the login page the prompt=login and max_age the request asked, beside redirect_to, and nothing it did not ask", async () => {
-	const { authorize, login } = await serve();
-	const old = await login();
-	now += 120_000;
-	const both = await authorize(request({ prompt: "login", max_age: "60" }), old);
-	expect([
-		both.at?.pathname,
-		both.at?.searchParams.get("prompt"),
-		both.at?.searchParams.get("max_age"),
-	]).toEqual(["/login", "login", "60"]);
-	const aged = await authorize(request({ max_age: "60" }), old);
-	expect([aged.at?.searchParams.get("prompt"), aged.at?.searchParams.get("max_age")]).toEqual([
-		null,
-		"60",
-	]);
-	const plain = await authorize(request());
-	expect([plain.at?.searchParams.has("prompt"), plain.at?.searchParams.has("max_age")]).toEqual([
-		false,
-		false,
-	]);
 });
 
 it("refuses a request back from its login whose session is still not new enough, the time known, rather than sending it round again", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 10_000;
+	advance(10_000);
 	const asked = await authorize(request({ prompt: "login" }), old);
 	const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
-	now += 1000;
+	advance(1000);
 	// A login whose authentication time stays before the asking, as an upstream's within its clock allowance may.
 	const stale = await login("alice", ["pwd"], now - 5000);
 	const back = await authorize(resume.search.slice(1), stale);
@@ -1271,10 +909,10 @@ it("refuses a request back from its login whose session is still not new enough,
 it("never counts a login whose authentication time is unknown as the newer one prompt=login asks, and refuses it back from the login", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 10_000;
+	advance(10_000);
 	const asked = await authorize(request({ prompt: "login" }), old);
 	const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
-	now += 1000;
+	advance(1000);
 	const unknown = await login("alice", ["pwd"], "unknown");
 	const back = await authorize(resume.search.slice(1), unknown);
 	expect(back.at?.searchParams.get("error")).toBe("login_required");
@@ -1296,23 +934,23 @@ it("never counts a session whose authentication time is unknown within max_age, 
 
 it("judges max_age on the kernel's clock, the one its session's login time is on", async () => {
 	const { authorize, login } = await serve();
-	now += 120_000;
+	advance(120_000);
 	const cookie = await login();
-	now += 59_000;
+	advance(59_000);
 	expect((await authorize(request({ max_age: "60" }), cookie)).at?.searchParams.has("code")).toBe(
 		true,
 	);
-	now += 41_000;
+	advance(41_000);
 	expect((await authorize(request({ max_age: "60" }), cookie)).at?.pathname).toBe("/login");
 });
 
 it("hashes a re-authentication the same whatever the order of parameters or prompt words", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
-	now += 10_000;
+	advance(10_000);
 	const asked = await authorize(request({ prompt: "login consent" }), old);
 	const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
-	now += 1000;
+	advance(1000);
 	const fresh = await login();
 	const reordered = new URLSearchParams([...resume.searchParams].reverse());
 	reordered.set("prompt", "consent login login");
@@ -1442,10 +1080,10 @@ describe("authorize: one trip to raise the authentication", () => {
 	it("keeps a newer login asked by prompt=login across the trip to raise it", async () => {
 		const s = await serve(table);
 		const old = await s.login();
-		now += 10_000;
+		advance(10_000);
 		const asked = await s.authorize(request({ acr_values: "urn:test:mfa", prompt: "login" }), old);
 		const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
-		now += 1000;
+		advance(1000);
 		const fresh = await s.login();
 		const sent = await s.authorize(resume.search.slice(1), fresh);
 		expect(`${sent.at?.origin}${sent.at?.pathname}`).toBe("https://as.example/mfa");
@@ -1627,7 +1265,7 @@ describe("authorize: the claims a request names beyond its scope", () => {
 			expect(await error(s, acr("alice"), cookie)).toBe("unmet_authentication_requirements");
 			const both = { id_token: { sub: { value: "alice" } }, userinfo: { sub: { value: "bob" } } };
 			expect(await error(s, both, cookie)).toBe("login_required");
-			await stop();
+			await stopServed();
 		}
 	});
 
@@ -1654,7 +1292,7 @@ describe("authorize: the claims a request names beyond its scope", () => {
 				.slice(from)
 				.filter((l) => l.event === "authorize.claims_parameter_off");
 			expect(warned.length, String(claimsParameter)).toBe(claimsParameter ? 0 : 1);
-			await stop();
+			await stopServed();
 		}
 	});
 
@@ -2086,5 +1724,5 @@ describe("authorize: an id_token_hint", () => {
 it("takes all it names, in the composition its tests serve", async () => {
 	const { input } = await serve();
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
-	expect((await takesUnused(input))["authorize"]).toBeUndefined();
+	expect((await takesUnused(input)).authorize).toBeUndefined();
 });

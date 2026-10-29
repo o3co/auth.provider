@@ -40,8 +40,10 @@ export interface Trusted {
 	readonly one: (name: string) => string | undefined;
 	/** Each parameter's first value. */
 	readonly params: ReadonlyMap<string, string>;
-	/** The request itself, for the session it carries. */
+	/** The request itself, for the session it carries and its parameters as sent. */
 	readonly request: Parameters<Sessions["enter"]>[0];
+	/** A refusal `route` read in the request's form (a parameter repeated or too long): the flow's to answer. */
+	readonly refused?: Decision;
 }
 
 /** The endpoint's own URL and the issuer's, both resolved by the package. */
@@ -73,6 +75,9 @@ export interface FlowParts extends Place {
 	readonly hint: HintCheck;
 }
 
+/** The longest login URL sent, the request line many proxies take by default; a longer one is answered here. */
+const maxLoginUrl = 8192;
+
 /** Decides for a trusted request: a refusal, a page to go to, or the code and its subject. */
 export type Flow = (trusted: Trusted) => Promise<Decision>;
 
@@ -83,12 +88,43 @@ export function flowWith(parts: FlowParts): Flow {
 	const urlWith = (params: Iterable<readonly [string, string]>) =>
 		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
 
-	return async ({ client, redirectUri, one, params, request }) => {
+	/** The login page, `redirect_to` back to `back`, with the fresh login asked beside it. */
+	const sentToLogin = (
+		back: string,
+		fresh?: { readonly login: boolean; readonly maxAgeMs?: number | undefined },
+	) => {
+		const login = new URL(loginPage);
+		login.searchParams.set("redirect_to", back);
+		// The page hands these to a login it starts elsewhere, an upstream's, so that one is new too.
+		if (fresh?.login) login.searchParams.set("prompt", "login");
+		if (fresh?.maxAgeMs !== undefined)
+			login.searchParams.set("max_age", String(fresh.maxAgeMs / 1000));
+		return { kind: "send", to: login.href } as const;
+	};
+
+	// RFC 9700 §4.11.2: a refusal goes back only to a browser logged in, but for a silent request. The
+	// request comes back from its login as it was sent, repeated or long parameters and all, to be refused again.
+	const loggedInFirst = async (refused: Decision, { one, request }: Trusted): Promise<Decision> => {
+		if (refused.kind !== "refuse" || one("prompt")?.split(" ").includes("none")) return refused;
+		if (await entered.enter(request)) return refused;
+		const sent = [...request.query].flatMap(([name, values]) =>
+			values.map((v) => [name, v] as const),
+		);
+		const login = sentToLogin(urlWith(sent));
+		if (login.to.length <= maxLoginUrl) return login;
+		return {
+			kind: "answer",
+			error: refused.error,
+			...(refused.description ? { description: refused.description } : {}),
+		};
+	};
+
+	/** The request read up to its session: a refusal, or what the rest of the flow decides on. */
+	const readOf = async ({ client, one, params }: Trusted) => {
 		const denied = consent.denied(one);
 		if (denied) return denied;
 		const checked = checkRequest(client, one, params);
 		if (checked.kind !== "checked") return checked;
-		const { challenge, nonce, prompt } = checked;
 		const allowed = checkScope(client, one("scope"), issuer, openidRequired);
 		if (allowed.kind !== "allowed") return allowed;
 		// The names and the sub a claims request asks are OpenID Connect's alone, the names read only where
@@ -108,6 +144,15 @@ export function flowWith(parts: FlowParts): Flow {
 		const asked = stepUp.asked(one, params, claims);
 		// A sub asked is checked first, once the session is known: an acr refusal waits for it.
 		if (asked.kind !== "asked" && subs.length === 0) return asked;
+		return { kind: "read", checked, allowed, claims, subs, asked } as const;
+	};
+
+	return async (trusted) => {
+		const { client, redirectUri, one, params, request } = trusted;
+		const read = trusted.refused ?? (await readOf(trusted));
+		if (read.kind !== "read") return loggedInFirst(read, trusted);
+		const { checked, allowed, claims, subs, asked } = read;
+		const { challenge, nonce, prompt } = checked;
 
 		const without = (...names: string[]) => {
 			const kept = new Map(params);
@@ -129,17 +174,13 @@ export function flowWith(parts: FlowParts): Flow {
 			if (need.login || need.maxAgeMs !== undefined || need.knownTime) {
 				resume.set("reauth", await reauths.remember(params, clock.now()));
 			}
-			const login = new URL(loginPage);
-			login.searchParams.set("redirect_to", urlWith(resume));
-			// The page hands these to a login it starts elsewhere, an upstream's, so that one is new too.
-			if (need.login) login.searchParams.set("prompt", "login");
-			if (need.maxAgeMs !== undefined)
-				login.searchParams.set("max_age", String(need.maxAgeMs / 1000));
-			return { kind: "send", to: login.href };
+			return sentToLogin(urlWith(resume), need);
 		};
 		const taken = await reauths.take(one("reauth"), params);
 		// Back with a record that is not this request's (spent, unknown, or its demand taken out): never let through.
-		if (params.has("reauth") && taken === undefined) return refusal("login_required");
+		if (params.has("reauth") && taken === undefined) {
+			return loggedInFirst(refusal("login_required"), trusted);
+		}
 
 		const session = await entered.enter(request);
 		if (!session) return toLogin();
