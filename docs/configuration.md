@@ -779,6 +779,7 @@ From `@mod/webauthn`.
 | `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost, with `kernel.environment = development`), or Android app origins. |
 | `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
+| `webauthn.algorithms` | list of EdDSA \| ES256 \| RS256 | `["EdDSA","ES256","RS256"]` |  |  |  | The signature algorithms a passkey may use, offered at registration in this order: EdDSA, ES256 or RS256, at least one. A passkey of one left out can no longer sign in. |
 
 ## webauthn-login
 
