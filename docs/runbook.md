@@ -141,7 +141,7 @@ Only a value a `previous` key sealed is sealed again; one `next` sealed is newer
 
 > **A rolling upgrade under `kernel.deployment = multi` makes sessions unavailable while old and new instances run together.** An instance cannot read a session record that a newer instance wrote: it lets nobody in on it and answers a login or logout on that cookie with 503. The cookie stays, and the session works again once every instance runs the new version. Upgrade all instances together, or expect 503s on session routes until the rollout ends.
 
-- Stored records keep their names within a version. A new version that changes a record's shape reads the old one for the record's lifetime.
+- Stored records keep their names within a version. A new version that changes a record's shape reads the one before it (N−1) as well as its own, never older ones ([design.md's Decisions](design.md#decisions)).
 - Changing `redis.prefix` starts from empty state: every key, sessions, refresh tokens, the denylist, lockouts and MFA factors included, lives under the prefix.
 - `create-auth-provider` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-auth-provider <target> --add <feature>`) and carry your configuration over.
 - A boot that refuses exits with status 78 and prints each refusal on stderr, by setting path and never by value. Fix every refusal it lists; they are reported together.
