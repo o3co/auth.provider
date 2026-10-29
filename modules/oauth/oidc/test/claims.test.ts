@@ -69,9 +69,11 @@ describe("the claim table", () => {
 	});
 
 	it("reads email_verified from users' attribute of that name alone", async () => {
-		const verified = { [userAttribute.emailVerified]: true };
-		expect(await released(verified, ["email"])).toEqual({ email_verified: true });
-		expect(await released({ emailVerified: true }, ["email"])).toEqual({});
+		// Beside the email, where users takes a verification.
+		const email = "alice@example.com";
+		const verified = { email, [userAttribute.emailVerified]: true };
+		expect(await released(verified, ["email"])).toEqual({ email, email_verified: true });
+		expect(await released({ email, emailVerified: true }, ["email"])).toEqual({ email });
 	});
 
 	it("releases groups for groups", async () => {

@@ -207,6 +207,23 @@ it("refuses to start on an attribute value users does not accept, naming the att
 	});
 });
 
+it("refuses to start on an email's verification without the email, as a ledger's is left out", async () => {
+	for (const verified of [true, false]) {
+		const attributes = { name: "Alice", email_verified: verified };
+		const refused = (await boot([testUser("a", "p", { attributes })]).catch(
+			(error) => error,
+		)) as BootRefused;
+		expect(refused.refusals, String(verified)).toEqual([
+			{
+				where: "users.registered.0.attributes.email_verified",
+				reason: "only beside the user's email",
+			},
+		]);
+	}
+	const beside = { email: "alice@example.com", email_verified: false };
+	await expect(boot([testUser("a", "p", { attributes: beside })])).resolves.toBeDefined();
+});
+
 it("links an upstream identity as its IdP's name and upstream subject, matched exactly, and once", async () => {
 	const hash = testPasswordHash("p");
 	const app = await boot([
