@@ -70,17 +70,6 @@ export function settling(
 		...(await stores.issuedAccess.members(id)).map(({ member }) => member),
 		...(await stores.issuedAccess.awaiting(id)),
 	];
-	/** Revokes what the family issued and this pass has not yet, then settles those that awaited. */
-	const revokeListed = async (id: string, gone: Set<string>) => {
-		for (const member of await issuedBy(id)) {
-			if (gone.has(member)) continue;
-			await revokeMember(member);
-			gone.add(member);
-		}
-		for (const member of await stores.issuedAccess.awaiting(id)) {
-			await stores.issuedAccess.settled(id, member);
-		}
-	};
 	// Revokes a family and what it issued. Listed first, so `sweep` finishes one stopped halfway; the
 	// mark is written even with no record, so a family being started now never comes alive.
 	const revokeFamily = async (id: string) => {
@@ -93,16 +82,17 @@ export function settling(
 			// A family placed meanwhile is marked when the revocation is tried again.
 			if (written !== "created") throw new Unavailable("refresh");
 		}
+		// Cleanup after the mark, which already refuses every token of the family: those its cap
+		// pushed out too, each settled only once this pass revoked it.
 		const gone = new Set<string>();
-		await revokeListed(id, gone);
-		// A refresh begun before the mark may list a token after this pass read the list, and fail to
-		// revoke it on its own pass: read again once done, so this pass never clears what it left.
-		for (;;) {
-			await stores.settles.done(id);
-			if ((await issuedBy(id)).every((member) => gone.has(member))) return;
-			await stores.settles.add(id);
-			await revokeListed(id, gone);
+		for (const member of await issuedBy(id)) {
+			await revokeMember(member);
+			gone.add(member);
 		}
+		for (const member of await stores.issuedAccess.awaiting(id)) {
+			if (gone.has(member)) await stores.issuedAccess.settled(id, member);
+		}
+		await stores.settles.done(id);
 	};
 	const sweep = async () => {
 		const { failed } = await stores.settles.each(revokeFamily);
@@ -184,6 +174,11 @@ export async function participantOver(c: BuildContext<Settings>) {
 		closing: async (session: { readonly id: string }) => {
 			for (const { member } of await stores.sessionFamilies.members(session.id)) {
 				await revoker.revokeFamily(member);
+			}
+			// Those its cap pushed out whose revocation never got through: revoked here, then settled.
+			for (const member of await stores.sessionFamilies.awaiting(session.id)) {
+				await revoker.revokeFamily(member);
+				await stores.sessionFamilies.settled(session.id, member);
 			}
 		},
 	};

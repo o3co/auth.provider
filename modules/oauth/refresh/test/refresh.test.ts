@@ -130,6 +130,36 @@ type Options = {
 	caps?: { sessionFamilies: number; issuedAccess: number };
 };
 
+/** Real references to revoke: each the first access token of a family of its own, which lives, so only the denylist ends it. */
+async function othersOf(s: Awaited<ReturnType<typeof serve>>, n: number) {
+	const found: { readonly reference: string; readonly access: string | undefined }[] = [];
+	for (let i = 0; i < n; i++) {
+		const other = await s.redeem();
+		const [listed] = await s.stores.byFamily.members(familyNameOf(other.refresh_token));
+		found.push({ reference: listed?.member ?? "", access: other.access_token });
+	}
+	return found;
+}
+
+/** A family whose cap of two pushed out its first access token, whose revocation failed: the token's reference. */
+async function pushedOutFamily() {
+	const s = await serve({
+		lifetime: 86_400,
+		accessLifetime: 600,
+		caps: { sessionFamilies: 1000, issuedAccess: 2 },
+	});
+	const first = await s.redeem();
+	shift += 1000;
+	const second = await s.refresh(first.refresh_token);
+	shift += 1000;
+	referenced.length = 0;
+	s.down.tokens.failNext("revokeReferenced");
+	expect((await s.refresh(second.body.refresh_token)).status).toBe(503);
+	const [pushed] = referenced;
+	expect(pushed?.done).toBe(false);
+	return { s, first, second, pushed: pushed?.reference ?? "" };
+}
+
 /** What `serve` assembles, with the stand-ins it reaches into. */
 function assembly(options: Options = {}) {
 	const simulated = simulatedStore();
@@ -336,8 +366,10 @@ function selectionStores() {
 }
 /** The access tokens issued, in order, as tokens issued them. */
 const issuedTokens: string[] = [];
-/** The references each revocation was asked for, in order, and whether it was carried out. */
+/** The references each revocation was asked for, in order, and whether tokens put each on its denylist. */
 const referenced: { readonly reference: string; readonly done: boolean }[] = [];
+/** Runs once, as the next revocation is asked for, before it is carried out. */
+let duringRevoke: (() => Promise<void>) | undefined;
 const capturing = {
 	// Over an empty target: the tokens handed in are frozen, so their own members cannot be swapped.
 	wrap: (inner: Tokens) =>
@@ -345,11 +377,14 @@ const capturing = {
 			get: (_target, prop) => {
 				if (prop === "revokeReferenced") {
 					return async (reference: string) => {
+						const during = duringRevoke;
+						duringRevoke = undefined;
+						if (during) await during();
 						const out = await inner.revokeReferenced(reference).catch((error: unknown) => {
 							referenced.push({ reference, done: false });
 							throw error;
 						});
-						referenced.push({ reference, done: true });
+						referenced.push({ reference, done: out.kind === "revoked" });
 						return out;
 					};
 				}
@@ -1037,18 +1072,21 @@ describe("refresh tokens", () => {
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
 	});
 
-	it("answer a revocation the sweep finished 200, and none before [guarantee-3-g]", async () => {
-		const s = await serve();
-		const first = await s.redeem();
-		const hinted = { token: first.refresh_token ?? "", token_type_hint: "refresh_token" };
+	it("answer a revocation the sweep finished 200, and none before, its pushed-out token revoked with the rest [guarantee-3-g]", async () => {
+		const { s, second, pushed } = await pushedOutFamily();
+		const hinted = { token: second.body.refresh_token ?? "", token_type_hint: "refresh_token" };
 		s.down.tokens.unavailable("revokeReferenced");
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		// Marked, so refused at once, whatever the denylist holds yet.
+		expect(await s.active(second.body.access_token)).toBe(false);
+		expect((await s.refresh(second.body.refresh_token)).body.error).toBe("invalid_grant");
 		await new Promise((resolve) => setTimeout(resolve, 1300));
 		// Its sweep failed as well: still pending, so still not answered revoked.
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
 		s.down.tokens.restore();
 		await new Promise((resolve) => setTimeout(resolve, 1300));
 		expect(s.stores.kept.pending()).toEqual([]);
+		expect(referenced).toContainEqual({ reference: pushed, done: true });
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
 	});
 
@@ -1239,57 +1277,70 @@ describe("refresh tokens", () => {
 	});
 
 	it("revoke with their family the access token a cap pushed out and failed to revoke [guarantee-3-g]", async () => {
-		const s = await serve({
-			lifetime: 86_400,
-			accessLifetime: 600,
-			caps: { sessionFamilies: 1000, issuedAccess: 2 },
-		});
-		const first = await s.redeem();
-		shift += 1000;
-		const second = await s.refresh(first.refresh_token);
-		shift += 1000;
-		referenced.length = 0;
-		s.down.tokens.failNext("revokeReferenced");
-		expect((await s.refresh(second.body.refresh_token)).status).toBe(503);
-		const [pushed] = referenced;
-		expect(pushed?.done).toBe(false);
+		const { s, second, pushed } = await pushedOutFamily();
 		const hinted = { token: second.body.refresh_token ?? "", token_type_hint: "refresh_token" };
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
-		expect(referenced.filter((r) => r.done).map((r) => r.reference)).toContain(pushed?.reference);
+		expect(referenced).toContainEqual({ reference: pushed, done: true });
 		expect(s.stores.kept.pending()).toEqual([]);
 	});
 
-	it("revoke every member of their family before the revocation is answered, one failing among them [guarantee-3-g]", async () => {
-		const s = await serve();
-		const first = await s.redeem();
-		const second = await s.refresh(first.refresh_token);
-		const third = await s.refresh(second.body.refresh_token);
-		const hinted = { token: third.body.refresh_token ?? "", token_type_hint: "refresh_token" };
-		referenced.length = 0;
+	it("revoke a pushed-out token with the rest before a retry is answered, one revocation failing first [guarantee-3-g]", async () => {
+		const { s, second, pushed } = await pushedOutFamily();
+		const hinted = { token: second.body.refresh_token ?? "", token_type_hint: "refresh_token" };
 		s.down.tokens.failNext("revokeReferenced");
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
-		const done = new Set(referenced.filter((r) => r.done).map((r) => r.reference));
-		expect(done.size).toBe(3);
+		expect(referenced).toContainEqual({ reference: pushed, done: true });
 		expect(s.stores.kept.pending()).toEqual([]);
 	});
 
-	it("keep a family pending that another pass listed a member for, and failed on, as this one finished [guarantee-3-g]", async () => {
-		const s = await serve();
+	it("leave awaiting, never settled, a token a cap pushed out while the family is revoked, and refuse the family's tokens all the same [guarantee-3-g]", async () => {
+		const s = await serve({ caps: { sessionFamilies: 1000, issuedAccess: 2 } });
 		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
 		const id = familyNameOf(first.refresh_token);
-		const hinted = { token: first.refresh_token ?? "", token_type_hint: "refresh_token" };
-		// A refresh begun before the mark lists its access token after this pass read the list, and
-		// fails to revoke it on its own pass.
-		s.stores.landingBeforeDone(async () => {
-			await s.stores.byFamily.add(id, "late-member", 60_000);
-			s.down.tokens.failNext("revokeReferenced");
-		});
-		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
-		expect(s.stores.kept.pending()).toEqual([id]);
-		referenced.length = 0;
+		const [short, long] = await othersOf(s, 2);
+		const hinted = { token: second.body.refresh_token ?? "", token_type_hint: "refresh_token" };
+		// A refresh begun before the mark lists two tokens as this pass revokes: the first ends soonest,
+		// so the second pushes it out, and it awaits, neither held nor read by this pass.
+		duringRevoke = async () => {
+			await s.stores.byFamily.add(id, short?.reference ?? "", 1000);
+			await s.stores.byFamily.add(id, long?.reference ?? "", 86_400_000);
+		};
 		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
-		expect(referenced).toContainEqual({ reference: "late-member", done: true });
+		// Its cleanup left for later, never settled unrevoked: it still awaits.
+		expect(await s.stores.byFamily.awaiting(id)).toContain(short?.reference);
+		expect(await s.active(second.body.access_token)).toBe(false);
+		expect((await s.refresh(second.body.refresh_token)).body.error).toBe("invalid_grant");
+	});
+
+	it("revoke at a session's close the families its cap pushed out of its list [guarantee-3-g]", async () => {
+		const s = await serve({ caps: { sessionFamilies: 1, issuedAccess: 1000 } });
+		const [pushed, kept] = ["p".repeat(22), "k".repeat(22)];
+		await s.stores.bySession.add(s.session.id, pushed, 60_000);
+		await s.stores.bySession.add(s.session.id, kept, 120_000);
+		await s.app.get(sessions).close(s.session.id);
+		expect(s.stores.kept.peek(pushed)).toEqual({ format: 1, revoked: true });
+		expect(s.stores.kept.peek(kept)).toEqual({ format: 1, revoked: true });
+	});
+
+	it("issue no first token from a family its session's cap pushed out and revoked as it started [guarantee-3-g]", async () => {
+		const s = await serve({ caps: { sessionFamilies: 1, issuedAccess: 1000 } });
+		let started = "";
+		// Saved, and before its first token is listed, another code of the session pushes it out.
+		s.stores.landingBeforeAccess(async (id) => {
+			started = id;
+			await s.redeem();
+		});
+		referenced.length = 0;
+		const first = await s.redeem();
+		expect(first.refresh_token).toBeUndefined();
+		expect(s.stores.kept.peek(started)).toEqual({ format: 1, revoked: true });
+		const listed = await s.stores.byFamily.members(started);
+		expect(listed.length).toBe(1);
+		for (const { member } of listed) {
+			expect(referenced).toContainEqual({ reference: member, done: true });
+		}
 		expect(s.stores.kept.pending()).toEqual([]);
 	});
 
