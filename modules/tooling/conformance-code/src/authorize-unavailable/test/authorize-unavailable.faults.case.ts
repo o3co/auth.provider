@@ -44,6 +44,8 @@ async function authorize(browser: ReturnType<typeof browserOn>) {
 		status: res.status,
 		code: back?.searchParams.get("code") ?? undefined,
 		error: back?.searchParams.get("error") ?? undefined,
+		/** Whether the answer carried a Location: a page or the redirect URI to go on to. */
+		sentOn: res.at !== undefined,
 		// The endpoint's own error, where it answered and sent nothing on.
 		own: res.at ? undefined : (JSON.parse(res.text || "{}") as { error?: string }).error,
 		at: performance.now(),
@@ -53,14 +55,22 @@ async function authorize(browser: ReturnType<typeof browserOn>) {
 /** The answer to a fault before the browser's session is found: the endpoint's own 503, nothing sent back. */
 const unanswered = {
 	status: 503,
+	sentOn: false,
 	code: undefined,
 	error: undefined,
 	own: "temporarily_unavailable",
 };
 /** The client's answer to a fault once the session is found: a redirect with temporarily_unavailable, no code. */
-const sentBack = { status: 302, code: undefined, error: "temporarily_unavailable", own: undefined };
+const sentBack = {
+	status: 302,
+	sentOn: true,
+	code: undefined,
+	error: "temporarily_unavailable",
+	own: undefined,
+};
 const shape = (a: Awaited<ReturnType<typeof authorize>>) => ({
 	status: a.status,
+	sentOn: a.sentOn,
 	code: a.code,
 	error: a.error,
 	own: a.own,
@@ -209,6 +219,11 @@ describe("the authorization endpoint issuing no code while the store cannot answ
 			expect(shape(answer)).toEqual(sentBack);
 			await awake;
 			await healed(d, a);
+			// Once Redis is back, the held write never landed: no write under its mark succeeded.
+			const landed = a.relay
+				.executions(codeKept)
+				.filter((e) => e.succeeded && sameMark(held.command, e.command));
+			expect(landed).toEqual([]);
 		});
 	});
 
