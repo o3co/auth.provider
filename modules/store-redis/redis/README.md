@@ -53,7 +53,7 @@
 - Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.
 
 ## Depends on
-- `kernel`, `store`, `tls-options` (`tlsOptions`, `isFloor`)
+- `kernel`, `store`, `tls-options` (`tlsOptions`, `isFloor`, `heldToFloor`)
 
 ## Vocabulary
 - slot: the range of keys one node holds; a partition fits in one.
