@@ -288,7 +288,7 @@ From `@mod/jwt-bearer`.
 |---|---|---|---|---|---|---|
 | `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is","conditions":{"subject-prefix":"REPLACE-SUBJECT-PREFIX"}}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. An entry's keys are `issuer`; `keys`, or `jwks-uri` with `accept-key-set-elsewhere`, or neither; `subject`, `upstream`, `subject-is-key-thumbprint`, `self-issued-prefix`, `conditions`, `accept-any-subject`, `ceiling`, `max-assertion-lifetime`, `clock-skew`, `profile` and `client`; and `algorithms`, which only an entry without `keys` takes; `jwt-bearer`'s internal module `issuers` says what each takes. |
 | `jwt-bearer.delegated-issuers` | list of string | `[]` |  |  |  | Issuers whose assertions another module checks by its own rules, each exactly as sent: their audience is an app, not this server, so RFC 7523 §3 does not hold. Each needs the one module that checks it. |
-| `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | How far ahead its `exp`, and how far back its `iat`, an assertion may be when it is taken, from `1s` to `1d` in whole seconds. |
+| `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | How far ahead its `exp` an assertion may be when it is taken, and how far its `exp` may be from its `iat`, from `1s` to `1d` in whole seconds. |
 | `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
 
 ## kernel

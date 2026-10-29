@@ -204,7 +204,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `jwt-bearer.issuers.<i>.accept-key-set-elsewhere` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
 | `jwt-bearer.issuers.<i>.client` | `@mod/jwt-bearer` |  | a request naming no client is taken as this public client, its assertions alone identifying it; warned at boot |
 | `jwt-bearer.issuers.<i>.self-issued-prefix` | `@mod/jwt-bearer` |  | any signer whose contributed key's thumbprint follows this prefix in `iss` and `sub` is taken as this issuer |
-| `jwt-bearer.max-assertion-lifetime` | `@mod/jwt-bearer` | `"1h"` | past the default hour, up to a day: a jwt-bearer assertion is taken that far ahead or back |
+| `jwt-bearer.max-assertion-lifetime` | `@mod/jwt-bearer` | `"1h"` | past the default hour, up to a day: a jwt-bearer assertion is taken with its `exp` that far ahead, and its `exp` no further from its `iat` |
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
 | `login-passkey.attempts` | `@mod/login-passkey` | `20` | raised, up to 100: more requests from one source in each window |
