@@ -11,6 +11,7 @@
 ## 2 ID Token
 
 - **oidc-core-2-a** MUST: an ID token carries `iss`, the issuer identifier: an `https` URL with no query or fragment.
+  note: N-https
 - **oidc-core-2-b** MUST: an ID token carries `sub`.
 - **oidc-core-2-c** MUST NOT: `sub` exceeds 255 ASCII characters.
 - **oidc-core-2-d** MUST: an ID token carries `aud`.
