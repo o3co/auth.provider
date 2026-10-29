@@ -40,7 +40,7 @@ it("describes each key by its schema: type and bounds, default, whether required
 		{ key: "s.mode", type: "a | b", default: "a", required: false },
 		{ key: "s.size", type: "integer (1–10)", default: 5, required: false },
 		{ key: "s.hosts", type: "list of string", required: false },
-		{ key: "s.retry.max-ms", type: "number", required: false },
+		{ key: "s.retry.max-ms", type: "number", required: false, within: "s.retry" },
 	]);
 	expect(
 		referenceOf([{ section: "s", owner: "@mod/s", rows: rowsOf(schema, ["s"], at) }]),
@@ -56,13 +56,30 @@ it("writes an example of several lines on one line of its table, as JSON writes 
 	expect(line).toContain('`"-----BEGIN KEY-----\\nREPLACE-KEY\\n-----END KEY-----"`');
 });
 
-it("requires a key inside an object only when the object is required too", () => {
-	const key = { type: "object", required: ["id"], properties: { id: { type: "string" } } };
-	const schema = { type: "object", required: ["current"], properties: { current: key, next: key } };
-	expect(rowsOf(schema, ["k"], () => ({}))).toEqual([
+it("requires a key inside an optional object only once the object is set, and holds its default only then", () => {
+	const key = {
+		type: "object",
+		required: ["id"],
+		properties: { id: { type: "string" }, alg: { type: "string", default: "a" } },
+	};
+	const schema = {
+		type: "object",
+		required: ["current"],
+		properties: { current: key, next: key, kept: { ...key, default: {} } },
+	};
+	const rows = rowsOf(schema, ["k"], () => ({}));
+	expect(rows).toEqual([
 		{ key: "k.current.id", type: "string", required: true },
-		{ key: "k.next.id", type: "string", required: false },
+		{ key: "k.current.alg", type: "string", default: "a", required: false },
+		{ key: "k.next.id", type: "string", required: true, within: "k.next" },
+		{ key: "k.next.alg", type: "string", default: "a", required: false, within: "k.next" },
+		{ key: "k.kept.id", type: "string", required: false },
+		{ key: "k.kept.alg", type: "string", default: "a", required: false },
 	]);
+	const table = referenceOf([{ section: "k", owner: "@mod/k", rows }]);
+	expect(table).toContain("| `k.current.id` | string |  | yes |");
+	expect(table).toContain("| `k.next.id` | string |  | when `k.next` is set |");
+	expect(table).toContain("| `k.next.alg` | string | `a` when `k.next` is set |  |");
 });
 
 it("merges the keys of a union of objects, required only where every variant requires them", () => {

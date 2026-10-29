@@ -26,7 +26,10 @@ export interface Row {
 	readonly key: string;
 	readonly type: string;
 	readonly default?: unknown;
+	/** With `within`, required once that object is set. */
 	readonly required: boolean;
+	/** The optional object the key lies in, nearest first: its default and requiredness hold only once that is set. */
+	readonly within?: string;
 	readonly env?: string;
 	readonly example?: unknown;
 	readonly description?: string;
@@ -74,27 +77,33 @@ function objectOf(s: JsonSchema): JsonSchema | undefined {
 
 /**
  * Each key of a schema, objects with properties walked into; `at` reads the fragment's value and
- * env. A key is required only where every object holding it is required too.
+ * env. A key inside an object neither required nor defaulted lies `within` it: its default and
+ * requiredness hold once that object is set. Inside a defaulted object no key is required.
  */
 export function rowsOf(
 	schema: JsonSchema,
 	path: readonly string[],
 	at: (key: string) => { readonly env?: string; readonly example?: unknown },
 	held = true,
+	within?: string,
 ): Row[] {
 	const object = objectOf(schema);
 	return Object.entries(object?.properties ?? {}).flatMap(([name, s]) => {
 		const keyPath = [...path, name];
-		const required = held && (object?.required ?? []).includes(name) && s.default === undefined;
+		const own = (object?.required ?? []).includes(name) && s.default === undefined;
 		const inner = objectOf(s);
-		if (inner) return rowsOf(inner, keyPath, at, required);
+		if (inner) {
+			if (own || s.default !== undefined) return rowsOf(inner, keyPath, at, held && own, within);
+			return rowsOf(inner, keyPath, at, true, keyPath.join("."));
+		}
 		const key = keyPath.join(".");
 		return [
 			{
 				key,
 				type: typeOf(s),
 				...(s.default === undefined ? {} : { default: s.default }),
-				required,
+				required: held && own,
+				...(within === undefined ? {} : { within }),
 				...at(key),
 				...(s.description ? { description: s.description } : {}),
 			},
@@ -209,6 +218,12 @@ const cell = (value: unknown) =>
 		: `\`${(typeof value === "string" && !value.includes("\n") ? value : JSON.stringify(value)).replaceAll("|", "\\|")}\``;
 const text = (value: string | undefined) =>
 	(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " ");
+/** A row's default and requiredness cells, each holding only once the object it lies within is set. */
+const held = (r: Row) => {
+	const once = r.within === undefined ? "" : ` when \`${r.within}\` is set`;
+	const fallback = r.default === undefined ? "" : `${cell(r.default)}${once}`;
+	return { fallback, required: r.required ? (once ? once.trimStart() : "yes") : "" };
+};
 
 /** The reference, generated: one table per section, then one per client metadata section and per IdP type. */
 export function referenceOf(
@@ -217,10 +232,10 @@ export function referenceOf(
 	types: readonly Omit<ClientSection, "schema">[] = [],
 ): string {
 	const blocks = sections.map(({ section, owner, rows }) => {
-		const lines = rows.map(
-			(r) =>
-				`| \`${r.key}\` | ${text(r.type)} | ${cell(r.default)} | ${r.required ? "yes" : ""} | ${r.env ? `\`${r.env}\`` : ""} | ${cell(r.example)} | ${text(r.description)} |`,
-		);
+		const lines = rows.map((r) => {
+			const { fallback, required } = held(r);
+			return `| \`${r.key}\` | ${text(r.type)} | ${fallback} | ${required} | ${r.env ? `\`${r.env}\`` : ""} | ${cell(r.example)} | ${text(r.description)} |`;
+		});
 		return [
 			`## ${section}`,
 			"",
@@ -258,10 +273,10 @@ const contributedBlocks = (
 			"",
 			"| Key | Type | Default | Required | Description |",
 			"|---|---|---|---|---|",
-			...rows.map(
-				(r) =>
-					`| \`${r.key}\` | ${text(r.type)} | ${cell(r.default)} | ${r.required ? "yes" : ""} | ${text(r.description)} |`,
-			),
+			...rows.map((r) => {
+				const { fallback, required } = held(r);
+				return `| \`${r.key}\` | ${text(r.type)} | ${fallback} | ${required} | ${text(r.description)} |`;
+			}),
 		].join("\n"),
 	);
 
@@ -307,22 +322,33 @@ const hoconValue = (value: unknown) =>
 		? value
 		: JSON.stringify(value);
 
-/** A section's defaults as HOCON, for an operator to read: each key, described, with its default or what it needs. */
+/**
+ * A section's defaults as HOCON, for an operator to read: each key, described, with its default or
+ * what it needs; a key within an optional object only as a comment, as it holds once that is set.
+ */
 export function referenceConfOf({
 	section,
 	owner,
 	rows,
 }: Omit<Section, "dir" | "schema" | "unfixed">): string {
 	const keys = rows.flatMap((r) => {
-		const key = r.key.split(".").slice(1).map(hoconKey).join(".");
+		const inSection = (path: string) => path.split(".").slice(1).map(hoconKey).join(".");
+		const key = inSection(r.key);
 		const about = (r.description ?? "")
 			.split("\n")
 			.filter(Boolean)
 			.map((line) => `\t# ${line}`);
+		const needs = r.required ? "required" : "optional";
+		if (r.within !== undefined) {
+			const once = `when ${inSection(r.within)} is set`;
+			const value =
+				r.default !== undefined
+					? `\t# ${key} = ${hoconValue(r.default)} (${once})`
+					: `\t# ${key}: ${needs} ${once}`;
+			return [...about, value];
+		}
 		const value =
-			r.default !== undefined
-				? `\t${key} = ${hoconValue(r.default)}`
-				: `\t# ${key}: ${r.required ? "required" : "optional"}`;
+			r.default !== undefined ? `\t${key} = ${hoconValue(r.default)}` : `\t# ${key}: ${needs}`;
 		return [...about, value];
 	});
 	return [
