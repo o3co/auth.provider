@@ -649,7 +649,7 @@
 - **oidc-core-9-k** SHOULD: with `private_key_jwt`, the OP takes its token endpoint's URL as the JWT's audience.
   deviates: D-1
 - **oidc-core-9-l** MUST: with `private_key_jwt`, the OP takes a JWT once only, by its `jti`, unless reuse was negotiated with the client.
-- **oidc-core-9-m** MUST NOT: with `private_key_jwt`, the OP takes a JWT on or after its `exp`.
+- **oidc-core-9-m** MUST NOT: with `private_key_jwt`, the OP takes a JWT on or after its `exp`, beyond the small leeway for clock skew RFC 7523 §3 allows.
 - **oidc-core-9-n** MUST: with `private_key_jwt`, the OP refuses a JWT without `iss`, `sub`, `aud`, `jti` or `exp`.
 - **oidc-core-9-o** MUST: the OP ignores claims of a client authentication JWT it does not understand.
 - **oidc-core-9-p** MUST: the OP takes the client authentication JWT from `client_assertion` alone.
