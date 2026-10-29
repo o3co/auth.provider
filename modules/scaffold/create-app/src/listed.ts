@@ -7,9 +7,6 @@ import { auditReceiversLine, chosenLines } from "./patterns/chosen.ts";
 const memoryStore = "@mod/store";
 
 /** Writes the app of `listed`, with what they need to run and the sink, into the plan's target; `index` as `generateFull` takes it. */
-/** The modules that issue what must be revocable, and so refuse `tokens.revocation = unsupported`. */
-const revocable = ["@mod/code-grant", "@mod/refresh", "@mod/session-tokens"];
-
 export async function generateListed(
 	plan: { readonly target: string; readonly workspace?: string; readonly outside?: OutsidePlan },
 	listed: readonly string[],
@@ -42,10 +39,8 @@ function decidedLines(modules: readonly string[]): string[] {
 			: "- `kernel.deployment`: `single` for one instance, `multi` for several.",
 		...(modules.includes("@mod/tokens")
 			? [
-					// Codes and refresh tokens must be revocable: their modules refuse `unsupported`.
-					revocable.some((name) => modules.includes(name))
-						? "- `tokens.revocation`: `denylist`, as this app issues codes or refresh tokens, which must be revocable."
-						: "- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported.",
+					// Which modules refuse `unsupported` is theirs to check at boot, not this guide's to list.
+					"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
 				]
 			: []),
 		...(modules.includes("@mod/audit")

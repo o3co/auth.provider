@@ -132,7 +132,7 @@ it("reads its fragments' scalars from env and writes their lists locally, with a
 	const guide = await readFile(join(target, "README.md"), "utf8");
 	expect(guide).toContain("from the modules listed: `@mod/tokens`.");
 	expect(guide).toContain(
-		"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported.",
+		"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
 	);
 	expect(guide).toContain("with `openssl rand -base64 32`");
 	// Its store is kept in memory: accepted, one instance, and Redis named for more.
@@ -157,10 +157,6 @@ it("promises no http, port or health check to a listed app that composes no http
 it("boots a listed app on its generated configuration filled, holding what its modules need, and stops on SIGTERM", async () => {
 	const target = await mkdtemp(join(tmpdir(), "create-app-"));
 	await generate({ target, modules: ["@mod/code-grant"], workspace: root });
-	// Its codes must be revocable, so its guide offers no `unsupported`.
-	expect(await readFile(join(target, "README.md"), "utf8")).toContain(
-		"- `tokens.revocation`: `denylist`, as this app issues codes or refresh tokens, which must be revocable.",
-	);
 	await linked(target);
 	// The generated file alone is refused only for keys the guide names.
 	await refusesGeneratedOnlyForNamedKeys(target);

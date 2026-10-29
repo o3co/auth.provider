@@ -113,9 +113,9 @@ describe.each(named)("the pattern %s", (name) => {
 		);
 		expect(readme).toContain("`create-auth-provider --list`");
 		expect(readme).toContain("with `openssl rand -base64 32`");
-		// Codes and refresh tokens must be revocable, so `unsupported` is for an app issuing neither.
+		// Which modules refuse `unsupported` is theirs to say at boot.
 		expect(readme).toContain(
-			"An app that issues no codes and no refresh tokens (`a2a`) may write `unsupported`",
+			"With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
 		);
 		if (name === "simple-web") {
 			expect(readme).toContain("With its default axes it needs no outside system");
