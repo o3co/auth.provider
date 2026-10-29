@@ -249,7 +249,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/redis` | adapter | `@mod/kernel`, `@mod/store`, `@mod/tls-options` |
+| `@mod/redis` | adapter | `@mod/kernel`, `@mod/store`, `@mod/tls-options`, `@mod/url-setting` |
 
 ### templates
 
