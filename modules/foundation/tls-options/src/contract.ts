@@ -32,9 +32,10 @@ export type HeldToFloor<T> = Omit<T, keyof FloorKeys> & FloorKeys;
 export const tlsOptions = contract<TlsOptions>("tls-options");
 
 /**
- * Whether `value` is a floor tls-options made, by any copy of the package: frozen, carrying its mark.
- * A copy (a spread, `Object.assign`), a cast or a frozen value written elsewhere is not, however its
- * type reads, and is to be refused.
+ * Whether `value` is a floor tls-options made, by any copy of the package: frozen, carrying its mark,
+ * and of the shape made now (the certificate check among its keys). A copy (a spread, `Object.assign`),
+ * a cast, a frozen value written elsewhere, or a floor of an older shape is not, however its type reads,
+ * and is to be refused.
  */
 export const isFloor: (value: unknown) => value is TlsOptions = isMarked;
 

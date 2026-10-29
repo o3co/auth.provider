@@ -142,6 +142,18 @@ describe("the section's options", () => {
 		expect(await handshakeWith(held, "tls1.3")).toMatchObject({ kind: "agreed" });
 	});
 
+	it("are no floor where an older tls-options made them, without the certificate check", () => {
+		// As tls-options made a floor before it carried `rejectUnauthorized`: marked and frozen, its keys then.
+		const older = { minVersion: "TLSv1.2", ciphers: defaultSuites };
+		Object.defineProperty(older, Symbol.for("@mod/tls-options.floor"), {
+			value: true,
+			enumerable: false,
+		});
+		Object.freeze(older);
+		expect(isFloor(older)).toBe(false);
+		expect(() => heldToFloor(older as unknown as TlsOptions, {})).toThrow(TypeError);
+	});
+
 	it("are a floor however many copies of the package are loaded", async () => {
 		vi.resetModules();
 		const another = await import("../src/testing.ts");

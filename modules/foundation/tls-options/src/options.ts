@@ -23,12 +23,14 @@ export function optionsOf(s: Settings): TlsOptions {
 	return Object.freeze(options) as unknown as TlsOptions;
 }
 
-/** Whether `value` is a floor made here: frozen, carrying the mark as its own. */
+/** Whether `value` is a floor made here: frozen, carrying the mark as its own, of the shape made now. */
 export const isMarked = (value: unknown): value is TlsOptions =>
 	typeof value === "object" &&
 	value !== null &&
 	Object.hasOwn(value, mark) &&
-	Object.isFrozen(value);
+	Object.isFrozen(value) &&
+	// Of the shape made now: a floor an older copy made, without the certificate check, is none.
+	(value as { readonly rejectUnauthorized?: unknown }).rejectUnauthorized === true;
 
 /** `options`, the floor's own keys copied last over them; a value no tls-options made throws. */
 export function heldTo<T extends object>(floor: TlsOptions, options: T): HeldToFloor<T> {
