@@ -1697,6 +1697,12 @@ importers:
       '@mod/claims-selection':
         specifier: workspace:*
         version: link:../claims-selection
+      '@mod/client-documents':
+        specifier: workspace:*
+        version: link:../../identity/client-documents
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant

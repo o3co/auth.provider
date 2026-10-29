@@ -72,15 +72,18 @@ export const published = contract<readonly MetadataItem[]>("published");
 
 /**
  * oidc with its dependencies. `config` is written over the defaults section by section;
- * `usersAs` stands in for users' modules, `sessionsAs` for the sessions subject-attributes reads.
+ * `usersAs` stands in for users' modules, `sessionsAs` for the sessions subject-attributes reads;
+ * `more` are composed beside them.
  */
 export const composed = (p: {
 	readonly runtime: Runtime;
 	readonly config?: Record<string, unknown>;
 	readonly usersAs?: readonly Module[];
 	readonly sessionsAs?: Module;
+	readonly more?: readonly Module[];
 }) => ({
 	modules: [
+		...(p.more ?? []),
 		http,
 		keysModule,
 		issuerModule,
