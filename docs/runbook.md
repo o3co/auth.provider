@@ -112,6 +112,7 @@ Tokens name the key that signed them (`kid`). An instance verifies a token by th
 2. **Wait for caches.** Wait at least 300 seconds after the last instance restarted, so every verifier that cached the key set has the new key.
 3. **Sign with the new key.**
    - Move the new key from `keys.next` to `keys.signing`.
+   - Where the new key's `alg` is another, set `oidc.id-token-alg` to it in the same change, and any registered client's `sections.oidc.id-token-alg` that names the old one: an instance whose signing key does not sign with `oidc.id-token-alg` refuses to boot. Until then each start warns `oidc.next_key_alg_differs`.
    - Move the old key to `keys.previous`, with an `expires-at` later than now plus the longest token lifetime. The access-token lifetime is 3600 seconds by default; count refresh and ID tokens if they are verified by this key.
    - Restart every instance. During a rolling restart, the instances not yet restarted already publish and verify the new key, because of step 1.
 4. **Retire the old key.** After its `expires-at`, remove it from `keys.previous` at the next restart. Tokens it signed are refused with `kid_expired` from its `expires-at`, and with `kid_unknown` once it is removed.
