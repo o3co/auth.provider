@@ -38,12 +38,12 @@ export const coverage: Coverage = {
 		{
 			method: "GET",
 			path: "/oauth/logout",
-			to: "the client's registered `post_logout_redirect_uri`, or an upstream's end of session",
+			to: "the client's registered `post_logout_redirect_uri`, an upstream's end of session, or the deployment's error page",
 		},
 		{
 			method: "POST",
 			path: "/oauth/logout",
-			to: "the client's registered `post_logout_redirect_uri`, or an upstream's end of session",
+			to: "the client's registered `post_logout_redirect_uri`, an upstream's end of session, or the deployment's error page",
 		},
 		{
 			method: "POST",
@@ -336,6 +336,10 @@ export const coverage: Coverage = {
 			weakens: "`none`: a failover loses writes, confirmed ones too",
 		},
 		{
+			key: "audit.receivers",
+			weakens: "`none`: audit events go nowhere, warned at every boot",
+		},
+		{
 			key: "tokens.access-token-lifetime",
 			weakens:
 				"past the default hour, up to a day: a leaked access token, or one a resource server verifies itself after a revocation, is taken that long",
@@ -456,6 +460,7 @@ export const coverage: Coverage = {
 		},
 		{ key: "authorize.login-page", why: "the deployment's page, which it draws and protects" },
 		{ key: "consent.page", why: "the deployment's page, which it draws and protects" },
+		{ key: "rp-logout.error-page", why: "the deployment's page, which it draws and protects" },
 		{
 			key: "outbound.allow",
 			why: "the hosts outbound may reach by name at all: the list opens only what it names",

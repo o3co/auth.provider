@@ -5,6 +5,7 @@
 - Owns the scenes of the token, introspection and revocation endpoints' refusals carrying no client's secret, no other client's token and no part of the signing key.
 - Owns the scenes of cross-origin requests to the token and revocation endpoints, the metadata documents and the key set (the key set's here, as the keys area cannot compose identity's origins without a cycle).
 - Owns the fault scenes of the OAuth endpoints, on a Redis topology and a deployment of their own, each after a control with no fault: a JWT bearer assertion's, a client assertion's and a DPoP proof's `jti` spent once (internal modules `assertion-once`, `client-assertion-once`, `dpop-once`); no token for a JWT bearer assertion, and no revocation answered done, while the store cannot answer (`token-unavailable`, `revocation-unavailable`); with what they share (`faults`).
+- Owns, on the same footing, the fault scenes of the token endpoint's request limit letting no request by while the store cannot count, its fail mode closed (internal module `requests-unavailable`).
 - Sets up the OAuth area's parts (issuer, clients, a client's binding requirement, introspection, revocation, trusted issuers and their profile, DPoP and its nonces at the token endpoint, the metadata document, requiring a verified email) on each of the legacy and new targets.
 - The set-up of clients that receive the code flow (clients with a redirect URI) also lives here.
 

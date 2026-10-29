@@ -38,7 +38,7 @@ export async function certificateAt(
 
 /**
  * The check of a server's identity that takes this certificate alone, by its fingerprint: the
- * suite's names `localhost`, not the host it is reached by, so its name is no check.
+ * suite's names `localhost.emobix.co.uk`, not the host it is reached by, so its name is no check.
  */
 export function pinnedTo(pem: string) {
 	const pinned = new X509Certificate(pem).fingerprint256;

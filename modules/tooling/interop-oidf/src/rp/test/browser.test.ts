@@ -32,7 +32,11 @@ beforeAll(async () => {
 				location: `${at.searchParams.get("back")}?code=c1&state=${at.searchParams.get("state")}`,
 			});
 		} else if (at.pathname === "/loop") res.writeHead(302, { location: "/loop" });
-		else if (at.pathname === "/slow") return;
+		else if (at.pathname === "/chain") {
+			const left = Number(at.searchParams.get("left"));
+			if (left === 0) res.writeHead(200);
+			else res.writeHead(302, { location: `/chain?left=${left - 1}` });
+		} else if (at.pathname === "/slow") return;
 		else res.writeHead(404);
 		res.end();
 	});
@@ -114,6 +118,15 @@ describe("the harness's browser", () => {
 		const unknown = browser({ [rp.origin]: rp.cert });
 		await expect(unknown.visit(`${rp.origin}/start`, { follow: () => true })).rejects.toThrow(
 			`the browser trusts no certificate for ${op.origin}`,
+		);
+	});
+
+	it("follows ten redirects and refuses the eleventh", async () => {
+		const b = browser({ [op.origin]: op.cert });
+		const ten = await b.visit(`${op.origin}/chain?left=10`, { follow: () => true });
+		expect([ten.status, ten.hops.length]).toEqual([200, 11]);
+		await expect(b.visit(`${op.origin}/chain?left=11`, { follow: () => true })).rejects.toThrow(
+			"more than 10 redirects",
 		);
 	});
 

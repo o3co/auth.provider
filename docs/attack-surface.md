@@ -75,8 +75,8 @@ Routes that send the browser elsewhere, which `outbound` never sees:
 |---|---|---|
 | GET | `/oauth/authorize` | the client's registered `redirect_uri`, or the login and consent pages |
 | POST | `/oauth/authorize` | the client's registered `redirect_uri` |
-| GET | `/oauth/logout` | the client's registered `post_logout_redirect_uri`, or an upstream's end of session |
-| POST | `/oauth/logout` | the client's registered `post_logout_redirect_uri`, or an upstream's end of session |
+| GET | `/oauth/logout` | the client's registered `post_logout_redirect_uri`, an upstream's end of session, or the deployment's error page |
+| POST | `/oauth/logout` | the client's registered `post_logout_redirect_uri`, an upstream's end of session, or the deployment's error page |
 | POST | `/oauth/federation/*` | an upstream's end of session (`federation-tokens`' logout) |
 | GET | `/session/oauth/federation/*` | the upstream identity provider's authorization endpoint |
 | GET | `/session/oauth/federation/*/callback` | the login's next step on this provider |
@@ -156,7 +156,6 @@ Settings that name where it reaches:
 | `jti-ledger-http.credential` | `@mod/jti-ledger-http` | by its name |
 | `keys.next.public-key` | `@mod/keys` | the next signing key, which may be given as its private PEM |
 | `keys.previous` | `@mod/keys` | a previous signing key, which may be given as its private PEM |
-| `keys.previous.<i>.public-key` | `@mod/keys` | a previous signing key, which may be given as its private PEM |
 | `keys.signing.private-key` | `@mod/keys` | by its name |
 | `keys.signing.secret` | `@mod/keys` | by its name |
 | `mail-smtp.password` | `@mod/mail-smtp` | by its name |
@@ -173,7 +172,6 @@ Settings that name where it reaches:
 | `subject-revocation-http.credential` | `@mod/subject-revocation-http` | by its name |
 | `subject-revocation-http.previous-credential` | `@mod/subject-revocation-http` | by its name |
 | `users-http.credential` | `@mod/users-http` | by its name |
-| `users.registered.<i>.password-hash` | `@mod/users` | a registered user's password hash, which a guess can be tried against offline |
 
 Secrets kept in stores (sealed transactions, secret hashes) are in each module's card, under Data.
 
@@ -181,55 +179,28 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 
 | Setting | From | Default | Weakens |
 |---|---|---|---|
-| `acr.values` | `@mod/acr` | `{}` | an acr met by a weak amr set: a login with only that is taken for the acr, so a step-up asking it asks no more |
-| `client-assertion.max-lifetime` | `@mod/client-assertion` | `"1h"` | past the default hour, up to a day: a client assertion is taken that long |
+| `audit.receivers` | `@mod/audit` |  | `none`: audit events go nowhere, warned at every boot |
 | `clients-cimd.allow` | `@mod/clients-cimd` | `[]` | clients name themselves by a metadata document fetched from these hosts |
 | `clients-cimd.allow-any-host` | `@mod/clients-cimd` | `false` | clients name themselves by a metadata document fetched from any host `deny` leaves |
-| `device-grant.attempts` | `@mod/device-grant` | `5` | raised, up to 100: more guesses at a user code in each window |
-| `device-grant.attempts-window` | `@mod/device-grant` | `"5m"` | shortened: the guesses `attempts` allows come back sooner |
-| `device-grant.code-lifetime` | `@mod/device-grant` | `"10m"` | past the default ten minutes, up to an hour: a user code can be guessed and a device code used that long |
 | `dpop.nonce.required` | `@mod/dpop` | `"never"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
-| `exchange-id-tokens.max-age` | `@mod/exchange-id-tokens` | `"10m"` | past the default ten minutes, up to an hour: an older id_token is taken for an exchange |
-| `external-jwt.key-set-max-age` | `@mod/external-jwt` | `"1d"` | past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it |
-| `federation-grants-connect.identity-check` | `@mod/federation-grants-connect` | `"required"` | `none`: a callback whose upstream account another user holds is not refused |
 | `federation-grants.keep-on-subject-revocation` | `@mod/federation-grants` | `false` | an established grant answers only to the `delegations` boundary when a revocation asks to keep delegations |
-| `federation-grants.max-lifetime` | `@mod/federation-grants` | `"30d"` | past the default 30 days, up to 365: a federation grant answers that long from its activation |
-| `federation-tokens.max-lifetime` | `@mod/federation-tokens` | `"1d"` | past the default day, up to 365: an upstream's token is taken to live that long |
 | `federation.idps` | `@mod/federation` | `{}` | each IdP's `upstream-amr` trusts its word for the local amr it maps, `mfa` among them; its `fresh-login-allowance` lets a login that far back count as fresh |
 | `federation.idps.<name>.accept-missing-iss` | `@mod/idp-oidc` | `false` | named so (`accept-*` and the like) |
-| `federation.idps.<name>.secret-lifetime` | `@mod/idp-apple` | `"5m"` | past the default five minutes, up to half a year: a signed client secret, if leaked, is used that long |
 | `http.insecure-origin` | `@mod/http` | `false` | named so (`accept-*` and the like) |
 | `jwt-bearer.issuers.<i>.accept-any-subject` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
 | `jwt-bearer.issuers.<i>.accept-key-set-elsewhere` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
-| `jwt-bearer.issuers.<i>.client` | `@mod/jwt-bearer` |  | a request naming no client is taken as this public client, its assertions alone identifying it; warned at boot |
-| `jwt-bearer.issuers.<i>.self-issued-prefix` | `@mod/jwt-bearer` |  | any signer whose contributed key's thumbprint follows this prefix in `iss` and `sub` is taken as this issuer |
-| `jwt-bearer.max-assertion-lifetime` | `@mod/jwt-bearer` | `"1h"` | past the default hour, up to a day: a jwt-bearer assertion is taken that far ahead or back |
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
-| `login-passkey.attempts` | `@mod/login-passkey` | `20` | raised, up to 100: more requests from one source in each window |
 | `login-passkey.counts-as-mfa` | `@mod/login-passkey` | `true` | `true` (the default): a passkey login whose user was verified meets a required second factor alone |
 | `login-passkey.password-exempt-group` | `@mod/login-passkey` |  | its members keep password logins where passkey holders are refused them |
-| `login-password.account-attempts` | `@mod/login-password` | `10` | raised, up to 100: more failed guesses at one identifier before each next one waits |
-| `login-password.attempts` | `@mod/login-password` | `20` | raised, up to 100: more password guesses from one source in each window |
 | `mail-smtp.security` | `@mod/mail-smtp` | `"starttls"` | `none`: no TLS, so the relay's authentication and the mail go in the clear, to a loopback relay only |
 | `mail.accept-unsent` | `@mod/mail` | `false` | named so (`accept-*` and the like) |
-| `mfa-binding-proof.mode` | `@mod/mfa-binding-proof` | `"when-available"` | `never`: a first counting factor binds with no binding proof asked |
 | `mfa-email.adds-second-factor` | `@mod/mfa-email` | `false` | `true`: a code by mail meets a required second factor, so the mailbox does |
-| `mfa-flows.attempts-per-transaction` | `@mod/mfa-flows` | `5` | raised, up to 10: more second-factor guesses in one transaction |
-| `mfa-flows.lockout.backoff` | `@mod/mfa-flows` | `"15m"` | shortened: holds after failed second-factor guesses end sooner, so more guesses go through |
-| `mfa-flows.lockout.budget` | `@mod/mfa-flows` | `10` | raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all |
-| `mfa-flows.lockout.budget-window` | `@mod/mfa-flows` | `"7d"` | shortened: holds after failed second-factor guesses end sooner, so more guesses go through |
-| `mfa-flows.lockout.hard-limit` | `@mod/mfa-flows` | `100` | raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all |
-| `mfa-flows.lockout.max-backoff` | `@mod/mfa-flows` | `"1d"` | shortened: holds after failed second-factor guesses end sooner, so more guesses go through |
-| `mfa-flows.lockout.memory` | `@mod/mfa-flows` | `"1d"` | shortened: holds after failed second-factor guesses end sooner, so more guesses go through |
-| `mfa-flows.lockout.threshold` | `@mod/mfa-flows` | `5` | raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all |
-| `mfa-webauthn.user-verification` | `@mod/mfa-webauthn` | `"preferred"` | `discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes |
 | `mfa.mode` | `@mod/mfa` | `"required"` | below `required`, using a session needs no second factor |
 | `mtls.mode` | `@mod/mtls` |  | `self-signed`: any certificate that parses binds, with no revocation |
 | `mtls.revocation.mode` | `@mod/mtls` |  | `disabled`: no certificate's revocation is checked |
 | `mtls.revocation.on-unavailable` | `@mod/mtls` |  | named so (`accept-*` and the like) |
 | `oidc.id-token-alg` | `@mod/oidc` | `"RS256"` | other than `RS256`: the metadata lists no `RS256` (OpenID Connect Discovery 1.0 §3), and a relying party that registers no algorithm, so expects `RS256`, gets ID tokens signed with this one |
-| `oidc.id-token-lifetime` | `@mod/oidc` | `"1h"` | past the default hour: a relying party may take an ID token that long |
 | `outbound.allow-any-public` | `@mod/outbound` | `false` | any public host is reached by name, not only those `outbound.allow` lists |
 | `outbound.internal-hosts` | `@mod/outbound` | `[]` | URLs of the operator's own configuration reach private addresses at these hosts |
 | `outbound.plain-internal` | `@mod/outbound` | `[]` | plain http to these pairs, readable and changeable on the way |
@@ -237,24 +208,16 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `outbound.plain-loopback` | `@mod/outbound` | `[]` | plain http to these loopback pairs |
 | `outbound.proxy` | `@mod/outbound` |  | the proxy, not `outbound`, resolves names and checks where they lead |
 | `outbound.resolution` | `@mod/outbound` | `"helper"` | `in-process`: names resolve in the app's own process, not in helpers that take none of its environment |
-| `passkeys.user-verification` | `@mod/passkeys` | `"preferred"` | `discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes |
 | `rate-limit.fail-mode` | `@mod/rate-limit` | `"closed"` | `open`: while the store cannot count, a route's request limit lets every request through |
 | `redis.durability` | `@mod/redis` |  | `none`: a crash loses the latest writes, spent assertion and proof ids and lockout records among them |
 | `redis.replication` | `@mod/redis` |  | `none`: a failover loses writes, confirmed ones too |
-| `refresh.lifetime` | `@mod/refresh` | `"1d"` | past the default day, up to 365 days: a leaked refresh token family is used that long |
 | `sections.client-assertion.accept-loose-audience` | `@mod/client-assertion` | `false` | named so (`accept-*` and the like) |
-| `sections.consent.first-party` | `@mod/consent` | `false` | `true`: that client's users are never asked for consent; taken only for a client the operator registered |
-| `sections.federation-tokens.receives` | `@mod/federation-tokens` | `false` | `true`: the client is handed its sessions' upstream tokens |
 | `sections.jwt-bearer.accept-unbound` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
-| `sections.token-exchange.others-tokens` | `@mod/token-exchange` | `false` | `true`: the client may exchange subject and actor tokens that name another client |
-| `sections.token-exchange.public-exchange` | `@mod/token-exchange` | `false` | `true`: the client may exchange while public, authenticating nothing |
-| `session-lifecycle.lifetime` | `@mod/session-lifecycle` | `"1h"` | past the default hour, up to 30 days: a session and its cookie are taken that long |
 | `store.accept-volatile` | `@mod/store` | `false` | named so (`accept-*` and the like) |
 | `token-exchange.max-lifetime` | `@mod/token-exchange` |  | a lifetime a client asks of an exchange (`o3co_expires_in`) is taken up to this, up to a day, past `tokens`' own lifetimes, though never past the subject token's end or its ties' |
 | `tokens.access-token-lifetime` | `@mod/tokens` | `"1h"` | past the default hour, up to a day: a leaked access token, or one a resource server verifies itself after a revocation, is taken that long |
 | `tokens.revocation` | `@mod/tokens` |  | `unsupported`: nothing issued can be revoked |
 | `tokens.subject-check` | `@mod/tokens` |  | `none`: no module checks an access token's subject against its revocations, so a revoked subject's access tokens are taken until they expire |
-| `webauthn.top-origins` | `@mod/webauthn` | `[]` | each page named may frame a ceremony, in another origin's page |
 
 ## What the operator does by hand
 
