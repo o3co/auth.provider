@@ -10,12 +10,12 @@ import { type Users, userAttribute, users } from "@mod/users";
 import {
 	type Continuation,
 	type Idp,
+	landed,
 	landingIn,
 	landingTakes,
 	proves,
 	recorderOf,
 	secondOf,
-	sent,
 } from "../round-trip/round-trip.ts";
 import type { Settings } from "../section.ts";
 
@@ -90,7 +90,7 @@ export function loginWith(p: LoginParts): Continuation {
 			const held = outcome.kind === "held";
 			record(held ? "held" : "succeeded", name, { subject, source });
 			const cookies = [...cleared, ...outcome.cookies];
-			if (!held) return sent(lands, cookies);
+			if (!held) return landed(lands, cookies);
 			return p.heldPage === undefined
 				? jsonAnswer(403, outcome.answer, { cookies })
 				: { status: 303, headers: { ...noStore, location: p.heldPage }, cookies };

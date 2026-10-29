@@ -203,7 +203,7 @@ describe("route: an OpenID Connect request", () => {
 		]);
 	});
 
-	it("takes one by POST as by GET, sending it on to the same GET by 303 [oidc-core-3.1.2.1-a]", async () => {
+	it("takes one by POST as by GET, sending it on to the same GET by 303 [oidc-core-3.1.2.1-a] [rfc9700-4.12-a]", async () => {
 		const sent = oidc();
 		const res = await issued.answer(testRequest({ method: "POST", form: sent }));
 		expect(res.status).toBe(303);

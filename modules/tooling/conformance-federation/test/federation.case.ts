@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { areaTarget, auditEvents, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { federationScene } from "../src/main.ts";
+import { federationScene, landedStatus } from "../src/main.ts";
 import { type Browser, browser as openBrowser, probeClient } from "./browser.ts";
 import { fakeUpstream } from "./upstream.ts";
 
@@ -64,7 +64,7 @@ describe("federation", () => {
 		const b = browser();
 		const query = await authorized(b, "u-alice");
 		const back = await b.get(`${start}/callback?${query}`);
-		expect([back.status, back.location]).toEqual([302, landing]);
+		expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 		expect(await b.session()).toBe(true);
 	});
 
@@ -103,7 +103,7 @@ describe("federation", () => {
 		expect((await b.get(`${start}/callback?${wrong}`)).status).toBe(400);
 		// Kept from before the callback that takes it, so a reuse carries the transaction still.
 		const kept = b.cookies();
-		expect((await b.get(`${start}/callback?${query}`)).status).toBe(302);
+		expect((await b.get(`${start}/callback?${query}`)).status).toBe(landedStatus());
 		expect((await b.get(`${start}/callback?${query}`, kept)).status).toBe(400);
 	});
 

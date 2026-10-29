@@ -361,7 +361,7 @@ describe("consent: the page", () => {
 });
 
 describe("consent: the answer", () => {
-	it("records the grant on acceptance and sends the user on by 303; a resend gets the same answer, the other decision none [rfc9700-2.1-c]", async () => {
+	it("records the grant on acceptance and sends the user on by 303; a resend gets the same answer, the other decision none [rfc9700-2.1-c] [rfc9700-4.12-a]", async () => {
 		const { pendingFor, given } = await serve();
 		const alice = await pendingFor("alice");
 		const accepted = await alice.answer("accept");
