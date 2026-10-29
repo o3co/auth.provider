@@ -23,10 +23,10 @@ Three choices cut across these shapes and change what the sections below say: wh
 
 ## Availability when a dependency fails
 
-The provider fails closed: a dependency that cannot answer never grants anything, and the request is refused, `503`, or for the authorization endpoint a redirect with `error=temporarily_unavailable` ([promise 3](security-model.md#promises-across-modules)). Availability is what it trades for this.
+The provider fails closed: a dependency that cannot answer never grants anything, and the request is refused, `503`, or for the authorization endpoint, once it has found the browser's session, a redirect with `error=temporarily_unavailable` ([promise 3](security-model.md#promises-across-modules)). Availability is what it trades for this.
 
 - **Tested** under Redis faults, each guarantee under the faults named with it:
-  - The authorization endpoint gives no code while a dependency its decision waits on cannot answer, with the network to or from Redis cut, the connection closed, Redis late or slow, a failover, a failover whose confirmations stay on the old primary, and Redis killed (guarantee 3-a).
+  - The authorization endpoint gives no code while a dependency its decision waits on cannot answer, with the network to or from Redis cut, the connection closed, Redis late or slow, a failover, a failover whose confirmations stay on the old primary, and Redis killed (guarantee 3-a). Until it has found the browser's session it sends the client nothing and answers `503` itself, for `prompt=none` too; once it has, it sends `temporarily_unavailable` back. A slow Redis is shown both before the session is found and after.
   - The token endpoint gives no token for a code, a refresh token, a JWT bearer assertion or a device code while a dependency its decision waits on cannot answer, under the same faults and a failover whose confirmations stay on the old primary (guarantees 3-b, 3-c, 3-d, 3-e).
   - The token endpoint gives no token for a code while the store cannot write (memory full, a write's confirmation by the replicas timed out or refused, replication chosen with no replica), and redeems the code once it can write again (guarantee 3-j, shown for a code alone).
   - The provider does not boot on a Redis set to evict keys (guarantee 3-k).
