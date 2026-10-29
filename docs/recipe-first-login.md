@@ -76,7 +76,9 @@ clients.registered = [
 ```
 <!-- end generated -->
 
+- Paste only the lines between the printed key's `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----`: the block above already has them, and a key with two of each is refused.
 - `http.insecure-origin = true` lets the public origin be plain http, for trying the app on your machine only (the `http` card). A deployment uses https.
+- `kernel.environment = development` lets boot take that plain-http origin and the plain-http login page; a production deployment, the default, refuses both (the `kernel` card).
 - With no `consent.page`, no user is asked for consent, and only a first-party client is served: `my-app` is marked `first-party` (the `consent` card).
 - The login page at `authorize.login-page` is yours to serve; the [login page guide](login-page.md) says what it sends. The steps below make its requests directly.
 - `my-app` is a public client: it authenticates with PKCE alone (the `clients` card). Its redirect URI is matched by exact string (the `redirect-uris` card of `authorize`).
