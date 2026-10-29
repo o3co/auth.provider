@@ -33,7 +33,7 @@
 
 ## 3 A dependency that cannot answer never grants anything.
 
-- **guarantee-3-a** MUST NOT: the authorization endpoint issues a code while a dependency its decision waits on cannot answer; it answers the client `error=temporarily_unavailable` once it trusts the redirect URI.
+- **guarantee-3-a** MUST NOT: the authorization endpoint issues a code while a dependency its decision waits on cannot answer; until it has found the browser's session it sends the client nothing and answers `503` `temporarily_unavailable` itself, for `prompt=none` too; once it has, it answers the client `error=temporarily_unavailable` at the redirect URI.
   faults: Pu, Pd, R, L, S, F, Fs, C
 - **guarantee-3-b** MUST NOT: the token endpoint issues a token for a code while a dependency its decision waits on cannot answer.
   faults: Pu, Pd, R, L, S, F, Fs, C
