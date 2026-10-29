@@ -21,6 +21,7 @@
 
 ## Invariants
 - Connects to Redis itself, through its client, apart from `outbound`, which carries HTTP alone (`network`: `redis`).
+- TLS holds to BCP 195 (RFC 9325) alone: under `rediss`, `tls-options`' floor's `minVersion` and `ciphers`, copied last; under `redis`, no TLS options, as the client takes up TLS for any. A floor not `tls-options`' own refuses boot.
 - Boot is refused, naming what is unmet, when the server is not what Deployment states.
 - Boot sends once every command the store sends, a script's on keys of the store's own (`<prefix>:{#check}:…`) it then removes, unless the server refuses that too; one the server refuses for good (`NOPERM`, or unknown or renamed), or keys it refuses the user, refuse boot, named. The probe sends them again, answering unready and warning `redis.settings_unmet` with the name. A write refused for want of replicas leaves a command unjudged, never refused.
 - Boot then runs once what a confirmation would and a store script does: with `replication`, the confirming connection reaching another server than the operations (their run ids differ, and the operations' did not change meanwhile, as in a failover), and a store script (`read`, `batchAcross`) the server cannot run, refuse boot, named; the probe runs both again, answering unready. A replica missing or lagging is neither.
@@ -39,6 +40,7 @@
 - A scan walks Redis's SCAN over the space's value keys alone, which one server holds (clusters are refused); a value at its very expiry may still be listed, and a read then finds none. A failover or restart during a walk loses its cursor's place, so a key may not come; a later walk lists it.
 
 ## Deployment
+- With `rediss`, a certificate valid for the URL's host, trusted by the platform, at what `tls-options`' floor takes.
 - Redis 7.0 or later, answering as a primary: no cluster, and no proxy splitting keys across nodes (boot runs `batchAcross` over two partitions, and refuses, named, a server that answers it `CROSSSLOT`).
 - `maxmemory-policy noeviction`, where a composed module keeps a space that must not be evicted.
 - `appendonly yes` and `appendfsync always`, where a composed module keeps a durable space, unless `durability` is `none`.
@@ -51,7 +53,7 @@
 - Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.
 
 ## Depends on
-- `kernel`, `store`
+- `kernel`, `store`, `tls-options` (`tlsOptions`, `isFloor`)
 
 ## Vocabulary
 - slot: the range of keys one node holds; a partition fits in one.

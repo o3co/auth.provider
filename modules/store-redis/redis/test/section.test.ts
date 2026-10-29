@@ -1,6 +1,7 @@
 import { connect } from "node:net";
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { beforeAll, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 
@@ -27,7 +28,7 @@ beforeAll(async () => {
 async function refusalOf(redis: unknown) {
 	const recorded = recordingLog();
 	const refused = await assemble({
-		modules: [redisModule],
+		modules: [redisModule, tlsOptionsForTests],
 		config: { ...kernelConfig(), redis },
 		runtime: quietRuntime({
 			clock: { now: () => 0 },

@@ -1,6 +1,7 @@
 import { contract, defineModule, probes, setting } from "@mod/kernel";
 import { type Space, spaces, store } from "@mod/store";
-import { Redis } from "ioredis";
+import { isFloor, type TlsOptions, tlsOptions } from "@mod/tls-options";
+import { Redis, type RedisOptions } from "ioredis";
 import { z } from "zod";
 import { redisProbe } from "./probe.ts";
 import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
@@ -254,6 +255,28 @@ function codeOf(error: unknown): string {
 		: "unknown";
 }
 
+/**
+ * The client's options. Over `rediss`, TLS holds to `floor`, its own keys alone and last; over
+ * `redis` there is no TLS, which the client would take up for any `tls` given.
+ */
+export function clientOptions(s: z.output<typeof section>, floor: TlsOptions): RedisOptions {
+	const tls =
+		new URL(s.url).protocol === "rediss:"
+			? { tls: { minVersion: floor.minVersion, ciphers: floor.ciphers } }
+			: {};
+	return {
+		lazyConnect: true,
+		connectTimeout: s["connect-timeout"],
+		maxRetriesPerRequest: 0,
+		enableOfflineQueue: false,
+		// A command whose reply was lost must not be sent again on a new connection: a resent
+		// WAIT would confirm nothing, and a resent script would run twice.
+		autoResendUnfulfilledCommands: false,
+		commandTimeout: s["command-timeout"],
+		...tls,
+	};
+}
+
 /** The two connections, open and checked, for the store and its probe alike. */
 const connections = contract<{
 	readonly client: Redis;
@@ -261,20 +284,20 @@ const connections = contract<{
 	readonly declared: readonly Space[];
 }>("redis.connections");
 
+const takes = [spaces, tlsOptions] as const;
+
 // Safe on many instances: it is the shared store, given the same `url` and `prefix` on each
 // (deployment-guarantees, Several instances).
-export default defineModule({ name: "redis", replicaSafe: true, section, takes: [spaces] }, (m) => [
+export default defineModule({ name: "redis", replicaSafe: true, section, takes }, (m) => [
 	m.provide(connections).by(async (c) => {
-		const client = new Redis(c.section.url, {
-			lazyConnect: true,
-			connectTimeout: c.section["connect-timeout"],
-			maxRetriesPerRequest: 0,
-			enableOfflineQueue: false,
-			// A command whose reply was lost must not be sent again on a new connection: a resent
-			// WAIT would confirm nothing, and a resent script would run twice.
-			autoResendUnfulfilledCommands: false,
-			commandTimeout: c.section["command-timeout"],
-		});
+		const floor = await c.get(tlsOptions);
+		if (!isFloor(floor)) {
+			return c.refuse(
+				"redis",
+				"the TLS floor is not one tls-options made: provide it from @mod/tls-options",
+			);
+		}
+		const client = new Redis(c.section.url, clientOptions(c.section, floor));
 		// The last failure's code, which a refused connect tells only through its error events.
 		let lastCode = "unknown";
 		const failed = (error: unknown) => {

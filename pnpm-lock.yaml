@@ -3516,6 +3516,9 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       ioredis:
         specifier: 5.11.1
         version: 5.11.1
