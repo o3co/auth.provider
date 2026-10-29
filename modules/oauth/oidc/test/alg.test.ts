@@ -137,7 +137,7 @@ describe("the algorithm a client registers for its ID tokens [oidc-core-10.1-a]"
 });
 
 describe("a deployment whose ID tokens are not signed with RS256", () => {
-	it("is warned of it once each boot, by the algorithm's name alone [oidc-discovery-3-aa]", async () => {
+	it("is warned of it once each boot, by the algorithm's name alone", async () => {
 		const recording = recordingLog();
 		const app = await booted({ runtime: quietRuntime({ log: recording.log }), config: edDsa });
 		app.get(makers);

@@ -314,7 +314,7 @@ describe("issuer's metadata", () => {
 		expect(await items()).toContainEqual({ name: "subject_types_supported", value: ["public"] });
 	});
 
-	it("names the algorithm ID tokens are signed with [oidc-discovery-3-z]", async () => {
+	it("names the algorithm ID tokens are signed with, RS256 by default [oidc-discovery-3-z] [oidc-discovery-3-aa]", async () => {
 		expect(await items()).toContainEqual({
 			name: "id_token_signing_alg_values_supported",
 			value: ["RS256"],
