@@ -59,10 +59,13 @@ const MAIL_STAGES: ReadonlyMap<string, Stage> = new Map([
 const LIMIT_REPLIES = new Set([421, 450, 451, 452]);
 const LIMIT_ENHANCED = new Set(["4.7.1", "4.7.28", "4.5.3"]);
 
-/** The TLS alert a refused handshake got, as OpenSSL names it in the error; no other text is read. */
+/** A refused handshake's TLS alert, ending OpenSSL's error; never of a reply, whose words the library adds. */
 function alertOf(failure: unknown): number | undefined {
-	const alert = /SSL alert number (\d{1,3})\b/.exec(stringField(failure, "message") ?? "")?.[1];
-	return alert === undefined ? undefined : Number(alert);
+	const code = stringField(failure, "code") ?? "";
+	if (stringField(failure, "response") !== undefined) return undefined;
+	if (code !== "ETLS" && code !== "ESOCKET" && !code.startsWith("ERR_SSL_")) return undefined;
+	const alert = /SSL alert number (\d{1,3})\s*$/.exec(stringField(failure, "message") ?? "")?.[1];
+	return alert !== undefined && Number(alert) <= 255 ? Number(alert) : undefined;
 }
 
 /** A reply's code, and an enhanced code of the same class right after it. */
