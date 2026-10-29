@@ -482,7 +482,7 @@ From `@mod/oidc`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `oidc.id-token-lifetime` | string | `1h` |  |  |  | How long an ID token lasts: a duration with a unit, e.g. 1h. |
-| `oidc.id-token-alg` | string |  |  |  |  | The JWS algorithm ID tokens are signed with, held to the one `keys` signs with: unset, that one. |
+| `oidc.id-token-alg` | string | `RS256` |  | `OIDC_ID_TOKEN_ALG` | `RS256` | The JWS algorithm ID tokens are signed with, which `keys` must sign with: RS256 unless written. Another warns at each start, as OpenID Connect Discovery 1.0 §3 has RS256 listed. |
 
 ## outbound
 
