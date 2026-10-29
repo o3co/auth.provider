@@ -18,6 +18,7 @@
 		"@mod/grants": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/resource-indicators": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"zod": "4.6.7"

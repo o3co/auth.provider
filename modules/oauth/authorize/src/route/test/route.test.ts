@@ -179,6 +179,19 @@ describe("route: an OpenID Connect request", () => {
 		);
 	});
 
+	it("puts no token in what it sends back, a code or a refusal, in the query alone [oidc-core-16.4-a]", async () => {
+		const told = ["code", "state", "iss", "error", "error_description"];
+		for (const res of [
+			await issued.answer(testRequest({ query: oidc() })),
+			await route(undefined, find).answer(testRequest({ query: oidc() })),
+		]) {
+			const at = new URL(res.headers?.location ?? "");
+			expect(at.hash).toBe("");
+			for (const name of at.searchParams.keys()) expect(told).toContain(name);
+			expect(at.searchParams.has("access_token") || at.searchParams.has("id_token")).toBe(false);
+		}
+	});
+
 	it("sends a state holding reserved characters back as the one value it was sent [rfc6749-10.14-a]", async () => {
 		const state = "a&b=c#d%25e+f g/?";
 		const res = await issued.answer(testRequest({ query: oidc({ state }) }));
@@ -190,7 +203,7 @@ describe("route: an OpenID Connect request", () => {
 		]);
 	});
 
-	it("takes one by POST as by GET, sending it on to the same GET by 303 [oidc-core-3.1.2.1-a]", async () => {
+	it("takes one by POST as by GET, sending it on to the same GET by 303 [oidc-core-3.1.2.1-a] [rfc9700-4.12-a]", async () => {
 		const sent = oidc();
 		const res = await issued.answer(testRequest({ method: "POST", form: sent }));
 		expect(res.status).toBe(303);

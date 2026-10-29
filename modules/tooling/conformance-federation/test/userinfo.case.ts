@@ -7,7 +7,7 @@ import { selfSigned, startFront } from "@mod/conformance-front";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { startTunnel } from "@mod/conformance-tunnel";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { federationScene, type IdpScene, readsUserinfo } from "../src/main.ts";
+import { federationScene, type IdpScene, landedStatus, readsUserinfo } from "../src/main.ts";
 import { type Browser, browser as openBrowser, probeClient } from "./browser.ts";
 import { fakeUpstream } from "./upstream.ts";
 
@@ -143,7 +143,7 @@ describe.runIf(able)("federation: reading the upstream's UserInfo", () => {
 	it("logs a browser in through an upstream on https, reading its UserInfo once the id_token holds", async () => {
 		const before = corp.userinfoCalls.length;
 		const { b, back, events } = await loggingIn("corp", "u-alice");
-		expect([back.status, back.location]).toEqual([302, landing]);
+		expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 		expect(await b.session()).toBe(true);
 		expect(corp.userinfoCalls.slice(before)).toEqual(["u-alice"]);
 		if (events) expect(events).toEqual([["federation.login.succeeded", undefined]]);
@@ -304,7 +304,7 @@ describe.runIf(able)(
 				},
 			});
 			const back = await b.get(`/session/oauth/federation/corp/callback?${query}`);
-			expect([back.status, back.location]).toEqual([302, landing]);
+			expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 			const claims = await releasedTo(b);
 			expect(claims).toMatchObject({
 				sub: "s-alice",

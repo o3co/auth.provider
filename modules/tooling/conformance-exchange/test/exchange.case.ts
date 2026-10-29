@@ -6,6 +6,11 @@ import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ExchangeScene, exchangeScene } from "../src/main.ts";
 
+/** The request parameter asking a lifetime, by the target: the legacy build reads `expires_in`. */
+const lifetimeParam = areaTarget().differs("lifetime-asked-as-expires-in")
+	? "expires_in"
+	: "o3co_expires_in";
+
 const issuer = "https://issuer.example";
 const callback = "https://app.example/cb";
 const api = "https://api.example";
@@ -240,19 +245,31 @@ describe("token exchange of tokens no session holds", () => {
 			return Number(claims.exp) - Number(claims.iat);
 		};
 
-		it("issues for a shorter expires_in, and answers that lifetime [rfc8693-2.2.1-d] [rfc6749-5.1-b]", async () => {
+		it("issues for a shorter lifetime asked, and answers that lifetime [rfc8693-2.2.1-d] [rfc6749-5.1-b]", async () => {
 			const { access_token: token } = await tokensFor();
-			const issued = await exchange("gateway", token, { expires_in: "60" });
+			const issued = await exchange("gateway", token, { [lifetimeParam]: "60" });
 			expect(issued.status).toBe(200);
 			expect(lifetimeOf(issued.body.access_token)).toBe(60);
 			expect(Number(issued.body.expires_in)).toBeGreaterThan(0);
 			expect(Number(issued.body.expires_in)).toBeLessThanOrEqual(60);
 		});
 
-		it("cuts a longer expires_in to the cap, never refusing it", async () => {
+		it.skipIf(areaTarget().differs("lifetime-asked-as-expires-in"))(
+			"reads a request's expires_in, registered for answers alone, as an unknown parameter: it asks nothing, and a malformed one is not refused",
+			async () => {
+				const { access_token: token } = await tokensFor();
+				for (const asked of ["60", "soon"]) {
+					const issued = await exchange("gateway", token, { expires_in: asked });
+					expect([asked, issued.status]).toEqual([asked, 200]);
+					expect(lifetimeOf(issued.body.access_token), asked).toBeGreaterThan(60);
+				}
+			},
+		);
+
+		it("cuts a longer lifetime asked to the cap, never refusing it", async () => {
 			const { access_token: token } = await tokensFor();
 			for (const asked of ["7200", "9999999999"]) {
-				const issued = await exchange("gateway", token, { expires_in: asked });
+				const issued = await exchange("gateway", token, { [lifetimeParam]: asked });
 				expect(issued.status).toBe(200);
 				expect(lifetimeOf(issued.body.access_token)).toBeLessThanOrEqual(maxLifetimeSeconds);
 				expect(Number(issued.body.expires_in)).toBeLessThanOrEqual(maxLifetimeSeconds);
@@ -262,10 +279,10 @@ describe("token exchange of tokens no session holds", () => {
 			}
 		});
 
-		it("refuses an expires_in that is not a positive whole number of seconds, or sent twice [rfc6749-3.2-d] [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
+		it("refuses a lifetime asked that is not a positive whole number of seconds, or sent twice [rfc6749-3.2-d] [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const { access_token: token } = await tokensFor();
 			for (const asked of ["soon", "0", "-60", "1.5"]) {
-				expect(refusal(await exchange("gateway", token, { expires_in: asked }))).toEqual([
+				expect(refusal(await exchange("gateway", token, { [lifetimeParam]: asked }))).toEqual([
 					400,
 					"invalid_request",
 				]);
@@ -274,8 +291,8 @@ describe("token exchange of tokens no session holds", () => {
 				["grant_type", exchangeGrant],
 				["subject_token", token ?? ""],
 				["subject_token_type", accessType],
-				["expires_in", "60"],
-				["expires_in", "120"],
+				[lifetimeParam, "60"],
+				[lifetimeParam, "120"],
 			]);
 			expect(refusal(twice)).toEqual([400, "invalid_request"]);
 		});
@@ -476,9 +493,9 @@ describe("token exchange: a cap below the subject token's life", () => {
 	const cap = 120;
 	startedFor(exchangeScene({ ...given, sessionless: true, maxLifetimeSeconds: cap }));
 
-	it("cuts a longer expires_in to the cap", async () => {
+	it("cuts a longer lifetime asked to the cap", async () => {
 		const { access_token: token } = await tokensFor();
-		const issued = await exchange("gateway", token, { expires_in: "7200" });
+		const issued = await exchange("gateway", token, { [lifetimeParam]: "7200" });
 		expect(issued.status).toBe(200);
 		const claims = claimsOf(issued.body.access_token);
 		const lifetime = Number(claims.exp) - Number(claims.iat);

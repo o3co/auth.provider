@@ -13,6 +13,7 @@
 - `releasedClaims.of` (subject, scope words, optionally the session's handle and what a request asks beyond its scope → the released claims; never `sub`)
 - `idTokenHints.check` (an ID token given back as a hint → its subject, session, client and issue time / sessionless / invalid)
 - A contribution to `code-grant`'s ID token makers
+- A contribution to `authorize`'s hint readers: the subject of a hint `idTokenHints.check` answers valid, an expired one included; any other, one naming no session among them, invalid
 - A contribution to `claims-selection`'s table of claim scopes: each table claim's scope, none outside the table
 - `issuer`'s metadata items: `scopes_supported` (`openid` and the table's scopes), `claims_supported` (`sub` and the table's claims), `subject_types_supported` (`public` only), `id_token_signing_alg_values_supported` (the algorithm `keys` signs with)
 - Operator section: `id-token-lifetime` (a duration written with a unit, `1m`–`1d` in whole seconds; default `1h`)
@@ -40,7 +41,7 @@
 | `groups` | `groups` | `groups` | list of strings |
 
 ## Depends on
-- `kernel`, `keys`, `issuer`, `code-grant`, `claims-selection`, `users` (the attribute names), `subject-attributes`
+- `kernel`, `keys`, `issuer`, `code-grant`, `claims-selection`, `users` (the attribute names), `subject-attributes`, `authorize` (the hint readers point)
 
 ## Vocabulary
 - claim table: the fixed rows of scope, claim, attribute and type.

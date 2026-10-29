@@ -66,7 +66,8 @@ From `@mod/clients-cimd`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `clients-cimd.allow` | list of string | `[]` |  |  |  | The host names a client id's document may be fetched from (.name also takes the names under it); when not empty, only these, and outbound's hosts narrow to them. |
+| `clients-cimd.allow` | list of string | `[]` |  |  | `["documents.example.invalid"]` | The host names a client id's document may be fetched from (.name also takes the names under it), outbound's hosts narrowed to them; boot is refused while it is empty, unless allow-any-host is set. |
+| `clients-cimd.allow-any-host` | boolean | `false` |  |  |  | Fetches a client id's document from any host deny leaves, where allow is empty; warned of at every start. |
 | `clients-cimd.deny` | list of string | `[]` |  |  |  | The host names a client id's document is never fetched from (.name also takes the names under it), checked before allow. |
 | `clients-cimd.scopes` | list of string | `[]` |  |  |  | The ceiling of scopes such a client may get: a document asking none gets all of them. |
 | `clients-cimd.audiences` | list of string | `[]` |  |  |  | The audiences such a client's tokens may name, as the operator allows. |
@@ -101,7 +102,7 @@ From `@mod/consent`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. |
+| `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. An https URL (http only on a loopback host, as authorize's login page). |
 | `consent.challenge-lifetime` | string | `10m` |  |  |  | How long a pending consent challenge stays answerable, from `1m` to `1h` in whole seconds. |
 
 ## device-grant
@@ -303,7 +304,7 @@ From `@mod/keys`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `keys.signing.kid` | string |  | yes | `KEYS_SIGNING_KID` | `signing-1` | The key id tokens signed with this key carry, unique in the ring. |
-| `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `EdDSA` | The algorithm the provider signs with. |
+| `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `RS256` | The algorithm the provider signs with. |
 | `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
 | `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
 | `keys.signing.secret-encoding` | hex \| base64 \| utf8 |  |  |  |  | How `secret` is read: `hex`, `base64` (strict) or `utf8`, the text's own bytes, as 0.17 and policy-verifier read it; a value not of the reading named is refused. Unset, hex or else base64. |
@@ -761,7 +762,7 @@ From `@mod/users-http`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `users-http.verify-url` | string |  |  | `USERS_HTTP_VERIFY_URL` | `https://ledger.example.invalid/verify` | Where a password is verified; without it, no password matches. Plain http is reached only where outbound's policy names it. |
-| `users-http.subject-url` | string |  |  |  |  | Where a user is looked up by subject; without it, every lookup by subject is unanswerable. Plain http is reached only where outbound's policy names it. |
+| `users-http.subject-url` | string |  |  | `USERS_HTTP_SUBJECT_URL` | `https://ledger.example.invalid/subject` | Where a user is looked up by subject; without it, every lookup by subject is unanswerable. Plain http is reached only where outbound's policy names it. |
 | `users-http.upstream-url` | string |  |  |  |  | Where a user is looked up by upstream identity; without it, users follows the links it keeps. Plain http is reached only where outbound's policy names it. |
 | `users-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
 | `users-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |
@@ -972,5 +973,5 @@ From `@mod/idp-oidc`.
 | `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  | Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. |
 | `federation.idps.<name>.read-userinfo` | boolean | `false` |  | Reads the IdP's UserInfo after each login, with its access token, for profile claims its id_token leaves out; the answer must name the id_token's subject. UserInfo and the description it is read from must then be https. |
 | `federation.idps.<name>.userinfo-endpoint` | string |  |  | Where UserInfo is read, without discovery; only with read-userinfo. |
-| `federation.idps.<name>.require-iss` | boolean | `false` |  | Asks every callback for `iss`, even where the issuer's description does not offer it. |
+| `federation.idps.<name>.accept-missing-iss` | boolean | `false` |  | Takes a callback without `iss` where the issuer's description does not offer it, for an IdP that never sends it; warned of at every start. |
 | `federation.idps.<name>.clock-skew` | string | `30s` |  | How far the IdP's clock may be from ours, for its id_token's times: 0s to 5m. |

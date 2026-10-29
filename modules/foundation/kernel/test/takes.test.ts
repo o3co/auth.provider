@@ -23,9 +23,9 @@ describe("a module's takes, checked before anything is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "tokens", takes: [keys, site, binding] }),
-					defineModule({ name: "token-endpoint", takes: [site, audit] }),
-					defineModule({ name: "tokens-store", takes: [store] }),
+					defineModule({ name: "tokens", replicaSafe: true, takes: [keys, site, binding] }),
+					defineModule({ name: "token-endpoint", replicaSafe: true, takes: [site, audit] }),
+					defineModule({ name: "tokens-store", replicaSafe: true, takes: [store] }),
 				],
 				config: single,
 			}),
@@ -47,10 +47,10 @@ describe("a module's takes, checked before anything is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "tokens", takes: [keys] }, (m) => [
+					defineModule({ name: "tokens", replicaSafe: true, takes: [keys] }, (m) => [
 						m.provide(tokens).by(async (c) => c.get(keys)),
 					]),
-					defineModule({ name: "token-endpoint", takes: [tokens, audit] }),
+					defineModule({ name: "token-endpoint", replicaSafe: true, takes: [tokens, audit] }),
 				],
 				config: single,
 			}),
@@ -71,6 +71,7 @@ describe("a module's takes, checked before anything is built", () => {
 					defineModule(
 						{
 							name: "sectioned",
+							replicaSafe: true,
 							section: z.object({ size: z.number() }),
 							// Not asked: its section did not pass.
 							takes: (s) => {
@@ -80,7 +81,12 @@ describe("a module's takes, checked before anything is built", () => {
 						},
 						(m) => [m.provide(shared).by(() => "a")],
 					),
-					defineModule({ name: "fixed", section: z.object({ on: z.boolean() }), takes: [missing] }),
+					defineModule({
+						name: "fixed",
+						replicaSafe: true,
+						section: z.object({ on: z.boolean() }),
+						takes: [missing],
+					}),
 					defineModule({ name: "unsafe", replicaSafe: false, takes: [] }, (m) => [
 						m.provide(shared).by(() => "b"),
 					]),
@@ -106,7 +112,7 @@ describe("a module's takes, checked before anything is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "pool-owner", takes: [] }, (m) => [
+					defineModule({ name: "pool-owner", replicaSafe: false, takes: [] }, (m) => [
 						m.provide(pool).by((c) => {
 							ran.push("pool opened");
 							c.onStop(() => {
@@ -115,7 +121,7 @@ describe("a module's takes, checked before anything is built", () => {
 							return "pool";
 						}),
 					]),
-					defineModule({ name: "needy", takes: [missing] }),
+					defineModule({ name: "needy", replicaSafe: true, takes: [missing] }),
 				],
 				config: single,
 			}),
@@ -131,8 +137,10 @@ describe("a module's takes, checked before anything is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "owner", takes: [] }, (m) => [m.provide(kept).by(() => "k")]),
-					defineModule({ name: "outsider", takes: [kept] }),
+					defineModule({ name: "owner", replicaSafe: true, takes: [] }, (m) => [
+						m.provide(kept).by(() => "k"),
+					]),
+					defineModule({ name: "outsider", replicaSafe: true, takes: [kept] }),
 				],
 				config: single,
 			}),
@@ -140,7 +148,7 @@ describe("a module's takes, checked before anything is built", () => {
 		expect(refusals).toEqual([{ where: "outsider", reason: "kept is taken by owner alone" }]);
 		const assembly = await assemble({
 			modules: [
-				defineModule({ name: "self", takes: [] }, (m) => [
+				defineModule({ name: "self", replicaSafe: true, takes: [] }, (m) => [
 					m.provide(own).by(() => "o"),
 					m.provide(after).by(async (c) => `${await c.get(own)}!`),
 				]),
@@ -154,7 +162,7 @@ describe("a module's takes, checked before anything is built", () => {
 		const signer = contract<object>("signer", { takenBy: ["issuer"] });
 		for (const how of ["get", "late", "caught", "late-caught"] as const) {
 			let ran = false;
-			const tokens = defineModule({ name: "tokens", takes: [] }, (m) => [
+			const tokens = defineModule({ name: "tokens", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(signer).by(() => ({})),
 				m.provide(contract<object>("tokens-out")).by(async (c) => {
 					ran = true;
@@ -182,8 +190,8 @@ describe("a module's takes, checked before anything is built", () => {
 		const empty = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "owner", takes: [one, some] }),
-					defineModule({ name: "two", takes: [] }, (m) => [
+					defineModule({ name: "owner", replicaSafe: true, takes: [one, some] }),
+					defineModule({ name: "two", replicaSafe: false, takes: [] }, (m) => [
 						m.contribute(one).by(() => "a"),
 						m.contribute(one).by(() => "b"),
 					]),
@@ -199,10 +207,10 @@ describe("a module's takes, checked before anything is built", () => {
 		const failing = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "owner", takes: [some] }, (m) => [
+					defineModule({ name: "owner", replicaSafe: false, takes: [some] }, (m) => [
 						m.provide(contract<readonly string[]>("all")).by((c) => c.collect(some)),
 					]),
-					defineModule({ name: "broken", takes: [] }, (m) => [
+					defineModule({ name: "broken", replicaSafe: false, takes: [] }, (m) => [
 						m.contribute(some).by(() => {
 							throw new Error("broken");
 						}),
@@ -220,9 +228,9 @@ describe("a module's takes, checked before anything is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "a", takes: [first, second] }),
+					defineModule({ name: "a", replicaSafe: true, takes: [first, second] }),
 					// The same point again, by another module and twice in one list: still checked once.
-					defineModule({ name: "b", takes: [first, first] }),
+					defineModule({ name: "b", replicaSafe: true, takes: [first, first] }),
 				],
 				config: single,
 			}),
@@ -245,7 +253,10 @@ describe("a module's takes, checked before anything is built", () => {
 		};
 		expect(
 			await refusalsOf(
-				assemble({ modules: [defineModule({ name: "a", takes: [handmade] })], config: single }),
+				assemble({
+					modules: [defineModule({ name: "a", replicaSafe: true, takes: [handmade] })],
+					config: single,
+				}),
 			),
 		).toEqual([{ where: "handmade", reason: "needs at least one contribution" }]);
 	});
@@ -257,7 +268,9 @@ describe("a module's takes, checked before anything is built", () => {
 		});
 		const many = extensionPoint<number>("many", { multiplicity: "many" });
 		const handles: readonly Handle[] = [keyed, many, contract<string>("c")];
-		expect(defineModule({ name: "typed", takes: handles }).takes).toEqual(handles);
+		expect(defineModule({ name: "typed", replicaSafe: true, takes: handles }).takes).toEqual(
+			handles,
+		);
 	});
 });
 
@@ -270,12 +283,12 @@ describe("a module's takes, held while it is built", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "provider", takes: [] }, (m) => [
+					defineModule({ name: "provider", replicaSafe: true, takes: [] }, (m) => [
 						m.provide(declared).by(() => "d"),
 						m.provide(undeclared).by(() => "u"),
 						m.provide(later).by(() => "l"),
 					]),
-					defineModule({ name: "taker", takes: [declared] }, (m) => [
+					defineModule({ name: "taker", replicaSafe: false, takes: [declared] }, (m) => [
 						m.provide(contract<string>("built")).by(async (c) => {
 							await c.get(declared);
 							try {
@@ -307,7 +320,7 @@ describe("a module's takes, held while it is built", () => {
 			assemble({
 				modules: [
 					defineModule(untyped, (m) => [m.provide(contract<string>("v")).by(() => "v")]),
-					defineModule({ name: "declared", takes: [] }),
+					defineModule({ name: "declared", replicaSafe: true, takes: [] }),
 				],
 				config: single,
 			}),
@@ -323,11 +336,12 @@ describe("a module's takes, held while it is built", () => {
 					modules: [
 						defineModule({
 							name: "thrower",
+							replicaSafe: true,
 							takes: () => {
 								throw thrown;
 							},
 						}),
-						defineModule({ name: "gap", takes: [missing] }),
+						defineModule({ name: "gap", replicaSafe: true, takes: [missing] }),
 					],
 					config: single,
 				}),
@@ -355,13 +369,13 @@ describe("the boot of #1974's hand-assembled app", () => {
 		const refusals = await refusalsOf(
 			assemble({
 				modules: [
-					defineModule({ name: "issuer", takes: [site] }),
-					defineModule({ name: "tokens", takes: [site, keys, binding] }, (m) => [
+					defineModule({ name: "issuer", replicaSafe: true, takes: [site] }),
+					defineModule({ name: "tokens", replicaSafe: true, takes: [site, keys, binding] }, (m) => [
 						m.provide(tokens).by(() => "t"),
 					]),
-					defineModule({ name: "token-endpoint", takes: [site, tokens, audit] }),
-					defineModule({ name: "clients", takes: [checkers] }),
-					defineModule({ name: "tokens-store", takes: [store] }),
+					defineModule({ name: "token-endpoint", replicaSafe: true, takes: [site, tokens, audit] }),
+					defineModule({ name: "clients", replicaSafe: true, takes: [checkers] }),
+					defineModule({ name: "tokens-store", replicaSafe: true, takes: [store] }),
 				],
 				config: single,
 			}),

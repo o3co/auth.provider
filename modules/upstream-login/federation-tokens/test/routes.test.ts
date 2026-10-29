@@ -191,15 +191,27 @@ describe("the token route", () => {
 		expect(await h.stores.records.read(h.session.id)).toBeDefined();
 	});
 
-	it("refuses a client the operator did not make a receiver, even one whose own metadata says it receives", async () => {
+	it("refuses a client the operator did not make a receiver, even one whose own metadata says it receives, challenging it insufficient_scope in its token's scheme [rfc6750-3-a] [rfc6750-3.1-c]", async () => {
 		const h = await linked();
 		for (const client of ["plain", named]) {
 			const { token } = await h.issue(h.session, client);
-			expect(await h.ask(token)).toMatchObject({ status: 403, json: { error: "forbidden" } });
+			const got = await h.ask(token);
+			expect([got.status, got.json, got.headers["www-authenticate"]]).toEqual([
+				403,
+				{ error: "forbidden" },
+				'Bearer error="insufficient_scope"',
+			]);
 		}
 		expect(h.events.map((e) => [e.kind, e.attributes?.reason])).toEqual([
 			["federation.token.failed", "forbidden"],
 			["federation.token.failed", "forbidden"],
+		]);
+		// A DPoP-bound token is challenged in its own scheme.
+		const bound = await h.issue(h.session, "plain", { dpop: true });
+		const got = await h.call("token", bound.token, { scheme: "DPoP" });
+		expect([got.status, got.headers["www-authenticate"]]).toEqual([
+			403,
+			'DPoP error="insufficient_scope"',
 		]);
 	});
 

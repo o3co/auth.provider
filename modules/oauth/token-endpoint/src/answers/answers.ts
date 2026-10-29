@@ -9,8 +9,9 @@ import {
 import type { OAuthError } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 
-/** RFC 6749 §5.2: `error_description` is printable ASCII but `"` and `\`; any other character shows as `?`. */
-const printable = (text: string) => text.replace(/[^\x20-\x21\x23-\x5b\x5d-\x7e]/g, "?");
+/** RFC 6749 §4.1.2.1 and §5.2: `error_description` is printable ASCII but `"` and `\`; any other character shows as `?`. */
+export const errorDescription = (text: string) =>
+	text.replace(/[^\x20-\x21\x23-\x5b\x5d-\x7e]/g, "?");
 
 /** Names an error body never takes from its members: the error's (RFC 6749 §5.2) and a success's (§5.1). */
 const reserved = new Set([
@@ -42,7 +43,7 @@ export function oauthError(
 			),
 		),
 		error,
-		...(description ? { error_description: printable(description) } : {}),
+		...(description ? { error_description: errorDescription(description) } : {}),
 	});
 }
 

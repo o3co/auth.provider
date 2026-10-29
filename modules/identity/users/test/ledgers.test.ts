@@ -91,7 +91,14 @@ describe("users ledgers", () => {
 		const one = ledgerModule(fakeLedger());
 		const two = ledgerModule(fakeLedger(), "other-ledger");
 		await expect(boot([one, two])).rejects.toBeInstanceOf(BootRefused);
-		await expect(boot([one], [testUser("bob", "p")])).rejects.toBeInstanceOf(BootRefused);
+		const both = await boot([one], [testUser("bob", "p")]).catch((error: BootRefused) => error);
+		expect((both as BootRefused).refusals).toEqual([
+			{
+				where: "users.registered",
+				reason:
+					"users are registered while a user ledger is contributed: take users.registered out, the ledger holding the users",
+			},
+		]);
 		await expect(boot([one])).resolves.toBeDefined();
 	});
 

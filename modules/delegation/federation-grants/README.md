@@ -22,7 +22,7 @@
 - `grantIntents`: the browser half's intent steps on an opaque `IntentRef`; `grantsBrowsers`: its route handlers, exactly one.
 - Client metadata `federation-grants`: `connections`, `return-uris` (exact, each one `redirect-uris`' `registrable` takes, holding no `grant_id`, `state` or `error`).
 - Operator section:
-  - `connections.<name>` (`idp`, `scopes` with `openid`, `resource?`, `max-access-token-lifetime`, `scope-subsets`)
+  - `connections.<name>` (`idp`, `scopes` with `openid`, `resource?` an absolute URI with no fragment or query, `max-access-token-lifetime`, `scope-subsets`)
   - `default-lifetime`, `max-lifetime` (`30d`)
   - `connect-lifetime` (`10m`)
   - `refresh-before` (`30s`)

@@ -30,6 +30,7 @@ const example = (issuerUrl: string): Grant => ({
 	},
 });
 
-export default defineModule({ name: "example-grant", takes: [issuer] }, (m) => [
+// Safe on many instances: it keeps nothing across requests.
+export default defineModule({ name: "example-grant", replicaSafe: true, takes: [issuer] }, (m) => [
 	m.contribute(grants).by(async (c) => example((await c.get(issuer)).url)),
 ]);

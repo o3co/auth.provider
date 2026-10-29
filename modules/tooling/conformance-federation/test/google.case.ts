@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { federationScene } from "../src/main.ts";
+import { federationScene, landedStatus } from "../src/main.ts";
 import { type Browser, browser as openBrowser, probeClient } from "./browser.ts";
 import { type Authorized, fakeUpstream, googleShape } from "./upstream.ts";
 
@@ -75,7 +75,7 @@ describe("federation through Google", () => {
 		const { query, asked } = await authorized(b, { subject: "1078-alice" });
 		expect([asked.get("access_type"), asked.get("prompt")]).toEqual(["offline", "consent"]);
 		const back = await b.get(`${start}/callback?${query}`);
-		expect([back.status, back.location]).toEqual([302, landing]);
+		expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 		expect(await b.session()).toBe(true);
 	});
 
@@ -121,7 +121,7 @@ describe.skipIf(areaTarget().differs("google-freshness-not-forwarded"))(
 			expect(asked.get("prompt")?.split(" ")).toContain("login");
 			expect(asked.get("max_age")).toBe("60");
 			const back = await b.get(`${start}/callback?${query}`);
-			expect([back.status, back.location]).toEqual([302, landing]);
+			expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 			expect(await b.session()).toBe(true);
 		});
 

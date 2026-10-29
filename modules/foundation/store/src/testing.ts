@@ -376,14 +376,34 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("expires at the time given, and treats expired entries as absent everywhere", async () => {
 				const s = await harness.open();
 				const key = fresh();
-				const { now } = await s.get(key("x"));
-				await overwrite(s, key("at"), 1, { expiry: { kind: "at", at: now + 150 } });
-				expect((await s.get(key("at"))).entry?.value).toBe(1);
+				const ms = 1_000;
+				const at = (await s.now()) + ms;
+				await overwrite(s, key("at"), 1, { expiry: { kind: "at", at } });
+				// Held or not by the store clock the read names, never by how long the caller took.
+				const heldUntil = async (name: string, until: number) => {
+					const read = await s.get(key(name));
+					expect([read.now, read.entry?.value]).toEqual([
+						read.now,
+						read.now < until ? 1 : undefined,
+					]);
+				};
+				await heldUntil("at", at);
 				const version = versionOf(
-					await overwrite(s, key("gone"), 1, { expiry: { kind: "after", ms: 150 } }),
+					await overwrite(s, key("gone"), 1, { expiry: { kind: "after", ms } }),
 				);
-				await overwrite(s, key("w"), 1, { expiry: { kind: "after", ms: 150 } });
-				await sleep(400);
+				// Written after `before`, so it expires no earlier than `before + ms`.
+				const before = await s.now();
+				await overwrite(s, key("w"), 1, { expiry: { kind: "after", ms } });
+				await heldUntil("w", before + ms);
+				// Every expiry above ends by `end`, as each was written before this read.
+				const end = (await s.now()) + ms;
+				const giveUp = Date.now() + ms + 5_000;
+				let now = await s.now();
+				while (now <= end && Date.now() < giveUp) {
+					await sleep(20);
+					now = await s.now();
+				}
+				expect(now > end, "the store clock did not pass the expiries").toBe(true);
 				expect((await s.get(key("at"))).entry).toBeNull();
 				expect((await s.take(key("gone"))).kind).toBe("missing");
 				expect((await s.replaceIf(key("gone"), version, 2, never)).kind).toBe("missing");

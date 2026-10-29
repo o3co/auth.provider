@@ -13,7 +13,7 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import { codeAt, faultScene, on, redeemAt, refreshAt, said } from "../../faults/test/faults.ts";
+import { familyAt, faultScene, on, refreshAt, said } from "../../faults/test/faults.ts";
 import { familyRead, isStoreOperation, rotationFrom, sessionRead } from "../../faults/test/wire.ts";
 
 const scene = faultScene({ refresh: {} });
@@ -21,14 +21,6 @@ const refused = [400, "invalid_grant"];
 const issued = [200, "Bearer"];
 /** Every request the relay passed. */
 const anything: Match = { request: () => true, succeeded: () => true };
-
-/** A family's first refresh token, from a code the instance gives and redeems. */
-async function familyAt(i: Instance): Promise<string> {
-	const answer = await redeemAt(i, await codeAt(i));
-	const token = answer.body.refresh_token;
-	if (typeof token !== "string") throw new Error(`no refresh token: ${answer.status}`);
-	return token;
-}
 
 /** The refresh token an answer gave, which must have given one. */
 const next = (answer: { body: Readonly<Record<string, unknown>> }) => {

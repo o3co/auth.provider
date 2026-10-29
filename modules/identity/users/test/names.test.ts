@@ -185,6 +185,22 @@ it("takes from values of any shape the attributes users names, each in a form it
 	expect(Object.isFrozen(accepted) && Object.isFrozen(accepted.groups)).toBe(true);
 });
 
+it("keeps no attribute a ledger states as null, so no answer the provider writes carries it [oidc-core-13.3-a]", () => {
+	expect(
+		acceptedAttributes({
+			email: null,
+			email_verified: null,
+			name: null,
+			picture: null,
+			groups: null,
+		}),
+	).toEqual({});
+	expect(acceptedAttributes({ email: "ann@example.invalid", email_verified: null })).toEqual({
+		email: "ann@example.invalid",
+	});
+	expect(acceptedAttributes({ groups: [null] })).toEqual({});
+});
+
 it("reads each value once, so what it checked is what it keeps", () => {
 	let reads = 0;
 	const shifting = {

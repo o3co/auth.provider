@@ -3,7 +3,7 @@ import { areaTarget, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Browser, browser as openBrowser, probeClient } from "../../../test/browser.ts";
 import { type Authorized, fakeUpstream } from "../../../test/upstream.ts";
-import { federationScene } from "../../main.ts";
+import { federationScene, landedStatus } from "../../main.ts";
 
 const origin = "https://issuer.example";
 const start = "/session/oauth/federation/corp";
@@ -108,7 +108,7 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 		it("meets prompt=login only with a login the upstream says came after the demand, never one it says is older [oidc-core-3.1.2.3-b] [oidc-core-3.1.2.1-l] [oidc-core-3.1.2.1-m] [guarantee-2-c]", async () => {
 			const b = browser();
 			const hourAgo = { subject: "u-alice", authTime: seconds() - 3600 };
-			expect((await federated(b, hourAgo)).status).toBe(302);
+			expect((await federated(b, hourAgo)).status).toBe(landedStatus());
 			const back = sentToLogIn((await authorize(b, { prompt: "login" })).location);
 			// The upstream still holds its own session, and says the user logged in an hour ago.
 			const again = await federated(b, hourAgo, back);
@@ -129,7 +129,7 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 		it("meets prompt=login in one trip through an upstream whose clock is a little behind, within its allowance, and never with a login past it [guarantee-2-c]", async () => {
 			const b = browser();
 			expect((await federated(b, { subject: "u-alice", authTime: seconds() - 3600 })).status).toBe(
-				302,
+				landedStatus(),
 			);
 			// A minute before the demand is past the allowance, the IdP's clock-skew of 30 seconds by default.
 			const past = (await authorize(b, { prompt: "login" })).location;
@@ -223,10 +223,12 @@ describe.skipIf(areaTarget().differs("federation-auth-time-from-upstream"))(
 		it("says when the user logged in only as the upstream says it, and nothing where the upstream says nothing [oidc-core-15.1-e]", async () => {
 			const said = browser();
 			const at = seconds() - 60;
-			expect((await federated(said, { subject: "u-alice", authTime: at })).status).toBe(302);
+			expect((await federated(said, { subject: "u-alice", authTime: at })).status).toBe(
+				landedStatus(),
+			);
 			expect((await idTokenClaims(said)).auth_time).toBe(at);
 			const silent = browser();
-			expect((await federated(silent, { subject: "u-alice" })).status).toBe(302);
+			expect((await federated(silent, { subject: "u-alice" })).status).toBe(landedStatus());
 			expect(await idTokenClaims(silent)).not.toHaveProperty("auth_time");
 		});
 	},

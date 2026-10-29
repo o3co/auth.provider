@@ -3,7 +3,7 @@ import { areaTarget, auditEvents, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Browser, browser as openBrowser, probeClient } from "../../../test/browser.ts";
 import { fakeUpstream } from "../../../test/upstream.ts";
-import { federationScene } from "../../main.ts";
+import { federationScene, landedStatus } from "../../main.ts";
 
 const origin = "https://issuer.example";
 const landing = "https://app.example/home";
@@ -78,14 +78,14 @@ describe("federation: linking an upstream identity to the account logged in", ()
 		const back = await b.get(
 			`${start}/callback?${await upstream.authorize(started.location, { subject })}`,
 		);
-		return back.status === 302 ? await b.loggedInAs() : back.status;
+		return back.status === landedStatus() ? await b.loggedInAs() : back.status;
 	}
 
 	it("links the identity to the account logged in, which a login through the upstream then opens", async () => {
 		const alice = await loggedIn("alice");
 		const query = await linking(alice, "u-new");
 		const back = await alice.get(`${start}/callback?${query}`);
-		expect([back.status, back.location]).toEqual([302, landing]);
+		expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 		expect(await federatedAs("u-new")).toBe(await alice.loggedInAs());
 	});
 
@@ -125,10 +125,10 @@ describe("federation: linking an upstream identity to the account logged in", ()
 	it("takes an identity already linked to the account again, changing nothing", async () => {
 		const alice = await loggedIn("alice");
 		expect((await alice.get(`${start}/callback?${await linking(alice, "u-again")}`)).status).toBe(
-			302,
+			landedStatus(),
 		);
 		const again = await alice.get(`${start}/callback?${await linking(alice, "u-again")}`);
-		expect(again.status).toBe(302);
+		expect(again.status).toBe(landedStatus());
 		expect(await federatedAs("u-again")).toBe(await alice.loggedInAs());
 	});
 
@@ -176,7 +176,7 @@ describe("federation: linking an upstream identity to the account logged in", ()
 			const linked = await trail.during(async () =>
 				alice.get(`${start}/callback?${await linking(alice, "u-audited")}`),
 			);
-			expect(linked.result.status).toBe(302);
+			expect(linked.result.status).toBe(landedStatus());
 			const on = { idp: "corp", source: alice.from };
 			expect(linked.events).toEqual([
 				{
