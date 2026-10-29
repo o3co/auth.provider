@@ -13,7 +13,7 @@ afterEach(() => stopServed());
 afterEach(() => eventsDeclared());
 
 describe("the flow: logging in before a refusal", () => {
-	/** A query's pairs in order of name, so the way back holds the request as it was sent, repeats and all. */
+	/** A query's pairs in order of name, so the way back holds every value sent, repeats included. */
 	const pairs = (query: string) =>
 		[...new URLSearchParams(query)].sort(([a], [b]) => a.localeCompare(b));
 

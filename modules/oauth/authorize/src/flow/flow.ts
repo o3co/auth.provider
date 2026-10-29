@@ -40,7 +40,7 @@ export interface Trusted {
 	readonly one: (name: string) => string | undefined;
 	/** Each parameter's first value. */
 	readonly params: ReadonlyMap<string, string>;
-	/** The request itself, for the session it carries and its parameters as sent. */
+	/** The request itself, for the session it carries and every parameter value sent. */
 	readonly request: Parameters<Sessions["enter"]>[0];
 	/** A refusal `route` read in the request's form (a parameter repeated or too long): the flow's to answer. */
 	readonly refused?: Decision;
@@ -103,7 +103,7 @@ export function flowWith(parts: FlowParts): Flow {
 	};
 
 	// RFC 9700 §4.11.2: a refusal goes back only to a browser logged in, but for a silent request. The
-	// request comes back from its login as it was sent, repeated or long parameters and all, to be refused again.
+	// request comes back from its login with every value sent, repeats included, to be refused again.
 	const loggedInFirst = async (refused: Decision, { request }: Trusted): Promise<Decision> => {
 		// Silent by any prompt sent, repeated or too long: such a request never shows a page.
 		const silent = [...request.query].some(
