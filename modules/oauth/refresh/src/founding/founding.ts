@@ -39,7 +39,11 @@ export function starting(
 		// A family dropped from its session's list would outlive the session: it ends instead.
 		if (pushedOut.length > 0) {
 			log.error("refresh.session_list_pushed_out", { count: pushedOut.length });
-			for (const dropped of pushedOut) await revoker.revokeFamily(dropped);
+			// One whose revocation fails stays on the settle list, which the sweep finishes.
+			for (const dropped of pushedOut) {
+				await revoker.revokeFamily(dropped);
+				await stores.sessionFamilies.settled(redeemed.session, dropped);
+			}
 			throw new Unavailable("refresh");
 		}
 		// A close that came before the list held it found nothing to revoke: the family ends here instead.
