@@ -146,6 +146,7 @@ describe("the scope", () => {
 	it.each([
 		["an empty scope", { scope: [] }],
 		["no scope at all", { scope: undefined }],
+		["the grant itself", { scope: ["read", "write"] }],
 	])(
 		"narrows as the refresh answers, and comes back to the grant when the next says %s",
 		async (_, next) => {
@@ -154,12 +155,26 @@ describe("the scope", () => {
 		},
 	);
 
-	it("keeps the scope it held for an answer wider than the grant, or unreadable", async () => {
-		for (const scope of [["read", "admin"], [1], "read"]) {
-			const h = await linked(granted, async () => answer({ scope }));
-			expect((await h.get()).json).toMatchObject({ access_token: "up-2", scope: "read write" });
+	it("refuses an answer wider than the grant, or unreadable, keeping and handing none of its access token", async () => {
+		for (const [scope, reason] of [
+			[["read", "admin"], "wider_scope"],
+			[[1], "invalid_scope"],
+			["read", "invalid_scope"],
+		] as const) {
+			const asked: string[] = [];
+			const answers = [answer({ scope, refreshToken: "r-2" }), answer({ accessToken: "up-3" })];
+			const h = await linked(granted, async (refreshToken) => {
+				asked.push(refreshToken);
+				return answers.shift() ?? answer({});
+			});
+			expect((await h.get()).json).toEqual({ error: "refresh_failed" });
+			expect(warned(h, "refresh_failed")).toEqual([{ idp: "corp", reason }]);
+			// Asked again once the failure is past: the refused token was never kept, its rotated refresh token was.
+			h.advance(30_000);
+			expect((await h.get()).json).toMatchObject({ access_token: "up-3", scope: "read write" });
+			expect(asked).toEqual(["r-1", "r-2"]);
 			const narrow = await narrowed({ scope });
-			expect((await narrow.get()).json).toMatchObject({ access_token: "up-3", scope: "read" });
+			expect((await narrow.get()).json).toEqual({ error: "refresh_failed" });
 		}
 	});
 });

@@ -75,8 +75,8 @@ Routes that send the browser elsewhere, which `outbound` never sees:
 |---|---|---|
 | GET | `/oauth/authorize` | the client's registered `redirect_uri`, or the login and consent pages |
 | POST | `/oauth/authorize` | the client's registered `redirect_uri` |
-| GET | `/oauth/logout` | the client's registered `post_logout_redirect_uri`, or an upstream's end of session |
-| POST | `/oauth/logout` | the client's registered `post_logout_redirect_uri`, or an upstream's end of session |
+| GET | `/oauth/logout` | the client's registered `post_logout_redirect_uri`, an upstream's end of session, or the deployment's error page |
+| POST | `/oauth/logout` | the client's registered `post_logout_redirect_uri`, an upstream's end of session, or the deployment's error page |
 | POST | `/oauth/federation/*` | an upstream's end of session (`federation-tokens`' logout) |
 | GET | `/session/oauth/federation/*` | the upstream identity provider's authorization endpoint |
 | GET | `/session/oauth/federation/*/callback` | the login's next step on this provider |
@@ -179,6 +179,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 
 | Setting | From | Default | Weakens |
 |---|---|---|---|
+| `audit.receivers` | `@mod/audit` |  | `none`: audit events go nowhere, warned at every boot |
 | `clients-cimd.allow` | `@mod/clients-cimd` | `[]` | clients name themselves by a metadata document fetched from these hosts |
 | `clients-cimd.allow-any-host` | `@mod/clients-cimd` | `false` | clients name themselves by a metadata document fetched from any host `deny` leaves |
 | `dpop.nonce.required` | `@mod/dpop` | `"never"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |

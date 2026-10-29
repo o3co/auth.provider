@@ -128,6 +128,22 @@ it("reads from the start once where the holder changes between its two reads, th
 	expect(changes).toBe(3);
 });
 
+it("reads from the start once where a registration lands between its two reads, the fence unmoved", async () => {
+	let reading: ((read: number) => Promise<void>) | undefined;
+	const h = kept({ reading: (read) => reading?.(read) ?? Promise.resolve() });
+	const id = await h.register("sam");
+	const emptied = (await h.records.removed("sam", id)).emptied;
+	if (!emptied) throw new Error("the last removal empties the list");
+	let landed = false;
+	reading = async () => {
+		if (landed) return;
+		landed = true;
+		await h.register("sam");
+	};
+	expect(await h.records.afterRemoval("sam", emptied)).toBe("passkey");
+	expect(await h.fence("sam")).toBe(emptied.fence);
+});
+
 it("makes the holder anew in a reset of a subject that has none, under the handle given, at fence 1", async () => {
 	const { records } = kept();
 	const handle = fresh();

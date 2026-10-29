@@ -1,12 +1,24 @@
 import { contract, defineModule, probes, setting } from "@mod/kernel";
 import { type Space, spaces, store } from "@mod/store";
+import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
 import { z } from "zod";
+import { clientDebugs, clientOptions, queryRefusal } from "./client-options.ts";
 import { redisProbe } from "./probe.ts";
 import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
 
 const section = z.strictObject({
-	url: z.url({ protocol: /^rediss?$/ }).describe("The Redis server to connect to."),
+	url: z
+		.url({ protocol: /^rediss?$/ })
+		.superRefine((url, ctx) => {
+			const refused = queryRefusal(url);
+			if (refused !== undefined) ctx.addIssue({ code: "custom", message: refused });
+		})
+		.describe("The Redis server to connect to, with no query: each option is its own setting."),
+	"address-family": z
+		.enum(["ipv4", "ipv6"])
+		.optional()
+		.describe("The address family the host's name resolves to: ipv4 or ipv6; either when unset."),
 	prefix: z
 		.string()
 		.regex(/^[a-z0-9-]+$/)
@@ -261,20 +273,22 @@ const connections = contract<{
 	readonly declared: readonly Space[];
 }>("redis.connections");
 
+const takes = [spaces, tlsOptions] as const;
+
 // Safe on many instances: it is the shared store, given the same `url` and `prefix` on each
 // (deployment-guarantees, Several instances).
-export default defineModule({ name: "redis", replicaSafe: true, section, takes: [spaces] }, (m) => [
+export default defineModule({ name: "redis", replicaSafe: true, section, takes }, (m) => [
 	m.provide(connections).by(async (c) => {
-		const client = new Redis(c.section.url, {
-			lazyConnect: true,
-			connectTimeout: c.section["connect-timeout"],
-			maxRetriesPerRequest: 0,
-			enableOfflineQueue: false,
-			// A command whose reply was lost must not be sent again on a new connection: a resent
-			// WAIT would confirm nothing, and a resent script would run twice.
-			autoResendUnfulfilledCommands: false,
-			commandTimeout: c.section["command-timeout"],
-		});
+		// On every boot: the client's own debug log writes AUTH's password; no value is told here.
+		if (clientDebugs(process.env.DEBUG)) c.log.warn("redis.client_debug_log", {});
+		const floor = await c.get(tlsOptions);
+		if (!isFloor(floor)) {
+			return c.refuse(
+				"redis",
+				"the TLS floor is not one tls-options made: provide it from @mod/tls-options",
+			);
+		}
+		const client = new Redis(c.section.url, clientOptions(c.section, floor));
 		// The last failure's code, which a refused connect tells only through its error events.
 		let lastCode = "unknown";
 		const failed = (error: unknown) => {
