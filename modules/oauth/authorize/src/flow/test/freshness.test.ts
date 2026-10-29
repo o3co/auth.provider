@@ -18,7 +18,7 @@ describe("the flow: the session's freshness, held across the trip to raise it", 
 		authorize: { "step-up-page": "https://as.example/mfa" },
 	};
 
-	it("measures max_age as the code is issued, back from raising it, so a record never lets a login past it through [guarantee-2-b]", async () => {
+	it("checks max_age immediately before the code is issued, back from raising it, so a record never lets a login past it through [guarantee-2-b]", async () => {
 		const s = await serve(table);
 		const stepUpBack = async (lateMs: number) => {
 			const old = await s.login();
