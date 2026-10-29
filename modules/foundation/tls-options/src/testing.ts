@@ -133,7 +133,13 @@ const offers: Record<
 /** What a handshake came to: the version and suite agreed, or refused, with the code each side's error gave. */
 export type Handshake =
 	| { readonly kind: "agreed"; readonly protocol: string | null; readonly cipher: string }
-	| { readonly kind: "refused"; readonly code: string; readonly peerCode: string };
+	| {
+			readonly kind: "refused";
+			readonly code: string;
+			/** The TLS alert the client got (RFC 8446 §6), as OpenSSL tells it; none where it got none. */
+			readonly alert: number | undefined;
+			readonly peerCode: string;
+	  };
 
 /**
  * The options of a peer offering `offer` alone, key and certificate included, and the authority to
@@ -191,7 +197,14 @@ export async function handshakeWith(options: ConnectionOptions, offer: Offer): P
 					p.refused,
 					new Promise<string>((none) => setTimeout(() => none("none"), 2000)),
 				]);
-				resolve({ kind: "refused", code: error.code ?? error.message, peerCode });
+				// The alert's number, unlike OpenSSL's name for it, is the same in every build.
+				const alert = /SSL alert number (\d+)/.exec(error.message)?.[1];
+				resolve({
+					kind: "refused",
+					code: error.code ?? error.message,
+					alert: alert === undefined ? undefined : Number(alert),
+					peerCode,
+				});
 			});
 		});
 	} finally {

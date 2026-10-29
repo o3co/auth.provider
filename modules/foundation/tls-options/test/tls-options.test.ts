@@ -15,17 +15,11 @@ const offers: readonly Offer[] = ["tls1.1", "static-rsa", "cbc", "ecdhe-aead", "
  */
 function outcomeOf(met: Handshake): string {
 	if (met.kind === "agreed") return "agreed";
-	const { code, peerCode } = met;
-	if (
-		code === "ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION" &&
-		peerCode === "ERR_SSL_UNSUPPORTED_PROTOCOL"
-	) {
-		return "refused: version";
-	}
-	// OpenSSL before 3.2 names the alert SSLV3.
-	const handshake = /^ERR_SSL_(TLS|SSLV3)_ALERT_HANDSHAKE_FAILURE$/;
-	if (handshake.test(code) && peerCode === "ERR_SSL_NO_SHARED_CIPHER") return "refused: suite";
-	return `other: ${code} / ${peerCode}`;
+	// The client's side by its alert's number (RFC 8446 §6), which no OpenSSL build names otherwise.
+	const { alert, peerCode } = met;
+	if (alert === 70 && peerCode === "ERR_SSL_UNSUPPORTED_PROTOCOL") return "refused: version";
+	if (alert === 40 && peerCode === "ERR_SSL_NO_SHARED_CIPHER") return "refused: suite";
+	return `other: ${met.code} (alert ${alert}) / ${peerCode}`;
 }
 /** Each peer's handshake under `options`. */
 const kinds = async (options: TlsOptions) =>
