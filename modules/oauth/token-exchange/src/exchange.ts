@@ -3,6 +3,7 @@ import { clientAllowance } from "@mod/client-allowance";
 import type { Client } from "@mod/clients";
 import type { Grant, GrantInput, GrantOutcome, TokenTie } from "@mod/grants";
 import { Unavailable } from "@mod/kernel";
+import { resourceRefusal } from "@mod/resource-indicators";
 import { type Binding, carried } from "@mod/sender-binding";
 import type { Actor, IssuedAccess, Tokens } from "@mod/tokens";
 import { verified } from "./answer.ts";
@@ -152,6 +153,9 @@ export function exchangeGrant(parts: Parts): Grant {
 			return refused("audience is not one the client may be issued", "invalid_target");
 		}
 		const resource = param("resource");
+		// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
+		const malformed = resource ? resourceRefusal(resource) : undefined;
+		if (malformed) return refused(malformed, "invalid_target");
 		if (resource && resource !== audience) {
 			return refused("resource is not the audience issued", "invalid_target");
 		}
@@ -176,6 +180,9 @@ export function exchangeGrant(parts: Parts): Grant {
 			return refused("audience is not one the subject token and the client hold", "invalid_target");
 		}
 		const resource = param("resource");
+		// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
+		const malformed = resource ? resourceRefusal(resource) : undefined;
+		if (malformed) return refused(malformed, "invalid_target");
 		if (resource && resource !== audience) {
 			return refused("resource is not the audience issued", "invalid_target");
 		}

@@ -1486,6 +1486,9 @@ importers:
       '@mod/outbound-policy':
         specifier: workspace:*
         version: link:../../foundation/outbound-policy
+      '@mod/resource-indicators':
+        specifier: workspace:*
+        version: link:../resource-indicators
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
@@ -2184,6 +2187,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/resource-indicators':
+        specifier: workspace:*
+        version: link:../resource-indicators
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding

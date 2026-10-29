@@ -1,6 +1,7 @@
 import { type Ceiling, clientAllowance } from "@mod/client-allowance";
 import { typOf } from "@mod/external-jwt";
 import type { GrantInput } from "@mod/grants";
+import { resourceRefusal } from "@mod/resource-indicators";
 import { decodeProtectedHeader } from "jose";
 
 /** The `typ` of an ID-JAG (draft-ietf-oauth-identity-assertion-authz-grant-04 §3.1), as `typOf` reads one. */
@@ -43,9 +44,9 @@ const own = (claims: Readonly<Record<string, unknown>>, name: string) =>
 	Object.hasOwn(claims, name) ? claims[name] : undefined;
 const isObject = (v: unknown): v is Record<string, unknown> =>
 	typeof v === "object" && v !== null && !Array.isArray(v);
-/** An absolute URI with no fragment, as RFC 8707 §2 asks of a resource. */
+/** An absolute URI with no fragment, as RFC 8707 §2 asks of a resource, read as resource-indicators reads one. */
 const isResource = (v: unknown): v is string =>
-	typeof v === "string" && URL.canParse(v) && !v.includes("#");
+	typeof v === "string" && resourceRefusal(v) === undefined;
 const isThumbprint = (v: unknown): v is string =>
 	typeof v === "string" && /^[A-Za-z0-9_-]{43}$/.test(v);
 
