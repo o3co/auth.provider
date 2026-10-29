@@ -10,7 +10,7 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 
 選んだ機能が依存するモジュールは、ジェネレーターが追加します。アプリは起動時に設定を検証し、見つかった問題を、設定名またはモジュール名とともにすべて表示します。
 
-0.18 は、パッケージ名を変更して 0.17 を書き直したバージョンで、タグを指定せずにインストールできます。リリース候補は npm の `next` タグで公開されます。既存の 0.17 環境を移行する場合は、まず[移行ガイド](docs/migration.md)を読んでください。既存環境をそのままアップグレードすることはできません。設定の書き直しが必要で、保存済みの状態も移行されません。
+0.18 の環境を 0.19 にアップグレードする場合は、[From 0.18 to 0.19](docs/migration.md#from-018-to-019) のアップグレード通知を確認してください。各通知に、必要な変更と、自分の環境が対象かどうかの確かめ方を記載しています。0.18 は、パッケージ名を変更して 0.17 を書き直したバージョンです。既存の 0.17 環境を移行する場合は、まず[移行ガイド](docs/migration.md)を読んでください。既存環境をそのままアップグレードすることはできません。設定の書き直しが必要で、保存済みの状態も移行されません。
 
 ## 主な機能
 
@@ -33,17 +33,17 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 | クライアントが保持する鍵にバインドしたトークン（DPoP） | RFC 9449 | [dpop](modules/oauth/dpop/README.md) |
 | 証明書にバインドしたトークン（mTLS） | RFC 8705 | [mtls](modules/cert-binding/mtls/README.md) |
 | リソースインジケーター | RFC 8707 | [resource-indicators](modules/oauth/resource-indicators/README.md) |
-| パスキーによるログインと登録 | WebAuthn | [webauthn-login](modules/passkey/webauthn-login/README.md), [passkey-registration](modules/passkey/passkey-registration/README.md) |
+| パスキーによるログインと登録 | WebAuthn | [login-passkey](modules/passkey/login-passkey/README.md), [webauthn-login](modules/passkey/webauthn-login/README.md), [passkey-registration](modules/passkey/passkey-registration/README.md) |
 | 第2の認証要素：認証アプリ（TOTP）、メールコード、リカバリーコード、セキュリティキー | RFC 6238, WebAuthn | [mfa](modules/second-factor/mfa/README.md) と `mfa-*` モジュール |
 | 上流の OpenID Connect プロバイダー、Google、GitHub、Apple を通じたログイン | OpenID Connect、GitHub OAuth | [federation](modules/upstream-login/federation/README.md) と `idp-*` モジュール |
 
-パスキーログインはトークンエンドポイントのカスタムグラントで、ブラウザーのセッションは開始しません。mTLS モジュールはトークンを証明書にバインドします。クライアント認証には別の方式を使います。
+`login-passkey` によるパスキーログインは、パスワードログインと同じようにブラウザーのセッションを開始します（[Adding passkey login to the app](docs/login-page.md#adding-passkey-login-to-the-app)）。`webauthn-login` では、トークンエンドポイントのカスタムグラントでもパスキーログインができます。この場合、ブラウザーのセッションは開始しません。mTLS モジュールはトークンを証明書にバインドします。クライアント認証には別の方式を使います。
 
-このほか、同意、ステップアップ認証、クライアント向けに上流のトークンを保持する機能に対応するモジュールがあります。ユーザーストアで失効させたユーザーのセッションを終了するモジュールもあります。[担当モジュール一覧](modules/README.md)には、すべてのモジュールとその責務をまとめています。
+このほか、同意、ステップアップ認証、クライアント向けに上流のトークンを保持する機能に対応するモジュールがあります。ユーザーストアで失効させたユーザーのセッションを終了するモジュールもあります。[担当モジュール一覧](modules/README.md)には、各関心を担当するモジュールをまとめています。各モジュールの card（README）に、そのモジュールが何をするかを記載しています。
 
 ### 自分で用意するもの
 
-- ログインページと、同意が必要なクライアントがある場合は同意ページ。プロバイダーは `redirect_to` パラメーターを付けて、ブラウザーをログインページにリダイレクトします。ログインページでは `GET /session/csrf` で CSRF トークンを取得し、ユーザー名、パスワード、トークン、`redirect_to` を `POST /session/login` に送信します。その後、応答で受け取った `redirect_to` にブラウザーを移動します。ページはプロバイダーの公開オリジンから配信してください。たとえば、同じリバースプロキシの背後に配置します。別のオリジンから送信されたログイン要求は拒否されます。要るリクエストと答えは[ログインページの手引き](docs/login-page.md)に、契約は [login-password](modules/identity/login-password/README.md) と [csrf](modules/identity/csrf/README.md) にあります。
+- ログインページと、同意が必要なクライアントがある場合は同意ページ。プロバイダーは `redirect_to` パラメーターを付けて、ブラウザーをログインページにリダイレクトします。ログインページでは `GET /session/csrf` で CSRF トークンを取得し、ユーザー名、パスワード、トークン、`redirect_to` を `POST /session/login` に送信します。その後、応答で受け取った `redirect_to` にブラウザーを移動します。ページはプロバイダーの公開オリジンから配信してください。たとえば、同じリバースプロキシの背後に配置します。別のオリジンから送信されたログイン要求は拒否されます。ログインページのリクエストと応答は[ログインページの手引き](docs/login-page.md)に、同意ページのリクエストと応答は[同意ページの手引き](docs/consent-page.md)に記載しています。契約は [login-password](modules/identity/login-password/README.md) と [csrf](modules/identity/csrf/README.md) にあります。
 - ユーザーアカウント。設定に列挙するか、プロバイダーが呼び出す独自の HTTP サービスで管理します。この HTTP サービスをドキュメントではユーザー台帳（user ledger）と呼びます（[users-http](modules/user-ledger-http/users-http/README.md)）。ユーザー登録とパスワード復旧の機能は含まれません。
 - TLS を終端するリバースプロキシ。アプリ自体は平文の HTTP で待ち受けます。
 - 各サービス内での認可。トークンで何を許可するかは、各サービスまたは別のポリシーエンジンが判断します。[関連プロジェクト](#関連プロジェクト)を参照してください。
@@ -57,7 +57,7 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 | 1. 既存のユーザー情報を使い続ける | ユーザー情報やパスワードは移行しません。プロバイダーは既存の認証 API に、パスワードの確認とユーザーの参照を問い合わせます。既存の API がプロバイダーの呼び出しに答えます。形が違う場合は、間に薄いアダプターを置きます。 | [users-http](modules/user-ledger-http/users-http/README.md) |
 | 2. OAuth と OIDC を先に入れる | 既存のサービスは動かしたまま、新しいアプリと既存のアプリを 1 つずつ標準のフローへ切り替えます。既存のシステムが知っている鍵を持つ端末やバックエンドは、署名した assertion をトークンに換えられます。鍵は既存の台帳に問い合わせ、各 `jti` はほかのサービスからも見える所で使い切ります。自分の鍵の thumbprint で自分を名乗る端末も、信頼する issuer の自分で発行する署名者（self-issued signer）として受けられます。 | [エンドポイント](#エンドポイント)と [discovery](modules/oauth/discovery/README.md)。[jwt-bearer](modules/oauth/jwt-bearer/README.md) と [signer-keys-http](modules/user-ledger-http/signer-keys-http/README.md)、[jti-ledger-http](modules/user-ledger-http/jti-ledger-http/README.md) |
 | 3. 認証を必要に応じて強くする | 第2の認証要素、パスキー、上流の IdP を通じたログイン（SSO）、ユーザーストアで失効させたユーザーの開いているセッションとそれに結びつくトークンの終了を、生成したアプリにモジュールとして足します。期限まで残るトークンもあります。runbook の [Revoking a user from the ledger](docs/runbook.md#revoking-a-user-from-the-ledger) を参照してください。 | [mfa](modules/second-factor/mfa/README.md)、[passkeys](modules/passkey/passkeys/README.md)、[federation](modules/upstream-login/federation/README.md)、[subject-revocation-http](modules/user-ledger-http/subject-revocation-http/README.md)。[パターンの選択と機能の追加](#パターンの選択と機能の追加) |
-| 4. ログインの体験を良くする | アカウントはそのままに、画面を変えます。ログインページと同意ページは自分で用意するもので、決まった契約に沿って作るので、作り直すことも、パスキーのボタンを足すこともできます。 | [ログインページのガイド](docs/login-page.md)、[MFA ページのレシピ](docs/recipe-mfa-page.md)、[login-passkey](modules/passkey/login-passkey/README.md) |
+| 4. ログインの体験を良くする | アカウントはそのままに、画面を変えます。ログインページと同意ページは自分で用意するもので、決まった契約に沿って作るので、作り直すことも、パスキーのボタンを足すこともできます。 | [ログインページのガイド](docs/login-page.md)、[同意ページのガイド](docs/consent-page.md)、[MFA ページのレシピ](docs/recipe-mfa-page.md)、[login-passkey](modules/passkey/login-passkey/README.md) |
 | 5. 必要になれば別の IdP へ移る | アプリはプロバイダーと標準の OAuth 2.0 と OIDC だけで話すので、Keycloak などの別の IdP へ移すのは、各クライアントの設定の変更です。移るまでの間、プロバイダーはその IdP を上流としてログインさせることもできます。ユーザー ID、セッション、トークンは引き継がれないので、その移行は別に計画します。 | [エンドポイント](#エンドポイント)。[federation](modules/upstream-login/federation/README.md) と [idp-oidc](modules/upstream-login/idp-oidc/README.md) |
 | 6. 使い続ける | 要件を満たす限り、プロバイダーを長く使う認証基盤として運用します。 | [本番運用の前に](#本番運用の前に)、[runbook](docs/runbook.md)、[セキュリティモデル](docs/security-model.md)、[バージョンとサポート](#バージョンとサポート) |
 
@@ -89,10 +89,10 @@ cp config/local.conf.example config/local.conf
 `.env` には次を設定します。
 
 - `ISSUER_URL` と `HTTP_PUBLIC_ORIGIN`：クライアントから見える URL（末尾のスラッシュなし）と、そのスキーム・ホスト・ポートです。両者のオリジンは一致させてください。
-  - デフォルトでは、公開オリジンは https でなければなりません。手元のマシンで平文の http を使って試すには、両方を `http://127.0.0.1:8080` に設定し、`.env` に `HTTP_INSECURE_ORIGIN=true` を設定してください。
+  - デフォルトでは、公開オリジンは https でなければなりません。手元のマシンで平文の http を使って試すには、両方を `http://127.0.0.1:8080` に設定し、`.env` に `HTTP_INSECURE_ORIGIN=true` と `KERNEL_ENVIRONMENT=development` を設定してください。デフォルトの `production` では、平文の http のオリジンとページは拒否されます。ほかの人が使う環境では `production` のままにしてください。
 - `KEYS_SIGNING_KID` と `KEYS_SIGNING_ALG`。サンプルでは RSA 鍵用に RS256 を指定しています。RS256 は、どの OpenID Connect クライアントも検証できます。
-- `AUTHORIZE_LOGIN_PAGE`：ログインページの URL です。プロバイダーと同じオリジンに置きます。たとえば `http://127.0.0.1:8080/login` とし、ページを配信して残りをアプリに渡すプロキシの背後に置きます。アプリはこのページを配信しません。別のオリジンのページでもアプリは起動しますが、そこからのログインは必ず `403 csrf` で拒否されます。`CONSENT_PAGE` は同意ページの URL です。すべてのクライアントがファーストパーティの場合は、未設定のままにしてください。
-- サンプルに従い、`KERNEL_DEPLOYMENT=single`、`STORE_ACCEPT_VOLATILE=true`、`MAIL_ACCEPT_UNSENT=true`、`TOKENS_REVOCATION=denylist` を設定します。これらは、単一インスタンスで動作し、状態をメモリーに保持し（再起動で失われます）、メールを送信しない構成であることを明示します。`TOKENS_REVOCATION=denylist` は失効したアクセストークンを denylist に置いて拒否し、`unsupported` は失効の要求に unsupported と答えます。
+- `AUTHORIZE_LOGIN_PAGE`：ログインページの URL です。プロバイダーと同じオリジンに置きます。たとえば `http://127.0.0.1:8080/login` とし、ページを配信して残りをアプリに渡すプロキシの背後に置きます。アプリはこのページを配信しません。別のオリジンのページでもアプリは起動しますが、そこからのログインは必ず `403 csrf` で拒否されます。この例のように、ループバックホスト上のページを平文の http で配信するには、`KERNEL_ENVIRONMENT=development` が必要です。`CONSENT_PAGE` は[同意ページ](docs/consent-page.md)の URL です。すべてのクライアントがファーストパーティの場合は、未設定のままにしてください。
+- `KERNEL_DEPLOYMENT=single`、`STORE_ACCEPT_VOLATILE=true`、`TOKENS_REVOCATION=denylist` を設定します。単一インスタンスで動作し、状態をメモリーに保持する構成であることを明示します。状態は再起動で失われます。`TOKENS_REVOCATION=denylist` は、失効したアクセストークンを denylist に置いて拒否します。`simple-web` はコードとリフレッシュトークンを発行し、どちらも失効できる必要があるため、`unsupported` は起動時に理由とともに拒否されます。
 
 署名鍵を生成します。
 
@@ -100,10 +100,10 @@ cp config/local.conf.example config/local.conf
 node -e 'const {generateKeyPairSync}=require("node:crypto");process.stdout.write(generateKeyPairSync("rsa",{modulusLength:2048}).privateKey.export({type:"pkcs8",format:"pem"}))' > signing.pem
 ```
 
-テスト用ユーザーのパスワードハッシュを作成します。プロバイダーが受け付けるのは bcrypt または scrypt のハッシュで、平文のパスワードは受け付けません。次のコマンドは scrypt ハッシュを出力します。
+テスト用ユーザーのパスワードハッシュを作成します。プロバイダーが受け付けるのは bcrypt または scrypt のハッシュで、平文のパスワードは受け付けません。次のコマンドは標準入力からパスワードを読み取り、scrypt ハッシュを出力します。パスワードはシェルの履歴に残りません。パスワードを入力して Enter を押し、続けて Ctrl-D を押してください。
 
 ```sh
-node -e 'const c=require("node:crypto");const s=c.randomBytes(16);const k=c.scryptSync(process.argv[1],s,32,{N:2**15,r:8,p:1,maxmem:64*1024*1024});const b=x=>x.toString("base64").replace(/=+$/,"");console.log(`$scrypt$ln=15,r=8,p=1$${b(s)}$${b(k)}`)' 'your-password'
+node -e 'const c=require("node:crypto"),s=c.randomBytes(16),p=require("node:fs").readFileSync(0,"utf8").replace(/\r?\n$/,""),k=c.scryptSync(p,s,32,{N:2**15,r:8,p:1,maxmem:2**26}),b=(x)=>x.toString("base64").replace(/=+$/,"");console.log(`$scrypt$ln=15,r=8,p=1$${b(s)}$${b(k)}`)'
 ```
 
 次に `config/local.conf` を記述します。ここには署名鍵、監査ログの送信先、ユーザー、クライアントを設定します。`.env` の `KEYS_SIGNING_PRIVATE_KEY` は未設定のままにしてください。`users.registered` はサンプルファイルにないため、自分で追加してください。
@@ -186,7 +186,7 @@ curl -s http://127.0.0.1:8080/oauth/token -d grant_type=authorization_code -d cl
 
 `--pattern` を省略すると `full` になります。外部サービスなしで始めるには `simple-web` を使ってください。
 
-機能の追加には `--add` を使い、`@mod/<name>` 形式のモジュール名を指定します。`<name>` は `modules/` 配下にあるモジュールのディレクトリ名です。
+機能の追加には `--add` を使い、`@mod/<name>` 形式のモジュール名を指定します。`<name>` は、モジュールのディレクトリ `modules/<group>/<name>` の最後の部分です。
 
 ```sh
 npx @o3co/create-auth-provider my-provider-dpop --pattern simple-web --add @mod/dpop
@@ -213,7 +213,7 @@ npx @o3co/create-auth-provider my-provider-dpop --pattern simple-web --add @mod/
 
 起動前に、すべてのサンプル値を置き換えてください。シークレットのプレースホルダーは `REPLACE-` で始まり、そのまま残っていると拒否されます。
 
-[設定リファレンス](docs/configuration.md)に、すべての設定の型、デフォルト値、環境変数を記載しています。このリポジトリの各モジュールディレクトリにも、デフォルト値を記載した生成済みの `reference.conf` があります。参照専用です。
+[設定リファレンス](docs/configuration.md)に、すべての設定の型、デフォルト値、環境変数を記載しています。設定を受け取る各モジュールのディレクトリにも、デフォルト値を記載した生成済みの `reference.conf` があります。参照専用です。
 
 ## Docker での実行
 
