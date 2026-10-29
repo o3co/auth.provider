@@ -15,7 +15,7 @@ export interface Coverage {
 	readonly secrets: readonly { readonly key: string; readonly holds: string }[];
 	/** Settings the naming rule takes for a secret, and are not. */
 	readonly notSecrets: readonly { readonly key: string; readonly why: string }[];
-	/** Settings that weaken a guarantee when set, beyond those the naming rule finds. */
+	/** Settings that weaken a guarantee when set, beyond those the naming rule finds, or saying how one it finds does. */
 	readonly loosening: readonly { readonly key: string; readonly weakens: string }[];
 	/** Settings a candidate by name or by the security model, that weaken none. */
 	readonly notLoosening: readonly { readonly key: string; readonly why: string }[];
@@ -130,6 +130,39 @@ export const coverage: Coverage = {
 		},
 		{ key: "tokens.revocation", weakens: "`unsupported`: nothing issued can be revoked" },
 		{
+			key: "tokens.subject-check",
+			weakens:
+				"`none`: no module checks an access token's subject against its revocations, so a revoked subject's access tokens are taken until they expire",
+		},
+		{
+			key: "token-exchange.max-lifetime",
+			weakens:
+				"a lifetime a client asks of an exchange (`o3co_expires_in`) is taken up to this, up to a day, past `tokens`' own lifetimes, though never past the subject token's end or its ties'",
+		},
+		{
+			key: "login-passkey.counts-as-mfa",
+			weakens:
+				"`true` (the default): a passkey login whose user was verified meets a required second factor alone",
+		},
+		{
+			key: "mfa-email.adds-second-factor",
+			weakens: "`true`: a code by mail meets a required second factor, so the mailbox does",
+		},
+		{
+			key: "rate-limit.fail-mode",
+			weakens:
+				"`open`: while the store cannot count, a route's request limit lets every request through",
+		},
+		{
+			key: "redis.durability",
+			weakens:
+				"`none`: a crash loses the latest writes, spent assertion and proof ids and lockout records among them",
+		},
+		{
+			key: "redis.replication",
+			weakens: "`none`: a failover loses writes, confirmed ones too",
+		},
+		{
 			key: "audit.receivers",
 			weakens: "`none`: audit events go nowhere, warned at every boot",
 		},
@@ -199,6 +232,10 @@ export const coverage: Coverage = {
 		},
 	],
 	notDestinations: [
+		{
+			key: "jwt-bearer.issuers.<i>.issuer",
+			why: "the issuer an assertion's `iss` is matched with, never fetched; its keys come from `jwks-uri`",
+		},
 		{
 			key: "clients-cimd.allow-any-host",
 			why: "a switch that names no host: documents are fetched where a client id points",
