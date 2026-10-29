@@ -3,12 +3,12 @@ import { createServer as createTlsServer } from "node:https";
 import { type AddressInfo, connect, type Socket } from "node:net";
 import { isUnavailable } from "@mod/kernel";
 import { policyOf, policySettings } from "@mod/outbound-policy";
-import { type Offer, peerOptions } from "@mod/tls-options/testing";
+import { type Offer, peerOptions, testTlsOptions } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 // The contract first, as the package loads it: transport and credential import each other through it.
-import "../src/contract.ts";
-import type { OutboundUnavailable } from "../src/contract.ts";
-import { type Route, send } from "../src/transport.ts";
+import "../../contract.ts";
+import type { OutboundUnavailable } from "../../contract.ts";
+import { type Route, send } from "../../transport.ts";
 
 const anyPublic = policyOf(policySettings.parse({ "allow-any-public": true }));
 const limits = { maxBytes: 1000, timeoutMs: 2000 };
@@ -65,7 +65,10 @@ const reach = (offer: Offer, way: "direct" | "proxied") => {
 					direct: () => false,
 				}
 			: undefined;
-	return send(admitted, {}, limits, async () => ["127.0.0.1"], anyPublic, route, { ca }).then(
+	return send(admitted, {}, limits, async () => ["127.0.0.1"], anyPublic, route, {
+		floor: testTlsOptions,
+		ca,
+	}).then(
 		() => "answered",
 		(error) => (isUnavailable(error) ? (error as Partial<OutboundUnavailable>).failure : error),
 	);

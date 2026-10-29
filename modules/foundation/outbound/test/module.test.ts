@@ -7,6 +7,7 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import { type Narrower, outbound, signedOutbound } from "../src/contract.ts";
@@ -25,7 +26,10 @@ const onlyProxy = (name?: string) => {
 };
 
 const boot = (settings: Record<string, unknown> = {}) =>
-	assemble({ modules: [outboundModule], config: { ...kernelConfig(), outbound: settings } });
+	assemble({
+		modules: [outboundModule, tlsOptionsForTests],
+		config: { ...kernelConfig(), outbound: settings },
+	});
 
 it("holds to the defaults: outbound-policy's for its keys, and outbound's own", () => {
 	expect(section.parse({})).toEqual({
@@ -158,7 +162,7 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 	const recorded = recordingLog();
 	const withProxy = (outboundSettings: Record<string, unknown>) =>
 		assemble({
-			modules: [outboundModule],
+			modules: [outboundModule, tlsOptionsForTests],
 			config: { ...kernelConfig(), outbound: outboundSettings },
 			runtime: quietRuntime({ log: recorded.log }),
 		});
@@ -205,7 +209,7 @@ it("warns at each boot that names plain-internal pairs, telling their count alon
 	const recorded = recordingLog();
 	const booted = (outboundSettings: Record<string, unknown>) =>
 		assemble({
-			modules: [outboundModule],
+			modules: [outboundModule, tlsOptionsForTests],
 			config: { ...kernelConfig(), outbound: outboundSettings },
 			runtime: quietRuntime({ log: recorded.log }),
 		});
@@ -218,9 +222,22 @@ it("warns at each boot that names plain-internal pairs, telling their count alon
 	expect(JSON.stringify(recorded.lines())).not.toContain("internal:");
 });
 
+it("refuses boot without tls-options, naming it: no TLS connection goes without the floor", async () => {
+	const refused = await assemble({
+		modules: [outboundModule],
+		config: { ...kernelConfig(), outbound: {} },
+	}).catch((error: unknown) => error);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toEqual([
+		{ where: "outbound", reason: "no module provides tls-options" },
+	]);
+});
+
 it("boots on many instances, holding nothing they would need to share", async () => {
 	const config = { ...kernelConfig({ deployment: "multi" }), outbound: {} };
-	await expect(assemble({ modules: [outboundModule], config })).resolves.toBeDefined();
+	await expect(
+		assemble({ modules: [outboundModule, tlsOptionsForTests], config }),
+	).resolves.toBeDefined();
 });
 
 it("boots without a proxy, and refuses a destination before sending", async () => {

@@ -13,6 +13,7 @@ import {
 } from "node:net";
 import { isUnavailable } from "@mod/kernel";
 import { policyOf, policySettings } from "@mod/outbound-policy";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
@@ -43,6 +44,8 @@ vi.mock("node:net", async (original) => {
 });
 
 /** The operator's policy at its plainest, checking the addresses a test's admitted URL reaches. */
+/** Every TLS connection's floor, as tls-options' defaults give it. */
+const withFloor = { floor: testTlsOptions };
 const anyPublic = policyOf(policySettings.parse({ "allow-any-public": true }));
 
 let server: Server;
@@ -168,7 +171,7 @@ const over = (
 			...settings,
 		}),
 		resolve,
-		{},
+		withFloor,
 		deadlineOf,
 		lookups,
 	);
@@ -642,12 +645,20 @@ describe("outbound", () => {
 		const atOnce: Resolver = () => {
 			throw new Error("resolver");
 		};
-		expect(await failure(send(admitted, {}, limits, atOnce, anyPublic))).toBe(
+		expect(await failure(send(admitted, {}, limits, atOnce, anyPublic, undefined, withFloor))).toBe(
 			"unavailable: unreachable",
 		);
 		expect(
 			await failure(
-				send(admitted, {}, limits, async () => atOnce("", AbortSignal.timeout(1)), anyPublic),
+				send(
+					admitted,
+					{},
+					limits,
+					async () => atOnce("", AbortSignal.timeout(1)),
+					anyPublic,
+					undefined,
+					withFloor,
+				),
 			),
 		).toBe("unavailable: unreachable");
 	});
@@ -679,7 +690,15 @@ describe("outbound", () => {
 			internal: false,
 		};
 		const limits = { maxBytes: 1000, timeoutMs: 1000 };
-		const answer = send(admitted, {}, limits, async () => ["127.0.0.1"], anyPublic);
+		const answer = send(
+			admitted,
+			{},
+			limits,
+			async () => ["127.0.0.1"],
+			anyPublic,
+			undefined,
+			withFloor,
+		);
 		expect(await failure(answer)).toBe("unavailable: unreachable");
 		raw.close();
 		// A TLS handshake record, naming the host, never plain text.
@@ -703,7 +722,10 @@ describe("outbound", () => {
 		const limits = { maxBytes: 1000, timeoutMs: 2000 };
 		const reach = (host: string, trust: { ca?: string } = { ca: authority }) =>
 			failure(
-				send(toward(host), {}, limits, async () => ["127.0.0.1"], anyPublic, undefined, trust),
+				send(toward(host), {}, limits, async () => ["127.0.0.1"], anyPublic, undefined, {
+					...withFloor,
+					...trust,
+				}),
 			);
 		expect(await reach("idp.example.test")).toBe("answered");
 		// A certificate for another name, or one no trusted authority issued, ends the connection.

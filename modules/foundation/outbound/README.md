@@ -21,7 +21,7 @@
 - outbound alone sets `User-Agent` (`auth-provider`), `Accept-Encoding`, `Host` and the headers that frame and carry the message.
 - A credential goes only as a request's `credential`, under the internal module `credential`'s rules. A redirect never carries it, being refused.
 - A 3xx other than 304 is refused as a redirect; a 101, an encoded answer, a body past the size cap, or headers past Node's 16 KiB are unavailable, and the connection is closed; other 1xx answers are waited past.
-- Every TLS connection, direct or through the proxy's tunnel, takes `tls-options`' floor, spread last over its own options: a server offering only an older TLS, the RSA key exchange or CBC is `unreachable`.
+- Every TLS connection, direct or through the proxy's tunnel, takes `tls-options`' floor, as the internal module `tls` says.
 - One deadline, the policy's limit, covers resolving (or the tunnel), connecting, the headers and the body; the body is cut at the policy's size.
 - A request past `max-concurrent` is unavailable at once, and each request gives its place back however it ends. Name lookups count apart: `max-lookups` at once (four unless set, never more than `max-concurrent`); one more is unavailable at once.
 - Names resolve as the system does, hosts file included: by default (`resolution`: `helper`) in helper processes, a helper that does not start refusing boot; with `in-process`, here, no deadline stopping one. See the internal modules `resolver-process` and `lookups`.

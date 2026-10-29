@@ -10,7 +10,6 @@ import type { LookupFunction, Socket } from "node:net";
 import { isIP, connect as plainConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { type Admitted, DestinationRefused, type Limits, type Policy } from "@mod/outbound-policy";
-import { tlsOptions } from "@mod/tls-options";
 import {
 	isOutboundUnavailable,
 	type OutboundFailure,
@@ -18,6 +17,7 @@ import {
 	type OutboundResponse,
 	OutboundUnavailable,
 } from "./contract.ts";
+import { type Tls, tlsOf } from "./tls/tls.ts";
 
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
@@ -40,11 +40,6 @@ export interface Route {
 	readonly resolve: Resolver;
 	readonly authorization?: string;
 	direct(host: string): boolean;
-}
-
-/** The authorities a destination's certificate is checked against, for a test; the platform's otherwise. */
-export interface Trust {
-	readonly ca?: string;
 }
 
 /** Headers outbound always sends as its own: the product's name, and a body as sent. */
@@ -179,7 +174,7 @@ async function viaProxy(
 	admitted: Admitted,
 	policy: Pick<Policy, "admitAddresses">,
 	signal: AbortSignal,
-	trust: Trust,
+	tls: Tls,
 ): Promise<Way> {
 	const written = writtenAddress(admitted);
 	const literal = written !== undefined;
@@ -191,8 +186,7 @@ async function viaProxy(
 			socket,
 			host: admitted.host,
 			...(literal ? {} : { servername: admitted.host }),
-			...trust,
-			...tlsOptions,
+			...tlsOf(tls),
 		});
 	return { carry: { agent }, release: () => socket.destroy() };
 }
@@ -203,7 +197,7 @@ async function atCheckedAddress(
 	resolve: Resolver,
 	policy: Pick<Policy, "admitAddresses">,
 	signal: AbortSignal,
-	trust: Trust,
+	tls: Tls,
 ): Promise<Way> {
 	const checked = policy.admitAddresses(await addressesOf(admitted, resolve, signal), admitted);
 	const [address = ""] = checked;
@@ -219,8 +213,7 @@ async function atCheckedAddress(
 		tlsConnect({
 			...at,
 			...(literal ? {} : { servername: admitted.host }),
-			...trust,
-			...tlsOptions,
+			...tlsOf(tls),
 		});
 	return { carry: { agent }, release: () => {} };
 }
@@ -232,15 +225,15 @@ export async function send(
 	limits: Limits,
 	resolve: Resolver,
 	policy: Pick<Policy, "admitAddresses">,
-	route?: Route,
-	trust: Trust = {},
+	route: Route | undefined,
+	tls: Tls,
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
 ): Promise<OutboundResponse> {
 	const signal = deadlineOf(limits.timeoutMs);
 	const proxied = route !== undefined && !admitted.plain && !route.direct(admitted.host);
 	const way = proxied
-		? await viaProxy(route, admitted, policy, signal, trust)
-		: await atCheckedAddress(admitted, resolve, policy, signal, trust);
+		? await viaProxy(route, admitted, policy, signal, tls)
+		: await atCheckedAddress(admitted, resolve, policy, signal, tls);
 	const answer = await new Promise<IncomingMessage>((answered, failed) => {
 		let outgoing: ClientRequest;
 		try {
@@ -251,7 +244,7 @@ export async function send(
 				method: request.method ?? "GET",
 				headers: { ...callerHeaders(request.headers), ...ownHeaders },
 				...way.carry,
-				...(admitted.plain ? {} : trust),
+				...(admitted.plain ? {} : tlsOf(tls)),
 				signal,
 			});
 		} catch (error) {

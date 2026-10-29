@@ -3,12 +3,16 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { outboundLimits } from "@mod/outbound-policy";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { expect, it } from "vitest";
 import { outbound } from "../src/contract.ts";
 import outboundModule, { section } from "../src/module.ts";
 
 const boot = (settings: Record<string, unknown>) =>
-	assemble({ modules: [outboundModule], config: { ...kernelConfig(), outbound: settings } });
+	assemble({
+		modules: [outboundModule, tlsOptionsForTests],
+		config: { ...kernelConfig(), outbound: settings },
+	});
 
 it("resolves in its helper processes by default, a plain-ipv4 pair's name to IPv4 alone", async () => {
 	const server = createServer((_, res) => res.end("ok"));
