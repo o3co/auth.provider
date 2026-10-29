@@ -118,12 +118,6 @@ export interface IssueLimits {
 export interface Tokens extends TokenValidity<AccessCheck> {
 	revocable(): boolean;
 	/**
-	 * The access-token lifetime that `issue` applies where the grant gives no `lifetimeSeconds`, in
-	 * whole seconds from 2 to 86400. It is fixed when `tokens` is built and never changes after, so a
-	 * check made at build time stays true.
-	 */
-	accessTokenLifetimeSeconds(): number;
-	/**
 	 * Whether an access token may be issued for the request; the same judgment `issue` makes, but for
 	 * the lifetime, which only `issue`'s limits and signing fix.
 	 */

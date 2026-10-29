@@ -9,11 +9,11 @@
 - Code records and redemption, the ID token (`code-grant`). The rules of redirect URIs and the client's section holding them (`redirect-uris`). Session entry decisions (`session`). Re-authentication records, their lifetime and store (`reauth`). Consent records and the first-party decision (`consent`). The login and `consent` pages (the deployment owns them).
 
 ## Offers
-- Route `/oauth/authorize` (GET; a POST is a `303` to the GET with the same parameters, which reads the session: cross-site POSTs lack its `SameSite=Lax` cookie; a POST carries only what fits in the GET's URL)
+- Route `/oauth/authorize` (GET; a POST is a `303` to the GET with its fields, which reads the session: cross-site POSTs lack its `SameSite=Lax` cookie; a POST carries only what fits in the GET's URL)
 - Both methods take other sites' requests, with the reason declared: a request arrives as the client's navigation and only starts what the user's own login and consent complete.
 - Extension point `hintReaders`, where the module that issues ID tokens judges an `id_token_hint` (`hint`'s card)
 - Contribution of the return path `/oauth/authorize` to `login-gates`
-- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`), `claims_parameter_supported` (`true` while `claims-selection` is `on`); to `claims-selection`'s consent judge, as for scope
+- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`), `claims_parameter_supported` (`true` while the package's `claims-parameter` is); to `claims-selection`'s consent judge, as for scope
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`, and of its document copy to `client-documents`
 - Operator section:
   - `login-page`: the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked.

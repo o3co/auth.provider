@@ -13,7 +13,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `google`)
-- IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both well-formed text), `access` (`offline` (default) or `online`), `require-iss` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Google's own), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional), `hosted-domains` (optional, lowercase domains)
+- IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both well-formed text), `access` (`offline` (default) or `online`), `require-iss` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Google's own), `algorithms` (`external-jwt`'s `algorithmsSetting`, default RS256), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional), `hosted-domains` (optional, lowercase domains)
 
 ## Invariants
 - Every request goes through `outbound`, narrowed to the one endpoint's host.
@@ -51,4 +51,4 @@
 - Anything else that fails refuses, without the library's or Google's text.
 
 ## Depends on
-- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`
+- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`, `url-setting`

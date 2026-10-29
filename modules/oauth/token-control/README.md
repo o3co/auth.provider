@@ -21,7 +21,7 @@
 - Both routes authenticate the client through `token-endpoint`'s `authenticateClient`, handing it the audit, which records a refusal as `client.authentication.failure`.
 - Both routes refuse a repeated parameter with `invalid_request`.
 - Introspection refuses public clients.
-- Introspection answers active only for a valid token whose audience the caller may see (`token-endpoint`'s allowance); every other token is `active:false`.
+- Introspection answers active only for a valid token whose audience the caller may see (`client-allowance`'s `maySee`); every other token is `active:false`.
 - A bound token is introspected with its own token type and `cnf`.
 - Only the client a token was issued to can revoke it; another client gets `200` and the token stays.
 - An access token's revocation is written on every request, past any earlier one, and answered only once confirmed.

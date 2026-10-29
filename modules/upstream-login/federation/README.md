@@ -17,7 +17,7 @@
 - Declares to `users` (`upstreamNames`) each IdP's name with the issuer its upstream says.
 - The operator section (its keys in the settings list).
 - Test configuration builders and an IdP type for tests (`./testing`)
-- Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`)
+- Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`, or `refused` for a login a gate refused, answered as `unknown_user`)
 - No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
 - Answer codes: `not_found` (404), `repeated_parameter`, `invalid_redirect`, `invalid_request`, `invalid_state`, `upstream_refused`, `continuation_unavailable` (400), `unknown_user`, `login_required` (401), a gate's answer (403), a continuation's own answers, `method_not_allowed` (405, with `allow`), `exchange_failed` (502), `temporarily_unavailable` (503)
 - Success is a 303 to the return target or the landing.
@@ -39,7 +39,7 @@
 - The start is declared as the user's own navigation, and the callback as the IdP's redirect or posted form, each in place of a policy keeping other sites out; both change state.
 - A login reports the upstream's login time as when the user authenticated, on our clock (a time before the start but within the IdP's fresh login allowance before the start's second counts as the start, to the millisecond), or that it is unknown.
 - After `prompt=login` or a max age, a login counts only when the upstream says when the user logged in.
-- Fresh enough: after `prompt=login`, the upstream's login time plus the IdP's `fresh-login-allowance` (its type's clock allowance by default) is not before the start's second (so an upstream that does not authenticate again passes a login up to that allowance before the start, or in the start's own second); with a max age, it is within the max age of now, to the millisecond.
+- Fresh enough, after `prompt=login` or with a max age: by the IdP's `fresh-login-allowance` (its type's clock allowance by default), as `round-trip`'s card says.
 - The fresh login allowance narrows only how far back a login time reaches: a time ahead of ours that the type's clock allowance passes, or any time the upstream says, is taken as the upstream says it.
 - The local user is found only by the IdP's name and the upstream subject.
 - An unknown identity is refused, and nothing is created.
@@ -50,7 +50,7 @@
 - Groups and other claims never reach the session.
 - A login's upstream tokens go to their receivers through `upstream-handoff`, which keeps a held login's for `transaction-lifetime`, its resume's deadline; if they cannot be kept, the callback is unavailable.
 - An IdP's redirect URI is the public origin plus its callback path.
-- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them) or cannot be reached, told apart, no public origin, or a `held-page` off it (the page reads the held login with this deployment's cookies), one reason per issue, all at once.
+- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them) or cannot be reached, told apart, no public origin, or a `held-page` off it (the page reads the held login with this deployment's cookies), one reason per issue, all at once; in production, also a `held-page` on a loopback host.
 - An IdP that answers in a posted form refuses boot where cookies cannot be secure, as its round trip's cookie is cross-site.
 
 ## Depends on

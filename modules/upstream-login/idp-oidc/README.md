@@ -21,12 +21,12 @@
 - Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives, and sent for an operator's URL (`internal`): the issuer for all its description names (an endpoint on another origin, another port too, reaches public addresses only), each given endpoint for itself; the client's secret goes to no other host.
 - An issuer's description that names an endpoint (its end of session included) on another host, as `outbound` matches hosts, refuses boot.
 - An endpoint the browser goes to (authorization, end of session), described or given, holds only where `outbound.refusals`' `browsedRefusal` takes it for the issuer or the given endpoint: https, or plain http at a loopback name or a `plain-internal` origin; else boot is refused, at `issuer` or the key. Plain http there carries the user's password and the IdP's cookies in the clear between browser and IdP, outside any mesh.
-- Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with that same narrowing: the description's own URL (at `issuer`), or `token-endpoint` and `jwks-uri` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
+- Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with that same narrowing: the description's own URL (at `issuer`), or `token-endpoint`, `jwks-uri` and a given `userinfo-endpoint` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
 - A description whose token endpoint or key set that policy refuses also refuses boot.
 - A description's refusal, `outbound` refusing to fetch it included, is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason. A description answered other than `200`, or that cannot be read as one (no JSON object, not its shape), refuses boot at the IdP, in `federation`'s words, not under `issuer`.
 - An answer naming another issuer in `iss` is refused before its code is used.
 - An answer without `iss` is refused, unless the IdP's `accept-missing-iss` is set and its description does not offer `iss`.
-- Where `iss` is not required so, every start logs a warning naming the IdP (answers are then taken without `iss`).
+- Where `iss` is not required so, boot logs a warning naming the IdP (answers are then taken without `iss`).
 - The id_token is checked by `external-jwt` with the issuer's key set at its `jwks_uri`, under `algorithms` and `clock-skew`, expecting the issuer and the client among its audiences. A key is read under one algorithm (`external-jwt`): with RS256 and PS256 both taken, one naming no `alg` is unused; an IdP signing with PS256 alone takes `["PS256"]`.
 - An id_token that gives `at_hash` must give the access token's, by its signature's digest; one that does not refuses the exchange.
 - The id_token must name no audience other than the client, and name the client as `azp` wherever it gives `azp`.
@@ -55,4 +55,4 @@
 - Without an end of session endpoint, the upstream offers no end of session.
 
 ## Depends on
-- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`
+- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`, `url-setting`

@@ -14,7 +14,7 @@
 ## Offers
 - `acr`: the known acr among the request's `acr_values`, in the order asked; the first of them a session's amr meet; and the session's current acr, the first in the table's order its amr meet.
 - Extension point: table entries, an acr and the amr sets that meet it, keyed by acr; `isAmrSets` is the rule they follow.
-- Contribution to `issuer`'s metadata: `acr_values_supported`, the operator's table in its written order, then the entries; left out when empty.
+- Contribution to `issuer`'s metadata: `acr_values_supported`, the operator's table in its order, then the entries; left out when empty.
 - Operator section: `values`, each acr and the amr sets that meet it, each set and each list non-empty; default empty.
 - Test configuration builders (`./testing`).
 
@@ -23,6 +23,7 @@
 - The first acr asked that is met wins; acr have no order of strength.
 - An acr is known only by its exact name as an own entry of the table.
 - The operator's table wins over an entry offered for the same acr.
+- The table's order is the operator's written order, but a name that reads as an integer (`0`, `1`, `2`) comes first, ascending, as the configuration is read as an object. A table of two entries or more holding one warns at every start, `acr.values_order` with those names: written as a name that does not read as an integer (`loa-1`), it keeps its written order. Every acr answered is one the session meets, so the order never answers one stronger.
 - An offered entry's sets follow the operator's rule, non-empty sets in a non-empty list; boot is refused for any other.
 - Boot is refused when an acr in the table has no set a declared way of logging in can meet: a configured one at `acr.values.<acr>`, never in the text; an offered one, a module's own name, by that name.
 

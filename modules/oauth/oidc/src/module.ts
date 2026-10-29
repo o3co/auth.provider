@@ -66,9 +66,10 @@ export default defineModule(
 			const signed = signer.algorithm();
 			const alg = c.section["id-token-alg"];
 			if (alg !== signed) {
+				// By the settings' paths alone, as a refusal holds no configuration value.
 				return c.refuse(
 					"oidc.id-token-alg",
-					`keys signs with ${signed}, not oidc.id-token-alg's ${alg}: add an ${alg} key as keys.signing, or set id-token-alg to ${signed}`,
+					"keys.signing.alg is not oidc.id-token-alg: give keys.signing a key of the algorithm oidc.id-token-alg names, or set oidc.id-token-alg to keys.signing.alg",
 				);
 			}
 			if (alg !== requiredAlg) c.log.warn("oidc.id_token_alg_not_rs256", { alg });
