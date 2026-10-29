@@ -8,7 +8,7 @@ A status here is read from the checklist and the tests alone: `mapped` (a test n
 
 An item's role is the role of the server's it binds: `as` the authorization server, `op` the OpenID Provider, `rs` the resource server at its own protected routes, `rp` the relying party to an upstream IdP, `client` the client sending tokens or assertions out.
 
-The checklist binds a production deployment (`kernel.environment = production`, the default). What only a development deployment allows, such as a plain-http public origin by `http.insecure-origin`, is outside it: a production deployment refuses a plain-http origin or issuer at boot, as the security model's Boot section (`docs/security-model.md`) tells. What an operator loosens explicitly, an `accept-*` setting or a `plain-*` pair, is the deployment's declared exception: an item keeps the status its tests give the default, and the security model's "Left to you" names the setting.
+The checklist binds a production deployment (`kernel.environment = production`, the default). What only a development deployment allows, such as a plain-http public origin by `http.insecure-origin`, is outside it: a production deployment refuses a plain-http origin or issuer at boot, as the security model's Boot section (`docs/security-model.md`) tells. What an operator loosens explicitly, an `accept-*` setting or a `plain-*` pair, or an algorithm it writes explicitly (`oidc.id-token-alg`), is the deployment's declared exception: an item keeps the status its tests give the default, and the security model's "Left to you" names the setting.
 
 The summary over every specification, by specification and by role, is not kept here: `pnpm --filter @mod/spec-checklist run summary` prints it from the checklist as it stands.
 
