@@ -104,8 +104,12 @@ export function flowWith(parts: FlowParts): Flow {
 
 	// RFC 9700 §4.11.2: a refusal goes back only to a browser logged in, but for a silent request. The
 	// request comes back from its login as it was sent, repeated or long parameters and all, to be refused again.
-	const loggedInFirst = async (refused: Decision, { one, request }: Trusted): Promise<Decision> => {
-		if (refused.kind !== "refuse" || one("prompt")?.split(" ").includes("none")) return refused;
+	const loggedInFirst = async (refused: Decision, { request }: Trusted): Promise<Decision> => {
+		// Silent by any prompt sent, repeated or too long: such a request never shows a page.
+		const silent = [...request.query].some(
+			([name, values]) => name === "prompt" && values.some((v) => v.split(" ").includes("none")),
+		);
+		if (refused.kind !== "refuse" || silent) return refused;
 		if (await entered.enter(request)) return refused;
 		const sent = [...request.query].flatMap(([name, values]) =>
 			values.map((v) => [name, v] as const),

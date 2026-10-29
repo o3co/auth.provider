@@ -39,18 +39,22 @@ describe("the flow: logging in before a refusal", () => {
 		}
 	});
 
-	it("answers a silent request without a session at once: its refusal, or login_required [rfc9700-4.11.2-b]", async () => {
+	it("answers a silent request without a session at once, its prompt repeated too: its refusal, or login_required [rfc9700-4.11.2-b]", async () => {
 		const { authorize } = await serve();
 		const refused = await authorize(request({ prompt: "none", scope: "unknown" }));
 		const silent = await authorize(request({ prompt: "none" }));
+		const twice = await authorize(
+			`${new URLSearchParams(request({ prompt: "none" }))}&prompt=none`,
+		);
 		expect(
-			[refused, silent].map((res) => [
+			[refused, silent, twice].map((res) => [
 				`${res.at?.origin}${res.at?.pathname}`,
 				res.at?.searchParams.get("error"),
 			]),
 		).toEqual([
 			[callback, "invalid_scope"],
 			[callback, "login_required"],
+			[callback, "invalid_request"],
 		]);
 	});
 
