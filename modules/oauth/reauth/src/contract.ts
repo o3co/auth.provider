@@ -12,7 +12,8 @@ export interface Reauths {
 	take(name: string | undefined, params: ReadonlyMap<string, string>): Promise<Reauth | undefined>;
 	/**
 	 * Whether the session's login is fresh enough for `prompt=login` and `max_age`, and its time known
-	 * when one is needed; an unknown time never is.
+	 * when one is needed; an unknown time never is. `prompt=login` and `max_age=0` are met by the
+	 * taken record; any other `max_age` by the login's age now, which no record stands for.
 	 */
 	fresh(
 		asked: {

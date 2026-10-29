@@ -57,11 +57,15 @@ export function reauthsWith({ store, clock, random }: ReauthsParts): Reauths {
 		},
 		fresh({ login, maxAgeMs, knownTime }, { authenticatedAt, authenticatedAtUnknown }, taken) {
 			if (authenticatedAtUnknown && (login || maxAgeMs !== undefined || knownTime)) return false;
-			if (!login && maxAgeMs === undefined) return true;
-			if (!login && maxAgeMs !== undefined && clock.now() - authenticatedAt <= maxAgeMs)
-				return true;
-			// To the millisecond: a login the upstream told in whole seconds comes lifted to the start of its round trip.
-			return taken !== undefined && authenticatedAt >= taken.at;
+			// Two checks, each on its own. The record shows a login for this request: to the millisecond,
+			// as a login the upstream told in whole seconds comes lifted to the start of its round trip.
+			const recorded = taken !== undefined && authenticatedAt >= taken.at;
+			if (login && !recorded) return false;
+			if (maxAgeMs === undefined) return true;
+			// max_age=0, which no login's age meets, is met by the record, as prompt=login is.
+			if (maxAgeMs === 0) return recorded;
+			// Measured now, as the request is decided: a record never stands for an age past it.
+			return clock.now() - authenticatedAt <= maxAgeMs;
 		},
 	};
 }
