@@ -27,6 +27,7 @@
 		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
+		"@mod/tls-options": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"jose": "6.2.13"
