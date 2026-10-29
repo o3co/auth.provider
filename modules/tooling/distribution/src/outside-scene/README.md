@@ -18,4 +18,4 @@
 - The app's `check:outside` passes. With the lockfile's zod pointed at another package's tarball on zod's registry, with that package's good integrity, it exits 1 for the integrity the release recorded, and for that alone: any other answer fails the scene.
 
 ## Depends on
-- pnpm, to pack, install and run; `yaml`, to change the lockfile; node's `http`, for the registry; the network, for the upstream registry.
+- pnpm, to pack, install and run; `tar`, run, to read a tarball's manifest; `yaml`, to change the lockfile; node's `http`, for the registry; the network, for the upstream registry.
