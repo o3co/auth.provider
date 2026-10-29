@@ -213,7 +213,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `sections.client-assertion.accept-loose-audience` | `@mod/client-assertion` | `false` | named so (`accept-*` and the like) |
 | `sections.jwt-bearer.accept-unbound` | `@mod/jwt-bearer` | `false` | named so (`accept-*` and the like) |
 | `store.accept-volatile` | `@mod/store` | `false` | named so (`accept-*` and the like) |
-| `token-exchange.max-lifetime` | `@mod/token-exchange` |  | an exchanged token lives up to this, up to a day, past `tokens`' own lifetimes |
+| `token-exchange.max-lifetime` | `@mod/token-exchange` |  | a lifetime a client asks of an exchange (`o3co_expires_in`) is taken up to this, up to a day, past `tokens`' own lifetimes, though never past the subject token's end or its ties' |
 | `tokens.access-token-lifetime` | `@mod/tokens` | `"1h"` | past the default hour, up to a day: a leaked access token, or one a resource server verifies itself after a revocation, is taken that long |
 | `tokens.revocation` | `@mod/tokens` |  | `unsupported`: nothing issued can be revoked |
 | `tokens.subject-check` | `@mod/tokens` |  | `none`: no module checks an access token's subject against its revocations, so a revoked subject's access tokens are taken until they expire |
