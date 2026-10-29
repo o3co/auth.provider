@@ -23,9 +23,7 @@ const shared = contract<Notices>("rp-logout.notices");
 /** The one handler both methods of the route share, built once. */
 const ending = contract<Handler>("rp-logout.ending");
 /** The confirmation's two handlers, built once. */
-const confirming = contract<{ readonly show: Handler; readonly take: Handler }>(
-	"rp-logout.confirming",
-);
+const confirming = contract<Awaited<ReturnType<typeof confirmFrom>>>("rp-logout.confirming");
 
 /** The logout's own requests per source, which every route that may sign a confirmation is counted with. */
 const counted = (c: { readonly section: Settings }) =>
@@ -79,9 +77,9 @@ export default defineModule(
 		m.provide(ending).by(async (c) => {
 			const ends = await c.collect(upstreamEnds);
 			if (ends.length > 1) return c.refuse(name, "more than one upstream end of session");
-			return endingFrom(c, ends[0]);
+			return endingFrom(c, ends[0], await c.get(confirming), path);
 		}),
-		m.provide(confirming).by(async (c) => confirmFrom(c, (await c.collect(upstreamEnds))[0])),
+		m.provide(confirming).by(async (c) => confirmFrom(c, (await c.collect(upstreamEnds))[0], path)),
 		// The confirmation of a logout started without a hint (OpenID Connect RP-Initiated Logout 1.0 §2).
 		m.contribute(routes).by(async (c) => ({
 			method: "GET",
@@ -109,7 +107,7 @@ export default defineModule(
 				// It closes the session even on a GET, so a HEAD is not answered as one.
 				...(method === "GET" ? { changesState: true } : {}),
 				crossSite:
-					"RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names.",
+					"RP-initiated logout is a navigation from the RP's site by design; without asking, it closes only the session the browser holds, where a hint the provider signed names it.",
 				// Counted before any hint is checked, which reads keys and the store.
 				uses: [counted(c)],
 				handle: await c.get(ending),

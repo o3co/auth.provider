@@ -9,6 +9,7 @@ const relyingParty = (s: Settings) => ({
 	origins: s.origins,
 	topOrigins: s["top-origins"],
 	timeoutMs: s["challenge-lifetime"] * 1000,
+	algorithms: s.algorithms,
 });
 
 /** In production, each list holding an http origin, which the origins take on localhost alone. */

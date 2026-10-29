@@ -37,6 +37,7 @@ From `@mod/authorize`.
 |---|---|---|---|---|---|---|
 | `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host, with `kernel.environment = development`). |
 | `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host, with `kernel.environment = development`). |
+| `authorize.login-url-limit` | string | `8KiB` |  |  |  | The longest login URL a browser is sent to, `redirect_to` and all: a size with a unit, from 2KiB to 64KiB. A request whose login URL would be longer is answered here, `400`, nothing sent back. |
 | `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  | oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default. |
 | `authorize.claims-parameter` | boolean | `true` |  |  |  | Whether the claims request parameter's names and value constraints are taken, and discovery says it is supported. False ignores them, and boot warns; the sub asked, the acr, an essential auth_time and the parameter's form still hold, as do the scope's claims and the selections already kept. |
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both methods together; over it, 429. |
@@ -140,10 +141,10 @@ From `@mod/exchange-id-tokens`.
 |---|---|---|---|---|---|---|
 | `exchange-id-tokens.max-age` | string | `10m` |  |  |  | The oldest an id_token may be, from its `iat`, from 1m to 1h. |
 | `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. |
-| `exchange-id-tokens.apple.upstream` | string | `apple` when `exchange-id-tokens.apple` is set |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
-| `exchange-id-tokens.apple.clients` | map |  | when `exchange-id-tokens.apple` is set |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
-| `exchange-id-tokens.google.upstream` | string | `google` when `exchange-id-tokens.google` is set |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
-| `exchange-id-tokens.google.clients` | map |  | when `exchange-id-tokens.google` is set |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+| `exchange-id-tokens.apple.upstream` | string | `apple` |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
+| `exchange-id-tokens.apple.clients` | map |  |  |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+| `exchange-id-tokens.google.upstream` | string | `google` |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
+| `exchange-id-tokens.google.clients` | map |  |  |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
 
 ## external-jwt
 
@@ -239,9 +240,9 @@ From `@mod/http`.
 | `http.public-origin` | string |  |  | `HTTP_PUBLIC_ORIGIN` | `https://login.example.invalid` | The scheme, host and port users reach this deployment at: an origin only, with no path. |
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
 | `http.insecure-origin` | boolean | `false` |  | `HTTP_INSECURE_ORIGIN` | `false` | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it, and only with `kernel.environment = development`, as a production deployment refuses it. |
-| `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  | when `http.client-certificate` is set |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
-| `http.client-certificate.header` | string | `client-cert` when `http.client-certificate` is set |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
-| `http.client-certificate.chain-header` | string | `client-cert-chain` when `http.client-certificate` is set |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
+| `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
+| `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
 | `http.headers-timeout` | string | `10s` |  |  |  | How long a client may take to send a request's headers, from 1s to 1m, such as 10s; past it the request is answered 408 and its connection closed. |
 | `http.request-timeout` | string | `30s` |  |  |  | How long a client may take to send a whole request, its body included, from 1s to 5m and no less than headers-timeout, such as 30s; past it the request is answered 408 and its connection closed. |
 | `http.max-connections` | integer (1–1000000) | `10000` |  |  |  | The most connections held open at once, from 1 to 1000000; one past it is closed as it arrives. |
@@ -308,9 +309,9 @@ From `@mod/keys`.
 | `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
 | `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
 | `keys.signing.secret-encoding` | hex \| base64 \| utf8 |  |  |  |  | How `secret` is read: `hex`, `base64` (strict) or `utf8`, the text's own bytes, as 0.17 and policy-verifier read it; a value not of the reading named is refused. Unset, hex or else base64. |
-| `keys.next.kid` | string |  | when `keys.next` is set |  |  | The key id of the key that signs next, unique in the ring. |
-| `keys.next.alg` | EdDSA \| ES256 \| RS256 |  | when `keys.next` is set |  |  | The algorithm the next key will sign with. |
-| `keys.next.public-key` | string |  | when `keys.next` is set |  |  | The next key's public half, as PEM; a private PEM is taken too. |
+| `keys.next.kid` | string |  |  |  |  | The key id of the key that signs next, unique in the ring. |
+| `keys.next.alg` | EdDSA \| ES256 \| RS256 |  |  |  |  | The algorithm the next key will sign with. |
+| `keys.next.public-key` | string |  |  |  |  | The next key's public half, as PEM; a private PEM is taken too. |
 | `keys.previous` | list of map | `[]` |  |  |  | Past signing keys that still verify tokens until each one's `expires-at`. |
 
 ## login-gates
@@ -462,18 +463,18 @@ From `@mod/mtls`.
 | `mtls.anchors` | list of string |  |  |  |  | The trust anchors, as PEM text holding one certificate each. |
 | `mtls.max-intermediates` | integer (0–14) | `4` |  |  |  | At most this many certificates between the leaf and an anchor. |
 | `mtls.min-rsa-bits` | integer (2048–16384) | `2048` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
-| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | when `mtls.revocation` is set |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
+| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  |  |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
 | `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
 | `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
-| `mtls.revocation.nonce` | boolean | `true` when `mtls.revocation` is set |  |  |  | Whether an OCSP request carries a nonce. |
-| `mtls.revocation.skew` | string | `5m` when `mtls.revocation` is set |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
-| `mtls.revocation.ocsp-fresh` | string | `10m` when `mtls.revocation` is set |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
-| `mtls.revocation.crl-ttl` | string | `1h` when `mtls.revocation` is set |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
-| `mtls.revocation.failure-lifetime` | string | `30s` when `mtls.revocation` is set |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
-| `mtls.revocation.crl-entries` | integer (1–65536) | `256` when `mtls.revocation` is set |  |  |  | How many CRLs are kept. |
-| `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` when `mtls.revocation` is set |  |  |  | How many OCSP answers are kept. |
-| `mtls.revocation.timeout` | string | `3s` when `mtls.revocation` is set |  |  |  | How long one fetch may take, from 1ms to 1m. |
-| `mtls.revocation.max-fetches` | integer (1–64) | `4` when `mtls.revocation` is set |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
+| `mtls.revocation.nonce` | boolean | `true` |  |  |  | Whether an OCSP request carries a nonce. |
+| `mtls.revocation.skew` | string | `5m` |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
+| `mtls.revocation.ocsp-fresh` | string | `10m` |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
+| `mtls.revocation.crl-ttl` | string | `1h` |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
+| `mtls.revocation.failure-lifetime` | string | `30s` |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
+| `mtls.revocation.crl-entries` | integer (1–65536) | `256` |  |  |  | How many CRLs are kept. |
+| `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` |  |  |  | How many OCSP answers are kept. |
+| `mtls.revocation.timeout` | string | `3s` |  |  |  | How long one fetch may take, from 1ms to 1m. |
+| `mtls.revocation.max-fetches` | integer (1–64) | `4` |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
 
 ## oidc
 
@@ -595,6 +596,7 @@ From `@mod/rp-logout`.
 | `rp-logout.remember-for` | string | `1d` |  |  |  | How long a session's clients are kept from a redemption, from 1m to 30d; at least as long as a session lives. |
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
+| `rp-logout.confirm-within` | string | `5m` |  |  |  | How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page. |
 | `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
 | `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
@@ -615,9 +617,11 @@ From `@mod/seal`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `seal.current.id` | string |  | yes | `SEAL_CURRENT_ID` | `seal-1` | The key's id, which heads every value it seals. |
-| `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | 32 bytes, base64, of at least 8 byte values. |
-| `seal.next.id` | string |  | when `seal.next` is set |  |  | The key's id: it opens values but seals none until it is made current. |
-| `seal.next.key` | string |  | when `seal.next` is set |  |  | 32 bytes, base64, of at least 8 byte values. |
+| `seal.current.algorithm` | aes-256-gcm | `aes-256-gcm` |  |  |  | What the key seals and opens with: aes-256-gcm, the default and only one. |
+| `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values. |
+| `seal.next.id` | string |  |  |  |  | The key's id: it opens values but seals none until it is made current. |
+| `seal.next.algorithm` | aes-256-gcm | `aes-256-gcm` |  |  |  | What the key seals and opens with: aes-256-gcm, the default and only one. |
+| `seal.next.key` | string |  |  |  |  | The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values. |
 | `seal.previous` | list of map | `[]` |  |  |  | Keys that only open what they sealed. |
 
 ## secret-hash
@@ -779,6 +783,7 @@ From `@mod/webauthn`.
 | `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost, with `kernel.environment = development`), or Android app origins. |
 | `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
+| `webauthn.algorithms` | list of EdDSA \| ES256 \| RS256 | `["EdDSA","ES256","RS256"]` |  |  |  | The signature algorithms a passkey may use, offered at registration in this order: EdDSA, ES256 or RS256, at least one. A passkey of one left out can no longer sign in. |
 
 ## webauthn-login
 
