@@ -44,18 +44,26 @@ async function authorize(browser: ReturnType<typeof browserOn>) {
 		status: res.status,
 		code: back?.searchParams.get("code") ?? undefined,
 		error: back?.searchParams.get("error") ?? undefined,
+		// The endpoint's own error, where it answered and sent nothing on.
+		own: res.at ? undefined : (JSON.parse(res.text || "{}") as { error?: string }).error,
 		at: performance.now(),
 	};
 }
 
 /** The answer to a fault before the browser's session is found: the endpoint's own 503, nothing sent back. */
-const unanswered = { status: 503, code: undefined, error: undefined };
+const unanswered = {
+	status: 503,
+	code: undefined,
+	error: undefined,
+	own: "temporarily_unavailable",
+};
 /** The client's answer to a fault once the session is found: a redirect with temporarily_unavailable, no code. */
-const sentBack = { status: 302, code: undefined, error: "temporarily_unavailable" };
+const sentBack = { status: 302, code: undefined, error: "temporarily_unavailable", own: undefined };
 const shape = (a: Awaited<ReturnType<typeof authorize>>) => ({
 	status: a.status,
 	code: a.code,
 	error: a.error,
+	own: a.own,
 });
 
 /** The control: with no fault, the endpoint keeps one new code and gives it. */
