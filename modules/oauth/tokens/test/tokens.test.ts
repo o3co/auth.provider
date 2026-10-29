@@ -243,6 +243,18 @@ it("refuses to start unless exactly one module checks subjects, or the section s
 	await boot(stated);
 });
 
+it("says whether subjects are checked: false only where the section states none", async () => {
+	const check = defineModule({ name: "check", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
+	]);
+	const checked = await boot(
+		{ revocation: "unsupported", "subject-check": undefined },
+		{ extra: [check] },
+	);
+	expect(checked.subjectsChecked()).toBe(true);
+	expect((await boot({ revocation: "unsupported" })).subjectsChecked()).toBe(false);
+});
+
 it("names and stamps the issuer that issuer owns", async () => {
 	const t = await boot(
 		{ revocation: "unsupported" },

@@ -541,7 +541,12 @@ export function tokensContract(
  * fails as shape when no binding kind of the composition writes its member, as tokens' does.
  */
 export function tokensStandIn(
-	options: { readonly revocable?: boolean; readonly lifetimeSeconds?: number } = {},
+	options: {
+		readonly revocable?: boolean;
+		readonly lifetimeSeconds?: number;
+		/** What `subjectsChecked` answers; checked unless a test says otherwise. */
+		readonly subjectsChecked?: boolean;
+	} = {},
 ) {
 	return defineModule(
 		{
@@ -641,6 +646,7 @@ export function tokensStandIn(
 				};
 				const stand: Tokens = {
 					revocable: () => denylist.revocable,
+					subjectsChecked: () => options.subjectsChecked ?? true,
 					...issuing(judge, issueAccess, c.clock.now),
 					verifyAccess: verify,
 					issuedToOf: async (token) => {
