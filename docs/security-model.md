@@ -207,7 +207,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Keeping the issuer's path when your proxy forwards requests: a proxy that strips it breaks every DPoP proof.
   - Choosing `mtls.revocation.on-unavailable` (`reject` refuses during a revocation outage; `allow` binds with a warning).
   - The self-signed mTLS mode binds any certificate that parses.
-  - Whether a client binds its tokens and how it authenticates are each client's: `sender-binding.required` and the client's `method`. Bearer tokens and `client_secret` stay allowed by default, as a web client with neither DPoP nor mutual TLS is the common one; require binding and an asymmetric method for each client that can hold a key.
+  - Whether a client binds its tokens and how it authenticates are each client's: `sections.sender-binding.required` and the client's `method`. Bearer tokens and `client_secret` stay allowed by default, as a web client with neither DPoP nor mutual TLS is the common one; require binding and an asymmetric method for each client that can hold a key.
 
 ## Rate limits
 
