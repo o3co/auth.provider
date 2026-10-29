@@ -6,12 +6,12 @@ const page = urlSetting({ schemes: ["https"], loopbackHttp: true });
 
 export const section = z.strictObject({
 	"login-page": page.describe(
-		"The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host).",
+		"The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host, with `kernel.environment = development`).",
 	),
 	"step-up-page": page
 		.optional()
 		.describe(
-			"Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host).",
+			"Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host, with `kernel.environment = development`).",
 		),
 	/** Whether every request names `openid` in its own scope (`dual` also serves plain OAuth clients). */
 	"oidc-mode": z
