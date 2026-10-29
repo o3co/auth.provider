@@ -1,7 +1,7 @@
 # rp-logout
 
 ## Responsibilities
-- Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), a person's confirmation where no hint names the session (`confirm`), the close both share (`closing`), the pages it ends on (`page`) and back-channel notices (`notices`).
+- Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), a person's confirmation where no hint names the browser's session (`confirm`), the close both share (`closing`), the pages it ends on (`page`) and back-channel notices (`notices`).
 - Keeps which clients redeemed a code in each session, and the notices not yet delivered.
 - Apart from `logout` (the browser's own logout): these need hints, keys, outbound requests and client records that the browser's logout does not.
 

@@ -2,6 +2,7 @@ import { type Clients, clientSources } from "@mod/clients";
 import { use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { keys } from "@mod/keys";
 import { requestsPerSource } from "@mod/rate-limit";
 import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn, stubSessions } from "@mod/session/testing";
@@ -41,20 +42,122 @@ describe("the logout a client starts", () => {
 		]);
 	});
 
-	it("ends it from a GET too, leaving another browser's cookie", async () => {
+	it("ends it from a GET too, the browser holding the session the hint names", async () => {
+		const h = await serve();
+		const { session, cookie } = await h.login();
+		const out = await h.call("GET", { id_token_hint: await h.hintFor(session.id) }, { cookie });
+		expect([out.status, out.json]).toEqual([200, { logged_out: true }]);
+		expect(await h.stillOpen(session.id)).toBe(false);
+	});
+
+	it("sends a hint naming a session the browser does not hold to the person's confirmation, another's or none, by GET or POST, carrying the checked request and closing nothing [oidc-rpinit-2-n]", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const other = await h.login();
-		const out = await h.call(
-			"GET",
-			{ id_token_hint: await h.hintFor(session.id) },
-			{
-				cookie: other.cookie,
-			},
-		);
-		expect([out.status, out.cookies]).toEqual([200, []]);
+		const hint = await h.hintFor(session.id);
+		for (const method of ["GET", "POST"] as const) {
+			for (const [name, headers] of [
+				["another session's cookie", { cookie: other.cookie }],
+				["no cookie", {}],
+			] as const) {
+				const params = { id_token_hint: hint, post_logout_redirect_uri: back, state: "s" };
+				const out = await h.call(method, params, headers);
+				const to = new URL(out.headers.location ?? "", issuer);
+				expect([method, name, out.status, to.pathname, out.cookies]).toEqual([
+					method,
+					name,
+					303,
+					"/oauth/logout/confirm",
+					[],
+				]);
+				const carried = await h.app
+					.get(keys)
+					.verify(to.searchParams.get("request") ?? "", "logout-request+jwt");
+				expect(carried.kind === "valid" && carried.claims).toMatchObject({
+					aud: `${issuer}/oauth/logout`,
+					sid: session.id,
+					client: "app",
+					back,
+					state: "s",
+				});
+			}
+		}
 		expect([await h.stillOpen(session.id), await h.stillOpen(other.session.id)]).toEqual([
-			false,
+			true,
+			true,
+		]);
+		expect(h.events).toEqual([]);
+	});
+
+	it("carries a hinted POST on to its own GET, never the hint, where the browser's cookie decides it as a GET's does", async () => {
+		const h = await serve();
+		const { session, cookie } = await h.login();
+		const hint = await h.hintFor(session.id);
+		const params = { id_token_hint: hint, post_logout_redirect_uri: back, state: "s 1" };
+		const posted = await h.call("POST", params, {}, false);
+		const to = new URL(posted.headers.location ?? "", issuer);
+		expect([posted.status, to.pathname, [...to.searchParams.keys()]]).toEqual([
+			303,
+			"/oauth/logout",
+			["request"],
+		]);
+		expect(posted.headers.location).not.toContain(hint);
+		expect(await h.stillOpen(session.id)).toBe(true);
+		// Followed by the browser holding the session: closed, and sent back with its state.
+		const followed = await h.call(
+			"GET",
+			{ request: to.searchParams.get("request") ?? "" },
+			{ cookie },
+		);
+		expect([followed.status, followed.headers.location]).toEqual([303, `${back}?state=s+1`]);
+		expect(await h.stillOpen(session.id)).toBe(false);
+	});
+
+	it("refuses a carried request sent beside any parameter of a hinted one, or one that does not read as one it signed, closing nothing", async () => {
+		const h = await serve();
+		const { session, cookie } = await h.login();
+		const posted = await h.call("POST", { id_token_hint: await h.hintFor(session.id) }, {}, false);
+		const request =
+			new URL(posted.headers.location ?? "", issuer).searchParams.get("request") ?? "";
+		const beside = {
+			id_token_hint: await h.hintFor(session.id),
+			client_id: "app",
+			post_logout_redirect_uri: back,
+			state: "s",
+		};
+		for (const [name, value] of Object.entries(beside)) {
+			const out = await h.call("GET", { request, [name]: value }, { cookie });
+			expect([name, out.status, out.json]).toEqual([
+				name,
+				400,
+				{
+					error: "invalid_request",
+					error_description: "request is sent with other logout parameters",
+				},
+			]);
+		}
+		const forged = await h.call("GET", { request: "not-a-request" }, { cookie });
+		expect([forged.status, forged.json]).toEqual([
+			400,
+			{ error: "invalid_request", error_description: "request is not valid" },
+		]);
+		expect(await h.stillOpen(session.id)).toBe(true);
+	});
+
+	it("sends a carried request for a session the browser does not hold on to the confirmation with the same token, closing nothing", async () => {
+		const h = await serve();
+		const { session } = await h.login();
+		const other = await h.login();
+		const posted = await h.call("POST", { id_token_hint: await h.hintFor(session.id) }, {}, false);
+		const request =
+			new URL(posted.headers.location ?? "", issuer).searchParams.get("request") ?? "";
+		const out = await h.call("GET", { request }, { cookie: other.cookie });
+		expect([out.status, out.headers.location]).toEqual([
+			303,
+			`/oauth/logout/confirm?${new URLSearchParams({ request })}`,
+		]);
+		expect([await h.stillOpen(session.id), await h.stillOpen(other.session.id)]).toEqual([
+			true,
 			true,
 		]);
 	});
@@ -116,10 +219,10 @@ describe("the logout a client starts", () => {
 
 	it("takes a hint past its end [oidc-rpinit-2-f]", async () => {
 		const h = await serve();
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		const iat = 1_800_000_000 - 7200;
 		const hint = await h.hintFor(session.id, { iat, exp: iat + 3600 });
-		expect((await h.call("GET", { id_token_hint: hint })).status).toBe(200);
+		expect((await h.call("GET", { id_token_hint: hint }, { cookie })).status).toBe(200);
 		expect(await h.stillOpen(session.id)).toBe(false);
 	});
 
@@ -138,10 +241,10 @@ describe("the logout a client starts", () => {
 	it("sends the browser back with its state only to a return the hint's client registered [oidc-rpinit-2-b] [oidc-rpinit-3-b]", async () => {
 		const h = await serve();
 		const go = async (asked: string, over: Record<string, unknown> = {}) => {
-			const { session } = await h.login();
+			const { session, cookie } = await h.login();
 			const hint = await h.hintFor(session.id, over);
 			const params = { id_token_hint: hint, post_logout_redirect_uri: asked, state: "s 1" };
-			return h.call("GET", params);
+			return h.call("GET", params, { cookie });
 		};
 		const sent = await go(back);
 		expect([sent.status, sent.headers.location]).toEqual([303, `${back}?state=s+1`]);
@@ -191,10 +294,10 @@ describe("the logout a client starts", () => {
 			["a hint naming no one client", "app", { aud: ["app", "api"], azp: undefined }],
 		] as const;
 		for (const [name, clientId, over] of refused) {
-			const { session } = await h.login();
+			const { session, cookie } = await h.login();
 			const hint = await h.hintFor(session.id, over);
 			for (const method of ["GET", "POST"] as const) {
-				const out = await h.call(method, { id_token_hint: hint, client_id: clientId });
+				const out = await h.call(method, { id_token_hint: hint, client_id: clientId }, { cookie });
 				expect([name, method, out.status, out.json]).toEqual([
 					name,
 					method,
@@ -209,11 +312,15 @@ describe("the logout a client starts", () => {
 		}
 		expect(h.events).toEqual([]);
 		// The client the hint was issued to, named as client_id too, logs out.
-		const { session } = await h.login();
-		const named = await h.call("GET", {
-			id_token_hint: await h.hintFor(session.id),
-			client_id: "app",
-		});
+		const { session, cookie } = await h.login();
+		const named = await h.call(
+			"GET",
+			{
+				id_token_hint: await h.hintFor(session.id),
+				client_id: "app",
+			},
+			{ cookie },
+		);
 		expect([named.status, named.json]).toEqual([200, { logged_out: true }]);
 		expect(await h.stillOpen(session.id)).toBe(false);
 	});
@@ -290,7 +397,7 @@ describe("the logout a client starts", () => {
 			["logout.close_pending", { sid: session.id, source: "127.0.0.1" }],
 		]);
 		// Sent again while the close is still pending: still 503, never a logout answered done.
-		const again = await h.call("POST", { id_token_hint: hint }, { "user-agent": "ua/1" });
+		const again = await h.call("POST", { id_token_hint: hint }, { cookie, "user-agent": "ua/1" });
 		expect([again.status, again.json]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(h.events.map((e) => e.kind)).toEqual(["logout.close_pending", "logout.close_pending"]);
 	});
@@ -306,10 +413,10 @@ describe("the logout a client starts", () => {
 			})),
 		]);
 		const h = await serve({ sessionsModule: readEndingSessions(60_000), extra: [watcher] });
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		const hint = await h.hintFor(session.id);
 		h.advance(60_000);
-		const answered = await h.call("POST", { id_token_hint: hint });
+		const answered = await h.call("POST", { id_token_hint: hint }, { cookie });
 		expect(answered.status).toBe(200);
 		expect(closing).toEqual([session.id]);
 		// Its record was still open: this close is the logout.
@@ -318,16 +425,22 @@ describe("the logout a client starts", () => {
 
 	it("answers a hint whose session is gone as logged out, acting on nothing: no event, and no return though one is asked [oidc-rpinit-2-g]", async () => {
 		const h = await serve();
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		const hint = await h.hintFor(session.id);
-		await h.call("POST", { id_token_hint: hint });
+		await h.call("POST", { id_token_hint: hint }, { cookie });
 		h.events.length = 0;
-		expect((await h.call("POST", { id_token_hint: hint })).json).toEqual({ logged_out: true });
-		const returned = await h.call("POST", {
-			id_token_hint: hint,
-			post_logout_redirect_uri: back,
-			state: "s",
+		expect((await h.call("POST", { id_token_hint: hint }, { cookie })).json).toEqual({
+			logged_out: true,
 		});
+		const returned = await h.call(
+			"POST",
+			{
+				id_token_hint: hint,
+				post_logout_redirect_uri: back,
+				state: "s",
+			},
+			{ cookie },
+		);
 		expect([returned.status, returned.headers.location, returned.json]).toEqual([
 			200,
 			undefined,
@@ -338,13 +451,17 @@ describe("the logout a client starts", () => {
 
 	it("passes over a parameter it does not read, an unsupported ui_locales included, sending a POST back by 303 [oidc-rpinit-2-c] [rfc9700-4.12-a]", async () => {
 		const h = await serve();
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		const hint = await h.hintFor(session.id);
-		const sent = await h.call("POST", {
-			id_token_hint: hint,
-			ui_locales: "tlh-Piqd x-unknown",
-			post_logout_redirect_uri: back,
-		});
+		const sent = await h.call(
+			"POST",
+			{
+				id_token_hint: hint,
+				ui_locales: "tlh-Piqd x-unknown",
+				post_logout_redirect_uri: back,
+			},
+			{ cookie },
+		);
 		expect([sent.status, sent.headers.location]).toEqual([303, back]);
 		expect(await h.stillOpen(session.id)).toBe(false);
 	});
@@ -363,10 +480,14 @@ describe("the logout a client starts", () => {
 			],
 		);
 		const h = await serve({ extra: [requirement] });
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		const hint = await h.hintFor(session.id);
 		short.now = true;
-		const sent = await h.call("GET", { id_token_hint: hint, post_logout_redirect_uri: back });
+		const sent = await h.call(
+			"GET",
+			{ id_token_hint: hint, post_logout_redirect_uri: back },
+			{ cookie },
+		);
 		expect([sent.status, sent.headers.location]).toEqual([303, back]);
 		expect(h.events.map((e) => [e.kind, e.subject, e.attributes?.sid])).toEqual([
 			["logout.success", "alice", session.id],
@@ -378,9 +499,9 @@ describe("the logout a client starts", () => {
 	it("answers 503 when a check cannot tell, logging what failed", async () => {
 		const down = unavailableSwitch<SessionClients>("rp-logout");
 		const h = await serve({ clientsDown: down });
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		down.failNext("members");
-		const out = await h.call("POST", { id_token_hint: await h.hintFor(session.id) });
+		const out = await h.call("POST", { id_token_hint: await h.hintFor(session.id) }, { cookie });
 		expect([out.status, out.json]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(h.logs().filter((l) => l.event === "rp-logout.unavailable")).toEqual([
 			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "rp-logout" } },
@@ -400,6 +521,7 @@ describe("the logout a client starts", () => {
 						},
 						cookies: ["session=s1"],
 					}),
+					handleOf: async () => "s1",
 					close: async () => {
 						throw new TypeError("a mistake in the close");
 					},
@@ -407,18 +529,18 @@ describe("the logout a client starts", () => {
 			),
 		]);
 		const h = await serve({ sessionsModule: broken });
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		const hint = await h.hintFor(session.id);
-		await expect(h.call("POST", { id_token_hint: hint })).rejects.toThrow(TypeError);
+		await expect(h.call("POST", { id_token_hint: hint }, { cookie })).rejects.toThrow(TypeError);
 		expect(h.events).toEqual([]);
 	});
 
 	it("answers 503 and records the failed close when the session cannot be closed", async () => {
 		const down = unavailableSwitch<Sessions>("session");
 		const h = await serve({ sessionsModule: switchedModule(sessionStandIn, sessions, down) });
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		down.failNext("close");
-		const out = await h.call("POST", { id_token_hint: await h.hintFor(session.id) });
+		const out = await h.call("POST", { id_token_hint: await h.hintFor(session.id) }, { cookie });
 		expect([out.status, out.json]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(h.events.map((e) => [e.kind, e.attributes])).toEqual([
 			["logout.cascade_failed", { sid: session.id, source: "127.0.0.1", store: "session" }],
@@ -429,11 +551,11 @@ describe("the logout a client starts", () => {
 describe("the front-channel page", () => {
 	it("frames each client of the session with iss and sid, in a sandbox keeping scripts and its own origin, then moves on to the return", async () => {
 		const h = await serve();
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		await h.redeemed(session.id, "app");
 		const hint = await h.hintFor(session.id);
 		const params = { id_token_hint: hint, post_logout_redirect_uri: back, state: "s" };
-		const out = await h.call("GET", params, { accept: "text/html" });
+		const out = await h.call("GET", params, { cookie, accept: "text/html" });
 		expect(out.status).toBe(200);
 		expect(out.headers["content-type"]).toBe("text/html; charset=utf-8");
 		const frame = `https://app.example/fc?iss=${encodeURIComponent(issuer)}&#38;sid=${session.id}`;
@@ -458,10 +580,10 @@ describe("the front-channel page", () => {
 
 	it("sends no page to a browser that does not prefer HTML", async () => {
 		const h = await serve();
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		await h.redeemed(session.id, "app");
 		const hint = await h.hintFor(session.id);
-		const out = await h.call("GET", { id_token_hint: hint }, { accept: "*/*" });
+		const out = await h.call("GET", { id_token_hint: hint }, { cookie, accept: "*/*" });
 		expect(out.json).toEqual({ logged_out: true });
 	});
 
@@ -474,14 +596,12 @@ describe("the front-channel page", () => {
 				},
 			},
 		});
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		await h.redeemed(session.id, "app");
 		const out = await h.call(
 			"GET",
 			{ id_token_hint: await h.hintFor(session.id) },
-			{
-				accept: "text/html,application/json;q=0.5",
-			},
+			{ cookie, accept: "text/html,application/json;q=0.5" },
 		);
 		expect(out.text).toContain(`src="https://app.example/fc?x=1&#38;iss=`);
 		expect(out.text).not.toContain("sid=");
@@ -498,11 +618,11 @@ it("leaves out a frame whose origin the page's policy cannot name, logging how m
 		},
 		redirects: { under: ["https://under_score.example/cb"] },
 	});
-	const { session } = await h.login();
+	const { session, cookie } = await h.login();
 	await h.redeemed(session.id, "app");
 	await h.redeemed(session.id, "under");
 	const hint = await h.hintFor(session.id);
-	const out = await h.call("GET", { id_token_hint: hint }, { accept: "text/html" });
+	const out = await h.call("GET", { id_token_hint: hint }, { cookie, accept: "text/html" });
 	expect(out.loads?.frames).toEqual(["https://app.example"]);
 	expect(h.logs().filter((l) => l.event === "rp-logout.frames_skipped")).toEqual([
 		expect.objectContaining({ level: "warn", fields: { count: 1 } }),
@@ -529,10 +649,10 @@ describe("the upstream's end of session", () => {
 	it("sends the browser to the upstream first, with the return and state, asked before the close", async () => {
 		const seen: { open?: boolean } = {};
 		const h = await serve({ extra: [ending(seen)] });
-		const { session } = await h.login();
+		const { session, cookie } = await h.login();
 		const hint = await h.hintFor(session.id);
 		const params = { id_token_hint: hint, post_logout_redirect_uri: back, state: "s" };
-		const out = await h.call("POST", params);
+		const out = await h.call("POST", params, { cookie });
 		expect(out.status).toBe(303);
 		expect(Object.fromEntries(new URL(String(out.headers.location)).searchParams)).toEqual({
 			postLogoutRedirectUri: back,
@@ -638,10 +758,10 @@ it("leaves out the frame of a client a source names whose front channel is at no
 		})),
 	]);
 	const h = await serve({ sections: {}, extra: [source] });
-	const { session } = await h.login();
+	const { session, cookie } = await h.login();
 	for (const { id } of records) await h.redeemed(session.id, id);
 	const hint = await h.hintFor(session.id, { aud: "https://remote.example/on" });
-	const out = await h.call("GET", { id_token_hint: hint }, { accept: "text/html" });
+	const out = await h.call("GET", { id_token_hint: hint }, { cookie, accept: "text/html" });
 	expect(out.loads?.frames).toEqual(["https://remote.example"]);
 	expect(h.logs().filter((l) => l.event === "rp-logout.frontchannel_off_redirects")).toEqual([
 		expect.objectContaining({ level: "warn", fields: { client: "https://remote.example/off" } }),

@@ -77,7 +77,7 @@ export default defineModule(
 		m.provide(ending).by(async (c) => {
 			const ends = await c.collect(upstreamEnds);
 			if (ends.length > 1) return c.refuse(name, "more than one upstream end of session");
-			return endingFrom(c, ends[0]);
+			return endingFrom(c, ends[0], await c.get(confirming), path);
 		}),
 		m.provide(confirming).by(async (c) => confirmFrom(c, (await c.collect(upstreamEnds))[0], path)),
 		// The confirmation of a logout started without a hint (OpenID Connect RP-Initiated Logout 1.0 §2).
