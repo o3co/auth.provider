@@ -60,6 +60,8 @@ onLegacy(codeArea, {
 		"session-grant-needs-origin-evidence",
 		// The session grant issues no scope when none is asked, whatever the client's defaults.
 		"session-grant-scope-left-out-without-defaults",
+		// Ours refuses a session grant without a session as RFC 6749's 400 invalid_grant; the legacy build answers 401 unauthorized.
+		"session-grant-invalid-grant",
 		// A back channel on plain http at loopback is allowed by its host alone, whatever its port.
 		"back-channel-by-host-and-port",
 		// An expired logout hint is refused; and an old one on a GET gets a page that asks to confirm.
@@ -81,5 +83,11 @@ onLegacy(codeArea, {
 		// Ours asks the person to confirm a logout without a hint, on a page of its own, and never returns
 		// from it, whatever return the request names; the legacy build refuses one without a hint.
 		"logout-confirmed-without-hint",
+		// Ours issues a code only for the End-User an id_token_hint names, and refuses one it did not
+		// issue; the legacy build reads no hint at authorization.
+		"authorize-reads-id-token-hint",
+		// Ours refuses prompt=select_account, having no page to choose an account by; the legacy build
+		// refuses the word as one it does not know.
+		"select-account-refused",
 	],
 });

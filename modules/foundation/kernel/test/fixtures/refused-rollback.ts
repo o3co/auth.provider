@@ -2,12 +2,12 @@
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "../../src/contract.ts";
 
 const held = contract<void>("held");
-const holding = defineModule({ name: "holding", takes: [] }, (m) => [
+const holding = defineModule({ name: "holding", replicaSafe: true, takes: [] }, (m) => [
 	m.provide(held).by((c) => {
 		c.onStop(() => new Promise<void>(() => {}));
 	}),
 ]);
-const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+const refusing = defineModule({ name: "refusing", replicaSafe: true, takes: [] }, (m) => [
 	m.provide(contract<void>("refused")).by((c) => c.refuse("refusing", "refused on purpose")),
 ]);
 

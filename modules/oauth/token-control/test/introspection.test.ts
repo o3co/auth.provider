@@ -22,6 +22,29 @@ describe("introspection", () => {
 		});
 	});
 
+	it("never answers the token it introspects, nor its signature, only what it tells of it [oidc-core-16.4-a]", async () => {
+		const s = await serve();
+		const token = await s.issue();
+		const answer = await s.post("/oauth/introspect", "api", { token });
+		expect(answer.json.active).toBe(true);
+		for (const part of [token, token.split(".")[2] ?? token]) {
+			expect(JSON.stringify(answer.json)).not.toContain(part);
+		}
+		const told = [
+			"active",
+			"iss",
+			"sub",
+			"client_id",
+			"aud",
+			"scope",
+			"exp",
+			"iat",
+			"token_type",
+			"cnf",
+		];
+		for (const name of Object.keys(answer.json)) expect(told).toContain(name);
+	});
+
 	it("finds an access token whatever type its hint names [rfc7662-2.1-b]", async () => {
 		const s = await serve();
 		const token = await s.issue();

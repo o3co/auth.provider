@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -103,6 +104,86 @@ it("tells a refused boot in its entries by the kernel's mark, never by its class
 		expect(source, entry).toContain("BootRefused.is(error)");
 		expect(source, entry).not.toContain("instanceof");
 	}
+});
+
+/** Each key application.conf reads from the environment, by its path, and the variable it reads. */
+function readByConf(conf: string): Record<string, string> {
+	const path: string[] = [];
+	const read: Record<string, string> = {};
+	for (const line of conf.split("\n").map((l) => l.trim())) {
+		const opened = /^(\S+) \{$/.exec(line);
+		if (opened?.[1]) path.push(opened[1]);
+		else if (line === "}") path.pop();
+		const set = /^(\S+) = \$\{\?([A-Z0-9_]+)\}$/.exec(line);
+		if (set?.[1] && set[2]) read[[...path, set[1]].join(".")] = set[2];
+	}
+	return read;
+}
+
+it("writes in each entry where its keys are written: the very keys and variables application.conf reads, a value of several lines in the local layer", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http", "@mod/keys", "@mod/seal"], fakePackages(), readme);
+	const conf = readByConf(await read(target, "config/application.conf"));
+	expect(conf["keys.signing.private-key"]).toBe("KEYS_SIGNING_PRIVATE_KEY");
+	for (const entry of ["src/main.ts", "src/reseal.ts"]) {
+		const source = await read(target, entry);
+		const table = /const keysRead: [^=]+= (\{.*\});/.exec(source)?.[1] ?? "{}";
+		const several = /const severalLines: [^=]+= (\[.*\]);/.exec(source)?.[1] ?? "[]";
+		// Both ways: no key the configuration reads is missing, and none it does not read is named.
+		expect(JSON.parse(table), entry).toEqual(conf);
+		expect(JSON.parse(several), entry).toEqual(["keys.signing.private-key"]);
+		// Names alone: no placeholder or value.
+		expect(source, entry).not.toContain("REPLACE");
+	}
+});
+
+it("adds to a refusal of a key it reads where to write it, and to none of a section or a key it does not read", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http", "@mod/keys"], fakePackages(), readme);
+	// Stand-ins for what the entry imports: a kernel refusing as told, and config-files reading nothing.
+	const fake = async (name: string, index: string) => {
+		const dir = join(target, "node_modules", name);
+		await mkdir(dir, { recursive: true });
+		const exports = { ".": "./index.js", "./module": "./index.js" };
+		await writeFile(join(dir, "package.json"), JSON.stringify({ name, type: "module", exports }));
+		await writeFile(join(dir, "index.js"), index);
+	};
+	await fake(
+		"@o3co/x-kernel",
+		`const mark = Symbol.for("test.refused");
+export class BootRefused extends Error {
+	constructor(refusals) { super("refused"); this.refusals = refusals; this[mark] = true; }
+	static is(error) { return Boolean(error?.[mark]); }
+}
+export const assemble = async () => { throw new BootRefused(JSON.parse(process.env.REFUSALS)); };
+export default {};`,
+	);
+	await fake(
+		"@o3co/x-config-files",
+		"export const loadConfig = async () => ({});\nexport const legacyVariablesCheck = async () => undefined;\nexport default {};",
+	);
+	for (const name of ["@o3co/x-http", "@o3co/x-keys"]) await fake(name, "export default {};");
+	const refusals = [
+		{ where: "http.port", reason: "required, and not set" },
+		{ where: "keys.signing.private-key", reason: "not readable as a key" },
+		{ where: "keys", reason: "a section refused whole" },
+		{ where: "http.unknown", reason: "unrecognized key" },
+	];
+	const run = spawnSync(process.execPath, ["src/main.ts"], {
+		cwd: target,
+		env: { ...process.env, REFUSALS: JSON.stringify(refusals) },
+		encoding: "utf8",
+	});
+	expect([run.status, run.stderr]).toEqual([
+		78,
+		[
+			"refused http.port: required, and not set (HTTP_PORT in .env, or http.port in config/local.conf)",
+			"refused keys.signing.private-key: not readable as a key (keys.signing.private-key in config/local.conf)",
+			"refused keys: a section refused whole",
+			"refused http.unknown: unrecognized key",
+			"",
+		].join("\n"),
+	]);
 });
 
 it("adds the reseal entry when seal is composed", async () => {

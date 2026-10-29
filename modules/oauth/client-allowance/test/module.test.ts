@@ -40,6 +40,21 @@ it("refuses boot for a field the section does not name", async () => {
 	});
 });
 
+it("refuses boot for offline_access among the scopes or the default scopes, naming the entry", async () => {
+	const refused = (allowed: Parameters<typeof allowancesFor>[0]) =>
+		boot(allowancesFor(allowed)).then(
+			() => [],
+			(error: { refusals: readonly { where: string; reason: string }[] }) => error.refusals,
+		);
+	const reason = "offline_access allows nothing: offline access is not offered, so remove it";
+	expect(await refused({ scopes: ["openid", "offline_access"] })).toEqual([
+		{ where: "clients.registered.0.sections.client-allowance.scopes.1", reason },
+	]);
+	expect(await refused({ scopes: ["openid"], "default-scopes": ["offline_access"] })).toEqual([
+		{ where: "clients.registered.0.sections.client-allowance.default-scopes.0", reason },
+	]);
+});
+
 it("takes nothing: its one contribution is a value", async () => {
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
 	expect((await takesUnused(assembly({})))["client-allowance"]).toBeUndefined();

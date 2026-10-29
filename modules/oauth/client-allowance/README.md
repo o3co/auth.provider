@@ -26,6 +26,7 @@
 
 ## Invariants
 - A client without the section is allowed nothing; an unknown field in it refuses the client's record.
+- OpenID Connect's offline access is not offered (out of scope): `offline_access` in `scopes` or `default-scopes` refuses the client's record at that entry.
 - Decisions are pure: no failure, no state.
 - `allowancesWithin` never widens the ceiling.
 

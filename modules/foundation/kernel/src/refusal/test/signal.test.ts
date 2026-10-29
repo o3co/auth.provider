@@ -15,7 +15,7 @@ describe("a refusal signal, as assembly records it", () => {
 	it("never lets a refusing build pass with no refusal, whatever becomes of the list or the signal", async () => {
 		/** A module whose factory refuses, then does `after` to the list given or the signal thrown. */
 		const refusing = (after: (reasons: Refusal[], signal: unknown) => unknown, before = false) =>
-			defineModule({ name: "a", takes: [] }, (m) => [
+			defineModule({ name: "a", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(contract("p")).by((c) => {
 					const reasons: Refusal[] = [{ where: "a.x", reason: "must refuse" }];
 					if (before) unreadableWhere(reasons);
@@ -88,7 +88,7 @@ describe("a refusal signal, as assembly records it", () => {
 	it("reads a rethrown signal's refusals one at a time, by index, keeping only each where and reason that is a string", async () => {
 		/** A module whose factory refuses, then rethrows its signal with `list` for its refusals. */
 		const rethrowing = (list: unknown) =>
-			defineModule({ name: "a", takes: [] }, (m) => [
+			defineModule({ name: "a", replicaSafe: true, takes: [] }, (m) => [
 				m.provide(contract("p")).by((c) => {
 					try {
 						c.refuse("a.x", "must refuse");

@@ -125,7 +125,7 @@ export async function assembleWatching(
 ): Promise<Assembly> {
 	const modules = input.modules;
 	const refusals: Refusal[] = [];
-	const { kernel, sections } = readSections(modules, input.config, refusals);
+	const { kernel, unsure, sections } = readSections(modules, input.config, refusals);
 	let sinkList: readonly LogSink[] | undefined;
 	// A runtime a test passes keeps its log, without threshold or sinks; its calls still never throw.
 	const runtime: Runtime = input.runtime
@@ -135,8 +135,9 @@ export async function assembleWatching(
 				random: systemRandom,
 				log: routedLog(kernel.logging.level, systemClock, () => sinkList),
 			};
-	checkReplicas(modules, sections, kernel.deployment, refusals);
-	checkProduction(modules, sections, kernel.environment, refusals);
+	// A deployment or environment its refused section does not hold validly is no ground to refuse on.
+	if (!unsure.has("deployment")) checkReplicas(modules, sections, kernel.deployment, refusals);
+	if (!unsure.has("environment")) checkProduction(modules, sections, kernel.environment, refusals);
 	// One preflight before any factory runs: every structural gap is named in one refusal, and a
 	// refused boot has built nothing, so no stop hook is left to run.
 	const parts = indexParts(modules, refusals);

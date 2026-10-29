@@ -17,7 +17,7 @@ describe("stop", () => {
 		order: string[],
 		hook: (signal: AbortSignal) => Promise<void> | void = () => {},
 	) =>
-		defineModule({ name, takes: [] }, (m) => [
+		defineModule({ name, replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<object>(name)).by((c) => {
 				c.onStop((signal) => {
 					order.push(name);
@@ -127,7 +127,7 @@ describe("stop", () => {
 		const seen: string[] = [];
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "p", takes: [] }, (m) => [
+				defineModule({ name: "p", replicaSafe: false, takes: [] }, (m) => [
 					m.provide(contract<object>("p")).by((c) => {
 						c.every(100, (signal) => {
 							return new Promise<void>((resolve) => {
@@ -170,7 +170,7 @@ describe("stop", () => {
 		await vi.advanceTimersByTimeAsync(1000);
 		await stop;
 		const rolledBack = recordingLog();
-		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
+		const refusing = defineModule({ name: "refusing", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(contract<void>("refused")).by((c) => c.refuse("refusing", "on purpose")),
 		]);
 		const refused = refusalsOf(
