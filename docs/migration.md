@@ -918,13 +918,13 @@ What changes from 0.18 to 0.19. Coming from a 0.18 release before 0.18.6, or fro
 | [U-0.19-64](#u-0.19-64) | Remove `require-iss`; set `accept-missing-iss = true` on an IdP that never sends `iss` | A configuration that sets `require-iss` on an `oidc` IdP; an `oidc` IdP whose callbacks carry no `iss` and whose description does not offer it |
 | [U-0.19-65](#u-0.19-65) | Set `clients-cimd.allow` to the hosts client documents come from, or `clients-cimd.allow-any-host = true` | An app that composes `clients-cimd` without `clients-cimd.allow` |
 | [U-0.19-66](#u-0.19-66) | Have the IdP issue this provider's id_tokens to its client alone | An upstream IdP (`oidc`, `google`, `apple`) whose id_tokens name another audience beside this provider's client |
-| [U-0.19-74](#u-0.19-74) | Place an Ed25519 key with `alg = EdDSA` where you mean to keep EdDSA; a deployment's own key needs nothing | A project generated with 0.19, or set up by the quick start or the first login recipe, whose clients or tooling expect EdDSA |
 | [U-0.19-67](#u-0.19-67) | Read `400 invalid_grant` where a session grant was refused `401 unauthorized` | A client of the session grant that reads its refusal |
 | [U-0.19-68](#u-0.19-68) | Read `invalid_client` where a certificate was refused `invalid_certificate` at issuance | A client presenting a certificate to bind its token (`mtls`) that reads its refusal |
 | [U-0.19-69](#u-0.19-69) | Send the lifetime asked in a token exchange as `o3co_expires_in` | A client of token exchange that sends `expires_in` |
 | [U-0.19-70](#u-0.19-70) | Send `resource` as an absolute URI without a fragment, and register audiences so | A client that sends a `resource` that is not an absolute URI, or one with a fragment, to a grant or token exchange |
 | [U-0.19-71](#u-0.19-71) | Take the fragment and the query out of `federation-grants.connections.<name>.resource` | A deployment whose federation grant connection names a `resource` with a fragment or a query |
 | [U-0.19-73](#u-0.19-73) | Accept a `303` where you read the status a login through an upstream lands with | A client, proxy or test of your own that expects an IdP's callback, or a link's, to answer `302` |
+| [U-0.19-74](#u-0.19-74) | Place an Ed25519 key with `alg = EdDSA` where you mean to keep EdDSA; a deployment's own key needs nothing | A project generated with 0.19, or set up by the quick start or the first login recipe, whose clients or tooling expect EdDSA |
 | [U-0.19-76](#u-0.19-76) | Declare `replicaSafe` on each module of your own | A module of your own |
 | [U-0.19-78](#u-0.19-78) | Remove `offline_access` from each client's `sections.client-allowance.scopes` and `default-scopes` | A client registration that lists `offline_access` there |
 | [U-0.19-80](#u-0.19-80) | Remove `offline_access` from `clients-cimd.scopes` | A configuration that lists it there |
