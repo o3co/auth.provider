@@ -5086,6 +5086,10 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
 
   modules/user-ledger-http/ledger-wire:
     devDependencies:
