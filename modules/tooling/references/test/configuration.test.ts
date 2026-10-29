@@ -82,6 +82,29 @@ it("requires a key inside an optional object only once the object is set, and ho
 	expect(table).toContain("| `k.next.alg` | string | `a` when `k.next` is set |  |");
 });
 
+it("holds a key nested in an optional object to the nearest optional object, a list of objects kept as one row", () => {
+	const object = (properties: Record<string, unknown>, required: string[] = []) => ({
+		type: "object",
+		required,
+		properties,
+	});
+	const next = object(
+		{
+			pair: object({ x: { type: "string" } }, ["x"]),
+			extra: object({ y: { type: "string" } }, ["y"]),
+			tuned: { ...object({ z: { type: "string" } }, ["z"]), default: {} },
+			hosts: { type: "array", items: object({ name: { type: "string" } }, ["name"]) },
+		},
+		["pair"],
+	);
+	expect(rowsOf(object({ next }), ["k"], () => ({}))).toEqual([
+		{ key: "k.next.pair.x", type: "string", required: true, within: "k.next" },
+		{ key: "k.next.extra.y", type: "string", required: true, within: "k.next.extra" },
+		{ key: "k.next.tuned.z", type: "string", required: false, within: "k.next" },
+		{ key: "k.next.hosts", type: "list of map", required: false, within: "k.next" },
+	]);
+});
+
 it("merges the keys of a union of objects, required only where every variant requires them", () => {
 	const schema = {
 		oneOf: [
