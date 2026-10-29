@@ -6,10 +6,15 @@ Each module's README is its card: it describes the module's contract. The owner 
 
 ## Contents
 
+- [What a card offers](#what-a-card-offers)
 - [Dividing a package](#dividing-a-package)
 - [Kinds](#kinds)
 - [Deepening and splitting](#deepening-and-splitting)
 - [Decisions](#decisions)
+
+## What a card offers
+
+A card's Offers list everything its entry points export, and an entry point exports nothing its card leaves out. Remove an export that nothing outside the package uses, but only in a package no bundle ships (the private ones under `modules/tooling`). `distribution` publishes each member of a shipped bundle at `<bundle>/<member>`, so removing one of its exports is a breaking change, made in a minor release (0.20 for now); until then, list it. A type that appears in an exported function's signature belongs to that function and is not listed separately. A `*Takes` export is assembly plumbing the package's root `module.ts` reads, so a card lists it only where the package's root exports it.
 
 ## Dividing a package
 
