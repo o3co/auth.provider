@@ -21,6 +21,7 @@ import {
 } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import { type OutboundRefusals, outboundRefusals, withinHosts } from "@mod/outbound-policy";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import {
 	type AuthorizationStart,
 	type CodeExchange,
@@ -281,7 +282,9 @@ const givenEndpoints = {
 };
 /** outbound's own refusals over `settings`, every name resolving to a private address. */
 const refusalsOver = (settings: Record<string, unknown>): OutboundRefusals => {
-	const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"]);
+	const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"], {
+		floor: testTlsOptions,
+	});
 	const { explained, plainInternal, browsedRefusal } = paths;
 	return { explained, plainInternal, browsedRefusal };
 };
@@ -706,7 +709,9 @@ describe("idp-oidc", () => {
 		/** outbound itself, every name resolving to a private address, a request ending fast. */
 		const reachOf = (internal: readonly string[]) => {
 			const settings = { allow: ["idp.corp"], "internal-hosts": internal, timeout: "300ms" };
-			const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"]);
+			const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"], {
+				floor: testTlsOptions,
+			});
 			return {
 				outbound: { fetch: paths.fetch } as Outbound,
 				refusals: { explained: paths.explained },
