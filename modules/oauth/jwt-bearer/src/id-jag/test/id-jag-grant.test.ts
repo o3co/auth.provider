@@ -24,6 +24,7 @@ import {
 } from "@mod/sender-binding";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
 import { issuancePolicies, tokens } from "@mod/tokens";
@@ -263,6 +264,7 @@ async function serve(
 			grantCaller,
 			clientAllowanceModule,
 			outboundModule,
+			tlsOptionsForTests,
 			externalJwtModule,
 			simulatedStore().module,
 			subjectRevocationStandIn,
