@@ -30,6 +30,7 @@
 - Refuses at boot unless the `keys` signer uses an asymmetric key (with a shared secret, any RP that knows it could forge tokens).
 - Every ID token is signed with `oidc.id-token-alg`, `RS256` unless written: boot is refused there, by the algorithms' names, where `keys` signs with another. A client's `id-token-alg` naming another is refused by its section, at boot at a registered client's place, by the algorithm's name alone, and for any other when its record is read.
 - An `oidc.id-token-alg` written other than `RS256`, which OpenID Connect Discovery 1.0 §3 has `id_token_signing_alg_values_supported` include, warns `oidc.id_token_alg_not_rs256` at each boot, with the algorithm's name alone.
+- A `keys.next` key of another algorithm is not refused, so a rotation can publish it first: each boot warns `oidc.next_key_alg_differs`, by the algorithms' names alone, that `id-token-alg` changes with its promotion.
 - The ID token's `typ` is the standard `JWT`. Telling token kinds apart is the receiver's check of its own kind, not this spelling.
 - A hint is taken only as an ID token `keys` verifies under `JWT`, from `issuer`'s URL, with a subject, `iat` and `exp`, whatever its `exp` (OpenID Connect RP-Initiated Logout 1.0 §2: an expired hint is still taken); its audience is not pinned. Its client is `azp` when the audience names it, else the one audience.
 - `auth_time` never exceeds `iat` (so clock skew cannot put it later).
