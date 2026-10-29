@@ -175,12 +175,10 @@ export function outboundOver(
 	lookupsAtOnce?: number,
 ): Paths {
 	// A copy of the floor, or another's value, may carry a weaker one: tls-options' own alone is taken.
-	if (!isFloor(tls.floor)) throw new NotTheFloor();
-	// What was checked is what is sent: the caller's object, changed later, is never read again.
-	const checked: Tls = Object.freeze({
-		floor: tls.floor,
-		...(tls.ca === undefined ? {} : { ca: tls.ca }),
-	});
+	// Each read once, so what was checked is what is sent: the caller's object is never read again.
+	const { floor, ca } = tls;
+	if (!isFloor(floor)) throw new NotTheFloor();
+	const checked: Tls = Object.freeze({ floor, ...(ca === undefined ? {} : { ca }) });
 	const pools =
 		typeof lookupsIn === "function"
 			? inProcessPools(settings, lookupsIn, lookupsAtOnce)
