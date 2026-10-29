@@ -18,6 +18,9 @@ async function tableOf(c: {
 	return table;
 }
 
+/** A name an object puts first, ascending, whatever order it was written in: one read as an array index. */
+const indexLike = (name: string) => /^(?:0|[1-9]\d*)$/.test(name) && Number(name) < 2 ** 32 - 1;
+
 /** The acr no declared way of logging in can meet, which would only ever answer unmet. */
 const unmeetable = (table: Table, provable: { achievable(set: readonly string[]): boolean }) =>
 	Object.entries(table)
@@ -58,6 +61,12 @@ export default defineModule(
 							]
 						: []),
 				]);
+			}
+			// The configuration is read as an object, which puts index-like names first: their written order is lost.
+			const written = Object.keys(c.section.values);
+			const reordered = written.filter(indexLike);
+			if (written.length > 1 && reordered.length > 0) {
+				c.log.warn("acr.values_order", { names: reordered.join(", ") });
 			}
 			/** The first of these acr, in their order, whose one set the amr hold whole. */
 			const firstMet = (names: readonly string[], amr: readonly string[]) => {

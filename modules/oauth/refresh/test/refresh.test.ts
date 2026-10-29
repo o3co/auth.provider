@@ -1005,6 +1005,38 @@ describe("refresh tokens", () => {
 		expect(await s.active(next.access_token)).toBe(false);
 	});
 
+	it("answer a revocation stopped halfway 503 on each retry, and 200 only once the family's access tokens are revoked [guarantee-3-g]", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const id = familyNameOf(first.refresh_token);
+		const hinted = { token: first.refresh_token ?? "", token_type_hint: "refresh_token" };
+		s.down.tokens.unavailable("revokeReferenced");
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		// Marked revoked, its access tokens not yet on the denylist: the mark names no client, so
+		// every retry finishes the revocation before it answers.
+		expect(s.stores.kept.peek(id)).toEqual({ format: 1, revoked: true });
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		expect((await s.post("/oauth/revoke", "other", hinted)).status).toBe(503);
+		expect(s.stores.kept.pending()).toEqual([id]);
+		s.down.tokens.restore();
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
+		expect(s.stores.kept.pending()).toEqual([]);
+		// Once finished, a retry has nothing left to do.
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
+	});
+
+	it("answer a revocation the sweep finished 200 [guarantee-3-g]", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const hinted = { token: first.refresh_token ?? "", token_type_hint: "refresh_token" };
+		s.down.tokens.unavailable("revokeReferenced");
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(503);
+		s.down.tokens.restore();
+		await new Promise((resolve) => setTimeout(resolve, 1300));
+		expect(s.stores.kept.pending()).toEqual([]);
+		expect((await s.post("/oauth/revoke", "app", hinted)).status).toBe(200);
+	});
+
 	it("answer 503 when the store cannot be reached, never invalid_grant", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();

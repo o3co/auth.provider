@@ -23,10 +23,10 @@
 
 ## Invariants
 - What a logout request is read for, and each refusal before its close: `ending`'s card.
-- The session closes through `session`'s `close`, which clears the cookie only when it opens the same session. A session closed before, or gone, is `200 {"logged_out":true}`, with no event, its cookie still cleared; one whose record the close found open, even past its lifetime or short of a requirement, is logged out.
+- The session closes through `session`'s `close`, which clears the cookie only when it opens the same session. A session closed before, or gone, has no event, its cookie still cleared; one whose record the close found open, even past its lifetime or short of a requirement, is logged out.
 - A close that is unavailable is `503` with `logout.cascade_failed`; any other error it throws is passed on, a mistake and no outage, so `http` answers it `500`.
 - A close left pending records `logout.close_pending` and answers `503 temporarily_unavailable`, clearing the cookie, as `logout` does, however often it is sent again: its tokens live until the close is swept, so it is no logout yet.
-- After a close, `logout.success`, with the subject and `sid`. Then, in order: the front-channel page when the browser prefers HTML to JSON and a client can be framed; `303` to the upstream; `303` to the return; `200 {"logged_out":true}`.
+- After a close, `logout.success`, with the subject and `sid`. What a close, or a session closed before or gone, is answered: `ending`'s card for a logout request, `confirm`'s for a confirmation's post.
 - Every answer is `no-store` with `Pragma: no-cache`.
 - Each host sweeps the kept notices every `sweep-interval`, logging how many it keeps; a notice whose try failed is not tried again until a `sweep-interval` after it was last due, or made, whichever host tried it, a late sweep trying it at once (Back-Channel Logout 1.0 §2.5); a session's close never waits for a client.
 - A client the store pushes out of a session's set is logged.
