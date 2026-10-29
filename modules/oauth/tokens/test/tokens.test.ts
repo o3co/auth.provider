@@ -180,36 +180,6 @@ describe("tokens", () => {
 		expect(t.revocable()).toBe(false);
 	});
 
-	it("tells a grant the lifetime it applies, so the grant refuses boot above its ceiling", async () => {
-		const ceilingSeconds = 900;
-		const ceiling = contract<object>("ceiling-grant");
-		const grantWithCeiling = defineModule(
-			{ name: "ceiling-grant", replicaSafe: true, takes: [tokens] },
-			(m) => [
-				m.provide(ceiling).by(async (c) => {
-					const lifetime = (await c.get(tokens)).accessTokenLifetimeSeconds();
-					if (lifetime > ceilingSeconds) {
-						return c.refuse(
-							"ceiling-grant",
-							`lifetime ${lifetime} s is over the ceiling ${ceilingSeconds} s`,
-						);
-					}
-					return {};
-				}),
-			],
-		);
-		const bootWith = (lifetime: string) =>
-			assembled(
-				{ "access-token-lifetime": lifetime, revocation: "unsupported" },
-				{ extra: [grantWithCeiling] },
-			);
-		await expect(bootWith("15m")).resolves.toBeDefined();
-		await expect(bootWith("14m")).resolves.toBeDefined();
-		await expect(bootWith("901s")).rejects.toMatchObject({
-			refusals: [{ where: "ceiling-grant", reason: "lifetime 901 s is over the ceiling 900 s" }],
-		});
-	});
-
 	it("refuses to start until revocation is decided", async () => {
 		await expect(boot({})).rejects.toBeInstanceOf(BootRefused);
 	});

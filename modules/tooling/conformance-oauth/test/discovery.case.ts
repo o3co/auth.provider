@@ -121,6 +121,24 @@ describe("the metadata document of a deployment without the JWT bearer grant", (
 	});
 });
 
+describe("the metadata document of a deployment without the authorization endpoint", () => {
+	const get = running("https://issuer.example", { authorize: false });
+
+	it.skipIf(areaTarget().differs("response-types-without-authorization-endpoint"))(
+		"names no response type, as a member with no values is left out [rfc8414-3.2-b] [oidc-discovery-4.2-b]",
+		async () => {
+			for (const path of [
+				"/.well-known/openid-configuration",
+				"/.well-known/oauth-authorization-server",
+			]) {
+				const answer = await get(path);
+				expect(answer.status).toBe(200);
+				expect(answer.body).not.toHaveProperty("response_types_supported");
+			}
+		},
+	);
+});
+
 describe("the metadata document of an issuer with a path", () => {
 	const issuer = "https://issuer.example/tenant";
 	const get = running(issuer);
