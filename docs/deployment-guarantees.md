@@ -82,6 +82,7 @@ The provider takes the word of what stands beside it, as the [trust assumptions]
 - **Operator's:** an upstream certificate's revocation, which `outbound` does not check: the egress proxy or the platform checks it, or the operator accepts that risk ([trust assumptions](security-model.md#trust-assumptions)).
 - **Tested** at boot, on a server that answers `CONFIG GET`: Redis's eviction policy (guarantee 3-k), its append-only file, and its replication settings, each refused at boot when it does not hold (the `redis` module's tests; the [runbook](runbook.md#what-the-server-must-be) lists what boot checks). Boot checks the settings, not that a replica is online: with `redis.replication = replicas` and none following, the provider boots and answers `503` to what must write until one follows (guarantee 3-j).
 - **Operator's:** on a server that refuses `CONFIG`, the settings declared in `redis.server-settings`, which boot takes unchecked ([runbook: A managed Redis that refuses `CONFIG`](runbook.md#a-managed-redis-that-refuses-config)); and with `redis.durability = none`, the append-only file is not checked at all, and a crash loses the latest writes.
+- **Operator's:** `DEBUG` left without `ioredis` (or `*`) in production: the Redis client's own debug log writes what it sends, AUTH's password among it. Every boot warns `redis.client_debug_log`, with no value, while it is set so.
 - **Not yet shown:** the safety of a whole deployment, the provider with its proxy, Redis, upstreams and ledgers, run end to end as one reference deployment.
 
 ## Not yet shown
