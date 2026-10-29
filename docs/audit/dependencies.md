@@ -107,7 +107,7 @@ flowchart LR
 | `@mod/labels` | foundation | none |
 | `@mod/mail` | foundation | `@mod/kernel` |
 | `@mod/metrics` | foundation | `@mod/kernel` |
-| `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/url-setting` |
+| `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/tls-options`, `@mod/url-setting` |
 | `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/kernel`, `@mod/url-setting` |
 | `@mod/rate-limit` | foundation | `@mod/audit`, `@mod/http`, `@mod/kernel`, `@mod/metrics`, `@mod/request-source`, `@mod/store` |
 | `@mod/records` | capability | `@mod/kernel`, `@mod/store` |
@@ -115,6 +115,7 @@ flowchart LR
 | `@mod/seal` | foundation | `@mod/kernel`, `@mod/keys` |
 | `@mod/secret-hash` | foundation | `@mod/kernel` |
 | `@mod/store` | foundation | `@mod/kernel` |
+| `@mod/tls-options` | foundation | `@mod/kernel` |
 | `@mod/url-setting` | foundation | none |
 
 ### identity
