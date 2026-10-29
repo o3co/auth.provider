@@ -104,8 +104,8 @@ const codeRequest = (clientId: string) => ({
 });
 
 /** A browser signed in afresh, and the ID token and access token a client's code gives in its session. */
-async function signedIn(id = "app") {
-	const browser = browserAt(() => base, issuer, user);
+async function signedIn(id = "app", source?: string) {
+	const browser = browserAt(() => base, issuer, user, source);
 	const tokensFor = async (clientId: string) => {
 		const answer = await browser.authorize(codeRequest(clientId));
 		const res = await fetch(`${base}/oauth/token`, {
@@ -152,6 +152,12 @@ async function logout(
 		...(method === "POST" ? { body: query } : {}),
 	});
 	const text = await res.text();
+	// A hinted POST is carried on to the logout's own GET: followed, as a browser follows it.
+	const location = res.headers.get("location") ?? "";
+	if (res.status === 303 && location.startsWith("/oauth/logout?")) {
+		const carried = Object.fromEntries(new URL(location, base).searchParams);
+		return logout(at, "GET", carried, extra);
+	}
 	const json = res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : undefined;
 	return { status: res.status, headers: res.headers, text, json };
 }
@@ -285,9 +291,10 @@ describe("a logout the client starts", () => {
 		"a logout a client starts without a hint",
 		() => {
 			/** The confirmation page as the browser holding the session gets it, with the form's cookie. */
-			const confirmationFor = async (at: SignedIn) => {
+			const confirmationFor = async (at: SignedIn, request?: string) => {
 				const session = await at.browser.login();
-				const res = await fetch(`${base}/oauth/logout/confirm`, {
+				const carried = request === undefined ? "" : `?${new URLSearchParams({ request })}`;
+				const res = await fetch(`${base}/oauth/logout/confirm${carried}`, {
 					headers: at.browser.headers({ cookie: session }),
 				});
 				const text = await res.text();
@@ -392,6 +399,79 @@ describe("a logout the client starts", () => {
 				expect([without.status, foreign.status]).toEqual([403, 403]);
 				expect(await stillSignedIn(at)).toBe(true);
 			});
+
+			// RP-Initiated Logout 1.0 §2: a hint for a session the browser does not hold is asked too; the
+			// legacy build closes the session the hint names.
+			describe.runIf(!areaTarget().differs("logout-asked-for-another-session"))(
+				"a logout whose hint names a session the browser does not hold",
+				() => {
+					const carriedIn = (location: string | null) =>
+						new URL(location ?? "", base).searchParams.get("request") ?? "";
+					/** Browsers of their own address, counted per source apart from the other scenes'. */
+					const elsewhere = () => signedIn("app", "198.51.100.30");
+
+					it("asks the person, by GET or POST, closing once they agree only the session the browser holds, never the hint's, and moving on to the return with its state [oidc-rpinit-2-n]", async () => {
+						// The hint's browser stays signed in throughout, so one serves both methods.
+						const at = await elsewhere();
+						for (const method of ["GET", "POST"] as const) {
+							const other = await elsewhere();
+							const params = {
+								id_token_hint: at.idToken,
+								post_logout_redirect_uri: back,
+								state: "s 1",
+							};
+							const started = await logout(other, method, params);
+							const to = new URL(started.headers.get("location") ?? "", base);
+							expect([method, started.status, to.pathname]).toEqual([
+								method,
+								303,
+								"/oauth/logout/confirm",
+							]);
+							const page = await confirmationFor(other, carriedIn(started.headers.get("location")));
+							expect(page.text).toContain("Do you want to log out of");
+							const done = await posted(other, page.cookie, {
+								csrf_token: page.token,
+								confirmation: page.confirmation,
+							});
+							const text = await done.text();
+							expect([method, done.status, done.headers.get("location")]).toEqual([
+								method,
+								200,
+								null,
+							]);
+							expect(text).toContain(`data-target="${back}?state=s+1"`);
+							expect([await stillSignedIn(at), await stillSignedIn(other)]).toEqual([true, false]);
+						}
+					});
+
+					it("asks a browser that sends no session cookie, and moves on to the return from the page saying it is not signed in, closing nothing", async () => {
+						const at = await elsewhere();
+						const query = new URLSearchParams({
+							id_token_hint: at.idToken,
+							post_logout_redirect_uri: back,
+							state: "s",
+						});
+						const started = await fetch(`${base}/oauth/logout?${query}`, {
+							redirect: "manual",
+							headers: at.browser.headers(),
+						});
+						expect([
+							started.status,
+							new URL(started.headers.get("location") ?? "", base).pathname,
+						]).toEqual([303, "/oauth/logout/confirm"]);
+						const carried = new URLSearchParams({
+							request: carriedIn(started.headers.get("location")),
+						});
+						const page = await fetch(`${base}/oauth/logout/confirm?${carried}`, {
+							headers: at.browser.headers(),
+						});
+						const text = await page.text();
+						expect(text).toContain("You are not signed in.");
+						expect(text).toContain(`data-target="${back}?state=s"`);
+						expect(await stillSignedIn(at)).toBe(true);
+					});
+				},
+			);
 
 			it("asks again, closing nothing, where the browser holds another session than the page was shown for", async () => {
 				const first = await signedIn();
