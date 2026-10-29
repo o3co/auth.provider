@@ -274,11 +274,22 @@ describe("authorize: the section", () => {
 		]);
 	});
 
+	it("reads the login URL's limit as a size with a unit, from 2KiB to 64KiB", () => {
+		const limit = (written: string) => section.safeParse({ ...login, "login-url-limit": written });
+		expect([limit("2KiB").data?.["login-url-limit"], limit("64KiB").success]).toEqual([2048, true]);
+		expect([limit("2047B").success, limit("65KiB").success, limit("4096").success]).toEqual([
+			false,
+			false,
+			false,
+		]);
+	});
+
 	it("reads a section that holds only the login page with the defaults it had, claims-parameter true", () => {
 		expect(section.parse(login)).toEqual({
 			...login,
 			"oidc-mode": "oidc-required",
 			"claims-parameter": true,
+			"login-url-limit": 8192,
 			requests: 60,
 			window: 60,
 		});

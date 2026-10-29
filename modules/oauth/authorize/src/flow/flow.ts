@@ -64,6 +64,8 @@ export interface FlowParts extends Place {
 	readonly clock: Clock;
 	/** The package's `login-page`. */
 	readonly loginPage: string;
+	/** The longest login URL sent (the package's `login-url-limit`), in bytes. */
+	readonly loginUrlLimit: number;
 	/** Whether each request must name `openid` itself (the package's `oidc-mode`). */
 	readonly openidRequired: boolean;
 	readonly reauths: Reauths;
@@ -75,31 +77,38 @@ export interface FlowParts extends Place {
 	readonly hint: HintCheck;
 }
 
-/** The longest login URL sent, the request line many proxies take by default; a longer one is answered here. */
-const maxLoginUrl = 8192;
+/** A request whose login URL would be past the limit, answered here when it was not refused already. */
+const tooLongToLogIn = refusal("invalid_request", "request too long to log in");
 
 /** Decides for a trusted request: a refusal, a page to go to, or the code and its subject. */
 export type Flow = (trusted: Trusted) => Promise<Decision>;
 
 export function flowWith(parts: FlowParts): Flow {
-	const { issuer, self, sessions: entered, codes: issued, clock, loginPage } = parts;
+	const { issuer, self, sessions: entered, codes: issued, clock, loginPage, loginUrlLimit } = parts;
 	const { reauths, stepUp, consent, openidRequired, tokens: issuance, target: targetOf } = parts;
 	const { selections, claimsParameter, hint: hintOf } = parts;
 	const urlWith = (params: Iterable<readonly [string, string]>) =>
 		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
 
-	/** The login page, `redirect_to` back to `back`, with the fresh login asked beside it. */
+	/**
+	 * The login page, `redirect_to` back to `back`, with the fresh login asked beside it; past the
+	 * limit, `refused` (or a request too long to log in) answered here, nothing sent back.
+	 */
 	const sentToLogin = (
 		back: string,
 		fresh?: { readonly login: boolean; readonly maxAgeMs?: number | undefined },
-	) => {
+		refused: Decision = tooLongToLogIn,
+	): Decision => {
 		const login = new URL(loginPage);
 		login.searchParams.set("redirect_to", back);
 		// The page hands these to a login it starts elsewhere, an upstream's, so that one is new too.
 		if (fresh?.login) login.searchParams.set("prompt", "login");
 		if (fresh?.maxAgeMs !== undefined)
 			login.searchParams.set("max_age", String(fresh.maxAgeMs / 1000));
-		return { kind: "send", to: login.href } as const;
+		if (login.href.length <= loginUrlLimit) return { kind: "send", to: login.href };
+		if (refused.kind !== "refuse") return refused;
+		const { error, description } = refused;
+		return { kind: "answer", error, ...(description ? { description } : {}) };
 	};
 
 	// RFC 9700 §4.11.2: a refusal goes back only to a browser logged in, but for a silent request. The
@@ -114,13 +123,7 @@ export function flowWith(parts: FlowParts): Flow {
 		const sent = [...request.query].flatMap(([name, values]) =>
 			values.map((v) => [name, v] as const),
 		);
-		const login = sentToLogin(urlWith(sent));
-		if (login.to.length <= maxLoginUrl) return login;
-		return {
-			kind: "answer",
-			error: refused.error,
-			...(refused.description ? { description: refused.description } : {}),
-		};
+		return sentToLogin(urlWith(sent), undefined, refused);
 	};
 
 	/** The request read up to its session: a refusal, or what the rest of the flow decides on. */
@@ -281,6 +284,7 @@ export async function flowOver(c: BuildContext<Settings>, place: Place): Promise
 		tokens: await c.get(tokens),
 		clock: c.clock,
 		loginPage: c.section["login-page"],
+		loginUrlLimit: c.section["login-url-limit"],
 		openidRequired: c.section["oidc-mode"] === "oidc-required",
 		claimsParameter: c.section["claims-parameter"],
 		reauths,

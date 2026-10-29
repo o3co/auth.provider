@@ -58,7 +58,20 @@ describe("the flow: logging in before a refusal", () => {
 		]);
 	});
 
-	it("answers a refusal at the endpoint by 400, sending nothing back, where its login URL would pass 8 KiB [rfc9700-4.11.2-b]", async () => {
+	it("answers a request at the endpoint by 400, sending nothing back, where its login URL would pass the limit set, on either way to log in [rfc9700-4.11.2-b]", async () => {
+		const { authorize } = await serve({ authorize: { "login-url-limit": "2KiB" } });
+		const long = { "x-a": "x".repeat(2048) };
+		const said = async (extra: Record<string, string>) => {
+			const res = await authorize(request({ ...long, ...extra }));
+			return [res.status, res.location, JSON.parse(res.text).error];
+		};
+		expect(await said({ scope: "unknown" })).toEqual([400, "", "invalid_scope"]);
+		expect(await said({})).toEqual([400, "", "invalid_request"]);
+		const short = await authorize(request({ scope: "unknown" }));
+		expect(short.at?.pathname).toBe("/login");
+	});
+
+	it("answers a refusal at the endpoint by 400, sending nothing back, where its login URL would pass 8 KiB by default [rfc9700-4.11.2-b]", async () => {
 		const { authorize } = await serve();
 		const long = Object.fromEntries(["a", "b", "c"].map((name) => [`x-${name}`, "x".repeat(2048)]));
 		const res = await authorize(request({ ...long, nonce: "n".repeat(2049) }));
