@@ -172,6 +172,34 @@ describe("authorization code: issuing and redeeming", () => {
 		).toBe("invalid_grant");
 	});
 
+	it("answers a POST with a 303 to the GET carrying the same parameters, where the session is read", async () => {
+		const sent = request({ scope: "openid read" });
+		const res = await fetch(`${base}/oauth/authorize`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"x-forwarded-proto": "https",
+				"x-forwarded-for": "198.51.100.20",
+				"x-forwarded-host": new URL(issuer).host,
+				"content-type": "application/x-www-form-urlencoded",
+				origin: issuer,
+				cookie: await browser.login(),
+			},
+			body: new URLSearchParams(sent),
+		});
+		const at = new URL(res.headers.get("location") ?? "", issuer);
+		if (areaTarget().differs("authorize-post-read-in-place")) {
+			// The legacy build reads the form in place, so the code goes to the client at once.
+			expect([`${at.origin}${at.pathname}`, at.searchParams.has("code")]).toEqual([callback, true]);
+		} else {
+			expect([res.status, `${at.origin}${at.pathname}`]).toEqual([
+				303,
+				`${issuer}/oauth/authorize`,
+			]);
+			expect(Object.fromEntries(at.searchParams)).toEqual(sent);
+		}
+	});
+
 	it("refuses a code after logout", async () => {
 		const res = await browser.authorize(request({ scope: "openid read" }));
 		const code = res.at?.searchParams.get("code") ?? "";

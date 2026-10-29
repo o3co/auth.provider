@@ -11,15 +11,16 @@
 ## Offers
 - Grant `refresh_token` for `grants`, taking its audience from the request; a `code-grant` addition `refresh_token`, for a client allowed the grant; taking it back revokes the family its redemption started, or marks that none may start.
 - A `tokens` access condition: a token whose family has ended is revoked, before the sweep revokes it.
-- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same.
+- A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same, and a family already marked revoked is finished before it is answered.
 - A participant for closing a session.
 - `grants`' token tie `family`: a token's family, `ended` (`family has ended`) or held to its end; a token issued from it is adopted.
 - Contract `lineage`: `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.
 - Operator section `refresh`, with `lifetime` and `sweep-interval` (each written with its unit, in whole seconds) and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
 - Audit event `refresh.family_revoked`, with the subject and the client, when a reuse revokes a family; never a token, its secret or the family's name: declared in `./audit-events`, listed in the audit event reference.
-- Store interfaces: families, redemptions, token links, each session's families, each family's access tokens, the families to revoke; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
+- Store interfaces: families, redemptions, token links, each session's families, each family's access tokens (with those a cap pushed out awaiting until settled), the families to revoke; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
 
 ## Invariants
+- A family's revocation is its confirmed mark: from then the access condition and the grant refuse every token of it at each verification and use. Revoking its access tokens by id (the denylist) and the sweep are cleanup after it, finished when the store answers; not a guarantee of their own.
 - A refresh token is `<family>.<secret>`: the family's name, 16 random bytes, and the secret, 32 random bytes, each in base64url, 66 characters in all (RFC 6749 §5.1 asks its size be documented).
 - Only a family's current token is usable, and each use swaps it for a new one. Any other token of the family is reuse and revokes the family; so is the loser of two concurrent uses.
 - A token with anything after it, another client's token, and one without the family's binding are refused without spending it.

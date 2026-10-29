@@ -66,11 +66,17 @@ describe("the helper, as a process", () => {
 		expect(await until(() => !alive(pid as number))).toBe(true);
 	}, 30_000);
 
-	it("gets none of its parent's environment but the resolver's variables and its threads", () => {
+	it("gets none of its parent's environment but the resolver's variables and its threads", async () => {
 		process.env.OUTBOUND_TEST_SECRET = "s3cr3t-value";
 		process.env.LOCALDOMAIN = "example.test";
 		const helper = startHelper(1, 3);
+		let ready = false;
+		helper.on("message", (message) => {
+			if ((message as { ready?: boolean }).ready === true) ready = true;
+		});
 		try {
+			// Read once it says it is ready: before its exec, the OS keeps no environment of its own for it.
+			expect(await until(() => ready)).toBe(true);
 			const env = environmentOf(helper.pid as number);
 			expect(env).not.toContain("s3cr3t-value");
 			expect(env).not.toContain("NODE_OPTIONS");

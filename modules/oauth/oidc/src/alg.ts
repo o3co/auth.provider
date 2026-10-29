@@ -21,7 +21,7 @@ export function clientSectionOf(alg: string): Section<ClientIdTokens> {
 		schema: z.strictObject({
 			"id-token-alg": z
 				.string()
-				.refine((named) => named === alg, `ID tokens are signed with ${alg} alone`)
+				.refine((named) => named === alg, "ID tokens are signed with oidc.id-token-alg alone")
 				.optional()
 				.describe(
 					"The JWS algorithm the client's ID tokens are signed with (`id_token_signed_response_alg`): the one `keys` signs with, the default; another is refused.",

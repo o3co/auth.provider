@@ -19,7 +19,6 @@
 - Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked. A policy reads session-built state late (`c.late`), else boot cycles.
 - `token-denylist`'s store interface for revoked tokens and its needs, passed on: a store wiring wires `tokens` and implements it.
 - `jwks_uri` among `issuer`'s metadata: `keys`' key set path on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
-- The access-token lifetime `issue` applies where a grant gives no lifetime, in seconds, through `accessTokenLifetimeSeconds`, so a grant with a lifetime ceiling can read it at build time and refuse boot above it. It is fixed once `tokens` is built.
 - Operator section: `access-token-lifetime` (written with its unit, `2s` to `1d` in whole seconds, default `1h`; a second's lifetime, its `iat` cut to the second, would leave less than a second once signed), `revocation` (`denylist` or `unsupported`), `issuance-timeout` (written with its unit, `1s` to `1m`, default `10s`), `subject-check` (`none` states that no module checks subjects).
 - `./testing`: the contract test every implementation passes, configuration builders, and a stand-in: in memory, unsigned, ending and reading bindings as `tokens` does.
 

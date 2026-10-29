@@ -25,7 +25,7 @@
 - Past `account-attempts` failures in a run, each next attempt at the identifier waits, `429` `too_many_attempts` with `retry-after`, and its password is not checked.
 - An identifier's wait doubles from a second to `account-max-wait`, and never locks it out.
 - Anyone who knows an identifier can keep its password login waiting, up to `account-max-wait` at a time, for as long as they keep trying; passkey and federation logins are not held back.
-- The right password ends the identifier's run; a guess `users` could not judge is handed back.
+- The right password ends the identifier's run where the gates open or hold the login (below); a guess `users` could not judge is handed back.
 - An identifier's run is forgotten after `account-window` without a failure.
 - Where the attempt per identifier cannot be counted, the login is `503` `service_unavailable`.
 - The password is handed to `users` as typed, with no Unicode normalization.
