@@ -360,8 +360,10 @@ describe("private_key_jwt", () => {
 		expect(await at({ exp: undefined })).toBe("bad_credentials");
 		expect(await at({ iat: seconds() + 30 })).toBe("app");
 		expect(await at({ iat: seconds() + 31 })).toBe("bad_credentials");
+		// Its `exp` less its `iat`, with no skew: each within reach, the two further apart than the cap.
 		expect(await at({ iat: seconds() - 1800, exp: seconds() + 1800 })).toBe("app");
-		expect(await at({ iat: seconds() - 3631 })).toBe("bad_credentials");
+		expect(await at({ iat: seconds() - 1801, exp: seconds() + 1800 })).toBe("bad_credentials");
+		expect(await at({ iat: seconds() - 1810, exp: seconds() + 1810 })).toBe("bad_credentials");
 		expect(await at({ nbf: seconds() + 30 })).toBe("app");
 		expect(await at({ nbf: seconds() + 31 })).toBe("bad_credentials");
 		expect(await at({ jti: undefined })).toBe("bad_credentials");
