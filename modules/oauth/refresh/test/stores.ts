@@ -26,6 +26,7 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 	const byFamily = memoryRecords<never>(now, size).keyedSets(caps.issuedAccess);
 	const down = { families: unavailableSwitch<FamilyStore>("family store") };
 	let meanwhile: ((id: string) => Promise<void>) | undefined;
+	let beforeDone: ((id: string) => Promise<void>) | undefined;
 	/** What redemptions and the settle list were given, as written. */
 	const given: unknown[] = [];
 	const module = defineModule({ name: "refresh-stores", replicaSafe: false, takes: [] }, (m) => [
@@ -58,11 +59,32 @@ export function memoryStores(caps = { sessionFamilies: 1000, issuedAccess: 1000 
 				given.push(id);
 				return kept.deferred.add(id);
 			},
+			done: async (id: string) => {
+				const first = beforeDone;
+				beforeDone = undefined;
+				if (first) await first(id);
+				return kept.deferred.done(id);
+			},
 		})),
 	]);
 	/** The next update that finds no record is followed by this write. */
 	const landing = (write: (id: string) => Promise<void>) => {
 		meanwhile = write;
 	};
-	return { module, kept, marks, links, bySession, byFamily, down, landing, given };
+	/** The settle list's next `done` is preceded by this write, as another pass landing just before it. */
+	const landingBeforeDone = (write: (id: string) => Promise<void>) => {
+		beforeDone = write;
+	};
+	return {
+		module,
+		kept,
+		marks,
+		links,
+		bySession,
+		byFamily,
+		down,
+		landing,
+		landingBeforeDone,
+		given,
+	};
 }

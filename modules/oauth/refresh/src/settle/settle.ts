@@ -57,8 +57,28 @@ export function settling(
 		const { pushedOut } = await stores.issuedAccess.add(id, referenceOf(access), remainingMs);
 		if (pushedOut.length > 0) {
 			log.error("refresh.access_pushed_out", { count: pushedOut.length });
-			for (const member of pushedOut) await revokeMember(member);
+			// One whose revocation fails awaits, and its family's revocation revokes it.
+			for (const member of pushedOut) {
+				await revokeMember(member);
+				await stores.issuedAccess.settled(id, member);
+			}
 			throw new Unavailable("refresh");
+		}
+	};
+	/** The family's access tokens, those its cap pushed out and still awaiting among them. */
+	const issuedBy = async (id: string) => [
+		...(await stores.issuedAccess.members(id)).map(({ member }) => member),
+		...(await stores.issuedAccess.awaiting(id)),
+	];
+	/** Revokes what the family issued and this pass has not yet, then settles those that awaited. */
+	const revokeListed = async (id: string, gone: Set<string>) => {
+		for (const member of await issuedBy(id)) {
+			if (gone.has(member)) continue;
+			await revokeMember(member);
+			gone.add(member);
+		}
+		for (const member of await stores.issuedAccess.awaiting(id)) {
+			await stores.issuedAccess.settled(id, member);
 		}
 	};
 	// Revokes a family and what it issued. Listed first, so `sweep` finishes one stopped halfway; the
@@ -73,8 +93,16 @@ export function settling(
 			// A family placed meanwhile is marked when the revocation is tried again.
 			if (written !== "created") throw new Unavailable("refresh");
 		}
-		for (const { member } of await stores.issuedAccess.members(id)) await revokeMember(member);
-		await stores.settles.done(id);
+		const gone = new Set<string>();
+		await revokeListed(id, gone);
+		// A refresh begun before the mark may list a token after this pass read the list, and fail to
+		// revoke it on its own pass: read again once done, so this pass never clears what it left.
+		for (;;) {
+			await stores.settles.done(id);
+			if ((await issuedBy(id)).every((member) => gone.has(member))) return;
+			await stores.settles.add(id);
+			await revokeListed(id, gone);
+		}
 	};
 	const sweep = async () => {
 		const { failed } = await stores.settles.each(revokeFamily);
