@@ -323,7 +323,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `promotion` (`src/promotion`): promoting a replica of a Redis topology's primary without losing what the primary took.
   - `relay` (`src/relay`): a relay between an app and Redis that causes a fault at a known point and shows that it happened.
   - `store-wire` (`src/store-wire`): the Redis adapter's wire, read in one place, so a scene names a store write in a store's words and the relay matches it.
-- `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, and the session grant.
+- `@mod/conformance-code` (verification, `modules/tooling/conformance-code`): Owns the conformance scenes of the code flow area: the authorization endpoint and its consent step, code redemption, refresh and its binding, acr, the session grant, and the ID token coming from the code flow alone.
   - `acr` (`src/acr`): the scenes of the acr a client asks for.
   - `authorize-unavailable` (`src/authorize-unavailable`): the fault scenes of the authorization endpoint issuing no code while the store cannot answer (`guarantee-3-a`).
   - `boundaries` (`src/boundaries`): the fault scenes of bounds the security model leaves to the operator, recorded as they are; no promise is checked, so none names a guarantee or a fault of one.

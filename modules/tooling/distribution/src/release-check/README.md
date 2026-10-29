@@ -24,4 +24,4 @@
 - Each launch of the check is a run of its own, named by a random id, so no name or label of an earlier one is ever its own; it sweeps its run's containers by label at its end, a container still there a problem told. What a killed check left is removed by hand while no check runs (`containers`' card).
 
 ## Depends on
-- The package's build; `create-app` (its patterns), `trial` (the layer each image boots on); pnpm, to pack and install; Docker, to build and run images.
+- The package's build; `create-app` (its patterns), `trial` (the layer each image boots on); pnpm, to pack and install; Docker, to build and run images; `tar`, run, to list a tarball's files.
