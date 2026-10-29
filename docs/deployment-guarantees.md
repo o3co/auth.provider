@@ -66,10 +66,9 @@ Audit is best effort ([Audit](security-model.md#audit)).
 - **Tested**, with Redis shared:
   - An authorization code is redeemed once (guarantee 5-a), a refresh token is rotated once (5-b), and a JWT bearer assertion's, a client assertion's and a DPoP proof's `jti` is spent once (5-c, 5-d, 5-e).
   - A session left closing is closed by its logout or a later sweep on any instance, and a logout that cannot finish answers `503` (1-a).
-  - A device code is decided and redeemed once, a recovery code is used once, a passkey challenge is used once (5-f, 5-g, 5-h), and a login lockout's count holds, each attempt counted once (5-i).
+  - A device code is decided and redeemed once, a recovery code is used once, a passkey challenge is used once (5-f, 5-g, 5-h), a login lockout's count holds, each attempt counted once (5-i), and an id_token is exchanged once, by the token exchange or as a JWT bearer assertion (5-j).
   - A subject's revocation boundary refuses, at any instance, what was made before it (4-a to 4-e, under [Revocation at resource servers](#revocation-at-resource-servers)).
 - **The faults each ran under.** On one instance: a lost answer, all answers lost (but for 1-a and 5-i), a failover, and Redis killed; for 5-a, 5-b and 1-a also a failover whose confirmations stay on the old primary. On two instances: an instance killed after a write and before its answer, and two instances acting on the same thing at once; for 5-a also an instance's clock moved forward or back, and for 1-a all answers to a closing lost, another instance's sweep closing it. A scene on one instance shows what Redis's faults do, not what a second instance does at the same time.
-- **Declared, not yet shown under these faults:** an id_token exchanged once (5-j).
 - **Declared:** boot refuses a module that declares itself unsafe on several instances, or declares nothing of them, as [promise 5](security-model.md#promises-across-modules) says; a declaration is its author's word, so check your own modules' before setting `kernel.deployment = multi`.
 - **Declared:** where the upstream ends a federation grant while the store answers reads but refuses writes, only the instance that heard the end refuses the grant; another hands out the upstream access token it holds until that token ends or the end is written. Where the store answers no reads, every instance answers unavailable.
 - **Operator's:** the same configuration on every instance (the signing keys, the issuer, Redis's URL and prefix, the seal key, the registered clients and users, the trusted proxies and public origin, the DPoP nonce secret, each IdP's settings, and the shard counts and per-shard limits of the work the sweeps walk: code-grant-store's `void-shards`, session-store's `closing-shards`, refresh-store's `settle-shards`, rp-logout-store's `notice-shards` and session-tokens-store's `pending-shards`, each with its `*-per-shard` limit; and, once set, `mfa-witness-http.withdraw-url`, and `login-passkey.password` with `login-passkey.password-exempt-group`, as the runbook's steps for them say), and host clocks synchronized, with no skew allowed between hosts ([Trust assumptions](security-model.md#trust-assumptions), [runbook: Many instances](runbook.md#many-instances)).
@@ -88,7 +87,6 @@ The provider takes the word of what stands beside it, as the [trust assumptions]
 
 Gathered from the sections above:
 
-- Under injected Redis faults: an exchanged id_token used once (5-j).
 - Recovery times and a service level under failure.
 - A resource server outside the provider verifying tokens after a revocation.
 - An audit receiver stopped, slowed or filled against a running provider.
