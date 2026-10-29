@@ -19,7 +19,7 @@ const section = z.strictObject({
 		.array(urlSetting({ schemes: ["https"], loopbackHttp: true }))
 		.prefault([])
 		.describe(
-			"The https URLs (http only on a loopback host), matched as written, a login may return to besides the return paths modules contribute.",
+			"The https URLs (http only on a loopback host, with `kernel.environment = development`), matched as written, a login may return to besides the return paths modules contribute.",
 		),
 });
 

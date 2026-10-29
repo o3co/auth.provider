@@ -33,7 +33,7 @@ export const section = z.strictObject({
 	"held-page": urlSetting({ schemes: ["https"], loopbackHttp: true })
 		.optional()
 		.describe(
-			"The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host. Without it, a held login is answered 403 with the gate's answer.",
+			"The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host with `kernel.environment = development`. Without it, a held login is answered 403 with the gate's answer.",
 		),
 	"transaction-lifetime": setting
 		.duration("s")

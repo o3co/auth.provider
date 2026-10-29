@@ -10,7 +10,7 @@ export const section = z.strictObject({
 	"step-up-page": page
 		.optional()
 		.describe(
-			"Where a link's start that falls short of a session requirement sends the browser once to raise it, then back to the start: an https URL (http only on a loopback host). Without it, the start's 403 names no page.",
+			"Where a link's start that falls short of a session requirement sends the browser once to raise it, then back to the start: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, the start's 403 names no page.",
 		),
 });
 

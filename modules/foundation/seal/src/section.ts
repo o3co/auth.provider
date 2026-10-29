@@ -14,6 +14,11 @@ export const section = z
 	.strictObject({
 		current: key.describe("The key that seals; any key of the ring opens."),
 		next: key
+			.extend({
+				id: key.shape.id.describe(
+					"The key's id: it opens values but seals none until it is made current.",
+				),
+			})
 			.optional()
 			.describe("Opens but never seals, so every host opens with it before it seals."),
 		previous: z.array(key).prefault([]).describe("Keys that only open what they sealed."),

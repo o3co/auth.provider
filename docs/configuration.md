@@ -35,8 +35,8 @@ From `@mod/authorize`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host). |
-| `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host). |
+| `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host, with `kernel.environment = development`). |
+| `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host, with `kernel.environment = development`). |
 | `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  | oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default. |
 | `authorize.claims-parameter` | boolean | `true` |  |  |  | Whether the claims request parameter's names and value constraints are taken, and discovery says it is supported. False ignores them, and boot warns; the sub asked, the acr, an essential auth_time and the parameter's form still hold, as do the scope's claims and the selections already kept. |
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both methods together; over it, 429. |
@@ -102,7 +102,7 @@ From `@mod/consent`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. An https URL (http only on a loopback host, as authorize's login page). |
+| `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked, and the authorization endpoint serves only first-party clients. An https URL (http only on a loopback host, with `kernel.environment = development`, as authorize's login page). |
 | `consent.challenge-lifetime` | string | `10m` |  |  |  | How long a pending consent challenge stays answerable, from `1m` to `1h` in whole seconds. |
 
 ## device-grant
@@ -161,7 +161,7 @@ From `@mod/federation`.
 |---|---|---|---|---|---|---|
 | `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`, and lets its logins past the local second factor), `fresh-login-allowance` (how long before a demand for a fresh login the upstream may say the user logged in, for `prompt=login` and a max age, from 0s to 5m; the type's clock allowance, `clock-skew`, by default) and the type's own settings. With none, every login answers not found, and each boot warns `federation.no_idps`. |
 | `federation.landing` | string |  |  |  |  | The https URL a login lands on when it named no return target; the public origin's root by default. |
-| `federation.held-page` | string |  |  |  |  | The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host. Without it, a held login is answered 403 with the gate's answer. |
+| `federation.held-page` | string |  |  |  |  | The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host with `kernel.environment = development`. Without it, a held login is answered 403 with the gate's answer. |
 | `federation.transaction-lifetime` | string | `10m` |  |  |  | How long a round trip, or a held login's tokens, may wait, from 1m to 1h. |
 | `federation.requests` | integer (1–1000) | `60` |  |  |  | Starts and callbacks allowed per source in each window. |
 | `federation.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |
@@ -192,9 +192,9 @@ From `@mod/federation-grants-connect`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation-grants-connect.page` | string |  |  | `FEDERATION_GRANTS_CONNECT_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host). Connections refuse boot without it. |
-| `federation-grants-connect.login-page` | string |  |  | `FEDERATION_GRANTS_CONNECT_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host). |
-| `federation-grants-connect.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host). |
+| `federation-grants-connect.page` | string |  |  | `FEDERATION_GRANTS_CONNECT_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host, with `kernel.environment = development`). Connections refuse boot without it. |
+| `federation-grants-connect.login-page` | string |  |  | `FEDERATION_GRANTS_CONNECT_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host, with `kernel.environment = development`). |
+| `federation-grants-connect.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host, with `kernel.environment = development`). |
 | `federation-grants-connect.identity-check` | required \| none | `required` |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. |
 
 ## federation-grants-store
@@ -212,7 +212,7 @@ From `@mod/federation-link`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation-link.step-up-page` | string |  |  |  |  | Where a link's start that falls short of a session requirement sends the browser once to raise it, then back to the start: an https URL (http only on a loopback host). Without it, the start's 403 names no page. |
+| `federation-link.step-up-page` | string |  |  |  |  | Where a link's start that falls short of a session requirement sends the browser once to raise it, then back to the start: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, the start's 403 names no page. |
 
 ## federation-tokens
 
@@ -281,7 +281,7 @@ From `@mod/jwt-bearer`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is","conditions":{"subject-prefix":"REPLACE-SUBJECT-PREFIX"}}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. |
+| `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is","conditions":{"subject-prefix":"REPLACE-SUBJECT-PREFIX"}}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. An entry's keys are `issuer`; `keys`, or `jwks-uri` with `accept-key-set-elsewhere`, or neither; `subject`, `upstream`, `subject-is-key-thumbprint`, `self-issued-prefix`, `conditions`, `accept-any-subject`, `ceiling`, `max-assertion-lifetime`, `clock-skew`, `profile` and `client`; and `algorithms`, which only an entry without `keys` takes; `jwt-bearer`'s internal module `issuers` says what each takes. |
 | `jwt-bearer.delegated-issuers` | list of string | `[]` |  |  |  | Issuers whose assertions another module checks by its own rules, each exactly as sent: their audience is an app, not this server, so RFC 7523 §3 does not hold. Each needs the one module that checks it. |
 | `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | How far ahead its `exp`, and how far back its `iat`, an assertion may be when it is taken, from `1s` to `1d` in whole seconds. |
 | `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
@@ -319,7 +319,7 @@ From `@mod/login-gates`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs (http only on a loopback host), matched as written, a login may return to besides the return paths modules contribute. |
+| `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs (http only on a loopback host, with `kernel.environment = development`), matched as written, a login may return to besides the return paths modules contribute. |
 
 ## login-passkey
 
@@ -616,7 +616,7 @@ From `@mod/seal`.
 |---|---|---|---|---|---|---|
 | `seal.current.id` | string |  | yes | `SEAL_CURRENT_ID` | `seal-1` | The key's id, which heads every value it seals. |
 | `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | 32 bytes, base64, of at least 8 byte values. |
-| `seal.next.id` | string |  |  |  |  | The key's id, which heads every value it seals. |
+| `seal.next.id` | string |  |  |  |  | The key's id: it opens values but seals none until it is made current. |
 | `seal.next.key` | string |  |  |  |  | 32 bytes, base64, of at least 8 byte values. |
 | `seal.previous` | list of map | `[]` |  |  |  | Keys that only open what they sealed. |
 
@@ -776,7 +776,7 @@ From `@mod/webauthn`.
 |---|---|---|---|---|---|---|
 | `webauthn.rp-id` | string |  | yes | `WEBAUTHN_RP_ID` | `login.example.invalid` | The relying party ID: each web origin's host, or a domain each one lies under. |
 | `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` | The relying party's name, as an authenticator shows it. |
-| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins. |
+| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost, with `kernel.environment = development`), or Android app origins. |
 | `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
 
