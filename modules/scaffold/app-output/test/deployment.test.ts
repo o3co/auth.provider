@@ -186,6 +186,27 @@ export default {};`,
 	]);
 });
 
+it("tells in each guide how to make a random secret, what tokens.revocation = unsupported does, and that a value of several lines is never in .env", async () => {
+	for (const template of ["pattern-readme.md", "full-readme.md", "listed-readme.md"]) {
+		const target = await mkdtemp(join(tmpdir(), "app-output-"));
+		await writeDeployment(target, ["@mod/http", "@mod/keys"], fakePackages(), {
+			...readme,
+			template,
+		});
+		const guide = await read(target, "README.md");
+		expect(guide, template).toContain("with `openssl rand -base64 32`");
+		expect(guide, template).toContain(
+			"| `keys.signing.private-key` | `KEYS_SIGNING_PRIVATE_KEY` (process environment only, never .env) |",
+		);
+	}
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http"], fakePackages(), readme);
+	// Which modules refuse `unsupported` is theirs to say at boot.
+	expect(await read(target, "README.md")).toContain(
+		"With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
+	);
+});
+
 it("adds the reseal entry when seal is composed", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeDeployment(target, ["@mod/seal"], fakePackages(), readme);

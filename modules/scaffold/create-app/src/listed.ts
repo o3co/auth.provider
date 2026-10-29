@@ -38,7 +38,10 @@ function decidedLines(modules: readonly string[]): string[] {
 			? "- `kernel.deployment`: `single`: the store is kept in this process, so the deployment runs as one instance; list `@mod/redis` to keep it in Redis and run several."
 			: "- `kernel.deployment`: `single` for one instance, `multi` for several.",
 		...(modules.includes("@mod/tokens")
-			? ["- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported."]
+			? [
+					// Which modules refuse `unsupported` is theirs to check at boot, not this guide's to list.
+					"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
+				]
 			: []),
 		...(modules.includes("@mod/audit")
 			? [

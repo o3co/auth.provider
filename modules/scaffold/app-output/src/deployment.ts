@@ -210,8 +210,11 @@ const guideLists = (settings: readonly Setting[], written: readonly Written[]) =
 	settings: settings
 		.map((s) => {
 			// On one line of its table: a placeholder of several lines as JSON writes it.
-			const shown = s.placeholder.includes("\n") ? JSON.stringify(s.placeholder) : s.placeholder;
-			return `| \`${s.key}\` | \`${s.env}\` | \`${shown}\` |`;
+			const several = s.placeholder.includes("\n");
+			const shown = several ? JSON.stringify(s.placeholder) : s.placeholder;
+			// Docker reads one line per variable from an env file, so a value of several lines is never in .env.
+			const env = several ? `\`${s.env}\` (process environment only, never .env)` : `\`${s.env}\``;
+			return `| \`${s.key}\` | ${env} | \`${shown}\` |`;
 		})
 		.join("\n"),
 	written: written
@@ -229,7 +232,7 @@ function httpLines(http: { readonly serves: boolean; readonly live: boolean }) {
 	const port = envName("http.port");
 	return {
 		tryHttp: http.serves
-			? `To try it on this machine over plain http, set \`http.public-origin\` to \`http://localhost:${httpPort}\` and \`http.insecure-origin\` to \`true\`, and \`kernel.environment\` to \`development\`: an http public origin boots only with both, and its cookies cannot be made secure. A deployment keeps an https origin, leaves \`http.insecure-origin\` \`false\` and \`kernel.environment\` \`production\`.\n`
+			? `To try it on this machine over plain http, set \`http.public-origin\` and \`issuer.url\` to \`http://localhost:${httpPort}\`, \`http.insecure-origin\` to \`true\`, and \`kernel.environment\` to \`development\`: an http public origin boots only with both, and its cookies cannot be made secure. A deployment keeps an https origin, leaves \`http.insecure-origin\` \`false\` and \`kernel.environment\` \`production\`.\n`
 			: "",
 		dockerRun: http.serves
 			? `docker run --env-file .env -e ${host}=0.0.0.0 -e ${port}=${httpPort} ${config} -p ${httpPort}:${httpPort} auth-provider`

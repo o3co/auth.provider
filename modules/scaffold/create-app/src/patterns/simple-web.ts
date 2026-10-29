@@ -4,9 +4,9 @@ export const simpleWeb: Pattern = {
 	name: "simple-web",
 	use:
 		"A web login by password for clients that use the authorization code flow with refresh; " +
-		"services that use client credentials add it (--add @mod/client-credentials). It needs no " +
-		"outside system: the store is kept in memory, users are listed in the configuration, and " +
-		"audit events go to the log.",
+		"services that use client credentials add it (--add @mod/client-credentials). With its " +
+		"default axes it needs no outside system: the store is kept in memory, users are listed in " +
+		"the configuration, and audit events go to the log; another --axis brings its own.",
 	axes: {
 		"@mod/store": "@mod/store",
 		"@mod/users": "@mod/users",
