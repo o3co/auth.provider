@@ -5,7 +5,7 @@ import { tlsOptions } from "@mod/tls-options";
 import { type Offer, peerOptions, testTlsOptions } from "@mod/tls-options/testing";
 import { Redis } from "ioredis";
 import { afterAll, expect, it } from "vitest";
-import { clientOptions } from "../src/client-options.ts";
+import { clientDebugs, clientOptions } from "../src/client-options.ts";
 import redisModule from "../src/module.ts";
 
 const offers: readonly Offer[] = ["tls1.1", "static-rsa", "cbc", "ecdhe-aead", "tls1.3"];
@@ -108,4 +108,11 @@ it("refuses boot on a floor that is not tls-options' own, however alike, before 
 			reason: "the TLS floor is not one tls-options made: provide it from @mod/tls-options",
 		},
 	]);
+});
+
+it("finds the client's own debug log turned on by DEBUG naming ioredis or every namespace, and off when taken out", () => {
+	const on = ["ioredis:*", "ioredis:redis", "*", "express:*,ioredis:*", "app:* ioredis:connection"];
+	const off = [undefined, "", "express:*", "-ioredis:*", "*,-ioredis:*", "*,-*"];
+	expect(on.filter((debug) => !clientDebugs(debug))).toEqual([]);
+	expect(off.filter((debug) => clientDebugs(debug))).toEqual([]);
 });

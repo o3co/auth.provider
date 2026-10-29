@@ -3,7 +3,7 @@ import { type Space, spaces, store } from "@mod/store";
 import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
 import { z } from "zod";
-import { clientOptions, queryRefusal } from "./client-options.ts";
+import { clientDebugs, clientOptions, queryRefusal } from "./client-options.ts";
 import { redisProbe } from "./probe.ts";
 import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
 
@@ -279,6 +279,8 @@ const takes = [spaces, tlsOptions] as const;
 // (deployment-guarantees, Several instances).
 export default defineModule({ name: "redis", replicaSafe: true, section, takes }, (m) => [
 	m.provide(connections).by(async (c) => {
+		// On every boot: the client's own debug log writes AUTH's password; no value is told here.
+		if (clientDebugs(process.env.DEBUG)) c.log.warn("redis.client_debug_log", {});
 		const floor = await c.get(tlsOptions);
 		if (!isFloor(floor)) {
 			return c.refuse(

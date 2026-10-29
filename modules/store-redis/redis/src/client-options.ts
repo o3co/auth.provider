@@ -20,22 +20,21 @@ const insteadOf: Readonly<Record<string, string>> = {
 	commandTimeout: "commandTimeout as redis.command-timeout",
 };
 
-/**
- * Why a URL is refused, if it is: the client takes each name of its query as an option, over the
- * ones given it (TLS among them). The reason names each option and where it is written instead,
- * never a value, which may be a password.
- */
+/** Why a URL with a query, an empty one too, is refused, as the client reads options from it; never a value. */
 export function queryRefusal(url: string): string | undefined {
+	if (!url.split("#")[0]?.includes("?")) return undefined;
+	const lead = "redis.url carries no query: write each option as its own setting";
 	const names = [...new Set(new URL(url).searchParams.keys())];
-	if (names.length === 0) return undefined;
-	const instead = names.map(
-		(name) =>
-			insteadOf[name] ??
-			(/^[A-Za-z][A-Za-z0-9]{0,39}$/.test(name)
-				? `${name} is not taken`
-				: "an option is not taken"),
-	);
-	return `redis.url carries no query: write each option as its own setting: ${instead.join("; ")}`;
+	if (names.length === 0) return `${lead}, and take out the ?`;
+	const instead = [...new Set(names.map((name) => insteadOf[name] ?? "an option is not taken"))];
+	return `${lead}: ${instead.join("; ")}`;
+}
+
+/** Whether `DEBUG` turns on the client's own debug log (`ioredis` or `*`, not taken out with `-`), which writes AUTH's password. */
+export function clientDebugs(debug: string | undefined): boolean {
+	const names = (debug ?? "").split(/[\s,]+/);
+	if (names.some((name) => name === "-*" || name.startsWith("-ioredis"))) return false;
+	return names.some((name) => name === "*" || name.startsWith("ioredis"));
 }
 
 /**
