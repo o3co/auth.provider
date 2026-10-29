@@ -22,7 +22,7 @@
 - Tampering, a malformed value, a part not written in its one form, a short tag and another context all give the same refusal.
 - A failed open never puts the stored content in its answer.
 - A rotation runs the resealers only once every host seals with the new `current`; a host still sealing with an older key writes values a walk misses.
-- Boot is refused without `current`, for a key `keys`' `secretBytes` refuses (not its algorithm's size of strict base64, fewer than 8 byte values, a `REPLACE-` sample), for an algorithm not in the table,, for an id that is not 1–32 of letters, digits, `_` and `-`, and for ids named alike anywhere in the ring.
+- Boot is refused without `current`, for a key `keys`' `secretBytes` refuses (not its algorithm's size of strict base64, fewer than 8 byte values, a `REPLACE-` sample), for an algorithm not in the table, for an id that is not 1–32 of letters, digits, `_` and `-`, and for ids named alike anywhere in the ring.
 - No sample keys, and no plaintext kept.
 
 ## Depends on
