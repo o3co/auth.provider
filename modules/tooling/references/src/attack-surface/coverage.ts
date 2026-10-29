@@ -130,6 +130,11 @@ export const coverage: Coverage = {
 		},
 		{ key: "tokens.revocation", weakens: "`unsupported`: nothing issued can be revoked" },
 		{
+			key: "tokens.access-token-lifetime",
+			weakens:
+				"past the default hour, up to a day: a leaked access token, or one a resource server verifies itself after a revocation, is taken that long",
+		},
+		{
 			key: "mtls.mode",
 			weakens: "`self-signed`: any certificate that parses binds, with no revocation",
 		},
@@ -215,6 +220,10 @@ export const coverage: Coverage = {
 		},
 	],
 	notLoosening: [
+		{
+			key: "sections.sender-binding.required",
+			why: "`true` binds every token issued to the client; its default takes bearer tokens, the client's choice as the security model leaves it",
+		},
 		{
 			key: "http.proxy-hops",
 			why: "how deep forwarding is followed through trusted proxies: part of naming them",

@@ -29,6 +29,7 @@ Every guarantee here rests on what the deployment does. Each section's "Left to 
 - **Its host clocks are synchronized (NTP).** Sessions, codes, tokens, lockouts, key expiry and a subject's revocation are judged on each host's clock, with nothing allowed for skew between hosts: a revocation is compared in whole seconds, so what was made just before it on a host whose clock runs ahead can count as made after it and outlive it ([runbook](runbook.md#before-you-deploy)). Keep them as close as NTP allows; no allowance between hosts is promised.
 - **What it terminates, it protects.** TLS is terminated in front of the app, which speaks plain HTTP behind it.
 - **An outbound proxy checks where names lead.** With `outbound.proxy` set, the proxy resolves names and refuses the addresses `outbound` would refuse ([Outbound requests](#outbound-requests)).
+- **Its egress proxy or platform checks upstream certificates' revocation.** `outbound` checks an upstream's certificate chain and name, never whether it was revoked (no CRL or OCSP); where nothing in front checks it, the operator accepts that risk ([Outbound requests](#outbound-requests)).
 - **Plain-text peers are on a trusted network.** What goes to a `plain-internal` pair, and to Redis where it is reached in the clear, is readable and changeable on the way: such peers sit on a network trusted against both.
 - **Redis keeps what it is checked to keep.** Its persistence stays as it was at boot, the replicas persist too, and a lagging replica is never promoted ([Storage](#storage)).
 - **An upstream's word on its own authentication is trusted as far as it is mapped.** An IdP's `amr` and `auth_time` count as the IdP says, for what `federation.idps.<name>.upstream-amr` maps and the fresh-login allowance lets in ([Upstream identity providers](#upstream-identity-providers)).
@@ -131,6 +132,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **Left to you:**
   - Keeping the configuration files and environment that hold secrets readable only by the app.
   - Setting `kernel.environment = development` only to try the provider on one machine. Production still takes plain http on a loopback host for an upstream identity provider's browser endpoints, and loopback and private-use redirect and logout URIs for clients.
+  - Setting `mail.accept-unsent` only where nothing need be mailed: the logging-only sender sends nothing, so no code or link mailed reaches its user.
 
 ## Secrets and logs
 
@@ -180,6 +182,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **Left to you:**
   - Choosing `tokens.revocation`. With `unsupported`, nothing issued can be revoked, and boot refuses a composition that issues refresh tokens or codes.
   - With `subject-check = none`, a revoked subject's access tokens live until they expire.
+  - Choosing `tokens.access-token-lifetime` (2s to 1d, one hour by default, as 0.18 had). In front of a resource server of high value, 5 to 15 minutes keeps a stolen token's use short; a refresh token renews it.
 - **Claims a grant adds:** a grant may add claims to the access tokens it issues (`AccessGrant.claims`). The signature covers the whole token, so a resource server cannot tell which claims the provider wrote and which a grant added. Reserved names only keep a grant from overwriting what the provider writes and what a specification gives a meaning; they make no added claim trustworthy. An added claim is what the grant composed asserts: composing a grant entrusts it with what its tokens say. Only `tokens` signs an access token (`at+jwt`); `keys.sign` refuses that type, and `keys.verify` too, so every access token is checked by `verifyAccess`. `verifyAccess` refuses as none of its own a token whose `exp` comes before its `iat`, whose `iat` is over 60 seconds ahead of the clock, or with over a day between them.
   - A refreshed or exchanged token carries no added claim, so an added claim cannot carry a restriction that must hold on: a resource server never reads a missing one as no restriction.
 
@@ -204,6 +207,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Keeping the issuer's path when your proxy forwards requests: a proxy that strips it breaks every DPoP proof.
   - Choosing `mtls.revocation.on-unavailable` (`reject` refuses during a revocation outage; `allow` binds with a warning).
   - The self-signed mTLS mode binds any certificate that parses.
+  - Whether a client binds its tokens and how it authenticates are each client's: `sections.sender-binding.required` and the client's `method`. Bearer tokens and `client_secret` stay allowed by default, as a web client with neither DPoP nor mutual TLS is the common one; require binding and an asymmetric method for each client that can hold a key.
 
 ## Rate limits
 
@@ -224,7 +228,11 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **ID-JAGs (`jwt-bearer`, an entry's `profile = "id-jag"`, opt-in, preview):** an ID-JAG is taken by its issuer's profile entry alone; every other way an assertion goes refuses one by its header's type before anything is verified, so none is taken by rules that would not hold its client or scope. Each is presented by the confidential client its `client_id` names, its scope and resources a ceiling beside its issuer's and the client's allowance, checked again before its `jti` is used up, and its `cnf` key proved by DPoP alone, whose proofs the endpoint checks before the grant runs. Its audience is this server's issuer alone. The metadata names the profile, never the issuers taking it.
 - **A JWT bearer grant naming no client (`jwt-bearer`, an entry's `client`, opt-in):** the assertion is the request's only credential, for the one registered client with no credentials its entry names. Its entry boots only with `conditions`, with its subjects bound by a link or a key's thumbprint, or with its keys contributed by a module that answers each signer's own keys alone (`perSigner: true`, as `signer-keys-http` declares): `accept-any-subject` cannot stand in. The entry and its client are bound both ways, so no other client takes its assertions and it takes no other's, and a request naming no client is answered alike for whatever fails before its subject is taken.
 - **An upstream's UserInfo (`idp-oidc`, `read-userinfo`, opt-in):** read once a login's id_token holds, with its access token as a Bearer credential, over https alone whatever `outbound` takes for the IdP. It only completes the profile the id_token leaves out (`email`, `name`, `picture`); it never names the user, who is found by the IdP and the id_token's `sub` alone, and never says how or when they logged in. An answer naming another `sub` refuses the login and none of its values is used.
-- **Left to you:** mapping an upstream value to a local amr in `federation.idps.<name>.upstream-amr` (to `mfa`, say) trusts that IdP's claim for the amr, and for any acr it meets (such as `urn:o3co:acr:mfa`); a login whose amr holds `mfa` passes the local second factor unasked. Map only what you trust the IdP to have checked.
+- **Left to you:**
+  - Mapping an upstream value to a local amr in `federation.idps.<name>.upstream-amr` (to `mfa`, say) trusts that IdP's claim for the amr, and for any acr it meets (such as `urn:o3co:acr:mfa`); a login whose amr holds `mfa` passes the local second factor unasked. Map only what you trust the IdP to have checked.
+  - Setting an OpenID Connect IdP's `accept-missing-iss` only for one that never sends `iss`: its callbacks are then taken without their issuer checked (RFC 9207), and each start warns `idp-oidc.iss_not_required`.
+  - Setting a trusted issuer's `accept-any-subject`, or a public client's `sections.jwt-bearer.accept-unbound`, only where what the entries above say it takes is accepted.
+  - Setting a trusted issuer's `accept-key-set-elsewhere` only for a host you trust as the issuer: its key set is then fetched from that host, over https still.
 
 ## Outbound requests
 
@@ -240,7 +248,9 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so). The proxy's own name is resolved by `outbound`, within the request's deadline.
   - Names resolve in helper processes that take none of the environment but the resolver's own variables, and answer addresses alone (`outbound.resolution = helper`, the default). A helper is started only in the one form guard G26 lets through.
   - What goes to a `plain-internal` pair, passwords, tokens and credentials among it, is in the clear: name only peers on a network trusted against reading and changing it (each boot warns `outbound.plain_internal`).
+  - A `plain-loopback` pair is reached at loopback addresses alone, so what goes to it stays on the host: name only a peer of your own there, such as a sidecar; what it sends on is yours.
   - Name a pair in `outbound.plain-ipv4` only where its IPv4 answers are the ones to reach, as ECS Service Connect's are: the name's IPv6 answers are not used.
+  - An upstream certificate's revocation: `outbound` checks the chain and the name alone. Have the egress proxy or the platform check it, or accept that a revoked certificate is taken.
   - Network egress filtering is still expected.
 
 ## Storage
@@ -252,6 +262,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Keeping a lagging replica from being promoted.
   - The replicas' own persistence.
   - Leaving the server's settings as they were at boot.
+  - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them.
 
 ## Audit
 

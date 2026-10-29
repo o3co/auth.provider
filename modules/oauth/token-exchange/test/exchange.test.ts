@@ -379,6 +379,22 @@ describe("token-exchange", () => {
 		expect(refusal).toEqual(["invalid_request", "may_act does not name the party acting"]);
 	});
 
+	it("decides on the top-level claims and the current actor alone, never on a prior actor, the chain cut by max-actor-depth alone [rfc8693-4.1-a]", async () => {
+		const s = await serve();
+		const actor = {
+			actor_token: (await s.issue({ subject: "carol" })).token,
+			actor_token_type: accessTokenType,
+		};
+		// No allowance names mallory: a prior actor is carried, never judged.
+		for (const prior of ["bob", "mallory"]) {
+			const subject = await s.issue({ actor: { subject: prior } });
+			const issued = await s.issued(
+				await s.exchange("app", { ...subjectOf(subject.token), ...actor }),
+			);
+			expect(issued.grant.actor, prior).toEqual({ subject: "carol", actor: { subject: prior } });
+		}
+	});
+
 	it("refuses a chain longer than the operator's limit", async () => {
 		const s = await serve({ settings: { "max-actor-depth": 2 } });
 		const chained = await s.issue({ actor: { subject: "bob" } });

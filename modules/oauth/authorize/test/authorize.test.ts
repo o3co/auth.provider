@@ -349,7 +349,7 @@ const request = (extra: Record<string, string> = {}) => ({
 });
 
 describe("authorize: trust in the redirect URI", () => {
-	it("answers locally until the client and an exactly registered redirect URI are known [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a] [rfc6749-3.1.2.2-c] [rfc6749-10.1-b] [rfc6749-10.2-b] [rfc6749-10.14-a] [oidc-core-3.1.2.2-b]", async () => {
+	it("answers locally until the client and an exactly registered redirect URI are known, a request without one refused where two are registered [rfc6749-3.1.2.3-a] [rfc6749-4.1.2.1-b] [rfc6749-3.1.2.4-b] [rfc6749-3.1.2.3-b] [rfc6749-3.1.2.3-c] [rfc9700-2.1-a] [rfc9700-4.1.3-a] [rfc6749-3.1.2.2-c] [rfc6749-10.1-b] [rfc6749-10.2-b] [rfc6749-10.14-a] [oidc-core-3.1.2.2-b]", async () => {
 		const { authorize, login } = await serve();
 		const cookie = await login();
 		for (const params of [
