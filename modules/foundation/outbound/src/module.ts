@@ -33,14 +33,8 @@ import {
 } from "./lookups/contract.ts";
 import { plainIpv4Rules, plainIpv4Setting, takesIpv4 } from "./plain-ipv4.ts";
 import { type ResolverPool, resolverPool } from "./resolver-process/contract.ts";
-import {
-	type Lookup,
-	type Resolver,
-	type Route,
-	send,
-	systemLookup,
-	type Trust,
-} from "./transport.ts";
+import type { Tls } from "./tls/tls.ts";
+import { type Lookup, type Resolver, type Route, send, systemLookup } from "./transport.ts";
 
 export const section = policySettings
 	.safeExtend({
@@ -166,7 +160,8 @@ export function outboundOver(
 	settings: z.output<typeof section>,
 	/** The pools to resolve in; a lookup function, as a test gives, runs in this process. */
 	lookupsIn: LookupPools | Lookup,
-	trust: Trust = {},
+	/** The floor every TLS connection holds to, and a test's authorities. */
+	tls: Tls = {},
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
 	/** In this process, the lookups at once; else as the settings and the threadpool give. */
 	lookupsAtOnce?: number,
@@ -203,7 +198,7 @@ export function outboundOver(
 			takesIpv4(settings["plain-ipv4"], admitted) ? 4 : undefined,
 		);
 		return requestPlace(() =>
-			send(admitted, sent, limits, resolving, policy, route, trust, deadlineOf),
+			send(admitted, sent, limits, resolving, policy, route, tls, deadlineOf),
 		);
 	};
 	return {
