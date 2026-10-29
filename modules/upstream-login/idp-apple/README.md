@@ -14,7 +14,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `apple`, answering by `form_post`)
-- IdP settings (under `federation`'s `idps.<name>`): `client-id` (the Services ID), `client-secret`, `team-id`, `key-id`, `private-key` (PKCS8 PEM; all five well-formed text), `secret-lifetime` (1m–15777000s, default `5m`), `scopes` (of `name` and `email`; default `email`), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Apple's own), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional)
+- IdP settings (under `federation`'s `idps.<name>`): `client-id` (the Services ID), `client-secret`, `team-id`, `key-id`, `private-key` (PKCS8 PEM; all five well-formed text), `secret-lifetime` (1m–15777000s, default `5m`), `scopes` (of `name` and `email`; default `email`), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Apple's own), `algorithms` (`external-jwt`'s `algorithmsSetting`, default RS256), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional)
 
 ## Invariants
 - Boot is refused for a callback that is not https or is on a loopback host, as `url-setting`'s `isLoopbackName` judges it (`localhost` and the names under it, 127.0.0.0/8, `[::1]`, 127.0.0.0/8 mapped into IPv6).
@@ -56,4 +56,4 @@
 - Anything else that fails refuses, without the library's or Apple's text.
 
 ## Depends on
-- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`
+- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`, `url-setting`

@@ -1,9 +1,9 @@
 /** The resolver's helper processes in an app's image, run as a deployment constrains it. */
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Container } from "../containers/container.ts";
+import { docker } from "../containers/docker.ts";
 import { pidsCurrent } from "./cgroup.ts";
-import type { Container } from "./containers/container.ts";
-import { docker } from "./containers/docker.ts";
 
 /** The part of `images` a scene drives: booting the image with constraints, a look while ready. */
 interface Booting {
@@ -21,6 +21,13 @@ const processes = async (c: Container) => (await inside(c, "ps", "-o", "pid,args
 const helpers = async (c: Container) =>
 	(await processes(c)).filter((p) => p.includes("helper.mjs"));
 
+/** The foundation's modules the image's outbound is run once more with: outbound, and the TLS floor it takes. */
+export const lookupModules = ["tls-options", "outbound"] as const;
+/** Their configuration beside the kernel's: outbound reaching the app at `pair` alone, in plain http. */
+export const lookupConfig = (pair: string) => ({
+	outbound: { "allow-any-public": true, "plain-loopback": [pair], "plain-ipv4": [pair] },
+});
+
 /** The image's outbound run once more in the container: the status of the app's readiness at `localhost`, for IPv4 where it listens. */
 const lookedUp = async (c: Container, port: string) =>
 	(
@@ -31,9 +38,9 @@ const lookedUp = async (c: Container, port: string) =>
 			"-e",
 			`import { assemble, kernelConfig } from "@o3co/auth-provider-foundation/kernel";
 import { outbound } from "@o3co/auth-provider-foundation/outbound";
-import outboundModule from "@o3co/auth-provider-foundation/outbound/module";
+${lookupModules.map((name, i) => `import m${i} from "@o3co/auth-provider-foundation/${name}/module";`).join("\n")}
 const pair = "localhost:${port}";
-const app = await assemble({ modules: [outboundModule], config: { ...kernelConfig(), outbound: { "allow-any-public": true, "plain-loopback": [pair], "plain-ipv4": [pair] } } });
+const app = await assemble({ modules: [${lookupModules.map((_, i) => `m${i}`).join(", ")}], config: { ...kernelConfig(), ...${JSON.stringify(lookupConfig(`localhost:${port}`))} } });
 const answer = await app.get(outbound).fetch("http://" + pair + "/readyz").then((a) => String(a.status), (e) => "failed: " + (e?.failure ?? e?.name));
 await app.stop();
 process.stdout.write(answer);`,

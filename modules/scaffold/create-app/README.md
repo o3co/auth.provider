@@ -16,9 +16,9 @@
 - The configuration, audit event and route references, and each package's `reference.conf`: `references`.
 
 ## Offers
-- `generate`, and the `create-app` command around it (also `run`, the command on given arguments, answering its exit status, for a package that runs it): packages listed make their app; none makes a pattern's, `--pattern` naming it (default `full`), `--add` naming features to add, `--axis <owner>=<module>` an axis's choice and `--<group>` a group's features, comma-separated (not for full).
+- `generate`, and the `create-app` command around it (also `run`, the command on given arguments, answering its exit status, for a package that runs it): packages listed make their app, `--sink <package>` naming its log sink; none makes a pattern's, `--pattern` naming it (default `full`), `--add` naming features to add, `--axis <owner>=<module>` an axis's choice and `--<group>` a group's features, comma-separated (not for full). `--workspace <root>` names a workspace whose packages it links.
 - A package outside the release is named `npm:<name>` (a package listed, `--add`, an axis's module) and read from `--outside-from <project>`, where the operator had pnpm install it; `--allow-fresh <name>` lets one published within the last day be installed.
-- `--list` names, one a line, what `--add` takes: `combinations`' `addable`.
+- `--list` names, one a line, what `--add` takes: `combinations`' `addable`. `--help` (`-h`) writes the usage.
 - `patterns()`: each pattern's name, use, conformance areas and what conformance adds for its run.
 - A pattern's README opens with its use and carries its card; the full template's names the opt-in features not added; a listed app's names the modules listed.
 

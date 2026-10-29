@@ -42,4 +42,4 @@ Preview: the ID-JAG profile follows draft-ietf-oauth-identity-assertion-authz-gr
 - The package owns the metadata item `authorization_grant_profiles_supported`: `[idJagProfile]` where an entry takes the profile, left out otherwise; it names no issuer (draft §9.4). A profile another grant takes comes into this item's value here, never as a second contribution, which boot refuses.
 
 ## Depends on
-- `client-allowance` (`parseScope`, a ceiling's form), `external-jwt` (`typOf`), `grants` (the client's and binding's types), `jose` (reading a header unverified)
+- `client-allowance` (`parseScope`, a ceiling's form), `external-jwt` (`typOf`), `grants` (the client's and binding's types), `jose` (reading a header unverified), `resource-indicators` (`resourceRefusal`, the form of a `resource`)

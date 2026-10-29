@@ -11,7 +11,7 @@ Internal module of `conformance-code`: what the area's fault scenes share in the
   - a store operation as the Redis adapter sends it, a subject's boundary writes and the one that creates it, and a follower's first write, session-lifecycle adding to its closings.
 
 ## Offers
-- `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `browserOn`, `codeAt`, `tokenAt`, `redeemAt`, `familyAt`, `refreshAt`, `said`, and the scene's `issuer`, `callback` and client `app`.
+- `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `pkce` (a verifier of its own and its challenge), `browserOn`, `codeAt`, `tokenAt`, `redeemAt`, `familyAt`, `refreshAt`, `said`, and the scene's `issuer`, `callback` and client `app`.
 - From `test/wire.ts`: `prefix`, `codeRecord`, `codeKept`, `codeRead`, `codeReadSettled`, `cookieRead`, `codeUse`, `codeNoted`, `rotationFrom`, `familyRead`, `sessionRead`, `added`, `recordAs`, `revocationOf`, `closingOf`, `doneWith`, `Closing`, `isStoreOperation`, `boundaryOf`, `boundaryCreated`, `closingAdded`.
 
 ## Invariants

@@ -15,8 +15,7 @@
 - Registration of legacy set-ups (area → fragments, needs that cannot be provided, declared differences)
 - Registration of driver `legacy` (registered on import)
 - Driver `legacy` runs the build in the legacy directory
-- Preparation script (`prepare-legacy`): clones the baseline into the legacy directory at `legacyCommit`, the commit of `v0.17.0` (the version the legacy directory is named for), or at `LEGACY_COMMIT` (a full sha, for trying another by hand), and builds the standalone build and the packages the composed entry adds
-- `legacyCommit` and `legacyCommitOf` (the commit the script builds)
+- Preparation script (`prepare-legacy`): clones the baseline into the legacy directory at the commit of `v0.17.0` (the version the legacy directory is named for), or at `LEGACY_COMMIT` (a full sha, for trying another by hand), and builds the standalone build and the packages the composed entry adds
 - The preparation script and the composed entry read those packages from one list
 - The legacy directory: `LEGACY_DIR` where set, else `auth-provider/legacy-0.17.0` under `$XDG_CACHE_HOME` (`~/.cache` when that is unset or relative), never the OS temp dir
 
