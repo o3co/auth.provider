@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import {
 	clientSectionsOf,
 	idpTypesOf,
+	type JsonSchema,
 	referenceFile,
 	referenceOf,
 	rowsOf,
@@ -83,7 +84,7 @@ it("requires a key inside an optional object only once the object is set, and ho
 });
 
 it("holds a key nested in an optional object to the nearest optional object, a list of objects kept as one row", () => {
-	const object = (properties: Record<string, unknown>, required: string[] = []) => ({
+	const object = (properties: Record<string, JsonSchema>, required: string[] = []): JsonSchema => ({
 		type: "object",
 		required,
 		properties,
