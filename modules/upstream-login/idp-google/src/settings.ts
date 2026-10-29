@@ -1,3 +1,4 @@
+import { algorithmsSetting, knownAlgorithms } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
 import {
 	browsedRefusalText,
@@ -28,6 +29,9 @@ const section = clientSetting.extend({
 	"jwks-uri": endpoint
 		.prefault("https://www.googleapis.com/oauth2/v3/certs")
 		.describe("Where the keys that sign Google's id_tokens are read; Google's own unless named."),
+	algorithms: algorithmsSetting(knownAlgorithms, ["RS256"]).describe(
+		"The algorithms Google's id_tokens may be signed with: asymmetric ones only, RS256 by default, the one Google signs with.",
+	),
 	"clock-skew": setting
 		.duration("s")
 		.pipe(z.number().int().min(0).max(300))
