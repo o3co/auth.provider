@@ -11,7 +11,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { amrSources } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import { sessionStandIn } from "@mod/session/testing";
@@ -123,6 +123,41 @@ it("lists the operator's acr in written order, then the offered ones, and nothin
 	expect(await listed()).toEqual(["urn:t:zz", "urn:t:aa", "urn:t:both", "urn:t:offered"]);
 	await stop();
 	expect(await (await serve({}, [])).listed()).toBeUndefined();
+});
+
+it("puts names that read as integers first, ascending, and warns at start where the table holds one beside another", async () => {
+	const warned = async (values: Record<string, string[][]>) => {
+		const logged = recordingLog();
+		const app = await assemble({
+			...assembly(values, [proving(["pwd", "otp"])]),
+			runtime: quietRuntime({ log: logged.log }),
+		});
+		await app.start();
+		stop = () => app.stop(1000);
+		const order = app.get(published).find((item) => item.name === "acr_values_supported")?.value;
+		const lines = logged.lines().filter((l) => l.event === "acr.values_order");
+		await stop();
+		return { order, current: app.get(acr).current(["pwd", "otp"]), lines };
+	};
+	// Written "urn:t:x", "2", "1", "0", as a configuration file holds them; an object reads the integers first.
+	const mixed = await warned({
+		"urn:t:x": [["pwd"]],
+		"2": [["pwd", "otp"]],
+		"1": [["pwd"]],
+		"0": [["pwd"]],
+	});
+	expect(mixed.order).toEqual(["0", "1", "2", "urn:t:x"]);
+	expect(mixed.current).toBe("0");
+	expect(mixed.lines).toEqual([
+		{ level: "warn", event: "acr.values_order", fields: { names: "0, 1, 2" } },
+	]);
+	// Names that do not read as integers keep the written order, and warn of nothing.
+	const named = await warned({ "loa-2": [["pwd", "otp"]], "loa-1": [["pwd"]], "01": [["pwd"]] });
+	expect(named.order).toEqual(["loa-2", "loa-1", "01"]);
+	expect(named.current).toBe("loa-2");
+	expect(named.lines).toEqual([]);
+	// One entry alone has no order to lose.
+	expect((await warned({ "1": [["pwd"]] })).lines).toEqual([]);
 });
 
 it("refuses to start with an acr no declared way of logging in can meet: a configured one at its key, an offered one by its name", async () => {

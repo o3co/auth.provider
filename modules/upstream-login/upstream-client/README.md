@@ -8,7 +8,7 @@
 - What a type asks of its upstream beyond these, and which of these rules it takes (the type). Making a start's state, nonce and challenge, and the login's round trip (`federation`). Checking a JWT's signature and times (`external-jwt`).
 
 ## Offers
-- `credentialSetting`: a credential that is not blank. `clientSetting`: `client-id` and `client-secret`, which a type extends with its own settings. `endpointSetting`: an http or https URL, by `http`'s part for configured URLs. `scopeSetting`: one scope, in RFC 6749's characters.
+- `credentialSetting`: a credential that is not blank. `clientSetting`: `client-id` and `client-secret`, which a type extends with its own settings. `endpointSetting`: an http or https URL, by `url-setting`'s `urlSetting`. `scopeSetting`: one scope, in RFC 6749's characters.
 - `authorizationUrl` (the endpoint, the start, the client ID and scopes, the type's own parameters) → the URL.
 - `basicAuthorization` (client ID, secret) → the HTTP Basic header value, each part form-urlencoded (RFC 6749 §2.3.1).
 - `answerOf` (an answer as `outbound` reads JSON, a schema) → what the schema reads. `tokenAnswerOf` (an answer, the scope asked) → the upstream tokens, and the id_token apart.

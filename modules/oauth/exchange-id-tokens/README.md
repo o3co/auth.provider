@@ -11,10 +11,11 @@
 ## Offers
 - Composition definition (a verifier for `token-exchange.verifiers`, the Space `exchange-id-tokens.used`, and to `users.upstream-names` each kind's upstream name with its issuer).
 - Contract `idTokenChecks` (`.`): each written kind's `iss` values; `check`, the id_token `taken` (the account, the kind's issuer, `iat` and `exp`, the one client, a `holderDigest`) or invalid; `consume`, `consumed` once, then `replayed`. The exchange's verifier is these checks.
+- Store interface `usedIdTokens` (`.`), wired by the assembly with `usedIdTokensNeeds` (no eviction, a crash and a failover survived): `save` a name under its kind for a lifetime, answering `created` or `exists`.
 - Operator section, times written with their unit:
   - `max-age` (`1m` to `1h`, default `10m`): the oldest an id_token may be, from its `iat`. `clock-skew` (`0s` to `5m`, default `30s`).
   - `apple` and `google`, each optional, at least one: `upstream` (default the kind's name), the name users links the upstream subject under; `clients`, this provider's client IDs, each with `audiences` (one or more) and `authorized-parties` (default none); `algorithms` (`external-jwt`'s `algorithmsSetting`, default RS256).
-- `./testing`: `exchangeIdTokensOver(issuers)`, the module over issuers whose keys a test holds; the composed module is over the fixed issuers alone.
+- `./testing`: `exchangeIdTokensOver(issuers)`, the module over issuers whose keys a test holds, and `fixedIssuers`, the ones the composed module is over alone; the store interface's contract test for every implementation (`usedIdTokensContract`: each name taken once while held, through faults).
 
 ## Data
 - Space `exchange-id-tokens.used` (no-eviction, durable, replicated), contributed whenever the module is composed: each id_token taken, by kind, under the SHA-256 of its header and payload, kept until the latest any section could take it: `exp` or `iat` plus the longest `max-age` (1h), whichever is first, plus the longest `clock-skew` (5m) and a minute. So a section's own values, widened or differing between instances, never let one back.
