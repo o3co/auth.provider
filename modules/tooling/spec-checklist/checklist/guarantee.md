@@ -22,7 +22,7 @@
 
 ## 1 Closing a session closes every path for the tokens issued from it.
 
-- **guarantee-1-a** MUST: a session left closing, with participants not yet done, is closed by its logout or a later sweep, and once closed no path is left open for the tokens issued from it, but for the cap's push-out a store outage keeps from closing, declared in design.md's Decisions: no participants, no back-channel notice; a logout that cannot finish answers `503`, never logged out.
+- **guarantee-1-a** MUST: a session left closing, with participants not yet done, is closed by its logout or a later sweep, and once closed no path is left open for the tokens issued from it, but for a session the cap pushed out and a store outage kept from closing (design.md's Decisions): no participants, no back-channel notice; a logout that cannot finish answers `503`, never logged out.
   faults: Lr, Lx, F, Fs, C, K, H2
 
 ## 2 `prompt=login` and `max_age` are met only by a fresh authentication.
