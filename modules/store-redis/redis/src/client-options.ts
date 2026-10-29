@@ -30,11 +30,15 @@ export function queryRefusal(url: string): string | undefined {
 	return `${lead}: ${instead.join("; ")}`;
 }
 
-/** Whether `DEBUG` turns on the client's own debug log (`ioredis` or `*`, not taken out with `-`), which writes AUTH's password. */
+/** Whether `DEBUG` turns on the client's `ioredis:redis` log, which writes AUTH's password, read as the `debug` library reads it. */
 export function clientDebugs(debug: string | undefined): boolean {
-	const names = (debug ?? "").split(/[\s,]+/);
-	if (names.some((name) => name === "-*" || name.startsWith("-ioredis"))) return false;
-	return names.some((name) => name === "*" || name.startsWith("ioredis"));
+	const names = (debug ?? "").split(/[\s,]+/).filter((name) => name !== "");
+	const matches = (pattern: string) =>
+		new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*?")}$`).test(
+			"ioredis:redis",
+		);
+	if (names.some((name) => name.startsWith("-") && matches(name.slice(1)))) return false;
+	return names.some((name) => !name.startsWith("-") && matches(name));
 }
 
 /**

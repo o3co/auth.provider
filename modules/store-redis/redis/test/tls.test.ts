@@ -110,9 +110,29 @@ it("refuses boot on a floor that is not tls-options' own, however alike, before 
 	]);
 });
 
-it("finds the client's own debug log turned on by DEBUG naming ioredis or every namespace, and off when taken out", () => {
-	const on = ["ioredis:*", "ioredis:redis", "*", "express:*,ioredis:*", "app:* ioredis:connection"];
-	const off = [undefined, "", "express:*", "-ioredis:*", "*,-ioredis:*", "*,-*"];
+it("finds the client's ioredis:redis log turned on by DEBUG as the debug library reads it, and off where taken out or not named", () => {
+	const on = [
+		"ioredis:*",
+		"ioredis:redis",
+		"*",
+		"express:*,ioredis:*",
+		"ioredis:*,-ioredis:connection",
+		"*,-ioredis:connection",
+		"*redis*",
+		"io*",
+		"*:redis",
+	];
+	const off = [
+		undefined,
+		"",
+		"express:*",
+		"-ioredis:*",
+		"*,-ioredis:*",
+		"*,-*",
+		"ioredis:connection",
+		"*,-ioredis:redis",
+		"ioredis.redis",
+	];
 	expect(on.filter((debug) => !clientDebugs(debug))).toEqual([]);
 	expect(off.filter((debug) => clientDebugs(debug))).toEqual([]);
 });
