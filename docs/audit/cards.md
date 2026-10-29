@@ -164,6 +164,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/rp-logout` (feature, `modules/oauth/rp-logout`): Ends a session at a client's request and tells the session's clients that it closed: the logout route (`ending`), a person's confirmation where no hint names the browser's session (`confirm`), the close both share (`closing`), the pages it ends on (`page`) and back-channel notices (`notices`).
   - `closing` (`src/closing`): the close a logout asks, the same whichever route asked it.
   - `confirm` (`src/confirm`): the confirmation of a logout `ending` could not close without asking (OpenID Connect RP-Initiated Logout 1.0 §2), and the request `ending` carries in the browser's URL.
+  - `carried` (`src/confirm/carried`): the request `ending` carries on in the browser's URL, a logout it checked that closes nothing by itself.
   - `ending` (`src/ending`): the logout a client starts (OpenID Connect RP-Initiated Logout 1.0).
   - `notices` (`src/notices`): back-channel notices that a session closed.
   - `page` (`src/page`): the front-channel page.
