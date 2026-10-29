@@ -1,6 +1,7 @@
 import { contract } from "@mod/kernel";
-import type { VerifyAlgorithm } from "@mod/keys";
+import { type VerifyAlgorithm, verifyAlgorithms } from "@mod/keys";
 import type { Narrower } from "@mod/outbound";
+import { z } from "zod";
 
 export type Jwk = Readonly<Record<string, unknown>>;
 
@@ -87,6 +88,23 @@ export interface ExternalJwt {
 }
 
 export const externalJwt = contract<ExternalJwt>("external-jwt");
+
+/** The asymmetric algorithms a verifier knows, as `algorithms` answers them, for a section declared before any verifier is had. */
+export const knownAlgorithms: readonly Algorithm[] = verifyAlgorithms;
+
+/**
+ * The setting a caller's section names the algorithms it takes by: a list, not empty, of the
+ * asymmetric ones given (never none nor a shared secret), `byDefault` where unwritten. A default
+ * outside them is refused as one the operator wrote is. The caller describes it in its own words.
+ */
+export const algorithmsSetting = (
+	asymmetric: readonly Algorithm[],
+	byDefault: readonly Algorithm[],
+) =>
+	z
+		.array(z.enum(asymmetric as [Algorithm, ...Algorithm[]]))
+		.min(1)
+		.prefault([...byDefault]);
 
 /**
  * A header's `typ` as RFC 7515 compares it, as a media type: its type alone, its parameters and the
