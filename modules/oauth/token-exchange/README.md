@@ -9,13 +9,13 @@
 - Verifying other token types (the contributing side). What a token is tied to, kept by its owners (`grants`' token ties: `refresh`'s family, `session-tokens`' session). Revocation (`tokens`). Whether a binding carries over (`sender-binding`). Client authentication (`token-endpoint`). The client's allowance (`client-allowance`).
 
 ## Offers
-- Composition definition. The grant, and the verifier of the type `urn:ietf:params:oauth:token-type:access_token` (through `tokens`).
-- Extension point `token-exchange.verifiers`, one verifier per token type; a second for one type refuses the boot.
+- Composition definition, refusing boot where `tokens` checks no subject (`subjectsChecked`). The grant, and the verifier of the type `urn:ietf:params:oauth:token-type:access_token` (through `tokens`).
+- Extension point `token-exchange.verifiers`, one verifier per token type; a second for a type refuses boot.
   - A verifier answers invalid, or a token by its `kind`, with its subject, issuer and expiry: `own`, naming the client by issued-to or audience, with its scope, audience, binding, actor chain and `may_act`; or `foreign`, another issuer's for an app, with `clients` (at least one) and `holderDigest`, `BASE64URL(SHA-256(jkt))` of the key a public client must hold. It throws unavailable when it cannot tell.
   - `issued` names a token this provider issued, so its ties are asked. Only the built-in verifier's `issued`, amr, authentication time and acr are read.
   - `consume(token)`, optional: records a once-only token, answering `consumed` or `replayed`.
 - Client metadata section `token-exchange`: `others-tokens` (default false), whether the client may present tokens that do not name it; `public-exchange` (default false), whether a public client may exchange.
-- Operator section: `max-actor-depth` (1–10, default 3); `max-lifetime` (2s–1d, optional, written with its unit; from two seconds, the shortest lifetime `tokens` issues), the longest lifetime an exchange may ask for, even past `tokens`' lifetime.
+- Operator section: `max-actor-depth` (1–10, default 3); `max-lifetime` (2s–1d, optional, written with its unit), the longest lifetime an exchange may ask for, even past `tokens`' lifetime.
 
 ## Invariants
 - Only a client explicitly allowed the grant: a confidential one, or a public one with `public-exchange`. Any other public client is `401 invalid_client`.
