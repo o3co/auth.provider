@@ -275,7 +275,9 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - At stop, deliveries under way are awaited until `kernel.stop-deadline`.
   - The `log` receiver writes attribute names, never their values.
 - **Not guaranteed:** delivery. Audit is best effort (tier 1): a request is answered without waiting for its events to be delivered, and an event is lost past a receiver's `max-pending`, when its receiver fails, or when still under way at the stop deadline. `audit-http` never sends an event again.
-- **Left to you:** a collector that keeps up, and watching the lost-event count.
+- **Left to you:**
+  - A collector that keeps up, and watching the lost-event count.
+  - Setting `audit.receivers = none` only where no record of what happened is needed: events then go nowhere, and every boot warns so.
 
 ## Keys
 
