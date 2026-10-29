@@ -201,10 +201,12 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 		const script = (id: string) => due.steps.find((s) => s.id === id)?.run ?? "";
 		const dir = mkdtempSync(join(tmpdir(), "ci-oidf-"));
 		try {
-			// git answers the files a test names; pnpm, every plan the checklist has.
+			// git answers the files a test names, read from a file: an environment string is capped at
+			// 128 KiB on Linux, below what a large pull request names. pnpm answers every plan the checklist has.
+			const changedFile = join(dir, "changed");
 			writeFileSync(
 				join(dir, "git"),
-				'#!/bin/sh\ncase "$1" in diff) printf "%s\\n" $CHANGED ;; *) echo head ;; esac\n',
+				'#!/bin/sh\ncase "$1" in diff) tr " " "\\n" < "$CHANGED_FILE" ;; *) echo head ;; esac\n',
 				{ mode: 0o755 },
 			);
 			writeFileSync(
@@ -215,16 +217,18 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 			const outputs = (changed: string, more: Record<string, string> = {}) => {
 				const out = join(dir, "out");
 				writeFileSync(out, "");
+				writeFileSync(changedFile, changed);
 				const env = {
 					...process.env,
 					PATH: `${dir}:${process.env.PATH}`,
 					GITHUB_OUTPUT: out,
 					EVENT: "pull_request",
 					BASE: "develop",
-					CHANGED: changed,
+					CHANGED_FILE: changedFile,
 					...more,
 				};
 				const ran = spawnSync("bash", ["-c", script("due")], { env, encoding: "utf8" });
+				expect(ran.error).toBeUndefined();
 				expect(ran.status, ran.stderr).toBe(0);
 				const read = () =>
 					Object.fromEntries(
@@ -238,6 +242,7 @@ describe("CI's jobs, as spec-checklist's runs plan them", () => {
 					env: { ...env, SCOPE: scope },
 					encoding: "utf8",
 				});
+				expect(planned.error).toBeUndefined();
 				expect(planned.status, planned.stderr).toBe(0);
 				const all = read();
 				return { oidf: all.oidf, scope: all["oidf-scope"], plans: all["oidf-plans"] };
