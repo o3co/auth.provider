@@ -17,7 +17,8 @@
 - `session-participants`' participant `notices`: answers once each notice is kept, then tries each once.
 - `issuer`'s metadata items: `end_session_endpoint` (on the origin `issuer` names its endpoints on, `endpointOrigin`: the public origin wherever one is written), and `frontchannel_logout_supported`, `frontchannel_logout_session_supported`, `backchannel_logout_supported` and `backchannel_logout_session_supported` (true).
 - Audit events with the subject and `sid`, and `source` and `userAgent` when known: `logout.success`, `logout.cascade_failed` (with `store` `session`, the module whose close failed); `logout.close_pending` with `sid` and `source` only, declared exactly as `logout` declares it. All declared in `./audit-events`.
-- Operator section: `remember-for` (1m–30d, default `1d`), `notify-within` (1m–7d, default `1d`), `sweep-interval` (1s–1h, default `1m`), `confirm-within` (1m–15m, default `5m`: how long a carried request and a confirmation may be answered), `requests` (logout requests per source in each `window`, a GET and a POST together, before any hint is checked; 1–100000, default 60) and `window` (1s–1d, default `1m`); times are written with their unit, a bare number refused.
+- Operator section: `remember-for` (1m–30d, default `1d`), `notify-within` (1m–7d, default `1d`), `sweep-interval` (1s–1h, default `1m`), `confirm-within` (1m–15m, default `5m`: how long a carried request and a confirmation may be answered); times are written with their unit, a bare number refused.
+- Operator section, besides: `requests` (logout requests per source in each `window`, a GET and a POST together, before any hint is checked; 1–100000, default 60), `window` (1s–1d, default `1m`), and `error-page` (optional: the deployment's page a browser's refused logout goes to).
 - Store interfaces, which the assembly wires, each needing no eviction, a crash and a failover survived: the clients of each session (a keyed set with lifetimes, answering those pushed out); the notices not yet delivered (add, done, go through; one whose handling fails stays).
 - `./testing`: a configuration builder, and the contract tests of both store interfaces.
 
@@ -32,10 +33,7 @@
 - A client the store pushes out of a session's set is logged.
 - Returns and channel URLs are as `registration` judges them; a registered client's back channel that `outbound`'s policy refuses refuses boot.
 - A record whose section does not fit is refused whole (`clients`).
-- Each frame's URL gets `iss`, and `sid` when its client asked for the session (OpenID Connect Front-Channel Logout 1.0 §2).
-- A frame whose origin a Content-Security-Policy host source cannot name is left out, logged.
-- It declares it loads only the frames' origins and its one script.
-- Without a place to go next, the page has no script and stays.
+- The front-channel page's frames, what it declares it loads, and its script: `page`'s card.
 - A notice names the client, the session's handle and subject, the time it is given up (`notify-within` on `kernel`'s clock), its logout token's `jti` and, once a try failed, the time before which it is not tried again; past that time, it is dropped and logged. Fields it does not know are left unread; one that does not read is dropped and logged.
 - The logout token is signed by `keys` under `logout+jwt`, so with the algorithm of the client's ID tokens, which `oidc` holds to the one `keys` signs with (OpenID Connect Back-Channel Logout 1.0 §2.6); with `iss`, `sub`, `aud` (the client), `iat`, `exp` 300 seconds on, the notice's `jti` (the same on every try, so a client can tell a repeat), the back-channel logout event, and `sid` unless the client said no (OpenID Connect Back-Channel Logout 1.0 §2.4).
 - It is posted as a form through `outbound`, which follows no redirect. A 2xx settles it; 408, 429, 5xx or a failure to reach the client keeps it; a destination `outbound` refuses or any other status settles it, logged.

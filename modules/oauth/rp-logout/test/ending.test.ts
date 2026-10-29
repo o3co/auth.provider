@@ -436,7 +436,7 @@ describe("the logout a client starts", () => {
 		expect([...paged.events, ...plain.events]).toEqual([]);
 	});
 
-	it("answers 503 where the client a return is judged by cannot be read, and closes nothing", async () => {
+	it("answers 503 where the client a return is judged by cannot be read, and closes nothing, as JSON to a browser even beside an error page", async () => {
 		const down = unavailableSwitch<Clients>("clients");
 		const h = await serve({ clientRecordsDown: down });
 		const { session } = await h.login();
@@ -450,6 +450,20 @@ describe("the logout a client starts", () => {
 			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "clients" } },
 		]);
 		expect(await h.stillOpen(session.id)).toBe(true);
+		// An outage is no refusal: the error page is the deployment's for refusals alone.
+		const pagedDown = unavailableSwitch<Clients>("clients");
+		const paged = await serve({
+			clientRecordsDown: pagedDown,
+			settings: { "error-page": "https://pages.example/logout-error" },
+		});
+		const signedIn = await paged.login();
+		pagedDown.failNext("find");
+		const browser = await paged.call(
+			"GET",
+			{ id_token_hint: await paged.hintFor(signedIn.session.id), post_logout_redirect_uri: back },
+			{ accept: "text/html" },
+		);
+		expect([browser.status, browser.json]).toEqual([503, { error: "temporarily_unavailable" }]);
 	});
 
 	it("answers a close left pending 503, clearing the cookie and recording it by its sid and source alone, never as a logout", async () => {
