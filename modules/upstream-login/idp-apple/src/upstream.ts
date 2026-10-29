@@ -63,7 +63,7 @@ export function opened(
 			issuer,
 			client,
 			jwks: { url: s["jwks-uri"], hosts: [hostOf(s["jwks-uri"])] },
-			algorithms: ["RS256"],
+			algorithms: s.algorithms,
 			skewMs,
 			// Apple has sent `email_verified` both as a boolean and as text.
 			emailVerified: [true, "true"],

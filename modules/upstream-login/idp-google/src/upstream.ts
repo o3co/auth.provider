@@ -33,7 +33,7 @@ export function opened(
 			issuer,
 			client,
 			jwks: { url: s["jwks-uri"], hosts: [hostOf(s["jwks-uri"])] },
-			algorithms: ["RS256"],
+			algorithms: s.algorithms,
 			skewMs,
 			// Google names as azp another client of the same project that asked for the login.
 			crossClient: true,

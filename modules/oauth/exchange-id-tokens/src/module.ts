@@ -54,7 +54,7 @@ export const exchangeIdTokensOver = (issuers: Issuers) =>
 							kind,
 							upstream: settings.upstream,
 							iss,
-							jwt: jwt.verifierOf(keys, { algorithms: ["RS256"], skewMs }),
+							jwt: jwt.verifierOf(keys, { algorithms: settings.algorithms, skewMs }),
 							clients: Object.entries(settings.clients),
 						},
 					];
