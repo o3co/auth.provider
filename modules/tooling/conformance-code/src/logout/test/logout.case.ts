@@ -162,16 +162,16 @@ async function logout(
 	return { status: res.status, headers: res.headers, text, json };
 }
 /**
- * Whether the browser's session still gives a code: a code is yes, being sent away to log in is no,
- * and any other answer (a limit, an outage, an error at the client) fails the scene rather than read
- * as signed out.
+ * Whether the browser's session still gives a code: a code is yes, a `302` to the login page, the
+ * answer both builds give a browser without a session, is no, and any other answer (a limit, an
+ * outage, an error at the client) fails the scene rather than read as signed out.
  */
 const stillSignedIn = async (at: SignedIn) => {
 	const res = await at.browser.authorize(codeRequest("app"));
 	if (res.at?.searchParams.get("code") != null) return true;
-	const away =
-		res.at !== undefined && `${res.at.origin}${res.at.pathname}` !== "https://app.example/cb";
-	if ([302, 303].includes(res.status) && away) return false;
+	const toLogIn =
+		res.at !== undefined && `${res.at.origin}${res.at.pathname}` === `${issuer}/login`;
+	if (res.status === 302 && toLogIn) return false;
 	throw new Error(`authorize answered ${res.status}, ${res.at?.href ?? "no redirect"}`);
 };
 
