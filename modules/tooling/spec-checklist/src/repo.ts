@@ -10,6 +10,7 @@ import {
 	parseDecisions,
 	parseItems,
 	parseLedger,
+	parseNotes,
 	type Spec,
 } from "./checklist.ts";
 import { type Expected, type Run, runsPrinted } from "./evidence/runs.ts";
@@ -33,7 +34,9 @@ export function readChecklist(dir = checklistDir, model = securityModel): Checkl
 	const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
 	const parsing: Finding[] = [];
 	const specs: Spec[] = [];
-	for (const f of files.filter((f) => !f.endsWith(".ledger.md") && f !== "decisions.md").sort()) {
+	// The files that are no spec: what several specs share, and the directory's own guide to the forms.
+	const shared = ["decisions.md", "notes.md", "README.md"];
+	for (const f of files.filter((f) => !f.endsWith(".ledger.md") && !shared.includes(f)).sort()) {
 		const spec = f.slice(0, -".md".length);
 		const items = parseItems(spec, readFileSync(join(dir, f), "utf8"));
 		const ledgerFile = `${spec}.ledger.md`;
@@ -64,7 +67,15 @@ export function readChecklist(dir = checklistDir, model = securityModel): Checkl
 	const decisions = files.includes("decisions.md")
 		? parseDecisions(readFileSync(join(dir, "decisions.md"), "utf8"))
 		: { decisions: new Map(), findings: [] };
-	return { specs, decisions: decisions.decisions, parsing: [...parsing, ...decisions.findings] };
+	const notes = files.includes("notes.md")
+		? parseNotes(readFileSync(join(dir, "notes.md"), "utf8"))
+		: { notes: new Map(), findings: [] };
+	return {
+		specs,
+		decisions: decisions.decisions,
+		notes: notes.notes,
+		parsing: [...parsing, ...decisions.findings, ...notes.findings],
+	};
 }
 
 /** Every test in the workspace that names an item, by item, and each ID written where no test's title is. */

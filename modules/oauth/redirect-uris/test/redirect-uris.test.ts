@@ -73,6 +73,25 @@ it("registers https, http to localhost or loopback literals, and reverse-domain 
 	expect(matches("http://localhost:8080/cb", "http://localhost:9999/cb")).toBe(false);
 });
 
+it("compares a redirect URI with a registered one as an exact string, but for the port of a loopback IP literal, as RFC 9700 §2.1 updates the exact match [oidc-core-3.1.2.1-f] [rfc9700-2.1-a] [rfc9700-4.1.3-a]", () => {
+	const registered = "https://app.example/cb";
+	expect(matches(registered, registered)).toBe(true);
+	for (const sent of [
+		"https://app.example/cb/",
+		"https://APP.example/cb",
+		"https://app.example/cb?x=1",
+		"https://app.example:443/cb",
+		"https://app.example/Cb",
+	]) {
+		expect(matches(registered, sent), sent).toBe(false);
+	}
+	// A native app's loopback IP literal takes any port, and nothing else is let go.
+	expect(matches("http://127.0.0.1/cb", "http://127.0.0.1:51004/cb")).toBe(true);
+	expect(matches("http://[::1]:9000/cb", "http://[::1]:7111/cb")).toBe(true);
+	expect(matches("http://127.0.0.1/cb", "http://127.0.0.1:51004/cb/")).toBe(false);
+	expect(matches("http://localhost:8080/cb", "http://localhost:9999/cb")).toBe(false);
+});
+
 it("refuses to register redirect URIs with a fragment, userinfo, control characters or answer names [rfc6749-3.1.2-a] [rfc6749-3.1.2-c]", () => {
 	expect(registrable("https://app.example/cb?x=1")).toBe(true);
 	for (const bad of [

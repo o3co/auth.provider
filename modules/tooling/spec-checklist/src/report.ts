@@ -1,4 +1,4 @@
-import { type Item, roles, type Spec } from "./checklist.ts";
+import { type Item, type Note, roles, type Spec } from "./checklist.ts";
 import { classOf } from "./ids.ts";
 
 /** A test that names an item: its package, its file in the package, and its title. */
@@ -103,6 +103,7 @@ export function reportFiles(
 	specs: readonly Spec[],
 	tests: ReadonlyMap<string, readonly TestRef[]>,
 	updatedBy: ReadonlyMap<string, readonly string[]>,
+	notes: ReadonlyMap<string, Note> = new Map(),
 ): Map<string, string> {
 	const files = new Map<string, string>();
 	files.set(
@@ -114,14 +115,26 @@ export function reportFiles(
 			"",
 			"Each specification has a page here, `<spec>.md`, with a row for each of its items.",
 			"",
-			"A status here is read from the checklist and the tests alone: `mapped` (a test names the item), `hole` (no test does), `noncompliant` (a MUST known not met), `deviates` (a SHOULD not followed, by a decision), `out-of-scope` (a feature not offered). Whether a mapped item's tests ran and passed is told by each CI run's compliance report.",
+			"A status here is read from the checklist and the tests alone: `mapped` (a test names the item), `hole` (no test does), `noncompliant` (a MUST known not met), `deviates` (a SHOULD not followed, by a decision), `out-of-scope` (a feature not offered, or what the deployment provides, as its reason says). Whether a mapped item's tests ran and passed is told by each CI run's compliance report. An item that asks the server for a document (its scope requirements, the size of its codes and tokens) is met by the cards and the guides, which no test can name, so it counts as a hole.",
 			"",
 			"An item's role is the role of the server's it binds: `as` the authorization server, `op` the OpenID Provider, `rs` the resource server at its own protected routes, `rp` the relying party to an upstream IdP, `client` the client sending tokens or assertions out.",
 			"",
-			"The checklist binds a production deployment (`kernel.environment = production`, the default). What only a development deployment allows, such as a plain-http public origin by `http.insecure-origin`, is outside it: a production deployment refuses a plain-http origin or issuer at boot, as the security model's Boot section (`docs/security-model.md`) tells.",
+			"The checklist binds a production deployment (`kernel.environment = production`, the default). What only a development deployment allows, such as a plain-http public origin by `http.insecure-origin`, is outside it: a production deployment refuses a plain-http origin or issuer at boot, as the security model's Boot section (`docs/security-model.md`) tells. What an operator loosens explicitly, an `accept-*` setting or a `plain-*` pair, is the deployment's declared exception: an item keeps the status its tests give the default, and the security model's \"Left to you\" names the setting.",
 			"",
 			"The summary over every specification, by specification and by role, is not kept here: `pnpm --filter @mod/spec-checklist run summary` prints it from the checklist as it stands.",
 			"",
+			...(notes.size > 0
+				? [
+						"## Notes",
+						"",
+						"Notes several items point to, from their Note cell:",
+						"",
+						...[...notes.values()].map(
+							(n) => `- <a id="${n.id.toLowerCase()}"></a>**${n.id}**: ${n.text}`,
+						),
+						"",
+					]
+				: []),
 		].join("\n"),
 	);
 	for (const s of specs) {
@@ -137,6 +150,7 @@ export function reportFiles(
 									: mark.issue,
 						]
 					: []),
+				...(i.note !== undefined ? [`[${i.note}](README.md#${i.note.toLowerCase()})`] : []),
 				...(i.updates.length > 0 ? [`updates ${i.updates.join(", ")}`] : []),
 				...(i.faults ? [`faults: ${i.faults.join(", ")}`] : []),
 				...(i.faults && unmarkedFaults(i, tests.get(i.id) ?? []).length > 0

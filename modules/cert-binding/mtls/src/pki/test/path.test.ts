@@ -29,7 +29,7 @@ describe("path validation", () => {
 		).toBe("path of 3");
 	});
 
-	it("refuses a path it cannot build to a trusted anchor, or one whose signatures or times do not hold", async () => {
+	it("refuses a path it cannot build to a trusted anchor, or one whose signatures or times do not hold, as pkijs's chain validation engine judges them [rfc8705-7.5-a]", async () => {
 		const { root, intermediate, client } = await hierarchy();
 		expect(await reasonOf(client.der, [], policyOf([root.der]))).toBe("path");
 		// A root the client sends counts for nothing.

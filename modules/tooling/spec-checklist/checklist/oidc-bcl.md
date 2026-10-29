@@ -10,6 +10,7 @@
 - **oidc-bcl-2.2-b** MUST: the OP keeps the query of a `backchannel_logout_uri` when it adds parameters to it.
 - **oidc-bcl-2.2-c** MUST NOT: the OP takes a client's `backchannel_logout_uri` that has a fragment.
 - **oidc-bcl-2.2-d** SHOULD: the OP takes as a client's `backchannel_logout_uri` only an `https` URL, or an `http` one for a confidential client where the OP allows `http`.
+  deviates: D-7
 - **oidc-bcl-2.2-e** SHOULD: where o3co's RP registers a `backchannel_logout_uri` at an upstream by dynamic registration, it also registers `backchannel_logout_session_required`.
   role: rp
   out-of-scope: o3co's RP takes no logout token: no upstream-login module offers a back-channel logout URI, and o3co registers nothing at an upstream (upstream-client's settings).
@@ -46,6 +47,7 @@
 
 - **oidc-bcl-2.6-a** MUST NOT: a logout token is signed with `alg` `none`.
 - **oidc-bcl-2.6-b** SHOULD: where neither `id_token_signing_alg_values_supported` nor the client's `id_token_signed_response_alg` is used, a logout token is signed with `RS256`.
+  out-of-scope: a logout token is signed with the key ID tokens are, under the algorithm the metadata names.
 - **oidc-bcl-2.6-c** MUST: o3co's RP validates a logout token it receives by this section's steps.
   role: rp
   out-of-scope: o3co's RP takes no logout token: no upstream-login module offers a back-channel logout URI, and o3co registers nothing at an upstream (upstream-client's settings).
