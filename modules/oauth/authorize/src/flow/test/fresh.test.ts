@@ -3,6 +3,7 @@ import { issuancePolicies } from "@mod/tokens";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	advance,
+	callback,
 	eventsDeclared,
 	issuer,
 	request,
@@ -61,16 +62,18 @@ describe("the flow: a fresh login measured again before the code", () => {
 		expect(res.at?.searchParams.has("code")).toBe(true);
 	});
 
+	/** An issuance policy that takes two seconds to judge. */
+	const slow = defineModule({ name: "slow", replicaSafe: false, takes: [] }, (m) => [
+		m.contribute(issuancePolicies).by(() => ({
+			name: "slow",
+			judge: async () => {
+				advance(2000);
+				return { kind: "allowed" };
+			},
+		})),
+	]);
+
 	it("measures max_age again before the code, so a step that outlasts it sends the browser to log in [guarantee-2-b] [oidc-core-3.1.2.1-r]", async () => {
-		const slow = defineModule({ name: "slow", replicaSafe: false, takes: [] }, (m) => [
-			m.contribute(issuancePolicies).by(() => ({
-				name: "slow",
-				judge: async () => {
-					advance(2000);
-					return { kind: "allowed" };
-				},
-			})),
-		]);
 		const s = await serve({ extra: [slow] });
 		const cookie = await s.login();
 		advance(9900);
@@ -79,5 +82,17 @@ describe("the flow: a fresh login measured again before the code", () => {
 		const resume = new URL(res.at?.searchParams.get("redirect_to") ?? "");
 		const again = await s.authorize(resume.search.slice(1), await s.login());
 		expect(again.at?.searchParams.has("code")).toBe(true);
+	});
+
+	it("refuses a silent request that a step makes outlast its max_age with login_required, giving no code [guarantee-2-b]", async () => {
+		const s = await serve({ extra: [slow] });
+		const cookie = await s.login();
+		advance(9900);
+		const res = await s.authorize(request({ max_age: "10", prompt: "none" }), cookie);
+		expect([at(res), res.at?.searchParams.get("error"), res.at?.searchParams.has("code")]).toEqual([
+			callback,
+			"login_required",
+			false,
+		]);
 	});
 });
