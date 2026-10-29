@@ -37,6 +37,8 @@ function serve(
 		readonly close?: (id: string) => Promise<CloseOutcome>;
 		readonly upstream?: string;
 		readonly issue?: () => { field: string; token: string; cookies: string[] };
+		/** The package's `confirm-within`, in seconds; 300 unless a test is about it. */
+		readonly within?: number;
 	} = {},
 ) {
 	let at = nowMs;
@@ -105,6 +107,7 @@ function serve(
 		issuer,
 		confirmUrl,
 		logoutUrl,
+		withinSeconds: options.within ?? 300,
 		now: () => at,
 		log: logged.log,
 	});
@@ -403,5 +406,22 @@ describe("a request the logout carries", () => {
 			await confirm.take(browser("s1", { confirmation }));
 			expect([name, upstreamBacks]).toEqual([name, [registered ? back : {}]]);
 		}
+	});
+
+	it("gives a carried request and a confirmation the time confirm-within sets, the confirmation never past the request's", async () => {
+		const { confirm, advance } = serve({ within: 120 });
+		const token = await confirm.carry({ sid: "s9", client: "app", back });
+		expect(await keys.verify(token, "logout-request+jwt")).toMatchObject({
+			claims: { exp: nowS + 120 },
+		});
+		advance(60_000);
+		const carriedPage = text(await confirm.show(shownWith("s1", token)));
+		const carriedBound = /name="confirmation" value="([^"]+)"/.exec(carriedPage)?.[1] ?? "";
+		const plainPage = text(await confirm.show(shown("s1")));
+		const plainBound = /name="confirmation" value="([^"]+)"/.exec(plainPage)?.[1] ?? "";
+		expect([
+			await keys.verify(carriedBound, "logout-confirm+jwt"),
+			await keys.verify(plainBound, "logout-confirm+jwt"),
+		]).toMatchObject([{ claims: { exp: nowS + 120 } }, { claims: { exp: nowS + 60 + 120 } }]);
 	});
 });

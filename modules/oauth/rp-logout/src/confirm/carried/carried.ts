@@ -7,8 +7,6 @@ import { returnsTo } from "../../registration/registration.ts";
 export const carriedParam = "request";
 /** The kind of the token a carried request is. */
 const carriedType = "logout-request+jwt";
-/** How long the browser has to follow a carried request. */
-const carriedSeconds = 300;
 
 /**
  * A logout `ending` checked and carries on in the browser's URL: the session the hint names, its
@@ -34,6 +32,8 @@ export interface CarriedParts {
 	readonly issuer: string;
 	/** The logout endpoint's URL, which a carried request names as its audience. */
 	readonly logoutUrl: string;
+	/** How long, in seconds, the browser has to follow a carried request (the package's `confirm-within`). */
+	readonly withinSeconds: number;
 	readonly now: () => number;
 }
 
@@ -88,7 +88,7 @@ export function carriedWith(p: CarriedParts) {
 	return {
 		/** A request `ending` checked, signed to be carried in the browser's URL. */
 		carry: (request: CarriedRequest): Promise<string> => {
-			const exp = Math.floor(p.now() / 1000) + carriedSeconds;
+			const exp = Math.floor(p.now() / 1000) + p.withinSeconds;
 			const at = { iss: p.issuer, aud: p.logoutUrl, exp };
 			return p.keys.sign({ ...at, sid: request.sid, ...carriedClaims(request) }, carriedType);
 		},

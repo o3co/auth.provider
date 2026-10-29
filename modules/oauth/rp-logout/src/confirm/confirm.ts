@@ -25,8 +25,6 @@ export const confirmPath = "/oauth/logout/confirm";
 
 /** The kind of the token that binds a confirmation to the session it was shown for. */
 const confirmationType = "logout-confirm+jwt";
-/** How long a confirmation page may be answered. */
-const confirmationSeconds = 300;
 
 export interface ConfirmParts {
 	readonly sessions: { handleOf(request: HttpRequest): Promise<string | undefined> };
@@ -42,6 +40,8 @@ export interface ConfirmParts {
 	readonly confirmUrl: string;
 	/** The logout endpoint's URL, which a carried request names as its audience. */
 	readonly logoutUrl: string;
+	/** How long, in seconds, a confirmation and a carried request may be answered (the package's `confirm-within`). */
+	readonly withinSeconds: number;
 	readonly now: () => number;
 	readonly log: Log;
 }
@@ -95,7 +95,7 @@ export function confirmWith(p: ConfirmParts) {
 		carried: Carried,
 	): Promise<HttpResponse> => {
 		// A confirmation carrying a return lasts no longer than the request it came from.
-		const fresh = seconds() + confirmationSeconds;
+		const fresh = seconds() + p.withinSeconds;
 		const exp = carried.back.postLogoutRedirectUri === undefined ? fresh : (carried.exp ?? fresh);
 		const confirmation = await p.keys.sign(
 			{ iss: p.issuer, aud: p.confirmUrl, sid: handle, exp, ...carriedClaims(carried) },
@@ -185,6 +185,7 @@ export async function confirmFrom(
 		issuer: issuerUrl,
 		confirmUrl: `${origin}${confirmPath}`,
 		logoutUrl: `${origin}${logoutPath}`,
+		withinSeconds: c.section["confirm-within"],
 		now: c.clock.now,
 		log: c.log,
 	});
