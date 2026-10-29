@@ -21,7 +21,7 @@
 
 ## Invariants
 - Connects to Redis itself, through its client, apart from `outbound`, which carries HTTP alone (`network`: `redis`).
-- Under `rediss`, TLS holds to `tls-options`' floor (BCP 195), its keys copied last; under `redis`, no TLS options. Another floor refuses boot.
+- Under `rediss`, TLS takes `tls-options`' floor alone (BCP 195); under `redis`, no TLS options. Another floor refuses boot.
 - Boot is refused, naming what is unmet, when the server is not what Deployment states.
 - Boot sends once every command the store sends, a script's on keys of the store's own (`<prefix>:{#check}:…`) it then removes, unless the server refuses that too; one the server refuses for good (`NOPERM`, or unknown or renamed), or keys it refuses the user, refuse boot, named. The probe sends them again, answering unready and warning `redis.settings_unmet` with the name. A write refused for want of replicas leaves a command unjudged, never refused.
 - Boot then runs once what a confirmation would and a store script does: with `replication`, the confirming connection reaching another server than the operations (their run ids differ, and the operations' did not change meanwhile, as in a failover), and a store script (`read`, `batchAcross`) the server cannot run, refuse boot, named; the probe runs both again, answering unready. A replica missing or lagging is neither.
