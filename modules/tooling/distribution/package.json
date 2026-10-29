@@ -25,5 +25,10 @@
 		"@mod/trial": "workspace:*",
 		"typescript": "6.0.3",
 		"yaml": "2.9.1"
+	},
+	"devDependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/outbound": "workspace:*",
+		"@mod/tls-options": "workspace:*"
 	}
 }

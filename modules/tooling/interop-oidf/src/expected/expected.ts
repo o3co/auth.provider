@@ -42,6 +42,19 @@ const canonical = (variant: unknown) =>
 const testOf = (e: Expected) =>
 	JSON.stringify([e["test-name"], canonical(e.variant), e["configuration-filename"]]);
 
+/** A skip whose test a failure names under another class: one test's entries share one class across both files. */
+const acrossFiles = (failures: readonly Expected[], skips: readonly Expected[]) => {
+	const classes = new Map(failures.map((e) => [testOf(e), e.class]));
+	return skips.flatMap((e) => {
+		const other = classes.get(testOf(e));
+		return other === undefined || !e.class || other === e.class
+			? []
+			: [
+					`${e["test-name"]} (${e["configuration-filename"]}): a test's entries share one class, here ${other} and ${e.class}`,
+				];
+	});
+};
+
 /**
  * Why the entries may not go to the suite: each names its test, variant and configuration file
  * exactly, a failure its block and condition too, once; its class holds as the checklist judges
@@ -124,6 +137,7 @@ export async function expectedOf(
 	const problems = [
 		...expectedProblems(failures, "failure", known),
 		...expectedProblems(skips, "skip", known),
+		...acrossFiles(failures, skips),
 	];
 	if (problems.length > 0)
 		throw new Error(`the expected entries of ${name} may not be taken:\n${problems.join("\n")}`);

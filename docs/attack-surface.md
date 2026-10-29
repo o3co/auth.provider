@@ -177,6 +177,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 
 | Setting | From | Default | Weakens |
 |---|---|---|---|
+| `audit.receivers` | `@mod/audit` |  | `none`: audit events go nowhere, warned at every boot |
 | `clients-cimd.allow` | `@mod/clients-cimd` | `[]` | clients name themselves by a metadata document fetched from these hosts |
 | `clients-cimd.allow-any-host` | `@mod/clients-cimd` | `false` | clients name themselves by a metadata document fetched from any host `deny` leaves |
 | `dpop.nonce.required` | `@mod/dpop` | `"never"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
