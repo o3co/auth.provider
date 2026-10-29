@@ -913,8 +913,6 @@ What changes from 0.18 to 0.19. Coming from a 0.18 release before 0.18.6, or fro
 | [U-0.19-59](#u-0.19-59) | Upgrade every instance to 0.19 before clients send `claims`; set `authorize.claims-parameter = false` to ignore its names and value constraints. Compose `claims-selection` and `claims-selection-store` beside `code-grant` in an app composed by hand | A deployment that composes `code-grant`; a client that sends `claims` with a `sub` value |
 | [U-0.19-60](#u-0.19-60) | Set `http.public-origin`, and compose `csrf` where you list the modules yourself | An app that composes `rp-logout` and no other module that checks CSRF (such as `logout`, `login-password` or `consent`), without `http.public-origin`, or one composed by hand that lists `rp-logout` without `csrf` |
 | [U-0.19-61](#u-0.19-61) | Compose a grant, or leave `token-endpoint` out | An app that composes `token-endpoint` and no grant |
-| [U-0.19-70](#u-0.19-70) | Send `resource` as an absolute URI without a fragment, and register audiences so | A client that sends a `resource` that is not an absolute URI, or one with a fragment, to a grant or token exchange |
-| [U-0.19-71](#u-0.19-71) | Take the fragment and the query out of `federation-grants.connections.<name>.resource` | A deployment whose federation grant connection names a `resource` with a fragment or a query |
 | [U-0.19-62](#u-0.19-62) | Send as `id_token_hint` only an ID token of the person signed in, or none; drop `prompt=select_account` | A client that sends `id_token_hint` or `prompt=select_account` in an OpenID Connect request |
 | [U-0.19-63](#u-0.19-63) | Read the scope issued: `offline_access` is left out of it at authorization, never refused, unless asked alone | A client that asks for `offline_access` |
 | [U-0.19-64](#u-0.19-64) | Remove `require-iss`; set `accept-missing-iss = true` on an IdP that never sends `iss` | A configuration that sets `require-iss` on an `oidc` IdP; an `oidc` IdP whose callbacks carry no `iss` and whose description does not offer it |
@@ -923,6 +921,8 @@ What changes from 0.18 to 0.19. Coming from a 0.18 release before 0.18.6, or fro
 | [U-0.19-67](#u-0.19-67) | Read `400 invalid_grant` where a session grant was refused `401 unauthorized` | A client of the session grant that reads its refusal |
 | [U-0.19-68](#u-0.19-68) | Read `invalid_client` where a certificate was refused `invalid_certificate` at issuance | A client presenting a certificate to bind its token (`mtls`) that reads its refusal |
 | [U-0.19-69](#u-0.19-69) | Send the lifetime asked in a token exchange as `o3co_expires_in` | A client of token exchange that sends `expires_in` |
+| [U-0.19-70](#u-0.19-70) | Send `resource` as an absolute URI without a fragment, and register audiences so | A client that sends a `resource` that is not an absolute URI, or one with a fragment, to a grant or token exchange |
+| [U-0.19-71](#u-0.19-71) | Take the fragment and the query out of `federation-grants.connections.<name>.resource` | A deployment whose federation grant connection names a `resource` with a fragment or a query |
 | [U-0.19-76](#u-0.19-76) | Declare `replicaSafe` on each module of your own | A module of your own |
 | [U-0.19-78](#u-0.19-78) | Remove `offline_access` from each client's `sections.client-allowance.scopes` and `default-scopes` | A client registration that lists `offline_access` there |
 | [U-0.19-80](#u-0.19-80) | Remove `offline_access` from `clients-cimd.scopes` | A configuration that lists it there |
