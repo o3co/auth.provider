@@ -27,7 +27,7 @@
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand), the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
 - `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them; every boot warns `redis.durability_none` naming the durable spaces.
 - Boot is refused on a space needing replicated or confirmed reads without `replication`.
-- A refusal or a warning never tells the URL, which may hold a password; an error event is logged by its name alone.
+- A refusal or a warning never tells the URL, which may hold a password; a failure is told by its code alone, never its message: an error event as `redis.error` with `code`, and a refused connection in `redis.url`'s reason.
 - `replicas`: at runtime, no replica seen is unavailable.
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
