@@ -43,17 +43,22 @@
 ## 3 OpenID Provider Metadata
 
 - **oidc-discovery-3-a** MUST: the discovery document carries `issuer`, an `https` URL with no query or fragment.
+  note: N-https
 - **oidc-discovery-3-b** MUST: where issuer discovery by WebFinger is supported, `issuer` is identical to the issuer WebFinger returns.
   out-of-scope: issuer discovery by WebFinger is not offered (no `/.well-known/webfinger` route in docs/routes.md).
 - **oidc-discovery-3-c** MUST: `issuer` is identical to the `iss` of the ID tokens the OP issues.
 - **oidc-discovery-3-d** MUST: the discovery document carries `authorization_endpoint`.
 - **oidc-discovery-3-e** MUST: `authorization_endpoint` uses the `https` scheme.
+  note: N-https
 - **oidc-discovery-3-f** MUST: the discovery document carries `token_endpoint`, unless only the implicit flow is used.
 - **oidc-discovery-3-g** MUST: `token_endpoint` uses the `https` scheme.
+  note: N-https
 - **oidc-discovery-3-h** SHOULD: the discovery document carries `userinfo_endpoint`.
 - **oidc-discovery-3-i** MUST: `userinfo_endpoint` uses the `https` scheme.
+  note: N-https
 - **oidc-discovery-3-j** MUST: the discovery document carries `jwks_uri`.
 - **oidc-discovery-3-k** MUST: `jwks_uri` uses the `https` scheme.
+  note: N-https
 - **oidc-discovery-3-l** MUST: where the JWK Set holds both signing and encryption keys, every key carries `use`.
   out-of-scope: the JWK Set holds signing keys alone (`keys`' key set, `use` `sig`).
 - **oidc-discovery-3-m** SHOULD NOT: one key is used both to sign and to encrypt.

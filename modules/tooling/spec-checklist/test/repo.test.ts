@@ -23,7 +23,12 @@ describe("the checklist and the workspace's tests", () => {
 	});
 
 	it("are what docs/compliance says, as `run report` writes it", () => {
-		const files = reportFiles(checklist.specs, workspace.tests, updatedByOf(checklist));
+		const files = reportFiles(
+			checklist.specs,
+			workspace.tests,
+			updatedByOf(checklist),
+			checklist.notes,
+		);
 		for (const [name, text] of files)
 			expect(readFileSync(join(reportDir, name), "utf8"), name).toBe(text);
 	});

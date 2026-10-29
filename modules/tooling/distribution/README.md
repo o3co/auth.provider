@@ -17,6 +17,7 @@
 - `pnpm release:evidence-fetch <fetched>` and `pnpm release:evidence-judge <fetched> <dir>`: before anything is published, the evidence of the CI run that tested the tag's tree, fetched with a token and judged without one, or the release stopped; see the internal module `release-evidence`.
 - `pnpm release:sbom <tarballs> <dir>`: before anything is published, the release's lists of what it ships, made from its tarballs; see the internal module `release-sbom`.
 - `pnpm release:listed <tarballs> <tarballs.json>`: where the release publishes, the tarballs held to those the lists were made of; see the internal module `release-listed`.
+- `pnpm release:notes <version> <file>`: where the release publishes, its notes from the version's section of the changelog; see the internal module `release-notes`.
 
 ## Invariants
 - Bundles come only from the directory structure and the bundle manifests.

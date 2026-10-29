@@ -25,6 +25,7 @@
 
 - **oidc-rpinit-2.1-a** MUST: with RP-Initiated Logout and Discovery both offered, the discovery document names `end_session_endpoint`.
 - **oidc-rpinit-2.1-b** MUST: `end_session_endpoint` is an `https` URL.
+  note: N-https
 
 ## 3 Redirection to RP After Logout
 

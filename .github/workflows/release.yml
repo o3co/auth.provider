@@ -394,13 +394,20 @@ jobs:
           tar -czf "$RUNNER_TEMP/auth-provider-${VERSION}-evidence.tar.gz" -C "$RUNNER_TEMP" release-evidence
           tar -czf "$RUNNER_TEMP/auth-provider-${VERSION}-sbom.tar.gz" -C "$RUNNER_TEMP" sbom
 
+      # The notes are the version's section of CHANGELOG.md: the commits on
+      # main are one per package, so no pull request's title would tell them.
+      - name: Write the release's notes
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: pnpm release:notes "$VERSION" "$RUNNER_TEMP/release-notes.md"
+
       - name: Create GitHub Release (draft)
         id: draft
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           draft: true
           prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
           files: |
             ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-evidence.tar.gz
             ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-sbom.tar.gz
