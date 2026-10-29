@@ -29,6 +29,7 @@ Every guarantee here rests on what the deployment does. Each section's "Left to 
 - **Its host clocks are synchronized (NTP).** Sessions, codes, tokens, lockouts, key expiry and a subject's revocation are judged on each host's clock, with nothing allowed for skew between hosts: a revocation is compared in whole seconds, so what was made just before it on a host whose clock runs ahead can count as made after it and outlive it ([runbook](runbook.md#before-you-deploy)). Keep them as close as NTP allows; no allowance between hosts is promised.
 - **What it terminates, it protects.** TLS is terminated in front of the app, which speaks plain HTTP behind it.
 - **An outbound proxy checks where names lead.** With `outbound.proxy` set, the proxy resolves names and refuses the addresses `outbound` would refuse ([Outbound requests](#outbound-requests)).
+- **Its egress proxy or platform checks upstream certificates' revocation.** `outbound` checks an upstream's certificate chain and name, never whether it was revoked (no CRL or OCSP); where nothing in front checks it, the operator accepts that risk ([Outbound requests](#outbound-requests)).
 - **Plain-text peers are on a trusted network.** What goes to a `plain-internal` pair, and to Redis where it is reached in the clear, is readable and changeable on the way: such peers sit on a network trusted against both.
 - **Redis keeps what it is checked to keep.** Its persistence stays as it was at boot, the replicas persist too, and a lagging replica is never promoted ([Storage](#storage)).
 - **An upstream's word on its own authentication is trusted as far as it is mapped.** An IdP's `amr` and `auth_time` count as the IdP says, for what `federation.idps.<name>.upstream-amr` maps and the fresh-login allowance lets in ([Upstream identity providers](#upstream-identity-providers)).
@@ -243,6 +244,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Names resolve in helper processes that take none of the environment but the resolver's own variables, and answer addresses alone (`outbound.resolution = helper`, the default). A helper is started only in the one form guard G26 lets through.
   - What goes to a `plain-internal` pair, passwords, tokens and credentials among it, is in the clear: name only peers on a network trusted against reading and changing it (each boot warns `outbound.plain_internal`).
   - Name a pair in `outbound.plain-ipv4` only where its IPv4 answers are the ones to reach, as ECS Service Connect's are: the name's IPv6 answers are not used.
+  - An upstream certificate's revocation: `outbound` checks the chain and the name alone. Have the egress proxy or the platform check it, or accept that a revoked certificate is taken.
   - Network egress filtering is still expected.
 
 ## Storage
