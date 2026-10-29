@@ -615,9 +615,11 @@ From `@mod/seal`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `seal.current.id` | string |  | yes | `SEAL_CURRENT_ID` | `seal-1` | The key's id, which heads every value it seals. |
-| `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | 32 bytes, base64, of at least 8 byte values. |
+| `seal.current.algorithm` | aes-256-gcm | `aes-256-gcm` |  |  |  | What the key seals and opens with: aes-256-gcm, the default and only one. |
+| `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values. |
 | `seal.next.id` | string |  |  |  |  | The key's id: it opens values but seals none until it is made current. |
-| `seal.next.key` | string |  |  |  |  | 32 bytes, base64, of at least 8 byte values. |
+| `seal.next.algorithm` | aes-256-gcm | `aes-256-gcm` |  |  |  | What the key seals and opens with: aes-256-gcm, the default and only one. |
+| `seal.next.key` | string |  |  |  |  | The key's bytes, base64, as many as its algorithm takes, of at least 8 byte values. |
 | `seal.previous` | list of map | `[]` |  |  |  | Keys that only open what they sealed. |
 
 ## secret-hash
