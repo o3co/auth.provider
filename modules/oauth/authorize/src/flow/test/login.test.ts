@@ -69,6 +69,11 @@ describe("the flow: logging in before a refusal", () => {
 		expect(await said({})).toEqual([400, "", "invalid_request"]);
 		const short = await authorize(request({ scope: "unknown" }));
 		expect(short.at?.pathname).toBe("/login");
+		// Padded to a login URL of the limit exactly, then one byte past it.
+		const padded = (n: number) => authorize(request({ scope: "unknown", "x-a": "x".repeat(n) }));
+		const pad = 2048 - ((await padded(1)).location.length - 1);
+		const [at, past] = [await padded(pad), await padded(pad + 1)];
+		expect([at.location.length, at.at?.pathname, past.status]).toEqual([2048, "/login", 400]);
 	});
 
 	it("answers a refusal at the endpoint by 400, sending nothing back, where its login URL would pass 8 KiB by default [rfc9700-4.11.2-b]", async () => {
