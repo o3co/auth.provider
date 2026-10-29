@@ -36,7 +36,9 @@ const floorKeys: { readonly [K in keyof FloorKeys]: (value: unknown) => boolean 
 /** Whether `value` holds `key` as a spread copies it: its own, enumerable, a value and no getter, taken by `takes`. */
 const holds = (value: object, key: string, takes: (value: unknown) => boolean) => {
 	const own = Object.getOwnPropertyDescriptor(value, key);
-	return own !== undefined && own.enumerable === true && "value" in own && takes(own.value);
+	return (
+		own !== undefined && own.enumerable === true && Object.hasOwn(own, "value") && takes(own.value)
+	);
 };
 
 /** Whether `value` is a floor made here: frozen, carrying the mark as its own, of the shape made now. */
@@ -70,12 +72,14 @@ export function heldTo<T extends object>(floor: TlsOptions, options: T): HeldToF
 			"the TLS floor is not one tls-options made: provide it from @mod/tls-options",
 		);
 	}
-	const passing = passingTheFloor.filter((key) => Object.hasOwn(options, key));
+	// Its enumerable keys alone: the mark is not one, so the result is no floor. The copy is what is
+	// checked, and given, so options that answer one way and then another cannot slip a key past.
+	const held = { ...options, ...floor };
+	const passing = passingTheFloor.filter((key) => Object.hasOwn(held, key));
 	if (passing.length > 0) {
 		throw new TypeError(
 			`options held to the TLS floor take none of ${passing.join(", ")}, which would loosen it`,
 		);
 	}
-	// Its enumerable keys alone: the mark is not one, so the result is no floor.
-	return { ...options, ...floor } as unknown as HeldToFloor<T>;
+	return held as unknown as HeldToFloor<T>;
 }

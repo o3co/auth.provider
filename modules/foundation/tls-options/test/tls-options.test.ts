@@ -136,6 +136,20 @@ describe("the section's options", () => {
 				`options held to the TLS floor take none of ${key}, which would loosen it`,
 			);
 		}
+		// Nor one that options hide from a first look and show to a later one, as a Proxy may: what is
+		// checked is what is given.
+		let looked = 0;
+		const shifting = new Proxy(
+			{},
+			{
+				ownKeys: () => ["checkServerIdentity"],
+				getOwnPropertyDescriptor: () =>
+					looked++ === 0
+						? undefined
+						: { value: () => undefined, enumerable: true, configurable: true },
+			},
+		);
+		expect(Object.hasOwn(heldToFloor(floor, shifting), "checkServerIdentity")).toBe(false);
 		// What it gives is the caller's options, no floor; a floor copied by hand is refused.
 		expect(isFloor(heldToFloor(floor, {}))).toBe(false);
 		const copied = { ...floor } as TlsOptions;
