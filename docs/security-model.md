@@ -54,7 +54,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - One exception: shortening `session-lifecycle.lifetime` ends the sessions it now covers when they are next read, without their participants, and the tokens issued before then keep their earlier expiry.
    - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
-   - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh.
+   - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh. The record meets `prompt=login` and `max_age=0`; any other `max_age` is checked immediately before the code is issued (the time the store takes to write it not counted), after every step the request went through, consent included, so a record never stands for an age past it.
    - Scenes: code ("password logins meeting a client's demand for a fresh login"), federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
    - One exception, through an upstream: a login the upstream says came within its fresh login allowance before the demand counts as fresh, even where the upstream did not authenticate again (`federation`'s card, "Fresh enough"). The login page hands `prompt=login` and `max_age` to the upstream, which asks the user again where it honours them. To narrow the allowance, set `federation.idps.<name>.fresh-login-allowance` for that IdP (by default its `clock-skew`); the id_token is still checked under `clock-skew`.
    - It narrows only how far back a reported login time reaches. At `0s`, a login in the second `prompt=login` was asked in still counts, as that check compares whole seconds. A max age is compared to the millisecond, `auth_time + allowance + max_age >= now`, so at `0s` `max_age=0` refuses a login before the callback, even in its second. A time ahead of ours that `clock-skew` lets the id_token carry counts, and the time is the upstream's word: one that ignores `prompt=login` and reports a new time passes.
@@ -102,7 +102,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 
 ## Revocation delays
 
-How long something revoked can still be used, by where it is checked. **None** means the next check after the revocation is recorded refuses it: a request already past its checks is not stopped (promise 4), and the store or ledger that holds it answers as it now stands, an outage refusing rather than allowing (promise 3).
+How long something revoked can still be used, by where it is checked. **None** means the next check after the revocation is recorded refuses it: a request already past its checks is not stopped (promise 4), and the store or ledger that holds it answers as it now stands, an outage refusing rather than allowing (promise 3). A revocation takes effect when its mark is confirmed: an operation that read or wrote what it revokes before then may finish; every verification and use that starts after it refuses, and a token handed back meanwhile is refused at its next verification and use. The one exception for a request started after the mark is an instance still connected to the old primary after a failover (the row below; [Guarantees by deployment](deployment-guarantees.md#availability-when-a-dependency-fails)).
 
 | What is revoked | Where it is checked | Delay | Set by |
 |---|---|---|---|
@@ -113,6 +113,7 @@ How long something revoked can still be used, by where it is checked. **None** m
 | Any access token, at a resource server that asks introspection | Each call | As long as the resource server keeps the answer, at most to its `exp` (RFC 7662 §4) | The resource server |
 | A refresh token or its family | Each refresh | None | `refresh` |
 | A session | Each read | None; its tokens as promise 1 says | `session` |
+| Anything, at an instance still connected to the old primary after a failover | That instance's verification, reading unconfirmed | Until it reconnects (the deployment fences the old primary before promoting a replica); a token exchanged there, until the subject token's own expiry | The deployment |
 | A back-channel logout notice | The client, once delivered | No bound: after a failure that can pass (408, 429, a 5xx, the client unreachable) a notice is tried again until `rp-logout.notify-within` (default `1d`), then dropped; one `outbound` refuses, any other status, or a client gone is settled at once, undelivered | `rp-logout.notify-within` |
 | An issuer's or an IdP's key set (`external-jwt`) | Each verification, against the set fetched | Fetched again after an hour; while none can be had, the last set is used until `external-jwt.key-set-max-age` (default `1d`) after its fetch, then unavailable | `external-jwt.key-set-max-age` |
 | A JWT bearer signer's key at a ledger (`signer-keys-http`) | Each assertion | None, as far as the ledger answers its current keys | The ledger |
@@ -275,7 +276,9 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - At stop, deliveries under way are awaited until `kernel.stop-deadline`.
   - The `log` receiver writes attribute names, never their values.
 - **Not guaranteed:** delivery. Audit is best effort (tier 1): a request is answered without waiting for its events to be delivered, and an event is lost past a receiver's `max-pending`, when its receiver fails, or when still under way at the stop deadline. `audit-http` never sends an event again.
-- **Left to you:** a collector that keeps up, and watching the lost-event count.
+- **Left to you:**
+  - A collector that keeps up, and watching the lost-event count.
+  - Setting `audit.receivers = none` only where no record of what happened is needed: events then go nowhere, and every boot warns so.
 
 ## Keys
 

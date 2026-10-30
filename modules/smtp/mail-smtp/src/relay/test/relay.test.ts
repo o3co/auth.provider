@@ -1,5 +1,7 @@
 import { connect, createServer, Socket } from "node:net";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { expect, it } from "vitest";
+import { answerOf } from "../answers.ts";
 import { mailboxOf, RelayFailure, relayOver } from "../relay.ts";
 
 it("reads one mailbox from `from`, with or without a display name, leaving its address to the section", () => {
@@ -38,6 +40,7 @@ it("under none, sends nothing when the connected peer is not loopback", async ()
 			security: "none",
 			from: { name: "", address: "noreply@example.test" },
 			deadlineMs: 1000,
+			floor: testTlsOptions,
 		},
 		elsewhere,
 	);
@@ -61,6 +64,7 @@ it("gives up on a connection that never opens at the connecting deadline, a quar
 			security: "starttls",
 			from: { name: "", address: "noreply@example.test" },
 			deadlineMs: 400,
+			floor: testTlsOptions,
 		},
 		silent,
 	);
@@ -68,4 +72,19 @@ it("gives up on a connection that never opens at the connecting deadline, a quar
 		(e: unknown) => e,
 	);
 	expect(failure).toMatchObject({ stage: "connection", codes: { code: "ETIMEDOUT" } });
+});
+
+it("keeps a TLS alert's number only of a TLS failure carrying no reply, and only one an alert can have", () => {
+	const phase = { securing: true, awaitingGreeting: false };
+	const failed = (failure: object) => (answerOf(failure, phase) as RelayFailure).codes.alert;
+	const refused =
+		"error:0A000410:SSL routines::ssl/tls alert handshake failure:SSL alert number 40";
+	expect(failed({ code: "ETLS", message: refused })).toBe(40);
+	expect(failed({ code: "ESOCKET", message: `${refused}\n` })).toBe(40);
+	expect(failed({ code: "ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE", message: refused })).toBe(40);
+	// The library adds a reply's words to the message: a relay cannot write an alert there.
+	const reply = "554 5.7.1 SSL alert number 7";
+	expect(failed({ code: "ETLS", message: `Error: ${reply}`, response: reply })).toBeUndefined();
+	expect(failed({ code: "EPROTOCOL", message: refused })).toBeUndefined();
+	expect(failed({ code: "ETLS", message: "SSL alert number 999" })).toBeUndefined();
 });

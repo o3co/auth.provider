@@ -84,7 +84,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/login-attributes` (feature, `modules/identity/login-attributes`): Decides which of a login's attributes are kept: `users`' named set, within caps.
   - `keeping` (`src/keeping`): keeping a login's attributes within caps.
 - `@mod/login-gates` (feature, `modules/identity/login-gates`): Passes a confirmed login through the gates, then has `session` open it.
-- `@mod/login-password` (feature, `modules/identity/login-password`): Provides the password login endpoint: verifies with `users`, and logs in through `login-gates`, reporting the time the password was verified as the login's authentication time.
+- `@mod/login-password` (feature, `modules/identity/login-password`): Provides the password login endpoint: verifies with `users`, and logs in through `login-gates`, naming the session's opening as the login's authentication time (`opening`), so a gate's wait never ages it.
 - `@mod/session` (feature, `modules/identity/session`): Owns the contract of user sessions: their cookie, their listing under their subject, and their lifecycle (open → closing → closed), as every implementation keeps them; a session is opened only once listed, so a revocation finds every live one.
   - `rules` (`src/rules`): the rules every implementation of `sessions` keeps alike, the stand-in too, offered as `sessionRules`.
 - `@mod/session-lifecycle` (adapter, `modules/identity/session-lifecycle`): Keeps sessions for `session`'s contract: their records, cookies and listing under their subject, and their lifecycle (open → closing → closed), over its own store interfaces as the assembly wires them.
@@ -401,6 +401,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `carried` (`src/release-check/carried`): which package managers an app's image holds.
   - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
   - `given` (`src/release-check/given`): which tarballs the release check holds to.
+  - `helpers` (`src/release-check/helpers`): the helpers scene, the resolver's helper processes in an app's image, run as a deployment constrains them.
   - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
   - `release-listed` (`src/release-listed`): where the release publishes, the tarballs held to those its lists of what it ships were made of.
   - `release-notes` (`src/release-notes`): the release's notes, from the version's section of the changelog.

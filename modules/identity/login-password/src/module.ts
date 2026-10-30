@@ -143,8 +143,6 @@ export default defineModule(
 						await budgets.abandoned(accountAttempts, key, policy, reserved.reservation);
 					throw error;
 				});
-				// When the password was proved: the login's authentication time, whatever a gate holds after.
-				const verifiedAt = c.clock.now();
 				if (verified.kind !== "user") {
 					recordLogin(request, "failed");
 					return answer(401, { error: "invalid_credentials" });
@@ -154,7 +152,8 @@ export default defineModule(
 				const facts = {
 					subject: verified.user.subject,
 					amr: proves,
-					authenticatedAt: verifiedAt,
+					// Authenticated here, so as fresh as the session it opens, however long a gate holds it first.
+					authenticatedAt: "opening" as const,
 					attributes: attributesOf(verified.user),
 				};
 				const outcome = await gates.login(request, facts, done).catch(async (error) => {

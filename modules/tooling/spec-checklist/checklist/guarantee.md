@@ -28,7 +28,7 @@
 ## 2 `prompt=login` and `max_age` are met only by a fresh authentication.
 
 - **guarantee-2-a** MUST: a request with `prompt=login` is met only by an authentication made for it, by `reauth`'s record, which `authorize` makes for the request and takes once.
-- **guarantee-2-b** MUST: a request with `max_age` is met only by an authentication within it, and an authentication time `session` does not know never counts as fresh.
+- **guarantee-2-b** MUST: a request with `max_age` is met only by an authentication within it, checked immediately before the code is issued, after every step the request went through, consent included; the time the store takes to write the code is not counted, and redemption adds at most the code's lifetime. `max_age=0` is met as `prompt=login` is, by an authentication made for the request (guarantee-2-a). An authentication time `session` does not know never counts as fresh.
 - **guarantee-2-c** MUST: through an upstream, a login counts as fresh only where the time the upstream reports for it is within its fresh login allowance, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default): for `prompt=login`, no further back than the allowance before the demand, compared in whole seconds; for `max_age`, where `auth_time + allowance + max_age >= now`, compared to the millisecond.
 
 ## 3 A dependency that cannot answer never grants anything.
@@ -51,7 +51,7 @@
   faults: Pu, Pd, R, L, S, F, C
 - **guarantee-3-i** MUST NOT: an attempt limit lets an attempt pass while its store cannot count, whatever `rate-limit.fail-mode` is.
   faults: Pu, Pd, R, L, S, F, Fs, C
-- **guarantee-3-j** MUST NOT: anything is issued while the store cannot write, and a request made after it can write again passes.
+- **guarantee-3-j** MUST NOT: a grant that keeps in the store what it issues or what issuing spends (a code redeemed, a refresh family rotated, a device code used, a JWT bearer assertion's or an exchanged id_token's use) issues anything while the store cannot write, and a request made after it can write again passes.
   faults: M, R0, Wt, Nr
 - **guarantee-3-k** MUST NOT: the provider boots on a Redis set to evict keys.
   faults: Ev

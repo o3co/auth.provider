@@ -201,11 +201,20 @@ it("writes one log line per event, with the attributes' names and never their va
 	]);
 });
 
-it("delivers nowhere when the section states none", async () => {
+it("delivers nowhere when the section states none, warning so at every boot", async () => {
+	const nowhere = {
+		level: "warn",
+		event: "audit events go nowhere",
+		fields: { receivers: "none" },
+	};
 	const a = await boot("none");
 	a.record({ kind: "k" });
 	await settled();
-	expect(lines()).toEqual([]);
+	expect(lines()).toEqual([nowhere]);
+	await boot("none");
+	expect(lines()).toEqual([nowhere, nowhere]);
+	await boot(["log"]);
+	expect(warnings()).toEqual([nowhere, nowhere]);
 });
 
 it("refuses to start without the statement, with an unknown name, or with a receiver left unnamed", async () => {

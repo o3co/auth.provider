@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import {
 	clientSectionsOf,
 	idpTypesOf,
+	itemRowsOf,
 	type JsonSchema,
 	referenceFile,
 	referenceOf,
@@ -106,20 +107,111 @@ it("holds a key nested in an optional object to the nearest optional object, a l
 	]);
 });
 
-it("merges the keys of a union of objects, required only where every variant requires them", () => {
-	const schema = {
+it("writes a union told apart by one key by its variants: a key's default and requiredness when that key takes theirs", () => {
+	const schema: JsonSchema = {
+		oneOf: [
+			{
+				type: "object",
+				required: ["mode"],
+				properties: { mode: { const: "off", description: "Whether it runs." } },
+			},
+			{
+				type: "object",
+				required: ["mode", "hosts"],
+				properties: {
+					mode: { enum: ["on", "loud"] },
+					hosts: { type: "array", items: { type: "string" } },
+					header: { type: "string", default: "a" },
+				},
+			},
+			{
+				type: "object",
+				required: ["mode", "header"],
+				properties: { mode: { const: "quiet" }, header: { type: "string" } },
+			},
+		],
+	};
+	const rows = rowsOf(schema, ["u"], () => ({}));
+	const by = (values: string[]) => [{ key: "u.mode", values }];
+	expect(rows).toEqual([
+		{
+			key: "u.mode",
+			type: "off | on | loud | quiet",
+			required: true,
+			description: "Whether it runs.",
+		},
+		{ key: "u.hosts", type: "list of string", required: true, when: by(["on", "loud"]) },
+		{ key: "u.header", type: "string", default: "a", required: false, when: by(["on", "loud"]) },
+		{ key: "u.header", type: "string", required: true, when: by(["quiet"]) },
+	]);
+	const table = referenceOf([{ section: "u", owner: "@mod/u", rows }]);
+	expect(table).toContain("| `u.hosts` | list of string |  | when `u.mode` is `on` or `loud` |");
+	expect(table).toContain("| `u.header` | string | `a` when `u.mode` is `on` or `loud` |  |");
+	expect(table).toContain("| `u.header` | string |  | when `u.mode` is `quiet` |");
+});
+
+it("holds a variant's object's keys to both variants, outermost first, beside an optional object's", () => {
+	const inner: JsonSchema = {
 		oneOf: [
 			{ type: "object", required: ["mode"], properties: { mode: { const: "off" } } },
 			{
 				type: "object",
 				required: ["mode", "hosts"],
-				properties: { mode: { const: "on" }, hosts: { type: "array", items: { type: "string" } } },
+				properties: { mode: { enum: ["a", "b", "c"] }, hosts: { type: "string" } },
+			},
+		],
+	};
+	const schema: JsonSchema = {
+		oneOf: [
+			{ type: "object", required: ["kind"], properties: { kind: { const: "plain" } } },
+			{
+				type: "object",
+				required: ["kind", "check"],
+				properties: { kind: { const: "checked" }, check: inner, extra: inner },
+			},
+		],
+	};
+	const rows = rowsOf(schema, ["s"], () => ({})).filter((r) => r.key.endsWith(".hosts"));
+	expect(rows.map((r) => [r.key, r.required, r.within, r.when])).toEqual([
+		[
+			"s.check.hosts",
+			true,
+			undefined,
+			[
+				{ key: "s.kind", values: ["checked"] },
+				{ key: "s.check.mode", values: ["a", "b", "c"] },
+			],
+		],
+		[
+			"s.extra.hosts",
+			true,
+			"s.extra",
+			[
+				{ key: "s.kind", values: ["checked"] },
+				{ key: "s.extra.mode", values: ["a", "b", "c"] },
+			],
+		],
+	]);
+	const table = referenceOf([{ section: "s", owner: "@mod/s", rows }]);
+	expect(table).toContain(
+		"| `s.extra.hosts` | string |  | when `s.kind` is `checked` and `s.extra` is set and `s.extra.mode` is `a`, `b` or `c` |",
+	);
+});
+
+it("merges the keys of a union no one key tells apart, required only where every variant requires them", () => {
+	const schema: JsonSchema = {
+		oneOf: [
+			{ type: "object", required: ["a"], properties: { a: { type: "string" } } },
+			{
+				type: "object",
+				required: ["a", "b"],
+				properties: { a: { type: "string" }, b: { type: "string" } },
 			},
 		],
 	};
 	expect(rowsOf(schema, ["u"], () => ({}))).toEqual([
-		{ key: "u.mode", type: "off | on", required: true },
-		{ key: "u.hosts", type: "list of string", required: false },
+		{ key: "u.a", type: "string", required: true },
+		{ key: "u.b", type: "string", required: false },
 	]);
 });
 
@@ -209,4 +301,33 @@ it("describes every key of every IdP type's settings", async () => {
 		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);
+});
+
+it("lists the keys inside a list of objects under its `<i>`, lists within it too, never required", () => {
+	const issuer: JsonSchema = {
+		type: "object",
+		required: ["iss"],
+		properties: {
+			iss: { type: "string" },
+			"accept-any-subject": { type: "boolean", default: false },
+			keys: {
+				type: "array",
+				items: { type: "object", required: ["kid"], properties: { kid: { type: "string" } } },
+			},
+		},
+	};
+	const schema: JsonSchema = {
+		type: "object",
+		properties: {
+			issuers: { type: "array", items: issuer },
+			plain: { type: "array", items: { type: "string" } },
+		},
+	};
+	expect(itemRowsOf(schema, ["j"]).map((r) => [r.key, r.required, r.default])).toEqual([
+		["j.issuers.<i>.iss", false, undefined],
+		["j.issuers.<i>.accept-any-subject", false, false],
+		["j.issuers.<i>.keys", false, undefined],
+		["j.issuers.<i>.keys.<i>.kid", false, undefined],
+	]);
+	expect(rowsOf(schema, ["j"], () => ({})).map((r) => r.key)).toEqual(["j.issuers", "j.plain"]);
 });

@@ -96,6 +96,30 @@ describe("re-authentication records", () => {
 		advance(1);
 		expect(reauths.fresh(maxAge, { authenticatedAt: 999_000 }, undefined)).toBe(false);
 	});
+
+	it("holds max_age to the login's age when asked, a record never standing for it, and meets max_age=0 by the record [guarantee-2-b]", () => {
+		const { reauths, advance } = setUp();
+		// The record was made at 990_000, as the request left for its login; the login came at 995_000.
+		const taken = { format: 1, at: 990_000, request: "r" } as const;
+		const loggedIn = { authenticatedAt: 995_000 };
+		const maxAge = { login: false, maxAgeMs: 10_000, knownTime: false };
+		expect(reauths.fresh(maxAge, loggedIn, taken)).toBe(true);
+		// Back from a step-up or an upstream later than max_age after the login: refused, record or not.
+		advance(5_001);
+		expect(reauths.fresh(maxAge, loggedIn, taken)).toBe(false);
+		expect(reauths.fresh(maxAge, loggedIn, undefined)).toBe(false);
+		// prompt=login with max_age asks both: the record, and the age when asked.
+		const both = { login: true, maxAgeMs: 10_000, knownTime: false };
+		expect(reauths.fresh(both, loggedIn, taken)).toBe(false);
+		const recent = { authenticatedAt: 1_000_000 };
+		expect(reauths.fresh(both, recent, taken)).toBe(true);
+		expect(reauths.fresh(both, recent, undefined)).toBe(false);
+		// max_age=0 no login meets by its age: the record meets it, as prompt=login.
+		const zero = { login: false, maxAgeMs: 0, knownTime: false };
+		expect(reauths.fresh(zero, loggedIn, taken)).toBe(true);
+		expect(reauths.fresh(zero, { authenticatedAt: 989_999 }, taken)).toBe(false);
+		expect(reauths.fresh(zero, recent, undefined)).toBe(false);
+	});
 });
 
 it("provides the records over the store the assembly wires, taking all it names", async () => {

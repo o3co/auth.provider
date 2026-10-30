@@ -34,6 +34,7 @@ export interface Policy {
 	readonly algorithms: readonly Algorithm[];
 	/** How far the issuer's clock may be from `kernel`'s. */
 	readonly skewMs: number;
+	/** The longest a token may live: `exp` ahead of now, with the skew, and `exp` − `iat`, without it. */
 	readonly maxLifetimeMs?: number;
 	/** The header's `typ`, compared as RFC 7515 says. */
 	readonly typ?: string;
