@@ -975,7 +975,7 @@ From `@mod/idp-google`.
 | `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
 | `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
 | `federation.idps.<name>.access` | offline \| online | `offline` |  | `offline` asks for a refresh token, so Google shows its consent screen at every login; `online` asks none. |
-| `federation.idps.<name>.require-iss` | boolean | `true` |  | Asks every callback for `iss`, which Google says it always sends. |
+| `federation.idps.<name>.accept-missing-iss` | boolean | `false` |  | Takes a callback without `iss`, which Google says it always sends; warned of at every start. |
 | `federation.idps.<name>.authorization-endpoint` | string | `https://accounts.google.com/o/oauth2/v2/auth` |  | Where the browser is sent to log in at Google; Google's own unless named. |
 | `federation.idps.<name>.token-endpoint` | string | `https://oauth2.googleapis.com/token` |  | Where a code is exchanged for tokens; Google's own unless named. |
 | `federation.idps.<name>.jwks-uri` | string | `https://www.googleapis.com/oauth2/v3/certs` |  | Where the keys that sign Google's id_tokens are read; Google's own unless named. |

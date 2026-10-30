@@ -197,6 +197,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `federation-grants.max-lifetime` | `@mod/federation-grants` | `"30d"` | past the default 30 days, up to 365: a federation grant answers that long from its activation |
 | `federation-tokens.max-lifetime` | `@mod/federation-tokens` | `"1d"` | past the default day, up to 365: an upstream's token is taken to live that long |
 | `federation.idps` | `@mod/federation` | `{}` | each IdP's `upstream-amr` trusts its word for the local amr it maps, `mfa` among them; its `fresh-login-allowance` lets a login that far back count as fresh |
+| `federation.idps.<name>.accept-missing-iss` | `@mod/idp-google` | `false` | named so (`accept-*` and the like) |
 | `federation.idps.<name>.accept-missing-iss` | `@mod/idp-oidc` | `false` | named so (`accept-*` and the like) |
 | `federation.idps.<name>.secret-lifetime` | `@mod/idp-apple` | `"5m"` | past the default five minutes, up to half a year: a signed client secret, if leaked, is used that long |
 | `http.insecure-origin` | `@mod/http` | `false` | named so (`accept-*` and the like) |

@@ -16,7 +16,7 @@ export default defineModule(
 			return idpType({
 				type: "google",
 				settings: settingsOf(await c.get(outboundRefusals)),
-				open: async (read) => opened(read, out, jwt, { clock: c.clock }),
+				open: async (read, { idp }) => opened(read, out, jwt, { clock: c.clock, log: c.log, idp }),
 			});
 		}),
 	],
