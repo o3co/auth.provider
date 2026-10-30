@@ -1,4 +1,5 @@
 import { setting } from "@mod/kernel";
+import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
 export const section = z.strictObject({
@@ -25,6 +26,11 @@ export const section = z.strictObject({
 		.prefault("5m")
 		.describe(
 			"How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page.",
+		),
+	"error-page": urlSetting({ schemes: ["https"], loopbackHttp: true })
+		.optional()
+		.describe(
+			"Where a browser's refused logout request is sent, with `error` and `error_description` in its query: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, every refusal is answered as JSON.",
 		),
 	requests: z
 		.number()

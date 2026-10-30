@@ -97,7 +97,7 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 	const named = c.secrets.map((s) => ({ key: s.key, owner: ownerOf(s.key), holds: s.holds }));
 	const loosening = [
 		...settings
-			.filter((s) => looseningByName(s.key))
+			.filter((s) => looseningByName(s.key) && !c.loosening.some((l) => l.key === s.key))
 			.map((s) => ({ ...s, weakens: "named so (`accept-*` and the like)" })),
 		...c.loosening.map((l) => ({
 			...owned.get(l.key),
@@ -218,13 +218,18 @@ export async function attackSurfaceIn(root: string): Promise<SurfaceInput> {
 		...(await clientSectionsOf(root)),
 		...(await idpTypesOf(root)),
 	];
-	const settings = sections.flatMap((s) =>
-		s.rows.map((r) => ({
-			key: r.key,
-			owner: s.owner,
-			...(r.default === undefined ? {} : { default: r.default }),
-		})),
-	);
+	// A key held in several variants is one setting of its owner, its first default shown.
+	const settings = [
+		...new Map(
+			sections
+				.flatMap((s) => [...s.rows, ...(s.items ?? [])].map((r) => ({ r, owner: s.owner })))
+				.toReversed()
+				.map(({ r, owner }) => [
+					`${owner} ${r.key}`,
+					{ key: r.key, owner, ...(r.default === undefined ? {} : { default: r.default }) },
+				]),
+		).values(),
+	].toReversed();
 	const packages = [...workspacePackages(root)].map(([name, dir]) => {
 		const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
 		return {

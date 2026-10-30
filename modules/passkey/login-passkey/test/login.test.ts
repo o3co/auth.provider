@@ -208,7 +208,7 @@ const refusedBy = (reason: string) =>
 	});
 
 describe("a passkey login", () => {
-	it("opens a session for the passkey's subject, with the user's attributes, at the challenge's time", async () => {
+	it("opens a session for the passkey's subject, with the user's attributes, authenticated at its opening", async () => {
 		const s = await serve();
 		const key = await s.registered("s-alice");
 		const answered = await s.login(key);
@@ -218,7 +218,7 @@ describe("a passkey login", () => {
 		const [facts] = s.seen;
 		expect(facts?.subject).toBe("s-alice");
 		expect(facts?.attributes?.values.groups).toEqual(["staff"]);
-		expect(typeof facts?.authenticatedAt).toBe("number");
+		expect(facts?.authenticatedAt).toBe("opening");
 		expect(s.events).toContainEqual(
 			expect.objectContaining({ kind: "passkey.session.opened", subject: "s-alice" }),
 		);

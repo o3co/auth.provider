@@ -397,7 +397,46 @@ describe("the logout a client starts", () => {
 		expect(h.events).toEqual([]);
 	});
 
-	it("answers 503 where the client a return is judged by cannot be read, and closes nothing", async () => {
+	it("sends a browser's refused request on to the deployment's error page, its error in the query, and answers JSON otherwise, closing nothing", async () => {
+		const page = "https://pages.example/logout-error?lang=en";
+		const browser = { accept: "text/html,application/xhtml+xml,*/*;q=0.8" };
+		const unregistered = {
+			error: "invalid_request",
+			error_description: "post_logout_redirect_uri is not registered for the client",
+		};
+		const paged = await serve({ settings: { "error-page": page } });
+		const { session } = await paged.login();
+		const hint = await paged.hintFor(session.id);
+		const asked = { id_token_hint: hint, post_logout_redirect_uri: `${back}/`, state: "s" };
+		for (const method of ["GET", "POST"] as const) {
+			const out = await paged.call(method, asked, browser);
+			expect([method, out.status, out.headers]).toMatchObject([method, 303, noCache]);
+			const to = new URL(out.headers.location ?? "");
+			expect([to.origin + to.pathname, Object.fromEntries(to.searchParams)]).toEqual([
+				"https://pages.example/logout-error",
+				{ lang: "en", ...unregistered },
+			]);
+		}
+		// Every refusal a browser meets goes there: a parameter sent twice too.
+		const twice = await paged.call("GET", { ...asked, state: ["a", "b"] }, browser);
+		expect(new URL(twice.headers.location ?? "").searchParams.get("error_description")).toBe(
+			"repeated parameter",
+		);
+		const json = await paged.call("GET", asked, { accept: "application/json" });
+		expect([json.status, json.json]).toEqual([400, unregistered]);
+		expect(await paged.stillOpen(session.id)).toBe(true);
+		const plain = await serve();
+		const other = await plain.login();
+		const out = await plain.call(
+			"GET",
+			{ ...asked, id_token_hint: await plain.hintFor(other.session.id) },
+			browser,
+		);
+		expect([out.status, out.json]).toEqual([400, unregistered]);
+		expect([...paged.events, ...plain.events]).toEqual([]);
+	});
+
+	it("answers 503 where the client a return is judged by cannot be read, and closes nothing, as JSON to a browser even beside an error page", async () => {
 		const down = unavailableSwitch<Clients>("clients");
 		const h = await serve({ clientRecordsDown: down });
 		const { session } = await h.login();
@@ -411,6 +450,20 @@ describe("the logout a client starts", () => {
 			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "clients" } },
 		]);
 		expect(await h.stillOpen(session.id)).toBe(true);
+		// An outage is no refusal: the error page is the deployment's for refusals alone.
+		const pagedDown = unavailableSwitch<Clients>("clients");
+		const paged = await serve({
+			clientRecordsDown: pagedDown,
+			settings: { "error-page": "https://pages.example/logout-error" },
+		});
+		const signedIn = await paged.login();
+		pagedDown.failNext("find");
+		const browser = await paged.call(
+			"GET",
+			{ id_token_hint: await paged.hintFor(signedIn.session.id), post_logout_redirect_uri: back },
+			{ accept: "text/html" },
+		);
+		expect([browser.status, browser.json]).toEqual([503, { error: "temporarily_unavailable" }]);
 	});
 
 	it("answers a close left pending 503, clearing the cookie and recording it by its sid and source alone, never as a logout", async () => {

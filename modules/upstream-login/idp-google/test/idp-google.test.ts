@@ -3,7 +3,7 @@ import { externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
 import { testSigner } from "@mod/external-jwt/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
@@ -112,7 +112,9 @@ async function open(world: { token?: Handler; settings?: Record<string, unknown>
 		...endpoints,
 		...world.settings,
 	});
-	return { upstream: opened(read, stub, app.get(externalJwt), { clock }), asked };
+	const recorded = recordingLog();
+	const at = { clock, log: recorded.log, idp: "google" };
+	return { upstream: opened(read, stub, app.get(externalJwt), at), asked, warned: recorded.lines };
 }
 
 const start: AuthorizationStart = {
@@ -406,8 +408,9 @@ describe("idp-google", () => {
 		expect(await profileOf({})).toBeUndefined();
 	});
 
-	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless iss is not asked, comparing it code point by code point [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b] [oidc-discovery-5-c]", async () => {
-		const { upstream, asked } = await open({ token: async () => granted() });
+	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless its absence is accepted, comparing it code point by code point [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b] [oidc-discovery-5-c]", async () => {
+		const { upstream, asked, warned } = await open({ token: async () => granted() });
+		expect(warned()).toEqual([]);
 		for (const iss of [
 			undefined,
 			"",
@@ -421,8 +424,11 @@ describe("idp-google", () => {
 		expect(asked).toEqual([]);
 		const lenient = await open({
 			token: async () => granted(),
-			settings: { "require-iss": false },
+			settings: { "accept-missing-iss": true },
 		});
+		expect(lenient.warned()).toEqual([
+			{ level: "warn", event: "idp-google.iss_not_required", fields: { idp: "google" } },
+		]);
 		expect(await lenient.upstream.exchange(exchange({ iss: undefined }))).toMatchObject({
 			subject: "g-alice",
 		});
@@ -430,6 +436,18 @@ describe("idp-google", () => {
 			expect(await outcome(lenient.upstream.exchange(exchange({ iss }))), iss).toBe("refused");
 		}
 		expect(lenient.asked.filter((a) => a.url === endpoints["token-endpoint"])).toHaveLength(1);
+	});
+
+	it("refuses 0.18's require-iss as an unknown key, naming it", () => {
+		const read = settings.safeParse({
+			"client-id": "c",
+			"client-secret": "s",
+			"require-iss": false,
+		});
+		expect(read.success).toBe(false);
+		expect(read.error?.issues).toEqual([
+			expect.objectContaining({ code: "unrecognized_keys", keys: ["require-iss"] }),
+		]);
 	});
 
 	it("takes an id_token under the algorithms its settings name, RS256 alone by default", async () => {

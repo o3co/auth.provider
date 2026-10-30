@@ -11,7 +11,7 @@
 
 ## Offers
 - `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked.
-- `complete`: login fact → session and cookie at `kernel`'s time; an authentication time neither epoch milliseconds (0 to 8.64e15) nor `unknown` is a `TypeError`, before anything is closed; the carried session is closed first, and the login is unavailable when that close cannot be added to the closings, or the new session cannot be listed under its subject.
+- `complete`: login fact → session and cookie at `kernel`'s time; an authentication time neither epoch milliseconds (0 to 8.64e15), `opening` nor `unknown` is a `TypeError`, before anything is closed; the carried session is closed first, and the login is unavailable when that close cannot be added to the closings, or the new session cannot be listed under its subject.
 - `enterFor`: request and level (use / none / credentials) → entered (with its end: the opening plus the lifetime in force), absent, or short with the requirement's name and its answer, passed on unread; a session closed or revoked while the requirements are asked is absent.
 - Extension point `entryJudge`: context and level → the first requirement that falls short, or admitted with whether one judged the level; asked with "use" by `enter` and the checks by handle. Where nothing judges `credentials`, `sessionRules` holds the floor (`rules`' card), as it closes a subject's listed sessions in the listing's order, for an implementation and the stand-in alike.
 - `refusedEntry`: an entry that did not enter → its answer, absent `401` `{"error":"login_required"}`, short `403` with the requirement's answer, both kept out of caches.
@@ -28,7 +28,7 @@
 
 ## Invariants
 - A session's state only moves forward. A host that cannot read a record (one a newer host wrote, during a rolling upgrade) lets nobody in on it and answers a login or close over its cookie Unavailable; the cookie stays.
-- A login's authentication time is kept (a raise included), the opening time when it gives a later one; one it reports unknown is answered as `authenticatedAtUnknown` and never counts as fresh. The lifetime, the cookie and the subject's revocation boundary count from the opening instead.
+- A login's authentication time, and what counts from the opening instead, follow `rules`' card.
 - A session's subject is the one its login gave while its record lives (a raise included), and a handle names one session only, so a caller that kept a handle with its subject never finds them disagree.
 - A login's attributes are kept as `login-attributes` keeps them, a frozen copy taken at login, kept unchanged (a raise included) until the session closes.
 

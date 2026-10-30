@@ -20,8 +20,12 @@ export interface AuthContext {
 export interface LoginFacts {
 	readonly subject: string;
 	readonly amr: readonly string[];
-	/** When the user authenticated (epoch ms, 0 to 8.64e15), or "unknown"; the opening when later; anything else is a TypeError. */
-	readonly authenticatedAt: number | "unknown";
+	/**
+	 * When the user authenticated (epoch ms, 0 to 8.64e15), the opening when later; "opening", the session's
+	 * opening, for a login the provider authenticates itself, a gate's wait included; or "unknown". Anything
+	 * else is a TypeError.
+	 */
+	readonly authenticatedAt: number | "opening" | "unknown";
 	readonly attributes?: SourcedAttributes;
 }
 

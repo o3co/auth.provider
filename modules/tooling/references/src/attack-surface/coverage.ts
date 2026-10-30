@@ -15,7 +15,7 @@ export interface Coverage {
 	readonly secrets: readonly { readonly key: string; readonly holds: string }[];
 	/** Settings the naming rule takes for a secret, and are not. */
 	readonly notSecrets: readonly { readonly key: string; readonly why: string }[];
-	/** Settings that weaken a guarantee when set, beyond those the naming rule finds. */
+	/** Settings that weaken a guarantee when set, beyond those the naming rule finds, or saying how one it finds does. */
 	readonly loosening: readonly { readonly key: string; readonly weakens: string }[];
 	/** Settings a candidate by name or by the security model, that weaken none. */
 	readonly notLoosening: readonly { readonly key: string; readonly why: string }[];
@@ -38,12 +38,12 @@ export const coverage: Coverage = {
 		{
 			method: "GET",
 			path: "/oauth/logout",
-			to: "the client's registered `post_logout_redirect_uri`, or an upstream's end of session",
+			to: "the client's registered `post_logout_redirect_uri`, an upstream's end of session, or the deployment's error page",
 		},
 		{
 			method: "POST",
 			path: "/oauth/logout",
-			to: "the client's registered `post_logout_redirect_uri`, or an upstream's end of session",
+			to: "the client's registered `post_logout_redirect_uri`, an upstream's end of session, or the deployment's error page",
 		},
 		{
 			method: "POST",
@@ -88,6 +88,14 @@ export const coverage: Coverage = {
 			key: "keys.previous",
 			holds: "a previous signing key, which may be given as its private PEM",
 		},
+		{
+			key: "keys.previous.<i>.public-key",
+			holds: "a previous signing key, which may be given as its private PEM",
+		},
+		{
+			key: "users.registered.<i>.password-hash",
+			holds: "a registered user's password hash, which a guess can be tried against offline",
+		},
 		{ key: "seal.previous", holds: "the previous sealing keys" },
 	],
 	notSecrets: [
@@ -129,6 +137,204 @@ export const coverage: Coverage = {
 				"an established grant answers only to the `delegations` boundary when a revocation asks to keep delegations",
 		},
 		{ key: "tokens.revocation", weakens: "`unsupported`: nothing issued can be revoked" },
+		{
+			key: "mfa-binding-proof.mode",
+			weakens: "`never`: a first counting factor binds with no binding proof asked",
+		},
+		{
+			key: "webauthn.top-origins",
+			weakens: "each page named may frame a ceremony, in another origin's page",
+		},
+		{
+			key: "mfa-webauthn.user-verification",
+			weakens:
+				"`discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes",
+		},
+		{
+			key: "passkeys.user-verification",
+			weakens:
+				"`discouraged`: the authenticator is not asked to verify its user, so whoever holds it passes",
+		},
+		{
+			key: "acr.values",
+			weakens:
+				"an acr met by a weak amr set: a login with only that is taken for the acr, so a step-up asking it asks no more",
+		},
+		{
+			key: "device-grant.attempts",
+			weakens: "raised, up to 100: more guesses at a user code in each window",
+		},
+		{
+			key: "device-grant.attempts-window",
+			weakens: "shortened: the guesses `attempts` allows come back sooner",
+		},
+		{
+			key: "login-password.attempts",
+			weakens: "raised, up to 100: more password guesses from one source in each window",
+		},
+		{
+			key: "login-password.account-attempts",
+			weakens:
+				"raised, up to 100: more failed guesses at one identifier before each next one waits",
+		},
+		{
+			key: "login-passkey.attempts",
+			weakens: "raised, up to 100: more requests from one source in each window",
+		},
+		{
+			key: "mfa-flows.attempts-per-transaction",
+			weakens: "raised, up to 10: more second-factor guesses in one transaction",
+		},
+		{
+			key: "sections.consent.first-party",
+			weakens:
+				"`true`: that client's users are never asked for consent; taken only for a client the operator registered",
+		},
+		{
+			key: "sections.token-exchange.others-tokens",
+			weakens: "`true`: the client may exchange subject and actor tokens that name another client",
+		},
+		{
+			key: "sections.token-exchange.public-exchange",
+			weakens: "`true`: the client may exchange while public, authenticating nothing",
+		},
+		{
+			key: "sections.federation-tokens.receives",
+			weakens: "`true`: the client is handed its sessions' upstream tokens",
+		},
+		{
+			key: "federation-grants-connect.identity-check",
+			weakens: "`none`: a callback whose upstream account another user holds is not refused",
+		},
+		{
+			key: "jwt-bearer.issuers.<i>.client",
+			weakens:
+				"a request naming no client is taken as this public client, its assertions alone identifying it; warned at boot",
+		},
+		{
+			key: "jwt-bearer.issuers.<i>.self-issued-prefix",
+			weakens:
+				"any signer whose contributed key's thumbprint follows this prefix in `iss` and `sub` is taken as this issuer",
+		},
+		{
+			key: "mfa-flows.lockout.threshold",
+			weakens:
+				"raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all",
+		},
+		{
+			key: "mfa-flows.lockout.budget",
+			weakens:
+				"raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all",
+		},
+		{
+			key: "mfa-flows.lockout.hard-limit",
+			weakens:
+				"raised, with no upper bound: more second-factor guesses before a hold, so past enough no lockout at all",
+		},
+		{
+			key: "mfa-flows.lockout.backoff",
+			weakens:
+				"shortened: holds after failed second-factor guesses end sooner, so more guesses go through",
+		},
+		{
+			key: "mfa-flows.lockout.max-backoff",
+			weakens:
+				"shortened: holds after failed second-factor guesses end sooner, so more guesses go through",
+		},
+		{
+			key: "mfa-flows.lockout.budget-window",
+			weakens:
+				"shortened: holds after failed second-factor guesses end sooner, so more guesses go through",
+		},
+		{
+			key: "mfa-flows.lockout.memory",
+			weakens:
+				"shortened: holds after failed second-factor guesses end sooner, so more guesses go through",
+		},
+		{
+			key: "refresh.lifetime",
+			weakens:
+				"past the default day, up to 365 days: a leaked refresh token family is used that long",
+		},
+		{
+			key: "session-lifecycle.lifetime",
+			weakens: "past the default hour, up to 30 days: a session and its cookie are taken that long",
+		},
+		{
+			key: "oidc.id-token-lifetime",
+			weakens: "past the default hour: a relying party may take an ID token that long",
+		},
+		{
+			key: "federation-grants.max-lifetime",
+			weakens:
+				"past the default 30 days, up to 365: a federation grant answers that long from its activation",
+		},
+		{
+			key: "federation-tokens.max-lifetime",
+			weakens: "past the default day, up to 365: an upstream's token is taken to live that long",
+		},
+		{
+			key: "external-jwt.key-set-max-age",
+			weakens:
+				"past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it",
+		},
+		{
+			key: "client-assertion.max-lifetime",
+			weakens: "past the default hour, up to a day: a client assertion is taken that long",
+		},
+		{
+			key: "jwt-bearer.max-assertion-lifetime",
+			weakens:
+				"past the default hour, up to a day: a jwt-bearer assertion is taken with its `exp` that far ahead, and its `exp` no further from its `iat`",
+		},
+		{
+			key: "federation.idps.<name>.secret-lifetime",
+			weakens:
+				"past the default five minutes, up to half a year: a signed client secret, if leaked, is used that long",
+		},
+		{
+			key: "device-grant.code-lifetime",
+			weakens:
+				"past the default ten minutes, up to an hour: a user code can be guessed and a device code used that long",
+		},
+		{
+			key: "exchange-id-tokens.max-age",
+			weakens:
+				"past the default ten minutes, up to an hour: an older id_token is taken for an exchange",
+		},
+		{
+			key: "tokens.subject-check",
+			weakens:
+				"`none`: no module checks an access token's subject against its revocations, so a revoked subject's access tokens are taken until they expire",
+		},
+		{
+			key: "token-exchange.max-lifetime",
+			weakens:
+				"a lifetime a client asks of an exchange (`o3co_expires_in`) is taken up to this, up to a day, past `tokens`' own lifetimes, though never past the subject token's end or its ties'",
+		},
+		{
+			key: "login-passkey.counts-as-mfa",
+			weakens:
+				"`true` (the default): a passkey login whose user was verified meets a required second factor alone",
+		},
+		{
+			key: "mfa-email.adds-second-factor",
+			weakens: "`true`: a code by mail meets a required second factor, so the mailbox does",
+		},
+		{
+			key: "rate-limit.fail-mode",
+			weakens:
+				"`open`: while the store cannot count, a route's request limit lets every request through",
+		},
+		{
+			key: "redis.durability",
+			weakens:
+				"`none`: a crash loses the latest writes, spent assertion and proof ids and lockout records among them",
+		},
+		{
+			key: "redis.replication",
+			weakens: "`none`: a failover loses writes, confirmed ones too",
+		},
 		{
 			key: "audit.receivers",
 			weakens: "`none`: audit events go nowhere, warned at every boot",
@@ -200,6 +406,10 @@ export const coverage: Coverage = {
 	],
 	notDestinations: [
 		{
+			key: "jwt-bearer.issuers.<i>.issuer",
+			why: "the issuer an assertion's `iss` is matched with, never fetched; its keys come from `jwks-uri`",
+		},
+		{
 			key: "clients-cimd.allow-any-host",
 			why: "a switch that names no host: documents are fetched where a client id points",
 		},
@@ -250,6 +460,7 @@ export const coverage: Coverage = {
 		},
 		{ key: "authorize.login-page", why: "the deployment's page, which it draws and protects" },
 		{ key: "consent.page", why: "the deployment's page, which it draws and protects" },
+		{ key: "rp-logout.error-page", why: "the deployment's page, which it draws and protects" },
 		{
 			key: "outbound.allow",
 			why: "the hosts outbound may reach by name at all: the list opens only what it names",

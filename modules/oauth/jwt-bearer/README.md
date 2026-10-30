@@ -23,7 +23,7 @@
 - Extension point `delegatedAssertions`: a delegated issuer's assertions, checked and used up by another module by its own rules (`delegated`). Client metadata section `jwt-bearer` (`delegated`).
 - Operator section (`jwtBearerConfig` in `./testing`):
   - `issuers`, the trusted issuers, each entry as the internal module `issuers` reads it. `delegated-issuers`, as `issuers` reads them.
-  - `max-assertion-lifetime` (`1s` to `1d`, default `1h`): how far ahead its `exp`, and back its `iat`, an assertion may be when taken, not `exp - iat`. `clock-skew` (`0s` to `5m`, default `30s`). Each in whole seconds with its unit, narrowed by an entry alone.
+  - `max-assertion-lifetime` (`1s` to `1d`, default `1h`): how far ahead its `exp` may be when taken, and its `exp` − `iat`, as `external-jwt` holds a longest lifetime. `clock-skew` (`0s` to `5m`, default `30s`). Each in whole seconds with its unit, narrowed by an entry alone.
 
 ## Invariants
 - Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once signed is refused by `tokens`, also `expired`.
