@@ -142,19 +142,24 @@ describe("a password login a second factor holds for longer than max_age", () =>
 		return new URL(res.headers.get("location") ?? "", issuer);
 	};
 
-	it("counts max_age from when the second factor lets the login in, not from the password", async () => {
-		const { codes } = await s.enrol("dana");
-		const b = heldBrowser(() => s.at.base);
-		const sent = await ask(b, new URLSearchParams(request({ max_age: "1" })).toString());
-		const back = sent.searchParams.get("redirect_to") ?? "";
-		// The page logs in, then the browser follows the return, as the other scenes here do.
-		const login = await b.login("dana");
-		expect(login.status).toBe(403);
-		// The second factor takes longer than max_age allows after the password.
-		await new Promise((resolve) => setTimeout(resolve, 1500));
-		const done = await letInByRecovery(b, String(login.body.transaction), codes[0] ?? "");
-		expect(done.status).toBe(200);
-		const answered = await ask(b, new URL(back, issuer).search.slice(1));
-		expect(answered.searchParams.has("code")).toBe(true);
-	});
+	// The legacy build counts max_age from the password, so it refuses a second factor slower than it.
+	it.skipIf(areaTarget().differs("max-age-from-the-second-factor"))(
+		"counts max_age from when the second factor lets the login in, not from the password [guarantee-2-b]",
+		async () => {
+			const { codes } = await s.enrol("dana");
+			const b = heldBrowser(() => s.at.base);
+			const sent = await ask(b, new URLSearchParams(request({ max_age: "3" })).toString());
+			const back = sent.searchParams.get("redirect_to") ?? "";
+			// The page logs in, then the browser follows the return, as the other scenes here do.
+			const login = await b.login("dana");
+			expect(login.status).toBe(403);
+			// The second factor takes longer than max_age allows after the password; max_age leaves a slow
+			// runner seconds, not one, between the second factor and the next request.
+			await new Promise((resolve) => setTimeout(resolve, 3500));
+			const done = await letInByRecovery(b, String(login.body.transaction), codes[0] ?? "");
+			expect(done.status).toBe(200);
+			const answered = await ask(b, new URL(back, issuer).search.slice(1));
+			expect(answered.searchParams.has("code")).toBe(true);
+		},
+	);
 });
