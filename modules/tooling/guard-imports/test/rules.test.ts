@@ -1185,21 +1185,27 @@ describe("guard-imports", () => {
 			]);
 		});
 
-		it("reads an object in narrower as an owner's statement while it is switched over", () => {
-			const legacy = pkg(
-				"@c/policy",
-				{ "src/narrower.ts": narrower, "src/contract.ts": sending.join("\n") },
-				{
-					exports: { ".": "./src/contract.ts" },
-					dependencies: { "@c/urls": "*" },
-					narrower: { type: "Narrower", property: "internal" },
-				},
-				"foundation",
+		it("reads an object in narrower as a writer's malformed declaration, never as an owner", () => {
+			const mistaken = writer(
+				"@c/mistaken",
+				{ type: "Narrower", property: "internal" },
+				stating("@c/mistaken"),
 			);
-			expect(found([urls, legacy, declaring("@c/declared"), writer("@c/other")])).toContain(
-				"@c/other/src/module.ts:5 internal",
-			);
-			expect(found([urls, legacy, declaring("@c/declared")])).toEqual([]);
+			expect(found([urls, owner(), mistaken])).toEqual([
+				'@c/mistaken narrower is {"type":"Narrower","property":"internal"}, not exactly "internal"',
+				"@c/mistaken/src/module.ts:5 internal",
+				"@c/mistaken/src/module.ts:6 internal",
+				"@c/mistaken/src/module.ts:9 internal",
+				"@c/mistaken/src/module.ts:10 internal",
+				"@c/mistaken/src/module.ts:11 internal",
+				"@c/mistaken/src/module.ts:16 internal",
+				"@c/mistaken/src/module.ts:17 internal",
+				"@c/mistaken/src/module.ts:18 internal",
+				"@c/mistaken/src/module.ts:21 internal",
+				"@c/mistaken/src/module.ts:22 internal",
+				"@c/mistaken/src/module.ts:23 internal",
+				"@c/mistaken/src/module.ts:24 internal",
+			]);
 		});
 
 		it("reads the type and the property the owner states, never a name of guard's own", () => {

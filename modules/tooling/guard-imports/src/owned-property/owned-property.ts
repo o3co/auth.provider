@@ -242,24 +242,19 @@ export interface PropertyDeclarations {
 	readonly declaring: readonly Pkg[];
 }
 
-/**
- * The owners' `narrowerOwner` and the writers' `narrower` in `packages`. While it is switched over, an
- * object in `narrower` is read as an owner's statement too.
- */
+/** The owners' `narrowerOwner` and the writers' `narrower` in `packages`. */
 export function propertyDeclarations(packages: readonly Pkg[]): PropertyDeclarations {
 	const owners: Owned[] = [];
 	const malformed: Pkg[] = [];
 	const declaring: Pkg[] = [];
 	for (const p of packages) {
-		const writes = p.manifest.narrower;
-		const legacy = typeof writes === "object" && writes !== null && !Array.isArray(writes);
-		const stated = p.manifest.narrowerOwner ?? (legacy ? writes : undefined);
+		const stated = p.manifest.narrowerOwner;
 		if (stated !== undefined) {
 			const owned = ownedOf(stated);
 			if (owned === undefined) malformed.push(p);
 			else owners.push({ owner: p, ...owned });
 		}
-		if (writes !== undefined && !legacy) declaring.push(p);
+		if (p.manifest.narrower !== undefined) declaring.push(p);
 	}
 	return { owners, malformed, declaring };
 }
