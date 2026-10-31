@@ -30,7 +30,7 @@
 - A package outside the release is composed beside the published release alone, through `combinations`' `combinationsWith`: never with a linked workspace, nor from the workspace. The app depends on it at its recorded version, imports it by its name, and its fragment is read with the release's in one reading.
 - It is composed beside a release whose index records the integrity of its bundles and of zod, and passes them to `app-output` for the app to be held to. An index that records none, a zod other than the app's, and a package outside the release taking as a peer a bundle the index records no integrity of are refused.
 - `npm:` without `--outside-from`, `--outside-from` with no `npm:` name, `npm:` with a linked workspace, and `--allow-fresh` of a name not named `npm:` are usage errors.
-- A pattern or a listed app whose store is kept in memory says in its README that the deployment runs as one instance.
+- A pattern or a listed app whose store is kept in memory says in its README that the deployment runs as one instance, by `store`'s own declaration.
 - A listed app takes no axis default but one declared to replace its owner: its store is kept in memory unless a store adapter is listed.
 
 ## Data
