@@ -1,0 +1,32 @@
+import { legacyVariablesCheck, loadConfig } from "{{configFiles}}";
+import { assemble, BootRefused } from "{{kernel}}";
+{{imports}}
+
+{{refused}}
+
+const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
+const source = { files, env: process.env };
+const app = await loadConfig(source)
+	.then(async (config) => {
+		// A variable 0.17 read, left in the environment, is named once, or refuses boot, as config-files says.
+		const told = await legacyVariablesCheck(source);
+		if (told !== undefined) await written(process.stderr, `warn config-files: ${told}\n`);
+		return assemble({ modules: [{{modules}}], config });
+	})
+	.catch(refused);
+// Taken before starting, so a signal while starting stops once started instead of killing.
+let started: Promise<void> = Promise.resolve();
+// Run once: a second signal, the same or the other, waits for the first stop instead of stopping again.
+let stopping: Promise<void> | undefined;
+const stop = () =>
+	(stopping ??= (async () => {
+		await started.catch(() => undefined);
+		// Within the kernel's `stop-deadline`.
+		await app.stop();
+		process.exit(0);
+	})());
+// Kept for every signal: with none listening, a repeated one would take Node's default and kill mid-stop.
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
+started = app.start();
+await started;
