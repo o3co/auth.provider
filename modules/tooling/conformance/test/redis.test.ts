@@ -5,7 +5,7 @@ import { startRedis } from "../src/driver.ts";
 
 const docker = (() => {
 	try {
-		dockerSync(["info"], dockerWithin.control, { stdio: "ignore" });
+		dockerSync(["version"], dockerWithin.control, { stdio: "ignore" });
 		return true;
 	} catch {
 		return false;
