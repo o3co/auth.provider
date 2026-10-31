@@ -67,6 +67,17 @@ describe("a policy made from the operator's settings", () => {
 		}
 	});
 
+	it("names the plain lists too in a plain http URL's first refusal, so one refusal says every key it needs", () => {
+		const policy = made({ "allow-any-public": false, allow: ["idp.example"] });
+		expect(policy.explain("http://localhost:8080/")).toBe(
+			"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public; plain http also needs its host:port in outbound.plain-loopback, or, for a URL of your own configuration on a private network, in outbound.plain-internal",
+		);
+		// https asks nothing of the plain lists.
+		expect(policy.explain("https://other.example/")).toBe(
+			"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+		);
+	});
+
 	it("explains a refusal with what to set, says where a credential may not go, and reads host lists", () => {
 		const policy = made({ "allow-any-public": false, allow: ["idp.example"] });
 		expect(policy.explain("https://other.example/")).toBe(
