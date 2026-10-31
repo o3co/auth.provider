@@ -30,9 +30,10 @@ const linkOf = (value: unknown) => {
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
-/** A header's value as a log may carry it: printable ASCII, cut short. */
-const loggable = (value: string | undefined) =>
-	(value ?? "").replace(/[^\x20-\x7e]/g, "").slice(0, 64);
+/** The values `Sec-Fetch-Site` takes, as a log carries them: anything else, absent included, is `other`. */
+const fetchSites = new Set(["cross-site", "same-origin", "same-site", "none"]);
+const fetchSiteOf = (value: string | undefined) =>
+	value !== undefined && fetchSites.has(value) ? value : "other";
 
 /**
  * The step-up page for a start short of `requirement`, coming back to this start alone: spelled from
@@ -147,7 +148,7 @@ export function linkWith(p: LinkParts): UpstreamContinuation {
 		begin: async (request, name) => {
 			// Only a navigation from this deployment's own page: another site cannot tie its identity here.
 			if (!p.origin.sameOrigin(request)) {
-				const secFetchSite = loggable(request.headers.get("sec-fetch-site"));
+				const secFetchSite = fetchSiteOf(request.headers.get("sec-fetch-site"));
 				p.log.warn("federation.link_start_rejected", { idp: name, secFetchSite });
 				return { answer: jsonAnswer(403, { error: "link_requires_trusted_origin" }) };
 			}

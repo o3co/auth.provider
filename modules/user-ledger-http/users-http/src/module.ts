@@ -45,8 +45,13 @@ const section = z
 	})
 	.superRefine((s, ctx) => {
 		const urls = urlKeys.flatMap((key) => s[key] ?? []);
+		// At the first key, so a generated app tells where it is set, as it does for any refused key.
 		if (urls.length === 0) {
-			ctx.addIssue({ code: "custom", message: `needs one of ${urlKeys.join(", ")}` });
+			ctx.addIssue({
+				code: "custom",
+				path: [urlKeys[0]],
+				message: `needs one of ${urlKeys.join(", ")}`,
+			});
 		}
 	});
 

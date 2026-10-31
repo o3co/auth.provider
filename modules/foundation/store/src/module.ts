@@ -19,7 +19,7 @@ export default defineModule(
 					);
 				}
 				// Accepted, yet said at every start: a restart forgets what these spaces keep.
-				c.log.warn("store.volatile_accepted", { spaces: kept.map((s) => s.name).join(",") });
+				c.log.warn("store.volatile_accepted", { spaces: kept.map((s) => s.name).join(", ") });
 			}
 			return memoryStore(c.clock, declared);
 		}),

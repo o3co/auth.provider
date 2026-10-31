@@ -4,6 +4,12 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"asks": [
+		{
+			"line": "`mfa-binding-proof.mode`: `when-available`, by default, asks a binding proof before a subject's first counting factor where one is composed; with none composed, that factor binds unproved and every start warns `mfa-binding-proof.none_available`. `always` asks one, refusing boot with none composed; `never` asks none, warned at every start.",
+			"decides": true
+		}
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./module": "./src/module.ts"

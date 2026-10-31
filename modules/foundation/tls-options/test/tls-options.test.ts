@@ -156,7 +156,7 @@ describe("the section's options", () => {
 		expect(() => heldToFloor(copied, {})).toThrow(TypeError);
 	});
 
-	it("check the peer's certificate where NODE_TLS_REJECT_UNAUTHORIZED is 0, which bare options do not", async () => {
+	it("check the peer's certificate where NODE_TLS_REJECT_UNAUTHORIZED is 0, which bare options do not [oidc-core-16.17-a] [oidc-discovery-7.1-a]", async () => {
 		vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
 		const held = heldToFloor(tlsOptionsFor({}), {});
 		expect(await handshakeWith({}, "tls1.3", false)).toMatchObject({ kind: "agreed" });

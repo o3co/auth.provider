@@ -24,8 +24,11 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import keysModule from "@mod/keys/module";
+import { keysConfig } from "@mod/keys/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
+import senderBindingModule from "@mod/sender-binding/module";
 import { sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
@@ -36,10 +39,12 @@ import {
 	type AccessGrant,
 	type IssuanceRequest,
 	issuancePolicies,
+	subjectChecks,
 	type Tokens,
 	tokens,
 } from "@mod/tokens";
-import { tokensStandIn } from "@mod/tokens/testing";
+import tokensModule from "@mod/tokens/module";
+import { tokensConfig, tokensStandIn } from "@mod/tokens/testing";
 import { describe, expect, it } from "vitest";
 import { accessTokenType, type ExchangeVerifier, exchangeVerifiers } from "../src/contract.ts";
 import tokenExchange from "../src/module.ts";
@@ -236,7 +241,11 @@ async function serve(
 				confidentialClient({ id: "app", sections: allowed }),
 				confidentialClient({
 					id: "gate",
-					sections: { ...allowed, "token-exchange": { "others-tokens": true } },
+					// Its public-exchange is unread, a confidential client being allowed the grant always.
+					sections: {
+						...allowed,
+						"token-exchange": { "others-tokens": true, "public-exchange": true },
+					},
 				}),
 				publicClient({ id: "spa", sections: allowed }),
 				publicClient({
@@ -558,6 +567,44 @@ describe("token-exchange: the subject check", () => {
 			],
 		});
 		await serve({ subjectsChecked: true });
+	});
+
+	it("refuses to boot beside tokens itself, not its stand-in, where its section states subject-check none, and boots where a module checks subjects [guarantee-4-e]", async () => {
+		/** The exchange composed with tokens itself and what each of them takes. */
+		const composed = (subjects: "checked" | "unchecked", extra: Module[] = []) =>
+			assemble({
+				modules: [
+					http,
+					keysModule,
+					issuerModule,
+					senderBindingModule,
+					tokensModule,
+					clientsModule,
+					secretHashModule,
+					grantCaller,
+					clientAllowanceModule,
+					tokenExchange,
+					...extra,
+				],
+				config: {
+					...kernelConfig(),
+					...httpConfig(),
+					...keysConfig(),
+					...issuerConfig(),
+					...tokensConfig({}, { subjects }),
+					...clientsConfig([confidentialClient({ id: "app", sections: allowed })]),
+				},
+				runtime,
+			});
+		await expect(composed("unchecked")).rejects.toMatchObject({
+			refusals: [
+				{ where: "token-exchange", reason: expect.stringContaining("tokens.subject-check") },
+			],
+		});
+		const check = defineModule({ name: "check", replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
+		]);
+		await composed("checked", [check]);
 	});
 });
 
@@ -1323,7 +1370,7 @@ describe("token-exchange: an answer told by its kind", () => {
 	});
 });
 
-it("warns at every start for each client that exchanges while public or exchanges others' tokens, by its id", async () => {
+it("warns at every start for each client that exchanges while public or exchanges others' tokens, by its id, and not of a confidential client's public-exchange", async () => {
 	const from = logged.lines().length;
 	await serve();
 	const warned = logged

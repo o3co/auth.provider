@@ -70,11 +70,14 @@ export default defineModule(
 					"tokens.subject-check is none, so a token made before a subject's revocation could be exchanged for a new one: compose a subject check and leave tokens.subject-check unset, or leave token-exchange out",
 				);
 			}
-			// Told at every start by client: each exchanges more than its own tokens, or while public.
+			// Told at every start by client: each exchanges more than its own tokens, or while public;
+			// `public-exchange` is read for a public client alone, so a confidential one is not told of it.
 			for (const client of (await c.get(clients)).registered()) {
 				const { "others-tokens": others, "public-exchange": publicly } =
 					client.section(clientSection);
-				if (publicly) c.log.warn("token-exchange.public_exchange", { client: client.id });
+				if (publicly && client.kind !== "confidential") {
+					c.log.warn("token-exchange.public_exchange", { client: client.id });
+				}
 				if (others) c.log.warn("token-exchange.others_tokens", { client: client.id });
 			}
 			const verifiers = await c.collect(exchangeVerifiers);

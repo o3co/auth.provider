@@ -57,6 +57,7 @@
   faults: Ev
 - **guarantee-3-l** MUST NOT: the ledger's subject revocation route (`/ledger/subject-revocations`) answers `200` complete while a dependency it waits on cannot answer; it answers `503` with `state` `unknown` where the boundary's write was not confirmed, `incomplete` where the boundary is written and a follower did not finish, and with no `state` where its window could not count.
   faults: Pu, Pd, R, L, S, F, Fs, C
+- **guarantee-3-m** MUST NOT: the provider reads a user ledger over HTTP (`users-http`) as knowing no such user from any answer but a `404` with `{"error":"not_found"}` or a `410` with `{"error":"gone"}`; an answer that is neither those nor the user, one it cannot read included, is unavailable. The password call's `401` that challenges no credential it sent is read as no such user too, a deprecated exception kept for 0.17's ledgers.
 
 ## 4 A subject's revocation boundary refuses everything made before it.
 

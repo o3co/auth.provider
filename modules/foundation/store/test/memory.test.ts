@@ -185,7 +185,7 @@ it("warns at every start that boots durable or replicated spaces on memory, nami
 		return recorded.lines().filter((line) => line.level === "warn");
 	};
 	expect(await warned(durable, replicated)).toEqual([
-		{ level: "warn", event: "store.volatile_accepted", fields: { spaces: "kept,copied" } },
+		{ level: "warn", event: "store.volatile_accepted", fields: { spaces: "kept, copied" } },
 	]);
 	expect(await warned()).toEqual([]);
 });

@@ -176,18 +176,31 @@ it("names the step-up page a short start is sent to, with the requirement and on
 	]);
 });
 
-it("refuses a start not shown to come from this origin, logging the IdP and what the browser said", async () => {
-	const s = standIn();
-	s.set.sameOrigin = false;
-	const request = testRequest({ headers: new Map([["sec-fetch-site", "cross-site\u0007"]]) });
-	expect(await refusedAt(s, request)).toEqual([403, { error: "link_requires_trusted_origin" }]);
-	expect(s.logged.lines()).toEqual([
-		{
-			level: "warn",
-			event: "federation.link_start_rejected",
-			fields: { idp: "corp", secFetchSite: "cross-site" },
-		},
-	]);
+it("refuses a start not shown to come from this origin, logging the IdP and what the browser said, as one of Sec-Fetch-Site's values or other", async () => {
+	for (const [sent, logged] of [
+		["cross-site", "cross-site"],
+		["same-site", "same-site"],
+		["none", "none"],
+		["cross-site\u0007", "other"],
+		["Cross-Site", "other"],
+		["a value the browser never sends", "other"],
+		[undefined, "other"],
+	] as const) {
+		const s = standIn();
+		s.set.sameOrigin = false;
+		const headers = new Map(sent === undefined ? [] : [["sec-fetch-site", sent]]);
+		expect(await refusedAt(s, testRequest({ headers }))).toEqual([
+			403,
+			{ error: "link_requires_trusted_origin" },
+		]);
+		expect(s.logged.lines(), String(sent)).toEqual([
+			{
+				level: "warn",
+				event: "federation.link_start_rejected",
+				fields: { idp: "corp", secFetchSite: logged },
+			},
+		]);
+	}
 });
 
 it("links the identity to the session's subject, hands the tokens to that session, records it, and lands by 303 [rfc9700-4.12-a]", async () => {

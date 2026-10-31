@@ -23,8 +23,8 @@
 - Delivery is best effort (tier 1): receivers run after `record` returns, so an answer never waits for its events. One that throws or rejects never changes the emitter's answer or stops the others.
 - An event is lost past a receiver's pending limit (never queued), when its receiver fails, or when still under way at the stop deadline: at stop, deliveries under way are awaited until `kernel.stop-deadline`.
 - The built-in receiver `log` writes at `info`, so `kernel` drops its lines when the operator's log level is higher; the other receivers are not subject to that level.
-- Every loss is counted, and a warning names the receiver once when it starts losing, with the failure's kind alone (`backlog`, `stopped`, or the error's name, never its message), and once when it next takes an event.
-- `none` warns at every boot that events go nowhere (`audit events go nowhere`, with `receivers: none`).
+- Every loss is counted, and a warning names the receiver once when it starts losing, with the failure's kind alone (`backlog`, `stopped`, or the error's name, never its message) (`audit.receiver_losing`), and once when it next takes an event (`audit.receiver_recovered`).
+- `none` warns at every boot that events go nowhere (`audit.receivers_none`).
 - Boot is refused without the section or with no receiver named, saying to name `log`, one a composed module contributes, or `none`; for a name that is no receiver (at its place, `audit.receivers.<i>`, never by the name), for a composed receiver left unnamed or named `log`, and for `none` while a receiver is composed.
 
 ## Data
