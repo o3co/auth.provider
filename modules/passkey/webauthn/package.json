@@ -5,6 +5,9 @@
 	"type": "module",
 	"kind": "feature",
 	"optIn": true,
+	"asks": [
+		"`webauthn.origins`: the origins a ceremony is taken from, each matched exactly: https, or plain http only on the host `localhost` (refused in production), never an IP address."
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
