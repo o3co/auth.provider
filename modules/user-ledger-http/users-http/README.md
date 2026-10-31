@@ -23,7 +23,7 @@
   |---|---|
   | `200`, a JSON object with an `id` of a subject's shape (`users`) and a non-empty string `username` | the user |
   | `401` with a Bearer challenge, when a credential was sent | unavailable (the credential is refused) |
-  | `401` otherwise | none |
+  | `401` otherwise | none; deprecated, kept for 0.17's ledgers: answer `404` with `{"error":"not_found"}` for no user with that identifier and password |
   | `404` with `{"error":"not_found"}`, or `410` with `{"error":"gone"}`, as for a lookup | none |
   | anything else, `403` (a proxy before the ledger may send it while it fails), a `200` of another shape, a `404` or `410` saying neither and other `2xx` included | unavailable |
 
