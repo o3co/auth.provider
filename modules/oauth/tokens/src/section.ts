@@ -7,7 +7,9 @@ export const section = z.strictObject({
 		// A second's lifetime, its iat cut to the second, leaves less than a second once signed: never issued.
 		.pipe(z.number().int().min(2).max(86_400))
 		.prefault("1h")
-		.describe("How long an access token lives, from `2s` to `1d` in whole seconds."),
+		.describe(
+			"How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds.",
+		),
 	revocation: z
 		.enum(["denylist", "unsupported"])
 		.describe(

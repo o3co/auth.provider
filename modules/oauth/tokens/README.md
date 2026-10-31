@@ -19,7 +19,8 @@
 - Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked. A policy reads session-built state late (`c.late`), else boot cycles.
 - `token-denylist`'s store interface for revoked tokens and its needs, passed on: a store wiring wires `tokens` and implements it.
 - `jwks_uri` among `issuer`'s metadata: `keys`' key set path on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
-- Operator section: `access-token-lifetime` (written with its unit, `2s` to `1d` in whole seconds, default `1h`; a second's lifetime, its `iat` cut to the second, would leave less than a second once signed), `revocation` (`denylist` or `unsupported`), `issuance-timeout` (written with its unit, `1s` to `1m`, default `10s`), `subject-check` (`none` states that no module checks subjects).
+- Operator section: `access-token-lifetime` (written with its unit, `2s` to `1d` in whole seconds, default `1h`, counted from when `issue` is asked, the policies' wait included: a lifetime no longer than that wait leaves none, and the token is refused; a second's lifetime, its `iat` cut to the second, would leave less than a second once signed).
+- Operator section, beside it: `revocation` (`denylist` or `unsupported`), `issuance-timeout` (written with its unit, `1s` to `1m`, default `10s`), `subject-check` (`none` states that no module checks subjects).
 - `./testing`: the contract test every implementation passes, configuration builders, and a stand-in: in memory, unsigned, ending and reading bindings as `tokens` does.
 
 ## Invariants
@@ -32,6 +33,7 @@
 - An added claim follows `added-claims`' rules, its shape, reserved names and limits; one outside them is the grant's maker's mistake (TypeError at `issue` and `admits`, a 500 with no audit), and a token read back with one is refused as `shape`.
 - A token over 16 KiB, or an actor chain over 16, is neither issued (TypeError) nor read.
 - An access token ends after its lifetime from its issue, capped at the expiry cap given. What `issue` answers of what is left, and its refusal of a token with less than a second, are `issuance`'s.
+- An access token's `iat` is the second `issue` was asked, taken before the policies are asked, so a subject boundary recorded while they answer refuses the token; its lifetime runs from there, what the client is told of it from signing. A grant asks `issue` right after its last check against the boundary, with nothing awaited between.
 
 ## Depends on
 - `kernel`, `keys`, `issuer`, `sender-binding`, `added-claims`, `token-denylist`

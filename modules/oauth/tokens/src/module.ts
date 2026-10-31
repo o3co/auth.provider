@@ -110,9 +110,9 @@ export default defineModule(
 			const judge = judging(await c.collect(issuancePolicies), c.clock.now, () =>
 				AbortSignal.timeout(timeout),
 			);
-			const issueAccess: IssueAccess = async (grant, limits) => {
+			const issueAccess: IssueAccess = async (grant, askedAt, limits) => {
 				const lifetimeSeconds = lifetimeOf(limits?.lifetimeSeconds, lifetime);
-				const { iat, exp } = expiryOf(c.clock.now(), lifetimeSeconds, limits?.notAfter);
+				const { iat, exp } = expiryOf(askedAt, lifetimeSeconds, limits?.notAfter);
 				const claims = {
 					iss,
 					...grantClaims(keptGrant(grant, iat)),

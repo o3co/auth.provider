@@ -22,16 +22,15 @@ import senderBindingModule from "@mod/sender-binding/module";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	type AccessCondition,
-	type AccessGrant,
 	accessConditions,
-	type IssueLimits,
+	issuancePolicies,
 	subjectChecks,
-	type Tokens,
 	tokens,
 } from "../src/contract.ts";
 import { defaultLifetimeSeconds } from "../src/limits.ts";
 import tokensModule from "../src/module.ts";
 import { section } from "../src/section.ts";
+import { issueFor } from "./composed.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 const start = 1_800_000_000_000;
@@ -63,12 +62,6 @@ async function boot(...args: Parameters<typeof assembled>) {
 /** The grant most tests issue for; a test that is about the grant writes its own. */
 const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
 
-/** Issues through `issue`, which nothing here refuses, and answers what it issued. */
-async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
-	const issued = await t.issue({ grant, grantType: "test" }, limits);
-	if (issued.kind !== "issued") throw new Error(`refused by ${issued.policy}`);
-	return issued.access;
-}
 const claimsOf = (token: string) =>
 	JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
 
@@ -423,6 +416,21 @@ it("refuses a token whose cap has passed, handing none out", async () => {
 	});
 });
 
+it("stamps iat when issue was asked, before the policies' wait: a boundary recorded meanwhile refuses it [guarantee-4-e]", async () => {
+	const waiting = defineModule({ name: "waiting", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(issuancePolicies).by(() => ({
+			name: "waiting",
+			judge: async () => {
+				now += 5_000;
+				return { kind: "allowed" as const };
+			},
+		})),
+	]);
+	const asked = Math.floor(now / 1000);
+	const t = await boot({ revocation: "unsupported" }, { extra: [waiting] });
+	expect(claimsOf((await issueFor(t, grant)).token)).toMatchObject({ iat: asked });
+});
+
 it("refuses a token another issuer stamped, and one bound by two members", async () => {
 	const kinds = defineModule({ name: "two-kinds", replicaSafe: true, takes: [] }, (m) =>
 		["one", "two"].map((member) =>
@@ -475,7 +483,7 @@ it("reads the access token's lifetime with its unit, in whole seconds, an hour b
 it("takes all it names under either revocation, the denylist only where it keeps one", async () => {
 	for (const revocation of ["denylist", "unsupported"]) {
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
-		expect((await takesUnused(assembly({ revocation })))["tokens"], revocation).toBeUndefined();
+		expect((await takesUnused(assembly({ revocation }))).tokens, revocation).toBeUndefined();
 	}
 });
 
