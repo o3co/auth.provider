@@ -5,7 +5,6 @@ import {
 	type Instance,
 	instanceOf,
 	ready,
-	recovered,
 	replicasOnline,
 	repointed,
 	sameMark,
@@ -147,7 +146,6 @@ describe("an id_token exchanged once, by the token exchange or as a JWT bearer a
 			const token = await idToken();
 			expect(said(await exchangedAt(i, token))).toEqual(issued);
 			await failover(d);
-			await recovered(d);
 			await ready(i);
 			await refusedAsTaken(i, token);
 		});
@@ -163,7 +161,6 @@ describe("an id_token exchanged once, by the token exchange or as a JWT bearer a
 			expect(crashed.exitCode).toBe(137);
 			repointed(d);
 			await replicasOnline(d);
-			await recovered(d);
 			await ready(i);
 			await refusedAsTaken(i, token);
 		});

@@ -114,9 +114,10 @@ describe("nothing issued while the store cannot write, and a request after it ca
 	});
 
 	it("gives no token when a write's confirmation by the replicas times out, and redeems the code once after [guarantee-3-j] {fault:Wt}", async () => {
-		// The scene's values, not the defaults. A confirmation waits 300 ms, so the resends' waits keep
-		// the scene from growing too long.
-		const redis = { "replication-timeout": "300ms" };
+		// The scene's values, not the defaults. A confirmation waits 2 s: short enough that the resends'
+		// waits keep the scene from growing too long, long enough that the control's write is confirmed on
+		// a loaded runner. The paused replica never acknowledges, so the fault is the same.
+		const redis = { "replication-timeout": "2s" };
 		// repl-timeout past the scene: a primary that dropped the stopped replica would confirm with WAIT 1.
 		const settings = ["--repl-timeout", "300"];
 		await on({ name: "store-rows-wt", settings, redis }, async (d) => {
@@ -145,7 +146,9 @@ describe("nothing issued while the store cannot write, and a request after it ca
 	});
 
 	it("gives no token while Redis refuses writes as NOREPLICAS, and redeems the code once after [guarantee-3-j] {fault:Nr}", async () => {
-		await on({ name: "store-rows-nr" }, async (d) => {
+		// A lag of its own, shorter than the topology's: the paused replicas soon stop counting as good.
+		const settings = ["--min-replicas-max-lag", "2"];
+		await on({ name: "store-rows-nr", settings }, async (d) => {
 			const a = instanceOf(d);
 			await control(a);
 			const c = await codeAt(a);
