@@ -12,7 +12,7 @@ export type AddedValue =
 /**
  * The claims a grant adds to its access token, by name, as JSON values. Never one at the top that
  * an access token's issuer writes (`iss`, `sub`, `aud`, `client_id`, `scope`, `act`, `amr`, `auth_time`, `acr`, `iat`,
- * `exp`, `jti`, `cnf`), nor one a specification gives a meaning the issuer never writes (`nbf`, `roles`,
+ * `exp`, `jti`, `cnf`, `o3co_standing_at`), nor one a specification gives a meaning the issuer never writes (`nbf`, `roles`,
  * `groups`, `entitlements`, `scp`, `may_act`, `authorization_details`, `htm`, `htu`, `ath`, `nonce`,
  * `azp`, `at_hash`, `c_hash`, `sid`, `name`, `picture`, `profile`, `email`, `email_verified`,
  * `active`, `token_type`, `username`); never `__proto__`, `constructor`, `prototype` or `toJSON` at
@@ -35,6 +35,8 @@ const written = [
 	"exp",
 	"jti",
 	"cnf",
+	// When the grant's own check compared the subject's boundary, for a token tied to no session.
+	"o3co_standing_at",
 ];
 
 /** Names a specification gives a meaning an access token's issuer does not write: no grant adds one, and a payload holding one is none the issuer wrote. */
