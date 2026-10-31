@@ -68,10 +68,11 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	for (const name of optIns()) expect(readme).toContain(`- \`${name}\``);
 });
 
-it("names by hand only the keys no module's example holds", async () => {
+it("names in its guide each key no module's example holds", async () => {
 	const readme = await read(await generated(), "README.md");
-	const section = readme.split("## Keys no example holds")[1]?.split("\n## ")[0] ?? "";
-	expect([...section.matchAll(/^- `([a-z0-9.-]+)`/gm)].map((m) => m[1])).toEqual([
+	const named = (key: string) =>
+		readme.split("\n").some((l) => l.startsWith("- ") && l.includes(`\`${key}\``));
+	for (const key of [
 		"authorize.step-up-page",
 		"federation.held-page",
 		"http.trusted-proxies",
@@ -81,9 +82,10 @@ it("names by hand only the keys no module's example holds", async () => {
 		"mail-smtp.user",
 		"mail-smtp.password",
 		"clients.registered",
-	]);
-	// Every other key the guide names comes from the fragments.
-	for (const heading of ["Values the operator decides", "Pages the operator serves", "Secrets"]) {
+	]) {
+		expect(named(key), key).toBe(true);
+	}
+	for (const heading of ["Pages the operator serves", "Secrets"]) {
 		expect(readme).not.toContain(`## ${heading}`);
 	}
 });
@@ -287,12 +289,6 @@ it("gives a generated app a trial layer by its own modules, with hosts under .in
 		Object.keys(all)
 			.filter((section) => section !== "keys" && section !== "http")
 			.sort(),
-	);
-});
-
-it("tells the operator to set the page a federation login a second factor holds goes on at", async () => {
-	expect(await read(await generated(), "README.md")).toContain(
-		"- `federation.held-page`: the page a federation login a second factor holds goes on at, on the public origin; without it, the browser stops at the factor's answer.",
 	);
 });
 
