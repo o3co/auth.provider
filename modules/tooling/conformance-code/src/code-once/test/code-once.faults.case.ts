@@ -1,6 +1,5 @@
 import {
 	confirmation,
-	type Execution,
 	failover,
 	faultRun,
 	hostLibfaketime,
@@ -16,7 +15,7 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import { type Code, codeAt, on, redeemAt, said } from "../../faults/test/faults.ts";
+import { type Code, codeAt, on, oneWrite, redeemAt, said } from "../../faults/test/faults.ts";
 import { codeNoted, codeRecord, codeUse, isStoreOperation } from "../../faults/test/wire.ts";
 
 const refused = [400, "invalid_grant"];
@@ -50,16 +49,6 @@ const onceUnder = (i: Instance, c: Code, first: { command: Parameters<typeof sam
 	const effects = successes(i, codeUse(c));
 	expect(effects.length).toBeGreaterThan(0);
 	expect(effects.every((e) => sameMark(first.command, e.command))).toBe(true);
-};
-
-/**
- * Sent at least once, and every send a resend of the first under its mark: a send left unanswered
- * past its command timeout goes again, and the mark answers it as it first did, so it is one write.
- */
-const oneWrite = (sent: readonly Execution[]) => {
-	const [first, ...resends] = sent;
-	expect(first).toBeDefined();
-	if (first) expect(resends.every((e) => sameMark(first.command, e.command))).toBe(true);
 };
 
 describe("an authorization code redeemed once under faults", () => {

@@ -3,10 +3,13 @@ import type { AreaScene } from "@mod/conformance";
 import {
 	type Deployed,
 	type Deploying,
+	type Execution,
 	type Instance,
 	on as onDeployment,
+	sameMark,
 } from "@mod/conformance/testing";
 import type { ClientScene } from "@mod/conformance-oauth";
+import { expect } from "vitest";
 // The package's entry, which sets the area up on each target.
 import { type CodeScene, codeScene } from "../../main.ts";
 import { backChannel, browserAt } from "../../testing.ts";
@@ -129,3 +132,13 @@ export async function familyAt(i: Instance): Promise<string> {
 
 export const refreshAt = (i: Instance, token: string) =>
 	tokenAt(i, { grant_type: "refresh_token", refresh_token: token });
+
+/**
+ * Sent at least once, and every send a resend of the first under its mark: a send left unanswered
+ * past its command timeout goes again, and the mark answers it as it first did, so it is one write.
+ */
+export const oneWrite = (sent: readonly Execution[]) => {
+	const [first, ...resends] = sent;
+	expect(first).toBeDefined();
+	if (first) expect(resends.every((e) => sameMark(first.command, e.command))).toBe(true);
+};

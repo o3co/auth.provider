@@ -1,6 +1,5 @@
 import {
 	confirmation,
-	type Execution,
 	failover,
 	type Instance,
 	instanceOf,
@@ -14,7 +13,7 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import { familyAt, faultScene, on, refreshAt, said } from "../../faults/test/faults.ts";
+import { familyAt, faultScene, on, oneWrite, refreshAt, said } from "../../faults/test/faults.ts";
 import { familyRead, isStoreOperation, rotationFrom, sessionRead } from "../../faults/test/wire.ts";
 
 const scene = faultScene({ refresh: {} });
@@ -50,16 +49,6 @@ async function refusedAsSpent(i: Instance, token: string) {
 	expect(said(await refreshAt(i, token))).toEqual(refused);
 	expect(said(await refreshAt(i, await familyAt(i)))).toEqual(issued);
 }
-
-/**
- * Sent at least once, and every send a resend of the first under its mark: a send left unanswered
- * past its command timeout goes again, and the mark answers it as it first did, so it is one write.
- */
-const oneWrite = (sent: readonly Execution[]) => {
-	const [first, ...resends] = sent;
-	expect(first).toBeDefined();
-	if (first) expect(resends.every((e) => sameMark(first.command, e.command))).toBe(true);
-};
 
 describe("a refresh token rotated once under faults", () => {
 	it("rotates a refresh token once whose rotation's answer is lost once, the resend taking the first answer [guarantee-5-b] {fault:Lr}", async () => {
