@@ -129,6 +129,8 @@ export function refreshGrant({
 					authenticatedAt: family.authenticatedAt,
 					...(family.authenticatedAtUnknown ? { authenticatedAtUnknown: true as const } : {}),
 					...(family.acr ? { acr: family.acr } : {}),
+					// Bound to no session, the token stands from the authentication its boundary was compared with.
+					...(family.session ? {} : { standingAt: family.authenticatedAt }),
 				},
 				// A refresh continues a grant the policies already let through: they may judge it so.
 				{
