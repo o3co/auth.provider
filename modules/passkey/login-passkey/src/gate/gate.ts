@@ -43,10 +43,16 @@ export const gateIn = async (c: BuildContext<Settings>) => {
 			"refused-when-held needs a passkey witness composed: a lost passkey store would read as holding none",
 		);
 	}
+	const exempt = c.section["password-exempt-group"];
+	if (refuses && exempt !== undefined) {
+		c.log.warn("login-passkey.password_exempt_group", {
+			reason: "a group's members keep password logins where passkey holders are refused them",
+		});
+	}
 	return credentialPolicy({
 		refuses,
 		holders,
 		recorded: await recordedIn(c),
-		exempt: c.section["password-exempt-group"],
+		exempt,
 	});
 };
