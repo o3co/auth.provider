@@ -42,7 +42,9 @@ let replica = "";
 let secondReplica = "";
 let network = "";
 
-const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+const within = { encoding: "utf8", killSignal: "SIGKILL" } as const;
+const docker = (...args: string[]) =>
+	execFileSync("docker", args, { ...within, timeout: args[0] === "run" ? 180_000 : 60_000 }).trim();
 const cli = (target: string, ...args: string[]) => docker("exec", target, "redis-cli", ...args);
 /** Whether the target answers PING; a container still starting answers nothing yet. */
 const pings = (target: string) => {
