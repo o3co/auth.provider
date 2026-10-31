@@ -441,13 +441,22 @@ describe("the logout a client starts", () => {
 		const h = await serve({ clientRecordsDown: down });
 		const { session } = await h.login();
 		down.failNext("find");
-		const out = await h.call("GET", {
+		const out = await h.served("GET", "/oauth/logout", {
 			id_token_hint: await h.hintFor(session.id),
 			post_logout_redirect_uri: back,
 		});
-		expect([out.status, out.json]).toEqual([503, { error: "temporarily_unavailable" }]);
-		expect(h.logs().filter((l) => l.event === "rp-logout.unavailable")).toEqual([
-			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "clients" } },
+		expect([out.status, out.cacheControl, out.json]).toEqual([
+			503,
+			"no-store",
+			{ error: "temporarily_unavailable" },
+		]);
+		// http answers it, by the route's declared answer, and warns of it once.
+		expect(h.logs().filter((l) => l.event.endsWith(".unavailable"))).toEqual([
+			{
+				level: "warn",
+				event: "http.unavailable",
+				fields: { what: "clients", route: "/oauth/logout" },
+			},
 		]);
 		expect(await h.stillOpen(session.id)).toBe(true);
 		// An outage is no refusal: the error page is the deployment's for refusals alone.
@@ -458,8 +467,9 @@ describe("the logout a client starts", () => {
 		});
 		const signedIn = await paged.login();
 		pagedDown.failNext("find");
-		const browser = await paged.call(
+		const browser = await paged.served(
 			"GET",
+			"/oauth/logout",
 			{ id_token_hint: await paged.hintFor(signedIn.session.id), post_logout_redirect_uri: back },
 			{ accept: "text/html" },
 		);
@@ -589,15 +599,24 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(false);
 	});
 
-	it("answers 503 when a check cannot tell, logging what failed", async () => {
+	it("answers 503 when a check cannot tell, as http warns of it by what failed and the route", async () => {
 		const down = unavailableSwitch<SessionClients>("rp-logout");
 		const h = await serve({ clientsDown: down });
 		const { session, cookie } = await h.login();
 		down.failNext("members");
-		const out = await h.call("POST", { id_token_hint: await h.hintFor(session.id) }, { cookie });
-		expect([out.status, out.json]).toEqual([503, { error: "temporarily_unavailable" }]);
-		expect(h.logs().filter((l) => l.event === "rp-logout.unavailable")).toEqual([
-			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "rp-logout" } },
+		const hint = { id_token_hint: await h.hintFor(session.id) };
+		const out = await h.served("POST", "/oauth/logout", hint, { cookie });
+		expect([out.status, out.cacheControl, out.json]).toEqual([
+			503,
+			"no-store",
+			{ error: "temporarily_unavailable" },
+		]);
+		expect(h.logs().filter((l) => l.event.endsWith(".unavailable"))).toEqual([
+			{
+				level: "warn",
+				event: "http.unavailable",
+				fields: { what: "rp-logout", route: "/oauth/logout" },
+			},
 		]);
 		// Nothing was closed: the session still enters.
 		expect(await h.stillOpen(session.id)).toBe(true);
