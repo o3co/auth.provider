@@ -17,7 +17,7 @@
 
 ## Offers
 - Area `passkey` and the shape of its parts
-- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run, named to the evidence as `@mod/conformance-passkey#faults` by the run itself; the area's own run and its pattern runs leave them out
+- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-passkey#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
 - The legacy set-up, and the needs the legacy system cannot provide, live only in `src/legacy.ts`.
