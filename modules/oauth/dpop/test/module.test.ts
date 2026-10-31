@@ -203,11 +203,34 @@ describe("dpop", () => {
 		expect(await token(early)).toEqual(replayed);
 	});
 
-	it("keeps a proof spent for twice its window and an allowance for the store's clock", async () => {
+	it("keeps a proof spent for twice the widest window and an allowance for the store's clock, whatever is set", async () => {
 		const spent = spentInMemory();
 		const token = await serve(spent);
 		await token(await proof());
-		expect(spent.lifetimes).toEqual([2 * 60_000 + 60_000]);
+		expect(spent.lifetimes).toEqual([2 * 300_000 + 60_000]);
+	});
+
+	it("keeps a proof spent past the widest window, so one widened on the same store takes it no more [guarantee-5-e]", async () => {
+		const spent = spentInMemory();
+		const at = async (window: string, dpopProof: string) =>
+			(await boot({ "proof-window": window, nonce: { required: "never" } }, spent))
+				.get(senderBinding)
+				.bindingOf(
+					testRequest({
+						method: "POST",
+						path: "/oauth/token",
+						headers: new Map([["dpop", dpopProof]]),
+					}),
+					{ kind: "issue" },
+				);
+		const once = await proof();
+		expect(await at("1s", once)).toMatchObject(bound);
+		// Started again on the same store with the widest window, the very proof still within it.
+		shift += 299_000;
+		expect(await at("5m", once)).toEqual(replayed);
+		// A fresh proof of the same iat is taken: the window still holds, so the refusal is the record's.
+		const iat = Math.floor((runtime.clock.now() - 299_000) / 1000);
+		expect(await at("5m", await proof({ iat }))).toMatchObject(bound);
 	});
 
 	it("does not use up a proof refused for its ath", async () => {
