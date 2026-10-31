@@ -61,6 +61,12 @@ export default defineModule(
 	(m) => [
 		m.provide(bindingProof).by(async (c) => {
 			const p = await provingIn(c);
+			// The operator's choice, yet said at every start: a first factor binds with nothing proved.
+			if (p.mode === "never") {
+				c.log.warn("mfa-binding-proof.never_asked", {
+					reason: "a first counting factor binds with no binding proof asked",
+				});
+			}
 			if (p.mode === "always" && p.proofs.length === 0) {
 				return c.refuse(
 					"mfa-binding-proof.proofs",

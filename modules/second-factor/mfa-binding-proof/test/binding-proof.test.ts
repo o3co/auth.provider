@@ -3,7 +3,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
 import { factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
@@ -23,7 +23,8 @@ import { bindingProof, bindingProofs } from "../src/contract.ts";
 import bindingProofModule from "../src/module.ts";
 
 let shift = 0;
-const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => Date.now() + shift }, log: logged.log });
 let stop = async () => {};
 afterEach(async () => {
 	await stop();
@@ -202,6 +203,26 @@ it("lets mfa begin a first binding only with the subject's pass, for the transac
 	expect((await decided.begin("bob", "code", bob, "t")).kind, "in time").toBe("begun");
 	shift += 61_000;
 	expect(await decided.begin("bob", "code", bob, "t"), "past its end").toEqual(required);
+});
+
+it("warns at every start where it asks nothing, and not by default", async () => {
+	const warned = async (mode?: "never") => {
+		const from = logged.lines().length;
+		await serve(mode);
+		return logged
+			.lines()
+			.slice(from)
+			.filter((line) => line.event === "mfa-binding-proof.never_asked");
+	};
+	expect(await warned("never")).toEqual([
+		{
+			level: "warn",
+			event: "mfa-binding-proof.never_asked",
+			fields: { reason: "a first counting factor binds with no binding proof asked" },
+		},
+	]);
+	await stop();
+	expect(await warned()).toEqual([]);
 });
 
 it("asks nothing under never, and the first contributed under always", async () => {
