@@ -113,7 +113,7 @@ describe("log threshold", () => {
 });
 
 describe("log sinks", () => {
-	it("runs a sink's stop hooks after every other module's, as sinks are built first", async () => {
+	it("runs a sink's stop hooks after those of every module its build does not take, as sinks are built first", async () => {
 		const order: string[] = [];
 		// Listed first, so it is the build order, not the list's, that puts the sink's hook last.
 		const provider = defineModule({ name: "provider", replicaSafe: false, takes: [] }, (m) => [
