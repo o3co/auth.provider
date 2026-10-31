@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Pkg } from "@mod/guard-imports";
 import { expect, it, vi } from "vitest";
 import { packages, root } from "../../../test/root.ts";
 import { coverage } from "../coverage.ts";
@@ -12,6 +13,7 @@ import {
 	destinationCandidate,
 	looseningByName,
 	looseningCandidate,
+	privateReachOf,
 	type SurfaceInput,
 	secretByName,
 } from "../surface.ts";
@@ -41,7 +43,7 @@ it("answers HEAD for a GET that does not change state, and for no other", () => 
 		settings: [],
 		packages: [],
 		composed: [],
-		internalBy: [],
+		privateReach: [],
 		coverage: empty,
 	};
 	const reference = attackSurfaceOf(input);
@@ -94,7 +96,7 @@ it("finds secrets and weakening settings by their names, and leaves out what the
 		],
 		packages: [],
 		composed: [],
-		internalBy: [],
+		privateReach: [],
 		coverage: { ...empty, notSecrets: [{ key: "x.password", why: "not one" }] },
 	};
 	const reference = attackSurfaceOf(input);
@@ -109,7 +111,7 @@ it("lists each route that takes cross-origin requests, so turning CORS on for on
 		settings: [],
 		packages: [],
 		composed: [],
-		internalBy: [],
+		privateReach: [],
 		coverage: empty,
 	});
 	expect(attackSurfaceOf(input(true))).toContain("- POST `/token` (`@mod/r`)");
@@ -136,7 +138,7 @@ it("lists destinations by their names and the coverage's, the coverage's with wh
 		settings: [{ key: "x.host", owner: "@mod/x" }],
 		packages: [],
 		composed: [],
-		internalBy: [],
+		privateReach: [],
 		coverage: { ...empty, destinations: [{ key: "x.host", reaches: "the relay" }] },
 	});
 	expect(reference).toContain("| `x.host` | `@mod/x` |  | the relay |");
@@ -219,4 +221,25 @@ it("holds the coverage to the workspace: every setting, route and runbook sectio
 			.replaceAll(" ", "-"),
 	);
 	expect(coverage.manualTasks.map((t) => t.anchor).filter((a) => !anchors.includes(a))).toEqual([]);
+});
+
+it("lists who may reach private addresses by their own declaration of the owner's property", () => {
+	const at = (name: string, manifest: Pkg["manifest"]): Pkg => ({
+		name,
+		dir: `/${name}`,
+		manifest,
+		card: undefined,
+		files: [],
+	});
+	const owner = at("@x/policy", { narrower: { type: "Narrower", property: "internal" } });
+	expect(
+		privateReachOf([
+			owner,
+			at("@x/b", { narrower: "internal" }),
+			at("@x/a", { narrower: "internal" }),
+			at("@x/other", { narrower: "private" }),
+			at("@x/none", {}),
+		]),
+	).toEqual(["@x/a", "@x/b"]);
+	expect(privateReachOf([at("@x/b", { narrower: "internal" })])).toEqual([]);
 });

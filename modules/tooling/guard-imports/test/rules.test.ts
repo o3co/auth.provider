@@ -874,7 +874,7 @@ describe("guard-imports", () => {
 		]);
 	});
 
-	describe("G32 internal by the packages the narrower's owner lists", () => {
+	describe("G32 internal by the packages declaring it", () => {
 		const urls = pkg("@c/urls", {
 			"src/contract.ts": [
 				"declare const brand: unique symbol;",
@@ -891,7 +891,11 @@ describe("guard-imports", () => {
 			"export type { Narrower };",
 			"export const send = (url: string, n?: Narrower) => (n?.internal === undefined ? url : n.internal);",
 		];
-		const policy = (internalBy: unknown, own: string[] = []) =>
+		/** The owner, stating what it holds to declaration, its contract writing `own` beside. */
+		const owner = (
+			owned: unknown = { type: "Narrower", property: "internal" },
+			own: string[] = [],
+		) =>
 			pkg(
 				"@c/policy",
 				{
@@ -902,13 +906,13 @@ describe("guard-imports", () => {
 				{
 					exports: { ".": "./src/contract.ts" },
 					dependencies: { "@c/urls": "*" },
-					internalBy,
+					narrower: owned,
 				},
 				"foundation",
 			);
 		/** A package writing `internal` in each way the rule counts, and in ways it does not. */
-		const writer = (name: string) =>
-			pkg(
+		const writer = (name: string, declared?: unknown, card = `# ${name}\n`) => ({
+			...pkg(
 				name,
 				{
 					"src/module.ts": [
@@ -947,77 +951,152 @@ describe("guard-imports", () => {
 					"test/module.test.ts":
 						'import { read } from "@c/urls";\nexport const t = { internal: read("http://x/") };\n',
 				},
-				{ exports: { ".": "./src/module.ts" }, dependencies: { "@c/urls": "*", "@c/policy": "*" } },
-			);
+				{
+					exports: { ".": "./src/module.ts" },
+					dependencies: { "@c/urls": "*", "@c/policy": "*" },
+					...(declared === undefined ? {} : { narrower: declared }),
+				},
+			),
+			card,
+		});
+		/** A card stating the declaration, as G26's do theirs. */
+		const stating = (name: string) =>
+			`# ${name}\n\n- Reaches private addresses (\`narrower\`: \`internal\`).\n`;
+		/** A writer declaring `internal`, its card stating it. */
+		const declaring = (name: string) => writer(name, "internal", stating(name));
 		const found = (packages: Pkg[]) =>
 			check(packages, budget)
 				.filter((v) => v.rule.startsWith("G32"))
 				.map((v) => `${v.where} ${v.detail}`);
-
-		it("passes a package the list names, writing internal in each way", () => {
-			expect(found([urls, policy(["@c/listed"]), writer("@c/listed")])).toEqual([]);
-		});
-
-		it("refuses each internal a package the list leaves out writes, and counts no other field, binding or test", () => {
-			expect(found([urls, policy(["@c/listed"]), writer("@c/listed"), writer("@c/other")])).toEqual(
-				[
-					"@c/other/src/module.ts:5 internal",
-					"@c/other/src/module.ts:6 internal",
-					"@c/other/src/module.ts:9 internal",
-					"@c/other/src/module.ts:10 internal",
-					"@c/other/src/module.ts:11 internal",
-					"@c/other/src/module.ts:16 internal",
-					"@c/other/src/module.ts:17 internal",
-					"@c/other/src/module.ts:21 internal",
-					"@c/other/src/module.ts:22 internal",
-					"@c/other/src/module.ts:23 internal",
-					"@c/other/src/module.ts:24 internal",
-				],
-			);
-		});
 
 		it("counts the owner too: it states internal, and writes none", () => {
 			const leak = [
 				'import { read } from "@c/urls";',
 				'export const leak = () => send("x", { internal: read("http://x/") });',
 			];
-			expect(found([urls, policy(["@c/listed"], leak), writer("@c/listed")])).toEqual([
+			expect(found([urls, owner(undefined, leak), declaring("@c/declared")])).toEqual([
 				"@c/policy/src/contract.ts:5 internal",
 			]);
 		});
 
-		it("refuses a list where the owner's contract exports no Narrower with internal", () => {
+		it("refuses an owner whose contract exports no type of that name with the property", () => {
 			const hidden = pkg(
 				"@c/policy",
 				{
 					"src/contract.ts":
 						'import type { ConfiguredUrl } from "@c/urls";\ninterface Narrower { readonly internal?: ConfiguredUrl }\nexport const send = (n?: Narrower) => n;\n',
 				},
-				{ exports: { ".": "./src/contract.ts" }, dependencies: { "@c/urls": "*" }, internalBy: [] },
+				{
+					exports: { ".": "./src/contract.ts" },
+					dependencies: { "@c/urls": "*" },
+					narrower: { type: "Narrower", property: "internal" },
+				},
 				"foundation",
 			);
 			expect(found([urls, hidden])).toEqual([
-				"@c/policy internalBy, but it exports no Narrower with internal",
+				"@c/policy narrower, but it exports no Narrower with internal",
 			]);
 		});
 
-		it("refuses a list naming a package that writes none, no workspace package, or one twice, and one not a list", () => {
-			const silent = pkg("@c/silent", { "src/module.ts": "export const x = 1;\n" });
+		it("passes a package that declares internal in its manifest and states it on its card", () => {
+			expect(found([urls, owner(), declaring("@c/declared")])).toEqual([]);
+		});
+
+		it("refuses each internal a package not declaring it writes, and counts no other field, binding or test", () => {
+			expect(found([urls, owner(), declaring("@c/declared"), writer("@c/other")])).toEqual([
+				"@c/other/src/module.ts:5 internal",
+				"@c/other/src/module.ts:6 internal",
+				"@c/other/src/module.ts:9 internal",
+				"@c/other/src/module.ts:10 internal",
+				"@c/other/src/module.ts:11 internal",
+				"@c/other/src/module.ts:16 internal",
+				"@c/other/src/module.ts:17 internal",
+				"@c/other/src/module.ts:21 internal",
+				"@c/other/src/module.ts:22 internal",
+				"@c/other/src/module.ts:23 internal",
+				"@c/other/src/module.ts:24 internal",
+			]);
+		});
+
+		it("refuses a declaration that writes none, a value other than the property itself, and a card not stating it", () => {
+			/** A package that writes none, declaring as given, its card stating `internal`. */
+			const silent = (name: string, declared: unknown) => ({
+				...pkg(
+					name,
+					{ "src/module.ts": "export const x = 1;\n" },
+					{ exports: { ".": "./src/module.ts" }, narrower: declared },
+				),
+				card: stating(name),
+			});
 			expect(
 				found([
 					urls,
-					policy(["@c/listed", "@c/silent", "@c/gone", "@c/listed"]),
-					writer("@c/listed"),
-					silent,
+					owner(),
+					silent("@c/silent", "internal"),
+					silent("@c/listing", ["internal"]),
+					silent("@c/other-word", "private"),
+					writer("@c/unstated", "internal"),
 				]),
 			).toEqual([
-				"@c/policy internalBy names @c/listed twice",
-				"@c/policy internalBy: @c/silent writes no internal",
-				"@c/policy internalBy: @c/gone is no workspace package",
+				'@c/listing narrower is ["internal"], not exactly "internal"',
+				'@c/other-word narrower is "private", not exactly "internal"',
+				"@c/unstated card states `narrower`: `internal`",
+				"@c/silent narrower: internal, but it writes none",
 			]);
-			expect(found([urls, policy("@c/listed"), writer("@c/listed")])).toEqual([
-				"@c/policy internalBy is no list of package names",
+		});
+
+		it("refuses a declaration with no owner, two owners, and an owner's statement of no type or property", () => {
+			expect(found([urls, declaring("@c/declared")])).toEqual([
+				"@c/declared narrower: internal, but no package owns it",
 			]);
+			const second = { ...owner(), name: "@c/second" };
+			expect(found([urls, owner(), second, declaring("@c/declared")])).toEqual([
+				"@c/policy narrower: @c/second states it owns it too",
+			]);
+			expect(found([urls, owner({ type: "Narrower" })])).toEqual([
+				"@c/policy narrower names no type and property it holds to declaration",
+			]);
+		});
+
+		it("reads the type and the property the owner states, never a name of guard's own", () => {
+			const renamed = pkg(
+				"@c/policy",
+				{
+					"src/contract.ts": [
+						'import type { ConfiguredUrl } from "@c/urls";',
+						"export interface Limits { readonly private?: ConfiguredUrl }",
+						"export const send = (url: string, l?: Limits) => l?.private ?? url;",
+					].join("\n"),
+				},
+				{
+					exports: { ".": "./src/contract.ts" },
+					dependencies: { "@c/urls": "*" },
+					narrower: { type: "Limits", property: "private" },
+				},
+				"foundation",
+			);
+			const writing = (name: string, declared?: string) => ({
+				...pkg(
+					name,
+					{
+						"src/module.ts": [
+							'import { read } from "@c/urls";',
+							'import { send } from "@c/policy";',
+							'export const reach = () => send("x", { private: read("http://x/") });',
+							'export const named = () => send("x", { internal: read("http://x/") } as never);',
+						].join("\n"),
+					},
+					{
+						exports: { ".": "./src/module.ts" },
+						dependencies: { "@c/urls": "*", "@c/policy": "*" },
+						...(declared === undefined ? {} : { narrower: declared }),
+					},
+				),
+				card: `# ${name}\n\n- (\`narrower\`: \`private\`).\n`,
+			});
+			expect(
+				found([urls, renamed, writing("@c/declared", "private"), writing("@c/other")]),
+			).toEqual(["@c/other/src/module.ts:3 private"]);
 		});
 	});
 });

@@ -18,7 +18,7 @@
   - G29: a test file composing every module a feature bridge `joins` and a module contributing to the bridge's points composes the bridge too, so no contribution that decides an answer is silently lost.
   - G30: outside the package each `./audit-events` declares through (`audit`), shipped code records an event only through the declared wrapper (`declaredAudit`), never on the contract's own `record`, so every event reaches the audit event reference.
   - G31: a contract a manifest declares `takenBy` (contract name → the packages that may take it) is imported, in shipped code, by those packages alone, by name, alias, namespace or re-export; the declaration names the modules of the kernel `takenBy` the contract declares, no more and no fewer.
-  - G32: shipped code writes the narrower's `internal` (a property of that name holding the type `Narrower.internal` takes), which reaches private addresses, only in the packages its owner's manifest lists in `internalBy`; each listed package writes one.
+  - G32: the property an owner holds to declaration (the narrower's `internal`, which reaches private addresses) is written in shipped code only by the packages declaring it in their manifest and card (the `internal-by` internal module).
 
 ## Not here
 - Hostile code: the rules hold our own code to its design, written the ordinary way; a form written to slip past them, a dependency's behaviour, prototype or reflection tricks, custom loaders and file-system races are review's.
