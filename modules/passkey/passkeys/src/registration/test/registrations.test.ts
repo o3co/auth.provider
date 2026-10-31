@@ -22,6 +22,7 @@ import { keptChallenges } from "../../challenges/challenges.ts";
 import { registrations } from "../../contract.ts";
 import passkeysModule from "../../module.ts";
 import { keptPasskeys } from "../../records.ts";
+import type { StoredChallenge } from "../../store.ts";
 import { passkeysConfig } from "../../testing.ts";
 import { registrationsOver } from "../registrations.ts";
 
@@ -43,9 +44,11 @@ function kept({
 		timeoutMs: 120_000,
 	};
 	const random = (n: number) => new Uint8Array(randomBytes(n));
+	const ceremonies = ceremoniesFor(rp, random, now);
+	const records = keptPasskeys(stores.passkeys, writeToken, now);
 	const registrations = registrationsOver({
-		ceremonies: ceremoniesFor(rp, random, now),
-		records: keptPasskeys(stores.passkeys, writeToken, now),
+		ceremonies,
+		records,
 		challenges: keptChallenges(stores.challenges, now, 120_000),
 		verification,
 		max,
@@ -74,8 +77,18 @@ function kept({
 			answer: await registrations.register(subject, response, "laptop"),
 		};
 	};
-	return { stores, registrations, register };
+	return { stores, registrations, register, ceremonies, records };
 }
+
+it("completes a registration whose challenge was kept as format 1, as 0.18 opened it", async () => {
+	const { stores, registrations, ceremonies, records } = kept();
+	const handle = await records.handleFor("sam", randomBytes(32).toString("base64url"));
+	const made = ceremonies.creation({ handle, name: "sam" }, [], "preferred");
+	const before = { v: 1, kind: "registration", subject: "sam", at: Date.now() };
+	await stores.challenges.open(made.challenge, before as unknown as StoredChallenge, 120_000);
+	const response = softwareAuthenticator().create(made.options as Options, { origin: testOrigin });
+	expect((await registrations.register("sam", response, "laptop")).kind).toBe("registered");
+});
 
 it("registers a passkey for the subject under one handle, and excludes it from the next options", async () => {
 	const { registrations, register } = kept();

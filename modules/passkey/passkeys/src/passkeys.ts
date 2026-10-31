@@ -21,24 +21,26 @@ const partOf = (requester: Requester, part: "by" | "id") => {
 	}
 	return value;
 };
-// A digest keeps the challenge's record one size, whatever the requester sent; its two parts are
-// written as one JSON list, so no split of one string reads as another.
-const digestOf = (requester: Requester) =>
-	createHash("sha256")
-		.update(JSON.stringify([partOf(requester, "by"), partOf(requester, "id")]))
-		.digest("base64url");
+/**
+ * Who asked, as the challenge keeps it: `by` in clear, and the id's digest, which keeps the record one
+ * size whatever the id. The two are kept and compared apart, never joined into one string.
+ */
+const askerOf = (requester: Requester) => ({
+	by: partOf(requester, "by"),
+	requester: createHash("sha256").update(partOf(requester, "id")).digest("base64url"),
+});
 
 /** Assertions by the passkeys webauthn keeps, each found by the credential it names. */
 export function passkeysOver(p: PasskeyParts): Passkeys {
 	return {
 		challenge: async (requester) => {
-			const digest = digestOf(requester);
+			const asker = askerOf(requester);
 			const { options, challenge } = p.ceremonies.request([], p.verification);
-			await p.challenges.open(challenge, { kind: "assertion", requester: digest });
+			await p.challenges.open(challenge, { kind: "assertion", ...asker });
 			return { options };
 		},
 		assert: async (response, requester) => {
-			const digest = digestOf(requester);
+			const asker = askerOf(requester);
 			const answered = response as { id?: unknown; response?: { userHandle?: unknown } } | null;
 			// Without a handle nothing ties the key to its holder: refused before the store is asked.
 			const handle = answered?.response?.userHandle;
@@ -46,7 +48,12 @@ export function passkeysOver(p: PasskeyParts): Passkeys {
 			const challenge = challengeOf(response);
 			if (challenge === undefined || typeof answered?.id !== "string") return refused("malformed");
 			const opened = await p.challenges.take(challenge);
-			if (opened?.kind !== "assertion" || opened.requester !== digest) {
+			// A format 1 challenge names no asker (`by` none), so it is taken and refused whatever it names.
+			const mine =
+				opened?.kind === "assertion" &&
+				opened.by === asker.by &&
+				opened.requester === asker.requester;
+			if (!mine) {
 				return refused("challenge");
 			}
 			const found = await p.records.passkey(answered.id);
