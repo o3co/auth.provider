@@ -26,7 +26,9 @@ async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms
 	throw new Error(`${what} did not happen in ${ms} ms`);
 }
 
-const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+const within = { encoding: "utf8", killSignal: "SIGKILL" } as const;
+const docker = (...args: string[]) =>
+	execFileSync("docker", args, { ...within, timeout: args[0] === "run" ? 180_000 : 60_000 }).trim();
 /** Whether Redis answers PING; a container still starting answers nothing yet. */
 const pings = () => {
 	try {
