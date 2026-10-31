@@ -2,7 +2,7 @@ import { type Client, clients } from "@mod/clients";
 import { type FormTokens, formTokens } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Loads, noStore } from "@mod/http";
 import { endpointOrigin, issuer } from "@mod/issuer";
-import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
+import type { BuildContext, Log } from "@mod/kernel";
 import { type Keys, keys } from "@mod/keys";
 import { sessions } from "@mod/session";
 import { type Closing, closingFrom, closingTakes } from "../closing/closing.ts";
@@ -44,7 +44,8 @@ const repeated = jsonAnswer(400, {
 	error: "invalid_request",
 	error_description: "repeated parameter",
 });
-const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
+/** A check that cannot tell: the package's routes declare it, and a close that cannot be made answers it. */
+export const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
 const htmlHeaders = { ...noStore, "content-type": "text/html; charset=utf-8" };
 
 /** A page, its cookies and what it loads. */
@@ -136,20 +137,9 @@ export function confirmWith(p: ConfirmParts) {
 		return page(done.html, { cookies: closed.cookies, loads: done.loads });
 	};
 
-	/** Answered here where something cannot tell, so http never sees it: logged by what failed. */
-	const guarded =
-		(handler: (request: HttpRequest) => Promise<HttpResponse>) =>
-		async (request: HttpRequest): Promise<HttpResponse> => {
-			try {
-				return await handler(request);
-			} catch (error) {
-				if (!isUnavailable(error)) throw error;
-				p.log.warn("rp-logout.unavailable", { what: error.what });
-				return unavailable;
-			}
-		};
 	const { carry, carried } = carrying;
-	return { carry, carried, current, show: guarded(show), take: guarded(take) };
+	// A check that cannot tell throws Unavailable on, which the routes' declared answer answers.
+	return { carry, carried, current, show, take };
 }
 
 /** What `confirmFrom` takes from the composition. */

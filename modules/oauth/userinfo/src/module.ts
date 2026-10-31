@@ -1,7 +1,7 @@
 import { claimsSelections } from "@mod/claims-selection";
 import { type Route, routes } from "@mod/http";
 import { endpointOrigin, issuer, metadata } from "@mod/issuer";
-import { type BuildContext, defineModule, isUnavailable } from "@mod/kernel";
+import { type BuildContext, defineModule } from "@mod/kernel";
 import { releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
@@ -17,9 +17,9 @@ const cors = {
 	exposes: ["www-authenticate", "dpop-nonce", "retry-after"],
 };
 
-/** The handler, answering a check or claims that cannot tell as `503`, never as a refusal. */
+/** The handler; a check or claims that cannot tell throw Unavailable, which the route answers. */
 async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
-	const userinfo = userinfoOver({
+	return userinfoOver({
 		now: c.clock.now,
 		senderBinding: await c.get(senderBinding),
 		tokens: await c.get(tokens),
@@ -28,16 +28,6 @@ async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 		selections: await c.get(claimsSelections),
 		claims: await c.get(releasedClaims),
 	});
-	return async (request) => {
-		try {
-			return await userinfo(request);
-		} catch (error) {
-			if (!isUnavailable(error)) throw error;
-			// Answered here, so http never sees it: logged by what failed.
-			c.log.warn("userinfo.unavailable", { what: error.what });
-			return unavailable;
-		}
-	};
 }
 
 /** What its routes and its metadata take. */
@@ -66,6 +56,8 @@ export default defineModule({ name: "userinfo", replicaSafe: true, takes: module
 							"The access token comes in the Authorization header, never a cookie, and it only reads.",
 						unlimited: "It is authenticated by a bearer access token and only reads.",
 					}),
+			// `503`, never a refusal: http warns of it once, by what failed and the route.
+			unavailable: { response: unavailable },
 			handle: await handlerOf(c),
 		})),
 	),
