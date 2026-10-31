@@ -31,8 +31,14 @@ async function boot() {
 	const { input, simulated } = assembly();
 	const app = await assemble(input);
 	const t = app.get(tokens);
-	const issue = async (subject: string) => {
-		const grant = { subject, issuedTo: "c", audience: ["api"], scope: [] };
+	const issue = async (subject: string, standingAt?: number) => {
+		const grant = {
+			subject,
+			issuedTo: "c",
+			audience: ["api"],
+			scope: [],
+			...(standingAt === undefined ? {} : { standingAt }),
+		};
 		const issued = await t.issue({ grant, grantType: "test" });
 		if (issued.kind !== "issued") throw new Error(issued.reason);
 		return issued.access.token;
@@ -55,6 +61,17 @@ it("keeps a token issued in a later second than the revocation", async () => {
 	await s.revoke("alice");
 	now += 1000;
 	expect((await s.t.verifyAccess(await s.issue("alice"))).kind).toBe("valid");
+});
+
+it("fails a token standing before its subject's revocation, though issued in a later second than it [guarantee-4-a]", async () => {
+	const s = await boot();
+	const checkedAt = now;
+	await s.revoke("alice");
+	now += 1000;
+	expect(await s.t.verifyAccess(await s.issue("alice", checkedAt))).toEqual({
+		kind: "invalid",
+		reason: "revoked",
+	});
 });
 
 it("is unavailable, never valid or revoked, while the revocation cannot be read", async () => {
