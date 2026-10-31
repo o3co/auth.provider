@@ -8,7 +8,7 @@
 	"asks": [
 		"Audit events named in `audit.receivers = [{adapters}]`.",
 		{
-			"line": "`audit.receivers`: the names of the audit receivers composed: `{adapters}`.",
+			"line": "`audit.receivers`: the names of the audit receivers composed: `[{adapters}]`.",
 			"decides": true
 		},
 		{
