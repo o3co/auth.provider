@@ -21,7 +21,7 @@
 - A receiver gets the event frozen, with its time (`at`, epoch ms) from `kernel`'s clock, whatever the emitter wrote.
 - The emitter's own attributes are copied, never frozen. A `userAgent`, the request's own text, reaches receivers bounded as 0.17 bounded it: a `?` for each character outside RFC 6749's NQSCHAR, at most 200 characters (a longer one keeps 197 and `...`); the subject and other attributes stay as written.
 - Delivery is best effort (tier 1): receivers run after `record` returns, so an answer never waits for its events. One that throws or rejects never changes the emitter's answer or stops the others.
-- An event is lost past a receiver's pending limit (never queued), when its receiver fails, or when still under way at the stop deadline: at stop, deliveries under way are awaited until `kernel.stop-deadline`.
+- An event is lost past a receiver's pending limit (never queued), when its receiver fails, or when still under way at the stop deadline: at stop, deliveries under way are awaited until `kernel.stop-deadline`. An event recorded after it, by a handler still running, is still delivered, and lost and counted like any other when its receiver fails.
 - The built-in receiver `log` writes at `info`, so `kernel` drops its lines when the operator's log level is higher; the other receivers are not subject to that level.
 - Every loss is counted, and a warning names the receiver once when it starts losing, with the failure's kind alone (`backlog`, `stopped`, or the error's name, never its message) (`audit.receiver_losing`), and once when it next takes an event (`audit.receiver_recovered`).
 - `none` warns at every boot that events go nowhere (`audit.receivers_none`).
