@@ -2,7 +2,7 @@
 
 The module cards are the source of truth. Where this page and a card disagree, the card wins. This page orders the steps and points to the cards; every command, the configuration file and every request and answer below are recorded from a running app, on each pull request, so they do not go stale.
 
-It takes a new app from generation to its first token on your machine: a user in the configuration, a password login, and a client that uses the authorization code flow with PKCE. The app keeps its state in memory and is reached over plain http at `localhost`.
+It takes a new app from generation to its first token on your machine: a user in the configuration, a password login, and a client that uses the authorization code flow with PKCE. The app keeps its state in memory and is reached over plain http at `127.0.0.1`.
 
 ## Generate the app
 
@@ -42,12 +42,12 @@ Write `config/local.conf` with the key and the hash:
 ```hocon
 kernel.deployment = single
 kernel.environment = development
-issuer.url = "http://localhost:8080"
+issuer.url = "http://127.0.0.1:8080"
 http {
-  public-origin = "http://localhost:8080"
+  public-origin = "http://127.0.0.1:8080"
   insecure-origin = true
 }
-authorize.login-page = "http://localhost:8080/login"
+authorize.login-page = "http://127.0.0.1:8080/login"
 tokens.revocation = denylist
 store.accept-volatile = true
 audit.receivers = [log]
@@ -96,7 +96,7 @@ GET /oauth/authorize?response_type=code&client_id=my-app&redirect_uri=http%3A%2F
 
 ```http
 302
-location: http://localhost:8080/login?redirect_to=http%3A%2F%2Flocalhost%3A8080%2Foauth%2Fauthorize%3Fresponse_type%3Dcode%26client_id%3Dmy-app%26redirect_uri%3Dhttp%253A%252F%252Flocalhost%253A3000%252Fcallback%26scope%3Dopenid%26state%3Dxyz%26code_challenge%3D7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM%26code_challenge_method%3DS256
+location: http://127.0.0.1:8080/login?redirect_to=http%3A%2F%2F127.0.0.1%3A8080%2Foauth%2Fauthorize%3Fresponse_type%3Dcode%26client_id%3Dmy-app%26redirect_uri%3Dhttp%253A%252F%252Flocalhost%253A3000%252Fcallback%26scope%3Dopenid%26state%3Dxyz%26code_challenge%3D7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM%26code_challenge_method%3DS256
 ```
 
 ```http
@@ -123,7 +123,7 @@ x-csrf-token: <csrf_token>
 {
   "username": "alice",
   "password": "<password>",
-  "redirect_to": "http://localhost:8080/oauth/authorize?response_type=code&client_id=my-app&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fcallback&scope=openid&state=xyz&code_challenge=7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM&code_challenge_method=S256"
+  "redirect_to": "http://127.0.0.1:8080/oauth/authorize?response_type=code&client_id=my-app&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fcallback&scope=openid&state=xyz&code_challenge=7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM&code_challenge_method=S256"
 }
 ```
 
@@ -132,7 +132,7 @@ x-csrf-token: <csrf_token>
 content-type: application/json
 
 {
-  "redirect_to": "http://localhost:8080/oauth/authorize?response_type=code&client_id=my-app&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fcallback&scope=openid&state=xyz&code_challenge=7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM&code_challenge_method=S256"
+  "redirect_to": "http://127.0.0.1:8080/oauth/authorize?response_type=code&client_id=my-app&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fcallback&scope=openid&state=xyz&code_challenge=7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM&code_challenge_method=S256"
 }
 ```
 
@@ -142,7 +142,7 @@ GET /oauth/authorize?response_type=code&client_id=my-app&redirect_uri=http%3A%2F
 
 ```http
 302
-location: http://localhost:3000/callback?code=<code>&state=xyz&iss=http%3A%2F%2Flocalhost%3A8080
+location: http://localhost:3000/callback?code=<code>&state=xyz&iss=http%3A%2F%2F127.0.0.1%3A8080
 ```
 <!-- end generated -->
 
