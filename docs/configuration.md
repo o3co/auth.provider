@@ -417,12 +417,12 @@ From `@mod/mfa-flows`.
 | `mfa-flows.attempts-per-transaction` | integer (2–10) | `5` |  |  |  | How many proofs one transaction takes, from 2 to 10; the one that uses up the last ends it. |
 | `mfa-flows.requests` | integer (1–100000) | `60` |  |  |  | POSTs allowed per source in each window, over every form this package's routes take, from 1 to 100000. |
 | `mfa-flows.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
-| `mfa-flows.lockout.threshold` | integer (-9007199254740991–100) | `5` |  |  |  | Consecutive failures before the first hold; a positive integer up to 100, no more than `budget`. |
+| `mfa-flows.lockout.threshold` | integer (1–100) | `5` |  |  |  | Consecutive failures before the first hold; a positive integer up to 100, no more than `budget`. |
 | `mfa-flows.lockout.backoff` | string | `15m` |  |  |  | The first hold after `threshold` failures, in whole seconds, such as `15m`. |
 | `mfa-flows.lockout.max-backoff` | string | `1d` |  |  |  | The longest hold, the first doubling up to it, no shorter than `backoff`, in whole seconds, such as `1d`. |
-| `mfa-flows.lockout.budget` | integer (-9007199254740991–100) | `10` |  |  |  | Failures allowed in any `budget-window`; a positive integer up to 100, from `threshold` to `hard-limit`. |
+| `mfa-flows.lockout.budget` | integer (1–100) | `10` |  |  |  | Failures allowed in any `budget-window`; a positive integer up to 100, from `threshold` to `hard-limit`. |
 | `mfa-flows.lockout.budget-window` | string | `7d` |  |  |  | The window `budget` is counted over, in whole seconds, such as `7d`. |
-| `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–100) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer up to 100, no less than `budget`. |
+| `mfa-flows.lockout.hard-limit` | integer (1–100) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer up to 100, no less than `budget`. |
 | `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, at least 1h and no shorter than `max-backoff`, in whole seconds, such as `1d`. |
 
 ## mfa-management
