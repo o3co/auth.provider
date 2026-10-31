@@ -89,8 +89,8 @@ const mayActFor = (subject: Exchanged, party: { readonly sub: string; readonly i
 			(iss === undefined || iss === party.iss),
 	);
 
-/** The `resource` asked, where one is: refused unless it is the audience issued. */
-const resourceAgrees = (param: GrantInput["param"], audience: string): Refusal | undefined => {
+/** The refusal of the `resource` asked, where one is and it is not the audience issued; none otherwise. */
+const resourceMismatch = (param: GrantInput["param"], audience: string): Refusal | undefined => {
 	const resource = param("resource");
 	// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
 	const malformed = resource ? resourceRefusal(resource) : undefined;
@@ -164,8 +164,8 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (audience === undefined || !clientAllowance.allowsAudience(client, audience, parts.issuer)) {
 			return refused("audience is not one the client may be issued", "invalid_target");
 		}
-		const disagrees = resourceAgrees(param, audience);
-		if (disagrees) return disagrees;
+		const mismatch = resourceMismatch(param, audience);
+		if (mismatch) return mismatch;
 		return { scope: [...allowed.scope], audience: [audience] };
 	};
 
@@ -186,8 +186,8 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (audience === undefined || !held.includes(audience)) {
 			return refused("audience is not one the subject token and the client hold", "invalid_target");
 		}
-		const disagrees = resourceAgrees(param, audience);
-		if (disagrees) return disagrees;
+		const mismatch = resourceMismatch(param, audience);
+		if (mismatch) return mismatch;
 		return { scope: asked.length > 0 ? [...new Set(asked)] : ceiling, audience: [audience] };
 	};
 
