@@ -177,7 +177,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Ending sessions with revocation, not by waiting out their lifetime, when they must end now.
   - The pages you serve (`authorize.login-page`, `consent.page`, the step-up pages and federation grants' pages): the provider draws none of them. Escaping what they show, from its answers (a client's name, the scopes asked) and from their URL, and the headers they are served with (a content security policy, framing), are yours.
   - Setting `mfa.mode = optional` only where a session may be used with no second factor: every start warns `mfa.not_required`.
-  - Setting `mfa-binding-proof.mode = never` only where a first counting factor may bind with nothing proved: every start warns `mfa-binding-proof.never_asked`.
+  - Setting `mfa-binding-proof.mode = never` only where a first counting factor may bind with nothing proved: every start warns `mfa-binding-proof.never_asked`. Under the default `when-available` with no binding proof composed, none is asked either, and every start warns `mfa-binding-proof.none_available`.
   - Setting `mfa-email.adds-second-factor` only where the mailbox may stand for a second factor: a code by mail then meets a required one, and every start warns `mfa-email.counts_as_second_factor`.
   - Setting `user-verification = discouraged` (`passkeys`, `mfa-webauthn`) only where holding the authenticator is enough: whoever holds it passes, and every start warns `passkeys.user_unverified` or `mfa-webauthn.user_unverified`.
   - Naming `webauthn.top-origins` only for pages you trust to frame a ceremony: every start warns `webauthn.framed_by_other_origins`, with their count.
@@ -194,6 +194,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **Left to you:**
   - Choosing `tokens.revocation`. With `unsupported`, nothing issued can be revoked, every start warns `tokens.revocation_unsupported`, and boot refuses a composition that issues refresh tokens or codes.
   - With `subject-check = none`, a revoked subject's access tokens live until they expire. Every start warns `tokens.subjects_unchecked`.
+  - Setting a registered client's `sections.token-exchange.public-exchange` only where it may exchange authenticating nothing, and `others-tokens` only where it may exchange tokens naming another client: every start warns `token-exchange.public_exchange` or `token-exchange.others_tokens` with its id.
   - Choosing `tokens.access-token-lifetime` (2s to 1d, one hour by default, as 0.18 had). In front of a resource server of high value, 5 to 15 minutes keeps a stolen token's use short; a refresh token renews it.
 - **Claims a grant adds:** a grant may add claims to the access tokens it issues (`AccessGrant.claims`). The signature covers the whole token, so a resource server cannot tell which claims the provider wrote and which a grant added. Reserved names only keep a grant from overwriting what the provider writes and what a specification gives a meaning; they make no added claim trustworthy. An added claim is what the grant composed asserts: composing a grant entrusts it with what its tokens say. Only `tokens` signs an access token (`at+jwt`); `keys.sign` refuses that type, and `keys.verify` too, so every access token is checked by `verifyAccess`. `verifyAccess` refuses as none of its own a token whose `exp` comes before its `iat`, whose `iat` is over 60 seconds ahead of the clock, or with over a day between them.
   - A refreshed or exchanged token carries no added claim, so an added claim cannot carry a restriction that must hold on: a resource server never reads a missing one as no restriction.
@@ -249,6 +250,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Setting a trusted issuer's `accept-key-set-elsewhere` only for a host you trust as the issuer: its key set is then fetched from that host, over https still.
   - Giving a trusted issuer a `self-issued-prefix` only where every signer whose key a module contributes may be taken as that issuer: every start warns `jwt-bearer.self_issued_signers`, naming the entries.
   - Setting `federation-grants-connect.identity-check = none` only where a callback whose upstream account another user holds may connect: every start warns `federation-grants-connect.identity_unchecked`.
+  - Setting a registered client's `sections.federation-tokens.receives` only for a client you trust with its sessions' upstream tokens: every start warns `federation-tokens.receives` with its id.
   - Setting `federation-grants.keep-on-subject-revocation` only where an established grant may outlive a subject's revocation that keeps delegations: every start warns `federation-grants.kept_on_subject_revocation`.
 
 ## Outbound requests
@@ -282,6 +284,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Leaving the server's settings as they were at boot.
   - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them. Every start that boots such spaces warns `store.volatile_accepted`, naming them.
   - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear. Boot does not refuse it, and warns `redis.plaintext` at every start where the host is not loopback by its name.
+  - Stating `redis.replication = none` only where there is no failover: a failover would lose the replicated spaces' writes, confirmed ones too, and every start warns `redis.replication_none`, naming those spaces.
 
 ## Audit
 

@@ -1177,12 +1177,15 @@ What changes from 0.18 to 0.19. A deployment that composes `code-grant` cannot g
   - `federation-grants-connect`: `identity-check = none` (`federation-grants-connect.identity_unchecked`).
   - `federation-grants`: `keep-on-subject-revocation = true` (`federation-grants.kept_on_subject_revocation`).
   - `http`: `insecure-origin = true`, taken in development alone (`http.insecure_origin`).
-  - `mfa`: `mode = optional` (`mfa.not_required`). `mfa-binding-proof`: `mode = never` (`mfa-binding-proof.never_asked`). `mfa-email`: `adds-second-factor = true` (`mfa-email.counts_as_second_factor`).
+  - `mfa`: `mode = optional` (`mfa.not_required`). `mfa-binding-proof`: `mode = never` (`mfa-binding-proof.never_asked`), and `when-available` with no binding proof composed (`mfa-binding-proof.none_available`). `mfa-email`: `adds-second-factor = true` (`mfa-email.counts_as_second_factor`).
   - `mfa-webauthn` and `passkeys`: `user-verification = discouraged` (`mfa-webauthn.user_unverified`, `passkeys.user_unverified`). `webauthn`: `top-origins` with any entry (`webauthn.framed_by_other_origins`, by their count).
   - `login-passkey`: `password-exempt-group`, where `password = refused-when-held` (`login-passkey.password_exempt_group`).
   - `mtls`: `revocation.mode = disabled` (`mtls.revocation_unchecked`), `revocation.on-unavailable = allow` (`mtls.binds_during_outage`).
   - `outbound`: `plain-loopback`, `plain-ipv4` and `internal-hosts` with any entry (`outbound.plain_loopback`, `outbound.plain_ipv4`, `outbound.internal_hosts`, by their count), `allow-any-public = true` (`outbound.any_public_host`), `resolution = in-process` (`outbound.resolution_in_process`). `outbound.proxy_checks_addresses` and `outbound.proxy_credentials_in_clear` no longer carry the proxy's `host`, but a `reason`.
   - `consent`: a registered client's `sections.consent.first-party = true` (`consent.first_party`, with the client's id).
+  - `federation-tokens`: a registered client's `sections.federation-tokens.receives = true` (`federation-tokens.receives`, with the client's id).
+  - `token-exchange`: a registered client's `sections.token-exchange.public-exchange` or `others-tokens` (`token-exchange.public_exchange`, `token-exchange.others_tokens`, with the client's id).
+  - `redis`: `replication = none` (`redis.replication_none`, naming the replicated spaces).
   - `jwt-bearer`: an issuer's `self-issued-prefix` (`jwt-bearer.self_issued_signers`, logged at info in 0.18, now a warning with the same fields).
   - `dpop`: `nonce.required = never` (`dpop.nonce_not_asked`).
   - Affected: a deployment that sets any of these to its loosening value; a log reader of your own that reads `host` from the two proxy warnings, or `jwt-bearer.self_issued_signers` at info.
