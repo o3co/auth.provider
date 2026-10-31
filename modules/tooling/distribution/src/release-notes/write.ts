@@ -5,6 +5,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { repositoryOf } from "../workspace.ts";
 import { notesOf } from "./notes.ts";
 
 const [version, out] = process.argv.slice(2);
@@ -13,7 +14,12 @@ if (!version || !out) {
 	process.exit(2);
 }
 const root = process.env.INIT_CWD ?? process.cwd();
-const taken = notesOf(readFileSync(join(root, "CHANGELOG.md"), "utf8"), version);
+const workspace = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const taken = notesOf(
+	readFileSync(join(root, "CHANGELOG.md"), "utf8"),
+	version,
+	repositoryOf(workspace),
+);
 if ("problem" in taken) {
 	console.error(`release-notes: ${taken.problem}`);
 	process.exit(1);
