@@ -18,6 +18,7 @@
 - A minor's dir is `v<major>.<minor>`, which each of its patches writes over; a version that is not a release (a prerelease among them) is refused.
 - The root points at the newest minor by number, and `versions.html` lists every minor newest first; other dirs of the site are left as they are.
 - A conversion or a write the documentation tool reports an error in fails the build.
+- typedoc is handed plain files alone, each an existing file named with no glob character, in one dir with no dir under it: under the minimatch the workspace resolves past GHSA-g3hv-75wg-m249, its glob path, which a glob or a common root with a dir under it takes, throws (the workspace's override).
 
 ## Depends on
 - `typedoc` (the documentation tool), `typescript` (the version the workspace compiles with); no workspace package.
