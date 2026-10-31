@@ -23,5 +23,10 @@ Internal module of `guard-imports`: G32, that the property an owner holds to dec
 - Not counted: a binding, a property of another type, a value of type `any`, `unknown` or `never`, a test, and an object only spread on, its own literal counted where written.
 - A package not declaring it writing one is reported at its file and line, never with the value. So are: a declaration that writes none, is not exactly the property, or is not stated on the card; a declaration with no owner, or two owners; and an owner's `narrower` naming no type and property.
 
+## Limits
+- What G32 promises is that the code it reads does not write the property undeclared. The runtime guarantee is `outbound-policy`'s: a private address is reached only at the origin of the `ConfiguredUrl` a caller names; G32 is the check of that in this repository.
+- It goes by type, so a value widened before it is written is not seen: one cast or typed as `any`, `unknown` or plain `string` first (`{ internal: url as any }`; `const t: string = url`, then `{ internal: t }`). Reflection (`Object.defineProperty`, `Reflect.set`) is not read either.
+- It reads the sources the workspace's packages hold, as pnpm lists them: each package's `.ts` (but `*.config.ts`) and `.mjs` files and its templates. Not read: test files (the rules' `testFile`), a package's `./testing` entry, `*.config.ts`, files and directories whose name starts with `.`, `node_modules`, and any package pnpm does not list, though shipped code may import one of them.
+
 ## Depends on
 - `typescript` (its type checker, over the workspace's packages by name).
