@@ -549,7 +549,7 @@ describe("token-exchange: bindings", () => {
 });
 
 describe("token-exchange: the subject check", () => {
-	it("refuses to boot where tokens checks no subject, naming tokens.subject-check, and boots where it does", async () => {
+	it("refuses to boot where tokens checks no subject, naming tokens.subject-check, and boots where it does [guarantee-4-e]", async () => {
 		await expect(serve({ subjectsChecked: false })).rejects.toMatchObject({
 			refusals: [
 				{ where: "token-exchange", reason: expect.stringContaining("tokens.subject-check") },
