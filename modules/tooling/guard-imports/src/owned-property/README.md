@@ -14,7 +14,7 @@ Internal module of `guard-imports`: G32, that the property an owner holds to dec
 
 ## Offers
 - `ownedPropertyRules` (G32).
-- `propertyDeclarations` (packages → what their manifests state: the owners' `narrowerOwner`, those naming no type and property, and the packages declaring `narrower`), so every reader reads the convention once; `PropertyDeclarations`, `Owned`.
+- `propertyDeclarations` (packages → what their manifests state: the owners' `narrowerOwner`, those naming no type and property, the packages declaring `narrower`, and the writers among them, those declaring exactly the one owner's property, none where there is no owner or two), so every reader reads and judges the convention once; `PropertyDeclarations`, `Owned`.
 
 ## Invariants
 - The owner is the one package whose `narrowerOwner` is `{ type, property }`; its contract exports that type (declared there or re-exported), whose property gives the type counted. The owner's own code is held to it too: it states the property, and writes none.

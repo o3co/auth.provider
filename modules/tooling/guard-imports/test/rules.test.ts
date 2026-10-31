@@ -1,7 +1,7 @@
 import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { importViolations, type Rules } from "../src/contract.ts";
+import { importViolations, propertyDeclarations, type Rules } from "../src/contract.ts";
 import type { Pkg } from "../src/workspace.ts";
 import { budget, pkg } from "./workspace.ts";
 
@@ -1302,6 +1302,27 @@ describe("guard-imports", () => {
 				"@c/mistaken/src/module.ts:23 internal",
 				"@c/mistaken/src/module.ts:24 internal",
 			]);
+		});
+
+		it("gives as writers the packages declaring exactly the one owner's property, and none without one owner", () => {
+			const at = (name: string, manifest: Pkg["manifest"]): Pkg => ({
+				name,
+				dir: `/${name}`,
+				manifest,
+				card: undefined,
+				files: [],
+			});
+			const owning = at("@x/policy", { narrowerOwner: { type: "Narrower", property: "internal" } });
+			const declared = [
+				at("@x/a", { narrower: "internal" }),
+				at("@x/b", { narrower: "private" }),
+				at("@x/c", { narrower: ["internal"] }),
+			];
+			const writers = (packages: Pkg[]) =>
+				propertyDeclarations(packages).writers.map((p) => p.name);
+			expect(writers([owning, ...declared])).toEqual(["@x/a"]);
+			expect(writers(declared)).toEqual([]);
+			expect(writers([owning, { ...owning, name: "@x/second" }, ...declared])).toEqual([]);
 		});
 
 		it("reads the type and the property the owner states, never a name of guard's own", () => {
