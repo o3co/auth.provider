@@ -14,7 +14,7 @@
 - IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both non-empty, well-formed text), `scopes` (default `read:user`), `authorization-endpoint`, `token-endpoint`, `api` (default GitHub's own; another for GitHub Enterprise), `issuer` (non-empty; default `https://github.com/login/oauth`)
 
 ## Invariants
-- Every request goes through `outbound`, narrowed to the hosts of the token endpoint and the API, and sent for the endpoint the operator set (`internal`), so a GitHub Enterprise at a private address is reached where `outbound.internal-hosts` lists its host.
+- Every request goes through `outbound`, narrowed to the hosts of the token endpoint and the API, and sent for the endpoint the operator set (`internal`; `narrower`: `internal`), so a GitHub Enterprise at a private address is reached where `outbound.internal-hosts` lists its host.
 - Boot is refused, at its key, where `outbound`'s destination policy refuses the token endpoint or the API's user URL with that same narrowing, saying which of its keys to set (`outbound.refusals`); GitHub's own defaults are asked too.
 - The authorization endpoint, which the browser goes to, holds only where `outbound.refusals`' `browsedRefusal` takes it for itself: https, or plain http at a loopback name or a `plain-internal` origin; else boot is refused at its key. Plain http there carries the user's GitHub password and cookies in the clear between browser and GitHub.
 - A callback whose `iss` is not the issuer is refused before its code is used.

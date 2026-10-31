@@ -1,12 +1,6 @@
-import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { type LogFields, Unavailable } from "@mod/kernel";
 import { witnessWire } from "@mod/ledger-wire";
-import {
-	DestinationRefused,
-	isOutboundUnavailable,
-	jsonObjectOf,
-	type Narrower,
-	type Outbound,
-} from "@mod/outbound";
+import { jsonObjectOf, type Narrower, type Outbound, postJson } from "@mod/outbound";
 import type { PasskeyWitness } from "@mod/passkey-witness";
 import type { z } from "zod";
 
@@ -27,13 +21,6 @@ export interface WitnessParts {
 
 type Call = "read" | "enroll" | "withdraw";
 
-/** The kind outbound gives a failure to send, or no-answer for anything else. */
-function kindOf(error: unknown): string {
-	if (DestinationRefused.is(error)) return error.reason;
-	if (isOutboundUnavailable(error)) return error.failure;
-	return "no-answer";
-}
-
 /** The passkey witness kept at the operator's ledger: every call asks it, nothing is kept here. */
 export function witnessAt(parts: WitnessParts): PasskeyWitness {
 	const { urls, out, credential, narrower, heldMs, now, warn } = parts;
@@ -42,17 +29,10 @@ export function witnessAt(parts: WitnessParts): PasskeyWitness {
 		warn("passkey-witness-http.ledger_failed", { call, ...why });
 		return new Unavailable("passkey-witness-http");
 	};
-	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
 	const post = (call: Call, body: Record<string, unknown>) =>
-		out
-			.fetch(
-				urls[call],
-				{ method: "POST", headers, body: JSON.stringify(body), credential: `Bearer ${credential}` },
-				narrower,
-			)
-			.catch((error: unknown) => {
-				throw failed(call, { reason: kindOf(error) });
-			});
+		postJson(out, { url: urls[call], body, credential, narrower }, (reason) =>
+			failed(call, { reason }),
+		);
 	/** The one JSON object a 200 holds, in the shape asked; any other answer is unavailable. */
 	const answered = async <T>(call: Call, body: Record<string, unknown>, shape: z.ZodType<T>) => {
 		const read = jsonObjectOf(await post(call, body));

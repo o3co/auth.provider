@@ -90,7 +90,7 @@ A package that depends on `outbound` can reach another server through it; this s
 
 - Packages that speak to the network themselves (`network` in their manifest): `@mod/http` (serves-http), `@mod/mail-smtp` (smtp), `@mod/outbound` (outbound), `@mod/redis` (redis).
 - Packages that depend on `outbound`: `@mod/audit-http`, `@mod/client-assertion`, `@mod/clients-cimd`, `@mod/external-jwt`, `@mod/idp-apple`, `@mod/idp-github`, `@mod/idp-google`, `@mod/idp-oidc`, `@mod/jti-ledger-http`, `@mod/jwt-bearer`, `@mod/mfa-witness-http`, `@mod/mtls`, `@mod/passkey-witness-http`, `@mod/rp-logout`, `@mod/signer-keys-http`, `@mod/upstream-client`, `@mod/users-http`.
-- Packages that may reach private addresses at URLs of the operator's configuration (`outbound-policy`'s `internalBy`): `@mod/audit-http`, `@mod/external-jwt`, `@mod/idp-github`, `@mod/idp-oidc`, `@mod/jti-ledger-http`, `@mod/mfa-witness-http`, `@mod/passkey-witness-http`, `@mod/signer-keys-http`, `@mod/users-http`.
+- Packages that may reach private addresses at URLs of the operator's configuration (`narrower` in their manifest): `@mod/audit-http`, `@mod/external-jwt`, `@mod/idp-github`, `@mod/idp-oidc`, `@mod/jti-ledger-http`, `@mod/mfa-witness-http`, `@mod/passkey-witness-http`, `@mod/signer-keys-http`, `@mod/users-http`.
 
 Settings that name where it reaches:
 

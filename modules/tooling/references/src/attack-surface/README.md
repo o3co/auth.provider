@@ -3,7 +3,7 @@
 Internal module of `references`: the attack surface reference, what reaches the provider from outside and what it reaches out to.
 
 ## Responsibilities
-- Generates `docs/attack-surface.md` from the full template with every opt-in: the packages it leaves out, its routes (the `HEAD` and preflight `OPTIONS` `http` answers beside them, `GET`s that change state, other sites' and uncounted routes, browser redirects), what reaches out (`network`, `outbound`'s dependents, `internalBy`, destination settings), secrets in settings, settings that weaken a guarantee, and the operator's manual tasks.
+- Generates `docs/attack-surface.md` from the full template with every opt-in: the packages it leaves out, its routes (the `HEAD` and preflight `OPTIONS` `http` answers beside them, `GET`s that change state, other sites' and uncounted routes, browser redirects), what reaches out (`network`, `outbound`'s dependents, `narrower`'s declarations, destination settings), secrets in settings, settings that weaken a guarantee, and the operator's manual tasks.
 - Holds the hand-written coverage (`coverage.ts`): what no module declares, each entry with why.
 
 ## Not here

@@ -43,17 +43,12 @@ export default defineModule(
 			if (credentialRefused !== undefined) {
 				return c.refuse("jti-ledger-http.credential", credentialRefusalText(credentialRefused));
 			}
-			const sent =
-				credential === undefined
-					? undefined
-					: header === undefined
-						? { credential: `Bearer ${credential}` }
-						: { credential, credentialHeader: header };
 			return ledgerAt({
 				issuer: c.section.issuer,
 				url,
 				out: await c.get(outbound),
-				sent,
+				credential,
+				credentialHeader: header,
 				narrower,
 				warn: (event, fields) => c.log.warn(event, fields),
 			});

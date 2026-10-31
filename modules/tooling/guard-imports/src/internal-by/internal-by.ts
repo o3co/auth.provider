@@ -39,21 +39,24 @@ const holdsTypeParameter = (type: ts.Type): boolean => {
 };
 
 /**
- * Whether an object literal's property may be written under the name `internal`: by name, or by a
- * computed key whose type the string "internal" fits (a union, a template, a mapped string or a
- * string of no known value alike), or whose type holds a type parameter anywhere, whatever it is
- * bound to: a guard's rule follows no further.
+ * Whether an object literal's property may be written under the owned property's name: by name, or
+ * by a computed key whose type that name fits (a union, a template, a mapped string or a string of
+ * no known value alike), or whose type holds a type parameter anywhere, whatever it is bound to: a
+ * guard's rule follows no further.
  */
-const namesInternal = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
+const namesOwned = (
+	checker: ts.TypeChecker,
+	property: ts.ObjectLiteralElementLike,
+	owned: string,
+) => {
 	const name = property.name;
 	if (name === undefined) return false;
 	if (!ts.isComputedPropertyName(name)) {
-		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === "internal";
+		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === owned;
 	}
 	const key = checker.getTypeAtLocation(name.expression);
 	return (
-		holdsTypeParameter(key) ||
-		checker.isTypeAssignableTo(checker.getStringLiteralType("internal"), key)
+		holdsTypeParameter(key) || checker.isTypeAssignableTo(checker.getStringLiteralType(owned), key)
 	);
 };
 
@@ -68,12 +71,23 @@ const writtenType = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementL
 	return undefined;
 };
 
+/** What an owner holds to declaration: its package, and the type its contract exports with the property. */
+interface Owned {
+	readonly owner: Pkg;
+	readonly type: string;
+	readonly property: string;
+}
+
 /**
- * Each object literal property named `internal`, in the shipped code of `packages`, whose value is
- * of the type the owner's `Narrower.internal` takes (`undefined` aside); a value of no known type
- * (`any`) or of none (`never`) is not counted.
+ * Each object literal property of the owned property's name, in the shipped code of `packages`,
+ * whose value is of the type the owner's type gives that property (`undefined` aside); a value of no
+ * known type (`any`) or of none (`never`) is not counted.
  */
-function writtenIn(s: Scope, owner: Pkg, packages: readonly Pkg[]): Written[] | string {
+function writtenIn(
+	s: Scope,
+	{ owner, type, property: owned }: Owned,
+	packages: readonly Pkg[],
+): Written[] | string {
 	const paths = Object.fromEntries(
 		s.packages.flatMap((p) => {
 			const entry = p.manifest.exports?.["."];
@@ -94,16 +108,16 @@ function writtenIn(s: Scope, owner: Pkg, packages: readonly Pkg[]): Written[] | 
 		paths,
 	});
 	const checker = program.getTypeChecker();
-	// `Narrower` as the contract exports it, wherever it is declared.
+	// The owner's type as its contract exports it, wherever it is declared.
 	const contract = program.getSourceFile(ownerEntry);
 	const module = contract && checker.getSymbolAtLocation(contract);
-	const exported = module && checker.getExportsOfModule(module).find((e) => e.name === "Narrower");
-	const narrower =
+	const exported = module && checker.getExportsOfModule(module).find((e) => e.name === type);
+	const declared =
 		exported && exported.flags & ts.SymbolFlags.Alias
 			? checker.getAliasedSymbol(exported)
 			: exported;
-	const property = narrower && checker.getDeclaredTypeOfSymbol(narrower).getProperty("internal");
-	if (property === undefined) return "exports no Narrower with internal";
+	const property = declared && checker.getDeclaredTypeOfSymbol(declared).getProperty(owned);
+	if (property === undefined) return `exports no ${type} with ${owned}`;
 	const wanted = checker.getNonNullableType(checker.getTypeOfSymbol(property));
 	const written: Written[] = [];
 	for (const { p, path, file } of files) {
@@ -112,7 +126,7 @@ function writtenIn(s: Scope, owner: Pkg, packages: readonly Pkg[]): Written[] | 
 		const visit = (node: ts.Node): void => {
 			if (ts.isObjectLiteralExpression(node)) {
 				for (const element of node.properties) {
-					if (!namesInternal(checker, element)) continue;
+					if (!namesOwned(checker, element, owned)) continue;
 					const value = writtenType(checker, element);
 					if (value === undefined) continue;
 					const type = checker.getNonNullableType(value);
@@ -129,37 +143,80 @@ function writtenIn(s: Scope, owner: Pkg, packages: readonly Pkg[]): Written[] | 
 	return written;
 }
 
+/** An owner's statement of what it holds to declaration, `{ type, property }`, or none where it is not one. */
+const ownedOf = (value: unknown): { type: string; property: string } | undefined => {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const { type, property } = value as Record<string, unknown>;
+	return typeof type === "string" && typeof property === "string" && type !== "" && property !== ""
+		? { type, property }
+		: undefined;
+};
+
 /**
- * G32: shipped code writes the narrower's `internal`, which reaches private addresses, only in the
- * packages its owner's manifest lists in `internalBy`; each listed package writes one.
+ * G32: shipped code writes the property an owner holds to declaration (the narrower's `internal`,
+ * which reaches private addresses) only in the packages that declare it, `narrower` in their manifest
+ * stating the property and their card stating that; each declaring package writes one. The owner
+ * states the type and the property in its own `narrower`.
  */
 export function internalByRules(s: Scope) {
-	const rule = "G32 internal is written by the packages internalBy lists alone";
-	for (const owner of s.packages) {
-		const listed = owner.manifest.internalBy;
-		if (listed === undefined) continue;
-		if (!Array.isArray(listed) || !listed.every((name) => typeof name === "string")) {
-			s.report(rule, owner.name, "internalBy is no list of package names");
+	const rule = "G32 an owned property is written only by the packages declaring it";
+	const owners: Owned[] = [];
+	const declaring: Pkg[] = [];
+	for (const p of s.packages) {
+		const value = p.manifest.narrower;
+		if (value === undefined) continue;
+		// An object is an owner's statement; anything else, a writer's declaration.
+		if (typeof value !== "object" || value === null || Array.isArray(value)) {
+			declaring.push(p);
 			continue;
 		}
-		for (const name of new Set(listed.filter((name, i) => listed.indexOf(name) !== i))) {
-			s.report(rule, owner.name, `internalBy names ${name} twice`);
+		const owned = ownedOf(value);
+		if (owned === undefined) {
+			s.report(rule, p.name, "narrower names no type and property it holds to declaration");
+		} else {
+			owners.push({ owner: p, ...owned });
 		}
-		// The owner too: it states `internal`, and writes none.
-		const written = writtenIn(s, owner, s.packages);
-		if (typeof written === "string") {
-			s.report(rule, owner.name, `internalBy, but it ${written}`);
+	}
+	const [owned, ...others] = owners;
+	if (owned === undefined) {
+		for (const p of declaring) {
+			s.report(rule, p.name, `narrower: ${String(p.manifest.narrower)}, but no package owns it`);
+		}
+		return;
+	}
+	for (const other of others) {
+		s.report(rule, owned.owner.name, `narrower: ${other.owner.name} states it owns it too`);
+	}
+	if (others.length > 0) return;
+	const { property } = owned;
+	const declared = new Set<string>();
+	for (const p of declaring) {
+		const value = p.manifest.narrower;
+		if (value !== property) {
+			s.report(
+				rule,
+				p.name,
+				`narrower is ${JSON.stringify(value)}, not exactly ${JSON.stringify(property)}`,
+			);
 			continue;
 		}
-		for (const name of new Set(listed)) {
-			if (!s.byName.has(name)) {
-				s.report(rule, owner.name, `internalBy: ${name} is no workspace package`);
-			} else if (!written.some((w) => w.pkg.name === name)) {
-				s.report(rule, owner.name, `internalBy: ${name} writes no internal`);
-			}
+		declared.add(p.name);
+		if (!(p.card ?? "").includes(`\`narrower\`: \`${property}\``)) {
+			s.report(rule, p.name, `card states \`narrower\`: \`${property}\``);
 		}
-		for (const w of written.filter((w) => !listed.includes(w.pkg.name))) {
-			s.report(rule, `${w.pkg.name}/${w.file}:${w.line}`, "internal");
+	}
+	// The owner too: it states the property, and writes none.
+	const written = writtenIn(s, owned, s.packages);
+	if (typeof written === "string") {
+		s.report(rule, owned.owner.name, `narrower, but it ${written}`);
+		return;
+	}
+	for (const name of declared) {
+		if (!written.some((w) => w.pkg.name === name)) {
+			s.report(rule, name, `narrower: ${property}, but it writes none`);
 		}
+	}
+	for (const w of written.filter((w) => !declared.has(w.pkg.name))) {
+		s.report(rule, `${w.pkg.name}/${w.file}:${w.line}`, property);
 	}
 }

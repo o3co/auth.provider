@@ -21,6 +21,9 @@ import { endSessionAt } from "../end-session.ts";
 import type { Current, Renewal } from "../renewal/renewal.ts";
 import type { Settings } from "../section.ts";
 
+/** The longest `retry-after` a renewal's limit is answered with: a day; a longer one, or none, is left unsaid. */
+const longestRetryAfterSeconds = 86_400;
+
 export const base = "/oauth/federation";
 
 type Kind = keyof typeof events;
@@ -110,7 +113,11 @@ export async function federationTokens(flow: Flow, request: HttpRequest): Promis
 		const current = await flow.renewal.current(caller.session, idp);
 		if (current.kind === "limited") {
 			const after = current.retryAfterSeconds;
-			const said = after !== undefined && Number.isInteger(after) && after >= 1 && after <= 86_400;
+			const said =
+				after !== undefined &&
+				Number.isInteger(after) &&
+				after >= 1 &&
+				after <= longestRetryAfterSeconds;
 			return jsonAnswer(
 				429,
 				{ error: "rate_limited" },

@@ -32,8 +32,8 @@ export interface SurfaceInput {
 	readonly packages: readonly PackageSeen[];
 	/** The packages the full template with every opt-in composes. */
 	readonly composed: readonly string[];
-	/** The packages `outbound-policy` lets reach private addresses (its `internalBy`). */
-	readonly internalBy: readonly string[];
+	/** The packages that may reach private addresses, each declaring it in its `narrower`. */
+	readonly privateReach: readonly string[];
 	readonly coverage: Coverage;
 }
 
@@ -74,7 +74,7 @@ const defaultOf = (value: unknown) => (value === undefined ? "" : code(JSON.stri
 
 /** The reference, generated. */
 export function attackSurfaceOf(input: SurfaceInput): string {
-	const { routes, settings, packages, composed, internalBy } = input;
+	const { routes, settings, packages, composed, privateReach } = input;
 	const c = input.coverage;
 	const owned = new Map(settings.map((s) => [s.key, s]));
 	const ownerOf = (key: string) => owned.get(key)?.owner ?? "";
@@ -175,7 +175,7 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 		"",
 		`- Packages that speak to the network themselves (\`network\` in their manifest): ${network.map((p) => `${code(p.name)} (${p.network})`).join(", ")}.`,
 		`- Packages that depend on \`outbound\`: ${reaching.map((p) => code(p.name)).join(", ")}.`,
-		`- Packages that may reach private addresses at URLs of the operator's configuration (\`outbound-policy\`'s \`internalBy\`): ${internalBy.map(code).join(", ")}.`,
+		`- Packages that may reach private addresses at URLs of the operator's configuration (\`narrower\` in their manifest): ${privateReach.map(code).join(", ")}.`,
 		"",
 		"Settings that name where it reaches:",
 		"",
@@ -211,6 +211,25 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 	].join("\n")}\n`;
 }
 
+/**
+ * The packages that may reach private addresses at URLs of the operator's configuration: those
+ * declaring, in `narrower`, the property its owner's `narrower` holds to declaration.
+ */
+export function privateReachOf(packages: readonly Pkg[]): readonly string[] {
+	const stated = packages
+		.map(({ manifest }) => manifest.narrower)
+		.find(
+			(value): value is { property: string } =>
+				typeof value === "object" &&
+				value !== null &&
+				typeof (value as { property?: unknown }).property === "string",
+		);
+	return packages
+		.filter(({ manifest }) => stated !== undefined && manifest.narrower === stated.property)
+		.map(({ name }) => name)
+		.sort();
+}
+
 /** Everything the reference is made from, read from the workspace at `root` and its packages. */
 export async function attackSurfaceIn(
 	root: string,
@@ -239,16 +258,15 @@ export async function attackSurfaceIn(
 			...(manifest.network ? { network: manifest.network as string } : {}),
 			composable: manifest.exports?.["./module"] !== undefined && manifest.kind !== "verification",
 			reachesOut: Object.hasOwn(manifest.dependencies ?? {}, "@mod/outbound"),
-			internalBy: (manifest.internalBy ?? []) as string[],
 		};
 	});
 	const sorted = listed.sort((a, b) => (a.name < b.name ? -1 : 1));
 	return {
 		routes: await routesIn(root, packages),
 		settings: settings.sort((a, b) => (a.key < b.key ? -1 : 1)),
-		packages: sorted.map(({ internalBy: _, ...p }) => p),
+		packages: sorted,
 		composed: full(optIns()),
-		internalBy: sorted.find((p) => p.name === "@mod/outbound-policy")?.internalBy ?? [],
+		privateReach: privateReachOf(packages),
 		coverage,
 	};
 }
