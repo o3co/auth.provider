@@ -1,6 +1,6 @@
 /** A deployment's project from a list of modules: configuration from their fragments, the image and a guide. */
 
-import { entriesOf } from "./entries/contract.ts";
+import { entriesOf, mainSource } from "@mod/app-entries";
 import {
 	applicationConf,
 	envExample,
@@ -13,15 +13,7 @@ import {
 } from "./fragments/contract.ts";
 import { type Beside, besideRelease } from "./outside/contract.ts";
 import type { Card, Packages, Release } from "./packages.ts";
-import {
-	filled,
-	mainSource,
-	manifestOf,
-	vacant,
-	withKernel,
-	writeProject,
-	zod,
-} from "./project.ts";
+import { filled, manifestOf, vacant, withKernel, writeProject, zod } from "./project.ts";
 
 /** The files the generated project names in its guide, each written where the guide says. */
 const paths = {
