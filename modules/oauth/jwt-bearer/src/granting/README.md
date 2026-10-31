@@ -14,7 +14,6 @@ Internal module of `jwt-bearer`: the grant itself, once boot has checked what it
 
 ## Invariants
 - What an assertion becomes, and each refusal on the way: the package's card.
-- Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once signed is refused by `tokens`, also `expired`.
 - A spend is read at its boundary by the package's `spentAt`: any throw but Unavailable, and any answer the ledger or the delegate does not give, is Unavailable.
 
 ## Depends on
