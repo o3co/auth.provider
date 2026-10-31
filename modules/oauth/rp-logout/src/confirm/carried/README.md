@@ -10,7 +10,7 @@ Internal module of `confirm`: the request `ending` carries on in the browser's U
 
 ## Offers
 - `carriedParam` (`request`), `CarriedRequest` (the hint's session, its client, the return and `state`), `Carried` (a client, return and time a token carries).
-- `carriedWith` (keys, client records, the issuer's and the logout's URLs, how long it may be followed, the clock) → `carry` (a carried request → its token), `read` (a token → the request and its time / none), `carried` (a token → the request / none), `current` (a client and its return → the return where the client, as its record is now, still registers it / none).
+- `carriedWith` (keys, client records, the issuer's and the logout's URLs, how long it may be followed, the clock) → `carry` (a carried request → its token), `read` (a token → the request and its time / none), `boundTo` (a token, its kind and audience → the session it names and what it carries / none), `carried` (a token → the request / none), `current` (a client and its return → the return where the client, as its record is now, still registers it / none).
 - `carriedClaims` and `carriedFrom`, the client, return and `state` a token's claims carry, both ways; `heldClaims`, a token's claims where the provider signed it as the kind asked, for the audience asked, and it has not expired.
 
 ## Invariants

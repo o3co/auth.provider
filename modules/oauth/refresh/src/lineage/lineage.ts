@@ -3,7 +3,7 @@ import type { TokenTie } from "@mod/grants";
 import { type BuildContext, contract, Unavailable } from "@mod/kernel";
 import type { IssuedToken, Lineage } from "../contract.ts";
 import { refreshGrantType } from "../contract.ts";
-import type { founding } from "../founding/found.ts";
+import { familyFieldsOf, type founding } from "../founding/found.ts";
 import { foundingIn } from "../founding/founding.ts";
 import { fromStoredLink, liveFamily } from "../record.ts";
 import type { Settings } from "../section.ts";
@@ -92,18 +92,7 @@ export function lineageOver(
 			const { client, access } = beginning;
 			if (!clientAllowance.allowsGrant(client, refreshGrantType)) return undefined;
 			const binding = found.bindingFor(client, beginning.binding);
-			const founded = {
-				clientId: client.id,
-				subject: beginning.subject,
-				scope: beginning.scope,
-				audience: beginning.audience,
-				authenticatedAt: beginning.authenticatedAt,
-				...(beginning.authenticatedAtUnknown ? { authenticatedAtUnknown: true as const } : {}),
-				amr: beginning.amr,
-				...(beginning.acr ? { acr: beginning.acr } : {}),
-				...(binding ? { binding } : {}),
-			};
-			return found.found(found.name(), founded, access, found.endsAt());
+			return found.found(found.name(), familyFieldsOf(beginning, binding), access, found.endsAt());
 		},
 	};
 }

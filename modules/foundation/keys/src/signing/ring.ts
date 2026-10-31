@@ -17,12 +17,16 @@ export interface Ring {
 	readonly publicKeys: readonly RingKey[];
 }
 
+/** RS256's least modulus, in bits (RFC 7518 §3.3). */
+const rsaModulusFloor = 2048;
+
 const keyTypes: Readonly<Record<AsymmetricAlg, (key: KeyObject) => boolean>> = {
 	EdDSA: (key) => key.asymmetricKeyType === "ed25519",
 	ES256: (key) =>
 		key.asymmetricKeyType === "ec" && key.asymmetricKeyDetails?.namedCurve === "prime256v1",
 	RS256: (key) =>
-		key.asymmetricKeyType === "rsa" && (key.asymmetricKeyDetails?.modulusLength ?? 0) >= 2048,
+		key.asymmetricKeyType === "rsa" &&
+		(key.asymmetricKeyDetails?.modulusLength ?? 0) >= rsaModulusFloor,
 };
 
 /** True once the key's expiry has passed; reads the clock only for keys that expire. */

@@ -9,15 +9,11 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
-		"@mod/client-credentials": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/subject-attributes": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"@mod/users": "workspace:*"
 	},
-	"helpers": [
-		"@mod/client-credentials"
-	],
 	"devDependencies": {
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session": "workspace:*",

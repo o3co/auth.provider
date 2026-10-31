@@ -1,8 +1,10 @@
-import { clientCredentialsGrantType } from "@mod/client-credentials";
 import { defineModule } from "@mod/kernel";
 import { subjectAttributes } from "@mod/subject-attributes";
 import { type IssuanceVerdict, issuancePolicies } from "@mod/tokens";
 import { userAttribute } from "@mod/users";
+
+/** RFC 6749 §4.4's grant type, the protocol's word: no user, so no address to check. */
+const clientCredentials = "client_credentials";
 
 const allowed: IssuanceVerdict = Object.freeze({ kind: "allowed" });
 const unverified: IssuanceVerdict = Object.freeze({
@@ -21,7 +23,7 @@ export default defineModule(
 				name: "verified-email",
 				judge: async ({ grant, grantType, session, continuing }) => {
 					// A continuing issuance follows one already judged; client credentials name no user.
-					if (continuing || grantType === clientCredentialsGrantType) return allowed;
+					if (continuing || grantType === clientCredentials) return allowed;
 					const found = await attributes().of(grant.subject, session);
 					// Only users' word: an upstream verified an address that need not be this user's.
 					const stated =

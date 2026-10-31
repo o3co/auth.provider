@@ -2332,9 +2332,6 @@ importers:
 
   modules/oauth/verified-email:
     dependencies:
-      '@mod/client-credentials':
-        specifier: workspace:*
-        version: link:../client-credentials
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
