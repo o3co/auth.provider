@@ -18,10 +18,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 - `@mod/federation-grants` (feature, `modules/delegation/federation-grants`): Takes a confidential client's intent to act for a user at one connection, and owns its steps through the browser and upstream, which a browser half runs over `grantIntents`.
   - `api` (`src/api`): the client routes, and the revocation follower.
-  - `lodging` (`src/api/lodging`): Internal module of `federation-grants`' `api`: a grant lodged, and a grant renewed.
-  - `revoking` (`src/api/revoking`): Internal module of `federation-grants`' `api`: a grant revoked by its client.
-  - `routing` (`src/api/routing`): Internal module of `federation-grants`' `api`: the routes a grant answers by id.
-  - `tokening` (`src/api/tokening`): Internal module of `federation-grants`' `api`: a grant's token, and its status.
+  - `lodging` (`src/api/lodging`): a grant lodged, and a grant renewed.
+  - `revoking` (`src/api/revoking`): a grant revoked by its client.
+  - `routing` (`src/api/routing`): the routes a grant answers by id.
+  - `tokening` (`src/api/tokening`): a grant's token, and its status.
   - `grant` (`src/grant`): what a grant and a browser step are, and the judgments the other internal modules share.
   - `intents` (`src/intents`): a grant's intent through the browser, as the package owns it.
   - `refresh` (`src/refresh`): handing a grant's upstream token, and renewing it.
