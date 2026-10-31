@@ -50,7 +50,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `serving` (`src/serving`): the server that answers each request with the route it reaches.
   - `settings` (`src/settings`): the schema of `http`'s operator section.
 - `@mod/http-ops` (feature, `modules/foundation/http-ops`): Answers the liveness and readiness routes, and times each request for `metrics`.
-- `@mod/kernel` (common, `modules/foundation/kernel`): Assembles modules: checks what they take, builds every provision and contribution, resolving contracts at once, then checks late references. Owns the generic rules of extension points, collecting contributions in module order.
+- `@mod/kernel` (common, `modules/foundation/kernel`): Assembles modules: checks what they take, builds every provision and contribution (internal module `building`), resolving contracts at once. Owns the generic rules of extension points, collecting contributions in module order.
+  - `building` (`src/building`): building the provisions and contributions, each once, and the build context each factory sees.
   - `config` (`src/config`): reading each module's section, and the kernel's own, from the configuration given.
   - `deployment` (`src/deployment`): the preflight of what the deployment's settings ask of the modules, before any factory runs.
   - `lifecycle` (`src/lifecycle`): what runs once the assembly starts, and how it stops and answers readiness.

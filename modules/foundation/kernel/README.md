@@ -1,7 +1,7 @@
 # kernel
 
 ## Responsibilities
-- Assembles modules: checks what they take, builds every provision and contribution, resolving contracts at once, then checks late references. Owns the generic rules of extension points, collecting contributions in module order.
+- Assembles modules: checks what they take, builds every provision and contribution (internal module `building`), resolving contracts at once. Owns the generic rules of extension points, collecting contributions in module order.
 - Loads configuration and gives each module only its own section, checked and frozen. With even one boot refusal, nothing is served.
 - Runs the lifecycle (start, periodic tasks, stop within a drain deadline) and answers readiness (internal module `lifecycle`, whose card holds their invariants).
 - Additions to this module go through a human gate.
@@ -28,7 +28,7 @@
 ## Invariants
 - Before any factory runs, the takes' preflight (internal module `takes`) refuses a module without takes and each gap a module's takes show, with the sections', replicas', production checks' and duplicate providers' refusals; a refused boot has built nothing. Replicas' and production checks are internal module `deployment`'s.
 - A module taking, by `get`, `late` or `collect`, a handle its takes do not name (its own contracts aside) refuses boot, even when it catches the throw.
-- Contracts and points resolve by value identity, never by name. Cycles, gaps, two providers, an empty point needing one, duplicate keys and a bad `every` interval refuse boot.
+- Contracts and points resolve by value identity, never by name. Cycles, gaps, an empty point needing one, duplicate keys and a bad `every` interval refuse boot.
 - Refusals of one stage are reported together, by key path (a value configuration cannot hold too), never by value; a key the schema needs and the configuration does not set is `required, and not set`, unless the schema words it itself. Every key a keyed point holds twice is refused, and a point is checked once however many modules collect it. `multi` refuses a module unsafe on multiple instances.
 - Before assembly succeeds, a late reference throws and `readinessReport` rejects. `readinessReport` and `stop` reject with a TypeError a deadline other than whole ms from 1 to 2^31−1. A late contract no module provides refuses boot.
 - A module a contract's `takenBy` does not name that takes it by `get` or `late` refuses boot, even when it catches the throw. `Assembly.get`, the composition root's, is not bound, and it binds the modules of a trusted assembly, never hostile code in the same process.
