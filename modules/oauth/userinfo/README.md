@@ -18,7 +18,7 @@
 - A token issued in a session is answered its claims only while that session enters at `use` for the token's subject; else (closed, ended, revoked, short of a requirement, or another subject's) `401 invalid_token`, challenged in the token's scheme.
 - The claims are what `oidc` releases for the token's scope and its kept selection: the names it asks beyond the scope, and the constraints on all it releases. The selection is read only for a token whose session enters, and the token's expiry is checked again once it is read: one that ended meanwhile is `401 invalid_token`, never answered without its selection.
 - `sub` is always the token's subject, and `sid` is never answered.
-- Every answer is `no-store`. A check or the claims that cannot tell answer `503 temporarily_unavailable`, never a refusal or a claim, logged as `userinfo.unavailable` (warn) with what failed.
+- Every answer is `no-store`. A check or the claims that cannot tell answer `503 temporarily_unavailable`, never a refusal or a claim: the routes' declared answer, which `http` gives after its warning `http.unavailable` with what failed and the route.
 
 ## Data
 - None.
