@@ -2,7 +2,7 @@
 
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
-import type { Pkg } from "@mod/guard-imports";
+import { type Pkg, propertyDeclarations } from "@mod/guard-imports";
 import type { RouteSeen } from "../assembled.ts";
 import { clientSectionsOf, idpTypesOf, sectionsIn } from "../configuration.ts";
 import { routesIn } from "../routes.ts";
@@ -213,19 +213,14 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 
 /**
  * The packages that may reach private addresses at URLs of the operator's configuration: those
- * declaring, in `narrower`, the property its owner's `narrower` holds to declaration.
+ * declaring the property the one owner holds to declaration, as guard-imports reads the manifests.
  */
 export function privateReachOf(packages: readonly Pkg[]): readonly string[] {
-	const stated = packages
-		.map(({ manifest }) => manifest.narrower)
-		.find(
-			(value): value is { property: string } =>
-				typeof value === "object" &&
-				value !== null &&
-				typeof (value as { property?: unknown }).property === "string",
-		);
-	return packages
-		.filter(({ manifest }) => stated !== undefined && manifest.narrower === stated.property)
+	const { owners, declaring } = propertyDeclarations(packages);
+	const [owned, ...others] = owners;
+	if (owned === undefined || others.length > 0) return [];
+	return declaring
+		.filter(({ manifest }) => manifest.narrower === owned.property)
 		.map(({ name }) => name)
 		.sort();
 }

@@ -906,7 +906,7 @@ describe("guard-imports", () => {
 				{
 					exports: { ".": "./src/contract.ts" },
 					dependencies: { "@c/urls": "*" },
-					narrower: owned,
+					narrowerOwner: owned,
 				},
 				"foundation",
 			);
@@ -934,8 +934,9 @@ describe("guard-imports", () => {
 						'const key = "internal";',
 						"export const keyed = () => send(url, { [key]: url });",
 						"export const got = { get internal() { return url; } };",
-						// Not counted: a literal of a generic factory's type, and an object only spread on.
+						// A generic factory's literal, whose type parameter the URL type could be bound to: counted.
 						"const make = <T>(v: T) => ({ internal: v });",
+						// Not counted: an object only spread on.
 						"export const made = () => send(url, make(url));",
 						"export const spread = () => send(url, { ...own });",
 						// A key whose type "internal" fits: a type parameter's constraint, a mapped string.
@@ -947,6 +948,11 @@ describe("guard-imports", () => {
 						// Not counted: a key no "internal" fits.
 						// biome-ignore lint/suspicious/noTemplateCurlyInString: the fixture's source holds a template type
 						"export const unrelated = (key: `unrelated-${string}`) => ({ [key]: url });",
+						// Not counted: a generic factory's literal whose type parameter no URL fits.
+						"export const counted = <T extends number>(v: T) => ({ internal: v });",
+						// Not counted: a key whose type parameter's constraint admits no "internal".
+						"interface Shape { readonly a?: string; readonly b?: boolean }",
+						"export const picked = <K extends keyof Shape>(key: K, s: Shape) => ({ [key]: s[key] as Shape[K] });",
 					].join("\n"),
 					"test/module.test.ts":
 						'import { read } from "@c/urls";\nexport const t = { internal: read("http://x/") };\n',
@@ -989,12 +995,12 @@ describe("guard-imports", () => {
 				{
 					exports: { ".": "./src/contract.ts" },
 					dependencies: { "@c/urls": "*" },
-					narrower: { type: "Narrower", property: "internal" },
+					narrowerOwner: { type: "Narrower", property: "internal" },
 				},
 				"foundation",
 			);
 			expect(found([urls, hidden])).toEqual([
-				"@c/policy narrower, but it exports no Narrower with internal",
+				"@c/policy narrowerOwner, but it exports no Narrower with internal",
 			]);
 		});
 
@@ -1011,6 +1017,7 @@ describe("guard-imports", () => {
 				"@c/other/src/module.ts:11 internal",
 				"@c/other/src/module.ts:16 internal",
 				"@c/other/src/module.ts:17 internal",
+				"@c/other/src/module.ts:18 internal",
 				"@c/other/src/module.ts:21 internal",
 				"@c/other/src/module.ts:22 internal",
 				"@c/other/src/module.ts:23 internal",
@@ -1035,11 +1042,15 @@ describe("guard-imports", () => {
 					silent("@c/silent", "internal"),
 					silent("@c/listing", ["internal"]),
 					silent("@c/other-word", "private"),
+					silent("@c/flagged", true),
+					silent("@c/cased", "Internal"),
 					writer("@c/unstated", "internal"),
 				]),
 			).toEqual([
 				'@c/listing narrower is ["internal"], not exactly "internal"',
 				'@c/other-word narrower is "private", not exactly "internal"',
+				'@c/flagged narrower is true, not exactly "internal"',
+				'@c/cased narrower is "Internal", not exactly "internal"',
 				"@c/unstated card states `narrower`: `internal`",
 				"@c/silent narrower: internal, but it writes none",
 			]);
@@ -1051,10 +1062,245 @@ describe("guard-imports", () => {
 			]);
 			const second = { ...owner(), name: "@c/second" };
 			expect(found([urls, owner(), second, declaring("@c/declared")])).toEqual([
-				"@c/policy narrower: @c/second states it owns it too",
+				"@c/policy narrowerOwner: @c/second states it owns it too",
 			]);
 			expect(found([urls, owner({ type: "Narrower" })])).toEqual([
-				"@c/policy narrower names no type and property it holds to declaration",
+				"@c/policy narrowerOwner names no type and property it holds to declaration",
+			]);
+		});
+
+		it("counts a generic helper's write at the helper, wherever it is called from", () => {
+			const helper = pkg(
+				"@c/helper",
+				{
+					"src/module.ts": [
+						"export const make = <T>(v: T) => ({ internal: v });",
+						"export const bounded = <T extends string>(v: T) => ({ internal: v });",
+						"export const numbered = <T extends number>(v: T) => ({ internal: v });",
+					].join("\n"),
+				},
+				{ exports: { ".": "./src/module.ts" } },
+			);
+			const calling = pkg(
+				"@c/calling",
+				{
+					"src/module.ts": [
+						'import { read } from "@c/urls";',
+						'import { send } from "@c/policy";',
+						'import { make } from "@c/helper";',
+						'export const reach = () => send("x", make(read("http://x/")));',
+					].join("\n"),
+				},
+				{
+					exports: { ".": "./src/module.ts" },
+					dependencies: { "@c/urls": "*", "@c/policy": "*", "@c/helper": "*" },
+				},
+			);
+			expect(found([urls, owner(), helper, calling])).toEqual([
+				"@c/helper/src/module.ts:1 internal",
+				"@c/helper/src/module.ts:2 internal",
+			]);
+		});
+
+		it("counts an assignment and a class field of the owned property under the same type rule", () => {
+			const assigning = pkg(
+				"@c/assigning",
+				{
+					"src/module.ts": [
+						'import { type ConfiguredUrl, read } from "@c/urls";',
+						'import type { Narrower } from "@c/policy";',
+						'const url = read("http://x/");',
+						"export const dotted = (n: { internal?: ConfiguredUrl }) => { n.internal = url; };",
+						'export const indexed = (n: { internal?: ConfiguredUrl }) => { n["internal"] = url; };',
+						"export const kept = (n: { internal?: ConfiguredUrl }) => { n.internal ??= url; };",
+						"export class Field { internal = url; }",
+						"export class Parameter { constructor(readonly internal: ConfiguredUrl) {} }",
+						"export class Typed implements Narrower { readonly internal?: ConfiguredUrl; }",
+						// Not counted: another type, a read, a comparison, another name.
+						"export const flag = (n: { internal?: boolean }) => { n.internal = true; };",
+						"export const read2 = (n: Narrower) => n.internal;",
+						"export const same = (n: Narrower) => n.internal === url;",
+						"export const other = (n: { hosts?: ConfiguredUrl }) => { n.hosts = url; };",
+					].join("\n"),
+				},
+				{ exports: { ".": "./src/module.ts" }, dependencies: { "@c/urls": "*", "@c/policy": "*" } },
+			);
+			expect(found([urls, owner(), assigning])).toEqual([
+				"@c/assigning/src/module.ts:4 internal",
+				"@c/assigning/src/module.ts:5 internal",
+				"@c/assigning/src/module.ts:6 internal",
+				"@c/assigning/src/module.ts:7 internal",
+				"@c/assigning/src/module.ts:8 internal",
+			]);
+		});
+
+		it("counts the property as a destructuring target, renamed, nested or in an array, and a pattern's own key as no write", () => {
+			const destructuring = pkg(
+				"@c/destructuring",
+				{
+					"src/module.ts": [
+						'import { type ConfiguredUrl, read } from "@c/urls";',
+						"type Held = { internal?: ConfiguredUrl };",
+						'const source = { url: read("http://x/") };',
+						"export const renamed = (n: Held) => { ({ url: n.internal } = source); };",
+						"export const nested = (n: Held) => { ({ a: { url: n.internal } } = { a: source }); };",
+						"export const listed = (n: Held, values: ConfiguredUrl[]) => { [n.internal] = values; };",
+						"export const looped = (n: Held, all: { url: ConfiguredUrl }[]) => { for ({ url: n.internal } of all); };",
+						// Not counted: a pattern's own key, which writes a local; a target of another type.
+						"export const local = (s: Held) => { let internal: ConfiguredUrl | undefined; ({ internal } = s); return internal; };",
+						"export const flag = (n: { internal?: boolean }) => { ({ ok: n.internal } = { ok: true }); };",
+					].join("\n"),
+				},
+				{ exports: { ".": "./src/module.ts" }, dependencies: { "@c/urls": "*" } },
+			);
+			expect(found([urls, owner(), destructuring])).toEqual([
+				"@c/destructuring/src/module.ts:4 internal",
+				"@c/destructuring/src/module.ts:5 internal",
+				"@c/destructuring/src/module.ts:6 internal",
+				"@c/destructuring/src/module.ts:7 internal",
+			]);
+			// A package that only reads the property, so declaring it, writes none.
+			const reading = {
+				...pkg(
+					"@c/reading",
+					{
+						"src/module.ts":
+							'import type { Narrower } from "@c/policy";\nexport const local = (s: Narrower) => { let internal; ({ internal } = s); return internal; };\n',
+					},
+					{
+						exports: { ".": "./src/module.ts" },
+						dependencies: { "@c/policy": "*" },
+						narrower: "internal",
+					},
+				),
+				card: stating("@c/reading"),
+			};
+			expect(found([urls, owner(), reading])).toEqual([
+				"@c/reading narrower: internal, but it writes none",
+			]);
+		});
+
+		it("holds a template to every form a source is held to, by the property's name", () => {
+			const templated = pkg(
+				"@c/templated",
+				{
+					"src/module.ts": "export const x = 1;\n",
+					"templates/main.ts.template": [
+						"export const assign = (n) => { n.internal = {{url}}; };",
+						'export const indexed = (n) => { n["internal"] = {{url}}; };',
+						"export class Field { internal = {{url}}; }",
+						"export class Parameter { constructor(readonly internal) {} }",
+						"export const renamed = (n, s) => { ({ url: n.internal } = s); };",
+						// Not counted: a pattern's own key, another name.
+						"export const local = (s) => { let internal; ({ internal } = s); return internal; };",
+						"export const other = (n) => { n.hosts = []; };",
+					].join("\n"),
+				},
+				{ exports: { ".": "./src/module.ts" } },
+			);
+			expect(found([urls, owner(), templated])).toEqual([
+				"@c/templated/templates/main.ts.template:1 internal",
+				"@c/templated/templates/main.ts.template:2 internal",
+				"@c/templated/templates/main.ts.template:3 internal",
+				"@c/templated/templates/main.ts.template:4 internal",
+				"@c/templated/templates/main.ts.template:5 internal",
+			]);
+		});
+
+		it("counts a value whose type parameter is itself a URL, any compound assignment, and a parenthesised target", () => {
+			const forms = pkg(
+				"@c/forms",
+				{
+					"src/module.ts": [
+						'import type { ConfiguredUrl } from "@c/urls";',
+						'import type { Narrower } from "@c/policy";',
+						"export function f<T extends ConfiguredUrl & { extra: true }>(url: T) { const s: Narrower = { internal: url }; return s; }",
+						"export const plus = (n: { internal?: string }, url: ConfiguredUrl) => { n.internal += url; };",
+						"export const wrapped = (n: { internal?: string }, url: ConfiguredUrl) => { (n.internal) = url; };",
+					].join("\n"),
+					"templates/main.ts.template": "export const plus = (n) => { n.internal += {{url}}; };\n",
+				},
+				{ exports: { ".": "./src/module.ts" }, dependencies: { "@c/urls": "*", "@c/policy": "*" } },
+			);
+			expect(found([urls, owner(), forms])).toEqual([
+				"@c/forms/src/module.ts:3 internal",
+				"@c/forms/src/module.ts:4 internal",
+				"@c/forms/src/module.ts:5 internal",
+				"@c/forms/templates/main.ts.template:1 internal",
+			]);
+		});
+
+		it("counts a plain .mjs source by type, and a template of a source by the property's name", () => {
+			const scripted = pkg(
+				"@c/scripted",
+				{
+					"src/run.mjs": [
+						'import { read } from "@c/urls";',
+						'import { send } from "@c/policy";',
+						'export const reach = () => send("x", { internal: read("http://x/") });',
+						"export const flag = { internal: true };",
+					].join("\n"),
+					"templates/main.ts.template": [
+						'import { send } from "{{policy}}";',
+						"export const reach = (url) => send(url, { internal: url });",
+						"export const flag = { internal: true };",
+						"export const other = { hosts: [] };",
+					].join("\n"),
+					"templates/guard.ts.part": "const kept = { 'internal': {{url}} };\n",
+					"templates/notes.md": "{ internal: url }\n",
+				},
+				{ exports: { ".": "./src/run.mjs" }, dependencies: { "@c/urls": "*", "@c/policy": "*" } },
+			);
+			expect(found([urls, owner(), scripted])).toEqual([
+				"@c/scripted/src/run.mjs:3 internal",
+				"@c/scripted/templates/main.ts.template:2 internal",
+				"@c/scripted/templates/main.ts.template:3 internal",
+				"@c/scripted/templates/guard.ts.part:1 internal",
+			]);
+		});
+
+		it("refuses a workspace with fewer owners than its rules ask for, and asks none where they do not say", () => {
+			const asking = { ...budget, declaredProperties: 1 };
+			const under = (packages: Pkg[]) =>
+				check(packages, asking)
+					.filter((v) => v.rule.startsWith("G32"))
+					.map((v) => `${v.where} ${v.detail}`);
+			expect(under([urls])).toEqual([
+				"workspace 1 package(s) must state what they hold to declaration, 0 do",
+			]);
+			expect(under([urls, owner(), declaring("@c/declared")])).toEqual([]);
+			expect(found([urls])).toEqual([]);
+		});
+
+		it("refuses an owner naming a type its contract does not export, or a property its type lacks", () => {
+			expect(found([urls, owner({ type: "Narowwer", property: "internal" })])).toEqual([
+				"@c/policy narrowerOwner, but it exports no Narowwer with internal",
+			]);
+			expect(found([urls, owner({ type: "Narrower", property: "interal" })])).toEqual([
+				"@c/policy narrowerOwner, but it exports no Narrower with interal",
+			]);
+		});
+
+		it("reads an object in narrower as a writer's malformed declaration, never as an owner", () => {
+			const mistaken = writer(
+				"@c/mistaken",
+				{ type: "Narrower", property: "internal" },
+				stating("@c/mistaken"),
+			);
+			expect(found([urls, owner(), mistaken])).toEqual([
+				'@c/mistaken narrower is {"type":"Narrower","property":"internal"}, not exactly "internal"',
+				"@c/mistaken/src/module.ts:5 internal",
+				"@c/mistaken/src/module.ts:6 internal",
+				"@c/mistaken/src/module.ts:9 internal",
+				"@c/mistaken/src/module.ts:10 internal",
+				"@c/mistaken/src/module.ts:11 internal",
+				"@c/mistaken/src/module.ts:16 internal",
+				"@c/mistaken/src/module.ts:17 internal",
+				"@c/mistaken/src/module.ts:18 internal",
+				"@c/mistaken/src/module.ts:21 internal",
+				"@c/mistaken/src/module.ts:22 internal",
+				"@c/mistaken/src/module.ts:23 internal",
+				"@c/mistaken/src/module.ts:24 internal",
 			]);
 		});
 
@@ -1071,7 +1317,7 @@ describe("guard-imports", () => {
 				{
 					exports: { ".": "./src/contract.ts" },
 					dependencies: { "@c/urls": "*" },
-					narrower: { type: "Limits", property: "private" },
+					narrowerOwner: { type: "Limits", property: "private" },
 				},
 				"foundation",
 			);

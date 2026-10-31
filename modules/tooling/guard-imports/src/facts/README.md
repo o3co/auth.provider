@@ -8,7 +8,7 @@ Internal module of `guard-imports`: what each source file says, read by one lexi
 ## Not here
 - Any rule's policy: which modules, names or forms are allowed, and whether an unresolved edge is refused or let through.
 - What the syntax does not show: dataflow and effects, a dependency's behaviour, prototype or reflection tricks, custom loaders, file-system races. Guard holds our own code to its design, written the ordinary way; it confines no hostile code.
-- Semantic resolution across files (a signature's declaration, a contract's type): the readers that build programs of their own (`surface`, `recorded`, `internal-by`).
+- Semantic resolution across files (a signature's declaration, a contract's type): the readers that build programs of their own (`surface`, `recorded`, `owned-property`).
 - A package's exports map: a bare specifier is a package and its subpath, unresolved further.
 
 ## Offers

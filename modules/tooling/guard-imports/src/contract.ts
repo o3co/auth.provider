@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { internalByRules } from "./internal-by/internal-by.ts";
+import { ownedPropertyRules } from "./owned-property/owned-property.ts";
 import { declaredRecordRules } from "./recorded/recorded.ts";
 import {
 	axisRules,
@@ -30,6 +30,11 @@ export type {
 	Unresolved,
 } from "./facts/facts.ts";
 export { type LexicalAnalysis, lexicalAnalysis } from "./facts/facts.ts";
+export {
+	type Owned,
+	type PropertyDeclarations,
+	propertyDeclarations,
+} from "./owned-property/owned-property.ts";
 export { budgetsAsTest, type Kinds, type Rules, type Scope, scopeOf } from "./scope.ts";
 export { type ImportUse, importedNames, importsOf, packageOf, parse } from "./source.ts";
 export type { Surface } from "./surface/surface.ts";
@@ -68,7 +73,7 @@ export function importRules(s: Scope, surfaces: ReadonlyMap<string, Surface>): v
 	bridgeRules(s, surfaces);
 	declaredRecordRules(s);
 	takenByRules(s);
-	internalByRules(s);
+	ownedPropertyRules(s);
 }
 
 /** The import and dependency rules over the workspace, as their findings. */

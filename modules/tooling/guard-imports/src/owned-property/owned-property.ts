@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { budgetsAsTest, type Scope } from "../scope.ts";
 import type { Pkg } from "../workspace.ts";
+import { byNameReading, isTemplate, typedReading, writesIn } from "./writes/writes.ts";
 
 const options: ts.CompilerOptions = {
 	target: ts.ScriptTarget.ES2022,
@@ -9,79 +11,30 @@ const options: ts.CompilerOptions = {
 	moduleResolution: ts.ModuleResolutionKind.Bundler,
 	allowImportingTsExtensions: true,
 	noEmit: true,
+	allowJs: true,
 	strict: true,
 	skipLibCheck: true,
 	types: [],
 };
 
-/** Where shipped code writes an `internal` property: its file and line. */
+/** Where shipped code writes the owned property: its file and line. */
 interface Written {
 	readonly pkg: Pkg;
 	readonly file: string;
 	readonly line: number;
 }
 
-/** Whether a type holds a type parameter anywhere: in a union or intersection, a template, a mapped string, or as one. */
-const holdsTypeParameter = (type: ts.Type): boolean => {
-	const deferred =
-		ts.TypeFlags.TypeParameter |
-		ts.TypeFlags.Index |
-		ts.TypeFlags.IndexedAccess |
-		ts.TypeFlags.Conditional |
-		ts.TypeFlags.Substitution;
-	if (type.flags & deferred) return true;
-	if (type.isUnionOrIntersection()) return type.types.some(holdsTypeParameter);
-	if (type.flags & ts.TypeFlags.TemplateLiteral)
-		return (type as ts.TemplateLiteralType).types.some(holdsTypeParameter);
-	if (type.flags & ts.TypeFlags.StringMapping)
-		return holdsTypeParameter((type as ts.StringMappingType).type);
-	return false;
-};
-
-/**
- * Whether an object literal's property may be written under the owned property's name: by name, or
- * by a computed key whose type that name fits (a union, a template, a mapped string or a string of
- * no known value alike), or whose type holds a type parameter anywhere, whatever it is bound to: a
- * guard's rule follows no further.
- */
-const namesOwned = (
-	checker: ts.TypeChecker,
-	property: ts.ObjectLiteralElementLike,
-	owned: string,
-) => {
-	const name = property.name;
-	if (name === undefined) return false;
-	if (!ts.isComputedPropertyName(name)) {
-		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === owned;
-	}
-	const key = checker.getTypeAtLocation(name.expression);
-	return (
-		holdsTypeParameter(key) || checker.isTypeAssignableTo(checker.getStringLiteralType(owned), key)
-	);
-};
-
-/** The type of the value a property is written with: its initializer, its shorthand name, or its getter's return. */
-const writtenType = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
-	if (ts.isPropertyAssignment(property)) return checker.getTypeAtLocation(property.initializer);
-	if (ts.isShorthandPropertyAssignment(property)) return checker.getTypeAtLocation(property.name);
-	if (ts.isGetAccessorDeclaration(property)) {
-		const signature = checker.getSignatureFromDeclaration(property);
-		return signature && checker.getReturnTypeOfSignature(signature);
-	}
-	return undefined;
-};
-
 /** What an owner holds to declaration: its package, and the type its contract exports with the property. */
-interface Owned {
+export interface Owned {
 	readonly owner: Pkg;
 	readonly type: string;
 	readonly property: string;
 }
 
 /**
- * Each object literal property of the owned property's name, in the shipped code of `packages`,
- * whose value is of the type the owner's type gives that property (`undefined` aside); a value of no
- * known type (`any`) or of none (`never`) is not counted.
+ * Each write of the owned property in the shipped code of `packages`, as `writes` finds and judges it
+ * by the type the owner's type gives that property, and in their templates by name; or why the owner's
+ * type cannot be read.
  */
 function writtenIn(
 	s: Scope,
@@ -99,7 +52,9 @@ function writtenIn(
 	const files = packages.flatMap((p) =>
 		s
 			.sources(p)
-			.filter((file) => file.endsWith(".ts") && !budgetsAsTest(s, p, file))
+			.filter(
+				(file) => (file.endsWith(".ts") || file.endsWith(".mjs")) && !budgetsAsTest(s, p, file),
+			)
 			.map((file) => ({ p, path: join(p.dir, file), file })),
 	);
 	const ownerEntry = join(owner.dir, entry);
@@ -119,28 +74,37 @@ function writtenIn(
 	const property = declared && checker.getDeclaredTypeOfSymbol(declared).getProperty(owned);
 	if (property === undefined) return `exports no ${type} with ${owned}`;
 	const wanted = checker.getNonNullableType(checker.getTypeOfSymbol(property));
-	const written: Written[] = [];
-	for (const { p, path, file } of files) {
+	const typed = typedReading(checker, wanted, owned);
+	const written = files.flatMap(({ p, path, file }) => {
 		const source = program.getSourceFile(path);
-		if (!source) continue;
-		const visit = (node: ts.Node): void => {
-			if (ts.isObjectLiteralExpression(node)) {
-				for (const element of node.properties) {
-					if (!namesOwned(checker, element, owned)) continue;
-					const value = writtenType(checker, element);
-					if (value === undefined) continue;
-					const type = checker.getNonNullableType(value);
-					if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never | ts.TypeFlags.Unknown)) continue;
-					if (!checker.isTypeAssignableTo(type, wanted)) continue;
-					const { line } = source.getLineAndCharacterOfPosition(element.getStart());
-					written.push({ pkg: p, file, line: line + 1 });
-				}
-			}
-			ts.forEachChild(node, visit);
-		};
-		visit(source);
-	}
-	return written;
+		return source ? writesIn(source, typed).map((line) => ({ pkg: p, file, line })) : [];
+	});
+	return [...written, ...templatedIn(s, owned, packages)];
+}
+
+/**
+ * Each write of the owned property in the templates of `packages`, in every form a source's is
+ * counted, by name alone: a template's imports are filled in when it is written out, so its values
+ * have no type to read. A computed key or an element access counts unless it is a literal of another
+ * name.
+ */
+function templatedIn(s: Scope, owned: string, packages: readonly Pkg[]): Written[] {
+	const byName = byNameReading(owned);
+	return packages.flatMap((p) =>
+		p.files
+			.filter((f) => isTemplate(f) && !budgetsAsTest(s, p, f))
+			.flatMap((file) => {
+				const text = readFileSync(join(p.dir, file), "utf8");
+				const source = ts.createSourceFile(
+					file,
+					text,
+					ts.ScriptTarget.ES2022,
+					true,
+					ts.ScriptKind.TS,
+				);
+				return writesIn(source, byName).map((line) => ({ pkg: p, file, line }));
+			}),
+	);
 }
 
 /** An owner's statement of what it holds to declaration, `{ type, property }`, or none where it is not one. */
@@ -152,30 +116,53 @@ const ownedOf = (value: unknown): { type: string; property: string } | undefined
 		: undefined;
 };
 
+/** What the workspace's manifests state of a property held to declaration, read once for every reader. */
+export interface PropertyDeclarations {
+	/** The packages stating, in `narrowerOwner`, the type and property they hold to declaration. */
+	readonly owners: readonly Owned[];
+	/** The packages whose `narrowerOwner` names no type and property. */
+	readonly malformed: readonly Pkg[];
+	/** The packages declaring, in `narrower`, the property they write, whatever its value. */
+	readonly declaring: readonly Pkg[];
+}
+
+/** The owners' `narrowerOwner` and the writers' `narrower` in `packages`. */
+export function propertyDeclarations(packages: readonly Pkg[]): PropertyDeclarations {
+	const owners: Owned[] = [];
+	const malformed: Pkg[] = [];
+	const declaring: Pkg[] = [];
+	for (const p of packages) {
+		const stated = p.manifest.narrowerOwner;
+		if (stated !== undefined) {
+			const owned = ownedOf(stated);
+			if (owned === undefined) malformed.push(p);
+			else owners.push({ owner: p, ...owned });
+		}
+		if (p.manifest.narrower !== undefined) declaring.push(p);
+	}
+	return { owners, malformed, declaring };
+}
+
 /**
  * G32: shipped code writes the property an owner holds to declaration (the narrower's `internal`,
  * which reaches private addresses) only in the packages that declare it, `narrower` in their manifest
  * stating the property and their card stating that; each declaring package writes one. The owner
- * states the type and the property in its own `narrower`.
+ * states the type and the property in its `narrowerOwner`.
  */
-export function internalByRules(s: Scope) {
+export function ownedPropertyRules(s: Scope) {
 	const rule = "G32 an owned property is written only by the packages declaring it";
-	const owners: Owned[] = [];
-	const declaring: Pkg[] = [];
-	for (const p of s.packages) {
-		const value = p.manifest.narrower;
-		if (value === undefined) continue;
-		// An object is an owner's statement; anything else, a writer's declaration.
-		if (typeof value !== "object" || value === null || Array.isArray(value)) {
-			declaring.push(p);
-			continue;
-		}
-		const owned = ownedOf(value);
-		if (owned === undefined) {
-			s.report(rule, p.name, "narrower names no type and property it holds to declaration");
-		} else {
-			owners.push({ owner: p, ...owned });
-		}
+	const { owners, malformed, declaring } = propertyDeclarations(s.packages);
+	for (const p of malformed) {
+		s.report(rule, p.name, "narrowerOwner names no type and property it holds to declaration");
+	}
+	// The workspace's rules say how many owners there must be: none stating it leaves writes unheld.
+	const required = s.budget.declaredProperties ?? 0;
+	if (owners.length < required) {
+		s.report(
+			rule,
+			"workspace",
+			`${required} package(s) must state what they hold to declaration, ${owners.length} do`,
+		);
 	}
 	const [owned, ...others] = owners;
 	if (owned === undefined) {
@@ -185,7 +172,7 @@ export function internalByRules(s: Scope) {
 		return;
 	}
 	for (const other of others) {
-		s.report(rule, owned.owner.name, `narrower: ${other.owner.name} states it owns it too`);
+		s.report(rule, owned.owner.name, `narrowerOwner: ${other.owner.name} states it owns it too`);
 	}
 	if (others.length > 0) return;
 	const { property } = owned;
@@ -208,7 +195,7 @@ export function internalByRules(s: Scope) {
 	// The owner too: it states the property, and writes none.
 	const written = writtenIn(s, owned, s.packages);
 	if (typeof written === "string") {
-		s.report(rule, owned.owner.name, `narrower, but it ${written}`);
+		s.report(rule, owned.owner.name, `narrowerOwner, but it ${written}`);
 		return;
 	}
 	for (const name of declared) {
