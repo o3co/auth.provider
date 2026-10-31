@@ -34,6 +34,9 @@ import type { PasskeyStore } from "../src/store.ts";
 import { passkeysConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
+/** The requester the tests ask and redeem as. */
+const asTest = { by: "test", id: "app" };
+
 /** A witnessing in place of passkey-witnessing's, its marks in a map: set where the subject holds a passkey, gone where an emptying write left none. */
 const scriptedWitnessing = (name = "witnessing") => {
 	const marks = new Map<string, string>();
@@ -342,9 +345,9 @@ it("leaves no usable passkey where the registration is stopped and its end canno
 		).rejects.toSatisfy(isUnavailable);
 		fails.down = false;
 		expect(await kept.listed?.("sam"), name).toEqual([]);
-		const { options: asking } = await app.get(passkeys).challenge("app");
+		const { options: asking } = await app.get(passkeys).challenge(asTest);
 		const assertion = authenticator.get(asking as RequestOptions, { origin: testOrigin });
-		expect(await app.get(passkeys).assert(assertion, "app"), name).toEqual({
+		expect(await app.get(passkeys).assert(assertion, asTest), name).toEqual({
 			kind: "refused",
 			reason: "unknown-credential",
 		});
@@ -394,9 +397,9 @@ async function sameId(app: Awaited<ReturnType<typeof boot>>) {
 	const two = await made(one.response.id);
 	/** Whether `authenticator` signs in, as the subject it signs in as. */
 	const signsIn = async ({ authenticator }: typeof one) => {
-		const { options } = await app.get(passkeys).challenge("app");
+		const { options } = await app.get(passkeys).challenge(asTest);
 		const assertion = authenticator.get(options as RequestOptions, { origin: testOrigin });
-		const asserted = await app.get(passkeys).assert(assertion, "app");
+		const asserted = await app.get(passkeys).assert(assertion, asTest);
 		return asserted.kind === "asserted" ? asserted.subject : asserted.kind;
 	};
 	return { kept, one, two, signsIn };

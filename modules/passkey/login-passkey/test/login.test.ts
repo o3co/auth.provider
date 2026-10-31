@@ -252,6 +252,9 @@ describe("a passkey login", () => {
 		const other = await s.options();
 		const elsewhere = await s.login(key, { cookie: other.cookie });
 		expect({ status: elsewhere.status, body: elsewhere.body }).toEqual(failed);
+		// The cookie sent with no value: no browser's mark, refused alike.
+		const blank = await s.login(key, { cookie: `${other.cookie.split("=")[0]}=` });
+		expect({ status: blank.status, body: blank.body }).toEqual(failed);
 		expect(s.seen).toEqual([]);
 	});
 

@@ -25,12 +25,14 @@ export interface RouteParts {
 
 /** The cookie that ties an assertion to the browser that asked its options. */
 const requesterCookie = "passkey-login";
+/** The browser's mark as passkeys knows it: this module's own, never another module's same id. */
+const requesterOf = (mark: string) => ({ by: "login-passkey", id: mark });
 
 /** The options route, then the login route that redeems what the options' challenge was answered with. */
 export function loginRoutes(p: RouteParts): Route[] {
 	const options = async (): Promise<HttpResponse> => {
 		const requester = Buffer.from(p.random(32)).toString("base64url");
-		const { options } = await p.passkeys.challenge(requester);
+		const { options } = await p.passkeys.challenge(requesterOf(requester));
 		const cookie = p.cookies.write(requesterCookie, requester, Math.ceil(p.lifetimeMs / 1000));
 		return jsonAnswer(200, options, { cookies: [cookie] });
 	};
@@ -53,8 +55,9 @@ export function loginRoutes(p: RouteParts): Route[] {
 			return jsonAnswer(401, { error: "passkey_login_failed" });
 		};
 		const found = p.cookies.lookup(request, requesterCookie);
-		if (found.kind !== "found") return refuse("challenge");
-		const asserted = await p.passkeys.assert(response, found.value);
+		// A mark sent empty names no browser: refused, as passkeys takes no requester without an id.
+		if (found.kind !== "found" || found.value === "") return refuse("challenge");
+		const asserted = await p.passkeys.assert(response, requesterOf(found.value));
 		if (asserted.kind === "refused") return refuse(asserted.reason);
 		const done = destination === undefined ? {} : { redirect_to: destination };
 		return p.open(request, asserted, done);
