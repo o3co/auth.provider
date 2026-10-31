@@ -129,14 +129,14 @@ export async function writeDeployment(
 	});
 }
 
-/** The guide's marks for what the modules ask: the lines, the lines under their heading, and the values decided, each after a line break. */
+/** The guide's marks for what the modules ask: the lines, the lines under their heading, and the values decided. */
 const guideAsked = ({ chosen, decides }: { chosen: string[]; decides: string[] }) => ({
 	asked: chosen.join("\n"),
 	askedSection:
 		chosen.length === 0
 			? ""
 			: ["## Store, users, audit and mail", "", ...chosen, "", ""].join("\n"),
-	decides: decides.map((line) => `\n${line}`).join(""),
+	decides: decides.join("\n"),
 });
 
 /** The install stage's install: with packages outside the release, what it checks against copied, and checked after. */

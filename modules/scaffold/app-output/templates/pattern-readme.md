@@ -15,7 +15,7 @@ Each key not written keeps its module's default.
 
 ## Store, users, audit and mail
 
-{{chosen}}
+{{asked}}
 
 ## Start
 
@@ -63,9 +63,7 @@ Each module's card, as installed, is the truth about it: what it does, its route
 
 ## Values the operator decides
 
-- `kernel.deployment`: {{deployment}}
-- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.
-- `audit.receivers`: the names of the audit receivers composed: {{receivers}}.
+{{decides}}
 
 Write secrets, such as the signing key, in `.env` or the local layer only; neither goes into git or the image.
 
