@@ -17,8 +17,8 @@
 - `issue` (a certificate, self-signed or under an issuer), `pemOf` and `thumbprintOf` (its `x5t#S256`), for other areas' scenes of a certificate-bound token
 
 ## Invariants
-- The legacy set-up, and the needs the legacy system cannot provide, live only in `src/legacy.ts`.
-- A scene the legacy system fails is not kept here; the module's own tests hold that behaviour.
+- The legacy set-up, the needs the legacy system cannot provide, and what it answers otherwise (`differs`) live only in `src/legacy.ts`.
+- A scene the legacy system answers otherwise runs on the new target alone, by a difference `src/legacy.ts` declares.
 - Touches only the HTTP interface.
 - Whether a token is bound is read from the access token's `cnf` and at introspection.
 - The new target reaches the fake revocation sources only because the scene names their hosts in outbound's `allow` and the sources as plain-http loopback destinations.
