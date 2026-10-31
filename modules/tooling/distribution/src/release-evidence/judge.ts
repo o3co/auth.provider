@@ -20,6 +20,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { largestOutputBytes } from "../limits.ts";
 import { cacheProblems } from "../workflow-caches/caches.ts";
 import { archiveProblems, entriesOf } from "./archive.ts";
 import {
@@ -57,7 +58,7 @@ const git = (...args: string[]) => {
 	return { ok: succeeded(answer), out: answer.stdout.trim() };
 };
 const ran = (command: string, args: readonly string[]) => {
-	const answer = spawnSync(command, args, { encoding: "utf8", maxBuffer: 1 << 28 });
+	const answer = spawnSync(command, args, { encoding: "utf8", maxBuffer: largestOutputBytes });
 	if (!succeeded(answer)) throw new Error(`${command} ${args.join(" ")}: ${answer.stderr.trim()}`);
 	return answer.stdout.trim();
 };
@@ -161,7 +162,7 @@ const walk = (dir: string): string[] =>
 function recomputed(run: RunSeen, tested: string, dir: string) {
 	const options = {
 		encoding: "utf8" as const,
-		maxBuffer: 1 << 28,
+		maxBuffer: largestOutputBytes,
 		env: { ...process.env, SPEC_EVIDENCE_COMMIT: tested, GITHUB_RUN_ID: String(run.id) },
 	};
 	// A stand-in for this module's own tests, never taken in a GitHub Actions run.

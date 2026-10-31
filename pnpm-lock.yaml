@@ -480,6 +480,9 @@ importers:
 
   modules/foundation/request-source:
     dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../address-reach
       '@mod/client-certificate':
         specifier: workspace:*
         version: link:../client-certificate

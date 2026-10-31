@@ -1,5 +1,5 @@
 import { jsonObjectOf, type Outbound, type OutboundRequest } from "@mod/outbound";
-import { answerOf, authorizationUrl, guarded } from "@mod/upstream-client";
+import { answerOf, authorizationUrl, guarded, tokenPostOf } from "@mod/upstream-client";
 import { type Upstream, UpstreamRefused } from "@mod/upstreams";
 import { z } from "zod";
 import { hostsOf, type Settings, userUrl } from "./settings.ts";
@@ -36,6 +36,12 @@ function profileOf(said: Readonly<Record<string, unknown>>) {
 /** GitHub's OAuth (not OpenID Connect): the subject is the user's numeric id, read from its API. */
 export function opened(s: Settings, outbound: Outbound): Upstream {
 	const hosts = hostsOf(s);
+	const post = tokenPostOf(
+		outbound,
+		s["token-endpoint"],
+		{ id: s["client-id"], auth: "form", secret: async () => s["client-secret"] },
+		{ hosts, internal: s["token-endpoint"] },
+	);
 	return {
 		issuer: s.issuer,
 		authorizationUrl: (start) =>
@@ -45,26 +51,12 @@ export function opened(s: Settings, outbound: Outbound): Upstream {
 			}),
 		exchange: async (exchange) => {
 			if (exchange.iss !== undefined && exchange.iss !== s.issuer) throw new UpstreamRefused();
-			const form = new URLSearchParams({
-				grant_type: "authorization_code",
-				code: exchange.code,
-				redirect_uri: exchange.redirectUri,
-				code_verifier: exchange.verifier,
-				client_id: s["client-id"],
-				client_secret: s["client-secret"],
-			});
-			const tokenRequest: OutboundRequest = {
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-					accept: "application/json",
-				},
-				body: form.toString(),
-			};
 			return guarded(async () => {
-				const granted = await outbound.fetch(s["token-endpoint"], tokenRequest, {
-					hosts,
-					internal: s["token-endpoint"],
+				const granted = await post({
+					grant_type: "authorization_code",
+					code: exchange.code,
+					redirect_uri: exchange.redirectUri,
+					code_verifier: exchange.verifier,
 				});
 				// GitHub answers a refused code with 200 and an error, so the token itself is required.
 				const { access_token } = answerOf(jsonObjectOf(granted), tokenAnswer);

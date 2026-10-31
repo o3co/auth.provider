@@ -10,7 +10,7 @@
 ## Offers
 - `credentialSetting`: a credential that is not blank. `clientSetting`: `client-id` and `client-secret`, which a type extends with its own settings. `endpointSetting`: an http or https URL, by `url-setting`'s `urlSetting`. `scopeSetting`: one scope, in RFC 6749's characters.
 - `authorizationUrl` (the endpoint, the start, the client ID and scopes, the type's own parameters) → the URL.
-- `basicAuthorization` (client ID, secret) → the HTTP Basic header value, each part form-urlencoded (RFC 6749 §2.3.1).
+- `tokenPostOf` (`outbound`, the token endpoint, the client's ID, `TokenAuth` (`basic` or `form`) and its secret as `() => Promise<string>`, the narrower) → a post of a grant, form-urlencoded, `accept: application/json`; HTTP Basic sends the ID and secret each form-urlencoded first (RFC 6749 §2.3.1).
 - `answerOf` (an answer as `outbound` reads JSON, a schema) → what the schema reads. `tokenAnswerOf` (an answer, the scope asked) → the upstream tokens, and the id_token apart.
 - `refreshAnswerOf` (a refresh's answer, the scope asked, what is unavailable) → the refresh's outcome.
 - `idTokenReaderOf` (`external-jwt`, the type's rules, a clock) → a reader: (id_token, the login's nonce) → the login (subject, login time, profile) and the checked claims, and `withUserinfo` (the upstream's UserInfo answer) → the login, its profile completed by it.
@@ -18,6 +18,7 @@
 - `guarded` (a type's call) → what it gives, or what it throws.
 
 ## Invariants
+- A client's secret goes only to the token endpoint, in each token post alone (outbound follows no redirect): as HTTP Basic, or after the grant in the form; asked for at each post, so one signed per call is fresh. The narrower is the caller's, passed on as given: `tokenPostOf` adds no host and no `internal` of its own.
 - A credential, the client's ID and secret among them, that is blank (empty or whitespace alone) or not well-formed text (half a surrogate pair) refuses boot; any other is taken as written.
 - federation's parameters are set first: `response_type` `code`, the client ID, the redirect URI, the scopes joined by spaces, the state and the PKCE challenge with its method.
 - A type's own parameter with the name of one of federation's is dropped; it never replaces it.

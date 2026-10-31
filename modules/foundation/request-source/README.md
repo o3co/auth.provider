@@ -34,7 +34,7 @@
 - The source and the trusted proxies are frozen.
 
 ## Depends on
-- `kernel` (the clock of the warning), `client-certificate`, `zod`.
+- `kernel` (the clock of the warning), `client-certificate`, `address-reach` (an address as a connection reaches it), `zod`.
 
 ## Vocabulary
 - source: where a request comes from, as the trusted proxies decide.

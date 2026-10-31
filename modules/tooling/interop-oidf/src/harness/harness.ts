@@ -48,6 +48,9 @@ const suiteSender = "198.51.100.40";
 /** The longest the suite's runner may run a plan. */
 const runWithinMs = 15 * 60_000;
 
+/** The most the suite's runner may write to either stream before it is stopped. */
+const largestSuiteOutputBytes = 256 * 1024 * 1024;
+
 const readJson = async <T>(file: string): Promise<T> =>
 	JSON.parse(await readFile(file, "utf8")) as T;
 
@@ -69,7 +72,7 @@ function runner(
 				timeout: runWithinMs,
 				signal,
 				killSignal: "SIGKILL",
-				maxBuffer: 256 * 1024 * 1024,
+				maxBuffer: largestSuiteOutputBytes,
 			},
 			(error, stdout, stderr) => {
 				const code = error === null ? 0 : typeof error.code === "number" ? error.code : null;

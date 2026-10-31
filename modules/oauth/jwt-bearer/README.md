@@ -2,14 +2,7 @@
 
 ## Responsibilities
 - Contributes the grant by JWT assertion.
-- Internal modules, each as its own card says:
-  - `issuers`
-  - `assertion`
-  - `delegated`
-  - `conditions`
-  - `policy`
-  - `clientless`
-  - `id-jag`
+- Internal modules, each as its own card says: `issuers`, `assertion`, `delegated`, `conditions`, `policy`, `clientless`, `id-jag` and `granting`.
 
 ## Not here
 - Client authentication (`token-endpoint`).

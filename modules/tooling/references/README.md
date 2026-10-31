@@ -30,6 +30,6 @@
 - The full template is assembled with the memory store in place of Redis, which is asked at assembly, and never started.
 
 ## Depends on
-- The workspace's package list; `app-output`'s fragments and the variables they read; `create-app`'s generation of the full template; `trial`'s layer; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes and marks, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.
+- `app-output`'s fragments and the variables they read; `create-app`'s generation of the full template; `trial`'s layer; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes and marks, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.
 - `config-files`, to read the assembled template's configuration files.
-- `guard-imports`, to read the workspace's manifests and cards for the audit index.
+- `guard-imports`, to read the workspace's packages, their manifests and cards (`readWorkspace`), once for every reference.

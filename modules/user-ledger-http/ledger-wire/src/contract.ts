@@ -22,9 +22,12 @@ export const usersWire = Object.freeze({
 	bySubject: (subject: string) => ({ subject }),
 	/** A lookup's body, by an upstream identity: the IdP's name and the subject there. */
 	byUpstream: (idp: string, subject: string) => ({ idp, subject }),
-	/** What a lookup's `404` and `410` say in `error` to mean no such user; unsaid, they mean nothing. */
+	/** What a lookup's or the password call's `404` and `410` say in `error` to mean no such user; unsaid, they mean nothing. */
 	noUser: Object.freeze({ 404: "not_found", 410: "gone" }) as Readonly<Record<number, string>>,
-	/** The password call's answer to a wrong identifier or password; challenging `Bearer`, it refuses the credential. */
+	/**
+	 * The password call's answer to a wrong identifier or password; challenging `Bearer`, it refuses the
+	 * credential. Deprecated as that answer: answer `noUser` instead.
+	 */
 	refused: 401,
 });
 
