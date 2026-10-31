@@ -1134,6 +1134,79 @@ describe("guard-imports", () => {
 			]);
 		});
 
+		it("counts the property as a destructuring target, renamed, nested or in an array, and a pattern's own key as no write", () => {
+			const destructuring = pkg(
+				"@c/destructuring",
+				{
+					"src/module.ts": [
+						'import { type ConfiguredUrl, read } from "@c/urls";',
+						"type Held = { internal?: ConfiguredUrl };",
+						'const source = { url: read("http://x/") };',
+						"export const renamed = (n: Held) => { ({ url: n.internal } = source); };",
+						"export const nested = (n: Held) => { ({ a: { url: n.internal } } = { a: source }); };",
+						"export const listed = (n: Held, values: ConfiguredUrl[]) => { [n.internal] = values; };",
+						"export const looped = (n: Held, all: { url: ConfiguredUrl }[]) => { for ({ url: n.internal } of all); };",
+						// Not counted: a pattern's own key, which writes a local; a target of another type.
+						"export const local = (s: Held) => { let internal: ConfiguredUrl | undefined; ({ internal } = s); return internal; };",
+						"export const flag = (n: { internal?: boolean }) => { ({ ok: n.internal } = { ok: true }); };",
+					].join("\n"),
+				},
+				{ exports: { ".": "./src/module.ts" }, dependencies: { "@c/urls": "*" } },
+			);
+			expect(found([urls, owner(), destructuring])).toEqual([
+				"@c/destructuring/src/module.ts:4 internal",
+				"@c/destructuring/src/module.ts:5 internal",
+				"@c/destructuring/src/module.ts:6 internal",
+				"@c/destructuring/src/module.ts:7 internal",
+			]);
+			// A package that only reads the property, so declaring it, writes none.
+			const reading = {
+				...pkg(
+					"@c/reading",
+					{
+						"src/module.ts":
+							'import type { Narrower } from "@c/policy";\nexport const local = (s: Narrower) => { let internal; ({ internal } = s); return internal; };\n',
+					},
+					{
+						exports: { ".": "./src/module.ts" },
+						dependencies: { "@c/policy": "*" },
+						narrower: "internal",
+					},
+				),
+				card: stating("@c/reading"),
+			};
+			expect(found([urls, owner(), reading])).toEqual([
+				"@c/reading narrower: internal, but it writes none",
+			]);
+		});
+
+		it("holds a template to every form a source is held to, by the property's name", () => {
+			const templated = pkg(
+				"@c/templated",
+				{
+					"src/module.ts": "export const x = 1;\n",
+					"templates/main.ts.template": [
+						"export const assign = (n) => { n.internal = {{url}}; };",
+						'export const indexed = (n) => { n["internal"] = {{url}}; };',
+						"export class Field { internal = {{url}}; }",
+						"export class Parameter { constructor(readonly internal) {} }",
+						"export const renamed = (n, s) => { ({ url: n.internal } = s); };",
+						// Not counted: a pattern's own key, another name.
+						"export const local = (s) => { let internal; ({ internal } = s); return internal; };",
+						"export const other = (n) => { n.hosts = []; };",
+					].join("\n"),
+				},
+				{ exports: { ".": "./src/module.ts" } },
+			);
+			expect(found([urls, owner(), templated])).toEqual([
+				"@c/templated/templates/main.ts.template:1 internal",
+				"@c/templated/templates/main.ts.template:2 internal",
+				"@c/templated/templates/main.ts.template:3 internal",
+				"@c/templated/templates/main.ts.template:4 internal",
+				"@c/templated/templates/main.ts.template:5 internal",
+			]);
+		});
+
 		it("counts a plain .mjs source by type, and a template of a source by the property's name", () => {
 			const scripted = pkg(
 				"@c/scripted",

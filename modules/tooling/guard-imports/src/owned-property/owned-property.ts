@@ -3,6 +3,7 @@ import { join } from "node:path";
 import ts from "typescript";
 import { budgetsAsTest, type Scope } from "../scope.ts";
 import type { Pkg } from "../workspace.ts";
+import { byNameReading, isTemplate, typedReading, writesIn } from "./writes/writes.ts";
 
 const options: ts.CompilerOptions = {
 	target: ts.ScriptTarget.ES2022,
@@ -22,66 +23,6 @@ interface Written {
 	readonly file: string;
 	readonly line: number;
 }
-
-/** Whether a type holds a type parameter anywhere: in a union or intersection, a template, a mapped string, or as one. */
-const holdsTypeParameter = (type: ts.Type): boolean => {
-	const deferred =
-		ts.TypeFlags.TypeParameter |
-		ts.TypeFlags.Index |
-		ts.TypeFlags.IndexedAccess |
-		ts.TypeFlags.Conditional |
-		ts.TypeFlags.Substitution;
-	if (type.flags & deferred) return true;
-	if (type.isUnionOrIntersection()) return type.types.some(holdsTypeParameter);
-	if (type.flags & ts.TypeFlags.TemplateLiteral)
-		return (type as ts.TemplateLiteralType).types.some(holdsTypeParameter);
-	if (type.flags & ts.TypeFlags.StringMapping)
-		return holdsTypeParameter((type as ts.StringMappingType).type);
-	return false;
-};
-
-/**
- * Whether a key may be the owned property's name: by name, or by a computed key whose type that name
- * fits (a union, a template, a mapped string or a string of no known value alike). A key whose type
- * holds a type parameter is read by what it may be bound to: its constraint, unknown for a bare one.
- */
-const namesOwned = (checker: ts.TypeChecker, name: ts.PropertyName | undefined, owned: string) => {
-	if (name === undefined) return false;
-	if (!ts.isComputedPropertyName(name)) {
-		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === owned;
-	}
-	return keyNames(checker, name.expression, owned);
-};
-
-/** Whether a key written as an expression (a computed key, an element access) may be the owned name. */
-const keyNames = (checker: ts.TypeChecker, expression: ts.Expression, owned: string) => {
-	const key = checker.getTypeAtLocation(expression);
-	const literal = checker.getStringLiteralType(owned);
-	if (holdsTypeParameter(key)) {
-		const constraint = checker.getBaseConstraintOfType(key);
-		return constraint === undefined || checker.isTypeAssignableTo(literal, constraint);
-	}
-	return checker.isTypeAssignableTo(literal, key);
-};
-
-/** The operators that write their left side. */
-const assigns = new Set([
-	ts.SyntaxKind.EqualsToken,
-	ts.SyntaxKind.QuestionQuestionEqualsToken,
-	ts.SyntaxKind.BarBarEqualsToken,
-	ts.SyntaxKind.AmpersandAmpersandEqualsToken,
-]);
-
-/** The type of the value a property is written with: its initializer, its shorthand name, or its getter's return. */
-const writtenType = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
-	if (ts.isPropertyAssignment(property)) return checker.getTypeAtLocation(property.initializer);
-	if (ts.isShorthandPropertyAssignment(property)) return checker.getTypeAtLocation(property.name);
-	if (ts.isGetAccessorDeclaration(property)) {
-		const signature = checker.getSignatureFromDeclaration(property);
-		return signature && checker.getReturnTypeOfSignature(signature);
-	}
-	return undefined;
-};
 
 /** What an owner holds to declaration: its package, and the type its contract exports with the property. */
 export interface Owned {
@@ -133,94 +74,37 @@ function writtenIn(
 	const property = declared && checker.getDeclaredTypeOfSymbol(declared).getProperty(owned);
 	if (property === undefined) return `exports no ${type} with ${owned}`;
 	const wanted = checker.getNonNullableType(checker.getTypeOfSymbol(property));
-	const written: Written[] = [];
-	for (const { p, path, file } of files) {
+	const typed = typedReading(checker, wanted, owned);
+	const written = files.flatMap(({ p, path, file }) => {
 		const source = program.getSourceFile(path);
-		if (!source) continue;
-		/** Records a write at `at` where its value, `undefined` aside, is of the property's type. */
-		const count = (at: ts.Node, value: ts.Type | undefined) => {
-			if (value === undefined) return;
-			const type = checker.getNonNullableType(value);
-			if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never | ts.TypeFlags.Unknown)) return;
-			// A type parameter is read by what it may be bound to: the helper writes it, whoever calls.
-			const generic = holdsTypeParameter(type);
-			const constraint = generic ? checker.getBaseConstraintOfType(type) : undefined;
-			const bindable =
-				generic && (constraint === undefined || checker.isTypeAssignableTo(wanted, constraint));
-			if (!bindable && !checker.isTypeAssignableTo(type, wanted)) return;
-			const { line } = source.getLineAndCharacterOfPosition(at.getStart());
-			written.push({ pkg: p, file, line: line + 1 });
-		};
-		const visit = (node: ts.Node): void => {
-			if (ts.isObjectLiteralExpression(node)) {
-				for (const element of node.properties) {
-					if (namesOwned(checker, element.name, owned))
-						count(element, writtenType(checker, element));
-				}
-			} else if (ts.isBinaryExpression(node) && assigns.has(node.operatorToken.kind)) {
-				// An assignment to the property, by name or by an element access.
-				const target = node.left;
-				const named =
-					(ts.isPropertyAccessExpression(target) && target.name.text === owned) ||
-					(ts.isElementAccessExpression(target) &&
-						keyNames(checker, target.argumentExpression, owned));
-				if (named) count(node, checker.getTypeAtLocation(node.right));
-			} else if (ts.isPropertyDeclaration(node) && node.initializer !== undefined) {
-				// A class field initialised under the property's name.
-				if (namesOwned(checker, node.name, owned))
-					count(node, checker.getTypeAtLocation(node.initializer));
-			} else if (ts.isParameterPropertyDeclaration(node, node.parent)) {
-				// A constructor's parameter property, written by whoever constructs it.
-				if (namesOwned(checker, node.name as ts.PropertyName, owned))
-					count(node, checker.getTypeAtLocation(node));
-			}
-			ts.forEachChild(node, visit);
-		};
-		visit(source);
-	}
+		return source ? writesIn(source, typed).map((line) => ({ pkg: p, file, line })) : [];
+	});
 	return [...written, ...templatedIn(s, owned, packages)];
 }
 
-/** A file that becomes a source once filled: a `.ts` or `.mjs` name under a suffix of its own. */
-const isTemplate = (file: string) => /\.(?:ts|mjs)\.[^./]+$/.test(file);
-
 /**
- * Each object literal property of the owned property's name in the templates of `packages`, by name
- * alone: a template's imports are filled in when it is written out, so its values have no type to
- * read. A computed key counts unless it is a literal of another name.
+ * Each write of the owned property in the templates of `packages`, in every form a source's is
+ * counted, by name alone: a template's imports are filled in when it is written out, so its values
+ * have no type to read. A computed key or an element access counts unless it is a literal of another
+ * name.
  */
 function templatedIn(s: Scope, owned: string, packages: readonly Pkg[]): Written[] {
-	const written: Written[] = [];
-	for (const p of packages) {
-		for (const file of p.files.filter((f) => isTemplate(f) && !budgetsAsTest(s, p, f))) {
-			const source = ts.createSourceFile(
-				file,
-				readFileSync(join(p.dir, file), "utf8"),
-				ts.ScriptTarget.ES2022,
-				false,
-				ts.ScriptKind.TS,
-			);
-			const named = (name: ts.PropertyName) => {
-				if (!ts.isComputedPropertyName(name)) {
-					return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === owned;
-				}
-				const key = name.expression;
-				return !(ts.isStringLiteralLike(key) || ts.isNumericLiteral(key)) || key.text === owned;
-			};
-			const visit = (node: ts.Node): void => {
-				if (ts.isObjectLiteralExpression(node)) {
-					for (const element of node.properties) {
-						if (element.name === undefined || !named(element.name)) continue;
-						const { line } = source.getLineAndCharacterOfPosition(element.getStart(source));
-						written.push({ pkg: p, file, line: line + 1 });
-					}
-				}
-				ts.forEachChild(node, visit);
-			};
-			visit(source);
-		}
-	}
-	return written;
+	const byName = byNameReading(owned);
+	return packages.flatMap((p) =>
+		p.files
+			.filter((f) => isTemplate(f) && !budgetsAsTest(s, p, f))
+			.flatMap((file) => {
+				const text = readFileSync(join(p.dir, file), "utf8");
+				const source = ts.createSourceFile(
+					file,
+					text,
+					ts.ScriptTarget.ES2022,
+					true,
+					ts.ScriptKind.TS,
+				);
+				return writesIn(source, byName).map((line) => ({ pkg: p, file, line }));
+			}),
+	);
 }
 
 /** An owner's statement of what it holds to declaration, `{ type, property }`, or none where it is not one. */
