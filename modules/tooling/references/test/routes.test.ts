@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
 import { routesFile, routesIn, routesOf } from "../src/routes.ts";
-import { root } from "./root.ts";
+import { packages, root } from "./root.ts";
 
 // These tests assemble the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
@@ -29,7 +29,7 @@ it("writes a route in a line: method, path, the package it is from, its bodies, 
 });
 
 it("finds every route full with every opt-in serves, each by the package it is from", async () => {
-	const routes = await routesIn(root);
+	const routes = await routesIn(root, packages);
 	expect(routes.find((r) => r.path === "/oauth/token")).toMatchObject({
 		owner: "@mod/token-endpoint",
 		method: "POST",
@@ -45,5 +45,5 @@ it("finds every route full with every opt-in serves, each by the package it is f
 });
 
 it("holds, committed, the route reference generated from the workspace as it is now", async () => {
-	expect(readFileSync(routesFile(root), "utf8")).toBe(routesOf(await routesIn(root)));
+	expect(readFileSync(routesFile(root), "utf8")).toBe(routesOf(await routesIn(root, packages)));
 });
