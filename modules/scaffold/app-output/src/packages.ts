@@ -1,6 +1,6 @@
 /** What the output takes from where the packages come from; the caller implements it. */
 import type { Asked } from "./asked/asked.ts";
-import type { Fragment } from "./fragments/contract.ts";
+import type { Fragment, Sampled } from "./fragments/contract.ts";
 import type { OutsideModules } from "./outside/contract.ts";
 
 /** Where the packages an app assembles come from, and how the app names them. */
@@ -19,6 +19,8 @@ export interface Packages {
 	outside?(names: readonly string[]): OutsideModules | undefined;
 	/** What each name declares for the guide; none where the caller has none, as an older bundle has. */
 	asks?(names: readonly string[]): readonly Asked[];
+	/** What each name declares of entry samples, its sample's text among it; none where the caller has none. */
+	samples?(names: readonly string[]): readonly Sampled[];
 }
 
 /** A module's card and section defaults, as the app installs them, from the app's directory. */

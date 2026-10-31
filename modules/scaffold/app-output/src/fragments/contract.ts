@@ -12,3 +12,4 @@ export {
 	type Written,
 	writtenOf,
 } from "./fragments.ts";
+export { type Sampled, sampleFile, sampleLines } from "./samples.ts";
