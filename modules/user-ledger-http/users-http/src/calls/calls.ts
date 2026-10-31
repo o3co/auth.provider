@@ -1,12 +1,11 @@
 import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
 import { usersWire } from "@mod/ledger-wire";
 import {
-	DestinationRefused,
-	isOutboundUnavailable,
 	jsonObjectOf,
 	type Narrower,
 	type Outbound,
 	type OutboundResponse,
+	postJson,
 } from "@mod/outbound";
 import type { ConfiguredUrl } from "@mod/url-setting";
 import { isWellFormedSubject, userAttribute, type Verified } from "@mod/users";
@@ -44,13 +43,6 @@ function challengesBearer(value: string | undefined): boolean {
 	return /(?:^|,)[ \t]*bearer(?:[ \t]*(?:,|$)|[ \t]+(?![ \t=]))/i.test(unquoted);
 }
 
-/** The kind outbound gives a failure to send, or no-answer for anything else. */
-function kindOf(error: unknown): string {
-	if (DestinationRefused.is(error)) return error.reason;
-	if (isOutboundUnavailable(error)) return error.failure;
-	return "no-answer";
-}
-
 /** The ledger's user `{id, ...}` as a new frozen user, or undefined when it is not one. */
 function userOf(answer: Readonly<Record<string, unknown>>) {
 	const { id, emailVerified } = answer;
@@ -72,14 +64,10 @@ export function calls(parts: CallParts): Calls {
 		warn("users-http.ledger_failed", why);
 		return new Unavailable("users-http");
 	};
-	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
-	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
 	const post = (url: ConfiguredUrl, body: unknown) =>
-		out
-			.fetch(url, { method: "POST", headers, body: JSON.stringify(body), ...sent }, narrowerOf(url))
-			.catch((error: unknown) => {
-				throw failed({ reason: kindOf(error) });
-			});
+		postJson(out, { url, body, credential, narrower: narrowerOf(url) }, (reason) =>
+			failed({ reason }),
+		);
 	/** A `200` read once into a user, or unavailable. */
 	const userIn = (answer: OutboundResponse, wanted: (user: object) => boolean) => {
 		if (answer.status !== 200) throw failed({ status: answer.status });
