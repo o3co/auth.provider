@@ -68,6 +68,9 @@ importers:
       '@mod/client-certificate':
         specifier: workspace:*
         version: link:../../foundation/client-certificate
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../../foundation/host-entries
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
@@ -77,9 +80,6 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
-      '@mod/outbound-policy':
-        specifier: workspace:*
-        version: link:../../foundation/outbound-policy
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding

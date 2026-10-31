@@ -10,10 +10,10 @@
 	},
 	"dependencies": {
 		"@mod/client-certificate": "workspace:*",
+		"@mod/host-entries": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
-		"@mod/outbound-policy": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"asn1js": "4.0.0",
 		"pkijs": "4.0.1",
