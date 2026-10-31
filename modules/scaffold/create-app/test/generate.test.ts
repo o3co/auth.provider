@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mainSource } from "@mod/app-output";
+import { mainSource } from "@mod/app-entries";
 import { addable, needed } from "@mod/combinations";
 import { trialLayer } from "@mod/trial";
 import { expect, it, vi } from "vitest";

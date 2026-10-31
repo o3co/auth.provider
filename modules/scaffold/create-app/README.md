@@ -12,7 +12,7 @@
 - What each module's configuration means, and its fragment (`config.example` beside its package.json): each module's.
 - What the full template and a selection compose: `combinations`.
 - The local layer that boots a generated app for a test or a conformance run: `trial`.
-- The project's files, from the configuration and its examples to the image, the guide and the app's entry, and what they are held to: `app-output`.
+- The project's files, from the configuration and its examples to the image and the guide, and what they are held to: `app-output`; the app's entries and how they boot: `app-entries`.
 - The configuration, audit event and route references, and each package's `reference.conf`: `references`.
 
 ## Offers

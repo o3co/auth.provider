@@ -2781,6 +2781,9 @@ importers:
         specifier: 7.8.5
         version: 7.8.5
     devDependencies:
+      '@mod/app-entries':
+        specifier: workspace:*
+        version: link:../app-entries
       '@mod/docker-client':
         specifier: workspace:*
         version: link:../../tooling/docker-client
