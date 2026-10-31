@@ -65,7 +65,9 @@ export const section = z
 			.duration("s")
 			.pipe(z.number().int().min(0).max(longestClockSkew))
 			.prefault("30s")
-			.describe("How far an id_token's times may be off this host's clock, from 0s to 5m."),
+			.describe(
+				"How far an id_token's times may be off this host's clock, from 0s to 5m. Set it no lower than your issuers' real clock drift: narrowing it can admit an id_token a wider skew refused at a revocation.",
+			),
 		apple: upstream("apple"),
 		google: upstream("google"),
 	})
