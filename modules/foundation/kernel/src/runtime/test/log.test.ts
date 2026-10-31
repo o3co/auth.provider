@@ -115,9 +115,9 @@ describe("log threshold", () => {
 describe("log sinks", () => {
 	it("hands each sink the level, event, kernel time and fields, the fields never replacing the others", async () => {
 		vi.useFakeTimers({ now: 1_700_000_000_000, toFake: ["Date"] });
-		const lines = await linesOf((log) =>
-			log.warn("e", { level: "error", event: "x", at: 1, n: 2 }),
-		);
+		// Fields a JavaScript caller may pass, past the type that refuses these names.
+		const forged: Record<string, string | number> = { level: "error", event: "x", at: 1, n: 2 };
+		const lines = await linesOf((log) => log.warn("e", forged));
 		expect(lines).toEqual([
 			{
 				level: "warn",

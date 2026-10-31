@@ -1,5 +1,5 @@
 import type { JtiLedger } from "@mod/jwt-bearer";
-import { type LogFields, Unavailable } from "@mod/kernel";
+import { type Log, Unavailable } from "@mod/kernel";
 import { type Narrower, type Outbound, postJson } from "@mod/outbound";
 
 export interface LedgerParts {
@@ -10,7 +10,7 @@ export interface LedgerParts {
 	readonly credential: string | undefined;
 	readonly credentialHeader: string | undefined;
 	readonly narrower: Narrower;
-	readonly warn: (event: string, fields: LogFields) => void;
+	readonly warn: Log["warn"];
 }
 
 /** The longest jti the ledger records, in UTF-8 bytes. */

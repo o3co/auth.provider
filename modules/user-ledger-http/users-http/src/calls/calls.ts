@@ -1,4 +1,4 @@
-import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { deepFreeze, type Log, Unavailable } from "@mod/kernel";
 import { usersWire } from "@mod/ledger-wire";
 import {
 	jsonObjectOf,
@@ -15,7 +15,7 @@ export interface CallParts {
 	readonly out: Outbound;
 	readonly credential: string | undefined;
 	readonly narrowerOf: (url: ConfiguredUrl) => Narrower;
-	readonly warn: (event: string, fields: LogFields) => void;
+	readonly warn: Log["warn"];
 }
 
 /** The ledger's calls: the password call, and a lookup that posts what it looks up. */

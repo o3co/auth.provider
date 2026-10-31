@@ -30,7 +30,7 @@ function inconsistencyOf(p: Pick<StandingParts, "audit" | "log">) {
 	const audited = declaredAudit(p.audit, events);
 	return (subject: string, at: Asked | "reset") => {
 		audited.record("mfa.enrollment_inconsistent", { subject, attributes: { at } });
-		p.log.warn("mfa.enrollment_inconsistent", { at });
+		p.log.warn("mfa.enrollment_inconsistent", { asked: at });
 		return new Unavailable("mfa");
 	};
 }

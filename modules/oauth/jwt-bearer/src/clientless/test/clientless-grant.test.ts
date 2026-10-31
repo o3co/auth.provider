@@ -262,12 +262,12 @@ describe("a grant naming no client, by an issuer's client", () => {
 			{
 				level: "warn",
 				event: "jwt-bearer.clientless_issuer",
-				fields: { at: "jwt-bearer.issuers.0" },
+				fields: { key: "jwt-bearer.issuers.0" },
 			},
 			{
 				level: "warn",
 				event: "jwt-bearer.clientless_issuer",
-				fields: { at: "jwt-bearer.issuers.2" },
+				fields: { key: "jwt-bearer.issuers.2" },
 			},
 		]);
 		const { client: _phones, ...unbound } = devicesEntry;

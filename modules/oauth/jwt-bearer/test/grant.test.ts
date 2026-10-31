@@ -1116,7 +1116,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 			{
 				level: "warn",
 				event: "jwt-bearer.self_issued_signers",
-				fields: { at: "jwt-bearer.issuers.1" },
+				fields: { key: "jwt-bearer.issuers.1" },
 			},
 		]);
 		expect(JSON.stringify(logged.lines())).not.toContain("device:");

@@ -15,7 +15,7 @@ const logReceiver = (log: Log): AuditReceiver => ({
 	receive: async (event) => {
 		log.info("audit", {
 			kind: event.kind,
-			at: event.at,
+			occurred: event.at,
 			...(event.subject === undefined ? {} : { subject: event.subject }),
 			...(event.attributes ? { attributes: Object.keys(event.attributes).join(",") } : {}),
 		});

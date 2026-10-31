@@ -4,7 +4,7 @@ import {
 	type SignerKeys,
 	takenAlgorithms,
 } from "@mod/jwt-bearer";
-import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { deepFreeze, type Log, Unavailable } from "@mod/kernel";
 import { publicMembers } from "@mod/keys";
 import { jsonObjectOf, type Narrower, type Outbound, postJson } from "@mod/outbound";
 import { z } from "zod";
@@ -15,7 +15,7 @@ export interface LookupParts {
 	readonly out: Outbound;
 	readonly credential: string | undefined;
 	readonly narrower: Narrower;
-	readonly warn: (event: string, fields: LogFields) => void;
+	readonly warn: Log["warn"];
 }
 
 const answerShape = z.object({

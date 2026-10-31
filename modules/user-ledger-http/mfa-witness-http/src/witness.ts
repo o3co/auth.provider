@@ -1,4 +1,4 @@
-import { type LogFields, Unavailable } from "@mod/kernel";
+import { type Log, Unavailable } from "@mod/kernel";
 import { witnessWire } from "@mod/ledger-wire";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import { jsonObjectOf, type Narrower, type Outbound, postJson } from "@mod/outbound";
@@ -18,7 +18,7 @@ export interface WitnessParts {
 	/** How long outbound holds a call made under `narrower`: a write's deadline is its sending time plus this. */
 	readonly heldMs: number;
 	readonly now: () => number;
-	readonly warn: (event: string, fields: LogFields) => void;
+	readonly warn: Log["warn"];
 }
 
 type Call = "read" | "enroll" | "clear" | "withdraw";

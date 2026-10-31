@@ -128,7 +128,7 @@ export async function assembleWatching(
 	sinkList = sinks;
 	// Once the sinks are built, so the lines reach them: what production would refuse, at each start.
 	for (const { where, reason } of allowed) {
-		runtime.log.warn("kernel.allowed_in_development", { at: where, reason });
+		runtime.log.warn("kernel.allowed_in_development", { key: where, reason });
 	}
 	// Each provision records its interface as it is built.
 	for (const item of providers.values()) await outcomeOf(item);
