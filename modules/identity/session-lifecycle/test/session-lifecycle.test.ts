@@ -934,7 +934,7 @@ describe("session closing", () => {
 });
 
 describe("session raise", () => {
-	it("raises a session under a new cookie, keeps its handle and authentication time, and the old cookie no longer enters", async () => {
+	it("raises a session under a new cookie, keeps its handle and authentication time, and the old cookie no longer enters [guarantee-2-b]", async () => {
 		const { s, withCookie, login, jar } = await boot();
 		const cookie = await login();
 		const before = (await s.enter(withCookie(cookie))) as Session;
