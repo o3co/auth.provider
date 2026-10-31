@@ -1,5 +1,5 @@
+import { docker, dockerWithin } from "@mod/docker-client";
 import { describe, expect, it } from "vitest";
-import { dockerSync } from "../../docker/docker.ts";
 import { appClockEnv, appClockImage, appLibfaketimeIn } from "../clock.ts";
 
 /** Serves one answer, reads its Date header, and times a one-second timer on the monotonic clock. */
@@ -13,25 +13,19 @@ const server = createServer((_, res) => res.end()).listen(0, async () => {
 	server.close();
 });`;
 
-const image = appClockImage();
-const library = appLibfaketimeIn(image);
+const image = await appClockImage();
+const library = await appLibfaketimeIn(image);
 
 /** The probe in a container, on a clock moved by `offset` (none for the real one), and the host's time around it. */
-function run(offset?: string) {
+async function run(offset?: string) {
 	const env = offset
 		? Object.entries(appClockEnv(offset, library)).flatMap(([k, v]) => ["-e", `${k}=${v}`])
 		: [];
 	const before = Date.now();
-	const out = dockerSync("run", [
-		"run",
-		"--rm",
-		...env,
-		image,
-		"node",
-		"--input-type=module",
-		"-e",
-		probe,
-	]);
+	const out = await docker(
+		["run", "--rm", ...env, image, "node", "--input-type=module", "-e", probe],
+		dockerWithin.run,
+	);
 	const after = Date.now();
 	return {
 		before,
@@ -41,12 +35,12 @@ function run(offset?: string) {
 }
 
 describe("an app on a moved clock (libfaketime on glibc Linux)", () => {
-	it("moves Date and the Date header by the offset either way, its timers on real time", () => {
+	it("moves Date and the Date header by the offset either way, its timers on real time", async () => {
 		for (const [offset, ms] of [
 			["+2h", 7_200_000],
 			["-30m", -1_800_000],
 		] as const) {
-			const r = run(offset);
+			const r = await run(offset);
 			expect(r.now - ms, offset).toBeGreaterThanOrEqual(r.before);
 			expect(r.now - ms, offset).toBeLessThanOrEqual(r.after);
 			// The header has whole seconds, and Node caches it for up to a second.
@@ -57,8 +51,8 @@ describe("an app on a moved clock (libfaketime on glibc Linux)", () => {
 		}
 	});
 
-	it("leaves the clock alone without the environment", () => {
-		const r = run();
+	it("leaves the clock alone without the environment", async () => {
+		const r = await run();
 		expect(r.now).toBeGreaterThanOrEqual(r.before);
 		expect(r.now).toBeLessThanOrEqual(r.after);
 	});

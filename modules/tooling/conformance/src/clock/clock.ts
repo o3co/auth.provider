@@ -2,22 +2,19 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { dockerSync } from "../docker/docker.ts";
+import { docker, dockerSync, dockerWithin } from "@mod/docker-client";
 
 /** The libfaketime a process on a moved clock preloads, by its Alpine package version. */
 export const libfaketime = "libfaketime=0.9.10-r3";
 
 /** An Alpine image given, with libfaketime added: built once, its tag a hash of how it is built. */
-export function clockImage(base: string): string {
+export async function clockImage(base: string): Promise<string> {
 	const recipe = `FROM ${base}\nRUN apk add --no-cache ${libfaketime}\n`;
 	const tag = `conformance-clock:${createHash("sha256").update(recipe).digest("hex").slice(0, 16)}`;
 	try {
-		dockerSync("control", ["image", "inspect", tag], { stdio: "ignore" });
+		dockerSync(["image", "inspect", tag], dockerWithin.control, { stdio: "ignore" });
 	} catch {
-		dockerSync("build", ["build", "-q", "-t", tag, "-"], {
-			input: recipe,
-			stdio: ["pipe", "ignore", "inherit"],
-		});
+		await docker(["build", "-q", "-t", tag, "-"], dockerWithin.build, { input: recipe });
 	}
 	return tag;
 }
@@ -42,30 +39,23 @@ const appClockBase =
 const appLibfaketime = "libfaketime=0.9.10-2.1";
 
 /** `appClockBase` with `appLibfaketime` added: built once, its tag a hash of how it is built. */
-export function appClockImage(): string {
+export async function appClockImage(): Promise<string> {
 	const recipe = `FROM ${appClockBase}\nRUN apt-get update -qq && apt-get install -y -qq --no-install-recommends ${appLibfaketime} && rm -rf /var/lib/apt/lists/*\n`;
 	const tag = `conformance-app-clock:${createHash("sha256").update(recipe).digest("hex").slice(0, 16)}`;
 	try {
-		dockerSync("control", ["image", "inspect", tag], { stdio: "ignore" });
+		dockerSync(["image", "inspect", tag], dockerWithin.control, { stdio: "ignore" });
 	} catch {
-		dockerSync("build", ["build", "-q", "-t", tag, "-"], {
-			input: recipe,
-			stdio: ["pipe", "ignore", "inherit"],
-		});
+		await docker(["build", "-q", "-t", tag, "-"], dockerWithin.build, { input: recipe });
 	}
 	return tag;
 }
 
 /** Where an image holds the thread-safe libfaketime, its directory named by its architecture. */
-export function appLibfaketimeIn(image: string): string {
-	return dockerSync("run", [
-		"run",
-		"--rm",
-		image,
-		"sh",
-		"-c",
-		"ls /usr/lib/*/faketime/libfaketimeMT.so.1",
-	]).trim();
+export function appLibfaketimeIn(image: string): Promise<string> {
+	return docker(
+		["run", "--rm", image, "sh", "-c", "ls /usr/lib/*/faketime/libfaketimeMT.so.1"],
+		dockerWithin.run,
+	);
 }
 
 /** Each library probed, and whether it moved a Node process's clock: probed once per path. */
