@@ -14,7 +14,7 @@
 
 ## Invariants
 - A command's time, or its signal, ends `docker`'s wait at once: the client is started in a process group of its own, and the group is killed, what the client started with it (a build's buildx plugin), its output let go.
-- `dockerSync` can end the client alone, so it takes no command that starts a process of its own: a `build`, a `run`, `compose` or any other throws a TypeError before anything runs, and is `docker`'s.
+- `dockerSync` can end the client alone, so it takes no command that starts a process of its own: a `build`, a `run`, `compose` or any other throws a TypeError before anything runs, and is `docker`'s. An `exec`'s command runs inside its container, which ending the client leaves to the container's removal.
 - A command past its time is a `timeout` naming its command and the time (`docker kill did not answer within 60 seconds`), what the client told before it kept.
 - Only Docker's own answer tells a container or an object gone: a daemon unreachable, refusing or slow is a failure, never absence.
 
