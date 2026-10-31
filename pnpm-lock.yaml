@@ -4633,6 +4633,9 @@ importers:
 
   modules/tooling/references:
     dependencies:
+      '@mod/app-entries':
+        specifier: workspace:*
+        version: link:../../scaffold/app-entries
       '@mod/app-output':
         specifier: workspace:*
         version: link:../../scaffold/app-output

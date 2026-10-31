@@ -1,6 +1,7 @@
 /** The configuration reference: every module's section, from its schema and its fragment, as one document. */
 import { join } from "node:path";
-import { type Fragment, fragmentsIn, kernel, settingsOf } from "@mod/app-output";
+import { kernel } from "@mod/app-entries";
+import { type Fragment, fragmentsIn, settingsOf } from "@mod/app-output";
 import type { Pkg } from "@mod/guard-imports";
 import { assembledIn, type Contributed, type Schema } from "./assembled.ts";
 
