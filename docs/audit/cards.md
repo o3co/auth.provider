@@ -67,6 +67,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/metrics` (foundation, `modules/foundation/metrics`): Owns the contract of counters, histograms and gauges: a name, help, every value each label can take, and a histogram's buckets.
 - `@mod/outbound` (foundation, `modules/foundation/outbound`): Offers the only path for outbound HTTP requests, under the operator's destination policy.
   - `credential` (`src/credential`): how a request's credential is sent, and the headers a caller may not write.
+  - `json` (`src/json`): a JSON call, as a caller speaking a JSON wire makes it through `outbound`.
   - `lookups` (`src/lookups`): name lookups shared among those asking a name at once, each waiting until its own deadline, and how many run at once.
   - `resolver-process` (`src/resolver-process`): name lookups run as the system runs them, in a helper process of their own, ended where no one waits on them.
   - `tls` (`src/tls`): the options each TLS connection outbound makes takes.
