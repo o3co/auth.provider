@@ -34,8 +34,9 @@ export const tlsOptions = contract<TlsOptions>("tls-options");
 /**
  * Whether `value` is a floor tls-options made, by any copy of the package: frozen, carrying its mark,
  * and of the shape made now (the certificate check among its keys). A copy (a spread, `Object.assign`),
- * a cast, a frozen value written elsewhere, or a floor of an older shape is not, however its type reads,
- * and is to be refused.
+ * a cast, a frozen value written elsewhere without the mark, or a floor of an older shape is not,
+ * however its type reads, and is to be refused. Code in the process writing the mark on purpose is out
+ * of scope.
  */
 export const isFloor: (value: unknown) => value is TlsOptions = isMarked;
 
