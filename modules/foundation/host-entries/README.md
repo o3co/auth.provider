@@ -15,7 +15,7 @@
 - `pairOf` (a pair): its one spelling, the host normalized and the port as written.
 
 ## Invariants
-- An entry is read as written: letters, digits and hyphens, or a whole address; only case and Unicode are corrected. A pair's host is read so, never `.name`, an IPv6 address in brackets; its port is 1–65535 without a leading zero.
+- An entry is read as written: letters, digits and hyphens, or a whole address; only case and Unicode are corrected. An address with no canonical form, such as one with a zone, is none. A pair's host is read so, never `.name`, an IPv6 address in brackets; its port is 1–65535 without a leading zero.
 - Hosts compare lowercase, in punycode, without a trailing dot, in canonical IP form, with IPv4 carried in IPv6 as IPv4; a host with an empty label has no spelling.
 - Nothing here resolves a name, reads settings or sends anything.
 
