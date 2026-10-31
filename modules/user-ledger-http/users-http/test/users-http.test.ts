@@ -316,7 +316,7 @@ describe("users-http", () => {
 		}
 	});
 
-	it("answers none to a 404 or a 410 saying it knows no such user, as a lookup does, unlogged", async () => {
+	it("answers none to a 404 or a 410 saying it knows no such user, as a lookup does, unlogged [guarantee-3-m]", async () => {
 		const { ledger } = await open();
 		for (const answer of [notFound, gone]) {
 			script = () => answer;
@@ -327,7 +327,7 @@ describe("users-http", () => {
 		expect(logged).toEqual([]);
 	});
 
-	it("answers unavailable to a 404 or a 410 that does not say it knows no such user, logging its status [guarantee-3-f]", async () => {
+	it("answers unavailable to a 404 or a 410 that does not say it knows no such user, logging its status [guarantee-3-f] [guarantee-3-m]", async () => {
 		const { ledger } = await open();
 		const answers: Answer[] = [
 			{ status: 404 },
@@ -745,7 +745,7 @@ describe("users-http looking a user up by subject", () => {
 		expect(JSON.parse(asked?.body ?? "")).toEqual({ subject: "s-alice" });
 	});
 
-	it("hands over the user it finds, needing no username, and none for a 404 or a 410, unlogged", async () => {
+	it("hands over the user it finds, needing no username, and none for a 404 or a 410, unlogged [guarantee-3-m]", async () => {
 		const { ledger } = await looking();
 		expect(await ledger.bySubject("s-alice")).toEqual({
 			kind: "user",
@@ -795,7 +795,7 @@ describe("users-http looking a user up by subject", () => {
 		expect(logged).toContainEqual(["users-http.ledger_failed", { status: 201 }]);
 	});
 
-	it("logs a lookup's 404 or 410 that does not say it knows no such user, with its status alone", async () => {
+	it("logs a lookup's 404 or 410 that does not say it knows no such user, with its status alone [guarantee-3-m]", async () => {
 		const { ledger } = await looking();
 		script = () => ({ status: 404, text: "ledger detail" });
 		await expect(ledger.bySubject("s-alice")).rejects.toSatisfy(isUnavailable);
@@ -949,7 +949,7 @@ describe("users-http looking a user up by upstream identity", () => {
 		expect(JSON.parse(asked?.body ?? "")).toEqual({ idp: "apple", subject: "apple-alice" });
 	});
 
-	it("answers none to a 404 or a 410 saying it knows no such user, and unavailable to a bare 404 or 410, a 401, a 403 or anything else it cannot read", async () => {
+	it("answers none to a 404 or a 410 saying it knows no such user, and unavailable to a bare 404 or 410, a 401, a 403 or anything else it cannot read [guarantee-3-m]", async () => {
 		const { ledger } = await open({ "upstream-url": upstreamUrl() });
 		expect(await ledger.byUpstream?.("apple", "apple-nobody")).toEqual({ kind: "none" });
 		expect(await ledger.byUpstream?.("apple", "apple-gone")).toEqual({ kind: "none" });
