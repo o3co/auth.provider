@@ -1,11 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { createConnection } from "node:net";
 import { describe, expect, it } from "vitest";
+import { dockerSync } from "../src/docker/docker.ts";
 import { startRedis } from "../src/driver.ts";
 
 const docker = (() => {
 	try {
-		execFileSync("docker", ["info"], { stdio: "ignore" });
+		dockerSync("control", ["info"], { stdio: "ignore" });
 		return true;
 	} catch {
 		return false;
@@ -14,9 +14,7 @@ const docker = (() => {
 
 /** The names of the containers that exist with the label and value given. */
 const containers = (label: string) =>
-	execFileSync("docker", ["ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"], {
-		encoding: "utf8",
-	})
+	dockerSync("control", ["ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"])
 		.split("\n")
 		.filter(Boolean);
 
@@ -54,11 +52,12 @@ describe.runIf(docker)("a throwaway Redis", () => {
 				expect(await answers(redis.url)).toBe(true);
 				// Docker bound the host port itself: the binding names none.
 				const [name] = containers(`conformance.owner=${process.pid}`);
-				const bindings = execFileSync(
-					"docker",
-					["inspect", "-f", "{{json .HostConfig.PortBindings}}", name ?? "none"],
-					{ encoding: "utf8" },
-				);
+				const bindings = dockerSync("control", [
+					"inspect",
+					"-f",
+					"{{json .HostConfig.PortBindings}}",
+					name ?? "none",
+				]);
 				expect(JSON.parse(bindings)).toEqual({
 					"6379/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
 				});
@@ -91,7 +90,7 @@ describe.runIf(docker)("a throwaway Redis", () => {
 		async () => {
 			// No process holds this pid: the highest a system gives is far below it.
 			const gone = "conformance.owner=2147483646";
-			execFileSync("docker", [
+			dockerSync("run", [
 				"run",
 				"-d",
 				"--label",
