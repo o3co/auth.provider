@@ -326,7 +326,7 @@ describe("session authentication time", () => {
 });
 
 describe("session entry", () => {
-	it("gives every login a new session and closes the one the request carried", async () => {
+	it("gives every login a new session and closes the one the request carried [guarantee-2-b]", async () => {
 		const { s, withCookie, login } = await boot();
 		const first = await login();
 		const second = await login("alice", withCookie(first));
