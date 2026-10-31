@@ -314,6 +314,15 @@ importers:
         specifier: workspace:*
         version: link:../url-setting
 
+  modules/foundation/host-entries:
+    dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../address-reach
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   modules/foundation/http:
     dependencies:
       '@mod/client-certificate':
