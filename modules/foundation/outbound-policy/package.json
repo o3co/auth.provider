@@ -20,6 +20,7 @@
 	],
 	"dependencies": {
 		"@mod/address-reach": "workspace:*",
+		"@mod/host-entries": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/url-setting": "workspace:*",
 		"zod": "4.6.7"
