@@ -326,13 +326,35 @@ describe("session authentication time", () => {
 });
 
 describe("session entry", () => {
-	it("gives every login a new session and closes the one the request carried", async () => {
+	it("gives every login a new session and closes the one the request carried [guarantee-2-b]", async () => {
 		const { s, withCookie, login } = await boot();
 		const first = await login();
 		const second = await login("alice", withCookie(first));
 		expect(second).not.toBe(first);
 		expect(await s.enter(withCookie(first))).toBeUndefined();
 		expect(await s.enter(withCookie(second))).toBeDefined();
+	});
+
+	it("keeps a session's authentication time across a raise, known or unknown, the raise's time kept apart [guarantee-2-b]", async () => {
+		const { s, withCookie } = await boot();
+		for (const authenticatedAt of [now - 60_000, "unknown"] as const) {
+			const done = await s.complete(testRequest(), { ...facts(), authenticatedAt });
+			const before = done.session.context;
+			expect(before.authenticatedAtUnknown).toBe(authenticatedAt === "unknown" || undefined);
+			now += 5000;
+			const raised = await s.raise(withCookie(pair(done.cookies[0])), ["otp"]);
+			// Read again, as the code's issue reads the session after authorize's check.
+			const read = await s.enter(withCookie(pair(raised?.cookies[0])));
+			for (const context of [raised?.session.context, read?.context]) {
+				expect(context, String(authenticatedAt)).toMatchObject({
+					authenticatedAt: before.authenticatedAt,
+					raisedAt: now,
+				});
+				expect(context?.authenticatedAtUnknown, String(authenticatedAt)).toBe(
+					before.authenticatedAtUnknown,
+				);
+			}
+		}
 	});
 
 	it("tells by handle the entry a session gives its holder", async () => {
@@ -934,7 +956,7 @@ describe("session closing", () => {
 });
 
 describe("session raise", () => {
-	it("raises a session under a new cookie, keeps its handle and authentication time, and the old cookie no longer enters", async () => {
+	it("raises a session under a new cookie, keeps its handle and authentication time, and the old cookie no longer enters [guarantee-2-b]", async () => {
 		const { s, withCookie, login, jar } = await boot();
 		const cookie = await login();
 		const before = (await s.enter(withCookie(cookie))) as Session;
