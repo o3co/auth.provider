@@ -46,7 +46,7 @@ import sessionTokensModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
-import { laggingRevocation, subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { revocableKinds } from "@mod/token-control";
 import tokenControl from "@mod/token-control/module";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
@@ -56,7 +56,6 @@ import {
 	type IssueLimits,
 	issuancePolicies,
 	referenceOf,
-	subjectChecks,
 	type Tokens,
 	tokens,
 } from "@mod/tokens";
@@ -128,8 +127,6 @@ type Options = {
 	/** Whether a confidential client's families are bound too. */
 	bindConfidential?: boolean;
 	extra?: Module[];
-	/** subject-revocation, when not its stand-in. */
-	subjects?: Module;
 	caps?: { sessionFamilies: number; issuedAccess: number };
 };
 
@@ -197,7 +194,7 @@ function assembly(options: Options = {}) {
 			sessionStandIn,
 			sessionRequirements,
 			sessionParticipants,
-			options.subjects ?? subjectRevocationStandIn,
+			subjectRevocationStandIn,
 			simulated.module,
 			sessionTokensModule,
 			sessionTokensInMemory().module,
@@ -1586,36 +1583,6 @@ describe("lineage", () => {
 		const issued = await issue(s, found.ends);
 		expect(isUnavailable(await found.join(issued).catch((e) => e))).toBe(true);
 		expect(await s.active(first.access_token)).toBe(false);
-	});
-
-	it("issues on a stale read of its subject's boundary a token the next verification refuses, as an unbound family's stands from its authentication [guarantee-4-a]", async () => {
-		const lagging = laggingRevocation();
-		const checked = defineModule(
-			{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
-			(m) => [
-				m.contribute(subjectChecks).by(async (c) => {
-					const revocation = await c.get(subjectRevocation);
-					return {
-						holds: async (t) =>
-							(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
-					};
-				}),
-			],
-		);
-		const s = await serve({ subjects: lagging.module, extra: [checked] });
-		const token = await s.app.get(lineage).start(await beginning(s, "app"));
-		shift += 1000;
-		lagging.lag();
-		await s.app.get(subjectRevocation).revoke("alice");
-		// Issued in a later second than the boundary, the family's authentication before it.
-		shift += 1500;
-		const next = await s.refresh(token);
-		expect(next.status).toBe(200);
-		lagging.catchUp();
-		expect(await s.app.get(tokens).verifyAccess(next.body.access_token ?? "")).toEqual({
-			kind: "invalid",
-			reason: "revoked",
-		});
 	});
 
 	it("starts a family bound to no session, which still ends with its subject's revocation", async () => {

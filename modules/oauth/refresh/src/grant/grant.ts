@@ -150,6 +150,15 @@ export function refreshGrant({
 				await revoker.revokeIssued(issued);
 				throw error;
 			}
+			// A boundary or a logout that came while the token was made: its session no longer enters, and
+			// the token, standing from its issue, is withdrawn rather than handed out.
+			if (family.session !== undefined) {
+				const entry = await checks.sessions.entryOf(family.session);
+				if (entry.kind !== "entered") {
+					await revoker.revokeIssued(issued);
+					return refused;
+				}
+			}
 			// Rotates only from the secret checked here, however often the change runs again.
 			const written = await stores.families.update(parsed.id, (stored) =>
 				liveFamily(stored)?.current === family.current ? { value: toStored(rotated) } : undefined,
