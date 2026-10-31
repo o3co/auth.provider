@@ -42,9 +42,14 @@ it("writes each line as one JSON object: level, at and event first, then the fie
 
 it("drops a field named like the envelope, keeping the line's own", async () => {
 	vi.useFakeTimers({ now: 1_700_000_000_000, toFake: ["Date"] });
-	const [line] = await written((log) =>
-		log.info("real", { level: "fatal", at: 1, event: "forged", kept: "yes" }),
-	);
+	// Fields a JavaScript caller may pass, past the type that refuses these names.
+	const forged: Record<string, string | number> = {
+		level: "fatal",
+		at: 1,
+		event: "forged",
+		kept: "yes",
+	};
+	const [line] = await written((log) => log.info("real", forged));
 	expect(JSON.parse(line ?? "")).toEqual({
 		level: "info",
 		at: 1_700_000_000_000,
