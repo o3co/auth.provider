@@ -415,6 +415,9 @@ importers:
       '@mod/address-reach':
         specifier: workspace:*
         version: link:../address-reach
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../host-entries
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel

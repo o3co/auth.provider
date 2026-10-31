@@ -1,5 +1,7 @@
 /** The plain pairs whose name outbound resolves to IPv4 addresses alone. */
-import { type Admitted, type HostEntry, hostEntryOf, withinHosts } from "@mod/outbound-policy";
+
+import { type HostEntry, hostEntryOf, withinHosts } from "@mod/host-entries";
+import type { Admitted } from "@mod/outbound-policy";
 import { z } from "zod";
 
 /** A pair as the plain lists read one: its host and its port. */
