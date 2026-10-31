@@ -47,6 +47,7 @@ export const section = z.strictObject({
 			threshold: z
 				.number()
 				.int()
+				.min(1)
 				.max(lockoutCountMax)
 				.prefault(5)
 				.describe(
@@ -63,6 +64,7 @@ export const section = z.strictObject({
 			budget: z
 				.number()
 				.int()
+				.min(1)
 				.max(lockoutCountMax)
 				.prefault(10)
 				.describe(
@@ -74,6 +76,7 @@ export const section = z.strictObject({
 			"hard-limit": z
 				.number()
 				.int()
+				.min(1)
 				.max(lockoutCountMax)
 				.prefault(100)
 				.describe(

@@ -46,10 +46,11 @@ it("takes the other numbers whole and within their bounds", () => {
 });
 
 it.each(["threshold", "budget", "hard-limit"])(
-	"takes lockout's %s up to 100, the most consecutive failures NIST SP 800-63B rev 4 §3.2.2 allows, and refuses 101",
+	"takes lockout's %s from 1 to 100, the most consecutive failures NIST SP 800-63B rev 4 §3.2.2 allows, and nothing outside",
 	(key) => {
 		// The order threshold ≤ budget ≤ hard-limit is rate-limit's to judge, at boot.
-		expect([100, 101].map((n) => parses({ lockout: { [key]: n } }))).toEqual([true, false]);
+		const taken = [0, 1, 100, 101].map((n) => parses({ lockout: { [key]: n } }));
+		expect(taken).toEqual([false, true, true, false]);
 	},
 );
 
