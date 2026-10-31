@@ -135,7 +135,7 @@ const guideAsked = ({ chosen, decides }: { chosen: string[]; decides: string[] }
 	askedSection:
 		chosen.length === 0
 			? ""
-			: ["## Store, users, audit and mail", "", ...chosen, "", ""].join("\n"),
+			: ["## Settings the composed modules ask for", "", ...chosen, "", ""].join("\n"),
 	decides: decides.join("\n"),
 });
 

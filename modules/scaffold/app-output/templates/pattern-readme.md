@@ -13,7 +13,7 @@ Each key not written keeps its module's default.
 
 {{card}}
 
-## Store, users, audit and mail
+## Settings the composed modules ask for
 
 {{asked}}
 
