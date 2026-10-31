@@ -192,7 +192,7 @@ it("writes one log line per event, with the attributes' names and never their va
 		{
 			level: "info",
 			event: "audit",
-			fields: { kind: "k", at: 1234, subject: "s", attributes: "method,result" },
+			fields: { kind: "k", occurred: 1234, subject: "s", attributes: "method,result" },
 		},
 	]);
 });
