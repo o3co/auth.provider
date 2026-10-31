@@ -131,11 +131,8 @@ it("counts a failing receiver's lost events and warns once when it starts losing
 	expect(got).toEqual(["k", "k"]);
 	expect(a.lost()).toEqual({ rejecting: 2, throwing: 2, fine: 0 });
 	expect(warned()).toEqual([
-		["audit receiver losing events", { receiver: "rejecting", lost: 1, failure: "Error" }],
-		[
-			"audit receiver losing events",
-			{ receiver: "throwing", lost: 1, failure: "DestinationRefused" },
-		],
+		["audit.receiver_losing", { receiver: "rejecting", lost: 1, failure: "Error" }],
+		["audit.receiver_losing", { receiver: "throwing", lost: 1, failure: "DestinationRefused" }],
 	]);
 	failing = false;
 	a.record({ kind: "k" });
@@ -143,12 +140,9 @@ it("counts a failing receiver's lost events and warns once when it starts losing
 	await settled();
 	expect(a.lost()).toEqual({ rejecting: 2, throwing: 4, fine: 0 });
 	expect(warned()).toEqual([
-		["audit receiver losing events", { receiver: "rejecting", lost: 1, failure: "Error" }],
-		[
-			"audit receiver losing events",
-			{ receiver: "throwing", lost: 1, failure: "DestinationRefused" },
-		],
-		["audit receiver recovered", { receiver: "rejecting", lost: 2 }],
+		["audit.receiver_losing", { receiver: "rejecting", lost: 1, failure: "Error" }],
+		["audit.receiver_losing", { receiver: "throwing", lost: 1, failure: "DestinationRefused" }],
+		["audit.receiver_recovered", { receiver: "rejecting", lost: 2 }],
 	]);
 	expect(JSON.stringify(warned())).not.toContain("s3cr3t");
 });
@@ -174,8 +168,8 @@ it("does not queue an event past a receiver's pending limit, and counts it as lo
 	await settled();
 	expect(got).toEqual(["1", "2"]);
 	expect(warned()).toEqual([
-		["audit receiver losing events", { receiver: "slow", lost: 1, failure: "backlog" }],
-		["audit receiver recovered", { receiver: "slow", lost: 1 }],
+		["audit.receiver_losing", { receiver: "slow", lost: 1, failure: "backlog" }],
+		["audit.receiver_recovered", { receiver: "slow", lost: 1 }],
 	]);
 	a.record({ kind: "4" });
 	await settled();
@@ -206,8 +200,8 @@ it("writes one log line per event, with the attributes' names and never their va
 it("delivers nowhere when the section states none, warning so at every boot", async () => {
 	const nowhere = {
 		level: "warn",
-		event: "audit events go nowhere",
-		fields: { receivers: "none" },
+		event: "audit.receivers_none",
+		fields: {},
 	};
 	const a = await boot("none");
 	a.record({ kind: "k" });
@@ -292,7 +286,7 @@ it("counts as lost the events still under way at the stop deadline, and stops on
 	expect(Date.now() - started).toBeLessThan(1000);
 	expect(assembly.get(audit).lost()).toEqual({ hung: 2 });
 	expect(warned()).toContainEqual([
-		"audit receiver losing events",
+		"audit.receiver_losing",
 		{ receiver: "hung", lost: 1, failure: "stopped" },
 	]);
 });

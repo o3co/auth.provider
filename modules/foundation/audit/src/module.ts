@@ -111,7 +111,7 @@ function lanesOver(
 		counted.add({ receiver: lane.receiver.name });
 		lane.losing += 1;
 		if (lane.losing === 1) {
-			log.warn("audit receiver losing events", {
+			log.warn("audit.receiver_losing", {
 				receiver: lane.receiver.name,
 				lost: 1,
 				failure,
@@ -120,7 +120,7 @@ function lanesOver(
 	};
 	const took = (lane: Lane) => {
 		if (lane.losing === 0) return;
-		log.warn("audit receiver recovered", { receiver: lane.receiver.name, lost: lane.losing });
+		log.warn("audit.receiver_recovered", { receiver: lane.receiver.name, lost: lane.losing });
 		lane.losing = 0;
 	};
 	return {
@@ -179,7 +179,7 @@ export default defineModule(
 			const { known, refusals } = receiversOf(await c.collect(auditReceivers), named, c.log);
 			if (refusals.length > 0) c.refuseAll(refusals);
 			// On every boot: the operator stated that events go nowhere.
-			if (named.length === 0) c.log.warn("audit events go nowhere", { receivers: "none" });
+			if (named.length === 0) c.log.warn("audit.receivers_none", {});
 			const lanes = lanesOver(
 				named,
 				known,
