@@ -608,6 +608,62 @@ describe("token-exchange: the subject check", () => {
 	});
 });
 
+/** A subject check refusing a token standing at or before `boundary`, but while its read lags. */
+function boundaryAt(boundary: number) {
+	const read = { lagging: false };
+	const module = defineModule({ name: "boundary", replicaSafe: false, takes: [] }, (m) => [
+		m.contribute(subjectChecks).by(() => ({
+			holds: async (token) => (!read.lagging && token.standingAt <= boundary ? "revoked" : "holds"),
+		})),
+	]);
+	return { read, module };
+}
+
+describe("token-exchange: the standing time", () => {
+	it("issues on a stale read of its subject's boundary a token the next verification refuses, as it stands from the subject token's [guarantee-4-e]", async () => {
+		const boundary = boundaryAt(now - 2000);
+		const s = await serve({ extra: [boundary.module] });
+		// Tied to no session, it stands from its grant's check, before the boundary.
+		const before = await s.issue({ standingAt: now - 5000 });
+		boundary.read.lagging = true;
+		const outcome = await s.exchange("app", subjectOf(before.token));
+		if (outcome.kind !== "issued") expect.unreachable("the stale read lets it through");
+		boundary.read.lagging = false;
+		expect(await s.issuing.verifyAccess(String(outcome.body.access_token))).toEqual({
+			kind: "invalid",
+			reason: "revoked",
+		});
+		const after = await s.issue({ standingAt: now - 1000 });
+		const exchanged = await s.issued(await s.exchange("app", subjectOf(after.token)));
+		expect(exchanged.standingAt).toBe(now - 1000);
+	});
+
+	it("takes the standing time any verifier answers, and one that gives none, or not a finite number, as 0 [guarantee-4-e]", async () => {
+		const boundary = boundaryAt(now - 2000);
+		let standing: unknown = now - 1000;
+		const s = await serve({
+			extra: [boundary.module],
+			verifier: outside(() => ({ ...outsideAnswer, standingAt: standing })),
+		});
+		const verified = async () => {
+			const outcome = await s.exchange("app", subjectOf("outside", outsideType));
+			if (outcome.kind !== "issued") expect.unreachable("the answer is taken");
+			return s.issuing.verifyAccess(String(outcome.body.access_token));
+		};
+		expect(await verified()).toMatchObject({ kind: "valid", standingAt: now - 1000 });
+		for (const given of [
+			now - 3000,
+			undefined,
+			String(now),
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+		]) {
+			standing = given;
+			expect(await verified(), String(given)).toEqual({ kind: "invalid", reason: "revoked" });
+		}
+	});
+});
+
 describe("token-exchange: a verifier's answer", () => {
 	it("refuses a second verifier for the same token type at boot", async () => {
 		const twin: ExchangeVerifier = {

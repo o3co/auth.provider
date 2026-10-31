@@ -10,6 +10,8 @@ export interface ExchangedToken {
 	readonly issuer: string;
 	/** Epoch ms. */
 	readonly expiresAt: number;
+	/** Epoch ms: when the token stands from, as its subject's revocation boundary is compared; one not a finite number is 0. */
+	readonly standingAt?: number;
 }
 
 /** A token naming the client by issued-to or audience, holding its own scope and audience. */

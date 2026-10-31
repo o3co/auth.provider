@@ -15,7 +15,13 @@ const scopes = z.array(z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/));
 const actor: z.ZodType = z.lazy(() =>
 	z.object({ subject: z.string().min(1), actor: actor.optional() }),
 );
-const common = { subject: z.string().min(1), issuer: z.string(), expiresAt: z.number() };
+const common = {
+	subject: z.string().min(1),
+	issuer: z.string(),
+	expiresAt: z.number(),
+	// None, or one not a finite number, stands before any boundary.
+	standingAt: z.number().catch(0),
+};
 const ownFields = {
 	issuedTo: z.string().optional(),
 	audience: strings,
@@ -49,13 +55,15 @@ const foreignOf = (read: {
 	subject: string;
 	issuer: string;
 	expiresAt: number;
+	standingAt: number;
 	clients: string[];
 	holderDigest?: string | undefined;
-}): ForeignToken => ({
+}): ForeignToken & Read => ({
 	kind: "foreign",
 	subject: read.subject,
 	issuer: read.issuer,
 	expiresAt: read.expiresAt,
+	standingAt: read.standingAt,
 	clients: read.clients as [string, ...string[]],
 	...(read.holderDigest === undefined ? {} : { holderDigest: read.holderDigest }),
 });
@@ -79,6 +87,7 @@ export function selfIssued(tokens: Tokens, issuer: string): ExchangeVerifier {
 				audience: grant.audience,
 				scope: grant.scope,
 				expiresAt: checked.expiresAt,
+				standingAt: checked.standingAt,
 				issued: checked.id,
 				...(checked.binding ? { binding: checked.binding } : {}),
 				...(grant.actor ? { actor: grant.actor } : {}),
@@ -92,15 +101,18 @@ export function selfIssued(tokens: Tokens, issuer: string): ExchangeVerifier {
 	return verifier;
 }
 
+/** A verifier's answer as read, its standing time always given. */
+export type Read = Exchanged & { readonly standingAt: number };
+
 /** A verifier's answer, its shape checked once and frozen; an invalid or malformed one is no answer. */
 export async function verified(
 	verifier: ExchangeVerifier,
 	token: string,
-): Promise<Exchanged | undefined> {
+): Promise<Read | undefined> {
 	const parsed = answer.safeParse(await verifier.verify(token));
 	if (!parsed.success || parsed.data.kind === "invalid") return undefined;
-	const read: Exchanged =
-		parsed.data.kind === "foreign" ? foreignOf(parsed.data) : (parsed.data as OwnToken);
+	const read: Read =
+		parsed.data.kind === "foreign" ? foreignOf(parsed.data) : (parsed.data as OwnToken & Read);
 	if (read.kind === "foreign") return deepFreeze(read);
 	const { amr, authenticatedAt, acr, issued, ...rest } = read;
 	// Only this provider's own tokens have a family or a session to look up.
