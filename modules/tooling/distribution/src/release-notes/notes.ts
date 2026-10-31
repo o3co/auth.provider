@@ -1,15 +1,21 @@
 /** A version's heading: `## [<version>] - <when>`, the version matched as written. */
 const headingOf = (line: string) => /^## \[([^\]]+)\](?: - (.*))?$/.exec(line);
 const dated = /^\d{4}-\d{2}-\d{2}$/;
+/** A link's target written relative to the repository: no scheme, and not led by `#` or `/`. */
+const relativeLink = /\]\((?![a-z][a-z\d+.-]*:|[#/])/gi;
 
 /**
  * The release's notes: the body of the version's section of the changelog, from its heading to the
- * next version's or the end. A version with no section, two, one not dated or one empty is refused.
+ * next version's or the end, each link relative to the repository pointed at the file in the version's
+ * tag, as a release page has no repository to resolve it in. A version with no section, two, one not
+ * dated or one empty is refused, and so is a workspace stating no repository.
  */
 export function notesOf(
 	changelog: string,
 	version: string,
+	repository: string | undefined,
 ): { readonly notes: string } | { readonly problem: string } {
+	if (repository === undefined) return { problem: "package.json states no repository" };
 	const lines = changelog.split("\n");
 	const at = lines.flatMap((line, i) => (headingOf(line)?.[1] === version ? [i] : []));
 	const [start] = at;
@@ -24,5 +30,5 @@ export function notesOf(
 		.join("\n")
 		.trim();
 	if (body === "") return { problem: `CHANGELOG.md's section for ${version} is empty` };
-	return { notes: `${body}\n` };
+	return { notes: `${body.replace(relativeLink, `](${repository}/blob/v${version}/`)}\n` };
 }
