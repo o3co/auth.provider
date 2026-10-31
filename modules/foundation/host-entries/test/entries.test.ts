@@ -28,6 +28,8 @@ describe("host lists", () => {
 			"0x0a.0.0.1",
 			"[10.0.0.1]",
 			".[fd00::1]",
+			"fe80::1%eth0",
+			"[fe80::1%eth0]",
 			"a..b",
 			"a.example.",
 			"a_b.example",
@@ -70,6 +72,7 @@ describe("host lists", () => {
 			"127.1:80",
 			"a.example.:80",
 			"[10.0.0.1]:80",
+			"[::1%eth0]:443",
 		]) {
 			expect(hostEntryOf(pair, { port: true }), pair).toBeUndefined();
 		}

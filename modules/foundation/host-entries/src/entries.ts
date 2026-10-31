@@ -57,7 +57,9 @@ export function hostEntryOf(
 	const bare = unbracketed(entry);
 	const family = isIP(bare);
 	if (family === 6 || (family === 4 && bare === entry)) {
-		return { kind: "address", address: normalized(bare) ?? bare };
+		// An address with no canonical form, such as one with a zone, is none: no request reaches it.
+		const address = normalized(bare);
+		return address === undefined ? undefined : { kind: "address", address };
 	}
 	const under = entry.startsWith(".");
 	const name = under ? entry.slice(1) : entry;
