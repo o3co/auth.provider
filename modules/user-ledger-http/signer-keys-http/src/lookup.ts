@@ -6,13 +6,7 @@ import {
 } from "@mod/jwt-bearer";
 import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
 import { publicMembers } from "@mod/keys";
-import {
-	DestinationRefused,
-	isOutboundUnavailable,
-	jsonObjectOf,
-	type Narrower,
-	type Outbound,
-} from "@mod/outbound";
+import { jsonObjectOf, type Narrower, type Outbound, postJson } from "@mod/outbound";
 import { z } from "zod";
 
 export interface LookupParts {
@@ -32,13 +26,6 @@ const answerShape = z.object({
 		.optional(),
 });
 
-/** The kind outbound gives a failure to send, or no-answer for anything else. */
-function kindOf(error: unknown): string {
-	if (DestinationRefused.is(error)) return error.reason;
-	if (isOutboundUnavailable(error)) return error.failure;
-	return "no-answer";
-}
-
 /** The signer keys of one issuer, asked of the ledger on every assertion, never kept. */
 export function keysAt(parts: LookupParts): SignerKeys {
 	const { issuer, url, out, credential, narrower, warn } = parts;
@@ -47,20 +34,16 @@ export function keysAt(parts: LookupParts): SignerKeys {
 		warn("signer-keys-http.ledger_failed", why);
 		return new Unavailable("signer-keys-http");
 	};
-	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
-	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
 	return {
 		issuer,
 		// The ledger answers a signer's own keys alone, as the Deployment section asks of it.
 		perSigner: true,
 		async keysOf({ subject, kid }) {
 			// A kid the assertion does not name is left out, as JSON writes no undefined member.
-			const body = JSON.stringify({ issuer, subject, kid });
-			const answer = await out
-				.fetch(url, { method: "POST", headers, body, ...sent }, narrower)
-				.catch((error: unknown) => {
-					throw failed({ reason: kindOf(error) });
-				});
+			const body = { issuer, subject, kid };
+			const answer = await postJson(out, { url, body, credential, narrower }, (reason) =>
+				failed({ reason }),
+			);
 			// Not known, or known and revoked: both are no keys here.
 			if (answer.status === 404 || answer.status === 410) return { kind: "none" };
 			if (answer.status !== 200) throw failed({ status: answer.status });
