@@ -47,3 +47,10 @@ it("names in its entry sample only keys its settings take", async () => {
 	const settings = (await contributed())?.settings as unknown as { shape: object };
 	expect(Object.keys(own).filter((key) => !(key in settings.shape))).toEqual([]);
 });
+
+it("names in its entry sample every key its settings require", async () => {
+	type Field = { safeParse(value: unknown): { success: boolean } };
+	const { shape } = (await contributed())?.settings as unknown as { shape: Record<string, Field> };
+	const required = Object.entries(shape).filter(([, field]) => !field.safeParse(undefined).success);
+	expect(required.map(([key]) => key).filter((key) => !(key in own))).toEqual([]);
+});
