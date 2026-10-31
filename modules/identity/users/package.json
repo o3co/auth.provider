@@ -9,7 +9,8 @@
 		{
 			"line": "Users in the configuration (`users.registered`).",
 			"unadapted": true
-		}
+		},
+		"`users.registered`: leave it unset where a user ledger is composed; boot refuses both."
 	],
 	"exports": {
 		".": "./src/contract.ts",
