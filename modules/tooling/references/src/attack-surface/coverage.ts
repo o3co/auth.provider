@@ -313,11 +313,6 @@ export const coverage: Coverage = {
 				"a lifetime a client asks of an exchange (`o3co_expires_in`) is taken up to this, up to a day, past `tokens`' own lifetimes, though never past the subject token's end or its ties'",
 		},
 		{
-			key: "login-passkey.counts-as-mfa",
-			weakens:
-				"`true` (the default): a passkey login whose user was verified meets a required second factor alone",
-		},
-		{
 			key: "mfa-email.adds-second-factor",
 			weakens: "`true`: a code by mail meets a required second factor, so the mailbox does",
 		},
