@@ -1,15 +1,12 @@
 import { configuredUrl } from "@mod/url-setting/testing";
 import { describe, expect, it } from "vitest";
-import { DestinationRefused, type RefusalReason } from "../src/contract.ts";
 import {
-	admitAddresses,
-	admitUrl,
-	hostEntryOf,
-	isListEntry,
-	listed,
-	normalized,
-	type Rules,
-} from "../src/policy.ts";
+	DestinationRefused,
+	policyOf,
+	policySettings,
+	type RefusalReason,
+} from "../src/contract.ts";
+import { admitAddresses, admitUrl, type Rules } from "../src/policy.ts";
 
 const open: Rules = {
 	allow: [],
@@ -57,9 +54,7 @@ describe("admitUrl", () => {
 	});
 
 	it("lets deny win over allow, matching every spelling of a host alike", () => {
-		expect(url("https://a.example/", { allow: ["a.example"], deny: ["A.Example."] })).toBe(
-			"denied",
-		);
+		expect(url("https://a.example/", { allow: ["a.example"], deny: ["A.Example"] })).toBe("denied");
 		expect(url("https://EVIL.example./", { deny: ["evil.example"] })).toBe("denied");
 		expect(url("https://xn--bcher-kva.example/", { deny: ["bücher.example"] })).toBe("denied");
 		expect(url("https://bücher.example/", { deny: ["xn--bcher-kva.example"] })).toBe("denied");
@@ -97,6 +92,36 @@ describe("admitUrl", () => {
 		expect(url("https://a.example/", {}, [".a.example"])).toBe("admitted");
 		expect(url("https://b.a.example/", {}, [".a.example"])).toBe("admitted");
 		expect(url("https://b.example/", {}, [".a.example"])).toBe("not-allowed");
+	});
+
+	it("matches allow and deny entries, each as boot reads one, and a caller's hosts as it spells them, alike before and after the host lists' reading", () => {
+		const named = (...allow: string[]) => ({ allow, anyPublic: false });
+		const cases: [string, string, boolean][] = [
+			["https://a.example/", "A.Example", true],
+			["https://b.a.example/", ".a.example", true],
+			["https://b.example/", ".a.example", false],
+			["https://10.0.0.1/", "10.0.0.1", true],
+			["https://[2001:db8::1]/", "2001:DB8:0::1", true],
+			["https://[2001:db8::1]/", "[2001:db8::1]", true],
+			["https://[::ffff:10.0.0.1]/", "10.0.0.1", true],
+			["https://10.0.0.1/", "::ffff:10.0.0.1", true],
+		];
+		for (const [raw, entry, among] of cases) {
+			expect(url(raw, named(entry)), `allow ${entry}`).toBe(among ? "admitted" : "not-allowed");
+			expect(url(raw, { deny: [entry] }), `deny ${entry}`).toBe(among ? "denied" : "admitted");
+			expect(url(raw, {}, [entry]), `hosts ${entry}`).toBe(among ? "admitted" : "not-allowed");
+		}
+		const denied = (address: string, entry: string) =>
+			policyOf(policySettings.parse({ "allow-any-public": true, deny: [entry] })).admitAddresses(
+				[address],
+				admitUrl("https://a.example/", open),
+			);
+		expect(reasonOf(() => denied("10.0.0.1", "10.0.0.1"))).toBe("denied");
+		expect(reasonOf(() => denied("::ffff:10.0.0.1", "10.0.0.1"))).toBe("denied");
+		expect(reasonOf(() => denied("2001:db8::1", "[2001:DB8::1]"))).toBe("denied");
+		expect(
+			policyOf(policySettings.parse({ allow: ["a.example"] })).explain("https://b.example/"),
+		).toContain("name the host in outbound.allow");
 	});
 
 	it("reaches no host while none is allowed by name and any public address is not", () => {
@@ -347,77 +372,5 @@ describe("admitAddresses", () => {
 			addresses(["172.32.0.0", "192.169.0.0", "100.128.0.0", "100.100.100.201"], false, true),
 		).toBe("admitted");
 		expect(addresses(["10.0.0.1", "127.0.0.1"], false, true)).toBe("special-address");
-	});
-});
-
-describe("host lists", () => {
-	it("reads an entry as written, correcting nothing but case and Unicode, and refuses anything else", () => {
-		expect(
-			["a.example", ".A.Example", "Bücher.example", "10.0.0.1", "fd00::1", "[FD00::1]"].map(
-				hostEntryOf,
-			),
-		).toEqual([
-			{ kind: "name", name: "a.example", under: false },
-			{ kind: "name", name: "a.example", under: true },
-			{ kind: "name", name: "xn--bcher-kva.example", under: false },
-			{ kind: "address", address: "10.0.0.1" },
-			{ kind: "address", address: "fd00::1" },
-			{ kind: "address", address: "fd00::1" },
-		]);
-		for (const entry of [
-			"*.a.example",
-			"*",
-			".",
-			"..a",
-			".10.0.0.1",
-			".10.0.5",
-			"10.0.5",
-			"010.0.0.1",
-			"0x0a.0.0.1",
-			"[10.0.0.1]",
-			".[fd00::1]",
-			"a..b",
-			"a.example.",
-			"a_b.example",
-			" a.example",
-			"a.example ",
-			"a\texample",
-			"-a.example",
-			"a-.example",
-			"a.123",
-			"a.example:443",
-			"https://a.example",
-			"",
-		]) {
-			expect(hostEntryOf(entry), JSON.stringify(entry)).toBeUndefined();
-			expect(isListEntry(entry), JSON.stringify(entry)).toBe(false);
-		}
-	});
-
-	it("matches a host exactly, or a name led by a dot and every name under it", () => {
-		const entries = ["Exact.example", ".under.example", "10.0.0.5"];
-		expect(
-			["exact.example", "under.example", "a.under.example", "b.a.under.example", "10.0.0.5"].map(
-				(host) => listed(host, entries),
-			),
-		).toEqual([true, true, true, true, true]);
-		expect(
-			["a.exact.example", "xunder.example", "example", "10.0.0.6"].map((host) =>
-				listed(host, entries),
-			),
-		).toEqual([false, false, false, false]);
-	});
-});
-
-describe("normalized", () => {
-	it("spells a host one way", () => {
-		expect(normalized("Example.COM.")).toBe("example.com");
-		expect(normalized("::ffff:7f00:1")).toBe("127.0.0.1");
-		expect(normalized("::1")).toBe("::1");
-		expect(normalized("a..b")).toBeUndefined();
-		expect(normalized("")).toBeUndefined();
-		expect(normalized(".")).toBeUndefined();
-		expect(normalized("::ffff:0:7f00:1")).toBe("127.0.0.1");
-		expect(normalized("64:ff9b::7f00:1")).toBe("64:ff9b::7f00:1");
 	});
 });

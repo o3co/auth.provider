@@ -10,6 +10,7 @@
 	},
 	"dependencies": {
 		"@mod/external-jwt": "workspace:*",
+		"@mod/host-entries": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",

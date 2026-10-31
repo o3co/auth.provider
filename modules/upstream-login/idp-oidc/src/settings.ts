@@ -1,9 +1,9 @@
 import { type Algorithm, algorithmsSetting } from "@mod/external-jwt";
+import { hostEntryOf } from "@mod/host-entries";
 import { setting } from "@mod/kernel";
 import {
 	browsedRefusalText,
 	destinationRefusal,
-	hostEntryOf,
 	type OutboundRefusals,
 } from "@mod/outbound-policy";
 import {
@@ -104,7 +104,7 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 				.array(z.string().refine((entry) => hostEntryOf(entry) !== undefined, "a host, or .name"))
 				.prefault([])
 				.describe(
-					"Hosts besides the issuer's its endpoints may be on, as outbound-policy reads a host list.",
+					"Hosts besides the issuer's its endpoints may be on, as host-entries reads a host list.",
 				),
 			"read-userinfo": z
 				.boolean()

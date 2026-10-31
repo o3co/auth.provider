@@ -15,7 +15,7 @@
 ## Offers
 - Composition definition only (the IdP type `oidc`)
 - IdP settings (under `federation`'s `idps.<name>`): `issuer`, `client-id`, `client-secret` (both well-formed text), `token-auth` (`client_secret_basic` (default) or `client_secret_post`), `scopes` (must hold `openid`; default `openid`), `algorithms` (`external-jwt`'s `algorithmsSetting`; default RS256, ES256, EdDSA, one for each kind of key), `accept-missing-iss` (default false), `clock-skew` (0s–5m, default `30s`; times written with their unit, a bare number refused)
-- IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), UserInfo's (`src/userinfo/`), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `outbound-policy` reads a host list; default none)
+- IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), UserInfo's (`src/userinfo/`), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `host-entries` reads a host list; default none)
 
 ## Invariants
 - Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives, and sent for an operator's URL (`internal`; `narrower`: `internal`): the issuer for all its description names (an endpoint on another origin, another port too, reaches public addresses only), each given endpoint for itself; the client's secret goes to no other host.
@@ -55,4 +55,4 @@
 - Without an end of session endpoint, the upstream offers no end of session.
 
 ## Depends on
-- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`, `url-setting`
+- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `host-entries`, `external-jwt`, `url-setting`

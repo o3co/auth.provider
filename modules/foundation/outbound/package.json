@@ -14,6 +14,7 @@
 	},
 	"dependencies": {
 		"@mod/address-reach": "workspace:*",
+		"@mod/host-entries": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
 		"@mod/tls-options": "workspace:*",
