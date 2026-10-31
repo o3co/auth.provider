@@ -81,7 +81,7 @@ clients.registered = [
 - `kernel.environment = development` lets the app start with that plain-http origin and plain-http login page. Production is the default, and it refuses both (the `kernel` card).
 - With no `consent.page`, no user is asked for consent, and only a first-party client is served: `my-app` is marked `first-party` (the `consent` card).
 - The login page at `authorize.login-page` is yours to serve; the [login page guide](login-page.md) says what it sends. The steps below make its requests directly.
-- `my-app` is a public client: it authenticates with PKCE alone (the `clients` card). Its redirect URI is matched by exact string (the `redirect-uris` card of `authorize`).
+- `my-app` is a public client: it authenticates with PKCE alone (the `clients` card). Its redirect URI is matched by exact string (the `redirect-uris` card).
 
 Start the app as the generated README's Start section says, with this file as the local layer.
 

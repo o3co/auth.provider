@@ -147,6 +147,8 @@ APP_CONFIG=config/local.conf,config/application.conf pnpm start
 
 If a setting is missing or invalid, the app prints one `refused <setting or module>: <reason>` line for each problem on standard error and exits with status 78. Fix them and start again; fixing one round can bring the next round's refusals.
 
+A trial set-up like this one logs warnings at every start, which are expected, not errors: `kernel.allowed_in_development`, once for each value only development takes (here the plain-http issuer, the plain-http login page on a loopback host, and the plain-http public origin, so the session's cookie goes in the clear), `store.volatile_accepted` (state kept in memory, naming its spaces) and `consent.first_party` (each client registered as first-party, which skips consent). A deployment for others sets these the other way, and the warnings stop.
+
 With the default port and the local issuer above, check that it is up:
 
 ```sh

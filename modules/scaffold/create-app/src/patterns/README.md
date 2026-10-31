@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Holds the patterns: each a deployment's use and the selection that composes it, in one file (`<name>.ts`) with a card of at most 10 lines (`<name>.md`).
-- Merges the operator's choice into a pattern's selection, and says when its store keeps the deployment to one instance.
+- Merges the operator's choice into a pattern's selection.
 
 ## Not here
 - What a selection composes (needs, axes, wirings, bridges) and checking its names and kinds: `combinations`.
@@ -17,9 +17,8 @@
 
 ## Invariants
 - A pattern names only the features that decide its use; the foundations come with what needs them.
-- A pattern writes no configuration value: its card names the keys the deployment provides for its use; what the store, users, audit and mail chosen ask is told from the modules composed (`chosen`), whatever the pattern's default.
+- A pattern writes no configuration value: its card names the keys the deployment provides for its use; what the store, users, audit and mail chosen ask is told by each module's own declaration, which `app-output` renders, whatever the pattern's default.
 - A group the operator names that is not one of the groups is refused, naming it.
-- The memory store (`store` chosen as its own axis) means one instance.
 - A pattern, and the full template, runs every conformance area whose module it composes.
 - Module names are written here and in the operator's flags only.
 

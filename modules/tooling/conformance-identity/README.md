@@ -8,7 +8,6 @@
 - Owns the fault scenes of password login and the ledger's revocation route, on a Redis topology and a deployment of their own, each after a control with no fault, with what they share (internal module `faults`).
 - Those scenes: the attempt limit letting no attempt by while the store cannot count (`attempts-unavailable`), a login opening no session while the store cannot answer (`login-unavailable`), an identifier's count holding across a crash, a failover and two instances (`lockout-holds`), and the ledger's route answering done only once every step was answered (`ledger-unavailable`).
 - Sets up the identity area's parts (public origin, users, login configuration, how a request limit answers while the store fails) on each of the legacy and new targets; the legacy one leaves the last to its own default.
-- On the new target, mail, where composed, is accepted to send nothing.
 - On a pattern's app that takes users from a ledger (`users-http`), serves the users a scene gives from a fake ledger the app is pointed at, unless the scene sets its own.
 - On a pattern's app that takes users from a ledger (`users-http`), a fake ledger holds the scene's users and answers their upstream links by `upstream-url`; a scene with users a ledger cannot hold (a bcrypt hash) is left out as the app's alternative.
 - On a pattern's app that keeps mfa's witness at a ledger (`mfa-witness-http`), a fake ledger keeps it for every scene, its own ledger or none: whether a subject is enrolled and by which token, the first mark, withdrawing it by its token alone, and clearing it.
@@ -24,7 +23,7 @@
 - The need for a user ledger over HTTP beside users in the settings
 - The need for a ledger that revokes subjects over HTTP (`ledgerRevocation`), which the legacy build cannot meet
 - The need for a recent-authentication window (`recentAuthenticationWindow`), which the legacy build cannot meet
-- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run, named to the evidence as `@mod/conformance-identity#faults` by the run itself; the area's own run and its pattern runs leave them out
+- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-identity#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
 - The legacy set-up, and the needs the legacy system cannot provide and the differences it answers differently, live only in `src/legacy.ts`.

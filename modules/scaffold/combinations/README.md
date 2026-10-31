@@ -8,10 +8,10 @@
 
 ## Not here
 - Whether a composition boots: the kernel's refusals.
-- The kinds' words and which way a dependency between them may point: `kinds`. The checks on what each kind depends on: `guard`.
+- The kinds' words and which way a dependency between them may point: `kinds`. The checks on what each kind depends on: `guard-imports`.
 - Generating an app, and reading an outside package into what it declares: `create-app`.
 - Running scenes: the conformance areas.
-- Checking that each feature declaring `storeWiring` has a wiring: `guard`.
+- Checking that each feature declaring `storeWiring` has a wiring: `guard-imports`.
 
 ## Offers
 - `completed`: the modules given, each owner whose declared default replaces it swapped for that default and each adapter's owner counted for bridges, then the wirings and bridges they come with, including those of what is brought in, each once, in the order first named.
