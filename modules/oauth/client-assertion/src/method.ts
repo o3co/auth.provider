@@ -6,6 +6,7 @@ import { type Clock, type Log, Unavailable } from "@mod/kernel";
 import { decodeJwt } from "jose";
 import { checked } from "./check.ts";
 import { clientKeys, keysOf } from "./keys/keys.ts";
+import { widestClockSkew } from "./section.ts";
 import type { SpentAssertions } from "./store.ts";
 
 export const assertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -112,8 +113,10 @@ export function assertionMethod(p: Parts): AuthMethod {
 				if (!loose) return refuse("audience");
 				p.log.warn("client-assertion.loose_audience", { client: client.id });
 			}
-			// Past the assertion's end by the allowance, and the margin for the store's own clock.
-			const lifetimeMs = assertion.expiresAt - p.clock.now() + p.skewMs + storeClockMarginMs;
+			// Past the assertion's end by the widest allowance a section takes, not the one in force, so
+			// a skew widened later on the same store never outlasts it; and the margin for the store's clock.
+			const lifetimeMs =
+				assertion.expiresAt - p.clock.now() + widestClockSkew * 1000 + storeClockMarginMs;
 			const saved = await p.spent.save(spentName(client.id, assertion.jti), lifetimeMs);
 			return saved === "exists" ? refuse("used before") : true;
 		},

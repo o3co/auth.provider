@@ -36,7 +36,7 @@
 
 ## Data
 - Spent proofs, named by the key's thumbprint and the `jti`. A thumbprint holds no dot, so a name is one key's and one `jti`'s alone.
-- Each is kept for twice the window, plus a minute for the store's clock.
+- Each is kept for twice five minutes, the widest `proof-window` the section takes, whatever is set, plus a minute for the store's clock: a `proof-window` widened later on the same store never takes it again.
 
 ## Depends on
 - `kernel`, `http`, `issuer`, `keys`, `sender-binding`

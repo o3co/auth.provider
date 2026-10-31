@@ -7,6 +7,9 @@ import { nonces } from "./nonce.ts";
 import { readProof, refused } from "./proof.ts";
 import { spentProofs } from "./store.ts";
 
+/** The widest `proof-window` the section takes, in seconds: a spent proof is kept by it, whatever is set. */
+const widestWindow = 300;
+
 const section = z.strictObject({
 	algorithms: z
 		.array(z.enum(["ES256", "ES384", "EdDSA", "RS256"]))
@@ -15,7 +18,7 @@ const section = z.strictObject({
 		.describe("The signing algorithms a DPoP proof may use."),
 	"proof-window": setting
 		.duration("s")
-		.pipe(z.number().int().min(1).max(300))
+		.pipe(z.number().int().min(1).max(widestWindow))
 		.prefault("1m")
 		.describe(
 			"How far a proof's `iat` may lie from the clock on either side, from `1s` to `5m` in whole seconds.",
@@ -92,11 +95,12 @@ export default defineModule(
 					const checked = await readProof(request, scene, { ...rules, origin }, c.clock.now());
 					if (checked.kind !== "proved") return checked;
 					// A proof is accepted within the window on either side of its iat, so it is
-					// remembered for twice the window from now.
+					// remembered for twice the widest window from now, not the one in force: a window
+					// widened later on the same store never outlasts it.
 					// A thumbprint holds no dot, so the name is one key's and one jti's alone.
 					const recorded = await spent.save(
 						`${checked.jkt}.${checked.jti}`,
-						2 * windowMs + clockAllowanceMs,
+						2 * widestWindow * 1000 + clockAllowanceMs,
 					);
 					if (recorded !== "created") return refused("proof used before");
 					return { kind: "bound", confirmation: checked.jkt };
