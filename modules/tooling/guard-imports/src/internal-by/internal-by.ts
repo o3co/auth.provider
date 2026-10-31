@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { budgetsAsTest, type Scope } from "../scope.ts";
@@ -9,6 +10,7 @@ const options: ts.CompilerOptions = {
 	moduleResolution: ts.ModuleResolutionKind.Bundler,
 	allowImportingTsExtensions: true,
 	noEmit: true,
+	allowJs: true,
 	strict: true,
 	skipLibCheck: true,
 	types: [],
@@ -39,25 +41,22 @@ const holdsTypeParameter = (type: ts.Type): boolean => {
 };
 
 /**
- * Whether an object literal's property may be written under the owned property's name: by name, or
- * by a computed key whose type that name fits (a union, a template, a mapped string or a string of
- * no known value alike), or whose type holds a type parameter anywhere, whatever it is bound to: a
- * guard's rule follows no further.
+ * Whether a key may be the owned property's name: by name, or by a computed key whose type that name
+ * fits (a union, a template, a mapped string or a string of no known value alike). A key whose type
+ * holds a type parameter is read by what it may be bound to: its constraint, unknown for a bare one.
  */
-const namesOwned = (
-	checker: ts.TypeChecker,
-	property: ts.ObjectLiteralElementLike,
-	owned: string,
-) => {
-	const name = property.name;
+const namesOwned = (checker: ts.TypeChecker, name: ts.PropertyName | undefined, owned: string) => {
 	if (name === undefined) return false;
 	if (!ts.isComputedPropertyName(name)) {
 		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === owned;
 	}
 	const key = checker.getTypeAtLocation(name.expression);
-	return (
-		holdsTypeParameter(key) || checker.isTypeAssignableTo(checker.getStringLiteralType(owned), key)
-	);
+	const literal = checker.getStringLiteralType(owned);
+	if (holdsTypeParameter(key)) {
+		const constraint = checker.getBaseConstraintOfType(key);
+		return constraint === undefined || checker.isTypeAssignableTo(literal, constraint);
+	}
+	return checker.isTypeAssignableTo(literal, key);
 };
 
 /** The type of the value a property is written with: its initializer, its shorthand name, or its getter's return. */
@@ -99,7 +98,9 @@ function writtenIn(
 	const files = packages.flatMap((p) =>
 		s
 			.sources(p)
-			.filter((file) => file.endsWith(".ts") && !budgetsAsTest(s, p, file))
+			.filter(
+				(file) => (file.endsWith(".ts") || file.endsWith(".mjs")) && !budgetsAsTest(s, p, file),
+			)
 			.map((file) => ({ p, path: join(p.dir, file), file })),
 	);
 	const ownerEntry = join(owner.dir, entry);
@@ -126,12 +127,17 @@ function writtenIn(
 		const visit = (node: ts.Node): void => {
 			if (ts.isObjectLiteralExpression(node)) {
 				for (const element of node.properties) {
-					if (!namesOwned(checker, element, owned)) continue;
+					if (!namesOwned(checker, element.name, owned)) continue;
 					const value = writtenType(checker, element);
 					if (value === undefined) continue;
 					const type = checker.getNonNullableType(value);
 					if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never | ts.TypeFlags.Unknown)) continue;
-					if (!checker.isTypeAssignableTo(type, wanted)) continue;
+					// A type parameter is read by what it may be bound to: the helper writes it, whoever calls.
+					const generic = holdsTypeParameter(type);
+					const constraint = generic ? checker.getBaseConstraintOfType(type) : undefined;
+					const bindable =
+						generic && (constraint === undefined || checker.isTypeAssignableTo(wanted, constraint));
+					if (!bindable && !checker.isTypeAssignableTo(type, wanted)) continue;
 					const { line } = source.getLineAndCharacterOfPosition(element.getStart());
 					written.push({ pkg: p, file, line: line + 1 });
 				}
@@ -139,6 +145,48 @@ function writtenIn(
 			ts.forEachChild(node, visit);
 		};
 		visit(source);
+	}
+	return [...written, ...templatedIn(s, owned, packages)];
+}
+
+/** A file that becomes a source once filled: a `.ts` or `.mjs` name under a suffix of its own. */
+const isTemplate = (file: string) => /\.(?:ts|mjs)\.[^./]+$/.test(file);
+
+/**
+ * Each object literal property of the owned property's name in the templates of `packages`, by name
+ * alone: a template's imports are filled in when it is written out, so its values have no type to
+ * read. A computed key counts unless it is a literal of another name.
+ */
+function templatedIn(s: Scope, owned: string, packages: readonly Pkg[]): Written[] {
+	const written: Written[] = [];
+	for (const p of packages) {
+		for (const file of p.files.filter((f) => isTemplate(f) && !budgetsAsTest(s, p, f))) {
+			const source = ts.createSourceFile(
+				file,
+				readFileSync(join(p.dir, file), "utf8"),
+				ts.ScriptTarget.ES2022,
+				false,
+				ts.ScriptKind.TS,
+			);
+			const named = (name: ts.PropertyName) => {
+				if (!ts.isComputedPropertyName(name)) {
+					return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === owned;
+				}
+				const key = name.expression;
+				return !(ts.isStringLiteralLike(key) || ts.isNumericLiteral(key)) || key.text === owned;
+			};
+			const visit = (node: ts.Node): void => {
+				if (ts.isObjectLiteralExpression(node)) {
+					for (const element of node.properties) {
+						if (element.name === undefined || !named(element.name)) continue;
+						const { line } = source.getLineAndCharacterOfPosition(element.getStart(source));
+						written.push({ pkg: p, file, line: line + 1 });
+					}
+				}
+				ts.forEachChild(node, visit);
+			};
+			visit(source);
+		}
 	}
 	return written;
 }

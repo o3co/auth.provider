@@ -934,8 +934,9 @@ describe("guard-imports", () => {
 						'const key = "internal";',
 						"export const keyed = () => send(url, { [key]: url });",
 						"export const got = { get internal() { return url; } };",
-						// Not counted: a literal of a generic factory's type, and an object only spread on.
+						// A generic factory's literal, whose type parameter the URL type could be bound to: counted.
 						"const make = <T>(v: T) => ({ internal: v });",
+						// Not counted: an object only spread on.
 						"export const made = () => send(url, make(url));",
 						"export const spread = () => send(url, { ...own });",
 						// A key whose type "internal" fits: a type parameter's constraint, a mapped string.
@@ -947,6 +948,11 @@ describe("guard-imports", () => {
 						// Not counted: a key no "internal" fits.
 						// biome-ignore lint/suspicious/noTemplateCurlyInString: the fixture's source holds a template type
 						"export const unrelated = (key: `unrelated-${string}`) => ({ [key]: url });",
+						// Not counted: a generic factory's literal whose type parameter no URL fits.
+						"export const counted = <T extends number>(v: T) => ({ internal: v });",
+						// Not counted: a key whose type parameter's constraint admits no "internal".
+						"interface Shape { readonly a?: string; readonly b?: boolean }",
+						"export const picked = <K extends keyof Shape>(key: K, s: Shape) => ({ [key]: s[key] as Shape[K] });",
 					].join("\n"),
 					"test/module.test.ts":
 						'import { read } from "@c/urls";\nexport const t = { internal: read("http://x/") };\n',
@@ -1011,6 +1017,7 @@ describe("guard-imports", () => {
 				"@c/other/src/module.ts:11 internal",
 				"@c/other/src/module.ts:16 internal",
 				"@c/other/src/module.ts:17 internal",
+				"@c/other/src/module.ts:18 internal",
 				"@c/other/src/module.ts:21 internal",
 				"@c/other/src/module.ts:22 internal",
 				"@c/other/src/module.ts:23 internal",
@@ -1055,6 +1062,68 @@ describe("guard-imports", () => {
 			]);
 			expect(found([urls, owner({ type: "Narrower" })])).toEqual([
 				"@c/policy narrower names no type and property it holds to declaration",
+			]);
+		});
+
+		it("counts a generic helper's write at the helper, wherever it is called from", () => {
+			const helper = pkg(
+				"@c/helper",
+				{
+					"src/module.ts": [
+						"export const make = <T>(v: T) => ({ internal: v });",
+						"export const bounded = <T extends string>(v: T) => ({ internal: v });",
+						"export const numbered = <T extends number>(v: T) => ({ internal: v });",
+					].join("\n"),
+				},
+				{ exports: { ".": "./src/module.ts" } },
+			);
+			const calling = pkg(
+				"@c/calling",
+				{
+					"src/module.ts": [
+						'import { read } from "@c/urls";',
+						'import { send } from "@c/policy";',
+						'import { make } from "@c/helper";',
+						'export const reach = () => send("x", make(read("http://x/")));',
+					].join("\n"),
+				},
+				{
+					exports: { ".": "./src/module.ts" },
+					dependencies: { "@c/urls": "*", "@c/policy": "*", "@c/helper": "*" },
+				},
+			);
+			expect(found([urls, owner(), helper, calling])).toEqual([
+				"@c/helper/src/module.ts:1 internal",
+				"@c/helper/src/module.ts:2 internal",
+			]);
+		});
+
+		it("counts a plain .mjs source by type, and a template of a source by the property's name", () => {
+			const scripted = pkg(
+				"@c/scripted",
+				{
+					"src/run.mjs": [
+						'import { read } from "@c/urls";',
+						'import { send } from "@c/policy";',
+						'export const reach = () => send("x", { internal: read("http://x/") });',
+						"export const flag = { internal: true };",
+					].join("\n"),
+					"templates/main.ts.template": [
+						'import { send } from "{{policy}}";',
+						"export const reach = (url) => send(url, { internal: url });",
+						"export const flag = { internal: true };",
+						"export const other = { hosts: [] };",
+					].join("\n"),
+					"templates/guard.ts.part": "const kept = { 'internal': {{url}} };\n",
+					"templates/notes.md": "{ internal: url }\n",
+				},
+				{ exports: { ".": "./src/run.mjs" }, dependencies: { "@c/urls": "*", "@c/policy": "*" } },
+			);
+			expect(found([urls, owner(), scripted])).toEqual([
+				"@c/scripted/src/run.mjs:3 internal",
+				"@c/scripted/templates/main.ts.template:2 internal",
+				"@c/scripted/templates/main.ts.template:3 internal",
+				"@c/scripted/templates/guard.ts.part:1 internal",
 			]);
 		});
 
