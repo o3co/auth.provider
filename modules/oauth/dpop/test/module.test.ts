@@ -12,7 +12,7 @@ import {
 	isUnavailable,
 	kernelConfig,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { type SenderBinding, senderBinding, senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
@@ -375,6 +375,23 @@ describe("server nonces (RFC 9449 §8)", () => {
 		}
 		await expect(boot({ nonce: { required: "never" } })).resolves.toBeDefined();
 	});
+});
+
+it("warns at every start where no nonce is asked, and not where one is", async () => {
+	const warned = async (nonce: Record<string, unknown>) => {
+		const recorded = recordingLog();
+		await assemble({ ...assembly({ nonce }), runtime: quietRuntime({ log: recorded.log }) });
+		return recorded.lines().filter((line) => line.event === "dpop.nonce_not_asked");
+	};
+	expect(await warned({ required: "never" })).toEqual([
+		{
+			level: "warn",
+			event: "dpop.nonce_not_asked",
+			fields: { reason: "no nonce is asked, so a proof made ahead is taken within its window" },
+		},
+	]);
+	const secret = randomBytes(32).toString("base64");
+	expect(await warned({ required: "as", secret })).toEqual([]);
 });
 
 it("takes all it names, asking nonces or not", async () => {

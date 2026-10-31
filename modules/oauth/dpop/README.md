@@ -13,7 +13,7 @@
 - Store interface for spent proofs: save a name for a lifetime, answering `created` or `exists`.
   - Requirements: no eviction, survives a crash, never rolled back by failover.
   - Its contract test, and the section for tests, `dpopConfig` (`./testing`).
-- Operator section `dpop`: `algorithms`, `proof-window`, and `nonce` (`required`: `never` by default, `as` or `as+rs`; `ttl`; `secret`), times written with their unit; its keys are in the configuration reference.
+- Operator section `dpop`: `algorithms`, `proof-window`, and `nonce` (`required`: `never` by default, which every start warns of as `dpop.nonce_not_asked`, `as` or `as+rs`; `ttl`; `secret`), times written with their unit; its keys are in the configuration reference.
 
 ## Invariants
 - Where a server-provided nonce is asked (RFC 9449 §8), a proof without one taken is refused `use_dpop_nonce` with the current nonce in `DPoP-Nonce`, before the token's hash is checked and before its jti is spent.
