@@ -26,7 +26,9 @@ async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms
 	throw new Error(`${what} did not happen in ${ms} ms`);
 }
 
-const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+/** A docker call killed past a minute, as long as its hook may take, so a stalled daemon fails the test. */
+const docker = (...args: string[]) =>
+	execFileSync("docker", args, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
 /** Whether Redis answers PING; a container still starting answers nothing yet. */
 const pings = () => {
 	try {

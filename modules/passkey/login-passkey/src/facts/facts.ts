@@ -26,7 +26,8 @@ export function factsOver(p: {
 		const facts = {
 			subject: asserted.subject,
 			amr: amrOf(asserted.userVerified, p.countsAsMfa),
-			authenticatedAt: asserted.challengedAt,
+			// Authenticated here, so as fresh as the session it opens, however long a gate holds it first.
+			authenticatedAt: "opening" as const,
 			attributes: { source: loginSource.users, values: acceptedAttributes(known.user.attributes) },
 		};
 		return { kind: "facts" as const, facts };

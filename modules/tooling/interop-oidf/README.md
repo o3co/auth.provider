@@ -3,7 +3,7 @@
 ## Responsibilities
 - Runs the OpenID Foundation's conformance suite, at a pinned version, against the provider: its OP plans Basic and Config and its three logout plans (RP-initiated, back-channel, front-channel), on the `simple-web` pattern's app behind an https front; and its relying party plan, the provider's federation login as the suite's OP's client, on the `sso-federated` pattern's app.
 - Reports each suite test as a vitest test, its result excused only by an expected entry the checklist lets it take.
-- Its internal modules for the suite: `suite` starts and stops it, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time.
+- Its internal modules for the suite: `suite` starts and stops it, `api` reaches its API trusting its certificate alone, `compose` composes its containers, `orphans` takes down a suite a killed run left, `commands` holds each command to its time.
 - Its internal modules for the provider: `scene` is the app's scene, `login` is the login page, `pkce` gives PKCE to requests that carry none; `rp` is the app as a relying party, the harness's browser and its checks of a sign-in.
 - Its internal modules for the results: `expected` judges the expected entries, `results` reads each test's outcome, `review` reads the pages the suite left for a person's review, `report` reports a plan's run as tests.
 - Its internal modules for a run: `lifecycle` holds what every plan run has (its directories, its deadline, its stops), `harness` runs an OP plan, `drive` drives a relying party plan's tests over the suite's API, `client-plan` runs a relying party plan.

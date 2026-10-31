@@ -26,6 +26,23 @@ describe("a plan's expected entries, read from its files", () => {
 		expect(read.skips).toEqual([]);
 	});
 
+	it("refuses the plan where a test's failure and its skip name two classes", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "expected-"));
+		await writeFile(join(dir, "basic.failures.json"), JSON.stringify([entry()]));
+		const skip = entry({
+			"current-block": undefined,
+			condition: undefined,
+			"expected-result": undefined,
+			class: "third-party",
+			adaptation: undefined,
+			issue: "https://x",
+		});
+		await writeFile(join(dir, "basic.skips.json"), JSON.stringify([skip]));
+		await expect(expectedOf(dir, "basic")).rejects.toThrow(
+			/oidcc-ensure-redirect-uri-in-authorization-request \(op\.json\): a test's entries share one class, here adaptation and third-party/,
+		);
+	});
+
 	it("refuses the plan, naming each entry that may not be taken", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "expected-"));
 		await writeFile(

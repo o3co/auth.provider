@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { dockerSync } from "../../docker/docker.ts";
 import { appClockEnv, appClockImage, appLibfaketimeIn } from "../clock.ts";
 
 /** Serves one answer, reads its Date header, and times a one-second timer on the monotonic clock. */
@@ -22,7 +22,7 @@ function run(offset?: string) {
 		? Object.entries(appClockEnv(offset, library)).flatMap(([k, v]) => ["-e", `${k}=${v}`])
 		: [];
 	const before = Date.now();
-	const out = execFileSync("docker", [
+	const out = dockerSync("run", [
 		"run",
 		"--rm",
 		...env,
@@ -36,7 +36,7 @@ function run(offset?: string) {
 	return {
 		before,
 		after,
-		...(JSON.parse(out.toString()) as { now: number; header: number; timerMs: number }),
+		...(JSON.parse(out) as { now: number; header: number; timerMs: number }),
 	};
 }
 

@@ -12,7 +12,7 @@
 - A browser login: there is none, so no session opens.
 
 ## Offers
-- Composition definition, and `passkeyAmr` (`["pop"]`).
+- Composition definition, `webauthnGrantType` (`urn:o3co:oauth:grant-type:webauthn`), and `passkeyAmr` (`["pop"]`).
 - The grant takes a JSON body only: `assertion` (the authenticator's response, an object) and `scope`.
 - Route `POST /oauth/webauthn/authentication/options`: takes JSON, a form or no body, and reads only `client_id`; declared to take requests from other sites.
   - It answers `passkeys`' options with `no-store`, their challenge made for that client.

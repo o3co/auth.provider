@@ -42,7 +42,7 @@
 - An entry holds the access, refresh and id tokens, the end, the scope the login granted and the scope now. Nothing else of the upstream's is kept.
 - A write lands only over the version it read, so a removed or relinked entry is neither brought back nor written over.
 - Only a structured `invalid_grant`, or `interaction_required` (the upstream asks the user to act there first), removes an entry.
-- A rotated refresh token is kept when the answer matches the IdP type's token answer schema, even where the rest of it is refused here.
+- A rotated refresh token is kept when the answer matches the IdP type's token answer schema, even where the rest of it is refused here, as a scope wider than the login's grant, or unreadable, is (`500 refresh_failed`).
 - An upstream logout removes the IdP's entry before it builds the upstream URL.
 - The return goes to the upstream only on an exact match of the client's list.
 - The id_token goes to the upstream only as the hint.

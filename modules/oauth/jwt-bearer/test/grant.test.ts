@@ -642,11 +642,17 @@ describe("jwt-bearer", () => {
 		);
 	});
 
-	it("refuses an assertion issued longer ago than the longest lifetime and the allowance", async () => {
+	it("refuses an assertion whose exp is further from its iat than the longest lifetime, with no allowance", async () => {
 		const s = await serve();
-		const at = (iat: number) => assertion({ ...base, iat });
-		expect(errorOf(await s.grant(await at(now / 1000 - 3600 - 30)))).toBe("issued");
-		expect(errorOf(await s.grant(await at(now / 1000 - 3600 - 31)))).toBe("invalid_grant");
+		// Each within reach of now, the two further apart than the lifetime.
+		const at = (iat: number, exp: number) => assertion({ ...base, iat, exp });
+		expect(errorOf(await s.grant(await at(now / 1000 - 1800, now / 1000 + 1800)))).toBe("issued");
+		expect(saidOf(await s.grant(await at(now / 1000 - 1801, now / 1000 + 1800)))).toBe(
+			"invalid_grant: lives too long",
+		);
+		expect(errorOf(await s.grant(await at(now / 1000 - 1810, now / 1000 + 1810)))).toBe(
+			"invalid_grant",
+		);
 	});
 
 	it("takes an audience list holding one of its audiences, and only strings", async () => {

@@ -265,14 +265,14 @@ export function renewalWith(parts: Parts) {
 		const said = refreshed.tokens as unknown as Partial<Record<keyof UpstreamTokens, unknown>>;
 		// A rotated refresh token is kept when the answer matches the IdP type's token answer schema, even where the rest of it is refused here.
 		const refreshToken = text(said.refreshToken) ?? kept.refreshToken;
-		// None said is the whole grant again; one wider than the grant, or unreadable, changes nothing.
+		// None said is the whole grant again; one wider than the grant, or unreadable, refuses the answer.
 		const answered = said.scope === undefined ? [] : scopeOf(said.scope);
 		const scope =
 			answered?.length === 0
 				? kept.granted
 				: answered?.every((s) => kept.granted.includes(s))
 					? answered
-					: kept.scope;
+					: undefined;
 		const accessToken = text(said.accessToken);
 		const ends = endOf(
 			said.expiresInSeconds,
@@ -288,8 +288,12 @@ export function renewalWith(parts: Parts) {
 				? "invalid_expiry"
 				: !bearer(tokenType)
 					? "invalid_token_type"
-					: undefined;
-		if (refused || accessToken === undefined || ends === "invalid") {
+					: answered === undefined
+						? "invalid_scope"
+						: scope === undefined
+							? "wider_scope"
+							: undefined;
+		if (refused || accessToken === undefined || ends === "invalid" || scope === undefined) {
 			if (refreshToken !== kept.refreshToken) {
 				const rotated = vault.seal(session, idp, { ...kept, refreshToken }, versionOf());
 				await rewrite(session, idp, rotated, entry.version);

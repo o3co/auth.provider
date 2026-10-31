@@ -6,7 +6,7 @@
  * them; the components bundles hold inside are listed from their declarations. Any list that does not
  * hold every tarball, or a bundled file undeclared, stops it.
  */
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
 	copyFileSync,
 	mkdirSync,
@@ -21,9 +21,10 @@ import { basename, join, resolve } from "node:path";
 import { optIns } from "@mod/combinations";
 import { readBundles } from "../contract.ts";
 import { packedOf } from "../release/seal.ts";
-import { images, overridesFile } from "../release-check/image.ts";
+import { docker } from "../release-check/containers/docker.ts";
+import { buildWithin, commandWithin, images, overridesFile } from "../release-check/image.ts";
 import { type Bom, coverageProblems, type Declared, insideBom, npmNamed } from "./boms.ts";
-import { notRemoved } from "./removal.ts";
+import { endOf, notRemoved } from "./removal.ts";
 
 const [given, into] = process.argv.slice(2);
 if (!given || !into) {
@@ -165,24 +166,24 @@ try {
 	const image = `${run}:full`;
 	try {
 		await images(run, { dir: tarballs, byName }, scratch).build(app, "full");
-		const id = execFileSync("docker", ["image", "inspect", "--format", "{{.Id}}", image], {
-			encoding: "utf8",
-		}).trim();
-		execFileSync("docker", ["save", image, "-o", join(scratch, "image.tar")]);
-		const scanned = spawnSync(
-			"docker",
-			[
-				"run",
-				"--rm",
-				"-v",
-				`${scratch}:/in:ro`,
-				config.syft,
-				"docker-archive:/in/image.tar",
-				"-o",
-				`cyclonedx-json@${config.cyclonedx}`,
-				"-q",
-			],
-			{ encoding: "utf8", maxBuffer: 1 << 28 },
+		const id = await docker(["image", "inspect", "--format", "{{.Id}}", image], commandWithin);
+		// Writing out and reading the whole image take no longer than building it.
+		await docker(["save", image, "-o", join(scratch, "image.tar")], buildWithin);
+		const scanned = await endOf(
+			docker(
+				[
+					"run",
+					"--rm",
+					"-v",
+					`${scratch}:/in:ro`,
+					config.syft,
+					"docker-archive:/in/image.tar",
+					"-o",
+					`cyclonedx-json@${config.cyclonedx}`,
+					"-q",
+				],
+				buildWithin,
+			),
 		);
 		if (scanned.status !== 0)
 			problems.push(`image: ${config.syft} could not list it: ${scanned.stderr.trim()}`);
@@ -195,15 +196,11 @@ try {
 	} finally {
 		// Removed however the build or the listing ended, the base stage's image too, and held to be gone.
 		const removing = [image, `${run}:base`];
-		const answer = spawnSync("docker", ["image", "rm", "-f", ...removing], { encoding: "utf8" });
-		const listed = spawnSync("docker", ["image", "ls", "--format", "{{.Repository}}:{{.Tag}}"], {
-			encoding: "utf8",
-		});
-		const left = notRemoved(
-			removing,
-			{ status: answer.status, stderr: answer.stderr ?? "" },
-			{ status: listed.status, stdout: listed.stdout ?? "", stderr: listed.stderr ?? "" },
+		const answer = await endOf(docker(["image", "rm", "-f", ...removing], commandWithin));
+		const listed = await endOf(
+			docker(["image", "ls", "--format", "{{.Repository}}:{{.Tag}}"], commandWithin),
 		);
+		const left = notRemoved(removing, answer, listed);
 		if (left) problems.push(left);
 	}
 
@@ -239,7 +236,7 @@ Lists in CycloneDX ${config.cyclonedx} JSON, made by the release from the tarbal
 - \`entrance.cdx.json\`: \`create-auth-provider\`, the entrance an operator runs with npx to make the app, installed alone; its lock is \`entrance.pnpm-lock.yaml\`.
 - \`inside.cdx.json\`: the packages a published bundle holds inside one of its files, which no dependency tree shows, at the versions the files hold.
 - \`build-tools.cdx.json\`: the tools that build and check the release, the workspace's development dependencies; no operator installs them.
-- \`image.cdx.json\`: the image this release built from the app's Dockerfile, listed by syft (\`image.json\` names it, its id and syft's version). It is a reference: the Dockerfile takes Node 24's latest, so an operator's build of another day holds another Node. pnpm runs only in the image's build (its deps stage); the image starts the app with node, and holds no package manager but npm, the corepack and the yarn Node's image bundles taken out.
+- \`image.cdx.json\`: the image this release built from the app's Dockerfile, listed by syft (\`image.json\` names it, its id and syft's version). It is a reference: the Dockerfile takes one Node 24 minor at its latest patch, so an operator's build of another day may hold another Node patch. pnpm runs only in the image's build (its deps stage); the image starts the app with node, and holds no package manager but npm, the corepack and the yarn Node's image bundles taken out.
 - \`tarballs.json\`: each tarball published, its name, version and npm integrity, which the release's own components in the lists carry as their SHA-512.
 
 The release's own components are named as npm publishes them (\`pkg:npm/%40o3co/<name>@<version>\`), with the hash of the very tarball published.

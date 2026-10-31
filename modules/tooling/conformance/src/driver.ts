@@ -1,7 +1,8 @@
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import type { AuditTrail } from "./audit/audit.ts";
+import { dockerSync } from "./docker/docker.ts";
 import { groupLive, running } from "./processes.ts";
 import type { Mailbox } from "./smtp.ts";
 
@@ -173,17 +174,20 @@ const owner = "conformance.owner";
 
 /** Removes the throwaway Redis that a process no longer running left behind, such as a run killed mid-scene. */
 function sweepLeftBehind(): void {
-	const listed = execFileSync(
-		"docker",
-		["ps", "-a", "--filter", `label=${owner}`, "--format", `{{.ID}} {{.Label "${owner}"}}`],
-		{ encoding: "utf8" },
-	);
+	const listed = dockerSync("control", [
+		"ps",
+		"-a",
+		"--filter",
+		`label=${owner}`,
+		"--format",
+		`{{.ID}} {{.Label "${owner}"}}`,
+	]);
 	for (const line of listed.split("\n").filter(Boolean)) {
 		const [id, pid] = line.split(" ");
 		if (!id || running(Number(pid))) continue;
 		// Its run may be removing it as this lists it (its stop, or `--rm`): gone or going is what this wants.
 		try {
-			execFileSync("docker", ["rm", "-f", "-v", id], { stdio: "ignore" });
+			dockerSync("control", ["rm", "-f", "-v", id], { stdio: "ignore" });
 		} catch {}
 	}
 }
@@ -195,7 +199,7 @@ export async function startRedis(
 	sweepLeftBehind();
 	const name = `conformance-redis-${process.pid}-${randomBytes(4).toString("hex")}`;
 	// Docker picks the host port as it binds, so no other process can take it in between.
-	execFileSync("docker", [
+	dockerSync("run", [
 		"run",
 		"-d",
 		"--rm",
@@ -210,17 +214,15 @@ export async function startRedis(
 		...settings,
 	]);
 	const stop = async () => {
-		execFileSync("docker", ["rm", "-f", "-v", name], { stdio: "ignore" });
+		dockerSync("control", ["rm", "-f", "-v", name], { stdio: "ignore" });
 	};
-	const bound = execFileSync("docker", ["port", name, "6379/tcp"], { encoding: "utf8" });
+	const bound = dockerSync("control", ["port", name, "6379/tcp"]);
 	const port = /:(\d+)\s*$/m.exec(bound)?.[1];
 	/** Whether the server answers, asked again for up to ten seconds. */
 	const answers = async () => {
 		for (let i = 0; port !== undefined && i < 100; i++) {
 			try {
-				const pong = execFileSync("docker", ["exec", name, "redis-cli", "ping"], {
-					encoding: "utf8",
-				});
+				const pong = dockerSync("control", ["exec", name, "redis-cli", "ping"]);
 				if (pong.trim() === "PONG") return true;
 			} catch {}
 			await new Promise((resolve) => setTimeout(resolve, 100));
@@ -239,7 +241,7 @@ export async function startRedis(
 		 * resumed is back once it answers again, so the scene's next step meets a store, not one waking.
 		 */
 		pause: async (paused) => {
-			execFileSync("docker", [paused ? "pause" : "unpause", name], { stdio: "ignore" });
+			dockerSync("control", [paused ? "pause" : "unpause", name], { stdio: "ignore" });
 			if (!paused && !(await answers()))
 				throw new Error(`the throwaway Redis ${name} did not come back`);
 		},
