@@ -35,6 +35,7 @@
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/subject-revocation-store": "workspace:*",
+		"@mod/subject-tokens": "workspace:*",
 		"@mod/tls-options": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/token-exchange": "workspace:*",
