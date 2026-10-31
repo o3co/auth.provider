@@ -12,12 +12,15 @@ import {
 	type Store,
 } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
-import { confirmationRounds } from "./round/round.ts";
+import { keysUnder } from "./keys.ts";
+import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
+
+/** How many keys SCAN is asked for at a time. */
+const scanPage = 200;
 
 type Raw = { value: string; version: string; expiresAt: string | null };
 
-const enc = encodeURIComponent;
 /** A text matched literally by SCAN's pattern. */
 const literal = (text: string) => text.replace(/[*?[\]\\]/g, (c) => `\\${c}`);
 
@@ -86,12 +89,8 @@ export async function refusedCommands(
 			problems.add(`the server refuses ${name}: allow it`);
 		} else if (!noReplicas(message)) throw error;
 	};
-	const round = confirmer.pipeline().call("ROLE").info("server");
-	const sent = ["ROLE", "INFO"];
-	if (replication !== undefined) {
-		round.set(`${prefix}:#confirm`, "1", "PX", 60_000);
-		sent.push("SET");
-	}
+	const round = confirmationPipeline(confirmer, prefix, replication !== undefined);
+	const sent = ["ROLE", "INFO", ...(replication !== undefined ? ["SET"] : [])];
 	if (replication === "replicas") {
 		// Answers within its millisecond, once a confirmation's WAIT before it has.
 		round.call("WAIT", 0, 1);
@@ -200,11 +199,7 @@ export function redisStore(
 	declared: readonly Space[],
 ): Store {
 	const { prefix } = options;
-	const slot = (key: Key) => `${prefix}:{${enc(key.space.name)}:${enc(key.partition)}}`;
-	const valueKey = (key: Key) => `${slot(key)}:v:${enc(key.name)}`;
-	const counterKey = (key: Key) => `${slot(key)}:c:${enc(key.name)}`;
-	const versionKey = (key: Key) => `${slot(key)}:#version`;
-	const markKey = (key: Key, mark: string | undefined) => `${slot(key)}:#mark:${enc(mark ?? "")}`;
+	const { slot, valueKey, counterKey, versionKey, markKey, spaceHead } = keysUnder(prefix);
 	/** Runs a script; every answer comes with the run id of the server that computed it. */
 	const run = async (script: string, keys: string[], args: (string | number)[]) => {
 		let reply: unknown;
@@ -415,10 +410,16 @@ export function redisStore(
 			},
 			now: async () => (await run(scripts.now, [], [])).now as number,
 			scan: async (space, cursor) => {
-				const head = `${prefix}:{${enc(space.name)}:`;
+				const head = spaceHead(space);
 				let reply: [string, string[]];
 				try {
-					reply = await client.scan(cursor ?? "0", "MATCH", `${literal(head)}*}:v:*`, "COUNT", 200);
+					reply = await client.scan(
+						cursor ?? "0",
+						"MATCH",
+						`${literal(head)}*}:v:*`,
+						"COUNT",
+						scanPage,
+					);
 				} catch {
 					throw new Unavailable("store");
 				}

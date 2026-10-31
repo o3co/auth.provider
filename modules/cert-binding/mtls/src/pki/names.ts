@@ -29,11 +29,16 @@ const isZero = (minimum: number | asn1js.Integer) =>
 		? minimum === 0
 		: minimum.valueBlock.valueHexView.every((b) => b === 0);
 
+/** An IP name constraint's bytes, the address and its mask: 4 + 4 for IPv4, 16 + 16 for IPv6. */
+const ipConstraintBytes = [8, 32];
+
 /** A subtree judged here: a DNS name, or an IPv4 or IPv6 network, without a depth limit. */
 function judged(subtree: pkijs.GeneralSubtree): boolean {
 	if (!isZero(subtree.minimum) || subtree.maximum !== undefined) return false;
 	if (subtree.base.type === generalName.dns) return true;
-	return subtree.base.type === generalName.ip && [8, 32].includes(bytesOf(subtree.base).length);
+	return (
+		subtree.base.type === generalName.ip && ipConstraintBytes.includes(bytesOf(subtree.base).length)
+	);
 }
 
 function allows(constraints: pkijs.NameConstraints, name: pkijs.GeneralName): boolean {

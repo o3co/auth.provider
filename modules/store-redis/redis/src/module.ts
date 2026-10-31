@@ -317,6 +317,10 @@ export default defineModule({ name: "redis", replicaSafe: true, section, takes }
 			commandTimeout: c.section["replication-timeout"] + c.section["command-timeout"],
 		});
 		confirmer.on("error", failed);
+		const disconnectBoth = () => {
+			client.disconnect();
+			confirmer.disconnect();
+		};
 		let checked: Awaited<ReturnType<typeof unmet>>;
 		const declared = await c.collect(spaces);
 		try {
@@ -324,16 +328,14 @@ export default defineModule({ name: "redis", replicaSafe: true, section, takes }
 			await confirmer.connect();
 			checked = await unmet(client, confirmer, declared, c.section);
 		} catch (error) {
-			client.disconnect();
-			confirmer.disconnect();
+			disconnectBoth();
 			return c.refuse(
 				"redis.url",
 				`cannot connect to Redis, or cannot check its configuration (${codeOf(error) === "unknown" ? lastCode : codeOf(error)})`,
 			);
 		}
 		if (checked.problems.length > 0) {
-			client.disconnect();
-			confirmer.disconnect();
+			disconnectBoth();
 			return c.refuse("redis", checked.problems.join("; "));
 		}
 		if (checked.declaredOnly.length > 0) {
@@ -350,17 +352,13 @@ export default defineModule({ name: "redis", replicaSafe: true, section, takes }
 		}
 		c.onStop(async (signal) => {
 			// Past the stop's deadline the connections are cut, not left waiting on QUIT.
-			const cut = () => {
-				client.disconnect();
-				confirmer.disconnect();
-			};
-			if (signal.aborted) return cut();
-			signal.addEventListener("abort", cut, { once: true });
+			if (signal.aborted) return disconnectBoth();
+			signal.addEventListener("abort", disconnectBoth, { once: true });
 			try {
 				await client.quit().catch(() => client.disconnect());
 				await confirmer.quit().catch(() => confirmer.disconnect());
 			} finally {
-				signal.removeEventListener("abort", cut);
+				signal.removeEventListener("abort", disconnectBoth);
 			}
 		});
 		return { client, confirmer, declared };

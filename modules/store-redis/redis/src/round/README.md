@@ -11,6 +11,7 @@ Internal module of `redis`: the confirmation round.
 ## Offers
 - `confirmationRounds` (the confirming connection; the prefix, the replication timeout and the replication the operator declared) → a confirmation, answering the run id of the server it confirmed on, or unavailable.
 - `sharedRounds`: rounds shared by the calls that ask while one runs.
+- `confirmationPipeline` (the confirming connection, the prefix, whether to write the confirmation key): ROLE, INFO server and the key in one trip, as a round sends it and the package's boot check does.
 
 ## Invariants
 - A confirmation writes the confirmation key on a connection of its own, then waits until every replica ROLE shows has it.
