@@ -100,7 +100,8 @@ export function withinHosts(raw: string, hosts: readonly string[]): boolean {
 	return url !== null && matches(normalized(url.hostname) ?? "", hosts);
 }
 
-/** A list of hosts an operator writes: hosts, or `.name` for the name and the names under it. */
-export const hostList = z
-	.array(z.string().refine(isListEntry, "not a host, or a name led by a dot"))
-	.prefault([]);
+/** One host a setting takes from an operator: a host, or `.name` for the name and the names under it. */
+export const hostEntry = z.string().refine(isListEntry, "not a host, or a name led by a dot");
+
+/** A list of hosts an operator writes, as `hostEntry` reads each; none unless set. */
+export const hostList = z.array(hostEntry).prefault([]);
