@@ -45,7 +45,7 @@
 - `appendonly yes` and `appendfsync always`, where a composed module keeps a durable space, unless `durability` is `none`.
 - With `replication` `replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of 1 or more. With `none`: no replica connected.
 - `CONFIG GET` allowed, or the settings it would read declared in `server-settings`.
-- Allowed: `EVAL`, the commands the scripts call (`TIME`, `INFO`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`), `SCAN`, `ROLE` and the keys under the prefix; with `replication`, `SET` of `<prefix>:#confirm`, and with `replicas` `WAIT`.
+- Allowed: `EVAL`, `PING` (the probe's), the commands the scripts call (`TIME`, `INFO`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`), `SCAN`, `ROLE` and the keys under the prefix; with `replication`, `SET` of `<prefix>:#confirm`, and with `replicas` `WAIT`.
 - The operator's, outside these checks: keeping a detached or lagging replica from promotion, replicas' disk writes, and what a `CONFIG SET` or a failover after boot lets through until the next probe answers unready.
 
 ## Data
