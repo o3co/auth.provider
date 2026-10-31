@@ -1,4 +1,5 @@
 import { heldToFloor, type TlsOptions } from "@mod/tls-options";
+import { isLoopbackName } from "@mod/url-setting";
 import type { RedisOptions } from "ioredis";
 
 /** What of the section the client's options are made from. */
@@ -29,6 +30,12 @@ export function queryRefusal(url: string): string | undefined {
 	const instead = [...new Set(names.map((name) => insteadOf[name] ?? "an option is not taken"))];
 	return `${lead}: ${instead.join("; ")}`;
 }
+
+/** Whether the URL reaches Redis in the clear off this host: `redis`, at a host not loopback by its name. */
+export const inTheClear = (url: string): boolean => {
+	const { protocol, hostname } = new URL(url);
+	return protocol === "redis:" && !isLoopbackName(hostname);
+};
 
 /** Whether `DEBUG` turns on the client's `ioredis:redis` log, which writes AUTH's password, read as the `debug` library reads it. */
 export function clientDebugs(debug: string | undefined): boolean {
