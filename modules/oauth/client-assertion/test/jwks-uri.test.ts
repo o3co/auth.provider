@@ -145,7 +145,7 @@ it("refuses boot for a client whose jwks-uri outbound's policy refuses", async (
 			{
 				where: "clients.registered.0.sections.client-assertion",
 				reason: expect.stringMatching(
-					/refuses the jwks-uri: not-allowed: name the host in outbound\.allow, or set outbound\.allow-any-public$/,
+					/refuses the jwks-uri: not-allowed: name the host in outbound\.allow, or set outbound\.allow-any-public; plain http also needs its host:port in outbound\.plain-loopback, or, for a URL of your own configuration on a private network, in outbound\.plain-internal$/,
 				),
 			},
 		],

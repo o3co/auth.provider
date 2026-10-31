@@ -66,7 +66,7 @@ export function hostEntryOf(
 	// Letters with the marks that write them, digits, dots, hyphens and the joiners; the URL parser
 	// (IDNA) refuses a joiner its script does not allow, and a mark leading a label.
 	if (/[^\p{L}\p{M}\p{N}.\-\u200C\u200D]/u.test(name)) return undefined;
-	// A mark the URL parser drops (a variation selector, U+034F, a Mongolian FVS) reads as written without it.
+	// A character the URL parser drops (a variation selector, U+034F, a Mongolian FVS, the Hangul filler) reads as written without it.
 	if (/(?![\u200C\u200D])\p{Default_Ignorable_Code_Point}/u.test(name)) return undefined;
 	const ascii = URL.parse(`https://${name}/`)?.hostname;
 	if (ascii === undefined || isIP(ascii) !== 0) return undefined;
@@ -100,7 +100,13 @@ export function withinHosts(raw: string, hosts: readonly string[]): boolean {
 	return url !== null && matches(normalized(url.hostname) ?? "", hosts);
 }
 
-/** A list of hosts an operator writes: hosts, or `.name` for the name and the names under it. */
-export const hostList = z
-	.array(z.string().refine(isListEntry, "not a host, or a name led by a dot"))
-	.prefault([]);
+/** One host a setting takes from an operator: a host, or `.name` for the name and the names under it. */
+export const hostEntry = z.string().refine(isListEntry, "not a host, or a name led by a dot");
+
+/** One `host:port` pair a setting takes from an operator, as `hostEntryOf` reads a pair. */
+export const hostPair = z
+	.string()
+	.refine((pair) => hostEntryOf(pair, { port: true }) !== undefined, "not a host:port pair");
+
+/** A list of hosts an operator writes, as `hostEntry` reads each; none unless set. */
+export const hostList = z.array(hostEntry).prefault([]);

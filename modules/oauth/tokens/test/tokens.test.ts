@@ -282,7 +282,7 @@ it("warns at every start where the section states that no module checks subjects
 	expect(await warned({ revocation: "denylist", "subject-check": undefined }, [check])).toEqual([]);
 });
 
-it("says whether subjects are checked: false only where the section states none", async () => {
+it("says whether subjects are checked: false only where the section states none [guarantee-4-e]", async () => {
 	const check = defineModule({ name: "check", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
 	]);

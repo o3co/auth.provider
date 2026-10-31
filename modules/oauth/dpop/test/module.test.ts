@@ -239,8 +239,11 @@ describe("server nonces (RFC 9449 §8)", () => {
 	const secret = randomBytes(32).toString("base64");
 	const bucketMs = 300_000;
 	/** A composition asking nonces where `required` says, reading at issuance or at a resource. */
-	async function asking(required: "never" | "as" | "as+rs") {
-		const app = await boot({ nonce: { required, ttl: `${bucketMs / 1000}s`, secret } });
+	const asking = (required: "never" | "as" | "as+rs") =>
+		reading({ nonce: { required, ttl: `${bucketMs / 1000}s`, secret } });
+	/** A composition with this dpop section, reading at issuance or at a resource. */
+	async function reading(dpopSection: unknown) {
+		const app = await boot(dpopSection);
 		return (dpopProof: string, scene: { kind: "issue" } | { kind: "resource"; token: string }) =>
 			app.get(senderBinding).bindingOf(
 				testRequest({
@@ -289,6 +292,16 @@ describe("server nonces (RFC 9449 §8)", () => {
 		expect(await read(await proof({ nonce: given }), issue)).toMatchObject(bound);
 		shift += bucketMs;
 		expect(await read(await proof({ nonce: given }), issue)).toMatchObject(askedAgain);
+	});
+
+	it("by default asks a nonce at the token endpoint, refusing a proof without one as use_dpop_nonce and giving one, and none at a resource [rfc9449-4.2-e]", async () => {
+		// The section gives the nonce's secret alone, so `required` is its default.
+		const read = await reading({ nonce: { secret } });
+		expect(await read(await proof(), issue)).toMatchObject({
+			...askedAgain,
+			headers: { "dpop-nonce": expect.any(String) },
+		});
+		expect(await read(await toResource(), atResource)).toMatchObject(bound);
 	});
 
 	it("takes at a resource under as+rs only the very nonce it gave [rfc9449-4.3-t]", async () => {

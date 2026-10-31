@@ -112,8 +112,13 @@ export default defineModule(
 			const refused = [trust, delegation].flatMap((t) => (t.kind === "refused" ? t.refusals : []));
 			if (trust.kind === "refused" || delegation.kind === "refused") return c.refuseAll(refused);
 			// Told at boot by client: each lets a leaked delegated assertion be used once, before its owner.
-			for (const client of (await c.get(clients)).registered()) {
-				if (acceptsUnbound(client)) c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
+			// Only a public client is read for it, and only a delegated issuer's assertion takes it.
+			if (c.section["delegated-issuers"].length > 0) {
+				for (const client of (await c.get(clients)).registered()) {
+					if (client.kind !== "confidential" && acceptsUnbound(client)) {
+						c.log.warn("jwt-bearer.accept_unbound", { client: client.id });
+					}
+				}
 			}
 			const resolvers = await c.collect(linkedSubjects);
 			if (linkedOf(c.section.issuers).size > 0 && resolvers.length === 0) {

@@ -1,6 +1,6 @@
 import { isIP } from "node:net";
 import { isLoopbackAddress, isPrivateAddress, isSpecialAddress } from "@mod/address-reach";
-import { hostEntryOf, listed, normalized, pairOf, withinHosts } from "@mod/host-entries";
+import { listed, normalized, pairOf, withinHosts } from "@mod/host-entries";
 import { isLoopbackName } from "@mod/url-setting";
 import {
 	type Admitted,
@@ -39,12 +39,6 @@ const badPorts = new Set([
 export const defaultPortOf = (protocol: string) => (protocol === "https:" ? 443 : 80);
 
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
-
-/** A host and a port, as `hostEntryOf` reads a pair. */
-export const isPair = (pair: string) => hostEntryOf(pair, { port: true }) !== undefined;
-
-/** Whether an operator's list entry reads as one. */
-export const isListEntry = (entry: string) => hostEntryOf(entry) !== undefined;
 
 /** Checks a URL before any name is resolved; `signed` material takes plain http at the caller's hosts. */
 export function admitUrl(
@@ -136,9 +130,14 @@ export function remedyOf(
 	switch (reason) {
 		case "not-allowed": {
 			const host = url ? normalized(url.hostname) : undefined;
-			return !policy.anyPublic && !listed(host ?? "", policy.allow)
-				? "name the host in outbound.allow, or set outbound.allow-any-public"
-				: "the host is not one the setting may reach";
+			if (policy.anyPublic || listed(host ?? "", policy.allow)) {
+				return "the host is not one the setting may reach";
+			}
+			const allow = "name the host in outbound.allow, or set outbound.allow-any-public";
+			// Plain http needs a plain list too: said now, so a second refusal does not name it after.
+			return url?.protocol === "http:"
+				? `${allow}; plain http also needs its host:port in outbound.plain-loopback, or, for a URL of your own configuration on a private network, in outbound.plain-internal`
+				: allow;
 		}
 		case "scheme":
 			return url?.protocol === "http:"

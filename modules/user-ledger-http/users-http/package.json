@@ -7,7 +7,7 @@
 	"narrower": "internal",
 	"adapts": "@mod/users",
 	"asks": [
-		"Users from an outside ledger (`users-http.verify-url`, `users-http.credential`).",
+		"Users from an outside ledger (`users-http.verify-url`; `users-http.credential` in the local layer when the ledger asks for one).",
 		"`users-http.subject-url`: the lookup by subject; without it, every lookup by subject is unanswerable.",
 		"`users-http.upstream-url`: the lookup by upstream identity, whose answer is the last word; without it, users reads its own links."
 	],

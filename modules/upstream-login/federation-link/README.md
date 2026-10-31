@@ -14,7 +14,7 @@
 - Answer codes: `link_requires_trusted_origin` (403), `login_required` (401), a session requirement's answer with `requirement` (403), and with `step-up-page` also `page`: that page with `requirement` and `redirect_to`, the start's own URL on the public origin with `link=1`, never what the browser sent besides, `identity_conflict` (409), `temporarily_unavailable` (503). Success is a 303 to where the round trip lands.
 
 ## Invariants
-- A start links only from this deployment's own page (`csrf`'s origin evidence), for a session entered at `credentials`. Another is logged `federation.link_start_rejected` (warn) with the IdP and the browser's `Sec-Fetch-Site`, printable and cut short.
+- A start links only from this deployment's own page (`csrf`'s origin evidence), for a session entered at `credentials`. Another is logged `federation.link_start_rejected` (warn) with the IdP and the browser's `Sec-Fetch-Site`: one of its four values, else `other`.
 - Without `mfa`, `credentials` asks a sign-in within `session-lifecycle.recent-authentication` (5 minutes by default), at the start and again at the callback: a link whose upstream step takes longer is refused.
 - The callback links only while that session enters at `credentials` with the same subject, and the browser is in no other session; never by email.
 - The session is checked before the link, right after it (before any token is handed over), and after the tokens' hand-off.

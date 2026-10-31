@@ -93,9 +93,8 @@ describe.each(named)("the pattern %s", (name) => {
 		expect(readme).toContain("`create-auth-provider --list`");
 		if (name === "simple-web") {
 			expect(readme).toContain("With its default axes it needs no outside system");
-			expect(readme).toContain(
-				"With a user ledger (`--axis @mod/users=@mod/users-http`), write none",
-			);
+			expect(readme).toContain("`--axis @mod/users=@mod/users-http` takes them from a user ledger");
+			expect(readme).toContain("leave it unset where a user ledger is composed; boot refuses both");
 		}
 		expect(readme).toMatch(
 			/A first login, step by step: https:\/\/github\.com\/o3co\/auth\.provider\/blob\/v[^/]+\/docs\/recipe-first-login\.md/,

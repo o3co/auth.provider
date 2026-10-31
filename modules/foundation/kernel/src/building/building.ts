@@ -117,6 +117,8 @@ export function buildingWith({
 }: BuildingParts) {
 	const { providers, contributions } = parts;
 	const built = new Map<Buildable, Promise<unknown>>();
+	/** Each provision's contract, so a provision built records its interface under it. */
+	const contractOf = new Map([...providers].map(([contract, item]) => [item, contract]));
 	const builtContracts = new Map<Contract<unknown>, unknown>();
 	const startHooks: Hook[] = [];
 	const stopHooks: StopHook[] = [];
@@ -262,7 +264,10 @@ export function buildingWith({
 		const context = contextFor(item, [...stack, item]);
 		const promise = (async () => {
 			try {
-				return await item.create(context);
+				const value = await item.create(context);
+				const contract = contractOf.get(item);
+				if (contract) builtContracts.set(contract, value);
+				return value;
 			} catch (error) {
 				recordFailure(error, item.module.name, refusals);
 				throw new DependencyFailed();
@@ -278,7 +283,9 @@ export function buildingWith({
 		build,
 		collected,
 		lateNamed,
-		builtContracts,
+		/** The interface a contract's provision built, or none where none did. */
+		provided: (contract: Contract<unknown>) =>
+			builtContracts.has(contract) ? { value: builtContracts.get(contract) } : undefined,
 		hooks: { start: startHooks, stop: stopHooks, periodics },
 		/** Late references and readiness answer from here on, readiness by `readiness`. */
 		assembledWith: (readiness: (deadlineMs: number) => Promise<ReadinessReport>) => {

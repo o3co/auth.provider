@@ -39,7 +39,7 @@
 
 ## Invariants
 - The ledger is reached only through `outbound`, at each URL's host alone; a redirect is not followed. Each URL is an internal destination (`narrower`: `internal`), named to `outbound` as itself: a private address is reached only when its host is in `outbound.internal-hosts` or, over plain http, when `outbound.plain-internal` names its `host:port`, and only at that URL's origin (scheme, host and port).
-- Boot is refused with no URL, on a URL outbound's destination policy refuses (at that URL's key, with which of `outbound`'s keys to set), and with a `credential` where `outbound.credentials` refuses its URLs (more than one origin, or one neither https nor a `plain-loopback` or `plain-internal` pair, in `credentialRefusalText`'s words; at `credential`): the credential goes to one party alone, sent by `outbound` as its `credential`.
+- Boot is refused with no URL (at `verify-url`), on a URL outbound's destination policy refuses (at that URL's key, with which of `outbound`'s keys to set), and with a `credential` where `outbound.credentials` refuses its URLs (more than one origin, or one neither https nor a `plain-loopback` or `plain-internal` pair, in `credentialRefusalText`'s words; at `credential`): the credential goes to one party alone, sent by `outbound` as its `credential`.
 - The password goes in the request body alone, never in a URL, a log line or an error.
 - A destination refused when sending, or no answer in time or size, is unavailable. A wrong `verify-url` makes verification unavailable, never "no such user", unless what answers there is a `401` without a Bearer challenge, which reads as none.
 - Boot reports never show the credential.

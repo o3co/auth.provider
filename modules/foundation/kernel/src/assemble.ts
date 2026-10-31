@@ -103,7 +103,7 @@ export async function assembleWatching(
 	for (const [module, handles] of heldTakes) watch?.held(module.name, handles);
 	refuseIfAny(refusals);
 
-	const { build, collected, lateNamed, builtContracts, hooks, assembledWith } = buildingWith({
+	const { build, collected, lateNamed, provided, hooks, assembledWith } = buildingWith({
 		runtime,
 		environment: kernel.environment,
 		sections,
@@ -130,10 +130,8 @@ export async function assembleWatching(
 	for (const { where, reason } of allowed) {
 		runtime.log.warn("kernel.allowed_in_development", { at: where, reason });
 	}
-	for (const [contract, item] of providers) {
-		const outcome = await outcomeOf(item);
-		if (outcome.ok) builtContracts.set(contract, outcome.value);
-	}
+	// Each provision records its interface as it is built.
+	for (const item of providers.values()) await outcomeOf(item);
 	let probeList: readonly Probe[] = [];
 	for (const [point, list] of contributions) {
 		const outcomes: Built[] = [];
@@ -167,10 +165,9 @@ export async function assembleWatching(
 
 	return {
 		get: <T>(contract: Contract<T>) => {
-			if (!builtContracts.has(contract as Contract<unknown>)) {
-				throw new Error(`${contract.label} is not provided`);
-			}
-			return builtContracts.get(contract as Contract<unknown>) as T;
+			const found = provided(contract as Contract<unknown>);
+			if (!found) throw new Error(`${contract.label} is not provided`);
+			return found.value as T;
 		},
 		start: async () => {
 			for (const hook of hooks.start) await hook();
