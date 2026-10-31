@@ -7,9 +7,10 @@
 	"storeWiring": true,
 	"asks": [
 		{
-			"line": "Users in the configuration (`users.registered`).",
+			"line": "Users in the configuration (`users.registered`, written in the local layer).",
 			"unadapted": true
-		}
+		},
+		"`users.registered`: leave it unset where a user ledger is composed; boot refuses both."
 	],
 	"exports": {
 		".": "./src/contract.ts",

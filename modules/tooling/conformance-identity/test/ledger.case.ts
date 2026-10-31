@@ -141,7 +141,7 @@ describe.runIf(areaTarget().can(httpLedger))("password login: a user ledger over
 		expect(fake.received.slice(from).some((r) => r.path.includes(right.password))).toBe(false);
 	});
 
-	it("answers a user the ledger does not hold as it answers a wrong password", async () => {
+	it("answers a user the ledger does not hold as it answers a wrong password [guarantee-3-m]", async () => {
 		mode = "alice";
 		const wrong = await login({ ...right, password: "nope" });
 		const unknown = await login({ ...right, username: "nobody" });
@@ -150,7 +150,7 @@ describe.runIf(areaTarget().can(httpLedger))("password login: a user ledger over
 		expect(sessionCookie(unknown.cookies)).toBeUndefined();
 	});
 
-	it("answers 503 while the ledger fails, is slow, answers 404 or refuses the credential, never as wrong credentials", async () => {
+	it("answers 503 while the ledger fails, is slow, answers 404 or refuses the credential, never as wrong credentials [guarantee-3-m]", async () => {
 		for (const failing of ["failing", "slow", "not-found", "refusing", "refusing-403"] as const) {
 			mode = failing;
 			const answer = await login(right);
@@ -159,14 +159,14 @@ describe.runIf(areaTarget().can(httpLedger))("password login: a user ledger over
 		}
 	});
 
-	it("answers 503 to a redirect, which it does not follow", async () => {
+	it("answers 503 to a redirect, which it does not follow [guarantee-3-m]", async () => {
 		mode = "redirecting";
 		const from = fake.received.length;
 		expect((await login(right)).status).toBe(503);
 		expect(fake.received.slice(from).map((r) => r.path)).not.toContain("/elsewhere");
 	});
 
-	it("answers 503 to a user with an empty id or a malformed username, opening no session", async () => {
+	it("answers 503 to a user with an empty id or a malformed username, opening no session [guarantee-3-m]", async () => {
 		for (const malformed of ["empty-subject", "malformed"] as const) {
 			mode = malformed;
 			const answer = await login(right);

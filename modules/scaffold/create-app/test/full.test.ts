@@ -68,10 +68,11 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	for (const name of optIns()) expect(readme).toContain(`- \`${name}\``);
 });
 
-it("names by hand only the keys no module's example holds", async () => {
+it("names in its guide each key no module's example holds, in the lines the modules declare", async () => {
 	const readme = await read(await generated(), "README.md");
-	const section = readme.split("## Keys no example holds")[1]?.split("\n## ")[0] ?? "";
-	expect([...section.matchAll(/^- `([a-z0-9.-]+)`/gm)].map((m) => m[1])).toEqual([
+	const line = (key: string) =>
+		readme.split("\n").find((l) => l.startsWith("- ") && l.includes(`\`${key}\``));
+	for (const key of [
 		"authorize.step-up-page",
 		"federation.held-page",
 		"http.trusted-proxies",
@@ -81,11 +82,17 @@ it("names by hand only the keys no module's example holds", async () => {
 		"mail-smtp.user",
 		"mail-smtp.password",
 		"clients.registered",
-	]);
-	// Every other key the guide names comes from the fragments.
-	for (const heading of ["Values the operator decides", "Pages the operator serves", "Secrets"]) {
+	]) {
+		expect(line(key), key).toBeDefined();
+	}
+	expect(line("federation.held-page")).toContain("public origin");
+	// No key named by hand: the guide's two lists are the modules' own, kernel's line first and once.
+	for (const heading of ["Keys no example holds", "Pages the operator serves", "Secrets"]) {
 		expect(readme).not.toContain(`## ${heading}`);
 	}
+	expect(readme).toContain("## Settings the composed modules ask for\n\n- ");
+	expect(readme.split("## Values the operator decides\n\n- `kernel.deployment`: ")).toHaveLength(2);
+	expect(readme.split("- `kernel.deployment`: ")).toHaveLength(2);
 });
 
 it("writes a witness-backfill script where the enrollment witness is kept, and none where it is not", async () => {
@@ -287,12 +294,6 @@ it("gives a generated app a trial layer by its own modules, with hosts under .in
 		Object.keys(all)
 			.filter((section) => section !== "keys" && section !== "http")
 			.sort(),
-	);
-});
-
-it("tells the operator to set the page a federation login a second factor holds goes on at", async () => {
-	expect(await read(await generated(), "README.md")).toContain(
-		"- `federation.held-page`: the page a federation login a second factor holds goes on at, on the public origin; without it, the browser stops at the factor's answer.",
 	);
 });
 

@@ -188,6 +188,31 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			const answered = await b.get(again.slice(origin.length));
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
+
+		it("takes at the callback a login older than a max age by less than the allowance, and refuses it login_required when the code would be issued [guarantee-2-b] [guarantee-2-c]", async () => {
+			const b = browser();
+			const sent = (await authorize(b, { max_age: "60" })).location;
+			const back = sentToLogIn(sent);
+			// 75 seconds ago is past the max age of 60 and within it plus the IdP's clock-skew of 30 seconds
+			// by default, and too far before the start to be lifted to it.
+			const between = await federated(
+				b,
+				{ subject: "u-alice", authTime: seconds() - 75 },
+				back,
+				handedOn(sent),
+			);
+			expect(between.location).toBe(back);
+			const refused = new URL((await b.get(back.slice(origin.length))).location);
+			expect([refused.searchParams.get("error"), refused.searchParams.has("code")]).toEqual([
+				"login_required",
+				false,
+			]);
+			// A login within the max age meets it.
+			const again = sentToLogIn((await authorize(b, { max_age: "60" })).location);
+			await federated(b, { subject: "u-alice", authTime: seconds() }, again);
+			const answered = await b.get(again.slice(origin.length));
+			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
+		});
 	},
 );
 

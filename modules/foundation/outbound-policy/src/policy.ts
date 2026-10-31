@@ -1,6 +1,6 @@
 import { isIP } from "node:net";
 import { isLoopbackAddress, isPrivateAddress, isSpecialAddress } from "@mod/address-reach";
-import { hostEntryOf, listed, normalized, pairOf, withinHosts } from "@mod/host-entries";
+import { listed, normalized, pairOf, withinHosts } from "@mod/host-entries";
 import { isLoopbackName } from "@mod/url-setting";
 import {
 	type Admitted,
@@ -39,9 +39,6 @@ const badPorts = new Set([
 export const defaultPortOf = (protocol: string) => (protocol === "https:" ? 443 : 80);
 
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
-
-/** A host and a port, as `hostEntryOf` reads a pair. */
-export const isPair = (pair: string) => hostEntryOf(pair, { port: true }) !== undefined;
 
 /** Checks a URL before any name is resolved; `signed` material takes plain http at the caller's hosts. */
 export function admitUrl(

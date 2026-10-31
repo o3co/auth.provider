@@ -54,7 +54,7 @@ it("reports when the upstream says the user logged in, or that it is unknown whe
 	expect(l.handed.map((facts) => facts.authenticatedAt)).toEqual([1_800_000_001_000, "unknown"]);
 });
 
-it("reports a login the upstream says came within its clock allowance before the start as made at the start", async () => {
+it("reports a login the upstream says came within its clock allowance before the start as made at the start [guarantee-2-c]", async () => {
 	const l = loginOf();
 	for (const authenticatedAt of [
 		startSecond - skewMs,
@@ -74,7 +74,7 @@ it("reports a login the upstream says came within its clock allowance before the
 	]);
 });
 
-it("moves a login to the start by the IdP's fresh login allowance, not its clock allowance, where the two differ", async () => {
+it("moves a login to the start by the IdP's fresh login allowance, not its clock allowance, where the two differ [guarantee-2-c]", async () => {
 	const l = loginOf(new Map(), 5000);
 	// Within the type's 30 s, but not the 5 s set: it stays as said, asked for no fresh login or not.
 	await l.complete({ subject: "u-1", amr: [], authenticatedAt: startSecond - 10_000 });
