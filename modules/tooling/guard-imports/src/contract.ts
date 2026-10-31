@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { internalByRules } from "./internal-by/internal-by.ts";
+import { ownedPropertyRules } from "./owned-property/owned-property.ts";
 import { declaredRecordRules } from "./recorded/recorded.ts";
 import {
 	axisRules,
@@ -68,7 +68,7 @@ export function importRules(s: Scope, surfaces: ReadonlyMap<string, Surface>): v
 	bridgeRules(s, surfaces);
 	declaredRecordRules(s);
 	takenByRules(s);
-	internalByRules(s);
+	ownedPropertyRules(s);
 }
 
 /** The import and dependency rules over the workspace, as their findings. */

@@ -238,7 +238,7 @@ const ownedOf = (value: unknown): { type: string; property: string } | undefined
  * stating the property and their card stating that; each declaring package writes one. The owner
  * states the type and the property in its own `narrower`.
  */
-export function internalByRules(s: Scope) {
+export function ownedPropertyRules(s: Scope) {
 	const rule = "G32 an owned property is written only by the packages declaring it";
 	const owners: Owned[] = [];
 	const declaring: Pkg[] = [];

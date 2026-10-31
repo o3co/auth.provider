@@ -1,4 +1,4 @@
-# internal-by
+# owned-property
 
 Internal module of `guard-imports`: G32, that the property an owner holds to declaration (the narrower's `internal`) is written only by the packages declaring it.
 
@@ -10,7 +10,7 @@ Internal module of `guard-imports`: G32, that the property an owner holds to dec
 - Values made to look like an operator's URL: another rule's.
 
 ## Offers
-- `internalByRules` (G32).
+- `ownedPropertyRules` (G32).
 
 ## Invariants
 - The owner is the one package whose `narrower` is `{ type, property }`; its contract exports that type (declared there or re-exported), whose property gives the type counted. The owner's own code is held to it too: it states the property, and writes none.
