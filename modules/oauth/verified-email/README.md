@@ -21,4 +21,4 @@
 - When the attributes cannot be read, it is unavailable, never a refusal.
 
 ## Depends on
-- `kernel`, `tokens`, `subject-attributes`, `users` (attribute names), `client-credentials` (the grant's name alone, a helper: composing this policy composes no grant)
+- `kernel`, `tokens`, `subject-attributes`, `users` (attribute names)
