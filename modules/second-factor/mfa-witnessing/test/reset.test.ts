@@ -81,7 +81,7 @@ describe("cleared, after a reset, over a witness offering withdraw", () => {
 			{ kind: "mfa.enrollment_inconsistent", subject: "ann", attributes: { at: "reset" } },
 		]);
 		expect(logged.lines().map((line) => [line.event, line.fields])).toEqual([
-			["mfa.enrollment_inconsistent", { at: "reset" }],
+			["mfa.enrollment_inconsistent", { asked: "reset" }],
 		]);
 	});
 
