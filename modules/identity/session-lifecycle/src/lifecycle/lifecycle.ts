@@ -23,11 +23,12 @@ import type {
 } from "../store.ts";
 import { listingOver } from "./listing/listing.ts";
 import { fromStored, type SessionRecord, toStored } from "./record.ts";
+import { retryingWith } from "./retrying.ts";
+import { freshToken, secretsWith } from "./secrets.ts";
 
 export { fromStored, type SessionRecord, toStored };
 
 export type OpenRecord = Extract<SessionRecord, { state: "open" }>;
-type ClosingRecord = Extract<SessionRecord, { state: "closing" }>;
 
 export interface LifecycleParts {
 	readonly kept: SessionStore;
@@ -68,38 +69,16 @@ export interface Lifecycle {
 	sessionOf(handle: string, record: AuthContext): Session;
 }
 
-const maxRetryMs = 3_600_000;
-const secretShape = /^[A-Za-z0-9_-]{43}$/;
-
 export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 	const { kept, index, closings, listed, revocation, jar, clock, log } = parts;
 	const { lifetimeMs, sweepMs } = parts;
 	const shortOf = sessionRules.judgedShortOf(parts.judge, parts.recent);
-	/** When this host may next sweep a closing whose record it cannot read, and since when it failed. */
-	const unread = new Map<string, { readonly since: number; readonly retryAt: number }>();
-	/** When to retry a closing that failed: after half its age, from the sweep interval up to an hour. Logged. */
-	const retryOf = (handle: string, since: number | undefined) => {
-		const at = clock.now();
-		const from = since ?? at;
-		log.warn("session-lifecycle.closing_pending", {
-			handle,
-			ageSeconds: Math.round((at - from) / 1000),
-		});
-		return { since: from, retryAt: at + Math.min(maxRetryMs, Math.max(sweepMs, (at - from) / 2)) };
-	};
-	/** Puts off a closing whose record this cannot read: the record is left as it is, so only this host knows. */
-	const putOffUnread = (handle: string) => {
-		unread.set(handle, retryOf(handle, unread.get(handle)?.since));
-	};
-	/** Puts off a closing whose participants failed, in its record. */
-	const putOff = async (handle: string, record: ClosingRecord) => {
-		const { retryAt } = retryOf(handle, record.closingSince);
-		await kept.update(handle, (stored) => {
-			// Only a closing waits for a retry: one closed meanwhile, or its mark, is left as it is.
-			const was = fromStored(stored);
-			return was?.state === "closing" ? { value: toStored({ ...was, retryAt }) } : undefined;
-		});
-	};
+	const { putOffUnread, putOff, dueOf, keepOnly } = retryingWith({ kept, clock, log, sweepMs });
+	const { secretIn, handleIn, issueSecret, retireSecret } = secretsWith({
+		jar,
+		index,
+		random: parts.random,
+	});
 	const listing = listingOver({
 		listed,
 		closings,
@@ -108,16 +87,6 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		endOpen: (handle) => endOpen(handle),
 		close: (handle) => close(handle),
 	});
-	const random = () => Buffer.from(parts.random.bytes(32)).toString("base64url");
-	const secretIn = (request: HttpRequest) => {
-		const carried = jar.lookup(request, "session");
-		return carried.kind === "found" && secretShape.test(carried.value) ? carried.value : undefined;
-	};
-	/** Which session a cookie's secret opens. */
-	const handleIn = async (request: HttpRequest) => {
-		const secret = secretIn(request);
-		return secret ? index.read(secret) : undefined;
-	};
 	const contextOf = (record: AuthContext): AuthContext => {
 		const attributes = keptAttributes(record.attributes);
 		return Object.freeze({
@@ -222,10 +191,6 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		const carried = jar.lookup(request, "session").kind !== "absent";
 		return { ...closed, cookies: carried ? [jar.write("session", "", 0)] : [] };
 	};
-	/** When a kept closing is next due: its record's retry time, or this host's for one it cannot read. */
-	const dueOf = (handle: string, record: SessionRecord | undefined) =>
-		(record ? ("retryAt" in record ? record.retryAt : undefined) : unread.get(handle)?.retryAt) ??
-		0;
 	/** Goes on with every pending closing that is due; one that fails does not hold up the rest. */
 	const sweep = async (stopping: AbortSignal) => {
 		const seen = new Set<string>();
@@ -234,10 +199,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 			seen.add(handle);
 			if (dueOf(handle, fromStored(await kept.read(handle))) <= clock.now()) await close(handle);
 		});
-		// Forgets the closings no longer kept, finished here or by another host.
-		if (!stopping.aborted) {
-			for (const handle of unread.keys()) if (!seen.has(handle)) unread.delete(handle);
-		}
+		if (!stopping.aborted) keepOnly(seen);
 		if (failed > 0) log.warn("session-lifecycle.sweep_failed", { count: failed });
 	};
 	const liveAt = async (handle: string) => {
@@ -268,18 +230,13 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		if (entry.kind === "absent") return entry;
 		return (await index.read(secret)) === handle ? entry : { kind: "absent" };
 	};
-	const issueSecret = async (handle: string, forMs: number) => {
-		const secret = random();
-		await created(index.save(secret, handle, forMs));
-		return { cookie: jar.write("session", secret, Math.max(1, Math.floor(forMs / 1000))) };
-	};
 	const open: Sessions["complete"] = async (request, facts) => {
 		sessionRules.checkAuthenticatedAt(facts);
 		// The earlier session is closed first; the login fails if that close cannot even be added to the closings.
 		const earlier = await handleIn(request);
 		if (earlier) await close(earlier);
 		// A new session every time, under a new handle: a login never carries on an earlier one.
-		const handle = random();
+		const handle = freshToken(parts.random);
 		const openedAt = clock.now();
 		const attributes = keptAtLogin(facts.attributes, log);
 		const context = {
@@ -309,7 +266,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		closeIn,
 		sweep,
 		issueSecret,
-		retireSecret: (secret) => index.remove(secret),
+		retireSecret,
 		sessionOf,
 	};
 }
