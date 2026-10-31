@@ -424,7 +424,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `protocol` (`src/protocol`): G33, a protocol package holds a wire's contract alone.
 - `@mod/guard-imports` (verification, `modules/tooling/guard-imports`): Reads the workspace: its packages and their manifests, what each source file imports, and each package's public surface.
   - `facts` (`src/facts`): what each source file says, read by one lexical program per run for the rules that read syntax: the modules it reaches and where each leads, and what each name it uses is bound to and stands for.
-  - `internal-by` (`src/internal-by`): G32, that the property an owner holds to declaration (the narrower's `internal`) is written only by the packages declaring it.
+  - `owned-property` (`src/owned-property`): G32, that the property an owner holds to declaration (the narrower's `internal`) is written only by the packages declaring it.
   - `recorded` (`src/recorded`): G30, that an audit event is recorded only through its declarations.
   - `surface` (`src/surface`): a package's public surface, read from its `.` entry by a TypeScript program of its own.
   - `taken` (`src/taken`): G31, that a contract its owner declares `takenBy` is imported by the packages it names alone.
