@@ -249,6 +249,8 @@ async function serve(
 			...keysConfig(),
 			...issuerConfig({ url: origin }),
 			...tokensConfig({ revocation: "denylist" }, { subjects: "checked" }),
+			// The proofs here carry no nonce: the token endpoint asks none, whatever dpop's default.
+			dpop: { nonce: { required: "never" } },
 			...clientsConfig([
 				confidentialClient({ id: "app", sections: allowed }),
 				confidentialClient({ id: "other", sections: allowed }),
