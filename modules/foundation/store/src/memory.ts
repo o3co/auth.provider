@@ -1,5 +1,7 @@
 import { deepFreeze, type Runtime } from "@mod/kernel";
 import {
+	type BatchWrite,
+	type Condition,
 	canonicalJson,
 	checkedStore,
 	type Entry,
@@ -86,6 +88,29 @@ export function memoryStore(
 		if (live(held, now)) return held;
 		values.delete(id(key));
 		return undefined;
+	};
+	/**
+	 * A batch at `now`, as one: every condition checked first, the first not met answered by its
+	 * index with nothing written; else every write made, each version (none for a removal) answered.
+	 */
+	const applyBatch = (
+		conditions: readonly Condition[],
+		writes: readonly BatchWrite[],
+		now: number,
+	) => {
+		for (const [index, condition] of conditions.entries()) {
+			const held = current(condition.key, now);
+			const holds = "absent" in condition ? !held : held?.version === condition.version;
+			if (!holds) return { kind: "conflict" as const, index };
+		}
+		const versions = writes.map((w) => {
+			if ("remove" in w) {
+				values.delete(id(w.key));
+				return null;
+			}
+			return write(w.key, w.put, w.expiry, now);
+		});
+		return { kind: "committed" as const, versions };
 	};
 	/** Runs a write once per idempotency mark and request, refusing it after its deadline. */
 	const guarded = async <A extends Answer>(
@@ -219,21 +244,9 @@ export function memoryStore(
 					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
 				]);
 				const partitions = [...new Set(keys.map(partitionOf))];
-				return guardedAcross(partitions, request, options, (now) => {
-					for (const [index, condition] of conditions.entries()) {
-						const held = current(condition.key, now);
-						const holds = "absent" in condition ? !held : held?.version === condition.version;
-						if (!holds) return { kind: "conflict" as const, index };
-					}
-					const versions = writes.map((w) => {
-						if ("remove" in w) {
-							values.delete(id(w.key));
-							return null;
-						}
-						return write(w.key, w.put, w.expiry, now);
-					});
-					return { kind: "committed" as const, versions };
-				});
+				return guardedAcross(partitions, request, options, (now) =>
+					applyBatch(conditions, writes, now),
+				);
 			},
 			batch: async (conditions, writes, options) => {
 				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
@@ -242,21 +255,9 @@ export function memoryStore(
 					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
 					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
 				]);
-				return guarded(keys[0] && partitionOf(keys[0]), request, options, (now) => {
-					for (const [index, condition] of conditions.entries()) {
-						const held = current(condition.key, now);
-						const holds = "absent" in condition ? !held : held?.version === condition.version;
-						if (!holds) return { kind: "conflict" as const, index };
-					}
-					const versions = writes.map((w) => {
-						if ("remove" in w) {
-							values.delete(id(w.key));
-							return null;
-						}
-						return write(w.key, w.put, w.expiry, now);
-					});
-					return { kind: "committed" as const, versions };
-				});
+				return guarded(keys[0] && partitionOf(keys[0]), request, options, (now) =>
+					applyBatch(conditions, writes, now),
+				);
 			},
 			count: (key, window, options) =>
 				guarded(
