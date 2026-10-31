@@ -641,6 +641,17 @@ describe("idp-oidc", () => {
 		expect(settings.parse({ ...base, "endpoint-hosts": taken })["endpoint-hosts"]).toEqual(taken);
 	});
 
+	it("takes an endpoint-hosts name in another script, its marks included, and refuses an address with a zone", () => {
+		const settings = settingsOf(asymmetric, policyRefusing());
+		const base = { issuer, "client-id": "c", "client-secret": "s" };
+		expect(settings.parse({ ...base, "endpoint-hosts": ["कि.example"] })["endpoint-hosts"]).toEqual(
+			["कि.example"],
+		);
+		const issues = settings.safeParse({ ...base, "endpoint-hosts": ["fe80::1%eth0"] }).error
+			?.issues;
+		expect(issues?.map((i) => i.path)).toEqual([["endpoint-hosts", 0]]);
+	});
+
 	it("refuses at boot, under issuer and naming it, a description's token endpoint or key set outbound's policy refuses", async () => {
 		const cdn = "https://tokens.idp-cdn.example";
 		const named = { "endpoint-hosts": ["tokens.idp-cdn.example"] };
