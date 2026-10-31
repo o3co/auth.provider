@@ -47,3 +47,18 @@ describe("composed beside federation-grants", () => {
 		expect(old).toBeInstanceOf(BootRefused);
 	});
 });
+
+it("warns at every start where the section says none, and not where it says required", async () => {
+	const warned = async (check?: string) =>
+		(await connector(check ? { settings: { "identity-check": check } } : {}))
+			.logs()
+			.filter((line) => line.event === "federation-grants-connect.identity_unchecked");
+	expect(await warned("none")).toEqual([
+		{
+			level: "warn",
+			event: "federation-grants-connect.identity_unchecked",
+			fields: { reason: "a callback whose upstream account another user holds is not refused" },
+		},
+	]);
+	expect(await warned()).toEqual([]);
+});

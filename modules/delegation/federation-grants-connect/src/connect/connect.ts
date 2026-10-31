@@ -380,6 +380,12 @@ export const connectOver = async (c: BuildContext<Settings>) => {
 	const intents = await c.get(grantIntents);
 	if (intents.connected && !c.section.page)
 		c.refuse(name, "connections need the page that asks the user");
+	// The operator's choice, yet said at every start: another user's upstream account is taken.
+	if (c.section["identity-check"] === "none") {
+		c.log.warn("federation-grants-connect.identity_unchecked", {
+			reason: "a callback whose upstream account another user holds is not refused",
+		});
+	}
 	return connectWith({
 		sessions: await c.get(sessions),
 		upstreamAccount: await upstreamAccountOver(c, c.section["identity-check"]),
