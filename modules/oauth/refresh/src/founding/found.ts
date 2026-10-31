@@ -1,6 +1,7 @@
 import type { Client } from "@mod/clients";
 import { Unavailable } from "@mod/kernel";
 import type { Binding } from "@mod/sender-binding";
+import type { Beginning } from "../contract.ts";
 import { allowanceMs, type Family, hashOf, liveFamily, toStored } from "../record.ts";
 import type { Revoker, Stores } from "../settle/settle.ts";
 
@@ -9,6 +10,23 @@ export const text = (random: Random, n: number) => Buffer.from(random(n)).toStri
 
 /** What a new family holds besides its secret and its end. */
 export type Founded = Omit<Family, "format" | "current" | "expiresAt">;
+
+/** Where a family begins, a code's redemption or a `start`; only a redemption names a session. */
+type Begun = Omit<Beginning, "access" | "binding"> & { readonly session?: string };
+
+/** A new family's fields, from where it begins and the binding `bindingFor` picked. */
+export const familyFieldsOf = (begun: Begun, binding: Binding | undefined): Founded => ({
+	clientId: begun.client.id,
+	subject: begun.subject,
+	scope: begun.scope,
+	audience: begun.audience,
+	...(begun.session !== undefined ? { session: begun.session } : {}),
+	authenticatedAt: begun.authenticatedAt,
+	...(begun.authenticatedAtUnknown ? { authenticatedAtUnknown: true as const } : {}),
+	amr: begun.amr,
+	...(begun.acr ? { acr: begun.acr } : {}),
+	...(binding ? { binding } : {}),
+});
 
 export function founding(
 	stores: Stores,
