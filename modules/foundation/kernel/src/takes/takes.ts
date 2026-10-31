@@ -62,20 +62,30 @@ export function checkTakes(
 		const handles = new Set(asked);
 		held.set(module, handles);
 		const own = new Set((module.provides ?? []).map((provision) => provision.contract));
-		for (const handle of handles) {
-			if (handle.kind === "contract") {
-				const taken = takenByRefusal(handle, module);
-				if (taken) refusals.push({ where: module.name, reason: taken });
-				if (!own.has(handle) && !parts.providers.has(handle)) {
-					refusals.push({ where: module.name, reason: `no module provides ${handle.label}` });
-				}
-			} else if (!pointsChecked.has(handle)) {
-				pointsChecked.add(handle);
-				const count = parts.contributions.get(handle as ExtensionPoint<unknown>)?.length ?? 0;
-				const broken = countRefusal(handle.rule, count);
-				if (broken) refusals.push({ where: handle.label, reason: broken });
-			}
-		}
+		for (const handle of handles) checkHandle(handle, module, own, parts, pointsChecked, refusals);
 	}
 	return held;
+}
+
+/** One handle a module takes: a contract it may take and some module provides, or a point's rule, each point once. */
+function checkHandle(
+	handle: Handle,
+	module: Module,
+	own: ReadonlySet<Handle>,
+	parts: Parameters<typeof checkTakes>[2],
+	pointsChecked: Set<Handle>,
+	refusals: Refusal[],
+): void {
+	if (handle.kind === "contract") {
+		const taken = takenByRefusal(handle, module);
+		if (taken) refusals.push({ where: module.name, reason: taken });
+		if (!own.has(handle) && !parts.providers.has(handle)) {
+			refusals.push({ where: module.name, reason: `no module provides ${handle.label}` });
+		}
+	} else if (!pointsChecked.has(handle)) {
+		pointsChecked.add(handle);
+		const count = parts.contributions.get(handle as ExtensionPoint<unknown>)?.length ?? 0;
+		const broken = countRefusal(handle.rule, count);
+		if (broken) refusals.push({ where: handle.label, reason: broken });
+	}
 }
