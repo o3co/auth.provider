@@ -170,6 +170,8 @@ async function open(extra?: Record<string, unknown>, allow?: string[]) {
 	const app = await boot(settings(extra), [], allow);
 	const [ledger] = app.get(collected);
 	if (!ledger) throw new Error("no ledger contributed");
+	// What the ledger logs once booted: outbound's start warnings (its plain-loopback pair) come before.
+	logged.length = 0;
 	return { ledger, users: app.get(users) };
 }
 /** Each request the ledger received, by the shape users-http sends. */
