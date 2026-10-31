@@ -108,6 +108,16 @@ const assembly = (
 	runtime,
 });
 
+/** The lines naming `event` that booting this assembly logs. */
+async function warnedOf(event: string, ...args: Parameters<typeof assembly>) {
+	const recorded = recordingLog();
+	await assemble({
+		...assembly(...args),
+		runtime: quietRuntime({ ...runtime, log: recorded.log }),
+	});
+	return recorded.lines().filter((line) => line.event === event);
+}
+
 async function assembled(...args: Parameters<typeof assembly>) {
 	return assemble(assembly(...args));
 }
@@ -181,14 +191,8 @@ describe("tokens", () => {
 	});
 
 	it("warns at every start where revocation is unsupported, and not where it is a denylist", async () => {
-		const warned = async (revocation: string) => {
-			const recorded = recordingLog();
-			await assemble({
-				...assembly({ revocation }),
-				runtime: quietRuntime({ ...runtime, log: recorded.log }),
-			});
-			return recorded.lines().filter((line) => line.event === "tokens.revocation_unsupported");
-		};
+		const warned = (revocation: string) =>
+			warnedOf("tokens.revocation_unsupported", { revocation });
 		expect(await warned("unsupported")).toEqual([
 			{
 				level: "warn",
@@ -266,14 +270,8 @@ it("warns at every start where the section states that no module checks subjects
 	const check = defineModule({ name: "check", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
 	]);
-	const warned = async (section: Record<string, unknown>, extra: Module[] = []) => {
-		const recorded = recordingLog();
-		await assemble({
-			...assembly(section, { extra }),
-			runtime: quietRuntime({ ...runtime, log: recorded.log }),
-		});
-		return recorded.lines().filter((line) => line.event === "tokens.subjects_unchecked");
-	};
+	const warned = (section: Record<string, unknown>, extra: Module[] = []) =>
+		warnedOf("tokens.subjects_unchecked", section, { extra });
 	expect(await warned({ revocation: "denylist" })).toEqual([
 		{
 			level: "warn",
