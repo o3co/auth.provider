@@ -113,6 +113,32 @@ describe("log threshold", () => {
 });
 
 describe("log sinks", () => {
+	it("runs a sink's stop hooks after every other module's, as sinks are built first", async () => {
+		const order: string[] = [];
+		// Listed first, so it is the build order, not the list's, that puts the sink's hook last.
+		const provider = defineModule({ name: "provider", replicaSafe: false, takes: [] }, (m) => [
+			m.provide(contract<void>("provided")).by((c) => {
+				c.onStop(() => {
+					order.push("stop provision");
+				});
+			}),
+		]);
+		const stopping = defineModule({ name: "stopping-sink", replicaSafe: false, takes: [] }, (m) => [
+			m.contribute(logSinks).by((c) => {
+				c.onStop(() => {
+					order.push("stop sink");
+				});
+				return { write: () => {} };
+			}),
+		]);
+		const app = await assemble({
+			modules: [provider, stopping],
+			config: config(),
+		});
+		await app.stop(1000);
+		expect(order).toEqual(["stop provision", "stop sink"]);
+	});
+
 	it("hands each sink the level, event, kernel time and fields, the fields never replacing the others", async () => {
 		vi.useFakeTimers({ now: 1_700_000_000_000, toFake: ["Date"] });
 		// Fields a JavaScript caller may pass, past the type that refuses these names.
