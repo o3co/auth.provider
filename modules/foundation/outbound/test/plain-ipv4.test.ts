@@ -254,7 +254,9 @@ describe("plain-ipv4 in the operator's section", () => {
 		expect(twice).toBe("plain-ipv4: plain-ipv4 names a pair once");
 	});
 
-	it("refuses an entry that is not a host:port pair, or holds another part of a URL in its host", () => {
+	it("refuses an entry that is not a host:port pair, or holds another part of a URL in its host, once at its place", () => {
+		// No rule of the section repeats it: not "names only pairs…", nor "names a pair once".
+		const twice = "plain-ipv4.0: not a host:port pair; plain-ipv4.1: not a host:port pair";
 		for (const entry of [
 			"api-internal",
 			"api-internal:09092",
@@ -272,22 +274,7 @@ describe("plain-ipv4 in the operator's section", () => {
 			"api_internal:9092",
 			"::1:9092",
 		]) {
-			expect(refusal({ "plain-ipv4": [entry] }), entry).toContain("not a host:port pair");
-		}
-	});
-
-	it("refuses an entry that is no pair once, at its place, and no rule of the section repeats it", () => {
-		for (const entry of [
-			"api internal:9092",
-			"api_internal:9092",
-			"::1:9092",
-			"api-internal.:9092",
-		]) {
-			expect(refusal({ "plain-ipv4": [entry] }), entry).toBe("plain-ipv4.0: not a host:port pair");
-			expect(
-				refusal({ "plain-internal": ["api-internal:9092"], "plain-ipv4": [entry, entry] }),
-				entry,
-			).toBe("plain-ipv4.0: not a host:port pair; plain-ipv4.1: not a host:port pair");
+			expect(refusal({ "plain-ipv4": [entry, entry] }), entry).toBe(twice);
 		}
 	});
 
