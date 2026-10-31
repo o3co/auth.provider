@@ -136,7 +136,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - A sample value left in place (`REPLACE-…`) is refused.
 - **Left to you:**
   - Keeping the configuration files and environment that hold secrets readable only by the app.
-  - Setting `kernel.environment = development` only to try the provider on one machine. Production still takes plain http on a loopback host for an upstream identity provider's browser endpoints, and loopback and private-use redirect and logout URIs for clients.
+  - Setting `kernel.environment = development` only to try the provider on one machine. Every start there warns `kernel.allowed_in_development` for each value a production deployment would refuse, by its key. Production still takes plain http on a loopback host for an upstream identity provider's browser endpoints, and loopback and private-use redirect and logout URIs for clients.
   - Setting `mail.accept-unsent` only where nothing need be mailed: the logging-only sender sends nothing, so no code or link mailed reaches its user. Every start warns `mail.unsent_accepted`.
 
 ## Secrets and logs
