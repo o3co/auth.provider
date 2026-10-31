@@ -210,7 +210,8 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/app-output` | assembly | none |
+| `@mod/app-entries` | assembly | none |
+| `@mod/app-output` | assembly | `@mod/app-entries` |
 | `@mod/combinations` | assembly | `@mod/kinds` |
 | `@mod/create-app` | assembly | `@mod/app-output`, `@mod/combinations` |
 | `@mod/kinds` | assembly | none |
@@ -308,7 +309,7 @@ flowchart LR
 | `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-exchange`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/interop-oidf` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-federation`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
 | `@mod/ledger-fakes` | verification | `@mod/ledger-wire` |
-| `@mod/references` | assembly | `@mod/app-output`, `@mod/combinations`, `@mod/config-files`, `@mod/create-app`, `@mod/guard-imports`, `@mod/kernel`, `@mod/trial` |
+| `@mod/references` | assembly | `@mod/app-entries`, `@mod/app-output`, `@mod/combinations`, `@mod/config-files`, `@mod/create-app`, `@mod/guard-imports`, `@mod/kernel`, `@mod/trial` |
 | `@mod/spec-checklist` | verification | `@mod/guard-imports` |
 
 ### upstream-login

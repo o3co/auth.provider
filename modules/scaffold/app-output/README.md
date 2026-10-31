@@ -3,22 +3,24 @@
 ## Responsibilities
 - Writes a generated project: a deployment of the modules it is given, with its configuration from their fragments, the environment's and the local layer's examples, an image and the operator's guide.
 - Maps each fragment's keys to the environment and the local layer, through the internal module `fragments`: the boundary that keeps module words out of the environment's.
-- Holds what every generated project shares: the target's check, the package name check, the manifest, the app's entry and its entries besides `start`, through the internal module `entries`.
+- Holds what every generated project shares: the target's check, the package name check and the manifest.
 - States what it takes from where the packages come from (`Packages`); the caller implements it.
 
 ## Not here
 - Where the packages come from (a workspace or a bundle's index), and what the app depends on to have them: the caller's, through `Packages`.
 - Which modules a project composes, and the values of its guide's own template marks: the caller's.
 - What each module's configuration means, and its fragment (`config.example` beside its package.json): each module's.
+- The app's entries and how they boot: `app-entries`.
 
 ## Offers
 - `writeDeployment(target, modules, packages, readme)`: writes the project assembling `modules`, the kernel and `config-files` first, from `packages` into `target`.
   - It writes the manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore`, a `.gitignore`, a README from `readme`'s template in `templates/` and values, and `AGENTS.md`.
   - Its guide templates are `full-readme.md`, `pattern-readme.md` and `listed-readme.md`; the caller fills each one's own marks (the full template's opt-ins; a pattern's name, use, card, choices, receivers and deployment; a listed app's list, choices and the values the operator decides).
   - The README lists each composed module's card as installed, and points at the `## Deployment` section of each card that has one, and at the release's walk to a first login where its repository is stated.
+  - The guide lists what the composed modules ask of the deployment, and the values the operator decides, from each one's own declaration, through the internal module `asked`.
   - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
-- `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), and the release (`Release`).
-- `namesPackages` and `vacant`, for a caller to refuse a plan before it composes; `mainSource`, the app's entry; `kernel` and `configFiles`, the packages every app depends on (its entry reads its configuration files through `config-files`).
+- `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), the release (`Release`), and, where the caller has them, what each name declares for the guide (`asks`, as `Asked`).
+- `namesPackages` and `vacant`, for a caller to refuse a plan before it composes.
 - `fragmentsIn`, `fragmentsOf`, `fragmentFile` and `settingsOf` (internal module `fragments`); `outsideLock` (`lockfile`).
 - `Packages.outside`, where the caller has packages outside the release: what the app is given beside them, see the internal module `outside`; `appZod`, the zod every app depends on.
 
@@ -32,16 +34,12 @@
 - The image follows one Node 24 minor, patch and digest unpinned, so a build takes its patches; a minor is fixed only until a newer one is out, so the operator moves `FROM` to the latest 24.x minor at each Node security release.
 - It pins corepack by version and installs the locked production dependencies in a stage of their own; the stage the app runs in starts again from Node's image and takes out the corepack and the yarn Node's image bundles, so no package manager but npm is in it, and runs node under `tini` as a user other than root.
 - Only an app composing `http` is given its port and interface in the image and the guide, and only one composing `http-ops` is checked for liveness (`/_healthcheck`, after a start period) or told of its endpoints.
-- The app reads the configuration files `APP_CONFIG` lists, comma-separated, layered in order; the generated configuration file when unset.
-- The app exits 78 on a refused boot, told by the kernel's mark (`BootRefused.is`), writing each refusal on standard error, every line handed on before it exits.
-- A refusal of a key the configuration reads from the environment says, after its reason, where to write it: its variable in `.env`, or the key in the local layer (the local layer alone for a value of several lines); a refusal of anything else is written as it is. The hint comes from a table written when the app was generated, from what writes `application.conf`: an app whose configuration files changed since may be told of a variable they no longer read.
-- The app's entry checks, as it boots, the variables 0.17 read that the environment sets and no configuration file reads, by `config-files`' `legacyVariablesCheck` alone: its warning goes once to standard error as `warn config-files:` and boot goes on; its refusal refuses boot. `APP_LEGACY_VARIABLES` (`warn`, `refuse`, `ignore`) chooses, read there.
-- SIGTERM or SIGINT stops the app, draining; one that comes while it starts stops it once started, and a second one waits for the first stop instead of stopping again.
 
 ## Data
 - Writes the target only; reads its templates and the fragment files it is pointed at.
 
 ## Depends on
+- `app-entries`: the app's entries, and `kernel` and `configFiles`, the packages every app depends on.
 - The HOCON library, through `fragments`; `yaml` and `semver`, through `lockfile` and `outside`.
 
 ## Vocabulary

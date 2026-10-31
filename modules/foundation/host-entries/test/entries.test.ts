@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { hostEntryOf, hostList, listed, normalized, withinHosts } from "../src/contract.ts";
+import {
+	hostEntry,
+	hostEntryOf,
+	hostList,
+	listed,
+	normalized,
+	withinHosts,
+} from "../src/contract.ts";
 import { isListEntry } from "../src/entries.ts";
 
 describe("host lists", () => {
@@ -150,6 +157,19 @@ describe("a name in another script", () => {
 		]) {
 			expect(hostEntryOf(entry), JSON.stringify(entry)).toBeUndefined();
 		}
+	});
+});
+
+describe("a setting's host entry", () => {
+	it("takes a host or `.name`, refusing anything else in one message, which a list of them, none unless set, gives at the entry's place", () => {
+		expect(hostEntry.safeParse(".a.example").success).toBe(true);
+		expect(hostEntry.safeParse("10.0.0.1").success).toBe(true);
+		const refused = hostEntry.safeParse("*.a.example").error?.issues.map((i) => i.message);
+		expect(refused).toEqual(["not a host, or a name led by a dot"]);
+		expect(hostList.parse(undefined)).toEqual([]);
+		expect(
+			hostList.safeParse(["a.example", "*"]).error?.issues.map((i) => [i.path, i.message]),
+		).toEqual([[[1], "not a host, or a name led by a dot"]]);
 	});
 });
 

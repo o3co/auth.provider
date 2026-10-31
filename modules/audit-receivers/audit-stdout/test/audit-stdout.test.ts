@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { audit } from "@mod/audit";
 import auditModule from "@mod/audit/module";
 import { assemble, kernelConfig } from "@mod/kernel";
@@ -60,4 +62,16 @@ it("fails as a receiver when the write fails", async () => {
 	a.record({ kind: "k" });
 	await settled();
 	expect(a.lost()).toEqual({ stdout: 1 });
+});
+
+it("registers under the name its manifest declares (`registersAs`), the one `audit.receivers` names", async () => {
+	const { registersAs } = JSON.parse(
+		readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"),
+	) as { registersAs: string };
+	const booted = assemble({
+		modules: [auditModule, auditStdout],
+		config: { ...kernelConfig(), audit: { receivers: [registersAs] } },
+		runtime,
+	});
+	await expect(booted).resolves.toBeDefined();
 });

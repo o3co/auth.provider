@@ -8,7 +8,7 @@ import { fakePackages } from "./fake.ts";
 
 const readme = {
 	template: "pattern-readme.md",
-	fill: { name: "simple-web", use: "A test.", card: "", chosen: "", receivers: "", deployment: "" },
+	fill: { name: "simple-web", use: "A test.", card: "" },
 };
 
 const read = (target: string, path: string) => readFile(join(target, path), "utf8");
@@ -200,8 +200,8 @@ it("tells in each guide how to make a random secret, what tokens.revocation = un
 		);
 	}
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/http"], fakePackages(), readme);
-	// Which modules refuse `unsupported` is theirs to say at boot.
+	await writeDeployment(target, ["@mod/http", "@mod/tokens"], fakePackages(), readme);
+	// Which modules refuse `unsupported` is theirs to say at boot; the line is tokens' own.
 	expect(await read(target, "README.md")).toContain(
 		"With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
 	);
@@ -267,27 +267,23 @@ it("refuses a target that holds anything, and writes nothing", async () => {
 	expect(await readdir(target)).toEqual(["kept"]);
 });
 
-it("fills a listed app's guide with the modules listed and the caller's lines", async () => {
+it("fills a listed app's guide with the modules listed, and kernel's decided line though it is not listed", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/http"], fakePackages(), {
-		template: "listed-readme.md",
-		fill: {
-			listed: "`@mod/http`",
-			chosen: "",
-			decided: "- `kernel.deployment`: `single` for one instance, `multi` for several.",
-		},
-	});
+	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
 
 	const guide = await read(target, "README.md");
 	expect(guide).toContain("from the modules listed: `@mod/http`.");
-	expect(guide).toContain("- `kernel.deployment`: `single` for one instance, `multi` for several.");
+	// kernel is in every app: its own declaration gives the line.
+	expect(guide).toContain(
+		"## Values the operator decides\n\n- `kernel.deployment`: `single` for one instance, `multi` for several.\n",
+	);
 	expect(guide).toContain("| `http.port` | `HTTP_PORT` | `8080` |");
 	expect(guide).not.toContain("{{");
 });
 
 const listedReadme = (listed: string) => ({
 	template: "listed-readme.md",
-	fill: { listed, chosen: "", decided: "" },
+	fill: { listed },
 });
 
 it("promises no http, port or health check to an app that composes no http", async () => {

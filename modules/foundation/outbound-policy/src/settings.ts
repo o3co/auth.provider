@@ -1,14 +1,12 @@
 import { hostList, pairOf } from "@mod/host-entries";
 import { setting } from "@mod/kernel";
 import { z } from "zod";
-import { isListEntry, isPair } from "./policy.ts";
-
-const hostEntries = z.array(z.string().refine(isListEntry, "not a host")).prefault([]);
+import { isPair } from "./policy.ts";
 
 /** The destination policy and caps an operator sets, the keys a section takes as its own. */
 export const policySettings = z
 	.strictObject({
-		allow: hostEntries.describe(
+		allow: hostList.describe(
 			"The hosts requests may reach by name; `.name` covers the name and the names under it.",
 		),
 		"allow-any-public": z
@@ -17,7 +15,7 @@ export const policySettings = z
 			.describe(
 				"Whether requests may reach any host at a public address, instead of naming hosts in `allow`.",
 			),
-		deny: hostEntries.describe(
+		deny: hostList.describe(
 			"The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it. An address listed is refused also where a name resolves to it.",
 		),
 		"plain-loopback": z

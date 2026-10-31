@@ -6,6 +6,9 @@
 	"kind": "adapter",
 	"network": "smtp",
 	"replaces": "@mod/mail",
+	"asks": [
+		"Mail through an SMTP relay (`mail-smtp.host`, `mail-smtp.from`; `mail-smtp.user` and `mail-smtp.password` in the local layer when it asks)."
+	],
 	"exports": {
 		"./module": "./src/module.ts"
 	},

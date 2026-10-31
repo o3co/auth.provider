@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { type AuditReceiver, audit, auditReceivers } from "@mod/audit";
 import auditModule from "@mod/audit/module";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
@@ -255,4 +257,16 @@ it("refuses to start without a URL, or with one it could not post to as written"
 	for (const [name, section] of Object.entries(refused)) {
 		await expect(boot(status(204), section), name).rejects.toBeInstanceOf(BootRefused);
 	}
+});
+
+it("registers under the name its manifest declares (`registersAs`), the one `audit.receivers` names", async () => {
+	const { registersAs } = JSON.parse(
+		readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"),
+	) as { registersAs: string };
+	const booted = assemble({
+		modules: [auditModule, outboundAnswering(status(204)), auditHttp],
+		config: { ...kernelConfig(), audit: { receivers: [registersAs] }, "audit-http": { url } },
+		runtime,
+	});
+	await expect(booted).resolves.toBeDefined();
 });
