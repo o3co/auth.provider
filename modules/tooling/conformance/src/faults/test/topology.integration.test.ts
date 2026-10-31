@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { ask, askAll, microsOf } from "../../ask/ask.ts";
+import { dockerSync } from "../../docker/docker.ts";
 import { type Reply, startRelay } from "../../relay/relay.ts";
 import { encode, rawClient } from "../../relay/test/client.ts";
 import { roleOf } from "../../store-wire/store-wire.ts";
@@ -13,11 +13,12 @@ afterEach(async () => {
 	running = [];
 });
 afterAll(() => {
-	const left = execFileSync(
-		"docker",
-		["ps", "-aq", "--filter", `label=conformance.owner=${process.pid}`],
-		{ encoding: "utf8" },
-	).trim();
+	const left = dockerSync("control", [
+		"ps",
+		"-aq",
+		"--filter",
+		`label=conformance.owner=${process.pid}`,
+	]).trim();
 	expect(left).toBe("");
 });
 const topology = async (spec: Parameters<typeof startTopology>[0]) => {
@@ -53,9 +54,18 @@ const linkOf = async (node: Node) => {
 	const info = await say(node, "INFO", "replication");
 	return { host: field(info, "master_host"), up: field(info, "master_link_status") === "up" };
 };
+/** The networks this process's topologies left, by id. */
+const networks = () =>
+	dockerSync("control", [
+		"network",
+		"ls",
+		"-q",
+		"--filter",
+		`label=conformance.owner=${process.pid}`,
+	]).trim();
 const exists = (what: "container" | "network" | "volume", name: string) => {
 	try {
-		execFileSync("docker", [what, "inspect", name], { stdio: "ignore" });
+		dockerSync("control", [what, "inspect", name], { stdio: "ignore" });
 		return true;
 	} catch {
 		return false;
@@ -76,9 +86,7 @@ describe("a Redis topology", () => {
 		const t = await topology({ replicas: 1 });
 		const names = t.nodes.map((n) => n.name);
 		const volumes = names.flatMap((n) =>
-			execFileSync("docker", ["inspect", "-f", "{{range .Mounts}}{{.Name}} {{end}}", n], {
-				encoding: "utf8",
-			})
+			dockerSync("control", ["inspect", "-f", "{{range .Mounts}}{{.Name}} {{end}}", n])
 				.trim()
 				.split(" ")
 				.filter(Boolean),
@@ -93,25 +101,17 @@ describe("a Redis topology", () => {
 	});
 
 	it("leaves nothing behind where a start fails", async () => {
-		const before = execFileSync(
-			"docker",
-			["network", "ls", "-q", "--filter", `label=conformance.owner=${process.pid}`],
-			{ encoding: "utf8" },
-		).trim();
+		const before = networks();
 		await expect(
 			startTopology({ replicas: 1, settings: ["--no-such-setting", "x"] }),
 		).rejects.toThrow();
-		const after = execFileSync(
-			"docker",
-			["network", "ls", "-q", "--filter", `label=conformance.owner=${process.pid}`],
-			{ encoding: "utf8" },
-		).trim();
-		expect(after).toBe(before);
-		const left = execFileSync(
-			"docker",
-			["ps", "-aq", "--filter", `label=conformance.owner=${process.pid}`],
-			{ encoding: "utf8" },
-		).trim();
+		expect(networks()).toBe(before);
+		const left = dockerSync("control", [
+			"ps",
+			"-aq",
+			"--filter",
+			`label=conformance.owner=${process.pid}`,
+		]).trim();
 		expect(left).toBe("");
 	});
 });

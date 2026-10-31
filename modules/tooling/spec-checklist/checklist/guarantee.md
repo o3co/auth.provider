@@ -22,18 +22,18 @@
 
 ## 1 Closing a session closes every path for the tokens issued from it.
 
-- **guarantee-1-a** MUST: a session left closing, with participants not yet done, is closed by its logout or a later sweep, and once closed no path is left open for the tokens issued from it; a logout that cannot finish answers `503`, never logged out.
+- **guarantee-1-a** MUST: a session left closing, with participants not yet done, is closed by its logout or a later sweep, and once closed no path is left open for the tokens issued from it, but for a session the cap pushed out while a store outage kept it from closing, declared in design.md's Decisions: it ends without its participants or a back-channel notice, and its access tokens live until they expire, at most to the session's own end; a logout that cannot finish answers `503`, never logged out.
   faults: Lr, Lx, F, Fs, C, K, H2
 
 ## 2 `prompt=login` and `max_age` are met only by a fresh authentication.
 
 - **guarantee-2-a** MUST: a request with `prompt=login` is met only by an authentication made for it, by `reauth`'s record, which `authorize` makes for the request and takes once.
-- **guarantee-2-b** MUST: a request with `max_age` is met only by an authentication within it, and an authentication time `session` does not know never counts as fresh.
+- **guarantee-2-b** MUST: a request with `max_age` is met only by an authentication within it, checked immediately before the code is issued, after every step the request went through, consent included; the time the store takes to write the code is not counted, and redemption adds at most the code's lifetime. `max_age=0` is met as `prompt=login` is, by an authentication made for the request (guarantee-2-a). An authentication time `session` does not know never counts as fresh.
 - **guarantee-2-c** MUST: through an upstream, a login counts as fresh only where the time the upstream reports for it is within its fresh login allowance, `federation.idps.<name>.fresh-login-allowance` (its `clock-skew` by default): for `prompt=login`, no further back than the allowance before the demand, compared in whole seconds; for `max_age`, where `auth_time + allowance + max_age >= now`, compared to the millisecond.
 
 ## 3 A dependency that cannot answer never grants anything.
 
-- **guarantee-3-a** MUST NOT: the authorization endpoint issues a code while a dependency its decision waits on cannot answer; until it has found the browser's session it sends the client no outage's answer and answers `503` `temporarily_unavailable` itself, for `prompt=none` too; once it has, it answers the client `error=temporarily_unavailable` at the redirect URI. A silent request's refusals before the session (`invalid_scope`, a repeated parameter, an unknown `reauth`) are no outage's answer: they go to the redirect URI without the session read, as `authorize`'s refusals do.
+- **guarantee-3-a** MUST NOT: the authorization endpoint issues a code while a dependency its decision waits on cannot answer; until it has found the browser's session it sends the client no outage's answer and answers `503` `temporarily_unavailable` itself, for `prompt=none` too; once it has, it answers the client `error=temporarily_unavailable` at the redirect URI. A silent request's refusals before the session (`invalid_scope`, a repeated parameter, an unknown `reauth`) are no outage's answer: they go to the redirect URI without the session read, as `authorize`'s refusals do. A client's own metadata document is no dependency its decision waits on: fetched from the client's host, a fetch that fails is no client (`clients-cimd`), not unavailable.
   faults: Pu, Pd, R, L, S, F, Fs, C
 - **guarantee-3-b** MUST NOT: the token endpoint issues a token for a code while a dependency its decision waits on cannot answer.
   faults: Pu, Pd, R, L, S, F, Fs, C
@@ -51,7 +51,7 @@
   faults: Pu, Pd, R, L, S, F, C
 - **guarantee-3-i** MUST NOT: an attempt limit lets an attempt pass while its store cannot count, whatever `rate-limit.fail-mode` is.
   faults: Pu, Pd, R, L, S, F, Fs, C
-- **guarantee-3-j** MUST NOT: anything is issued while the store cannot write, and a request made after it can write again passes.
+- **guarantee-3-j** MUST NOT: a grant that keeps in the store what it issues or what issuing spends (a code redeemed, a refresh family rotated, a device code used, a JWT bearer assertion's or an exchanged id_token's use) issues anything while the store cannot write, and a request made after it can write again passes.
   faults: M, R0, Wt, Nr
 - **guarantee-3-k** MUST NOT: the provider boots on a Redis set to evict keys.
   faults: Ev
@@ -105,7 +105,7 @@
 
 ## 8 Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.
 
-- **guarantee-8-a** MUST NOT: a refusal at boot shows a setting's value; it names the setting by its key path.
+- **guarantee-8-a** MUST NOT: a refusal at boot shows a setting's value; it names the setting by its key path, and a contribution by its name (a route's method and path, a receiver's name), even where a setting chose the name (`metrics-prometheus.path`); a name is never a secret.
 - **guarantee-8-b** MUST NOT: a log line carries a secret, credential, token, request body or header value, but for header values from a fixed set.
 - **guarantee-8-c** MUST NOT: an audit event carries a token or a secret.
 - **guarantee-8-d** MUST NOT: an answer carries a secret, but for tokens and codes to the one they are issued to, and a secret a registration shows once to its owner.

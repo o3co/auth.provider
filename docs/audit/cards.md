@@ -73,7 +73,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/seal` (foundation, `modules/foundation/seal`): Seals and opens stored data with authenticated encryption, by each key's algorithm (AES-256-GCM), under a key ring read at boot.
 - `@mod/secret-hash` (foundation, `modules/foundation/secret-hash`): Checks a secret against a stored bcrypt or scrypt hash, with the same work whether or not there is a hash to check against; knows no feature.
 - `@mod/store` (foundation, `modules/foundation/store`): Owns the contract of feature-neutral storage operations, each atomic and judged on the store clock, collects space declarations, and holds one memory implementation, not safe on many instances.
-- `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take.
+- `@mod/tls-options` (foundation, `modules/foundation/tls-options`): Owns the floor of the provider's own TLS connections as a client: the least version and the suites they take, and that each checks its peer's certificate.
 - `@mod/url-setting` (foundation, `modules/foundation/url-setting`): Decides which configured URLs boot, for every module that takes one by `urlSetting`, and when a section's own check of the URLs it holds may read them.
 
 ## identity
@@ -84,7 +84,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/login-attributes` (feature, `modules/identity/login-attributes`): Decides which of a login's attributes are kept: `users`' named set, within caps.
   - `keeping` (`src/keeping`): keeping a login's attributes within caps.
 - `@mod/login-gates` (feature, `modules/identity/login-gates`): Passes a confirmed login through the gates, then has `session` open it.
-- `@mod/login-password` (feature, `modules/identity/login-password`): Provides the password login endpoint: verifies with `users`, and logs in through `login-gates`, reporting the time the password was verified as the login's authentication time.
+- `@mod/login-password` (feature, `modules/identity/login-password`): Provides the password login endpoint: verifies with `users`, and logs in through `login-gates`, naming the session's opening as the login's authentication time (`opening`), so a gate's wait never ages it.
 - `@mod/session` (feature, `modules/identity/session`): Owns the contract of user sessions: their cookie, their listing under their subject, and their lifecycle (open → closing → closed), as every implementation keeps them; a session is opened only once listed, so a revocation finds every live one.
   - `rules` (`src/rules`): the rules every implementation of `sessions` keeps alike, the stand-in too, offered as `sessionRules`.
 - `@mod/session-lifecycle` (adapter, `modules/identity/session-lifecycle`): Keeps sessions for `session`'s contract: their records, cookies and listing under their subject, and their lifecycle (open → closing → closed), over its own store interfaces as the assembly wires them.
@@ -280,6 +280,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 ## store-redis
 
 - `@mod/redis` (adapter, `modules/store-redis/redis`): Implements the `store` contract with Redis, with one script per shape of basic operation and none per feature.
+  - `client` (`src/client`): the client's options, and what the URL and the environment say of its connection.
   - `round` (`src/round`): the confirmation round.
 
 ## templates
@@ -316,6 +317,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `audit` (`src/audit`): the events a running target sends, for the scenes that read them.
   - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
   - `deployment` (`src/deployment`): a fault scene's app as a deployment runs it, on a Redis topology.
+  - `docker` (`src/docker`): the docker client the base's scenes use (sync and async, within a deadline), for every container they start, stop and look at. An interim: once release-check's client is lifted into a tooling package (e.g. `@mod/docker-client`) with a sync form, conformance switches to it and this internal module goes.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
   - `fault-scene` (`src/fault-scene`): what an area's fault scene does with its deployment, apart from the faults it causes, in no area's words.
   - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
@@ -401,6 +403,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `carried` (`src/release-check/carried`): which package managers an app's image holds.
   - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
   - `given` (`src/release-check/given`): which tarballs the release check holds to.
+  - `helpers` (`src/release-check/helpers`): the helpers scene, the resolver's helper processes in an app's image, run as a deployment constrains them.
   - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
   - `release-listed` (`src/release-listed`): where the release publishes, the tarballs held to those its lists of what it ships were made of.
   - `release-notes` (`src/release-notes`): the release's notes, from the version's section of the changelog.

@@ -3,8 +3,9 @@ import { createServer as createTlsServer } from "node:https";
 import { type AddressInfo, connect, type Socket } from "node:net";
 import { isUnavailable } from "@mod/kernel";
 import { policyOf, policySettings } from "@mod/outbound-policy";
+import { heldToFloor } from "@mod/tls-options";
 import { type Offer, peerOptions, testTlsOptions } from "@mod/tls-options/testing";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 // The contract first, as the package loads it: transport and credential import each other through it.
 import "../../contract.ts";
 import type { OutboundUnavailable } from "../../contract.ts";
@@ -57,8 +58,8 @@ afterAll(() => {
 	proxy.close();
 });
 
-/** A request to the peer offering `offer`, directly or through the proxy's tunnel. */
-const reach = (offer: Offer, way: "direct" | "proxied") => {
+/** A request to the peer offering `offer`, directly or through the proxy's tunnel, trusting its authority unless told not. */
+const reach = (offer: Offer, way: "direct" | "proxied", trusted = true) => {
 	const { port = 0, ca = "" } = servers.get(offer) ?? {};
 	const admitted = {
 		url: new URL(`https://localhost:${port}/`),
@@ -78,7 +79,7 @@ const reach = (offer: Offer, way: "direct" | "proxied") => {
 			: undefined;
 	return send(admitted, {}, limits, async () => ["127.0.0.1"], anyPublic, route, {
 		floor: testTlsOptions,
-		ca,
+		...(trusted ? { ca } : {}),
 	}).then(
 		() => "answered",
 		// The failure callers see, and the client's own TLS error code noted beside it.
@@ -118,11 +119,22 @@ it("holds every connection to tls-options' floor, directly and through a proxy [
 	}
 });
 
-it("copies the floor's own keys alone, last over the test's authorities", () => {
+afterEach(() => vi.unstubAllEnvs());
+
+it("checks the destination's certificate where NODE_TLS_REJECT_UNAUTHORIZED is 0, directly and through a proxy", async () => {
+	vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
+	for (const way of ["direct", "proxied"] as const) {
+		expect(await reach("tls1.3", way, false), way).toMatch(/^unreachable: /);
+		expect(await reach("tls1.3", way), way).toBe("answered");
+	}
+	for (const peer of servers.values()) peer.refused = [];
+});
+
+it("holds the test's authorities to the floor, and takes no copy of one", () => {
+	// The floor's own keys are tls-options' to name.
+	expect(tlsOf({ floor: testTlsOptions, ca: "test authority" })).toEqual(
+		heldToFloor(testTlsOptions, { ca: "test authority" }),
+	);
 	const loosened = { ...testTlsOptions, rejectUnauthorized: false, ca: "another" };
-	expect(tlsOf({ floor: loosened, ca: "test authority" })).toEqual({
-		ca: "test authority",
-		minVersion: testTlsOptions.minVersion,
-		ciphers: testTlsOptions.ciphers,
-	});
+	expect(() => tlsOf({ floor: loosened, ca: "test authority" })).toThrow(TypeError);
 });

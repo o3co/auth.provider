@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Owns the conformance test base: the area contract, scene composition, the driver contract and selection, assembly of the new system, the pattern mode (every scene on one pattern's app), shared tools.
-- Its internal modules for running a target: `drivers` runs the new system, on a scene's parts or a pattern's app; `audit` keeps the events a target sends; `patterns` runs every pattern's areas.
+- Its internal modules for running a target: `drivers` runs the new system, on a scene's parts or a pattern's app; `audit` keeps the events a target sends; `patterns` runs every pattern's areas; `docker` runs every docker call they make within a time of its kind.
 - Its internal modules for fault scenes: `relay` causes a fault between an app and Redis at a known point and shows it happened; `store-wire` reads the Redis adapter's wire for it; `faults` runs a Redis topology and its nodes' faults; `promotion` promotes a replica without losing what the primary took; `ask` sends a node commands; `clock` moves a process's clock; `deployment` runs a scene's app as instances on a topology; `fault-scene` is what a scene does with that deployment beside its faults.
 
 ## Not here

@@ -11,7 +11,7 @@
 - Owns the scenes of what a subject's revocation by the ledger ends.
 - Owns the scenes of the code flow's answers, its refusals, discovery and userinfo's among them, carrying no client's secret, no user's password or token, and no part of the signing key.
 - Owns the code flow's fault scenes, on a Redis topology and deployment of their own, after a no-fault control: a code redeemed once, a refresh token rotated once, a closing session closed, no code, or token for a code or refresh token, while the store cannot answer, nothing issued while it cannot write, no boot where it evicts, a subject's revocation boundary refusing from any instance what was made before it, and the bounds left to the operator, recorded; the internal modules are named below.
-- Sets up the code flow area's parts (consent step, refresh, acr table, session grant, metadata document clients, logout with the back-channel origins allowed, beside the documents' hosts where both are on, how often pending closes are gone on with, how many shards the closings are spread over) on each of the legacy and new targets.
+- Sets up the code flow area's parts (consent step, refresh, acr table, session grant, metadata document clients, logout with the back-channel origins allowed, beside the documents' hosts where both are on) on each of the legacy and new targets; on the new target alone, how often pending closes are gone on with and how many shards the closings are spread over.
 - A code flow part can leave out the consent step.
 - If a second-factor part is present, the code flow set-up also includes the acr bridge.
 

@@ -13,7 +13,7 @@
 - Composition definition only: the `store` contract's implementation.
 - The probe `redis` at `kernel`'s `probes`, which PINGs both connections and checks again what boot checked of the server, logging `redis.settings_unmet` with what no longer holds when that changes.
 - Operator section:
-  - `url` (`redis` or `rediss`), `prefix` (lower-case letters, digits and `-`; default `store`).
+  - `url` (`redis` or `rediss`, with no query), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
   - `replication`: `replicas` or `none`, required when a space needs replicated or confirmed reads.
   - `durability`: `none`, or unset.
@@ -32,13 +32,15 @@
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
 - Internal module `round` (the confirmation round).
+- Internal module `client` (the client's options; what the URL and environment tell of the connection): boot warns `redis.plaintext` where the URL is in the clear, `redis.client_debug_log` where the client's own log is on. Another floor refuses boot.
 - Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
-- A command whose reply was lost is never sent again; a dropped connection fails at once, and nothing ends the process.
+- Nothing a connection does ends the process.
 - The store clock is Redis's time; values and counts are kept in separate keys, values untouched.
 - A scan walks Redis's SCAN over the space's value keys alone, which one server holds (clusters are refused); a value at its very expiry may still be listed, and a read then finds none. A failover or restart during a walk loses its cursor's place, so a key may not come; a later walk lists it.
 
 ## Deployment
+- With `rediss`, a certificate for the URL's host, trusted by the platform.
 - Redis 7.0 or later, answering as a primary: no cluster, and no proxy splitting keys across nodes (boot runs `batchAcross` over two partitions, and refuses, named, a server that answers it `CROSSSLOT`).
 - `maxmemory-policy noeviction`, where a composed module keeps a space that must not be evicted.
 - `appendonly yes` and `appendfsync always`, where a composed module keeps a durable space, unless `durability` is `none`.
@@ -51,7 +53,7 @@
 - Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.
 
 ## Depends on
-- `kernel`, `store`
+- `kernel`, `store`, `tls-options` (`tlsOptions`, `isFloor`; more inside `client`), `url-setting` (inside `client`)
 
 ## Vocabulary
 - slot: the range of keys one node holds; a partition fits in one.

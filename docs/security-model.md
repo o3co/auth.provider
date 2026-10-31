@@ -50,16 +50,17 @@ Each promise below holds across every module composed. Each names what keeps it 
    - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out. That `503` answers a request naming the session, by its cookie or by RP-initiated logout's hint, however often it is sent again; `/session/logout` sent again from a browser whose cookie the first answer cleared names no session and is answered `200`, as with no cookie, while the sweep finishes the close and the session's tokens end then.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
    - A session that ends by its lifetime leaves no token past it: each token issued from a session expires no later than the session's end, as the lifetime in force when it is issued sets it.
+   - Does not hold for a session the cap pushed out while the store failed to keep its close: it ends in its record without its participants and without a back-channel logout notice, then or at a later revocation, and its access tokens live until they expire, at most to the session's own end ([design.md's Decisions](design.md#decisions)); revoking the subject ends them where `subject-tokens` is composed.
    - One exception: shortening `session-lifecycle.lifetime` ends the sessions it now covers when they are next read, without their participants, and the tokens issued before then keep their earlier expiry.
    - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
-   - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh.
+   - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh. The record meets `prompt=login` and `max_age=0`; any other `max_age` is checked immediately before the code is issued (the time the store takes to write it not counted), after every step the request went through, consent included, so a record never stands for an age past it.
    - Scenes: code ("password logins meeting a client's demand for a fresh login"), federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
    - One exception, through an upstream: a login the upstream says came within its fresh login allowance before the demand counts as fresh, even where the upstream did not authenticate again (`federation`'s card, "Fresh enough"). The login page hands `prompt=login` and `max_age` to the upstream, which asks the user again where it honours them. To narrow the allowance, set `federation.idps.<name>.fresh-login-allowance` for that IdP (by default its `clock-skew`); the id_token is still checked under `clock-skew`.
    - It narrows only how far back a reported login time reaches. At `0s`, a login in the second `prompt=login` was asked in still counts, as that check compares whole seconds. A max age is compared to the millisecond, `auth_time + allowance + max_age >= now`, so at `0s` `max_age=0` refuses a login before the callback, even in its second. A time ahead of ours that `clock-skew` lets the id_token carry counts, and the time is the upstream's word: one that ignores `prompt=login` and reports a new time passes.
 3. **A dependency that cannot answer never grants anything.**
    - It covers what an authorization decision waits on; a notice sent best effort, such as an audit event or a logout notice to a client, decides nothing.
-   - Kept by: `kernel`'s `Unavailable`, which `http` answers `503`, or as the route declares; the authorization endpoint, once it trusts the redirect URI and has found the browser's session, answers it to the client by a redirect with `error=temporarily_unavailable`; until it has found the session it sends the client no outage's answer and answers `503` itself, for `prompt=none` too (RFC 9700 §4.11.2). A silent request's refusals before the session (`invalid_scope`, a repeated parameter, an unknown `reauth`) are no outage's answer: they go back to the redirect URI without the session read.
+   - Kept by: `kernel`'s `Unavailable`, which `http` answers `503`, or as the route declares; the authorization endpoint, once it trusts the redirect URI and has found the browser's session, answers it to the client by a redirect with `error=temporarily_unavailable`; until it has found the session it sends the client no outage's answer and answers `503` itself, for `prompt=none` too (RFC 9700 §4.11.2). A silent request's refusals before the session (`invalid_scope`, a repeated parameter, an unknown `reauth`) are no outage's answer: they go back to the redirect URI without the session read. A client's own metadata document is no dependency its decision waits on: it is fetched from the client's host, and a fetch that fails or a document refused is no client (`clients-cimd`, `400 invalid_client`), not unavailable, so no client's host decides whether the provider is available.
    - Scenes: each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey), identity ("password login: a user ledger over HTTP"), mtls (the CRL and OCSP outage scenes).
    - Declared exceptions, each the operator's choice: `rate-limit.fail-mode = open` and `mtls.revocation.on-unavailable = allow`.
    - While an issuer's key set cannot be fetched, the last one fetched is still used, up to `external-jwt.key-set-max-age` (`1d` by default) after its fetch.
@@ -85,7 +86,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - No scene: the guard checks it.
 8. **Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.**
    - What it hands out on purpose: tokens and codes to the one they are issued to, and a secret a registration shows once to its owner (a one-time password app's secret, recovery codes).
-   - Boot refusals name a setting by its key path, never its value.
+   - Boot refusals name a setting by its key path, never its value. A contribution's name (a route's method and path, a receiver's name) is named as its own, and a name is never a secret: where a setting chooses one, as `metrics-prometheus.path` does, its value is named so.
    - Log lines carry no secret, credential, token, request body or header value, but for header values from a fixed set (such as `Sec-Fetch-Site`). They may carry the identifiers an operator traces a problem by: a peer's or a proxy's address, a host name, a client's id (a metadata document's URL among them), a request's path, and a session's handle.
    - Kept by: `kernel`'s refusals, by key path; a library's `BuildRefused`, whose where and reason it writes as a public diagnostic, never a secret (the kernel checks their form, not what they say); `audit`, whose events carry no token or secret; `http`, which logs a failure by its kind only; and each module's own log lines.
    - Scenes: keys ("refusals about keys"), ops (metrics, readiness, refusals about the operations routes), identity (a ledger's credential at boot), and the audit scenes of the authorization endpoint, client credentials and second factor.
@@ -101,7 +102,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 
 ## Revocation delays
 
-How long something revoked can still be used, by where it is checked. **None** means the next check after the revocation is recorded refuses it: a request already past its checks is not stopped (promise 4), and the store or ledger that holds it answers as it now stands, an outage refusing rather than allowing (promise 3).
+How long something revoked can still be used, by where it is checked. **None** means the next check after the revocation is recorded refuses it: a request already past its checks is not stopped (promise 4), and the store or ledger that holds it answers as it now stands, an outage refusing rather than allowing (promise 3). A revocation takes effect when its mark is confirmed: an operation that read or wrote what it revokes before then may finish; every verification and use that starts after it refuses, and a token handed back meanwhile is refused at its next verification and use. The one exception for a request started after the mark is an instance still connected to the old primary after a failover (the row below; [Guarantees by deployment](deployment-guarantees.md#availability-when-a-dependency-fails)).
 
 | What is revoked | Where it is checked | Delay | Set by |
 |---|---|---|---|
@@ -112,6 +113,7 @@ How long something revoked can still be used, by where it is checked. **None** m
 | Any access token, at a resource server that asks introspection | Each call | As long as the resource server keeps the answer, at most to its `exp` (RFC 7662 §4) | The resource server |
 | A refresh token or its family | Each refresh | None | `refresh` |
 | A session | Each read | None; its tokens as promise 1 says | `session` |
+| Anything, at an instance still connected to the old primary after a failover | That instance's verification, reading unconfirmed | Until it reconnects (the deployment fences the old primary before promoting a replica); a token exchanged there, until the subject token's own expiry | The deployment |
 | A back-channel logout notice | The client, once delivered | No bound: after a failure that can pass (408, 429, a 5xx, the client unreachable) a notice is tried again until `rp-logout.notify-within` (default `1d`), then dropped; one `outbound` refuses, any other status, or a client gone is settled at once, undelivered | `rp-logout.notify-within` |
 | An issuer's or an IdP's key set (`external-jwt`) | Each verification, against the set fetched | Fetched again after an hour; while none can be had, the last set is used until `external-jwt.key-set-max-age` (default `1d`) after its fetch, then unavailable | `external-jwt.key-set-max-age` |
 | A JWT bearer signer's key at a ledger (`signer-keys-http`) | Each assertion | None, as far as the ledger answers its current keys | The ledger |
@@ -265,7 +267,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - The replicas' own persistence.
   - Leaving the server's settings as they were at boot.
   - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them.
-  - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear, and boot neither refuses it nor warns.
+  - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear. Boot does not refuse it, and warns `redis.plaintext` at every start where the host is not loopback by its name.
 
 ## Audit
 
@@ -274,7 +276,9 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - At stop, deliveries under way are awaited until `kernel.stop-deadline`.
   - The `log` receiver writes attribute names, never their values.
 - **Not guaranteed:** delivery. Audit is best effort (tier 1): a request is answered without waiting for its events to be delivered, and an event is lost past a receiver's `max-pending`, when its receiver fails, or when still under way at the stop deadline. `audit-http` never sends an event again.
-- **Left to you:** a collector that keeps up, and watching the lost-event count.
+- **Left to you:**
+  - A collector that keeps up, and watching the lost-event count.
+  - Setting `audit.receivers = none` only where no record of what happened is needed: events then go nowhere, and every boot warns so.
 
 ## Keys
 
