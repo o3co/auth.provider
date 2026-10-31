@@ -3,6 +3,7 @@ import { BootRefused, contract, defineModule } from "@mod/kernel";
 import { takesUnused } from "@mod/kernel/testing";
 import type { Binding } from "@mod/sender-binding";
 import { revocations } from "@mod/subject-revocation";
+import { laggingRevocation } from "@mod/subject-revocation/testing";
 import { type ExchangeVerifier, exchangeVerifiers } from "@mod/token-exchange";
 import { tokens } from "@mod/tokens";
 import { upstreamNames } from "@mod/users";
@@ -23,6 +24,7 @@ import {
 	said,
 	serve,
 	settings,
+	standingChecked,
 	stranger,
 } from "./harness.ts";
 
@@ -55,12 +57,15 @@ describe("exchange-id-tokens", () => {
 		);
 		const app = await boot(settings, [reader]);
 		const verifier = app.get(verifiersSeen).find((v) => v.tokenType === idTokenType);
-		const answer = await verifier?.verify(await apple.sign(appleClaims()));
+		const claims = appleClaims();
+		const answer = await verifier?.verify(await apple.sign(claims));
 		expect(answer).toEqual({
 			kind: "foreign",
 			subject: "acct-1",
 			issuer: "https://appleid.apple.com",
 			expiresAt: expect.any(Number),
+			// Its iat less the section's skew, 30 s.
+			standingAt: claims.iat * 1000 - 30_000,
 			clients: ["ios-app"],
 		});
 	});
@@ -151,6 +156,31 @@ describe("exchange-id-tokens", () => {
 			const after = await apple.sign(appleClaims({ iat: now / 1000 + 32 }));
 			clock.at = now + 33_000;
 			expect(said(await s.exchange("ios-app", after))).toEqual(["issued"]);
+		} finally {
+			clock.at = now;
+		}
+	});
+
+	it("issues on a stale read of its subject's boundary a token the next verification refuses, as it stands from the id_token's iat less the skew [guarantee-4-e]", async () => {
+		const lagging = laggingRevocation();
+		const s = await serve(settings, undefined, [standingChecked], lagging.module);
+		lagging.lag();
+		await s.app.get(revocations).record("acct-1");
+		/** The exchange of an id_token issued at `iat`, on the stale read, verified once the read catches up. */
+		const verified = async (iat: number) => {
+			const idToken = await apple.sign(appleClaims({ iat: iat / 1000 }));
+			clock.at = iat + 1000;
+			const outcome = await s.exchange("ios-app", idToken);
+			if (outcome.kind !== "issued") expect.unreachable("the stale read lets it through");
+			lagging.catchUp();
+			const checked = await s.app.get(tokens).verifyAccess(String(outcome.body.access_token));
+			lagging.lag();
+			return checked;
+		};
+		try {
+			// Issued 20 s after the boundary, by an issuer whose clock may run the 30 s skew ahead.
+			expect(await verified(now + 20_000)).toEqual({ kind: "invalid", reason: "revoked" });
+			expect(await verified(now + 32_000)).toMatchObject({ kind: "valid", standingAt: now + 2000 });
 		} finally {
 			clock.at = now;
 		}

@@ -101,6 +101,8 @@ export function idTokenChecksOver(parts: VerifierParts): IdTokenChecks {
 				subject,
 				issuer: taken.iss[0] as string,
 				issuedAt: iat * 1000,
+				// The skew is whole seconds, so this compared alone is the widened compare above.
+				standingAt: iat * 1000 - parts.skewMs,
 				expiresAt: exp * 1000,
 				client: clients[0] as string,
 				...(nonce !== undefined && digestShape.test(nonce) ? { holderDigest: nonce } : {}),
@@ -134,13 +136,14 @@ export function idTokens(checks: IdTokenChecks): ExchangeVerifier {
 		async verify(token) {
 			const taken = await checks.check(token);
 			if (taken.kind !== "taken") return { kind: "invalid" };
-			const { subject, issuer, expiresAt, client, holderDigest } = taken;
+			const { subject, issuer, expiresAt, standingAt, client, holderDigest } = taken;
 			// Another issuer's token for one app: what it may give is that client's allowance alone.
 			return {
 				kind: "foreign",
 				subject,
 				issuer,
 				expiresAt,
+				standingAt,
 				clients: [client],
 				...(holderDigest === undefined ? {} : { holderDigest }),
 			};

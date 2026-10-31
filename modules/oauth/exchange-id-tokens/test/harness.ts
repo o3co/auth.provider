@@ -14,10 +14,12 @@ import { quietRuntime } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
+import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import tokenExchange from "@mod/token-exchange/module";
+import { subjectChecks } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import usersModule from "@mod/users/module";
 import { memoryUsersStores, testUser } from "@mod/users/testing";
@@ -69,6 +71,21 @@ export const dpopKind = defineModule({ name: "dpop-kind", replicaSafe: true, tak
 		.contribute(senderBindings)
 		.by(() => ({ member: "jkt", tokenType: "DPoP", read: async () => ({ kind: "absent" }) })),
 ]);
+/** A subject check comparing a token's standing time with its subject's boundary, as subject-tokens does. */
+export const standingChecked = defineModule(
+	{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+	(m) => [
+		m.contribute(subjectChecks).by(async (c) => {
+			const revocation = await c.get(subjectRevocation);
+			return {
+				holds: async (token) =>
+					(await revocation.check(token.subject, token.standingAt)) === "valid"
+						? "holds"
+						: "revoked",
+			};
+		}),
+	],
+);
 /** The id_tokens taken, in memory, fresh for each composition. */
 /** The id_tokens taken in this store, so compositions can share one. */
 export const usedIn = (used: UsedIdTokens) =>
@@ -92,6 +109,7 @@ export const assembly = (
 	section: unknown,
 	extra: readonly Module[] = [],
 	used: Module = usedStandIn,
+	subjects: Module = subjectRevocationStandIn,
 ) => ({
 	modules: [
 		http,
@@ -106,7 +124,7 @@ export const assembly = (
 		tlsOptionsForTests,
 		externalJwtModule,
 		used,
-		subjectRevocationStandIn,
+		subjects,
 		usersModule,
 		memoryUsersStores().module,
 		tokenExchange,
@@ -134,11 +152,20 @@ export const assembly = (
 	runtime,
 });
 
-export const boot = (section: unknown, extra: readonly Module[] = [], used?: Module) =>
-	assemble(assembly(section, extra, used));
+export const boot = (
+	section: unknown,
+	extra: readonly Module[] = [],
+	used?: Module,
+	subjects?: Module,
+) => assemble(assembly(section, extra, used, subjects));
 
-export async function serve(section: unknown = settings, used?: Module) {
-	const app = await boot(section, [], used);
+export async function serve(
+	section: unknown = settings,
+	used?: Module,
+	extra: readonly Module[] = [],
+	subjects?: Module,
+) {
+	const app = await boot(section, extra, used, subjects);
 	const exchange = (client: string, idToken: string, binding?: Binding) =>
 		app.get(grantCalls).call(
 			grantType,
