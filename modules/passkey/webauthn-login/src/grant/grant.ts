@@ -8,6 +8,7 @@ import { type Lineage, lineage } from "@mod/refresh";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
 import events from "../audit-events.ts";
 import { passkeyAmr, webauthnGrantType } from "../contract.ts";
+import { requesterFor } from "../requester.ts";
 
 type Refusal = Extract<Awaited<ReturnType<Passkeys["assert"]>>, { kind: "refused" }>["reason"];
 
@@ -77,7 +78,7 @@ export function passkeyGrant(p: LoginParts): Grant {
 			if (typeof assertion !== "object" || assertion === null || Array.isArray(assertion)) {
 				return invalidGrant("assertion must be an object");
 			}
-			const asserted = await p.passkeys.assert(assertion, client.id);
+			const asserted = await p.passkeys.assert(assertion, requesterFor(client.id));
 			if (asserted.kind === "refused") return notAccepted(reasons[asserted.reason]);
 			// The authentication time is when the challenge was made.
 			const { subject, challengedAt: authenticatedAt } = asserted;
