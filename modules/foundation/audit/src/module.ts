@@ -32,7 +32,7 @@ const longest = 200;
 /** The request's text as receivers get it, as 0.17 bounded it: `?` for each character outside NQSCHAR, at most 200. */
 const bounded = (value: string) => {
 	const clean = value.replace(outsideNqschar, "?");
-	return clean.length <= longest ? clean : `${clean.slice(0, longest - 3)}...`;
+	return clean.length <= longest ? clean : `${clean.slice(0, longest - "...".length)}...`;
 };
 
 /** Each named receiver's lost events since boot, as a metric. */
