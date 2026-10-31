@@ -184,7 +184,6 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `acr.values` | `@mod/acr` | `{}` | an acr met by a weak amr set: a login with only that is taken for the acr, so a step-up asking it asks no more |
 | `audit.receivers` | `@mod/audit` |  | `none`: audit events go nowhere, warned at every boot |
 | `client-assertion.max-lifetime` | `@mod/client-assertion` | `"1h"` | past the default hour, up to a day: a client assertion is taken that long |
-| `clients-cimd.allow` | `@mod/clients-cimd` | `[]` | clients name themselves by a metadata document fetched from these hosts |
 | `clients-cimd.allow-any-host` | `@mod/clients-cimd` | `false` | clients name themselves by a metadata document fetched from any host `deny` leaves |
 | `device-grant.attempts` | `@mod/device-grant` | `5` | raised, up to 100: more guesses at a user code in each window |
 | `device-grant.attempts-window` | `@mod/device-grant` | `"5m"` | shortened: the guesses `attempts` allows come back sooner |
