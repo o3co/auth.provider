@@ -4,6 +4,11 @@ import { z } from "zod";
 /** A time written with its unit, read in whole seconds. */
 const seconds = () => setting.duration("s").pipe(z.number().int());
 
+/** NIST SP 800-63B rev 4 §3.2.2: no more than 100 consecutive failed attempts on one authenticator. */
+const lockoutCountMax = 100;
+/** The shortest a run of failures is remembered, so the failures counted stay consecutive. */
+const memoryMin = 3600;
+
 export const section = z.strictObject({
 	"transaction-lifetime": setting
 		.duration("s")
@@ -42,9 +47,10 @@ export const section = z.strictObject({
 			threshold: z
 				.number()
 				.int()
+				.max(lockoutCountMax)
 				.prefault(5)
 				.describe(
-					"Consecutive failures before the first hold; a positive integer, no more than `budget`.",
+					"Consecutive failures before the first hold; a positive integer up to 100, no more than `budget`.",
 				),
 			backoff: seconds()
 				.prefault("15m")
@@ -57,9 +63,10 @@ export const section = z.strictObject({
 			budget: z
 				.number()
 				.int()
+				.max(lockoutCountMax)
 				.prefault(10)
 				.describe(
-					"Failures allowed in any `budget-window`; a positive integer, from `threshold` to `hard-limit`.",
+					"Failures allowed in any `budget-window`; a positive integer up to 100, from `threshold` to `hard-limit`.",
 				),
 			"budget-window": seconds()
 				.prefault("7d")
@@ -67,14 +74,17 @@ export const section = z.strictObject({
 			"hard-limit": z
 				.number()
 				.int()
+				.max(lockoutCountMax)
 				.prefault(100)
 				.describe(
-					"Failures in one run after which the hold is fixed until released; a positive integer, no less than `budget`.",
+					"Failures in one run after which the hold is fixed until released; a positive integer up to 100, no less than `budget`.",
 				),
-			memory: seconds()
+			memory: setting
+				.duration("s")
+				.pipe(z.number().int().min(memoryMin))
 				.prefault("1d")
 				.describe(
-					"How long a run of failures is remembered without one, no shorter than `max-backoff`, in whole seconds, such as `1d`.",
+					"How long a run of failures is remembered without one, at least 1h and no shorter than `max-backoff`, in whole seconds, such as `1d`.",
 				),
 		})
 		.prefault({}),
