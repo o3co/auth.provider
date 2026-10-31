@@ -5,6 +5,12 @@
 	"type": "module",
 	"kind": "feature",
 	"storeWiring": true,
+	"asks": [
+		{
+			"line": "Users in the configuration (`users.registered`).",
+			"unadapted": true
+		}
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
