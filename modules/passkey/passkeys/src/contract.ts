@@ -1,14 +1,23 @@
 import { contract, extensionPoint } from "@mod/kernel";
 import type { CeremonyRefusal, Credential } from "@mod/webauthn";
 
+/**
+ * Who asks for a challenge and redeems it: the calling module, by its own name, and an id of its own
+ * (a client's, a browser's mark). Two modules' ids never stand for each other.
+ */
+export interface Requester {
+	readonly by: string;
+	readonly id: string;
+}
+
 /** Assertions by the discoverable passkeys this package keeps. Throws Unavailable when the store cannot tell. */
 export interface Passkeys {
 	/** The same for everyone: reads nothing and lists no credential. Only `requester` redeems it. */
-	challenge(requester: string): Promise<{ readonly options: unknown }>;
+	challenge(requester: Requester): Promise<{ readonly options: unknown }>;
 	/** `requester` is who redeems: a challenge made for another is refused as `challenge`. */
 	assert(
 		response: unknown,
-		requester: string,
+		requester: Requester,
 	): Promise<
 		| {
 				readonly kind: "asserted";

@@ -74,7 +74,7 @@ const recordedAs = {
 
 async function serve(section: Record<string, unknown> = {}, extra: Module[] = []) {
 	const seen: unknown[] = [];
-	const requesters: { asked: string[]; redeemed: string[] } = {
+	const requesters: { asked: unknown[]; redeemed: unknown[] } = {
 		asked: [],
 		redeemed: [],
 	};
@@ -189,7 +189,7 @@ describe("the passkey grant", () => {
 			},
 		});
 		expect(s.seen).toEqual([assertion]);
-		expect(s.requesters.redeemed).toEqual(["app"]);
+		expect(s.requesters.redeemed).toEqual([{ by: "webauthn-login", id: "app" }]);
 		if (outcome.kind !== "issued") expect.unreachable("the passkey is asserted");
 		const check = await s.app.get(tokens).verifyAccess(String(outcome.body.access_token));
 		if (check.kind !== "valid") expect.unreachable("the access token verifies");
@@ -386,7 +386,10 @@ describe("the authentication options route", () => {
 		const form = { "content-type": "application/x-www-form-urlencoded" };
 		expect((await s.ask()).status).toBe(200);
 		expect((await s.ask({ headers: form, body: "client_id=pub" })).status).toBe(200);
-		expect(s.requesters.asked).toEqual(["app", "pub"]);
+		expect(s.requesters.asked).toEqual([
+			{ by: "webauthn-login", id: "app" },
+			{ by: "webauthn-login", id: "pub" },
+		]);
 	});
 
 	it("refuses a missing client_id, and one that is not one non-empty string, making no challenge", async () => {

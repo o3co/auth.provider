@@ -123,9 +123,12 @@ async function composed() {
 	};
 	/** Whether a passkey with `id` logs in. */
 	const logsIn = async (id: string) => {
-		const options = (await app.get(passkeys).challenge("app")).options as RequestOptions;
+		const options = (await app.get(passkeys).challenge({ by: "test", id: "app" }))
+			.options as RequestOptions;
 		const response = keys.get(id)?.get(options, { origin: testOrigin });
-		return (await app.get(passkeys).assert(response, "app")).kind === "asserted";
+		return (
+			(await app.get(passkeys).assert(response, { by: "test", id: "app" })).kind === "asserted"
+		);
 	};
 	const listed = async () => (await regs.listed("sam")).map((p) => p.id);
 	// Read raw, under the keys passkeys keeps them by: what no read of passkeys hides, a pending record included.
