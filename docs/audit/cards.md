@@ -317,7 +317,6 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `audit` (`src/audit`): the events a running target sends, for the scenes that read them.
   - `clock` (`src/clock`): a process on a moved clock, by libfaketime.
   - `deployment` (`src/deployment`): a fault scene's app as a deployment runs it, on a Redis topology.
-  - `docker` (`src/docker`): the docker client the base's scenes use (sync and async, within a deadline), for every container they start, stop and look at. An interim: once release-check's client is lifted into a tooling package (e.g. `@mod/docker-client`) with a sync form, conformance switches to it and this internal module goes.
   - `drivers` (`src/drivers`): the new system's driver, composed from a scene's parts or on a pattern's app.
   - `fault-scene` (`src/fault-scene`): what an area's fault scene does with its deployment, apart from the faults it causes, in no area's words.
   - `faults` (`src/faults`): a Redis topology a fault scene runs on, and the faults of its nodes.
@@ -401,7 +400,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `release` (`src/release`): Packs the release, the index sealed in between, into the tarballs it publishes.
   - `release-check` (`src/release-check`): Checks the release as an operator meets it: apps made by the packed `create-auth-provider`, installed from the tarballs, type-checked, and booted in their image; an app assembled by hand from them; and a package outside the release composed beside them (`outside-scene`).
   - `carried` (`src/release-check/carried`): which package managers an app's image holds.
-  - `containers` (`src/release-check/containers`): the docker client, and each container a check runs, owned for its whole life.
+  - `containers` (`src/release-check/containers`): each container a check runs, owned for its whole life, its commands run by `docker-client`.
   - `given` (`src/release-check/given`): which tarballs the release check holds to.
   - `helpers` (`src/release-check/helpers`): the helpers scene, the resolver's helper processes in an app's image, run as a deployment constrains them.
   - `release-evidence` (`src/release-evidence`): the evidence a release keeps, from the CI run that tested what the tag publishes.
@@ -411,6 +410,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `order` (`src/release/order`): in what order the release packs and publishes what `pnpm bundles` built.
   - `packing` (`src/release/packing`): the release packed, the index sealed over every bundle before its own.
   - `workflow-caches` (`src/workflow-caches`): CI's and the release's workflows held to restoring no cache in a run a release takes evidence from.
+- `@mod/docker-client` (assembly, `modules/tooling/docker-client`): Runs the docker client within a time, ending it past its time, and sorts how each command fails, once, for every package that drives Docker: the release's images and the conformance base.
 - `@mod/guard` (verification, `modules/tooling/guard`): Checks the workspace's invariants, each reported by its id, place and what went over:
   - `budget` (`src/budget`): G7, how much each unit may hold and make a reader read, with G9 and G17 on what it measures.
   - `change-record` (`src/change-record`): a change record's machine rows, what two commits of the workspace differ in.

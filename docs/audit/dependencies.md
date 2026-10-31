@@ -284,7 +284,7 @@ flowchart LR
 | Package | Kind | Depends on |
 |---|---|---|
 | `@mod/api-docs` | assembly | none |
-| `@mod/conformance` | verification | `@mod/combinations`, `@mod/create-app`, `@mod/trial` |
+| `@mod/conformance` | verification | `@mod/combinations`, `@mod/create-app`, `@mod/docker-client`, `@mod/trial` |
 | `@mod/conformance-code` | verification | `@mod/conformance`, `@mod/conformance-identity`, `@mod/conformance-keys`, `@mod/conformance-legacy`, `@mod/conformance-mtls`, `@mod/conformance-oauth`, `@mod/conformance-second-factor` |
 | `@mod/conformance-device` | verification | `@mod/conformance`, `@mod/conformance-identity`, `@mod/conformance-keys`, `@mod/conformance-legacy`, `@mod/conformance-oauth` |
 | `@mod/conformance-exchange` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-identity`, `@mod/conformance-keys`, `@mod/conformance-legacy`, `@mod/conformance-oauth` |
@@ -300,7 +300,8 @@ flowchart LR
 | `@mod/conformance-recipes` | verification | `@mod/conformance`, `@mod/create-app` |
 | `@mod/conformance-second-factor` | verification | `@mod/conformance`, `@mod/conformance-legacy` |
 | `@mod/conformance-tunnel` | verification | none |
-| `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/trial` |
+| `@mod/distribution` | assembly | `@mod/combinations`, `@mod/create-app`, `@mod/docker-client`, `@mod/trial` |
+| `@mod/docker-client` | assembly | none |
 | `@mod/guard` | verification | `@mod/guard-imports`, `@mod/kinds` |
 | `@mod/guard-imports` | verification | none |
 | `@mod/interop-clients` | verification | `@mod/conformance`, `@mod/conformance-code`, `@mod/conformance-device`, `@mod/conformance-exchange`, `@mod/conformance-front`, `@mod/conformance-oauth`, `@mod/conformance-tunnel`, `@mod/spec-checklist` |
