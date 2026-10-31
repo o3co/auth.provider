@@ -152,12 +152,12 @@ export function admitUrl(
 	const port = url.port === "" ? defaultPortOf(url.protocol) : Number(url.port);
 	if (badPorts.has(port)) throw new DestinationRefused("port");
 	const host = normalized(url.hostname);
-	if (host === undefined || matches(host, policy.deny)) throw new DestinationRefused("denied");
-	if (!policy.anyPublic && !matches(host, policy.allow)) {
+	if (host === undefined || listed(host, policy.deny)) throw new DestinationRefused("denied");
+	if (!policy.anyPublic && !listed(host, policy.allow)) {
 		throw new DestinationRefused("not-allowed");
 	}
 	// Signed material always names its hosts, none meaning none; other callers narrow when they name some.
-	if ((signed || narrower.hosts) && !matches(host, narrower.hosts ?? [])) {
+	if ((signed || narrower.hosts) && !withinHosts(raw, narrower.hosts ?? [])) {
 		throw new DestinationRefused("not-allowed");
 	}
 	const plain = url.protocol === "http:";
@@ -227,7 +227,7 @@ export function remedyOf(
 	switch (reason) {
 		case "not-allowed": {
 			const host = url ? normalized(url.hostname) : undefined;
-			return !policy.anyPublic && !matches(host ?? "", policy.allow)
+			return !policy.anyPublic && !listed(host ?? "", policy.allow)
 				? "name the host in outbound.allow, or set outbound.allow-any-public"
 				: "the host is not one the setting may reach";
 		}
@@ -306,7 +306,7 @@ export function policyOf(settings: PolicySettings): Policy {
 	 * name resolved to it (an IPv4 address carried in IPv6 is the IPv4 one), and so does a special one.
 	 */
 	const checkedAddresses: Policy["admitAddresses"] = (addresses, admitted) => {
-		if (addresses.some((address) => matches(normalized(address) ?? address, rules.deny))) {
+		if (addresses.some((address) => listed(normalized(address) ?? address, rules.deny))) {
 			throw new DestinationRefused("denied");
 		}
 		return admitAddresses(addresses, admitted);

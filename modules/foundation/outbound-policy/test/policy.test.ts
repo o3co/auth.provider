@@ -1,6 +1,11 @@
 import { configuredUrl } from "@mod/url-setting/testing";
 import { describe, expect, it } from "vitest";
-import { DestinationRefused, type RefusalReason } from "../src/contract.ts";
+import {
+	DestinationRefused,
+	policyOf,
+	policySettings,
+	type RefusalReason,
+} from "../src/contract.ts";
 import {
 	admitAddresses,
 	admitUrl,
@@ -57,9 +62,7 @@ describe("admitUrl", () => {
 	});
 
 	it("lets deny win over allow, matching every spelling of a host alike", () => {
-		expect(url("https://a.example/", { allow: ["a.example"], deny: ["A.Example."] })).toBe(
-			"denied",
-		);
+		expect(url("https://a.example/", { allow: ["a.example"], deny: ["A.Example"] })).toBe("denied");
 		expect(url("https://EVIL.example./", { deny: ["evil.example"] })).toBe("denied");
 		expect(url("https://xn--bcher-kva.example/", { deny: ["bücher.example"] })).toBe("denied");
 		expect(url("https://bücher.example/", { deny: ["xn--bcher-kva.example"] })).toBe("denied");
@@ -97,6 +100,36 @@ describe("admitUrl", () => {
 		expect(url("https://a.example/", {}, [".a.example"])).toBe("admitted");
 		expect(url("https://b.a.example/", {}, [".a.example"])).toBe("admitted");
 		expect(url("https://b.example/", {}, [".a.example"])).toBe("not-allowed");
+	});
+
+	it("matches allow and deny entries, each as boot reads one, and a caller's hosts as it spells them, alike before and after the host lists' reading", () => {
+		const named = (...allow: string[]) => ({ allow, anyPublic: false });
+		const cases: [string, string, boolean][] = [
+			["https://a.example/", "A.Example", true],
+			["https://b.a.example/", ".a.example", true],
+			["https://b.example/", ".a.example", false],
+			["https://10.0.0.1/", "10.0.0.1", true],
+			["https://[2001:db8::1]/", "2001:DB8:0::1", true],
+			["https://[2001:db8::1]/", "[2001:db8::1]", true],
+			["https://[::ffff:10.0.0.1]/", "10.0.0.1", true],
+			["https://10.0.0.1/", "::ffff:10.0.0.1", true],
+		];
+		for (const [raw, entry, among] of cases) {
+			expect(url(raw, named(entry)), `allow ${entry}`).toBe(among ? "admitted" : "not-allowed");
+			expect(url(raw, { deny: [entry] }), `deny ${entry}`).toBe(among ? "denied" : "admitted");
+			expect(url(raw, {}, [entry]), `hosts ${entry}`).toBe(among ? "admitted" : "not-allowed");
+		}
+		const denied = (address: string, entry: string) =>
+			policyOf(policySettings.parse({ "allow-any-public": true, deny: [entry] })).admitAddresses(
+				[address],
+				admitUrl("https://a.example/", open),
+			);
+		expect(reasonOf(() => denied("10.0.0.1", "10.0.0.1"))).toBe("denied");
+		expect(reasonOf(() => denied("::ffff:10.0.0.1", "10.0.0.1"))).toBe("denied");
+		expect(reasonOf(() => denied("2001:db8::1", "[2001:DB8::1]"))).toBe("denied");
+		expect(
+			policyOf(policySettings.parse({ allow: ["a.example"] })).explain("https://b.example/"),
+		).toContain("name the host in outbound.allow");
 	});
 
 	it("reaches no host while none is allowed by name and any public address is not", () => {
