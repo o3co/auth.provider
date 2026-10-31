@@ -111,7 +111,7 @@ flowchart LR
 | `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/kernel`, `@mod/url-setting` |
 | `@mod/rate-limit` | foundation | `@mod/audit`, `@mod/http`, `@mod/kernel`, `@mod/metrics`, `@mod/request-source`, `@mod/store` |
 | `@mod/records` | capability | `@mod/kernel`, `@mod/store` |
-| `@mod/request-source` | foundation | `@mod/client-certificate`, `@mod/kernel` |
+| `@mod/request-source` | foundation | `@mod/address-reach`, `@mod/client-certificate`, `@mod/kernel` |
 | `@mod/seal` | foundation | `@mod/kernel`, `@mod/keys` |
 | `@mod/secret-hash` | foundation | `@mod/kernel` |
 | `@mod/store` | foundation | `@mod/kernel` |
