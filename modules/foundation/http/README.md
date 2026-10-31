@@ -27,14 +27,14 @@
 - `marks`: one per guarantee (`own-site`, `per-source`), a policy owner's claim that its policies keep it for the methods named, never a proof; every route's `changesState`, `crossSite` and `unlimited` are checked against them at boot (`guarantees`).
 - The request type, with its source as `request-source` decides it.
 - `listening` (the port) and `site` (the public origin; cookies can be made secure unless it is http, which boots only with `insecure-origin` and never in production (`kernel.environment`); `proxied`, whether `trusted-proxies` names a proxy, without which no request's scheme is https); an answer's `cookies` are sent one `Set-Cookie` each; `client-certificate`'s `certificateForwarding` is provided from this section.
-- The section's other keys, each described in the settings list: `host`, `port`, `public-origin`, `cors-origins`, `headers-timeout`, `request-timeout`, `max-connections`.
+- The section's other keys, each described in the settings list: `host`, `port`, `public-origin`, `cors-origins`, `headers-timeout`, `request-timeout`, `max-connections`, `proxy-hops`.
 - `requestEnds`: each request's end, once, answered or closed: the method sent, the declared path of the route reached (none when none), the status written or `closed` when the client closed first, and the milliseconds taken (never negative); its observers are told after the request, asynchronously, and what they throw or reject is dropped.
 - `jsonAnswer`: status, a JSON value, and any cookies and headers → an answer kept out of caches (`noStore`), but where the headers given replace its `cache-control` or `pragma`.
 - `./testing`: test configuration and request builders with working defaults.
 
 ## Invariants
 - Serves requests itself, as the one server of a deployment (`network`: `serves-http`). Every start under `insecure-origin` warns `http.insecure_origin`: the session's cookie goes in the clear.
-- Boot is refused, naming the route and the policy, when two routes take one method and path, a route uses a policy no module applies, a policy has two rules, or a route breaks what it declares; policies match by value, and a label only names one in a report.
+- Boot is refused, naming the route and the policy, when two routes take one method and path, a route uses a policy no module applies, a policy has two rules, or a route breaks what it declares; a label only names one in a report.
 - Every answer it writes carries the security headers, set in one place: a Content-Security-Policy whose default source is none, taking scripts, styles, images and fonts from this origin (styles and fonts also over https) and letting no one frame the answer, HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy: no-referrer` and the cross-origin ones; a route's own values of them, its policy included, are replaced; only `loads` widens a page's policy.
 - Stop refuses new connections and closes idle ones; requests in flight finish (`Connection: close`) until its deadline cuts them.
 - A request target that is not a URL gets `400`, an answer whose headers cannot be written gets `500`, no request stops the process, and error answers never show exception text or internal values.
