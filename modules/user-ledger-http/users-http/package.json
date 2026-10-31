@@ -6,6 +6,10 @@
 	"kind": "adapter",
 	"narrower": "internal",
 	"adapts": "@mod/users",
+	"asks": [
+		"Users from an outside ledger (`users-http.verify-url`, `users-http.credential`).",
+		"`users-http.subject-url` and `users-http.upstream-url`: where a lookup of a user by subject, or by upstream identity, is answered; without them, such a lookup is unavailable."
+	],
 	"exports": {
 		"./module": "./src/module.ts"
 	},
