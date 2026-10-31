@@ -448,7 +448,7 @@ export async function issuersIn(
 		for (const w of trust.warnings) c.log.warn(w.event, { at: w.where });
 		const selfIssued = selfIssuedOf(section.issuers);
 		if (selfIssued.length > 0) {
-			c.log.info("jwt-bearer.self_issued_signers", {
+			c.log.warn("jwt-bearer.self_issued_signers", {
 				at: selfIssued.map((s) => s.where).join(","),
 			});
 		}

@@ -1,13 +1,7 @@
-import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { type LogFields, Unavailable } from "@mod/kernel";
 import { witnessWire } from "@mod/ledger-wire";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
-import {
-	DestinationRefused,
-	isOutboundUnavailable,
-	jsonObjectOf,
-	type Narrower,
-	type Outbound,
-} from "@mod/outbound";
+import { jsonObjectOf, type Narrower, type Outbound, postJson } from "@mod/outbound";
 import type { z } from "zod";
 
 export interface WitnessParts {
@@ -29,13 +23,6 @@ export interface WitnessParts {
 
 type Call = "read" | "enroll" | "clear" | "withdraw";
 
-/** The kind outbound gives a failure to send, or no-answer for anything else. */
-function kindOf(error: unknown): string {
-	if (DestinationRefused.is(error)) return error.reason;
-	if (isOutboundUnavailable(error)) return error.failure;
-	return "no-answer";
-}
-
 /** The enrollment witness kept at the operator's ledger: every call asks it, nothing is kept here. */
 export function witnessAt(parts: WitnessParts): EnrollmentWitness {
 	const { urls, out, credential, narrower, heldMs, now, warn } = parts;
@@ -44,17 +31,8 @@ export function witnessAt(parts: WitnessParts): EnrollmentWitness {
 		warn("mfa-witness-http.ledger_failed", { call, ...why });
 		return new Unavailable("mfa-witness-http");
 	};
-	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
 	const post = (call: Call, url: string, body: Record<string, unknown>) =>
-		out
-			.fetch(
-				url,
-				{ method: "POST", headers, body: JSON.stringify(body), credential: `Bearer ${credential}` },
-				narrower,
-			)
-			.catch((error: unknown) => {
-				throw failed(call, { reason: kindOf(error) });
-			});
+		postJson(out, { url, body, credential, narrower }, (reason) => failed(call, { reason }));
 	/** The one JSON object a 200 holds, in the shape asked; any other answer is unavailable. */
 	const answered = async <T>(
 		call: "read" | "enroll",

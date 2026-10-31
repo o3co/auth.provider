@@ -90,7 +90,7 @@ A package that depends on `outbound` can reach another server through it; this s
 
 - Packages that speak to the network themselves (`network` in their manifest): `@mod/http` (serves-http), `@mod/mail-smtp` (smtp), `@mod/outbound` (outbound), `@mod/redis` (redis).
 - Packages that depend on `outbound`: `@mod/audit-http`, `@mod/client-assertion`, `@mod/clients-cimd`, `@mod/external-jwt`, `@mod/idp-apple`, `@mod/idp-github`, `@mod/idp-google`, `@mod/idp-oidc`, `@mod/jti-ledger-http`, `@mod/jwt-bearer`, `@mod/mfa-witness-http`, `@mod/mtls`, `@mod/passkey-witness-http`, `@mod/rp-logout`, `@mod/signer-keys-http`, `@mod/upstream-client`, `@mod/users-http`.
-- Packages that may reach private addresses at URLs of the operator's configuration (`outbound-policy`'s `internalBy`): `@mod/audit-http`, `@mod/external-jwt`, `@mod/idp-github`, `@mod/idp-oidc`, `@mod/jti-ledger-http`, `@mod/mfa-witness-http`, `@mod/passkey-witness-http`, `@mod/signer-keys-http`, `@mod/users-http`.
+- Packages that may reach private addresses at URLs of the operator's configuration (`narrower` in their manifest): `@mod/audit-http`, `@mod/external-jwt`, `@mod/idp-github`, `@mod/idp-oidc`, `@mod/jti-ledger-http`, `@mod/mfa-witness-http`, `@mod/passkey-witness-http`, `@mod/signer-keys-http`, `@mod/users-http`.
 
 Settings that name where it reaches:
 
@@ -184,12 +184,11 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `acr.values` | `@mod/acr` | `{}` | an acr met by a weak amr set: a login with only that is taken for the acr, so a step-up asking it asks no more |
 | `audit.receivers` | `@mod/audit` |  | `none`: audit events go nowhere, warned at every boot |
 | `client-assertion.max-lifetime` | `@mod/client-assertion` | `"1h"` | past the default hour, up to a day: a client assertion is taken that long |
-| `clients-cimd.allow` | `@mod/clients-cimd` | `[]` | clients name themselves by a metadata document fetched from these hosts |
 | `clients-cimd.allow-any-host` | `@mod/clients-cimd` | `false` | clients name themselves by a metadata document fetched from any host `deny` leaves |
 | `device-grant.attempts` | `@mod/device-grant` | `5` | raised, up to 100: more guesses at a user code in each window |
 | `device-grant.attempts-window` | `@mod/device-grant` | `"5m"` | shortened: the guesses `attempts` allows come back sooner |
 | `device-grant.code-lifetime` | `@mod/device-grant` | `"10m"` | past the default ten minutes, up to an hour: a user code can be guessed and a device code used that long |
-| `dpop.nonce.required` | `@mod/dpop` | `"never"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
+| `dpop.nonce.required` | `@mod/dpop` | `"as"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
 | `exchange-id-tokens.max-age` | `@mod/exchange-id-tokens` | `"10m"` | past the default ten minutes, up to an hour: an older id_token is taken for an exchange |
 | `external-jwt.key-set-max-age` | `@mod/external-jwt` | `"1d"` | past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it |
 | `federation-grants-connect.identity-check` | `@mod/federation-grants-connect` | `"required"` | `none`: a callback whose upstream account another user holds is not refused |
@@ -209,7 +208,6 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
 | `login-passkey.attempts` | `@mod/login-passkey` | `20` | raised, up to 100: more requests from one source in each window |
-| `login-passkey.counts-as-mfa` | `@mod/login-passkey` | `true` | `true` (the default): a passkey login whose user was verified meets a required second factor alone |
 | `login-passkey.password-exempt-group` | `@mod/login-passkey` |  | its members keep password logins where passkey holders are refused them |
 | `login-password.account-attempts` | `@mod/login-password` | `10` | raised, up to 100: more failed guesses at one identifier before each next one waits |
 | `login-password.attempts` | `@mod/login-password` | `20` | raised, up to 100: more password guesses from one source in each window |

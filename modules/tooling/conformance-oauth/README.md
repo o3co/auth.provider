@@ -24,7 +24,7 @@
 - The new set-up composes `client-credentials` only where a scene's client is allowed the grant, as boot refuses a grant a client is allowed that nothing composed serves.
 - A scene registers only the clients of its own grants; a client there only to be refused or to authenticate is allowed no grant.
 - A scene about DPoP, the jwt-bearer grant or resource indicators being absent says so (`false`).
-- A part names DPoP nonces (`dpopNonce`) only beside DPoP: the part's type refuses one without it.
+- A part names DPoP nonces (`dpopNonce`) only beside DPoP: the part's type refuses one without it. A DPoP part without them states `nonce.required = never`, whatever dpop's default.
 - The new set-up of a scene about DPoP, the jwt-bearer grant or resource indicators being absent names that module as one the scene is without.
 - A pattern's app with a user ledger and verified-email leaves out a jwt-bearer scene: no source can vouch for the subject's email.
 - Touches only the HTTP interface and boot refusals.

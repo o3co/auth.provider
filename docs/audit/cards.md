@@ -18,6 +18,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 - `@mod/federation-grants` (feature, `modules/delegation/federation-grants`): Takes a confidential client's intent to act for a user at one connection, and owns its steps through the browser and upstream, which a browser half runs over `grantIntents`.
   - `api` (`src/api`): the client routes, and the revocation follower.
+  - `lodging` (`src/api/lodging`): a grant lodged, and a grant renewed.
+  - `revoking` (`src/api/revoking`): a grant revoked by its client.
+  - `routing` (`src/api/routing`): the routes a grant answers by id.
+  - `tokening` (`src/api/tokening`): a grant's token, and its status.
   - `grant` (`src/grant`): what a grant and a browser step are, and the judgments the other internal modules share.
   - `intents` (`src/intents`): a grant's intent through the browser, as the package owns it.
   - `refresh` (`src/refresh`): handing a grant's upstream token, and renewing it.
@@ -62,8 +66,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/labels` (foundation, `modules/foundation/labels`): Owns the rule for a name a user gives something that a page shows back as it is, such as a second factor's label or a passkey's nickname.
 - `@mod/mail` (foundation, `modules/foundation/mail`): Owns the contract for sending mail: the sending side gives a purpose, one address, values, and optionally a locale and an expiry.
 - `@mod/metrics` (foundation, `modules/foundation/metrics`): Owns the contract of counters, histograms and gauges: a name, help, every value each label can take, and a histogram's buckets.
-- `@mod/outbound` (foundation, `modules/foundation/outbound`): Offers the only path for outbound HTTP requests, under the operator's destination policy.
+- `@mod/outbound` (foundation, `modules/foundation/outbound`): Sends every outbound HTTP request, applying `outbound-policy`'s destination policy to its URL before sending and its addresses before connecting.
   - `credential` (`src/credential`): how a request's credential is sent, and the headers a caller may not write.
+  - `json` (`src/json`): a JSON call, as a caller speaking a JSON wire makes it through `outbound`.
   - `lookups` (`src/lookups`): name lookups shared among those asking a name at once, each waiting until its own deadline, and how many run at once.
   - `resolver-process` (`src/resolver-process`): name lookups run as the system runs them, in a helper process of their own, ended where no one waits on them.
   - `tls` (`src/tls`): the options each TLS connection outbound makes takes.
@@ -246,7 +251,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 ## second-factor
 
 - `@mod/mfa` (feature, `modules/second-factor/mfa`): Owns each subject's second factors: a kind's secret, sealed, and its state.
+  - `binding` (`src/binding`): a factor begun, its pending proof, and its binding.
+  - `clearing` (`src/clearing`): a reset's clearing of a subject's factors and its mark, and a first binding refused.
   - `records` (`src/records`): how the factor lists and the claims on unique values are kept in `factorStore`, and sealed again.
+  - `standing` (`src/standing`): whether a subject's counting factors stand.
 - `@mod/mfa-binding` (feature, `modules/second-factor/mfa-binding`): Owns the contract for binding a new second factor: beginning it, judging its first proof, and writing it. The proofs asked before a first binding are another thing: `mfa-binding-proof`.
 - `@mod/mfa-binding-proof` (feature, `modules/second-factor/mfa-binding-proof`): Asks a subject with no counting second factor for another proof, such as owning a contact, before a first counting factor is bound, and gives the pass `mfa`'s `begin` takes.
 - `@mod/mfa-email` (feature, `modules/second-factor/mfa-email`): Contributes a code sent by mail as a kind of second factor (`email`), and owns how a code is mailed to the account's address, which `mfa-email-proof`'s proof before a first binding uses too.
@@ -422,7 +430,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `protocol` (`src/protocol`): G33, a protocol package holds a wire's contract alone.
 - `@mod/guard-imports` (verification, `modules/tooling/guard-imports`): Reads the workspace: its packages and their manifests, what each source file imports, and each package's public surface.
   - `facts` (`src/facts`): what each source file says, read by one lexical program per run for the rules that read syntax: the modules it reaches and where each leads, and what each name it uses is bound to and stands for.
-  - `internal-by` (`src/internal-by`): G32, that the narrower's `internal` is written by the packages its owner lists alone.
+  - `owned-property` (`src/owned-property`): G32, that the property an owner holds to declaration (the narrower's `internal`) is written only by the packages declaring it.
+  - `writes` (`src/owned-property/writes`): where a source writes the owned property, by type in a source and by name in a template.
   - `recorded` (`src/recorded`): G30, that an audit event is recorded only through its declarations.
   - `surface` (`src/surface`): a package's public surface, read from its `.` entry by a TypeScript program of its own.
   - `taken` (`src/taken`): G31, that a contract its owner declares `takenBy` is imported by the packages it names alone.

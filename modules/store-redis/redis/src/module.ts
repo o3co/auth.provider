@@ -214,18 +214,22 @@ async function unmet(
 	readonly problems: string[];
 	readonly declaredOnly: readonly SettingName[];
 	readonly undurable: readonly string[];
+	readonly unreplicated: readonly string[];
 }> {
 	// First, as the checks below send some of the same commands: a refused one is named, not lost.
 	const refused = await refusedCommands(client, confirmer, {
 		prefix: s.prefix,
 		replication: s.replication,
 	});
-	if (refused.length > 0) return { problems: refused, declaredOnly: [], undurable: [] };
+	if (refused.length > 0) {
+		return { problems: refused, declaredOnly: [], undurable: [], unreplicated: [] };
+	}
 	const round = await roundProblems(client, confirmer, {
 		prefix: s.prefix,
 		replication: s.replication,
 	});
-	if (round.length > 0) return { problems: round, declaredOnly: [], undurable: [] };
+	if (round.length > 0)
+		return { problems: round, declaredOnly: [], undurable: [], unreplicated: [] };
 	const role = await roleOf(client);
 	const settings = serverSettings(client, s["server-settings"] ?? {});
 	const problems = [
@@ -239,10 +243,19 @@ async function unmet(
 		s.durability === "none"
 			? declared.filter((d) => d.guarantees.includes("durable")).map((d) => d.name)
 			: [];
+	const unreplicated =
+		s.replication === "none"
+			? declared
+					.filter(
+						(d) => d.guarantees.includes("replicated") || d.guarantees.includes("confirmed-reads"),
+					)
+					.map((d) => d.name)
+			: [];
 	return {
 		problems: [...problems, ...settings.problems],
 		declaredOnly: [...settings.used],
 		undurable,
+		unreplicated,
 	};
 }
 
@@ -330,6 +343,10 @@ export default defineModule({ name: "redis", replicaSafe: true, section, takes }
 		if (checked.undurable.length > 0) {
 			// On every boot: a crash loses these spaces' latest writes, as the operator stated.
 			c.log.warn("redis.durability_none", { spaces: checked.undurable.join(", ") });
+		}
+		if (checked.unreplicated.length > 0) {
+			// On every boot: a failover loses these spaces' writes, confirmed ones too, as the operator stated.
+			c.log.warn("redis.replication_none", { spaces: checked.unreplicated.join(", ") });
 		}
 		c.onStop(async (signal) => {
 			// Past the stop's deadline the connections are cut, not left waiting on QUIT.

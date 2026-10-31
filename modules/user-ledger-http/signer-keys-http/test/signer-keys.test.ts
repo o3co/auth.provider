@@ -114,7 +114,9 @@ async function open(section: unknown = settings(), allow = ["127.0.0.1"]) {
 	});
 	const [keys] = app.get(collected);
 	if (!keys) throw new Error("no signer keys contributed");
-	return { keys, logged };
+	// What the keys log once booted: outbound's start warnings (its plain-loopback pair) come before.
+	const from = logged.lines().length;
+	return { keys, logged: { lines: () => logged.lines().slice(from) } };
 }
 
 /** jwt-bearer's spent assertions on records' stand-in, as a wiring would keep them. */

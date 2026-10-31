@@ -101,6 +101,17 @@ export default defineModule(
 		// cycle, as mfa collects this gate while it builds them.
 		m.contribute(firstBindingGates).by(async (c) => {
 			const p = await provingIn(c);
+			// The operator's choice, yet said at every start: a first factor binds with nothing proved. Here, as
+			// mfa collects this gate in every assembly, while the proof's provider is taken by enrolment alone.
+			if (p.mode === "never") {
+				c.log.warn("mfa-binding-proof.never_asked", {
+					reason: "a first counting factor binds with no binding proof asked",
+				});
+			} else if (p.mode === "when-available" && p.proofs.length === 0) {
+				c.log.warn("mfa-binding-proof.none_available", {
+					reason: "no binding proof is composed, so a first counting factor binds with none asked",
+				});
+			}
 			return {
 				admits: async ({ subject, kind, transaction, passed, from }) => {
 					if (!(await p.proofFor(subject, from))) return true;

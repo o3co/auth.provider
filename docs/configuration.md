@@ -129,7 +129,7 @@ From `@mod/dpop`.
 |---|---|---|---|---|---|---|
 | `dpop.algorithms` | list of ES256 \| ES384 \| EdDSA \| RS256 | `["ES256","ES384","EdDSA","RS256"]` |  |  |  | The signing algorithms a DPoP proof may use. |
 | `dpop.proof-window` | string | `1m` |  |  |  | How far a proof's `iat` may lie from the clock on either side, from `1s` to `5m` in whole seconds. |
-| `dpop.nonce.required` | never \| as \| as+rs | `never` |  | `DPOP_NONCE_REQUIRED` | `never` | Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources. |
+| `dpop.nonce.required` | never \| as \| as+rs | `as` |  | `DPOP_NONCE_REQUIRED` | `as` | Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources. |
 | `dpop.nonce.ttl` | string | `5m` |  | `DPOP_NONCE_TTL` | `5m` | How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this. |
 | `dpop.nonce.secret` | string |  |  | `DPOP_NONCE_SECRET` | `REPLACE-NONCE-SECRET-BASE64-32-BYTES` | The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never. |
 
@@ -1001,7 +1001,7 @@ From `@mod/idp-oidc`.
 | `federation.idps.<name>.end-session-endpoint` | string |  |  | Where a session at the IdP ends, without discovery; none when not given. |
 | `federation.idps.<name>.scopes` | list of string | `["openid"]` |  | The scopes asked of the IdP at a login, `openid` among them. |
 | `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","ES256","EdDSA"]` |  | The algorithms an id_token may be signed with: asymmetric ones only, by default one for each kind of key. Two for one kind (RS256 and PS256) leave a key of the IdP's set naming no alg unused. |
-| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  | Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. |
+| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  | Hosts besides the issuer's its endpoints may be on, as outbound-policy reads a host list. |
 | `federation.idps.<name>.read-userinfo` | boolean | `false` |  | Reads the IdP's UserInfo after each login, with its access token, for profile claims its id_token leaves out; the answer must name the id_token's subject. UserInfo and the description it is read from must then be https. |
 | `federation.idps.<name>.userinfo-endpoint` | string |  |  | Where UserInfo is read, without discovery; only with read-userinfo. |
 | `federation.idps.<name>.accept-missing-iss` | boolean | `false` |  | Takes a callback without `iss` where the issuer's description does not offer it, for an IdP that never sends it; warned of at every start. |

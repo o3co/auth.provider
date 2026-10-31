@@ -177,6 +177,25 @@ it("declares a guessable factor of amr email, adding mfa and counting only when 
 	});
 });
 
+it("warns at every start where a code by mail counts as a second factor, and not by default", async () => {
+	const warned = async (settings: Record<string, unknown>) => {
+		const from = logged.lines().length;
+		await boot(settings);
+		return logged
+			.lines()
+			.slice(from)
+			.filter((line) => line.event === "mfa-email.counts_as_second_factor");
+	};
+	expect(await warned({ "adds-second-factor": true })).toEqual([
+		{
+			level: "warn",
+			event: "mfa-email.counts_as_second_factor",
+			fields: { reason: "a code by mail meets a required second factor" },
+		},
+	]);
+	expect(await warned({})).toEqual([]);
+});
+
 it("binds the account's address by a long code sent there, showing the address masked", async () => {
 	const { kind, enrolled } = await annEnrolled("Ann@Example.COM");
 	expect(enrolled.show).toEqual({ sent_to: "A***@example.com", expires_in: 600 });

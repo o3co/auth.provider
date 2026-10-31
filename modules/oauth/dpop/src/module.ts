@@ -24,7 +24,7 @@ const section = z.strictObject({
 		.strictObject({
 			required: z
 				.enum(["never", "as", "as+rs"])
-				.prefault("never")
+				.prefault("as")
 				.describe(
 					"Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources.",
 				),
@@ -64,6 +64,12 @@ export default defineModule(
 		m.contribute(senderBindings).by(async (c) => {
 			const windowMs = c.section["proof-window"] * 1000;
 			const { required, ttl, secret } = c.section.nonce;
+			// The operator's choice, yet said at every start: a proof made ahead is taken within its window.
+			if (required === "never") {
+				c.log.warn("dpop.nonce_not_asked", {
+					reason: "no nonce is asked, so a proof made ahead is taken within its window",
+				});
+			}
 			// The section holds a secret wherever a nonce is asked.
 			const asked =
 				required === "never" || secret === undefined

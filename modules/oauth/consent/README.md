@@ -23,7 +23,7 @@
 - Error codes: `no_session` (401), `unknown_challenge` (400), `invalid_decision` (400), `repeated_parameter` (400), `csrf` (403), `temporarily_unavailable` (503).
 - Audit events, with the subject: declared in `./audit-events`, listed in the audit event reference.
 - Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL) and `host`; from a document, `client_name` (refused absent, not a string or blank), `client_uri` as written, and the host its source checked, never `first-party`, by `clientCopy`, contributed to `client-documents`' `documentCopies`.
-- `isFirstParty`: true only for a client the operator registered with `first-party` set.
+- `isFirstParty`: true only for a client the operator registered with `first-party` set; every start warns `consent.first_party` for each such client.
 - Operator section: `page` (an https URL without userinfo or fragment, or plain http on a loopback host outside production, as `authorize`'s login page; unset by default, so nobody is asked) and `challenge-lifetime` (written with its unit, `1m` to `1h` in whole seconds, default `10m`).
 - Store interfaces for grants and asks: save once, read, and update from what the record holds.
 - `./testing`: configuration builders, both store interfaces on `records` stand-ins, and the store contract tests.

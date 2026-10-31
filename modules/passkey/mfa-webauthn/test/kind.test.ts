@@ -1,5 +1,5 @@
 import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds, type Opened, type Verified } from "@mod/mfa-extensions";
 import { type AttributesAnswer, subjectAttributes } from "@mod/subject-attributes";
 import webauthnModule from "@mod/webauthn/module";
@@ -14,7 +14,8 @@ import kindModule from "../src/module.ts";
 
 /** How far the kernel's clock runs ahead of the host's; it goes back after each test. */
 let shift = 0;
-const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => Date.now() + shift }, log: logged.log });
 const kinds = contract<readonly FactorKind[]>("kinds");
 const browser = { origin: testOrigin };
 /** What subject-attributes answers, by subject; unknown for any other. */
@@ -61,6 +62,25 @@ async function boot(settings: Record<string, unknown> = {}) {
 	const app = await assemble(composition(settings));
 	return app.get(kinds)[0] as FactorKind;
 }
+
+it("warns at every start where the authenticator is not asked to verify its user", async () => {
+	const warned = async (settings: Record<string, unknown>) => {
+		const from = logged.lines().length;
+		await boot(settings);
+		return logged
+			.lines()
+			.slice(from)
+			.filter((line) => line.event === "mfa-webauthn.user_unverified");
+	};
+	expect(await warned({ "user-verification": "discouraged" })).toEqual([
+		{
+			level: "warn",
+			event: "mfa-webauthn.user_unverified",
+			fields: { reason: "the authenticator is not asked to verify its user" },
+		},
+	]);
+	expect(await warned({})).toEqual([]);
+});
 
 it("takes all it names", async () => {
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.

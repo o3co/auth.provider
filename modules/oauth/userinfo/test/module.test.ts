@@ -116,7 +116,7 @@ it("serves GET and POST, with or without a body, refusing a token whose session 
 	}
 });
 
-it("answers 503 when a check cannot tell, never stored, logging what failed", async () => {
+it("answers 503 when a check cannot tell, never stored, as http warns of it by what failed and the route", async () => {
 	const { url } = await serve();
 	failing = "unavailable";
 	const res = await fetch(url, {
@@ -127,8 +127,13 @@ it("answers 503 when a check cannot tell, never stored, logging what failed", as
 		"no-store",
 		{ error: "temporarily_unavailable" },
 	]);
-	expect(logged.lines().filter((l) => l.event === "userinfo.unavailable")).toEqual([
-		{ level: "warn", event: "userinfo.unavailable", fields: { what: "session" } },
+	// http answers it, by the route's declared answer, and warns of it once.
+	expect(logged.lines().filter((l) => l.event.endsWith(".unavailable"))).toEqual([
+		{
+			level: "warn",
+			event: "http.unavailable",
+			fields: { what: "session", route: "/oauth/userinfo" },
+		},
 	]);
 });
 
@@ -139,7 +144,7 @@ it("leaves an error that is not an inability to tell to http, neither 503 nor lo
 		headers: { authorization: "Bearer t", "x-forwarded-proto": "https" },
 	});
 	expect(res.status).toBe(500);
-	expect(logged.lines().filter((l) => l.event === "userinfo.unavailable")).toEqual([]);
+	expect(logged.lines().filter((l) => l.event.endsWith(".unavailable"))).toEqual([]);
 });
 
 it("answers no token it was presented and logs none, refusing it or unable to tell [rfc9700-4.9.3-a]", async () => {

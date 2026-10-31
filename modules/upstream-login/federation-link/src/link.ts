@@ -77,6 +77,58 @@ const landed = (location: string, cookies: readonly string[]): HttpResponse => (
 	cookies,
 });
 
+/** Where the link's session closed meanwhile: whether it still holds, and what undoes the link and its join. */
+function undoneIfClosed(
+	p: LinkParts,
+	{
+		link,
+		upstream,
+		linked,
+		name,
+		refused,
+	}: {
+		readonly link: { readonly session: string; readonly subject: string };
+		readonly upstream: { readonly idp: string; readonly subject: string };
+		readonly linked: Awaited<ReturnType<LinkParts["users"]["link"]>>;
+		readonly name: string;
+		readonly refused: (status: number, reason: string, error?: string) => HttpResponse;
+	},
+) {
+	/** Whether the session still enters at the start's level, as the subject the link is for. */
+	const stillHeld = async () => {
+		const again = await p.sessions.entryOf(link.session, "credentials");
+		return again.kind === "entered" && again.session.context.subject === link.subject;
+	};
+	// A best-effort amends for a session closed meanwhile: what this request wrote is undone,
+	// each step tried whatever the other does, and the first failure thrown after.
+	const undo = async (joined?: Joined) => {
+		const steps = await Promise.allSettled([
+			linked === "linked"
+				? p.users.unlink(link.subject, upstream).then((answer) => {
+						if (answer === "fixed") p.log.warn("federation.link_kept_fixed", { idp: name });
+					})
+				: undefined,
+			joined === undefined ? undefined : p.handoff.withdrawn(link.session, name, joined),
+		]);
+		const failed = steps.find((step) => step.status === "rejected");
+		if (failed) throw failed.reason;
+	};
+	/** Undoes what was written and refuses where the session no longer holds; throws, undone, where it cannot tell. */
+	const closedSince = async (joined?: Joined) => {
+		let held: boolean;
+		try {
+			held = await stillHeld();
+		} catch (error) {
+			await undo(joined);
+			throw error;
+		}
+		if (held) return undefined;
+		await undo(joined);
+		return refused(401, "session_closed_during_link", "login_required");
+	};
+	return { stillHeld, undo, closedSince };
+}
+
 /** A round trip that links the upstream identity to the account logged in when it started. */
 export function linkWith(p: LinkParts): UpstreamContinuation {
 	const audited = declaredAudit(p.audit, events);
@@ -141,38 +193,13 @@ export function linkWith(p: LinkParts): UpstreamContinuation {
 			const linked = await p.users.link(link.subject, upstream);
 			if (linked === "conflict") return refused(409, "conflict", "identity_conflict");
 			if (linked === "linked") record("linked", name, { subject: link.subject, source, userAgent });
-			/** Whether the session still enters at the start's level, as the subject the link is for. */
-			const stillHeld = async () => {
-				const again = await p.sessions.entryOf(link.session, "credentials");
-				return again.kind === "entered" && again.session.context.subject === link.subject;
-			};
-			// A best-effort amends for a session closed meanwhile: what this request wrote is undone,
-			// each step tried whatever the other does, and the first failure thrown after.
-			const undo = async (joined?: Joined) => {
-				const steps = await Promise.allSettled([
-					linked === "linked"
-						? p.users.unlink(link.subject, upstream).then((answer) => {
-								if (answer === "fixed") p.log.warn("federation.link_kept_fixed", { idp: name });
-							})
-						: undefined,
-					joined === undefined ? undefined : p.handoff.withdrawn(link.session, name, joined),
-				]);
-				const failed = steps.find((step) => step.status === "rejected");
-				if (failed) throw failed.reason;
-			};
-			/** Undoes what was written and refuses where the session no longer holds; throws, undone, where it cannot tell. */
-			const closedSince = async (joined?: Joined) => {
-				let held: boolean;
-				try {
-					held = await stillHeld();
-				} catch (error) {
-					await undo(joined);
-					throw error;
-				}
-				if (held) return undefined;
-				await undo(joined);
-				return refused(401, "session_closed_during_link", "login_required");
-			};
+			const { stillHeld, undo, closedSince } = undoneIfClosed(p, {
+				link,
+				upstream,
+				linked,
+				name,
+				refused,
+			});
 			// Checked right after the link, so a session closed by then is handed no tokens.
 			const closed = await closedSince();
 			if (closed) return closed;

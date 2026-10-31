@@ -10,7 +10,7 @@
 
 ## Offers
 - The `externalJwt` contract: a verifier from a key source and the caller's policy, and the asymmetric algorithms it knows, typed as `Algorithm` (`keys`' `VerifyAlgorithm`).
-  - Key sources: JWKs written in; PEM keys, each for the algorithm it is given for; a key set at a URL, fetched through `outbound` from the caller's hosts, and as the operator's configured URL where the caller names one (`internal`).
+  - Key sources: JWKs written in; PEM keys, each for the algorithm it is given for; a key set at a URL, fetched through `outbound` from the caller's hosts, and as the operator's configured URL where the caller names one (`internal`; `narrower`: `internal`).
   - Verifying answers valid (the header and claims, frozen), invalid with a reason, or unavailable when no key set can be had. An invalid answer found once the signature held (a claim's shape, a time, the issuer, audience or subject) carries `signed: true`; one before it (the header, the algorithm, the key, the signature) carries none.
   - Reasons: `malformed`, `algorithm`, `no-key`, `ambiguous-key`, `signature`, `expired`, `not-yet`, `future-iat`, `too-long`, `issuer`, `audience`, `subject`. A caller maps them to its own words.
 - `algorithmsSetting(asymmetric, byDefault)`: the setting a caller's section names its algorithms by, a list, not empty, of the asymmetric ones given, `byDefault` where unwritten (a default outside them refused); `knownAlgorithms`, the ones a verifier knows, for a section declared before a verifier is had.

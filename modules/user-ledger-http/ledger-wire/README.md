@@ -10,7 +10,7 @@
 - A fake ledger: the verification packages'.
 
 ## Offers
-- `usersWire`: the password call's body (`verify`, the identifier as `email`), a lookup's (`bySubject`, `byUpstream`), what a lookup's `404` and `410` say to mean no such user (`noUser`), and the password call's refusal (`refused`, `401`).
+- `usersWire`: the password call's body (`verify`, the identifier as `email`), a lookup's (`bySubject`, `byUpstream`), what a `404` and `410` say to mean no such user, for the lookups and the password call (`noUser`), and the password call's refusal (`refused`, `401`; deprecated as no such user: answer `noUser` instead).
 - `LedgerUserAnswer`: a user as the ledger answers it, `id` the subject.
 - `witnessWire`: each call's body (`read`, `enroll`, `withdraw`, `clear`, a write naming its `deadline`), the answers' schemas (`readAnswer`, `markAnswer` where withdraw is offered, `enrollAnswer`) and a write's answer once done (`written`, `204`).
 - `ledgerRoutes`: the route of each call, as a fake ledger and the examples serve it.

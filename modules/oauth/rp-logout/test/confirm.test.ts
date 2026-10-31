@@ -121,7 +121,7 @@ describe("the confirmation's routes", () => {
 		expect(h.events.map((e) => e.kind)).toEqual(["logout.success"]);
 	});
 
-	it("answer 503, closing nothing, where the session index cannot tell whose the browser is", async () => {
+	it("answer 503, closing nothing, where the session index cannot tell whose the browser is, as http warns of it", async () => {
 		const failing = defineModule({ takes: [], name: "session", replicaSafe: false }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
@@ -132,9 +132,20 @@ describe("the confirmation's routes", () => {
 			),
 		]);
 		const h = await serve({ sessionsModule: failing });
-		const shown = await h.confirming("GET", {}, { cookie: "session=s1" });
-		const taken = await h.confirming("POST", { confirmation: "x" }, { cookie: "session=s1" });
-		expect([shown.status, taken.status]).toEqual([503, 503]);
+		const asked = { cookie: "session=s1" };
+		const shown = await h.served("GET", "/oauth/logout/confirm", {}, asked);
+		const taken = await h.served("POST", "/oauth/logout/confirm", { confirmation: "x" }, asked);
+		const unavailable = [503, "no-store", { error: "temporarily_unavailable" }];
+		expect([shown, taken].map((a) => [a.status, a.cacheControl, a.json])).toEqual([
+			unavailable,
+			unavailable,
+		]);
+		// http answers each, by the route's declared answer, and warns of it once.
+		const route = "/oauth/logout/confirm";
+		expect(h.logs().filter((l) => l.event.endsWith(".unavailable"))).toEqual([
+			{ level: "warn", event: "http.unavailable", fields: { what: "session", route } },
+			{ level: "warn", event: "http.unavailable", fields: { what: "session", route } },
+		]);
 		expect(h.events).toEqual([]);
 	});
 

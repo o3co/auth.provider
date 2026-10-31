@@ -31,6 +31,12 @@ export default defineModule(
 					"a code by email is composed without mfa-email-proof, which proves the account's address before a first binding: compose it",
 				);
 			}
+			// The operator's choice, yet said at every start: the mailbox alone meets a second factor.
+			if (c.section["adds-second-factor"]) {
+				c.log.warn("mfa-email.counts_as_second_factor", {
+					reason: "a code by mail meets a required second factor",
+				});
+			}
 			return emailFactor({
 				mail: await c.get(mail),
 				users: await c.get(users),

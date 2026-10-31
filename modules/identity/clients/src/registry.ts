@@ -115,6 +115,23 @@ export function methodIssues(methods: readonly AuthMethod[]): { where: string; r
 	});
 }
 
+/**
+ * Which methods claim a request, each with the id it names, and which methods it is read by:
+ * `none` is what a request is when no other method claims it, and only then is it read.
+ */
+function claimedBy(request: HttpRequest, methods: readonly AuthMethod[]) {
+	const claim = (method: AuthMethod) => {
+		const id = method.claimed(request);
+		return id === undefined ? [] : [{ method, id }];
+	};
+	const others = methods.filter((m) => m.name !== none.name);
+	const claimed = others.flatMap(claim);
+	return {
+		tried: claimed.length > 0 ? claimed : claim(none),
+		read: claimed.length > 0 ? others : methods,
+	};
+}
+
 export function registry(
 	registered: ReadonlyMap<string, Client>,
 	sources: readonly ClientSource[],
@@ -177,15 +194,7 @@ export function registry(
 			!credentialParameters.some((name) => sends(request, name)) &&
 			!methods.some((m) => m.claimed(request) !== undefined || m.malformed?.(request) === true),
 		authenticate: async (request: HttpRequest): Promise<Authentication> => {
-			const claim = (method: AuthMethod) => {
-				const id = method.claimed(request);
-				return id === undefined ? [] : [{ method, id }];
-			};
-			// `none` is what a request is when no other method claims it, and only then is it read.
-			const others = methods.filter((m) => m.name !== none.name);
-			const claimed = others.flatMap(claim);
-			const tried = claimed.length > 0 ? claimed : claim(none);
-			const read = claimed.length > 0 ? others : methods;
+			const { tried, read } = claimedBy(request, methods);
 			const [only, ...more] = tried;
 			const challengesOf = (of: readonly AuthMethod[]) =>
 				of.flatMap((m) => (m.challenge ? [m.challenge] : []));

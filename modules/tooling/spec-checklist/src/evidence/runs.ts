@@ -224,25 +224,7 @@ const idsIn = (names: readonly string[]) => [
 	),
 ];
 
-/** Each item's status from the reports, in the order the card's invariant gives; an excused result counted apart. */
-export function itemStatuses(
-	items: readonly Item[],
-	tests: ReadonlyMap<string, readonly TestRef[]>,
-	reports: readonly EvidenceReport[],
-	expected: Expected,
-	pkgDirs: ReadonlyMap<string, string>,
-): ItemStatus[] {
-	const present = new Set(reports.map((r) => r.identity.entry));
-	const errored = new Set(reports.filter((r) => r.errors > 0).map((r) => r.identity.entry));
-	const brokenFiles = new Set(
-		reports.flatMap((r) =>
-			r.tests.filter((t) => t.names.length === 0 && t.state === "failed").map((t) => t.file),
-		),
-	);
-	const seen = new Map<
-		string,
-		{ passed: number; failed: number; excused: Record<string, number> }
-	>();
+function evidenceByReport(reports: readonly EvidenceReport[]) {
 	const evidence = new Map<string, Map<EvidenceReport, Evidence>>();
 	for (const r of reports) {
 		for (const t of r.tests) {
@@ -265,6 +247,14 @@ export function itemStatuses(
 			}
 		}
 	}
+	return evidence;
+}
+
+function countsSeen(reports: readonly EvidenceReport[]) {
+	const seen = new Map<
+		string,
+		{ passed: number; failed: number; excused: Record<string, number> }
+	>();
 	for (const t of reports.flatMap((r) => r.tests)) {
 		for (const id of idsIn(t.names)) {
 			const s = seen.get(id) ?? { passed: 0, failed: 0, excused: {} };
@@ -275,6 +265,53 @@ export function itemStatuses(
 			seen.set(id, s);
 		}
 	}
+	return seen;
+}
+
+/**
+ * Each test naming the item, in each report of each run of its file that reported: a suite's title
+ * is met by a test in it; a run none of whose reports ran the file lacks it too.
+ */
+function unrunOf(
+	ref: TestRef,
+	expected: Expected,
+	reports: readonly EvidenceReport[],
+	pkgDirs: ReadonlyMap<string, string>,
+): string[] {
+	const path = join(pkgDirs.get(ref.pkg) ?? ref.pkg, ref.file);
+	// A test's names hold its path's; a suite's, its path's and then a test's inside it.
+	const meets = (names: readonly string[]) =>
+		(ref.suite ? names.length > ref.path.length : names.length === ref.path.length) &&
+		ref.path.every((s, k) => s === null || titleMatches(s, names[k] ?? ""));
+	const ran = (r: EvidenceReport) => r.tests.some((t) => t.file === path && meets(t.names));
+	return entriesOfFile(ref.pkg, ref.file, expected)
+		.filter((e) => reports.some((r) => r.identity.entry === e))
+		.filter((e) => {
+			const covering = reports.filter(
+				(r) => r.identity.entry === e && r.tests.some((t) => t.file === path),
+			);
+			return covering.length === 0 || !covering.every(ran);
+		})
+		.map((e) => `${e}: ${ref.file} > ${ref.title}`);
+}
+
+/** Each item's status from the reports, in the order the card's invariant gives; an excused result counted apart. */
+export function itemStatuses(
+	items: readonly Item[],
+	tests: ReadonlyMap<string, readonly TestRef[]>,
+	reports: readonly EvidenceReport[],
+	expected: Expected,
+	pkgDirs: ReadonlyMap<string, string>,
+): ItemStatus[] {
+	const present = new Set(reports.map((r) => r.identity.entry));
+	const errored = new Set(reports.filter((r) => r.errors > 0).map((r) => r.identity.entry));
+	const brokenFiles = new Set(
+		reports.flatMap((r) =>
+			r.tests.filter((t) => t.names.length === 0 && t.state === "failed").map((t) => t.file),
+		),
+	);
+	const seen = countsSeen(reports);
+	const evidence = evidenceByReport(reports);
 	return items.map((i) => {
 		const refs = tests.get(i.id) ?? [];
 		const s = seen.get(i.id) ?? { passed: 0, failed: 0, excused: {} };
@@ -282,25 +319,7 @@ export function itemStatuses(
 		const entries = [...new Set(refs.flatMap((r) => entriesOfFile(r.pkg, r.file, expected)))];
 		const missing = entries.filter((e) => expected.entries.includes(e) && !present.has(e));
 		const broken = files.some((f) => brokenFiles.has(f)) || entries.some((e) => errored.has(e));
-		// Each test naming the item, in each report of each run of its file that reported: a suite's title
-		// is met by a test in it; a run none of whose reports ran the file lacks it too.
-		const unrun = refs.flatMap((ref) => {
-			const path = join(pkgDirs.get(ref.pkg) ?? ref.pkg, ref.file);
-			// A test's names hold its path's; a suite's, its path's and then a test's inside it.
-			const meets = (names: readonly string[]) =>
-				(ref.suite ? names.length > ref.path.length : names.length === ref.path.length) &&
-				ref.path.every((s, k) => s === null || titleMatches(s, names[k] ?? ""));
-			const ran = (r: EvidenceReport) => r.tests.some((t) => t.file === path && meets(t.names));
-			return entriesOfFile(ref.pkg, ref.file, expected)
-				.filter((e) => present.has(e))
-				.filter((e) => {
-					const covering = reports.filter(
-						(r) => r.identity.entry === e && r.tests.some((t) => t.file === path),
-					);
-					return covering.length === 0 || !covering.every(ran);
-				})
-				.map((e) => `${e}: ${ref.file} > ${ref.title}`);
-		});
+		const unrun = refs.flatMap((ref) => unrunOf(ref, expected, reports, pkgDirs));
 		const failures = reports.flatMap((r) => {
 			const { commit, run, attempt, job, entry } = r.identity;
 			const at = { commit, run, attempt, job, entry };

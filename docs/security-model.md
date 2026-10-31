@@ -155,7 +155,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - A forwarded client certificate is read only from a trusted peer.
   - Security headers (CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy: no-referrer`) are set on every answer the app writes. Node's own `400`, `408` and `431`, to a request it cannot read or that comes too slowly, carry none.
 - **Left to you:**
-  - Terminating TLS. The app speaks plain HTTP behind your proxy; an http public origin needs `http.insecure-origin = true`, which a production deployment refuses, so only with `kernel.environment = development` ([Boot](#boot)).
+  - Terminating TLS. The app speaks plain HTTP behind your proxy; an http public origin needs `http.insecure-origin = true`, which a production deployment refuses, so only with `kernel.environment = development` ([Boot](#boot)); every start then warns `http.insecure_origin`.
   - Setting `http.trusted-proxies` whenever a proxy is in front.
   - Making the proxy strip or overwrite `X-Forwarded-For`, the forwarded scheme and the client-certificate header that clients send.
   - Bounding upload rates and connections per client in front. The app bounds a request's headers and the whole request (`http.headers-timeout`, `http.request-timeout`) and the connections it holds (`http.max-connections`), all clients together.
@@ -176,6 +176,13 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Keeping other subdomains of your origin from being taken over: double submit relies on them being unable to set the cookie.
   - Ending sessions with revocation, not by waiting out their lifetime, when they must end now.
   - The pages you serve (`authorize.login-page`, `consent.page`, the step-up pages and federation grants' pages): the provider draws none of them. Escaping what they show, from its answers (a client's name, the scopes asked) and from their URL, and the headers they are served with (a content security policy, framing), are yours.
+  - Setting `mfa.mode = optional` only where a session may be used with no second factor: every start warns `mfa.not_required`.
+  - Setting `mfa-binding-proof.mode = never` only where a first counting factor may bind with nothing proved: every start warns `mfa-binding-proof.never_asked`. Under the default `when-available` with no binding proof composed, none is asked either, and every start warns `mfa-binding-proof.none_available`.
+  - Setting `mfa-email.adds-second-factor` only where the mailbox may stand for a second factor: a code by mail then meets a required one, and every start warns `mfa-email.counts_as_second_factor`.
+  - Setting `user-verification = discouraged` (`passkeys`, `mfa-webauthn`) only where holding the authenticator is enough: whoever holds it passes, and every start warns `passkeys.user_unverified` or `mfa-webauthn.user_unverified`.
+  - Naming `webauthn.top-origins` only for pages you trust to frame a ceremony: every start warns `webauthn.framed_by_other_origins`, with their count.
+  - Naming a `login-passkey.password-exempt-group` only for members who must keep password logins under `password = refused-when-held`: every start warns `login-passkey.password_exempt_group`.
+  - Setting a registered client's `sections.consent.first-party` only for a client you run: its users are never asked for consent, and every start warns `consent.first_party` with its id.
 
 ## Tokens
 
@@ -187,6 +194,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **Left to you:**
   - Choosing `tokens.revocation`. With `unsupported`, nothing issued can be revoked, every start warns `tokens.revocation_unsupported`, and boot refuses a composition that issues refresh tokens or codes.
   - With `subject-check = none`, a revoked subject's access tokens live until they expire. Every start warns `tokens.subjects_unchecked`.
+  - Setting a registered client's `sections.token-exchange.public-exchange` only where it may exchange authenticating nothing, and `others-tokens` only where it may exchange tokens naming another client: every start warns `token-exchange.public_exchange` or `token-exchange.others_tokens` with its id.
   - Choosing `tokens.access-token-lifetime` (2s to 1d, one hour by default, as 0.18 had). In front of a resource server of high value, 5 to 15 minutes keeps a stolen token's use short; a refresh token renews it.
 - **Claims a grant adds:** a grant may add claims to the access tokens it issues (`AccessGrant.claims`). The signature covers the whole token, so a resource server cannot tell which claims the provider wrote and which a grant added. Reserved names only keep a grant from overwriting what the provider writes and what a specification gives a meaning; they make no added claim trustworthy. An added claim is what the grant composed asserts: composing a grant entrusts it with what its tokens say. Only `tokens` signs an access token (`at+jwt`); `keys.sign` refuses that type, and `keys.verify` too, so every access token is checked by `verifyAccess`. `verifyAccess` refuses as none of its own a token whose `exp` comes before its `iat`, whose `iat` is over 60 seconds ahead of the clock, or with over a day between them.
   - A refreshed or exchanged token carries no added claim, so an added claim cannot carry a restriction that must hold on: a resource server never reads a missing one as no restriction.
@@ -206,11 +214,11 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - DPoP:
     - A proof is accepted once (its `jti` is kept where it is never evicted and survives a crash and a failover).
     - `htu` is compared with a URL built from the issuer, never from request headers.
-    - Nonces are checked when configured.
+    - A nonce is asked at the token endpoint by default (`dpop.nonce.required = as`), so a proof made ahead is refused there; `never` asks none, and every start warns `dpop.nonce_not_asked`.
   - A token bound to a key or certificate is refused when presented under another scheme, so a binding cannot be stripped.
 - **Left to you:**
   - Keeping the issuer's path when your proxy forwards requests: a proxy that strips it breaks every DPoP proof.
-  - Choosing `mtls.revocation.on-unavailable` (`reject` refuses during a revocation outage; `allow` binds with a warning).
+  - Choosing `mtls.revocation.on-unavailable` (`reject` refuses during a revocation outage; `allow` binds with a warning, and every start warns `mtls.binds_during_outage`). With `mtls.revocation.mode = disabled`, no certificate's revocation is checked, and every start warns `mtls.revocation_unchecked`.
   - The self-signed mTLS mode (`mtls.mode = self-signed`) binds any certificate that parses, with no path to an anchor and no revocation. Every start warns `mtls.self_signed`.
   - Whether a client binds its tokens and how it authenticates are each client's: `sections.sender-binding.required` and the client's `method`. Bearer tokens and `client_secret` stay allowed by default, as a web client with neither DPoP nor mutual TLS is the common one; require binding and an asymmetric method for each client that can hold a key.
 
@@ -240,6 +248,10 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Setting an OpenID Connect IdP's `accept-missing-iss` only for one that never sends `iss`: its callbacks are then taken without their issuer checked (RFC 9207), and each start warns `idp-oidc.iss_not_required`.
   - Setting a trusted issuer's `accept-any-subject`, or a public client's `sections.jwt-bearer.accept-unbound`, only where what the entries above say it takes is accepted.
   - Setting a trusted issuer's `accept-key-set-elsewhere` only for a host you trust as the issuer: its key set is then fetched from that host, over https still.
+  - Giving a trusted issuer a `self-issued-prefix` only where every signer whose key a module contributes may be taken as that issuer: every start warns `jwt-bearer.self_issued_signers`, naming the entries.
+  - Setting `federation-grants-connect.identity-check = none` only where a callback whose upstream account another user holds may connect: every start warns `federation-grants-connect.identity_unchecked`.
+  - Setting a registered client's `sections.federation-tokens.receives` only for a client you trust with its sessions' upstream tokens: every start warns `federation-tokens.receives` with its id.
+  - Setting `federation-grants.keep-on-subject-revocation` only where an established grant may outlive a subject's revocation that keeps delegations: every start warns `federation-grants.kept_on_subject_revocation`.
 
 ## Outbound requests
 
@@ -247,17 +259,18 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - No host is reached by name unless `outbound.allow` lists it or `outbound.allow-any-public` is set. `outbound.deny` is checked first.
   - A name is resolved once, every address it resolves to is checked, and the request connects only to a checked address. For plain http to a `host:port` in `outbound.plain-ipv4`, the name is resolved for IPv4 addresses alone: every one of those is checked, and IPv6 addresses are neither checked nor reached.
   - Loopback, link-local, the cloud metadata addresses, Azure's platform address (`168.63.129.16`) and other special-purpose addresses are never reached, but loopback ones over plain http at a `plain-loopback` or `plain-internal` pair the operator names.
-  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http, mfa-witness-http, passkey-witness-http, signer-keys-http and jti-ledger-http ledgers, an OpenID Connect IdP's issuer, its key set and the endpoints you give it, a GitHub Enterprise's endpoints: the modules `outbound-policy`'s `internalBy` names), at hosts in `outbound.internal-hosts`, or over plain http at a `host:port` in `outbound.plain-internal`, where every address the name resolves to (every IPv4 one, for a pair in `outbound.plain-ipv4`) must be private or loopback. Each is reached only at that URL's origin: an endpoint an IdP's description names on another origin reaches public addresses only.
+  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the packages [Reaching out](attack-surface.md#reaching-out) lists, each declaring it as `narrower` in its manifest), at hosts in `outbound.internal-hosts`, or over plain http at a `host:port` in `outbound.plain-internal`, where every address the name resolves to (every IPv4 one, for a pair in `outbound.plain-ipv4`) must be private or loopback. Each is reached only at that URL's origin: an endpoint an IdP's description names on another origin reaches public addresses only.
   - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` or `plain-internal` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
   - Proxy environment variables are never read.
   - An IdP's authorization and end-of-session endpoints, where the browser goes and outbound never does, are https, or plain http only at a loopback name or, for an OpenID Connect IdP or a GitHub Enterprise, at the origin of an issuer or endpoint of your own configuration that `outbound.plain-internal` names; any other refuses boot. Plain http there carries the user's password and the IdP's cookies in the clear between the browser and the IdP, which the browser reaches by its own resolver, outside any mesh.
 - **Left to you:**
-  - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so). The proxy's own name is resolved by `outbound`, within the request's deadline.
-  - Names resolve in helper processes that take none of the environment but the resolver's own variables, and answer addresses alone (`outbound.resolution = helper`, the default). A helper is started only in the one form guard G26 lets through.
+  - With `outbound.proxy` set, the proxy resolves names and checks where they lead (every start warns `outbound.proxy_checks_addresses`). The proxy's own name is resolved by `outbound`, within the request's deadline.
+  - Names resolve in helper processes that take none of the environment but the resolver's own variables, and answer addresses alone (`outbound.resolution = helper`, the default; `in-process` resolves them in the app's own process, and every start warns `outbound.resolution_in_process`). A helper is started only in the one form guard G26 lets through.
   - What goes to a `plain-internal` pair, passwords, tokens and credentials among it, is in the clear: name only peers on a network trusted against reading and changing it (each boot warns `outbound.plain_internal`).
-  - A `plain-loopback` pair is reached at loopback addresses alone, so what goes to it stays on the host: name only a peer of your own there, such as a sidecar; what it sends on is yours.
-  - Name a pair in `outbound.plain-ipv4` only where its IPv4 answers are the ones to reach, as ECS Service Connect's are: the name's IPv6 answers are not used.
+  - A `plain-loopback` pair is reached at loopback addresses alone, so what goes to it stays on the host: name only a peer of your own there, such as a sidecar; what it sends on is yours. Every start warns `outbound.plain_loopback`, with their count.
+  - Name a pair in `outbound.plain-ipv4` only where its IPv4 answers are the ones to reach, as ECS Service Connect's are: the name's IPv6 answers are not used. Every start warns `outbound.plain_ipv4`, with their count.
   - An upstream certificate's revocation: `outbound` checks the chain and the name alone. Have the egress proxy or the platform check it, or accept that a revoked certificate is taken.
+  - Setting `outbound.allow-any-public` only where any public host may be reached by name: every start warns `outbound.any_public_host`. Naming `outbound.internal-hosts` only for hosts of your own: URLs of your configuration then reach private addresses there, and every start warns `outbound.internal_hosts`, with their count.
   - Network egress filtering is still expected.
 
 ## Storage
@@ -271,6 +284,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Leaving the server's settings as they were at boot.
   - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them. Every start that boots such spaces warns `store.volatile_accepted`, naming them.
   - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear. Boot does not refuse it, and warns `redis.plaintext` at every start where the host is not loopback by its name.
+  - Stating `redis.replication = none` only where there is no failover: a failover would lose the replicated spaces' writes, confirmed ones too, and every start warns `redis.replication_none`, naming those spaces.
 
 ## Audit
 

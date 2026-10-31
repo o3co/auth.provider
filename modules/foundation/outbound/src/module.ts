@@ -294,11 +294,32 @@ export default defineModule(
 			// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
 			const plainInternal = c.section["plain-internal"].length;
 			if (plainInternal > 0) c.log.warn("outbound.plain_internal", { count: plainInternal });
+			// The operator's other loosenings, each said at every start by its count or reason alone.
+			const counted = [
+				["outbound.plain_loopback", c.section["plain-loopback"].length],
+				["outbound.plain_ipv4", c.section["plain-ipv4"].length],
+				["outbound.internal_hosts", c.section["internal-hosts"].length],
+			] as const;
+			for (const [event, count] of counted) if (count > 0) c.log.warn(event, { count });
+			if (c.section["allow-any-public"]) {
+				c.log.warn("outbound.any_public_host", {
+					reason: "any public host is reached by name, not only those outbound.allow lists",
+				});
+			}
+			if (c.section.resolution === "in-process") {
+				c.log.warn("outbound.resolution_in_process", {
+					reason: "names resolve in the app's own process, not in helpers",
+				});
+			}
+			// Neither names the proxy: a log line carries no value.
 			if (proxy !== undefined) {
-				const host = new URL(proxy).hostname;
-				c.log.warn("outbound.proxy_checks_addresses", { host });
-				if (c.section["proxy-authorization"] && !isLoopbackAddress(host)) {
-					c.log.warn("outbound.proxy_credentials_in_clear", { host });
+				c.log.warn("outbound.proxy_checks_addresses", {
+					reason: "the proxy, not outbound, resolves names and checks where they lead",
+				});
+				if (c.section["proxy-authorization"] && !isLoopbackAddress(new URL(proxy).hostname)) {
+					c.log.warn("outbound.proxy_credentials_in_clear", {
+						reason: "the proxy's credentials go in the clear",
+					});
 				}
 			}
 			const present = proxyVariables.filter((name) => (process.env[name] ?? "") !== "");

@@ -36,6 +36,16 @@ export default defineModule(
 					minRsaBits: s["min-rsa-bits"],
 				};
 				const r = s.revocation;
+				// The operator's choices, yet said at every start: a revoked certificate binds.
+				if (r.mode === "disabled") {
+					c.log.warn("mtls.revocation_unchecked", {
+						reason: "no certificate's revocation is checked",
+					});
+				} else if (r["on-unavailable"] === "allow") {
+					c.log.warn("mtls.binds_during_outage", {
+						reason: "a certificate binds while its revocation cannot be confirmed",
+					});
+				}
 				pki =
 					r.mode === "disabled"
 						? // Nothing is fetched, so no outage is ever left to the operator.

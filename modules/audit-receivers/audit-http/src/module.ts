@@ -9,6 +9,9 @@ import {
 } from "@mod/outbound-policy";
 import { section } from "./section.ts";
 
+/** Whether the collector took the event: any 2xx. */
+const delivered = (status: number) => status >= 200 && status <= 299;
+
 export default defineModule(
 	{
 		name: "audit-http",
@@ -43,7 +46,7 @@ export default defineModule(
 						{ method: "POST", headers, body: JSON.stringify(event), ...sent },
 						own,
 					);
-					if (answer.status < 200 || answer.status > 299) {
+					if (!delivered(answer.status)) {
 						throw new Error(`audit-http: the collector answered ${answer.status}`);
 					}
 				},

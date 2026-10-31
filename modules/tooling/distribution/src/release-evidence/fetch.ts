@@ -9,6 +9,7 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { largestOutputBytes } from "../limits.ts";
 import { succeeded } from "./spawned.ts";
 
 const directory = process.argv[2];
@@ -26,7 +27,7 @@ const stop = (problem: string): never => {
 	process.exit(1);
 };
 const ran = (command: string, args: readonly string[]) => {
-	const answer = spawnSync(command, args, { encoding: "utf8", maxBuffer: 1 << 28 });
+	const answer = spawnSync(command, args, { encoding: "utf8", maxBuffer: largestOutputBytes });
 	return { ok: succeeded(answer), out: answer.stdout.trim(), err: answer.stderr.trim() };
 };
 /** Each JSON value a paginated API answer's jq filter writes, one a line; the answer failing stops. */

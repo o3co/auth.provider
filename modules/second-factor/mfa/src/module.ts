@@ -44,6 +44,10 @@ export default defineModule(
 			if (c.section.mode === "required" && !kinds.some((k) => k.counts)) {
 				return c.refuse("mfa.mode", "required needs a factor kind that counts");
 			}
+			// The operator's choice, yet said at every start: a session is used with no second factor.
+			if (c.section.mode !== "required") {
+				c.log.warn("mfa.not_required", { reason: "using a session needs no second factor" });
+			}
 			// Sessions are held to the factors elsewhere: without that module, using them would ask for none.
 			if ((await c.collect(enforcers)).length === 0) {
 				return c.refuse(

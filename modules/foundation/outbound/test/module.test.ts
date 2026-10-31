@@ -1,4 +1,4 @@
-import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, defineModule, kernelConfig, type Log } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
 	type OutboundRefusals,
@@ -26,10 +26,11 @@ const onlyProxy = (name?: string) => {
 	if (name) vi.stubEnv(name, "http://proxy.test:3128");
 };
 
-const boot = (settings: Record<string, unknown> = {}) =>
+const boot = (settings: Record<string, unknown> = {}, log?: Log) =>
 	assemble({
 		modules: [outboundModule, tlsOptionsForTests],
 		config: { ...kernelConfig(), outbound: settings },
+		runtime: quietRuntime(log ? { log } : {}),
 	});
 
 it("holds to the defaults: outbound-policy's for its keys, and outbound's own", () => {
@@ -167,11 +168,7 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 	onlyProxy("HTTPS_PROXY");
 	const recorded = recordingLog();
 	const withProxy = (outboundSettings: Record<string, unknown>) =>
-		assemble({
-			modules: [outboundModule, tlsOptionsForTests],
-			config: { ...kernelConfig(), outbound: outboundSettings },
-			runtime: quietRuntime({ log: recorded.log }),
-		});
+		boot(outboundSettings, recorded.log);
 	const warned = () => recorded.lines().map((line) => line.event);
 	await withProxy({ proxy: "http://127.0.0.1:3128", "proxy-authorization": "Basic dGVzdA==" });
 	expect(warned()).toEqual(["outbound.proxy_checks_addresses"]);
@@ -209,23 +206,40 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 		expect(warned().slice(from), host).toEqual(["outbound.proxy_checks_addresses"]);
 	}
 	expect(JSON.stringify(recorded.lines())).not.toContain("dGVzdA==");
+	// Nor the proxy itself: a log line carries no value.
+	expect(JSON.stringify(recorded.lines())).not.toMatch(/proxy\.example|127\.|localhost|::1/);
 });
 
-it("warns at each boot that names plain-internal pairs, telling their count alone", async () => {
-	const recorded = recordingLog();
-	const booted = (outboundSettings: Record<string, unknown>) =>
-		assemble({
-			modules: [outboundModule, tlsOptionsForTests],
-			config: { ...kernelConfig(), outbound: outboundSettings },
-			runtime: quietRuntime({ log: recorded.log }),
-		});
-	await booted({});
-	expect(recorded.lines()).toEqual([]);
-	await booted({ "plain-internal": ["ledger.internal:9092", "keys.internal:8080"] });
-	expect(recorded.lines().map((line) => [line.level, line.event, line.fields])).toEqual([
+it("warns at each boot of each loosening set, by its entries' count or a reason, never a host", async () => {
+	const warned = async (outboundSettings: Record<string, unknown>) => {
+		const recorded = recordingLog();
+		await boot(outboundSettings, recorded.log);
+		expect(JSON.stringify(recorded.lines())).not.toMatch(/internal:|example|localhost/);
+		return recorded.lines().map((line) => [line.level, line.event, line.fields]);
+	};
+	expect(await warned({})).toEqual([]);
+	const plain = { "plain-internal": ["ledger.internal:9092", "keys.internal:8080"] };
+	const lists = {
+		...plain,
+		"plain-loopback": ["localhost:8080"],
+		"plain-ipv4": ["localhost:8080"],
+	};
+	expect(await warned({ ...lists, "internal-hosts": ["keys.example"] })).toEqual([
 		["warn", "outbound.plain_internal", { count: 2 }],
+		["warn", "outbound.plain_loopback", { count: 1 }],
+		["warn", "outbound.plain_ipv4", { count: 1 }],
+		["warn", "outbound.internal_hosts", { count: 1 }],
 	]);
-	expect(JSON.stringify(recorded.lines())).not.toContain("internal:");
+	const reasons = (await warned({ "allow-any-public": true, resolution: "in-process" })).map(
+		([, event, fields]) => [event, (fields as { reason: string }).reason],
+	);
+	expect(reasons).toEqual([
+		[
+			"outbound.any_public_host",
+			"any public host is reached by name, not only those outbound.allow lists",
+		],
+		["outbound.resolution_in_process", "names resolve in the app's own process, not in helpers"],
+	]);
 });
 
 it("refuses boot without tls-options, naming it: no TLS connection goes without the floor", async () => {

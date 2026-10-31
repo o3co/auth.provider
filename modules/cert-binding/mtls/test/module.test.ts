@@ -274,12 +274,14 @@ describe("mtls", () => {
 		expect(reaching.sent.every(([, , n]) => n.timeoutMs === 1234)).toBe(true);
 	});
 
+	/** The warnings a start under this section logs. */
+	const warned = async (section: unknown) => {
+		const recorded = recordingLog();
+		await boot(section, { run: quietRuntime({ log: recorded.log }) });
+		return recorded.lines().filter((line) => line.level === "warn");
+	};
+
 	it("warns at every start where any certificate that parses binds, and not under PKI", async () => {
-		const warned = async (section: unknown) => {
-			const recorded = recordingLog();
-			await boot(section, { run: quietRuntime({ log: recorded.log }) });
-			return recorded.lines().filter((line) => line.level === "warn");
-		};
 		expect(await warned({ mode: "self-signed" })).toEqual([
 			{
 				level: "warn",
@@ -290,6 +292,25 @@ describe("mtls", () => {
 			},
 		]);
 		expect(await warned((await pki()).section)).toEqual([]);
+	});
+
+	it("warns at every start where revocation is not checked, or an outage binds", async () => {
+		const { section } = await pki();
+		expect(await warned({ ...section, revocation: { mode: "disabled" } })).toEqual([
+			{
+				level: "warn",
+				event: "mtls.revocation_unchecked",
+				fields: { reason: "no certificate's revocation is checked" },
+			},
+		]);
+		const allowing = { ...section.revocation, "on-unavailable": "allow" };
+		expect(await warned({ ...section, revocation: allowing })).toEqual([
+			{
+				level: "warn",
+				event: "mtls.binds_during_outage",
+				fields: { reason: "a certificate binds while its revocation cannot be confirmed" },
+			},
+		]);
 	});
 
 	it("judges the leaf's end and the CRL's next update by the runtime's clock, logging a refusal", async () => {
@@ -305,7 +326,7 @@ describe("mtls", () => {
 				.lines()
 				.filter((line) => line.level === "warn")
 				.map((line) => line.event),
-		).toEqual(["mtls.certificate_refused"]);
+		).toEqual(["mtls.revocation_unchecked", "mtls.certificate_refused"]);
 		const table = {
 			"http://ca.example/crl": await crlOf({ by: intermediate }),
 			"http://root.example/crl": await crlOf({ by: root }),

@@ -7,7 +7,7 @@
 - Delivering mail and its limits (`mail` and its sender). The account's address (`users`). Keeping factors, challenges and transactions (`mfa`, `mfa-flows`). The proof of the account's address before a first binding (`mfa-email-proof`).
 
 ## Offers
-- Contribution to `mfa`'s factor kinds: `email`, amr `email`, guessable; it counts toward a required second factor only where its proof adds `mfa` (`adds-second-factor`), and is otherwise a way back only.
+- Contribution to `mfa`'s factor kinds: `email`, amr `email`, guessable; it counts toward a required second factor only where its proof adds `mfa` (`adds-second-factor`, which every start warns of: `mfa-email.counts_as_second_factor`), and is otherwise a way back only.
   - Enrolment: a 16-character code (Crockford's base32, 80 bits) mailed to the address the account states; its first proof is that code.
   - Challenge: six digits mailed to the factor's address, good until the earlier of `code-lifetime` and the end the caller gives.
   - Both show `{sent_to, expires_in}`: the address's first character and its domain, and the seconds the code lives.

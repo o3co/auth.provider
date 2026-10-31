@@ -3,7 +3,7 @@
 Internal module of `conformance`: what an area's fault scene does with its deployment, apart from the faults it causes, in no area's words.
 
 ## Responsibilities
-- Deploys a scene on a topology of its own, 2 replicas and 1 instance unless the scene says otherwise, every node needing one replica for a write, its instances trusting the certificates a scene names, and stops both however the scene ends.
+- Deploys a scene on a topology of its own, 2 replicas and 1 instance unless the scene says otherwise, every node needing for a write one replica that acknowledged within Redis's default 10 s (a scene checking NOREPLICAS sets a shorter lag of its own), its instances trusting the certificates a scene names, and stops both however the scene ends.
 - Waits for an instance to be ready again, or connected again to a server, and for the primary's replicas to be online again; points every relay at the primary after a promotion or a crash, and promotes a replica that has caught up.
 
 ## Offers
@@ -13,6 +13,7 @@ Internal module of `conformance`: what an area's fault scene does with its deplo
 - `reconnected` returns only once the instance's client has had a call answered on its new connection and that Redis takes writes, its good replicas as many as its `min-replicas-to-write` asks: a scene's request after it reaches the server it names, and is never refused for want of a connection or as NOREPLICAS in place of the refusal the scene checks.
 - A deployment is handed to its scene only once its primary takes writes (`recovered`), so every scene starts writable whatever the machine's load; past the bound, `deployed` fails naming what it waited on and stops what it started.
 - `recovered` waits, within 30 s, for every replica the topology names online and the good replicas the primary's `min-replicas-to-write` asks, which an instance's readiness does not show; past it, it fails naming what it waited on. A scene calls it in its recovery alone, never while it holds the primary unwritable on purpose.
+- `replicasOnline`, and so `failover`, return only once the primary takes writes again (`recovered`): the step that ends a fault waits for it, so a scene's next write is never refused as NOREPLICAS in place of what the scene checks.
 - A relay is pointed at the primary only by switching its upstream and cutting every connection, so no connection stays on a server that is no longer the primary.
 - Every wait has its bound (10 s for a connection, 30 s for readiness or the replicas) and fails past it.
 - Holds no feature vocabulary: the scene, its matches and its requests are the area's.

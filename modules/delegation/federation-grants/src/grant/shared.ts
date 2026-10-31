@@ -39,6 +39,11 @@ export async function sharedOver(c: BuildContext<Settings>) {
 		}
 	}
 	const maxMs = c.section["max-lifetime"] * 1000;
+	if (c.section["keep-on-subject-revocation"]) {
+		c.log.warn("federation-grants.kept_on_subject_revocation", {
+			reason: "an established grant answers only to the delegations boundary of a revocation",
+		});
+	}
 	return {
 		origin: origin ?? "",
 		records: await recordsOver(c),

@@ -3,12 +3,12 @@ import type { Clock, Log } from "@mod/kernel";
 import { jsonObjectOf, type Outbound } from "@mod/outbound";
 import {
 	authorizationUrl,
-	basicAuthorization,
 	endSessionUrl,
 	guarded,
 	idTokenReaderOf,
 	refreshAnswerOf,
 	tokenAnswerOf,
+	tokenPostOf,
 } from "@mod/upstream-client";
 import { type Upstream, UpstreamRefused } from "@mod/upstreams";
 import type { Settings } from "./settings.ts";
@@ -43,22 +43,12 @@ export function opened(
 		},
 		at.clock,
 	);
-	const credential = basicAuthorization(client, s["client-secret"]);
-	/** Posts to the token endpoint, the only host the client's secret goes to. */
-	const post = (form: URLSearchParams) =>
-		outbound.fetch(
-			s["token-endpoint"],
-			{
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-					accept: "application/json",
-				},
-				body: form.toString(),
-				credential,
-			},
-			{ hosts: [hostOf(s["token-endpoint"])] },
-		);
+	const post = tokenPostOf(
+		outbound,
+		s["token-endpoint"],
+		{ id: client, auth: "basic", secret: async () => s["client-secret"] },
+		{ hosts: [hostOf(s["token-endpoint"])] },
+	);
 	const offline = s.access === "offline";
 	return {
 		issuer,
@@ -83,14 +73,12 @@ export function opened(
 				if (exchange.iss !== undefined && exchange.iss !== issuer) throw new UpstreamRefused();
 				// No iss only where the operator accepts its absence.
 				if (exchange.iss === undefined && !s["accept-missing-iss"]) throw new UpstreamRefused();
-				const answer = await post(
-					new URLSearchParams({
-						grant_type: "authorization_code",
-						code: exchange.code,
-						redirect_uri: exchange.redirectUri,
-						code_verifier: exchange.verifier,
-					}),
-				);
+				const answer = await post({
+					grant_type: "authorization_code",
+					code: exchange.code,
+					redirect_uri: exchange.redirectUri,
+					code_verifier: exchange.verifier,
+				});
 				const { tokens, idToken } = tokenAnswerOf(jsonObjectOf(answer), scopes);
 				if (!idToken) throw new UpstreamRefused();
 				const { login, claims } = await idTokenOf(idToken, exchange.nonce, tokens.accessToken);
@@ -103,12 +91,12 @@ export function opened(
 			}),
 		refresh: (refreshToken, scopes) =>
 			guarded(async () => {
-				const form = new URLSearchParams({
+				const answer = await post({
 					grant_type: "refresh_token",
 					refresh_token: refreshToken,
+					...(scopes.length > 0 ? { scope: scopes.join(" ") } : {}),
 				});
-				if (scopes.length > 0) form.set("scope", scopes.join(" "));
-				return refreshAnswerOf(await post(form), scopes, "idp-google");
+				return refreshAnswerOf(answer, scopes, "idp-google");
 			}),
 		endSession: (at) => {
 			const configured = s["end-session-endpoint"];

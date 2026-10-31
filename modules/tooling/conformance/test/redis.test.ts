@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
 import { docker as dockerRun, dockerSync, dockerWithin } from "@mod/docker-client";
 import { describe, expect, it } from "vitest";
@@ -12,10 +13,16 @@ const docker = (() => {
 	}
 })();
 
-/** The names of the containers that exist with the label and value given. */
-const containers = (label: string) =>
+/** The names of the containers that exist with every label and value given. */
+const containers = (...labels: string[]) =>
 	dockerSync(
-		["ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"],
+		[
+			"ps",
+			"-a",
+			...labels.flatMap((label) => ["--filter", `label=${label}`]),
+			"--format",
+			"{{.Names}}",
+		],
 		dockerWithin.control,
 	)
 		.split("\n")
@@ -91,14 +98,27 @@ describe.runIf(docker)("a throwaway Redis", () => {
 		async () => {
 			// No process holds this pid: the highest a system gives is far below it.
 			const gone = "conformance.owner=2147483646";
-			await dockerRun(
-				["run", "-d", "--label", gone, "--label", "conformance=redis", "redis:7-alpine"],
+			// This run's own, so a run beside it, which leaves one of the same pid, is not counted here.
+			const ours = `conformance.test-run=${randomUUID()}`;
+			const created = await dockerRun(
+				[
+					"run",
+					"-d",
+					"--label",
+					gone,
+					"--label",
+					ours,
+					"--label",
+					"conformance=redis",
+					"redis:7-alpine",
+				],
 				dockerWithin.run,
 			);
-			expect(containers(gone)).toHaveLength(1);
+			// Told by docker's own answer: a run beside this one sweeps it too, so a listing may miss it.
+			expect(created.trim()).toMatch(/^[0-9a-f]{64}$/);
 			const redis = await startRedis();
 			await redis.stop();
-			expect(containers(gone)).toEqual([]);
+			expect(containers(gone, ours)).toEqual([]);
 		},
 		startsWithin,
 	);

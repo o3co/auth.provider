@@ -31,8 +31,11 @@ export default defineModule(
 		takes: [],
 	},
 	(m) => [
-		m
-			.provide(ceremonies)
-			.by((c) => ceremoniesFor(relyingParty(c.section), c.random.bytes, c.clock.now)),
+		m.provide(ceremonies).by((c) => {
+			// The operator's choice, yet said at every start: other origins' pages may frame a ceremony.
+			const framing = c.section["top-origins"].length;
+			if (framing > 0) c.log.warn("webauthn.framed_by_other_origins", { count: framing });
+			return ceremoniesFor(relyingParty(c.section), c.random.bytes, c.clock.now);
+		}),
 	],
 );

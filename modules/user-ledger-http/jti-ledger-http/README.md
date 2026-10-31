@@ -24,7 +24,7 @@
 ## Invariants
 - The answer's body is never read: the status alone decides, so nothing the ledger says is told on.
 - A `jti` over 256 bytes in UTF-8, the most the ledger records, is not sent: unavailable, logged `reason: "jti-too-long"`.
-- The ledger is reached only through `outbound`, at the URL's host alone; a redirect is not followed. The URL is an internal destination, named to `outbound` as itself: a private address is reached only when its host is in `outbound.internal-hosts` or, over plain http, when `outbound.plain-internal` names its `host:port`, and only at that URL's origin (scheme, host and port).
+- The ledger is reached only through `outbound`, at the URL's host alone; a redirect is not followed. The URL is an internal destination (`narrower`: `internal`), named to `outbound` as itself: a private address is reached only when its host is in `outbound.internal-hosts` or, over plain http, when `outbound.plain-internal` names its `host:port`, and only at that URL's origin (scheme, host and port).
 - Boot is refused on a `consume-url` that outbound's destination policy refuses (saying which of `outbound`'s keys to set), on a `credential` that `outbound.credentials` will not send there, and on a `credential-header` without a credential or one `outbound` refuses to carry a credential (`credentialHeaderRefusal`), each at its key.
 - Each failure logs one `jti-ledger-http.ledger_failed` warning with its status, or its kind alone: outbound's refusal reason or failure, `no-answer` or `jti-too-long`. No `jti`, credential, or byte from the ledger is logged; `replayed` is not logged.
 - Holds no state, so it is safe on multiple instances.

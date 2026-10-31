@@ -16,7 +16,7 @@
 - Extension point `enforcers`: the modules holding sessions to the factors (`mfa-entry`); without one, whatever the mode, boot is refused.
 - Audit events, with the subject, once written (never for a refused or raced decision but a first binding refused (`mfa.first_binding_conflict`), nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
 - Contributions: `login-gates` amr (each kind's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed.
-- Section: `mode` (`optional`, or `required` by default), `max-factors` (default 10).
+- Section: `mode` (`optional`, which every start warns of as `mfa.not_required`, or `required` by default), `max-factors` (default 10).
 - Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end; a list and a claim changed as one (`updateTogether`), a binding writing its factor and the claim on its unique value at once; mfa refuses to start over a store without it. Needs: never evicted, survives a crash and a failover, reads only what is confirmed.
 - `./testing`: the store's contract test, a config builder, and `updatingTogether`, a place's `updateTogether` over records' stand-in.
 

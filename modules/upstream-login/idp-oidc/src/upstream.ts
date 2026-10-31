@@ -1,12 +1,7 @@
 import type { ExternalJwt } from "@mod/external-jwt";
 import { withinHosts } from "@mod/host-entries";
 import type { Clock, Log } from "@mod/kernel";
-import {
-	DestinationRefused,
-	jsonObjectOf,
-	type Outbound,
-	type OutboundResponse,
-} from "@mod/outbound";
+import { DestinationRefused, jsonObjectOf, type Outbound } from "@mod/outbound";
 import {
 	browsedRefusalText,
 	destinationRefusal,
@@ -15,12 +10,12 @@ import {
 import {
 	answerOf,
 	authorizationUrl,
-	basicAuthorization,
 	endSessionUrl,
 	guarded,
 	idTokenReaderOf,
 	refreshAnswerOf,
 	tokenAnswerOf,
+	tokenPostOf,
 } from "@mod/upstream-client";
 import {
 	type AuthorizationStart,
@@ -189,24 +184,17 @@ export async function opened(
 					);
 		return { ...login, amr: read.data.amr ?? [] };
 	};
-	const post = s["token-auth"] === "client_secret_post";
 	/** Posts a grant to the token endpoint, with the client's secret as the operator says. */
-	const granting = (grant: Readonly<Record<string, string>>): Promise<OutboundResponse> => {
-		const form = new URLSearchParams({
-			...grant,
-			...(post ? { client_id: client, client_secret: s["client-secret"] } : {}),
-		});
-		const headers = {
-			"content-type": "application/x-www-form-urlencoded",
-			accept: "application/json",
-		};
-		const sent = post ? {} : { credential: basicAuthorization(client, s["client-secret"]) };
-		return outbound.fetch(
-			endpoints.token,
-			{ method: "POST", headers, body: form.toString(), ...sent },
-			narrowerOf(hosts, from.token),
-		);
-	};
+	const granting = tokenPostOf(
+		outbound,
+		endpoints.token,
+		{
+			id: client,
+			auth: s["token-auth"] === "client_secret_post" ? "form" : "basic",
+			secret: async () => s["client-secret"],
+		},
+		narrowerOf(hosts, from.token),
+	);
 	/**
 	 * The login and the tokens of a code; its scopes are what an answer without a scope stands for.
 	 * UserInfo is read where `userinfo` names it: a login's code, never a delegation's.

@@ -313,11 +313,6 @@ export const coverage: Coverage = {
 				"a lifetime a client asks of an exchange (`o3co_expires_in`) is taken up to this, up to a day, past `tokens`' own lifetimes, though never past the subject token's end or its ties'",
 		},
 		{
-			key: "login-passkey.counts-as-mfa",
-			weakens:
-				"`true` (the default): a passkey login whose user was verified meets a required second factor alone",
-		},
-		{
 			key: "mfa-email.adds-second-factor",
 			weakens: "`true`: a code by mail meets a required second factor, so the mailbox does",
 		},
@@ -381,10 +376,6 @@ export const coverage: Coverage = {
 			key: "outbound.resolution",
 			weakens:
 				"`in-process`: names resolve in the app's own process, not in helpers that take none of its environment",
-		},
-		{
-			key: "clients-cimd.allow",
-			weakens: "clients name themselves by a metadata document fetched from these hosts",
 		},
 		{
 			key: "clients-cimd.allow-any-host",
@@ -464,6 +455,10 @@ export const coverage: Coverage = {
 		{
 			key: "outbound.allow",
 			why: "the hosts outbound may reach by name at all: the list opens only what it names",
+		},
+		{
+			key: "clients-cimd.allow",
+			why: "the hosts a client's metadata document may come from: the list narrows them, and composing clients-cimd is the choice",
 		},
 		{
 			key: "http.trusted-proxies",
