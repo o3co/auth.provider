@@ -543,7 +543,7 @@ export function tokensContract(
 			});
 		});
 
-		it("fails a token whose subject was revoked after it stood, its standing its grant's else its issue, though issued after [guarantee-4-a]", async () => {
+		it("fails a token whose subject was revoked after it stood, its standing its grant's else its issue, though issued after", async () => {
 			const place = await open({ revocable: true });
 			const checkedAt = place.now();
 			const issued = await issueFor(place.tokens, grant);
