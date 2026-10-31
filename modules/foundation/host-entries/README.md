@@ -16,6 +16,7 @@
 
 ## Invariants
 - An entry is read as written: letters (with the marks that write them), digits, hyphens and dots, or a whole address; only case and Unicode are corrected, as the URL parser reads a host (IDNA); a joiner is kept only where its script's rules allow it. An address with no canonical form, such as one with a zone, is none. A pair's host is read so, never `.name`, an IPv6 address in brackets; its port is 1–65535 without a leading zero.
+- A character the parser would drop, such as a variation selector, makes no entry.
 - Hosts compare lowercase, in punycode, without a trailing dot, in canonical IP form, with IPv4 carried in IPv6 as IPv4; a host with an empty label has no spelling.
 - Nothing here resolves a name, reads settings or sends anything.
 

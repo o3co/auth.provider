@@ -111,14 +111,15 @@ describe("normalized", () => {
 describe("a name in another script", () => {
 	it("reads letters with the marks that write them, and a joiner where its script allows it, as the URL parser maps them", () => {
 		expect(
-			["कि.example", "é.example", "ไทย.example", "نامه\u200Cای.example"].map((entry) =>
-				hostEntryOf(entry),
+			["कि.example", "é.example", "ไทย.example", "نامه\u200Cای.example", "क्\u200Dष.example"].map(
+				(entry) => hostEntryOf(entry),
 			),
 		).toEqual([
 			{ kind: "name", name: "xn--11b8f.example", under: false },
 			{ kind: "name", name: "xn--9ca.example", under: false },
 			{ kind: "name", name: "xn--o3cw4h.example", under: false },
 			{ kind: "name", name: "xn--mgba3gch31f060k.example", under: false },
+			{ kind: "name", name: "xn--11b2ezcw70k.example", under: false },
 		]);
 		expect(hostList.safeParse(["कि.example", ".कि.example"]).success).toBe(true);
 		// Matched as the request's host is spelled: in punycode.
@@ -140,6 +141,12 @@ describe("a name in another script", () => {
 			"a.example ",
 			"a\u00ADb.example",
 			"a\u200Bb.example",
+			// Marks the URL parser drops, so the name would be read as one written without them.
+			"a\uFE0F.example",
+			"a\u{E0100}.example",
+			"a\u034F.example",
+			"\u1820\u180B.example",
+			"a\u3164b.example",
 		]) {
 			expect(hostEntryOf(entry), JSON.stringify(entry)).toBeUndefined();
 		}

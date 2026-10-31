@@ -66,6 +66,8 @@ export function hostEntryOf(
 	// Letters with the marks that write them, digits, dots, hyphens and the joiners; the URL parser
 	// (IDNA) refuses a joiner its script does not allow, and a mark leading a label.
 	if (/[^\p{L}\p{M}\p{N}.\-\u200C\u200D]/u.test(name)) return undefined;
+	// A mark the URL parser drops (a variation selector, U+034F, a Mongolian FVS) reads as written without it.
+	if (/(?![\u200C\u200D])\p{Default_Ignorable_Code_Point}/u.test(name)) return undefined;
 	const ascii = URL.parse(`https://${name}/`)?.hostname;
 	if (ascii === undefined || isIP(ascii) !== 0) return undefined;
 	return ascii.split(".").every((part) => label.test(part))
