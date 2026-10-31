@@ -69,8 +69,9 @@ async function boot({
 	loose = [] as readonly string[],
 	/** The operator section's settings. */
 	settings = {} as Parameters<typeof clientAssertionConfig>[0],
+	/** Where spent assertions are kept; a new place unless given, so a restart can keep it. */
+	stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 }),
 } = {}) {
-	const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
 	const down = unavailableSwitch<SpentAssertions>("spent assertions");
 	const location = defineModule({ name: "token-endpoint", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(tokenEndpointLocation).by(() => ({ url: tokenEndpoint ?? undefined })),
@@ -333,8 +334,8 @@ describe("private_key_jwt", () => {
 		expect(await tried(c, { jti: "late" })).toBe("app");
 		const kept = () => tried(c, { jti: "kept", exp: seconds() + 10 });
 		expect(await kept()).toBe("app");
-		// Past exp and the allowance.
-		now += 10_000 + 30_000;
+		// Past exp and the widest allowance a section takes, whatever is set.
+		now += 10_000 + 300_000;
 		expect(await kept()).toBe("bad_credentials");
 		// Within the store's clock margin.
 		now += 59_999;
@@ -342,6 +343,20 @@ describe("private_key_jwt", () => {
 		// Past the margin.
 		now += 1;
 		expect(await kept()).toBe("app");
+	});
+
+	it("keeps a spent jti past the widest clock-skew, so one widened on the same store takes it no more [guarantee-5-d]", async () => {
+		const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
+		const narrow = await boot({ stand, settings: { "clock-skew": "0s" } });
+		const once = await sign(claims({ jti: "widened", exp: seconds() + 10 }));
+		expect(await outcome(narrow.c, presenting(once))).toBe("app");
+		// Started again on the same store with the widest skew, the very assertion still within it.
+		const wide = await boot({ stand, settings: { "clock-skew": "5m" } });
+		now += 10_000 + 299_000;
+		expect(await outcome(wide.c, presenting(once))).toBe("bad_credentials");
+		expect(lastWarned()).toBe("used before");
+		// A fresh jti signed the same way is taken: the time still holds, so the refusal is the record's.
+		expect(await tried(wide.c, { jti: "widened-fresh", exp: seconds() - 299 })).toBe("app");
 	});
 
 	it("is unavailable when the store cannot tell", async () => {
