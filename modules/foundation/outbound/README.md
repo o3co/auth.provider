@@ -11,7 +11,7 @@
 - `outbound`: fetch a URL with a request and a narrower, answering status, headers and body, or throwing a destination refusal or unavailable with its failure. `isOutboundUnavailable` tells that unavailable by its mark, not its class, so a second bundled copy's is told too.
 - `outbound.signed`: the same for signed material, with the narrower's hosts always named.
 - `credentialHeaderRefusal` (`credential`'s): why a credential may not go as a header named so.
-- `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` (`plainInternal` and `browsedRefusal` too), `outbound.credentials` and `outbound.limits` from the section.
+- `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals`, `outbound.credentials` and `outbound.limits` from the section.
 - A JSON call: `postJson` posts a body as JSON, asking JSON back, its credential under the credential rule below (a Bearer token, or as given in the header named); a send that fails throws what its caller makes of `sendFailureOf`'s kind: the policy's reason, a `failure` (Vocabulary), or `no-answer`. `jsonObjectOf` reads one frozen UTF-8 object, at the status named, `200` by default.
 - Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, `max-lookups`, `resolution`, the proxy, `direct-hosts` (a host list, as `host-entries` reads one) and `plain-ipv4`; its keys are in the configuration reference.
 
@@ -36,7 +36,7 @@
 - Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, either case) are never read; with one set and no `proxy`, boot is refused, naming the variable alone, unless `direct-despite-proxy` is set.
 
 ## Depends on
-- `kernel`, `tls-options` (the TLS floor), `outbound-policy`, `host-entries` (`hostList`; `hostEntryOf`, to read `plain-ipv4`'s pairs as the plain lists do, and `withinHosts`, to match a URL's host to one), `address-reach` (`isLoopbackAddress`), `url-setting` (the proxy's origin)
+- `kernel`, `tls-options` (the TLS floor), `outbound-policy`, `host-entries` (also `hostEntryOf` and `withinHosts`, to read and compare `plain-ipv4`'s pairs), `address-reach` (`isLoopbackAddress`), `url-setting` (the proxy's origin)
 
 ## Vocabulary
 - failure: why outbound is unavailable, for a caller to log by, with no value and no body: `timeout` (the deadline came), `too-large` (a body or headers past the cap), `unreachable` (no address, no connection, or the connection lost), `unsupported-answer` (a 101 or an encoded answer), `busy` (past `max-concurrent`), `proxy-refused`.
