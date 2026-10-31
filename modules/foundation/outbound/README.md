@@ -12,7 +12,7 @@
 - `outbound.signed`: the same for signed material, with the narrower's hosts always named.
 - `credentialHeaderRefusal` (`credential`'s): why a credential may not go as a header named so.
 - `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` (`plainInternal` and `browsedRefusal` too), `outbound.credentials` and `outbound.limits` from the section.
-- A JSON call (internal module `json`): `postJson`, `sendFailureOf` and `jsonObjectOf` (one frozen UTF-8 object, at the status named, `200` by default).
+- A JSON call: `postJson` posts a body as JSON, asking JSON back, its credential under the credential rule below (a Bearer token, or as given in the header named); a send that fails throws what its caller makes of `sendFailureOf`'s kind: the policy's reason, a `failure` (Vocabulary), or `no-answer`. `jsonObjectOf` reads one frozen UTF-8 object, at the status named, `200` by default.
 - Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, `max-lookups`, `resolution`, the proxy, `direct-hosts` (a host list, as `outbound-policy` reads one) and `plain-ipv4`; its keys are in the configuration reference.
 
 ## Invariants
