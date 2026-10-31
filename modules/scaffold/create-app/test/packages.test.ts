@@ -12,6 +12,13 @@ const declared = {
 	registersAs: "http",
 	asks: ["Audit events posted to a receiver (`audit-http.url`)."],
 };
+/** The workspace this test lies in, linked with no index. */
+const root = join(import.meta.dirname, "..", "..", "..", "..");
+const noIndex = join(tmpdir(), "no-index.json");
+const linked = () => packagesFor({ workspace: root }, noIndex);
+/** A map an owner takes entry samples for, and a type's sample of its contract. */
+const taken = [{ map: "owner.entries", of: "@mod/c" }];
+const sample = 'type = "typed"\n';
 /** An index as distribution writes it into a bundle: members' manifests, public names and examples. */
 const indexed = () => {
 	const file = join(mkdtempSync(join(tmpdir(), "create-app-")), "index.json");
@@ -33,6 +40,8 @@ const indexed = () => {
 				entry("authorize", "oauth", 'authorize {\n  login-page = "REPLACE-LOGIN-PAGE"\n}\n'),
 				{ ...entry("redis", "store-redis"), deployment: true },
 				{ ...entry("audit-http", "audit-receivers"), manifest: declared },
+				{ ...entry("owner", "up"), manifest: { name: "@mod/owner", takesSamples: taken } },
+				{ ...entry("typed", "up"), manifest: { name: "@mod/typed", sampleOf: "@mod/c" }, sample },
 			],
 		}),
 	);
@@ -56,8 +65,7 @@ it("names a bundle's packages publicly, depending on each bundle once at the ind
 });
 
 it("links the workspace's packages where one is given, naming them as the workspace does", async () => {
-	const root = join(import.meta.dirname, "..", "..", "..", "..");
-	const packages = packagesFor({ workspace: root }, join(tmpdir(), "no-index.json"));
+	const packages = linked();
 	const kernelDir = workspacePackages(root).get("@mod/kernel");
 	expect(packages.dependencies(["@mod/kernel"])).toEqual({ "@mod/kernel": `link:${kernelDir}` });
 	expect(packages.importOf("@mod/kernel")).toBe("@mod/kernel");
@@ -65,7 +73,7 @@ it("links the workspace's packages where one is given, naming them as the worksp
 }, 30_000);
 
 it("takes the workspace it lies in, with no index and no workspace given", async () => {
-	const packages = packagesFor({}, join(tmpdir(), "no-index.json"));
+	const packages = packagesFor({}, noIndex);
 	expect(packages.dependencies(["@mod/kernel"])).toEqual({ "@mod/kernel": "*" });
 	expect((await packages.fragments(["@mod/kernel"])).map((f) => f.section)).toEqual(["kernel"]);
 }, 30_000);
@@ -89,9 +97,7 @@ it("points at each composed module's card, section defaults and Deployment secti
 		version: "0.18.0",
 		repository: "https://github.com/o3co/auth.provider",
 	});
-	const root = join(import.meta.dirname, "..", "..", "..", "..");
-	const linked = packagesFor({ workspace: root }, join(tmpdir(), "no-index.json"));
-	expect(linked.cards(["@mod/kernel", "@mod/redis"])).toEqual([
+	expect(linked().cards(["@mod/kernel", "@mod/redis"])).toEqual([
 		{
 			name: "@mod/kernel",
 			card: "node_modules/@mod/kernel/README.md",
@@ -104,16 +110,22 @@ it("points at each composed module's card, section defaults and Deployment secti
 			deployment: "node_modules/@mod/redis/README.md#deployment",
 		},
 	]);
-	expect(linked.release()).toMatchObject({ repository: "https://github.com/o3co/auth.provider" });
+	expect(linked().release()).toMatchObject({ repository: "https://github.com/o3co/auth.provider" });
 });
 
-it("gives what each module declares for the guide, from the index's manifests or the workspace's", () => {
-	expect(
-		packagesFor({}, indexed()).asks?.(["@mod/audit-http", "@mod/tokens", "@mod/nowhere"]),
-	).toEqual([declared, { name: "@mod/tokens" }]);
-	const root = join(import.meta.dirname, "..", "..", "..", "..");
-	const linked = packagesFor({ workspace: root }, join(tmpdir(), "no-index.json"));
-	expect(linked.asks?.(["@mod/audit-stdout"])).toEqual([
+it("gives what each module declares for the guide and of entry samples, from the index's manifests or the workspace's", () => {
+	const published = packagesFor({}, indexed());
+	expect(published.asks?.(["@mod/audit-http", "@mod/tokens", "@mod/nowhere"])).toEqual([
+		declared,
+		{ name: "@mod/tokens" },
+	]);
+	expect(published.samples?.(["@mod/owner", "@mod/typed", "@mod/tokens"])).toEqual([
+		{ name: "@mod/owner", takes: taken },
+		{ name: "@mod/typed", sampleOf: "@mod/c", sample: { from: "@mod/typed", text: sample } },
+		{ name: "@mod/tokens" },
+	]);
+	expect(linked().asks?.(["@mod/audit-stdout"])).toEqual([
 		{ name: "@mod/audit-stdout", adapts: "@mod/audit", registersAs: "stdout" },
 	]);
+	expect(linked().samples?.(["@mod/tokens"])).toEqual([{ name: "@mod/tokens" }]);
 }, 30_000);
