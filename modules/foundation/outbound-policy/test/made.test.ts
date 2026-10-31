@@ -112,6 +112,13 @@ describe("the policy's settings", () => {
 		for (const key of ["plain-loopback", "plain-internal"]) {
 			expect(policySettings.safeParse({ [key]: ["[::1%eth0]:443"] }).success, key).toBe(false);
 		}
+		// A name in another script, its marks included, is read as the URL parser maps a host.
+		for (const key of ["allow", "deny", "internal-hosts"]) {
+			expect(policySettings.safeParse({ [key]: ["कि.example"] }).success, key).toBe(true);
+		}
+		expect(policySettings.safeParse({ "internal-hosts": ["fe80::1%eth0"] }).success).toBe(false);
+		const mapped = policyOf(policySettings.parse({ allow: ["कि.example"] }));
+		expect(mapped.explain("https://xn--11b8f.example/")).toBeUndefined();
 		// A dot leading a name covers the names under it in a host list; a pair names one host.
 		expect(policySettings.safeParse({ allow: [".a"] }).success).toBe(true);
 		expect(policySettings.safeParse({ "plain-loopback": [".a:80"] }).success).toBe(false);
