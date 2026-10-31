@@ -137,7 +137,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **Left to you:**
   - Keeping the configuration files and environment that hold secrets readable only by the app.
   - Setting `kernel.environment = development` only to try the provider on one machine. Production still takes plain http on a loopback host for an upstream identity provider's browser endpoints, and loopback and private-use redirect and logout URIs for clients.
-  - Setting `mail.accept-unsent` only where nothing need be mailed: the logging-only sender sends nothing, so no code or link mailed reaches its user.
+  - Setting `mail.accept-unsent` only where nothing need be mailed: the logging-only sender sends nothing, so no code or link mailed reaches its user. Every start warns `mail.unsent_accepted`.
 
 ## Secrets and logs
 
@@ -185,7 +185,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - An outage answers 503, never "inactive" and never a success.
 - **Session tokens:** when a session holds more tokens than the store keeps, the oldest is pushed out and revoked. A session near its cap is listed before the add, so a crash leaves it to the sweep; only more concurrent adds than `session-tokens.push-out-margin`, together with a crash, can leave a pushed-out token alive until it expires.
 - **Left to you:**
-  - Choosing `tokens.revocation`. With `unsupported`, nothing issued can be revoked, and boot refuses a composition that issues refresh tokens or codes.
+  - Choosing `tokens.revocation`. With `unsupported`, nothing issued can be revoked, every start warns `tokens.revocation_unsupported`, and boot refuses a composition that issues refresh tokens or codes.
   - With `subject-check = none`, a revoked subject's access tokens live until they expire.
   - Choosing `tokens.access-token-lifetime` (2s to 1d, one hour by default, as 0.18 had). In front of a resource server of high value, 5 to 15 minutes keeps a stolen token's use short; a refresh token renews it.
 - **Claims a grant adds:** a grant may add claims to the access tokens it issues (`AccessGrant.claims`). The signature covers the whole token, so a resource server cannot tell which claims the provider wrote and which a grant added. Reserved names only keep a grant from overwriting what the provider writes and what a specification gives a meaning; they make no added claim trustworthy. An added claim is what the grant composed asserts: composing a grant entrusts it with what its tokens say. Only `tokens` signs an access token (`at+jwt`); `keys.sign` refuses that type, and `keys.verify` too, so every access token is checked by `verifyAccess`. `verifyAccess` refuses as none of its own a token whose `exp` comes before its `iat`, whose `iat` is over 60 seconds ahead of the clock, or with over a day between them.
@@ -211,7 +211,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 - **Left to you:**
   - Keeping the issuer's path when your proxy forwards requests: a proxy that strips it breaks every DPoP proof.
   - Choosing `mtls.revocation.on-unavailable` (`reject` refuses during a revocation outage; `allow` binds with a warning).
-  - The self-signed mTLS mode binds any certificate that parses.
+  - The self-signed mTLS mode (`mtls.mode = self-signed`) binds any certificate that parses, with no path to an anchor and no revocation. Every start warns `mtls.self_signed`.
   - Whether a client binds its tokens and how it authenticates are each client's: `sections.sender-binding.required` and the client's `method`. Bearer tokens and `client_secret` stay allowed by default, as a web client with neither DPoP nor mutual TLS is the common one; require binding and an asymmetric method for each client that can hold a key.
 
 ## Rate limits
@@ -222,7 +222,9 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Lockouts survive a crash and a failover.
   - A request whose source cannot be determined is refused with 503 and logged as a deployment error.
   - Failed password attempts at one identifier, from any source, make each next one wait, doubling to `login-password.account-max-wait` (default `5m`). In exchange, anyone who knows an identifier can keep that account's password login waiting up to that long, again and again; passkey and federation logins are not held back.
-- **Left to you:** setting the trusted proxies, so that each request's source is the client's and not your proxy's.
+- **Left to you:**
+  - Setting the trusted proxies, so that each request's source is the client's and not your proxy's.
+  - Setting `rate-limit.fail-mode = open` only where an outage must not refuse requests: a request limit then lets requests through uncounted while the store cannot count (attempt limits still answer 503). Every start warns `rate-limit.fail_open`.
 
 ## Upstream identity providers
 
@@ -267,7 +269,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - Keeping a lagging replica from being promoted.
   - The replicas' own persistence.
   - Leaving the server's settings as they were at boot.
-  - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them.
+  - Setting `store.accept-volatile` only where losing what was used is accepted: the spaces needing durable or replicated storage boot on memory, and a restart forgets them. Every start that boots such spaces warns `store.volatile_accepted`, naming them.
   - Reaching a Redis off the host by a `rediss` URL: with a `redis` one in `redis.url`, what the store keeps and the password the URL carries go in the clear. Boot does not refuse it, and warns `redis.plaintext` at every start where the host is not loopback by its name.
 
 ## Audit
