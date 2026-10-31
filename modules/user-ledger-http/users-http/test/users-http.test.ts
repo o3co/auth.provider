@@ -327,7 +327,7 @@ describe("users-http", () => {
 		expect(logged).toEqual([]);
 	});
 
-	it("answers unavailable to a 404 or a 410 that does not say it knows no such user, logging its status", async () => {
+	it("answers unavailable to a 404 or a 410 that does not say it knows no such user, logging its status [guarantee-3-f]", async () => {
 		const { ledger } = await open();
 		const answers: Answer[] = [
 			{ status: 404 },
@@ -949,7 +949,7 @@ describe("users-http looking a user up by upstream identity", () => {
 		expect(JSON.parse(asked?.body ?? "")).toEqual({ idp: "apple", subject: "apple-alice" });
 	});
 
-	it("answers none to a 404 or a 410, and unavailable to a 401, a 403 or anything else it cannot read", async () => {
+	it("answers none to a 404 or a 410 saying it knows no such user, and unavailable to a bare 404 or 410, a 401, a 403 or anything else it cannot read", async () => {
 		const { ledger } = await open({ "upstream-url": upstreamUrl() });
 		expect(await ledger.byUpstream?.("apple", "apple-nobody")).toEqual({ kind: "none" });
 		expect(await ledger.byUpstream?.("apple", "apple-gone")).toEqual({ kind: "none" });
