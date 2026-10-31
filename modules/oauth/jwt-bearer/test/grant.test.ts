@@ -1114,7 +1114,7 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		const told = logged.lines().filter((l) => l.event === "jwt-bearer.self_issued_signers");
 		expect(told).toEqual([
 			{
-				level: "info",
+				level: "warn",
 				event: "jwt-bearer.self_issued_signers",
 				fields: { at: "jwt-bearer.issuers.1" },
 			},

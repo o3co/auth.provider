@@ -2,7 +2,7 @@ import { Unavailable } from "@mod/kernel";
 import { type Entry, sessions } from "@mod/session";
 import type { UpstreamRefresh } from "@mod/upstreams";
 import { describe, expect, it, vi } from "vitest";
-import { back, harness, named, type Offered, unreadable } from "./harness.ts";
+import { back, harness, named, type Offered, receiver, unreadable } from "./harness.ts";
 
 const refreshed = (more: Record<string, unknown> = {}): UpstreamRefresh =>
 	({
@@ -440,4 +440,12 @@ describe("the upstream logout route", () => {
 		});
 		expect((await h.ask(h.token)).status).toBe(200);
 	});
+});
+
+it("warns at every start for each registered client that receives upstream tokens, by its id", async () => {
+	const h = await harness();
+	const warned = h.logged().filter((line) => line.event === "federation-tokens.receives");
+	expect(warned).toEqual([
+		{ level: "warn", event: "federation-tokens.receives", fields: { client: receiver } },
+	]);
 });

@@ -106,7 +106,9 @@ async function open(section: unknown = settings()) {
 	});
 	const [ledger] = app.get(collected);
 	if (!ledger) throw new Error("no ledger contributed");
-	return { ledger, logged };
+	// What the ledger logs once booted: outbound's start warnings (its plain-loopback pair) come before.
+	const from = logged.lines().length;
+	return { ledger, logged: { lines: () => logged.lines().slice(from) } };
 }
 const spending = (jti: string, keepUntil = 1_800_000_090_500) => ({
 	sentIssuer: fixedIss,

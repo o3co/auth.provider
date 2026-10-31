@@ -1,6 +1,9 @@
+import { assemble, kernelConfig } from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import webauthnModule from "../src/module.ts";
 import { section } from "../src/section.ts";
+import { webauthnConfig } from "../src/testing.ts";
 
 const accepts = (rpId: string, origins: string[]) =>
 	section.safeParse({ "rp-id": rpId, "rp-name": "RP", origins }).success;
@@ -116,4 +119,20 @@ it("refuses in production an origin over plain http on localhost, in either list
 		"top-origins",
 	]);
 	expect(ask(["https://as.example"], ["https://top.example"])).toEqual([]);
+});
+
+it("warns at every start where other origins' pages may frame a ceremony, by their count alone", async () => {
+	const warned = async (top: string[]) => {
+		const recorded = recordingLog();
+		await assemble({
+			modules: [webauthnModule],
+			config: { ...kernelConfig(), ...webauthnConfig({ "top-origins": top }) },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+		return recorded.lines();
+	};
+	expect(await warned(["https://shop.example", "https://news.example"])).toEqual([
+		{ level: "warn", event: "webauthn.framed_by_other_origins", fields: { count: 2 } },
+	]);
+	expect(await warned([])).toEqual([]);
 });

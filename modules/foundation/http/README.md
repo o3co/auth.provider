@@ -33,7 +33,7 @@
 - `./testing`: test configuration and request builders with working defaults.
 
 ## Invariants
-- Serves requests itself, as the one server of a deployment (`network`: `serves-http`).
+- Serves requests itself, as the one server of a deployment (`network`: `serves-http`). Every start under `insecure-origin` warns `http.insecure_origin`: the session's cookie goes in the clear.
 - Boot is refused, naming the route and the policy, when two routes take one method and path, a route uses a policy no module applies, a policy has two rules, or a route breaks what it declares; policies match by value, and a label only names one in a report.
 - Every answer it writes carries the security headers, set in one place: a Content-Security-Policy whose default source is none, taking scripts, styles, images and fonts from this origin (styles and fonts also over https) and letting no one frame the answer, HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy: no-referrer` and the cross-origin ones; a route's own values of them, its policy included, are replaced; only `loads` widens a page's policy.
 - Stop refuses new connections and closes idle ones; requests in flight finish (`Connection: close`) until its deadline cuts them.

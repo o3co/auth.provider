@@ -129,7 +129,7 @@ From `@mod/dpop`.
 |---|---|---|---|---|---|---|
 | `dpop.algorithms` | list of ES256 \| ES384 \| EdDSA \| RS256 | `["ES256","ES384","EdDSA","RS256"]` |  |  |  | The signing algorithms a DPoP proof may use. |
 | `dpop.proof-window` | string | `1m` |  |  |  | How far a proof's `iat` may lie from the clock on either side, from `1s` to `5m` in whole seconds. |
-| `dpop.nonce.required` | never \| as \| as+rs | `never` |  | `DPOP_NONCE_REQUIRED` | `never` | Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources. |
+| `dpop.nonce.required` | never \| as \| as+rs | `as` |  | `DPOP_NONCE_REQUIRED` | `as` | Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources. |
 | `dpop.nonce.ttl` | string | `5m` |  | `DPOP_NONCE_TTL` | `5m` | How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this. |
 | `dpop.nonce.secret` | string |  |  | `DPOP_NONCE_SECRET` | `REPLACE-NONCE-SECRET-BASE64-32-BYTES` | The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never. |
 

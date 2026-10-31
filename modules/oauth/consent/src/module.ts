@@ -6,7 +6,7 @@ import { defineModule, Unavailable } from "@mod/kernel";
 import { sessions } from "@mod/session";
 import { loopbackPagesRefused } from "@mod/url-setting";
 import { askKey, storedOf } from "./ask.ts";
-import { clientCopy, clientSection } from "./client-section.ts";
+import { clientCopy, clientSection, isFirstParty } from "./client-section.ts";
 import { consents } from "./contract.ts";
 import { answerRoute, showRoute } from "./routes.ts";
 import { section } from "./section.ts";
@@ -43,6 +43,10 @@ export default defineModule(
 			const asks = await c.get(askStore);
 			const origin = (await c.get(site)).origin;
 			if (origin === undefined) return c.refuse("consent", "a public origin is required");
+			// Told at every start by client: its users are never asked.
+			for (const client of (await c.get(clients)).registered()) {
+				if (isFirstParty(client)) c.log.warn("consent.first_party", { client: client.id });
+			}
 			/** Destinations are https URLs on this deployment's own origin; the caller made them. */
 			const onOrigin = (url: string) => httpsUrl(url)?.origin === origin;
 			const { page } = c.section;

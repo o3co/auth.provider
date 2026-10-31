@@ -23,7 +23,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
@@ -45,8 +45,10 @@ import { accessTokenType, type ExchangeVerifier, exchangeVerifiers } from "../sr
 import tokenExchange from "../src/module.ts";
 
 const now = 1_800_000_000_000;
+const logged = recordingLog();
 const runtime = quietRuntime({
 	clock: { now: () => now },
+	log: logged.log,
 	random: { bytes: (n) => new Uint8Array(n).map(() => Math.floor(Math.random() * 256)) },
 });
 const grantType = "urn:ietf:params:oauth:grant-type:token-exchange";
@@ -1319,4 +1321,17 @@ describe("token-exchange: an answer told by its kind", () => {
 			]);
 		}
 	});
+});
+
+it("warns at every start for each client that exchanges while public or exchanges others' tokens, by its id", async () => {
+	const from = logged.lines().length;
+	await serve();
+	const warned = logged
+		.lines()
+		.slice(from)
+		.filter((line) => line.event.startsWith("token-exchange."));
+	expect(warned).toEqual([
+		{ level: "warn", event: "token-exchange.others_tokens", fields: { client: "gate" } },
+		{ level: "warn", event: "token-exchange.public_exchange", fields: { client: "device" } },
+	]);
 });

@@ -1,4 +1,4 @@
-import { metadataSections, type Section } from "@mod/clients";
+import { clients, metadataSections, type Section } from "@mod/clients";
 import { grants, tokenTies } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
@@ -54,7 +54,7 @@ export default defineModule(
 		name: "token-exchange",
 		replicaSafe: true,
 		section,
-		takes: [tokens, issuer, exchangeVerifiers, tokenTies],
+		takes: [tokens, issuer, exchangeVerifiers, tokenTies, clients],
 	},
 	(m) => [
 		m.contribute(metadataSections).by(() => clientSection),
@@ -69,6 +69,13 @@ export default defineModule(
 					"token-exchange",
 					"tokens.subject-check is none, so a token made before a subject's revocation could be exchanged for a new one: compose a subject check and leave tokens.subject-check unset, or leave token-exchange out",
 				);
+			}
+			// Told at every start by client: each exchanges more than its own tokens, or while public.
+			for (const client of (await c.get(clients)).registered()) {
+				const { "others-tokens": others, "public-exchange": publicly } =
+					client.section(clientSection);
+				if (publicly) c.log.warn("token-exchange.public_exchange", { client: client.id });
+				if (others) c.log.warn("token-exchange.others_tokens", { client: client.id });
 			}
 			const verifiers = await c.collect(exchangeVerifiers);
 			return exchangeGrant({

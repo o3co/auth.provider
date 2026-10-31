@@ -19,7 +19,7 @@
 - Connections refuse boot without the page that asks the user.
 - A browser sent to the login page or the step-up page comes back to the connect it opened.
 - A connection's upstream round trip is `upstream-round-trip`'s, taken before its code is exchanged, at its own connection; the intent, browser session and subject are checked before and after the exchange, after the tokens are judged.
-- The upstream account matches the grant's and the client's `upstream_sub`; with `identity-check: required`, another holder or no answer refuses.
+- The upstream account matches the grant's and the client's `upstream_sub`; with `identity-check: required`, another holder or no answer refuses; `none`, every start warns `federation-grants-connect.identity_unchecked`.
 - Tokens, secrets and upstream text reach neither answers nor logs.
 
 ## Depends on

@@ -13,7 +13,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
 import { type LoginGate, loginGates, logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
@@ -74,6 +74,14 @@ interface Setup {
 	readonly extra?: Module[];
 }
 
+const logged = recordingLog();
+/** The lines naming `event` since `from`. */
+const loggedSince = (from: number, event: string) =>
+	logged
+		.lines()
+		.slice(from)
+		.filter((line) => line.event === event);
+
 async function serve(setup: Setup = {}) {
 	const audit = auditStandIn();
 	const seen: LoginFacts[] = [];
@@ -121,7 +129,7 @@ async function serve(setup: Setup = {}) {
 					])),
 			"login-passkey": setup.section ?? {},
 		},
-		runtime: quietRuntime(),
+		runtime: quietRuntime({ log: logged.log }),
 	};
 	const app = await assemble(input);
 	await app.start();
@@ -471,18 +479,30 @@ describe("the gate credential-policy", () => {
 		expect(passkeyLogin.status).toBe(200);
 	});
 
-	it("lets the exempt group's password logins through", async () => {
+	it("lets the exempt group's password logins through, warning so at every start", async () => {
+		const from = logged.lines().length;
 		const s = await serve({
 			section: { password: "refused-when-held", "password-exempt-group": "staff" },
 			extra: witnessed(),
 		});
+		expect(loggedSince(from, "login-passkey.password_exempt_group")).toEqual([
+			{
+				level: "warn",
+				event: "login-passkey.password_exempt_group",
+				fields: {
+					reason: "a group's members keep password logins where passkey holders are refused them",
+				},
+			},
+		]);
 		await s.registered("s-alice");
 		expect((await passwordLogin(s, "s-alice", ["staff"])).kind).toBe("opened");
 		expect((await passwordLogin(s, "s-alice", ["others"])).kind).toBe("refused");
 	});
 
 	it("passes every login where the password is allowed, as by default", async () => {
-		const s = await serve();
+		const from = logged.lines().length;
+		const s = await serve({ section: { "password-exempt-group": "staff" } });
+		expect(loggedSince(from, "login-passkey.password_exempt_group")).toEqual([]);
 		await s.registered("s-alice");
 		expect((await passwordLogin(s, "s-alice")).kind).toBe("opened");
 	});

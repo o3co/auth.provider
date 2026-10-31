@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Implements the `store` contract with Redis, with one script per shape of basic operation and none per feature.
-- Maps each partition to a hash tag, so a batch and a consistent read run in one slot. A batch across partitions runs in one script on the one server, over the slots of every partition it touches; it is what keeps this adapter off a cluster.
+- Maps each partition to a hash tag, so a batch and a consistent read run in one slot. A batch across partitions runs in one script on the one server, over the slots of every partition it touches.
 - Checks, once at boot, that the Redis configuration gives the declared spaces their guarantees.
 - Confirms an answer before giving it, for spaces that need replicated or confirmed reads.
 
@@ -26,10 +26,9 @@
 - Boot then runs once what a confirmation would and a store script does: with `replication`, the confirming connection reaching another server than the operations (their run ids differ, and the operations' did not change meanwhile, as in a failover), and a store script (`read`, `batchAcross`) the server cannot run, refuse boot, named; the probe runs both again, answering unready. A replica missing or lagging is neither.
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand), the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
 - `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them; every boot warns `redis.durability_none` naming the durable spaces.
-- Boot is refused on a space needing replicated or confirmed reads without `replication`.
 - A refusal or a warning never tells the URL, which may hold a password; a failure is told by its code alone, never its message: an error event as `redis.error` with `code`, and a refused connection in `redis.url`'s reason.
 - `replicas`: at runtime, no replica seen is unavailable.
-- `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable.
+- `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable; every boot warns `redis.replication_none` naming the replicated spaces.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
 - Internal module `round` (the confirmation round).
 - Internal module `client` (the client's options; what the URL and environment tell of the connection): boot warns `redis.plaintext` where the URL is in the clear, `redis.client_debug_log` where the client's own log is on. Another floor refuses boot.
@@ -37,7 +36,7 @@
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - Nothing a connection does ends the process.
 - The store clock is Redis's time; values and counts are kept in separate keys, values untouched.
-- A scan walks Redis's SCAN over the space's value keys alone, which one server holds (clusters are refused); a value at its very expiry may still be listed, and a read then finds none. A failover or restart during a walk loses its cursor's place, so a key may not come; a later walk lists it.
+- A scan walks Redis's SCAN over the space's value keys alone, which one server holds; a value at its very expiry may still be listed, and a read then finds none. A failover or restart during a walk loses its cursor's place, so a key may not come; a later walk lists it.
 
 ## Deployment
 - With `rediss`, a certificate for the URL's host, trusted by the platform.
