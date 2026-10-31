@@ -1,5 +1,6 @@
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { docker as dockerRun, dockerSync, dockerWithin } from "@mod/docker-client";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { configured, installed } from "./full-app.ts";
 
@@ -26,9 +27,8 @@ async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms
 	throw new Error(`${what} did not happen in ${ms} ms`);
 }
 
-/** A docker call killed past a minute, as long as its hook may take, so a stalled daemon fails the test. */
-const docker = (...args: string[]) =>
-	execFileSync("docker", args, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
+const docker = (...args: string[]) => dockerSync(args, dockerWithin.control);
+const run = (...args: string[]) => dockerRun(["run", ...args], dockerWithin.run);
 /** Whether Redis answers PING; a container still starting answers nothing yet. */
 const pings = () => {
 	try {
@@ -41,8 +41,7 @@ const pings = () => {
 beforeAll(async () => {
 	const port = await freePort();
 	// What the redis module's boot checks ask of the server for the spaces full declares.
-	container = docker(
-		"run",
+	container = await run(
 		"-d",
 		"--rm",
 		"-p",

@@ -2772,6 +2772,9 @@ importers:
         specifier: 7.8.5
         version: 7.8.5
     devDependencies:
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../../tooling/docker-client
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
