@@ -5,7 +5,7 @@ import { writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
-import { configFiles, kernel } from "@mod/app-output";
+import { configFiles, kernel } from "@mod/app-entries";
 import { parse } from "@o3co/ts.hocon";
 import { expect } from "vitest";
 import { packageDirs as dirs, leaves, read, type Tree } from "./full-app.ts";
