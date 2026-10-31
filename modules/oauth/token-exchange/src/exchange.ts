@@ -6,7 +6,7 @@ import { Unavailable } from "@mod/kernel";
 import { resourceRefusal } from "@mod/resource-indicators";
 import { type Binding, carried } from "@mod/sender-binding";
 import type { Actor, IssuedAccess, Tokens } from "@mod/tokens";
-import { type Read, verified } from "./answer.ts";
+import { verified } from "./answer.ts";
 import {
 	accessTokenType,
 	type Exchanged,
@@ -110,7 +110,7 @@ export function exchangeGrant(parts: Parts): Grant {
 		role: Role,
 		token: string,
 		type: string,
-	): Promise<Read | Refusal> => {
+	): Promise<Exchanged | Refusal> => {
 		const verifier = parts.verifiers.get(type);
 		if (!verifier) return refused(`${role}_token_type is not supported`);
 		const answer = await verified(verifier, token);

@@ -19,7 +19,7 @@ const common = {
 	subject: z.string().min(1),
 	issuer: z.string(),
 	expiresAt: z.number(),
-	// None, or one not a finite number, stands before any boundary.
+	// Required, yet none, or one not a finite number, stands before any boundary.
 	standingAt: z.number().catch(0),
 };
 const ownFields = {
@@ -58,7 +58,7 @@ const foreignOf = (read: {
 	standingAt: number;
 	clients: string[];
 	holderDigest?: string | undefined;
-}): ForeignToken & Read => ({
+}): ForeignToken => ({
 	kind: "foreign",
 	subject: read.subject,
 	issuer: read.issuer,
@@ -101,18 +101,15 @@ export function selfIssued(tokens: Tokens, issuer: string): ExchangeVerifier {
 	return verifier;
 }
 
-/** A verifier's answer as read, its standing time always given. */
-export type Read = Exchanged & { readonly standingAt: number };
-
 /** A verifier's answer, its shape checked once and frozen; an invalid or malformed one is no answer. */
 export async function verified(
 	verifier: ExchangeVerifier,
 	token: string,
-): Promise<Read | undefined> {
+): Promise<Exchanged | undefined> {
 	const parsed = answer.safeParse(await verifier.verify(token));
 	if (!parsed.success || parsed.data.kind === "invalid") return undefined;
-	const read: Read =
-		parsed.data.kind === "foreign" ? foreignOf(parsed.data) : (parsed.data as OwnToken & Read);
+	const read: Exchanged =
+		parsed.data.kind === "foreign" ? foreignOf(parsed.data) : (parsed.data as OwnToken);
 	if (read.kind === "foreign") return deepFreeze(read);
 	const { amr, authenticatedAt, acr, issued, ...rest } = read;
 	// Only this provider's own tokens have a family or a session to look up.
