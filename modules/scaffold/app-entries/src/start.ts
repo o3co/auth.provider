@@ -12,7 +12,6 @@ export async function filled(template: string, fill: Readonly<Record<string, str
 	return text.replace(/\{\{(\w+)\}\}/g, (all, key: string) => fill[key] ?? all);
 }
 
-/** The app's entry, importing each module under what `importOf` names it (the workspace's name, unless published). */
 /** Where the operator writes the keys the configuration reads: each one's variable, those of several lines, and the local layer. */
 export interface KeysWritten {
 	readonly read: Readonly<Record<string, string>>;
@@ -33,6 +32,7 @@ export const refusedPart = (keys: KeysWritten = noKeys) =>
 		local: keys.local,
 	});
 
+/** The app's entry, importing each module under what `importOf` names it (the workspace's name, unless published). */
 export const mainSource = async (
 	modules: readonly string[],
 	importOf = (name: string) => name,
