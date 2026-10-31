@@ -16,6 +16,7 @@ Internal module of `kernel`: the clock, randomness and log every module is given
 - A log call never throws, so no caller wraps one in try.
 - Lines below the level reach no sink; the rest reach every sink in module order, skipping one that throws. Sinks are built first; lines logged meanwhile are dropped.
 - A test's runtime keeps its own log.
+- A field never takes an envelope name (`level`, `event`, `at`), so a sink may write both as one object; the methods' type refuses one.
 
 ## Depends on
 - None; the package's handles

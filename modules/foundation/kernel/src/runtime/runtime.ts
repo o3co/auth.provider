@@ -10,14 +10,29 @@ export interface Random {
 
 export type LogFields = Readonly<Record<string, string | number | boolean>>;
 
-/** A call never throws: kernel guards every log it hands out, so no caller wraps one in try. */
+/**
+ * A call never throws: kernel guards every log it hands out, so no caller wraps one in try. No field
+ * takes a line's own name (level, event, at), which a sink writes beside the fields as one object.
+ */
 export interface Log {
-	trace(event: string, fields?: LogFields): void;
-	debug(event: string, fields?: LogFields): void;
-	info(event: string, fields?: LogFields): void;
-	warn(event: string, fields?: LogFields): void;
-	error(event: string, fields?: LogFields): void;
-	fatal(event: string, fields?: LogFields): void;
+	trace<
+		F extends LogFields & { readonly level?: never; readonly event?: never; readonly at?: never },
+	>(event: string, fields?: F): void;
+	debug<
+		F extends LogFields & { readonly level?: never; readonly event?: never; readonly at?: never },
+	>(event: string, fields?: F): void;
+	info<
+		F extends LogFields & { readonly level?: never; readonly event?: never; readonly at?: never },
+	>(event: string, fields?: F): void;
+	warn<
+		F extends LogFields & { readonly level?: never; readonly event?: never; readonly at?: never },
+	>(event: string, fields?: F): void;
+	error<
+		F extends LogFields & { readonly level?: never; readonly event?: never; readonly at?: never },
+	>(event: string, fields?: F): void;
+	fatal<
+		F extends LogFields & { readonly level?: never; readonly event?: never; readonly at?: never },
+	>(event: string, fields?: F): void;
 }
 
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
