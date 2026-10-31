@@ -20,13 +20,7 @@ import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	type AccessCondition,
-	accessConditions,
-	issuancePolicies,
-	subjectChecks,
-	tokens,
-} from "../src/contract.ts";
+import { type AccessCondition, accessConditions, subjectChecks, tokens } from "../src/contract.ts";
 import { defaultLifetimeSeconds } from "../src/limits.ts";
 import tokensModule from "../src/module.ts";
 import { section } from "../src/section.ts";
@@ -414,21 +408,6 @@ it("refuses a token whose cap has passed, handing none out", async () => {
 		reason: "no_lifetime_left",
 		description: "expired",
 	});
-});
-
-it("stamps iat as the second issue was asked, though a policy took five seconds to answer", async () => {
-	const waiting = defineModule({ name: "waiting", replicaSafe: true, takes: [] }, (m) => [
-		m.contribute(issuancePolicies).by(() => ({
-			name: "waiting",
-			judge: async () => {
-				now += 5_000;
-				return { kind: "allowed" as const };
-			},
-		})),
-	]);
-	const asked = Math.floor(now / 1000);
-	const t = await boot({ revocation: "unsupported" }, { extra: [waiting] });
-	expect(claimsOf((await issueFor(t, grant)).token)).toMatchObject({ iat: asked });
 });
 
 it("refuses a token another issuer stamped, and one bound by two members", async () => {

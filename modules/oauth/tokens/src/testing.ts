@@ -46,7 +46,7 @@ export interface TokensUnderTest {
 	advance(ms: number): void;
 	/** A binding kind the composition knows: the `cnf` member it writes, and its token type. */
 	readonly known: { readonly member: string; readonly tokenType: string };
-	/** From now on, the composition's subject check answers revoked for this subject. */
+	/** From now on, the composition's subject check answers revoked for this subject's tokens issued up to now. */
 	revokeSubject(subject: string): void;
 }
 
