@@ -18,11 +18,12 @@ const grant: AccessGrant = {
 const valid = (
 	tokenType = "Bearer",
 	granted: AccessGrant = grant,
-): Extract<AccessCheck, { kind: "valid" }> => ({
+): Extract<AccessCheck, { kind: "valid" }> & { readonly standingAt?: number } => ({
 	kind: "valid",
 	id: "token-1",
 	grant: granted,
 	expiresAt: 1000,
+	standingAt: 0,
 	tokenType,
 });
 const open: AuthContext = { subject: "ann", amr: ["pwd"], authenticatedAt: 0 };
