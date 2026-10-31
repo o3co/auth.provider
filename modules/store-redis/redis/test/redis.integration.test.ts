@@ -660,20 +660,27 @@ describe("one server alone, as configured with replication none", () => {
 		(m) => [m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] }))],
 	);
 
-	it("boots on Redis 7.4 and 7.0 alike: one server, its run id the same to both connections, and the store's scripts run", async () => {
+	it("boots on Redis 7.4 and 7.0 alike: one server, its run id the same to both connections, and the store's scripts run, warning at each boot of the spaces it leaves unreplicated", async () => {
 		for (const version of ["redis:7.4-alpine", "redis:7.0-alpine"]) {
 			const port = await freePort();
 			const id = docker("run", "-d", "--rm", "-p", `127.0.0.1:${port}:6379`, version);
 			lone.push(id);
 			await waitFor(() => pings(id));
+			const recorded = recordingLog();
 			const app = await assemble({
 				modules: [redisModule, tlsOptionsForTests, replicatedOnly],
 				config: {
 					...kernelConfig(),
 					redis: { url: `redis://127.0.0.1:${port}`, prefix: "alone", replication: "none" },
 				},
+				runtime: quietRuntime({ log: recorded.log }),
 			});
 			await app.stop(1000);
+			const warned = recorded.lines().filter((line) => line.event === "redis.replication_none");
+			expect(
+				warned.map((line) => line.fields.spaces),
+				version,
+			).toEqual(["replicated"]);
 		}
 	}, 90_000);
 });
