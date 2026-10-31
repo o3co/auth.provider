@@ -44,7 +44,7 @@ What each module contains is described by that module's contract card (each modu
 | Received values: a name's single value, and the names repeated | vocabulary | http |
 | Signing, verification, publishing public keys | contract | keys |
 | Sending outbound HTTP requests, and the operator's section `outbound` | contract / setting | outbound |
-| Where outbound requests may go: the destination policy, its boot questions and host lists | contract / setting | outbound-policy |
+| Where outbound requests may go: the destination policy and its boot questions | contract / setting | outbound-policy |
 | The floor of the provider's own TLS connections as a client, the certificate checked among it: the section `tls-options`, its contract and `heldToFloor` | contract / setting | tls-options |
 | What an IP address reaches by its kind: special-purpose, private, loopback | contract | address-reach |
 | How an operator writes a host in configuration (a name, `.name`, an address, a `host:port` pair), and whether a host is among such entries | vocabulary / setting | host-entries |
