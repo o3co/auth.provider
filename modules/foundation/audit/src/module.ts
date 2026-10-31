@@ -45,11 +45,126 @@ const abortOf = (signal: AbortSignal) =>
 		else signal.addEventListener("abort", () => resolve(), { once: true });
 	});
 
+/** The receivers a section names; `none` names none. */
+const namedIn = (section: { readonly receivers: "none" | readonly string[] }) =>
+	section.receivers === "none" ? [] : section.receivers;
+
+/** The receivers known by name, the built-in among them, and what refuses the boot: a contributed one under a built-in name or not named, or a name no receiver answers. */
+function receiversOf(
+	contributed: readonly AuditReceiver[],
+	named: readonly string[],
+	log: Log,
+): { known: ReadonlyMap<string, AuditReceiver>; refusals: readonly Refusal[] } {
+	const builtIns = new Map([["log", logReceiver(log)]]);
+	const known = new Map(builtIns);
+	const refusals: Refusal[] = [];
+	for (const receiver of contributed) {
+		if (builtIns.has(receiver.name)) {
+			refusals.push({
+				where: "audit.receivers",
+				reason: `${receiver.name} is a built-in name`,
+			});
+		} else if (!named.includes(receiver.name)) {
+			refusals.push({
+				where: "audit.receivers",
+				reason: `${receiver.name} is composed but not named`,
+			});
+		}
+		known.set(receiver.name, receiver);
+	}
+	// A name written in the list is a configured value: it is told by its place alone, beside the
+	// names that are composed, which are the modules' own.
+	const composed = [...known.keys()].join(", ") || "none";
+	for (const [at, name] of named.entries()) {
+		if (!known.has(name)) {
+			refusals.push({
+				where: `audit.receivers.${at}`,
+				reason: `names no composed receiver (composed: ${composed})`,
+			});
+		}
+	}
+	return { known, refusals };
+}
+
+/** One lane per named receiver: delivers each event, counts what a receiver loses, and at stop loses what is still under way. */
+function lanesOver(
+	named: readonly string[],
+	known: ReadonlyMap<string, AuditReceiver>,
+	counted: Counter,
+	log: Log,
+	max: number,
+) {
+	/** One receiver's events under way, lost since boot, and lost since it last took one. */
+	const lanes = named.map((name) => ({
+		receiver: known.get(name) as AuditReceiver,
+		pending: 0,
+		lost: 0,
+		losing: 0,
+	}));
+	type Lane = (typeof lanes)[number];
+	/** Past the stop deadline: what settles after is neither taken nor lost again. */
+	let closed = false;
+	const underWay = new Set<Promise<void>>();
+	/** `failure` is the kind alone (`backlog`, `stopped`, or the error's name), never a message a receiver wrote. */
+	const lose = (lane: Lane, failure: string) => {
+		lane.lost += 1;
+		counted.add({ receiver: lane.receiver.name });
+		lane.losing += 1;
+		if (lane.losing === 1) {
+			log.warn("audit receiver losing events", {
+				receiver: lane.receiver.name,
+				lost: 1,
+				failure,
+			});
+		}
+	};
+	const took = (lane: Lane) => {
+		if (lane.losing === 0) return;
+		log.warn("audit receiver recovered", { receiver: lane.receiver.name, lost: lane.losing });
+		lane.losing = 0;
+	};
+	return {
+		stop: async (signal: AbortSignal) => {
+			await Promise.race([Promise.allSettled([...underWay]), abortOf(signal)]);
+			closed = true;
+			for (const lane of lanes) {
+				for (; lane.pending > 0; lane.pending -= 1) lose(lane, "stopped");
+			}
+		},
+		deliver: (stamped: AuditEvent) => {
+			for (const lane of lanes) {
+				if (lane.pending >= max) {
+					lose(lane, "backlog");
+					continue;
+				}
+				lane.pending += 1;
+				// Deferred, so record returns first, and a receiver that throws at once fails like one that rejects.
+				const delivery = Promise.resolve()
+					.then(() => lane.receiver.receive(stamped))
+					.then(
+						() => {
+							if (!closed) took(lane);
+						},
+						(error: unknown) => {
+							if (!closed) lose(lane, error instanceof Error ? error.name : "thrown");
+						},
+					)
+					.finally(() => {
+						if (!closed) lane.pending -= 1;
+						underWay.delete(delivery);
+					});
+				underWay.add(delivery);
+			}
+		},
+		lost: () => Object.freeze(Object.fromEntries(lanes.map((l) => [l.receiver.name, l.lost]))),
+	};
+}
+
 export default defineModule(
 	{ name: "audit", section, replicaSafe: true, takes: [auditReceivers] },
 	(m) => [
 		m.provide(lostEvents).by((c) => {
-			const named = c.section.receivers === "none" ? [] : c.section.receivers;
+			const named = namedIn(c.section);
 			const spec = {
 				name: "auth_audit_events_lost_total",
 				help: "Audit events a receiver lost since boot: past max-pending, failed, or under way at the stop deadline.",
@@ -60,78 +175,20 @@ export default defineModule(
 		}),
 		m.contribute(instruments).by((c) => c.get(lostEvents)),
 		m.provide(audit).by(async (c) => {
-			const contributed = await c.collect(auditReceivers);
-			const named = c.section.receivers === "none" ? [] : c.section.receivers;
-			const builtIns = new Map([["log", logReceiver(c.log)]]);
-			const known = new Map(builtIns);
-			const refusals: Refusal[] = [];
-			for (const receiver of contributed) {
-				if (builtIns.has(receiver.name)) {
-					refusals.push({
-						where: "audit.receivers",
-						reason: `${receiver.name} is a built-in name`,
-					});
-				} else if (!named.includes(receiver.name)) {
-					refusals.push({
-						where: "audit.receivers",
-						reason: `${receiver.name} is composed but not named`,
-					});
-				}
-				known.set(receiver.name, receiver);
-			}
-			// A name written in the list is a configured value: it is told by its place alone, beside the
-			// names that are composed, which are the modules' own.
-			const composed = [...known.keys()].join(", ") || "none";
-			for (const [at, name] of named.entries()) {
-				if (!known.has(name)) {
-					refusals.push({
-						where: `audit.receivers.${at}`,
-						reason: `names no composed receiver (composed: ${composed})`,
-					});
-				}
-			}
+			const named = namedIn(c.section);
+			const { known, refusals } = receiversOf(await c.collect(auditReceivers), named, c.log);
 			if (refusals.length > 0) c.refuseAll(refusals);
 			// On every boot: the operator stated that events go nowhere.
 			if (named.length === 0) c.log.warn("audit events go nowhere", { receivers: "none" });
-			const max = c.section["max-pending"];
-			/** One receiver's events under way, lost since boot, and lost since it last took one. */
-			const lanes = named.map((name) => ({
-				receiver: known.get(name) as AuditReceiver,
-				pending: 0,
-				lost: 0,
-				losing: 0,
-			}));
-			type Lane = (typeof lanes)[number];
-			const counted = await c.get(lostEvents);
-			/** Past the stop deadline: what settles after is neither taken nor lost again. */
-			let closed = false;
-			const underWay = new Set<Promise<void>>();
-			/** `failure` is the kind alone (`backlog`, `stopped`, or the error's name), never a message a receiver wrote. */
-			const lose = (lane: Lane, failure: string) => {
-				lane.lost += 1;
-				counted.add({ receiver: lane.receiver.name });
-				lane.losing += 1;
-				if (lane.losing === 1) {
-					c.log.warn("audit receiver losing events", {
-						receiver: lane.receiver.name,
-						lost: 1,
-						failure,
-					});
-				}
-			};
-			const took = (lane: Lane) => {
-				if (lane.losing === 0) return;
-				c.log.warn("audit receiver recovered", { receiver: lane.receiver.name, lost: lane.losing });
-				lane.losing = 0;
-			};
+			const lanes = lanesOver(
+				named,
+				known,
+				await c.get(lostEvents),
+				c.log,
+				c.section["max-pending"],
+			);
 			// At stop, deliveries under way get until the deadline; what is still under way then is lost.
-			c.onStop(async (signal) => {
-				await Promise.race([Promise.allSettled([...underWay]), abortOf(signal)]);
-				closed = true;
-				for (const lane of lanes) {
-					for (; lane.pending > 0; lane.pending -= 1) lose(lane, "stopped");
-				}
-			});
+			c.onStop(lanes.stop);
 			return Object.freeze<Audit>({
 				record: (event) => {
 					const { attributes, ...rest } = event;
@@ -146,32 +203,9 @@ export default defineModule(
 								),
 							}
 						: {};
-					const stamped: AuditEvent = deepFreeze({ ...rest, ...copied, at: c.clock.now() });
-					for (const lane of lanes) {
-						if (lane.pending >= max) {
-							lose(lane, "backlog");
-							continue;
-						}
-						lane.pending += 1;
-						// Deferred, so record returns first, and a receiver that throws at once fails like one that rejects.
-						const delivery = Promise.resolve()
-							.then(() => lane.receiver.receive(stamped))
-							.then(
-								() => {
-									if (!closed) took(lane);
-								},
-								(error: unknown) => {
-									if (!closed) lose(lane, error instanceof Error ? error.name : "thrown");
-								},
-							)
-							.finally(() => {
-								if (!closed) lane.pending -= 1;
-								underWay.delete(delivery);
-							});
-						underWay.add(delivery);
-					}
+					lanes.deliver(deepFreeze({ ...rest, ...copied, at: c.clock.now() }));
 				},
-				lost: () => Object.freeze(Object.fromEntries(lanes.map((l) => [l.receiver.name, l.lost]))),
+				lost: lanes.lost,
 			});
 		}),
 	],
