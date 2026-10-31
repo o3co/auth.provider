@@ -10,6 +10,7 @@
   - `policy`
   - `clientless`
   - `id-jag`
+  - `granting`
 
 ## Not here
 - Client authentication (`token-endpoint`).
@@ -26,7 +27,6 @@
   - `max-assertion-lifetime` (`1s` to `1d`, default `1h`): how far ahead its `exp` may be when taken, and its `exp` − `iat`, as `external-jwt` holds a longest lifetime. `clock-skew` (`0s` to `5m`, default `30s`). Each in whole seconds with its unit, narrowed by an entry alone.
 
 ## Invariants
-- Issued tokens do not outlive the assertion's expiry: one with less than a second left when its `jti` would be used up is `expired`, the `jti` left unused, and a token with less than a second left once signed is refused by `tokens`, also `expired`.
 - Boot is refused on an entry `issuers` cannot read as a trusted issuer, as its card says, each at its place (`jwt-bearer.issuers.<i>`), never by its value; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them.
 - `as-is`: the token is for the signer's subject. `linked`: for the subject `linkedSubjects` resolves (`upstream`, the signer's subject) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.
 - A refusal's reason is told in this grant's own words. Keys or subjects that cannot be told make the grant unavailable, using up no `jti`.
