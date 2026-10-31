@@ -191,6 +191,28 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		}
 		return lines.join("\n");
 	};
+	/** The package's named types a declaration's signature refers to and the entry does not export, each as `name (export)`. */
+	const hiddenReferencesIn = (
+		declaration: ts.Declaration,
+		symbol: ts.Symbol,
+		exportedDeclarations: ReadonlySet<ts.Node>,
+	): string[] => {
+		const found: string[] = [];
+		const visit = (node: ts.Node): void => {
+			if (ts.isTypeReferenceNode(node) || ts.isExpressionWithTypeArguments(node)) {
+				const name = ts.isTypeReferenceNode(node) ? node.typeName : node.expression;
+				const referenced = checker.getSymbolAtLocation(name);
+				for (const d of referenced ? (resolveAlias(referenced).declarations ?? []) : []) {
+					if (named(d) && inside(d) && !exportedDeclarations.has(d)) {
+						found.push(`${(d as ts.NamedDeclaration).name?.getText() ?? "?"} (${symbol.name})`);
+					}
+				}
+			}
+			ts.forEachChild(node, visit);
+		};
+		for (const part of signatureParts(declaration)) visit(part);
+		return found;
+	};
 	const exported = checker.getExportsOfModule(moduleSymbol);
 	const exportedDeclarations = new Set<ts.Node>();
 	for (const symbol of exported) {
@@ -211,19 +233,9 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 	for (const symbol of exported) {
 		for (const declaration of resolveAlias(symbol).declarations ?? []) {
 			if (!inside(declaration)) continue;
-			const visit = (node: ts.Node): void => {
-				if (ts.isTypeReferenceNode(node) || ts.isExpressionWithTypeArguments(node)) {
-					const name = ts.isTypeReferenceNode(node) ? node.typeName : node.expression;
-					const referenced = checker.getSymbolAtLocation(name);
-					for (const d of referenced ? (resolveAlias(referenced).declarations ?? []) : []) {
-						if (named(d) && inside(d) && !exportedDeclarations.has(d)) {
-							hidden.add(`${(d as ts.NamedDeclaration).name?.getText() ?? "?"} (${symbol.name})`);
-						}
-					}
-				}
-				ts.forEachChild(node, visit);
-			};
-			for (const part of signatureParts(declaration)) visit(part);
+			for (const found of hiddenReferencesIn(declaration, symbol, exportedDeclarations)) {
+				hidden.add(found);
+			}
 		}
 	}
 	return { values, types, hidden: [...hidden].sort(), members, tokens, points, docs, signatures };
