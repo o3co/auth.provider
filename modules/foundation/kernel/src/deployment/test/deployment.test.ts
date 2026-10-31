@@ -101,19 +101,23 @@ describe("the deployment's environment", () => {
 			{
 				level: "warn",
 				event: "kernel.allowed_in_development",
-				fields: { at: "origin.url", reason: "is plain http" },
+				fields: { key: "origin.url", reason: "is plain http" },
 			},
 			{
 				level: "warn",
 				event: "kernel.allowed_in_development",
-				fields: { at: "twice.a", reason: "is plain http" },
+				fields: { key: "twice.a", reason: "is plain http" },
 			},
 			{
 				level: "warn",
 				event: "kernel.allowed_in_development",
-				fields: { at: "twice.b.c", reason: "is on loopback" },
+				fields: { key: "twice.b.c", reason: "is on loopback" },
 			},
 		]);
+		// A sink writes the line's own level, event and at beside its fields, so none may take those names.
+		const own = ["level", "event", "at"];
+		for (const line of warned)
+			expect(Object.keys(line.fields).filter((k) => own.includes(k))).toEqual([]);
 		expect(JSON.stringify(recorded.lines())).not.toContain(secret);
 		// Production refuses the same, and warns none of it.
 		const before = recorded.lines().length;
