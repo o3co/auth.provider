@@ -23,7 +23,7 @@
   |---|---|
   | `200`, a JSON object with an `id` of a subject's shape (`users`) and a non-empty string `username` | the user |
   | `401` with a Bearer challenge, when a credential was sent | unavailable (the credential is refused) |
-  | `401` otherwise | none; to be read as a lookup's is in a later release |
+  | `401` otherwise | none |
   | anything else, `403` (a proxy before the ledger may send it while it fails), a `200` of another shape, `404` and other `2xx` included | unavailable |
 
 - A lookup, with the body `{"subject"}` by subject or `{"idp", "subject"}` by upstream identity:
