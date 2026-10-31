@@ -181,6 +181,18 @@ describe("a docker command held until it answers", () => {
 		}
 	};
 
+	it("names an object's command in two words, as a failure tells it", async () => {
+		client("exec sleep 30");
+		expect(thrown(() => dockerSync(["network", "rm", "n-1"], 300))).toMatchObject({
+			command: "network rm",
+			message: "docker network rm did not answer within 0.3 seconds",
+		});
+		expect(await failure(docker(["image", "inspect", "t"], 300))).toMatchObject({
+			command: "image inspect",
+			message: "docker image inspect did not answer within 0.3 seconds",
+		});
+	});
+
 	it("answers what the client wrote, trimmed, as `docker` does", () => {
 		client('echo "  $1 $2 $3  "');
 		expect(dockerSync(["network", "create", "n-1"], 5_000)).toBe("network create n-1");
@@ -202,7 +214,7 @@ describe("a docker command held until it answers", () => {
 			wrote: "out\n",
 		});
 		vi.stubEnv("PATH", mkdtempSync(join(tmpdir(), "no-docker-")));
-		expect(thrown(() => dockerSync(["info"], 5_000))).toMatchObject({ kind: "unstarted" });
+		expect(thrown(() => dockerSync(["ps"], 5_000))).toMatchObject({ kind: "unstarted" });
 	});
 
 	it("timed out where the client outlasts its time, the client ended and what it told kept", () => {
@@ -226,6 +238,7 @@ describe("a docker command held until it answers", () => {
 			["run", "redis"],
 			["image", "build", "."],
 			["compose", "up"],
+			["info"],
 		]) {
 			expect(() => dockerSync(args, 5_000), args.join(" ")).toThrow(TypeError);
 		}

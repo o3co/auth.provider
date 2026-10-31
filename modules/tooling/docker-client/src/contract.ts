@@ -48,6 +48,12 @@ export const dockerWithin = {
 	build: 15 * 60_000,
 } as const;
 
+/** The objects whose command is its second word: `image inspect`, `network create`. */
+const objects = new Set(["image", "network", "volume", "container", "builder", "buildx"]);
+/** A command as its failure names it: its first word, and an object's command with it. */
+const commandOf = ([first = "", second]: readonly string[]) =>
+	objects.has(first) && second !== undefined ? `${first} ${second}` : first;
+
 /**
  * How a command is run: `merged`, answering its errors' stream too; `signal`, ending it when its work
  * ends; `input`, written to it, as a build's Dockerfile on its standard input.
@@ -63,7 +69,7 @@ export type Docker = (args: readonly string[], within: number, told?: Told) => P
 
 export const docker: Docker = (args, within, { merged = false, signal, input } = {}) =>
 	new Promise((answer, fail) => {
-		const command = args[0] ?? "";
+		const command = commandOf(args);
 		if (within <= 0 || signal?.aborted) {
 			fail(new DockerFailed("timeout", command, `docker ${command} had no time left`));
 			return;
@@ -152,7 +158,6 @@ const heldCommands = new Set([
 	"pause",
 	"unpause",
 	"rm",
-	"info",
 	"version",
 	"logs",
 ]);
@@ -176,7 +181,7 @@ export function dockerSync(
 	within: number,
 	{ input, stdio }: { readonly input?: string; readonly stdio?: "ignore" } = {},
 ): string {
-	const command = args[0] ?? "";
+	const command = commandOf(args);
 	if (!held(args)) {
 		throw new TypeError(
 			`docker ${command} is for docker alone: it starts a process of its own, which ending a held client would leave running`,
