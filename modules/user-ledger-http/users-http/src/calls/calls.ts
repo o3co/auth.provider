@@ -88,31 +88,38 @@ export function calls(parts: CallParts): Calls {
 		if (!user) throw failed({ reason: "malformed" });
 		return user;
 	};
+	/**
+	 * None where the ledger says it knows no such user, unavailable where a 404 or 410 does not say
+	 * so (a bare 404 may be a wrong path, a gateway or a ledger hiding itself), undefined otherwise.
+	 */
+	const noUserIn = (answer: OutboundResponse) => {
+		const said = usersWire.noUser[answer.status];
+		if (said === undefined) return undefined;
+		const read = jsonObjectOf(answer, answer.status);
+		if (read.kind === "object" && read.value.error === said) return none;
+		throw failed({ status: answer.status, reason: "unmarked" });
+	};
 	return {
 		async verify(url, identifier, password) {
 			// The identifier under the name the ledger's password call reads.
 			const answer = await post(url, usersWire.verify(identifier, password));
-			// A 401 alone refuses the user: a 403 may come from a proxy before the ledger while it fails, and
-			// read as a wrong password it would hold the account's logins back.
+			// A 401, or a 404 or 410 saying so as a lookup's does, refuses the user: a 403 may come from a
+			// proxy before the ledger while it fails, and read as a wrong password it would hold the
+			// account's logins back.
 			if (answer.status === usersWire.refused) {
 				// A challenge refuses the credential; with none sent, it can only refuse the user.
 				const challenged = challengesBearer(answer.headers.get("www-authenticate"));
 				if (credential === undefined || !challenged) return none;
 				throw failed({ reason: "credential-refused" });
 			}
-			return userIn(answer, (user) => isName((user as { username?: unknown }).username));
+			return (
+				noUserIn(answer) ??
+				userIn(answer, (user) => isName((user as { username?: unknown }).username))
+			);
 		},
 		async lookup(url, asked) {
 			const answer = await post(url, asked);
-			// Not known, or known and refused, only where the ledger says so: a bare 404 may be a wrong
-			// path, a gateway or a ledger hiding itself, never no such user.
-			const said = usersWire.noUser[answer.status];
-			if (said !== undefined) {
-				const read = jsonObjectOf(answer, answer.status);
-				if (read.kind === "object" && read.value.error === said) return none;
-				throw failed({ status: answer.status, reason: "unmarked" });
-			}
-			return userIn(answer, () => true);
+			return noUserIn(answer) ?? userIn(answer, () => true);
 		},
 	};
 }
