@@ -20,6 +20,7 @@ export interface Manifest {
 	wires?: string;
 	joins?: string[];
 	exports?: Record<string, string>;
+	takesSamples?: { map: string; of: string }[];
 }
 export const manifest = (name: string): Manifest =>
 	JSON.parse(readFileSync(join(dirs.get(name) ?? "", "package.json"), "utf8"));
@@ -100,7 +101,12 @@ export async function writesListsLocally(target: string, modules: readonly strin
 			value,
 		]),
 	);
-	expect([...uncommented].filter(([key]) => key !== spansSections)).toEqual(lists);
+	// Under a map a composed package takes entry samples for, the entries are the types' samples, app-output's to test.
+	const taken = [kernel, ...modules]
+		.flatMap((n) => manifest(n).takesSamples ?? [])
+		.map((t) => `${t.map}.`);
+	const own = [...uncommented].filter(([key]) => !taken.some((t) => key.startsWith(t)));
+	expect(own.filter(([key]) => key !== spansSections)).toEqual(lists);
 	expect(uncommented.get(spansSections)).toEqual([expect.stringMatching(/^REPLACE-[A-Z-]+$/)]);
 	expect(example).toMatch(/^# audit\.receivers = \[REPLACE-[A-Z-]+\]$/m);
 	const env = await read(target, ".env.example");
