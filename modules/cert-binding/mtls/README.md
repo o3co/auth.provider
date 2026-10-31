@@ -21,7 +21,7 @@
 ## Invariants
 - The binding is the base64url SHA-256 of the leaf's DER, the same at issuance and at a resource.
 - A certificate the proxy forwarded unreadable is refused.
-- Self-signed: any certificate that parses binds.
+- Self-signed: any certificate that parses binds, which every start warns of (`mtls.self_signed`).
 - PKI: a path to an anchor whose revocation is confirmed binds.
 - A refusal answers `invalid_client` at issuance, a code RFC 6749 §5.2 registers, and `invalid_token` at a resource (RFC 8705 §3); its reason is only logged.
 - An outage answers unavailable under `on-unavailable` reject, and binds with a warning under allow.

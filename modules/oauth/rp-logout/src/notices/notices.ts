@@ -49,6 +49,10 @@ export interface NoticeParts {
 const logoutEvent = "http://schemas.openid.net/event/backchannel-logout";
 /** Seconds a logout token lives; it is sent at once. */
 const tokenSeconds = 300;
+/** The client took the notice: Back-Channel Logout 1.0 §2.8 answers a logout done with `200`. */
+const delivered = (status: number) => status >= 200 && status < 300;
+/** A client that is busy or down may take it later; any other answer, §2.8's `400` among them, is final. */
+const mayRetry = (status: number) => status === 408 || status === 429 || status >= 500;
 
 /** A notice's fields, or none when it does not read as one. */
 const fieldsOf = (notice: string): Fields | undefined => {
@@ -102,9 +106,8 @@ export function noticesOver(p: NoticeParts) {
 			p.log.warn("rp-logout.backchannel_refused", { client, reason: answer.reason });
 			return done();
 		}
-		if (answer >= 200 && answer < 300) return done();
-		// A client that is busy or down may take it later; any other answer is final.
-		if (answer === 408 || answer === 429 || answer >= 500) throw new Unavailable("rp-logout");
+		if (delivered(answer)) return done();
+		if (mayRetry(answer)) throw new Unavailable("rp-logout");
 		p.log.warn("rp-logout.backchannel_rejected", { client, status: String(answer) });
 		return done();
 	};

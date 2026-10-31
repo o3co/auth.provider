@@ -39,6 +39,9 @@ const badPorts = new Set([
 	6669, 6679, 6697, 10080,
 ]);
 
+/** The port a URL of this protocol (`https:` or `http:`, as `URL.protocol` writes it) reaches when it names none. */
+export const defaultPortOf = (protocol: string) => (protocol === "https:" ? 443 : 80);
+
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
 /**
@@ -146,7 +149,7 @@ export function admitUrl(
 		throw new DestinationRefused("scheme");
 	}
 	if (url.username !== "" || url.password !== "") throw new DestinationRefused("userinfo");
-	const port = url.port === "" ? (url.protocol === "https:" ? 443 : 80) : Number(url.port);
+	const port = url.port === "" ? defaultPortOf(url.protocol) : Number(url.port);
 	if (badPorts.has(port)) throw new DestinationRefused("port");
 	const host = normalized(url.hostname);
 	if (host === undefined || matches(host, policy.deny)) throw new DestinationRefused("denied");
@@ -259,7 +262,7 @@ export function credentialRefusal(
 ): CredentialRefusal | undefined {
 	const parsed = urls.map((raw) => URL.parse(raw));
 	const named = (url: URL) => {
-		const port = url.port === "" ? 80 : Number(url.port);
+		const port = url.port === "" ? defaultPortOf(url.protocol) : Number(url.port);
 		const pair = `${normalized(url.hostname)}:${port}`;
 		return [...plainLoopback, ...plainInternal].some((listed) => pairOf(listed) === pair);
 	};

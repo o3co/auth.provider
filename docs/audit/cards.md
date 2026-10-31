@@ -84,6 +84,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/login-attributes` (feature, `modules/identity/login-attributes`): Decides which of a login's attributes are kept: `users`' named set, within caps.
   - `keeping` (`src/keeping`): keeping a login's attributes within caps.
 - `@mod/login-gates` (feature, `modules/identity/login-gates`): Passes a confirmed login through the gates, then has `session` open it.
+  - `returns` (`src/returns`): where a login may send the browser back to.
+  - `running` (`src/running`): a login through the gates, and a held one resumed.
 - `@mod/login-password` (feature, `modules/identity/login-password`): Provides the password login endpoint: verifies with `users`, and logs in through `login-gates`, naming the session's opening as the login's authentication time (`opening`), so a gate's wait never ages it.
 - `@mod/session` (feature, `modules/identity/session`): Owns the contract of user sessions: their cookie, their listing under their subject, and their lifecycle (open → closing → closed), as every implementation keeps them; a session is opened only once listed, so a revocation finds every live one.
   - `rules` (`src/rules`): the rules every implementation of `sessions` keeps alike, the stand-in too, offered as `sessionRules`.
@@ -146,6 +148,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `clientless` (`src/clientless`): a grant naming no client (RFC 7523 §3.1), where an entry's `client` is the client its verified assertion identifies, and the binding of entries and their clients.
   - `conditions` (`src/conditions`): the conditions an issuer holds an assertion's verified claims to, and whether claims meet them.
   - `delegated` (`src/delegated`): an assertion of a delegated issuer, which another module checks by its own rules (`delegatedAssertions`).
+  - `granting` (`src/granting`): the grant itself, once boot has checked what it is built from.
   - `id-jag` (`src/id-jag`): the ID-JAG profile's rules (Identity Assertion JWT Authorization Grant), read off a verified assertion and held against the request.
   - `issuers` (`src/issuers`): the trusted issuers, each entry of the section's `issuers`, and the signers and ledgers each is read with.
   - `policy` (`src/policy`): what a trusted issuer's own policy makes of the section's, for verifying its assertions, keeping them used and issuing their tokens.

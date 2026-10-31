@@ -111,7 +111,7 @@ flowchart LR
 | `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/kernel`, `@mod/url-setting` |
 | `@mod/rate-limit` | foundation | `@mod/audit`, `@mod/http`, `@mod/kernel`, `@mod/metrics`, `@mod/request-source`, `@mod/store` |
 | `@mod/records` | capability | `@mod/kernel`, `@mod/store` |
-| `@mod/request-source` | foundation | `@mod/client-certificate`, `@mod/kernel` |
+| `@mod/request-source` | foundation | `@mod/address-reach`, `@mod/client-certificate`, `@mod/kernel` |
 | `@mod/seal` | foundation | `@mod/kernel`, `@mod/keys` |
 | `@mod/secret-hash` | foundation | `@mod/kernel` |
 | `@mod/store` | foundation | `@mod/kernel` |
@@ -188,7 +188,7 @@ flowchart LR
 | `@mod/token-exchange` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/resource-indicators`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/tokens` | feature | `@mod/added-claims`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/sender-binding`, `@mod/token-denylist` |
 | `@mod/userinfo` | feature | `@mod/claims-selection`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/oidc`, `@mod/sender-binding`, `@mod/session`, `@mod/session-tokens`, `@mod/tokens` |
-| `@mod/verified-email` | feature | `@mod/client-credentials`, `@mod/kernel`, `@mod/subject-attributes`, `@mod/tokens`, `@mod/users` |
+| `@mod/verified-email` | feature | `@mod/kernel`, `@mod/subject-attributes`, `@mod/tokens`, `@mod/users` |
 
 ### passkey
 

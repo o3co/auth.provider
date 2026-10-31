@@ -27,6 +27,22 @@ const unmeetable = (table: Table, provable: { achievable(set: readonly string[])
 		.filter(([, sets]) => !sets.some((set) => provable.achievable(set)))
 		.map(([name]) => name);
 
+/**
+ * The refusals of acr no declared way of logging in can meet: a configured one told by its key,
+ * never in the text; the offered ones, a module's own names, in one.
+ */
+function refusalsFor(unmet: readonly string[], s: { readonly values: Table }) {
+	const configured = unmet.filter((name) => Object.hasOwn(s.values, name));
+	const offered = unmet.filter((name) => !Object.hasOwn(s.values, name));
+	const refusals = configured.map((name) => ({
+		where: `acr.values.${name}`,
+		reason: "no declared way of logging in can meet it",
+	}));
+	if (offered.length === 0) return refusals;
+	const reason = `an acr a module offers has no declared way of logging in that can meet it: ${offered.join(", ")}`;
+	return [...refusals, { where: "acr", reason }];
+}
+
 export default defineModule(
 	{ name: "acr", replicaSafe: true, section, takes: [acrEntries, logins] },
 	(m) => [
@@ -44,23 +60,7 @@ export default defineModule(
 			const provable = await c.get(logins);
 			const unmet = Object.keys(table).length > 0 ? unmeetable(table, provable) : [];
 			if (unmet.length > 0) {
-				// A configured acr is told by its key, never in the text; an offered one is a module's own name.
-				const configured = unmet.filter((name) => Object.hasOwn(c.section.values, name));
-				const offered = unmet.filter((name) => !Object.hasOwn(c.section.values, name));
-				return c.refuseAll([
-					...configured.map((name) => ({
-						where: `acr.values.${name}`,
-						reason: "no declared way of logging in can meet it",
-					})),
-					...(offered.length > 0
-						? [
-								{
-									where: "acr",
-									reason: `an acr a module offers has no declared way of logging in that can meet it: ${offered.join(", ")}`,
-								},
-							]
-						: []),
-				]);
+				return c.refuseAll(refusalsFor(unmet, c.section));
 			}
 			// The configuration is read as an object, which puts index-like names first: their written order is lost.
 			const written = Object.keys(c.section.values);

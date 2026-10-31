@@ -11,7 +11,7 @@ import {
 	sectionsIn,
 	unfixedKeys,
 } from "../src/configuration.ts";
-import { root } from "./root.ts";
+import { packages, root } from "./root.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
@@ -231,7 +231,7 @@ it("tells a key read from env that no fixed key of the schema holds, as one unde
 });
 
 it("reads from env only fixed keys of each section, never one under a map whose names are the operator's, naming the fragment", async () => {
-	const unfixed = (await sectionsIn(root)).flatMap((s) =>
+	const unfixed = (await sectionsIn(packages)).flatMap((s) =>
 		s.unfixed.map(
 			(key) =>
 				`${s.owner}'s config.example: ${key} is under a map the operator names; give its entries in the local layer`,
@@ -241,7 +241,9 @@ it("reads from env only fixed keys of each section, never one under a map whose 
 });
 
 it("finds keys in every section, so none is left out by a shape the reference cannot read", async () => {
-	const empty = (await sectionsIn(root)).filter((s) => s.rows.length === 0).map((s) => s.section);
+	const empty = (await sectionsIn(packages))
+		.filter((s) => s.rows.length === 0)
+		.map((s) => s.section);
 	expect(empty).toEqual([]);
 });
 
@@ -255,13 +257,13 @@ it("writes a client metadata section under `sections`, by the module that adds i
 });
 
 it("finds the client metadata sections that full with every opt-in composes, each by its contributor", async () => {
-	const found = await clientSectionsOf(root);
+	const found = await clientSectionsOf(root, packages);
 	expect(found.find((s) => s.section === "client-secret")?.owner).toBe("@mod/clients");
 	expect(found.filter((s) => s.rows.length === 0).map((s) => s.section)).toEqual([]);
 });
 
 it("finds each IdP type's settings that full with every opt-in composes, by the module that adds the type", async () => {
-	const types = await idpTypesOf(root);
+	const types = await idpTypesOf(root, packages);
 	expect(types.map((t) => [t.section, t.owner])).toEqual([
 		["apple", "@mod/idp-apple"],
 		["github", "@mod/idp-github"],
@@ -275,29 +277,29 @@ it("finds each IdP type's settings that full with every opt-in composes, by the 
 
 it("holds, committed, the reference generated from the workspace as it is now", async () => {
 	const reference = referenceOf(
-		await sectionsIn(root),
-		await clientSectionsOf(root),
-		await idpTypesOf(root),
+		await sectionsIn(packages),
+		await clientSectionsOf(root, packages),
+		await idpTypesOf(root, packages),
 	);
 	expect(readFileSync(referenceFile(root), "utf8")).toBe(reference);
 });
 
 it("describes every key of every section", async () => {
-	const lacking = (await sectionsIn(root)).flatMap(({ rows }) =>
+	const lacking = (await sectionsIn(packages)).flatMap(({ rows }) =>
 		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);
 });
 
 it("describes every key of every client metadata section", async () => {
-	const lacking = (await clientSectionsOf(root)).flatMap(({ rows }) =>
+	const lacking = (await clientSectionsOf(root, packages)).flatMap(({ rows }) =>
 		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);
 });
 
 it("describes every key of every IdP type's settings", async () => {
-	const lacking = (await idpTypesOf(root)).flatMap(({ rows }) =>
+	const lacking = (await idpTypesOf(root, packages)).flatMap(({ rows }) =>
 		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);

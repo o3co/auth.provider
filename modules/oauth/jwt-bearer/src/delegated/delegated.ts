@@ -68,21 +68,6 @@ export async function checkedBy(
 	return read.data as DelegatedCheck;
 }
 
-/** Uses the assertion up with its delegate, read at this boundary: only `spent` lets a token be issued. */
-export async function spentBy(
-	delegate: DelegatedAssertions,
-	assertion: string,
-): Promise<"spent" | "replayed"> {
-	let told: unknown;
-	try {
-		told = await delegate.spend(assertion);
-	} catch (error) {
-		throw isUnavailable(error) ? error : new Unavailable("jwt-bearer");
-	}
-	if (told !== "spent" && told !== "replayed") throw new Unavailable("jwt-bearer");
-	return told;
-}
-
 /** Whether the request proves, by DPoP, the key whose digest the assertion names. */
 export const holds = (binding: GrantInput["binding"], digest: string | undefined) =>
 	digest !== undefined &&

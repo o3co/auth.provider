@@ -1,3 +1,4 @@
+import { authenticatedAtOf, checkAuthenticatedAt } from "./authenticated.ts";
 import { closeListed } from "./listed.ts";
 import { credentialsSecondsDefault, judgedShortOf } from "./requirements.ts";
 
@@ -6,4 +7,6 @@ export const sessionRules = Object.freeze({
 	judgedShortOf,
 	credentialsSecondsDefault,
 	closeListed,
+	checkAuthenticatedAt,
+	authenticatedAtOf,
 });

@@ -22,6 +22,7 @@ import { type Again, type Decision, refusal } from "../decision.ts";
 import { type HintCheck, hintCheckOver, hintCheckTakes } from "../hint/hint.ts";
 import type { Settings } from "../section.ts";
 import { type StepUp, stepUpOver, stepUpTakes } from "../step-up/step-up.ts";
+import { urlFrom } from "../url.ts";
 
 /** A refusal by an issuance policy: `access_denied` with its description, recorded with its name and reason. */
 const policyRefusal = (refused: IssuanceRefused): Decision => ({
@@ -87,8 +88,7 @@ export function flowWith(parts: FlowParts): Flow {
 	const { issuer, self, sessions: entered, codes: issued, clock, loginPage, loginUrlLimit } = parts;
 	const { reauths, stepUp, consent, openidRequired, tokens: issuance, target: targetOf } = parts;
 	const { selections, claimsParameter, hint: hintOf } = parts;
-	const urlWith = (params: Iterable<readonly [string, string]>) =>
-		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
+	const urlWith = urlFrom(self);
 
 	/**
 	 * The login page, `redirect_to` back to `back`, with the fresh login asked beside it; past the

@@ -1,5 +1,5 @@
 import { isLoopbackAddress } from "@mod/address-reach";
-import { contract, defineModule } from "@mod/kernel";
+import { type BuildContext, contract, defineModule } from "@mod/kernel";
 import {
 	type CredentialPolicy,
 	credentialPolicy,
@@ -250,6 +250,30 @@ function inProcessPools(
 	};
 }
 
+/** Each pool's resolver helper, started for its share; a refused start ends both before boot is refused. */
+async function startedPools(
+	c: BuildContext<unknown>,
+	shares: LookupPools["shares"],
+): Promise<LookupPools> {
+	const poolOf = (pool: string, size: number) =>
+		resolverPool({ pool, size, warn: c.log.warn, now: () => c.clock.now() });
+	const started: ResolverPool[] = [poolOf("own", shares.own)];
+	if (shares.outside > 0) started.push(poolOf("outside", shares.outside));
+	const stopAll = () => Promise.all(started.map((pool) => pool.stop())).then(() => {});
+	c.onStop(stopAll);
+	try {
+		await Promise.all(started.map((pool) => pool.start()));
+	} catch {
+		await stopAll();
+		c.refuse(
+			"outbound.resolution",
+			"the resolver's helper process did not start: allow it to start, or set resolution = in-process",
+		);
+	}
+	const [ownPool, outsidePool] = started as [ResolverPool, ResolverPool?];
+	return { own: ownPool, outside: outsidePool ?? noPool, shares };
+}
+
 const paths = contract<Paths>("outbound.paths");
 
 export default defineModule(
@@ -285,25 +309,7 @@ export default defineModule(
 				);
 			}
 			if (c.section.resolution === "in-process") return over(systemLookup);
-			// Each pool's helper is started here; a refused start ends both before boot is refused.
-			const shares = lookupShares({ maxLookups: maxLookupsOf(c.section) });
-			const poolOf = (pool: string, size: number) =>
-				resolverPool({ pool, size, warn: c.log.warn, now: () => c.clock.now() });
-			const started: ResolverPool[] = [poolOf("own", shares.own)];
-			if (shares.outside > 0) started.push(poolOf("outside", shares.outside));
-			const stopAll = () => Promise.all(started.map((pool) => pool.stop())).then(() => {});
-			c.onStop(stopAll);
-			try {
-				await Promise.all(started.map((pool) => pool.start()));
-			} catch {
-				await stopAll();
-				c.refuse(
-					"outbound.resolution",
-					"the resolver's helper process did not start: allow it to start, or set resolution = in-process",
-				);
-			}
-			const [ownPool, outsidePool] = started as [ResolverPool, ResolverPool?];
-			return over({ own: ownPool, outside: outsidePool ?? noPool, shares });
+			return over(await startedPools(c, lookupShares({ maxLookups: maxLookupsOf(c.section) })));
 		}),
 		// One set of counts for both paths.
 		m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),

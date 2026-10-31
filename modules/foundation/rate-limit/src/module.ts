@@ -89,15 +89,19 @@ export default defineModule(
 			.by(async (c) =>
 				limitingAttempts(await c.get(attemptLimit), { log: c.log, recorded: await c.get(audit) }),
 			),
-		m
-			.contribute(policies)
-			.by(async (c) =>
-				limitingRequests(
-					await c.get(rateLimit),
-					{ log: c.log, recorded: await c.get(audit) },
-					c.section["fail-mode"],
-				),
-			),
+		m.contribute(policies).by(async (c) => {
+			// The operator's choice, yet said at every start: a store outage lifts every request limit.
+			if (c.section["fail-mode"] === "open") {
+				c.log.warn("rate-limit.fail_open", {
+					reason: "a request limit lets requests through while the store cannot count",
+				});
+			}
+			return limitingRequests(
+				await c.get(rateLimit),
+				{ log: c.log, recorded: await c.get(audit) },
+				c.section["fail-mode"],
+			);
+		}),
 		m.contribute(marks).by(() => perSourceMark),
 	],
 );

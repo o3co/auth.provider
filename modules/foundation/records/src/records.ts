@@ -40,6 +40,9 @@ export interface Changed<T> {
 const patienceMs = 10_000;
 /** How many times a write is tried again after losing a race, before it answers unavailable. */
 const attempts = 8;
+/** The first pause before a resend, doubled after each, up to the longest. */
+const firstPauseMs = 50;
+const longestPauseMs = 1000;
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -47,9 +50,9 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * so a write whose answer was lost gets the answer it first had and never takes effect twice.
  * Patience is counted in pauses, so no clock is read.
  */
-async function settled<A>(send: () => Promise<A>): Promise<A> {
+async function untilAnswered<A>(send: () => Promise<A>): Promise<A> {
 	let waited = 0;
-	let wait = 50;
+	let wait = firstPauseMs;
 	for (;;) {
 		try {
 			return await send();
@@ -58,8 +61,20 @@ async function settled<A>(send: () => Promise<A>): Promise<A> {
 		}
 		await pause(wait);
 		waited += wait;
-		wait = Math.min(wait * 2, 1000);
+		wait = Math.min(wait * 2, longestPauseMs);
 	}
+}
+
+/** What an attempt answers where it lost a race, or found nothing it could confirm: try again. */
+const again = Symbol("again");
+
+/** Runs `attempt` until it answers anything but `again`, at most `attempts` times; past them, unavailable. */
+async function retried<A>(attempt: () => Promise<A | typeof again>): Promise<A> {
+	for (let tried = 0; tried < attempts; tried++) {
+		const answered = await attempt();
+		if (answered !== again) return answered;
+	}
+	throw new Unavailable("records");
 }
 
 // A mark is random, not a hash of the write: two writers putting the same value on the same
@@ -81,7 +96,7 @@ async function confirmedAsRead(
 ) {
 	const markKey = { space: key.space, partition: key.partition, name: "settled" };
 	const marked = { idempotency: markFrom(place), deadline };
-	const confirmed = await settled(() =>
+	const confirmed = await untilAnswered(() =>
 		place.store.batch(
 			[version === undefined ? { key, absent: true } : { key, version }],
 			[{ key: markKey, put: true, expiry: { kind: "after", ms: 1 } }],
@@ -102,7 +117,7 @@ async function rewrite(
 		current: Json | undefined,
 	) => { readonly value: Json; readonly expiry: Expiry } | undefined,
 ): Promise<{ readonly before: Json | undefined; readonly after: Json | undefined }> {
-	for (let attempt = 0; attempt < attempts; attempt++) {
+	return retried(async () => {
 		const { entry, now } = await place.store.get(key);
 		const before = entry?.value;
 		const decided = decide(before);
@@ -110,16 +125,16 @@ async function rewrite(
 			if (await confirmedAsRead(place, key, entry?.version, deadlineFrom(now))) {
 				return { before, after: before };
 			}
-			continue;
+			return again;
 		}
 		const options: WriteOptions = { expiry: decided.expiry, ...markedAt(place, now) };
 		const written = entry
-			? await settled(() => place.store.replaceIf(key, entry.version, decided.value, options))
-			: await settled(() => place.store.putIfAbsent(key, decided.value, options));
+			? await untilAnswered(() => place.store.replaceIf(key, entry.version, decided.value, options))
+			: await untilAnswered(() => place.store.putIfAbsent(key, decided.value, options));
 		if (written.kind === "written") return { before, after: decided.value };
 		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
-	}
-	throw new Unavailable("records");
+		return again;
+	});
 }
 
 function expiryOf(lifetimeMs: number | "endless" | undefined): Expiry {
@@ -162,24 +177,25 @@ function recordsOf<T extends Json>(place: Place) {
 			key: string,
 			value: T,
 			lifetimeMs: number | "endless",
-		): Promise<"created" | "exists"> => {
-			for (let attempt = 0; attempt < attempts; attempt++) {
+		): Promise<"created" | "exists"> =>
+			retried(async () => {
 				const marked = markedAt(place, await place.store.now());
 				const options: WriteOptions = {
 					expiry: lifetimeMs === "endless" ? { kind: "never" } : { kind: "after", ms: lifetimeMs },
 					...marked,
 				};
-				const written = await settled(() => place.store.putIfAbsent(keyOf(key), value, options));
+				const written = await untilAnswered(() =>
+					place.store.putIfAbsent(keyOf(key), value, options),
+				);
 				if (written.kind === "written") return "created";
 				if (written.kind !== "exists") throw new Unavailable("records");
 				const { entry } = await place.store.get(keyOf(key));
-				if (!entry) continue;
+				if (!entry) return again;
 				if (await confirmedAsRead(place, keyOf(key), entry.version, marked.deadline)) {
 					return "exists";
 				}
-			}
-			throw new Unavailable("records");
-		},
+				return again;
+			}),
 		read: async (key: string): Promise<T | undefined> => {
 			const { entry } = await place.store.get(keyOf(key));
 			return entry?.value as T | undefined;
@@ -188,16 +204,15 @@ function recordsOf<T extends Json>(place: Place) {
 		 * Removes the record whatever it holds. An absence may be another's removal not confirmed yet,
 		 * so a write of its own made only while the key holds none confirms it; else it tries again.
 		 */
-		remove: async (key: string): Promise<void> => {
-			for (let attempt = 0; attempt < attempts; attempt++) {
+		remove: (key: string): Promise<void> =>
+			retried(async () => {
 				const options = markedAt(place, await place.store.now());
-				const taken = await settled(() => place.store.take(keyOf(key), options));
+				const taken = await untilAnswered(() => place.store.take(keyOf(key), options));
 				if (taken.kind === "late" || taken.kind === "reused") throw new Unavailable("records");
 				if (taken.kind !== "missing") return;
 				if (await confirmedAsRead(place, keyOf(key), undefined, options.deadline)) return;
-			}
-			throw new Unavailable("records");
-		},
+				return again;
+			}),
 		/**
 		 * Changes the record from what it holds now; `change` runs again on a lost race, so it must be
 		 * pure. Lifetimes are relative and kept by the store. Nothing when the key holds no record.
@@ -324,7 +339,7 @@ export async function changeRecords(p: {
 			throw new Error("records changed together are named once each");
 		}
 	});
-	for (let attempt = 0; attempt < attempts; attempt++) {
+	return retried(async () => {
 		const marked = markedAt(anchor.place, await target.now());
 		// Each record held once: the targets, then what the watch names besides.
 		const held: { target: Target; version: string | undefined; value: Json | undefined }[] =
@@ -377,9 +392,9 @@ export async function changeRecords(p: {
 							expiry: { kind: "after", ms: 1 },
 						} as const,
 					];
-		const written = await settled(() => batchAcross(conditions, sent, marked));
+		const written = await untilAnswered(() => batchAcross(conditions, sent, marked));
 		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
-		if (written.kind === "conflict") continue;
+		if (written.kind === "conflict") return again;
 		const changedAt = (at: number): ChangedRecord => {
 			const was = held[at]?.value;
 			const next = nexts[at];
@@ -390,8 +405,7 @@ export async function changeRecords(p: {
 			targets: p.targets.map((_, at) => changedAt(at)),
 			watched: watchedAt.map(changedAt),
 		};
-	}
-	throw new Unavailable("records");
+	});
 }
 
 /**
@@ -489,14 +503,24 @@ export function pairedRecordsAcross<A extends Json, B extends Json>(
 			];
 			// The watch of the attempt deciding: each attempt runs the watch before its decision.
 			let watched = { first: [] as readonly string[], second: [] as readonly string[] };
-			const split = <T>(fixedOnes: readonly T[], watchedOnes: readonly T[]) => ({
-				first: [...fixedOnes.slice(0, fixed), ...watchedOnes.slice(0, watched.first.length)],
-				second: [...fixedOnes.slice(fixed), ...watchedOnes.slice(watched.first.length)],
+			/** What is read, or what came of it, by place: each place's keys, then its watched ones. */
+			const byPlace = <F, S>(fixedOnes: readonly unknown[], watchedOnes: readonly unknown[]) => ({
+				first: [
+					...fixedOnes.slice(0, fixed),
+					...watchedOnes.slice(0, watched.first.length),
+				] as readonly F[],
+				second: [
+					...fixedOnes.slice(fixed),
+					...watchedOnes.slice(watched.first.length),
+				] as readonly S[],
 			});
+			/** `length` of `ones`, from `from`: a place's decided changes for its keys, or its watched ones. */
+			const take = (ones: readonly Next<Json>[], from: number, length: number) =>
+				Array.from({ length }, (_, at) => ones[from + at]);
 			const changed = await changeRecords({
 				targets,
 				watch: (read) => {
-					const named = p.watch?.(split(read, []) as unknown as Read) ?? {};
+					const named = p.watch?.(byPlace<A | undefined, B | undefined>(read, [])) ?? {};
 					watched = { first: named.first ?? [], second: named.second ?? [] };
 					return [
 						...watched.first.map((key) => ({ place: first, key })),
@@ -504,26 +528,20 @@ export function pairedRecordsAcross<A extends Json, B extends Json>(
 					];
 				},
 				decide: (read, found) => {
-					const next = p.decide(split(read, found) as unknown as Read);
+					const next = p.decide(byPlace<A | undefined, B | undefined>(read, found));
 					const ofFirst: readonly Next<Json>[] = next.first ?? [];
 					const ofSecond: readonly Next<Json>[] = next.second ?? [];
 					const fixedSecond = keys.second.length;
 					return {
-						targets: [
-							...Array.from({ length: fixed }, (_, at) => ofFirst[at]),
-							...Array.from({ length: fixedSecond }, (_, at) => ofSecond[at]),
-						],
+						targets: [...take(ofFirst, 0, fixed), ...take(ofSecond, 0, fixedSecond)],
 						watched: [
-							...Array.from({ length: watched.first.length }, (_, at) => ofFirst[fixed + at]),
-							...Array.from(
-								{ length: watched.second.length },
-								(_, at) => ofSecond[fixedSecond + at],
-							),
+							...take(ofFirst, fixed, watched.first.length),
+							...take(ofSecond, fixedSecond, watched.second.length),
 						],
 					};
 				},
 			});
-			return split(changed.targets, changed.watched) as unknown as Changed;
+			return byPlace<ChangedRecord<A>, ChangedRecord<B>>(changed.targets, changed.watched);
 		},
 	};
 }

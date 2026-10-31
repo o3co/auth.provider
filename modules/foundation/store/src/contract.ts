@@ -188,6 +188,9 @@ export type Decision =
 	| { readonly kind: "remove" }
 	| { readonly kind: "keep" };
 
+/** How many times `mutate` reads and decides again after losing a race, unless its caller says. */
+const defaultAttempts = 8;
+
 /**
  * Read, decide with a pure function, write on the version read; on a lost race the function
  * runs again on the new entry, so writes made in between are never overwritten blindly.
@@ -204,7 +207,7 @@ export async function mutate(
 > {
 	const limits = options.deadline === undefined ? {} : { deadline: options.deadline };
 	const gone = { kind: "done", value: null, version: null } as const;
-	for (let attempt = 0; attempt < (options.attempts ?? 8); attempt++) {
+	for (let attempt = 0; attempt < (options.attempts ?? defaultAttempts); attempt++) {
 		const { entry, now } = await target.get(key);
 		const decision = decide(entry, now);
 		if (decision.kind === "keep") {
@@ -369,11 +372,14 @@ function readWriteOptions(value: unknown): WriteOptions {
 	};
 }
 
+/** The largest count a window may allow. */
+const largestLimit = 1_000_000_000;
+
 function readWindow(value: unknown): { ms: number; limit: number } {
 	const read = fields("window", value, ["ms", "limit"]);
 	return {
 		ms: whole("window ms", read.ms, 1),
-		limit: whole("limit", read.limit, 0, 1_000_000_000),
+		limit: whole("limit", read.limit, 0, largestLimit),
 	};
 }
 
