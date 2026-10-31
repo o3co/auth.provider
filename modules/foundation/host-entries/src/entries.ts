@@ -63,7 +63,9 @@ export function hostEntryOf(
 	}
 	const under = entry.startsWith(".");
 	const name = under ? entry.slice(1) : entry;
-	if (/[^\p{L}\p{N}.-]/u.test(name)) return undefined;
+	// Letters with the marks that write them, digits, dots, hyphens and the joiners; the URL parser
+	// (IDNA) refuses a joiner its script does not allow, and a mark leading a label.
+	if (/[^\p{L}\p{M}\p{N}.\-\u200C\u200D]/u.test(name)) return undefined;
 	const ascii = URL.parse(`https://${name}/`)?.hostname;
 	if (ascii === undefined || isIP(ascii) !== 0) return undefined;
 	return ascii.split(".").every((part) => label.test(part))

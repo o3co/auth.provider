@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hostEntryOf, listed, normalized, withinHosts } from "../src/contract.ts";
+import { hostEntryOf, hostList, listed, normalized, withinHosts } from "../src/contract.ts";
 import { isListEntry } from "../src/entries.ts";
 
 describe("host lists", () => {
@@ -105,6 +105,44 @@ describe("normalized", () => {
 		expect(normalized(".")).toBeUndefined();
 		expect(normalized("::ffff:0:7f00:1")).toBe("127.0.0.1");
 		expect(normalized("64:ff9b::7f00:1")).toBe("64:ff9b::7f00:1");
+	});
+});
+
+describe("a name in another script", () => {
+	it("reads letters with the marks that write them, and a joiner where its script allows it, as the URL parser maps them", () => {
+		expect(
+			["कि.example", "é.example", "ไทย.example", "نامه\u200Cای.example"].map((entry) =>
+				hostEntryOf(entry),
+			),
+		).toEqual([
+			{ kind: "name", name: "xn--11b8f.example", under: false },
+			{ kind: "name", name: "xn--9ca.example", under: false },
+			{ kind: "name", name: "xn--o3cw4h.example", under: false },
+			{ kind: "name", name: "xn--mgba3gch31f060k.example", under: false },
+		]);
+		expect(hostList.safeParse(["कि.example", ".कि.example"]).success).toBe(true);
+		// Matched as the request's host is spelled: in punycode.
+		expect(listed("xn--11b8f.example", ["कि.example"])).toBe(true);
+		expect(withinHosts("https://xn--11b8f.example/", ["कि.example"])).toBe(true);
+	});
+
+	it("refuses a joiner its script does not allow, a mark leading a label, a symbol, another full stop, a space, a tab, a line break and an invisible format character", () => {
+		for (const entry of [
+			"a\u200Cb.example",
+			"\u0301a.example",
+			"☃.example",
+			"a。example",
+			"a．example",
+			"a｡example",
+			"a\tb.example",
+			"a\nb.example",
+			"a b.example",
+			"a.example ",
+			"a\u00ADb.example",
+			"a\u200Bb.example",
+		]) {
+			expect(hostEntryOf(entry), JSON.stringify(entry)).toBeUndefined();
+		}
 	});
 });
 
