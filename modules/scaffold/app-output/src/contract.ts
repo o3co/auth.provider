@@ -1,4 +1,5 @@
 export { configFiles, kernel } from "@mod/app-entries";
+export type { Ask, Asked } from "./asked/asked.ts";
 export { type Readme, writeDeployment } from "./deployment.ts";
 export {
 	type Fragment,

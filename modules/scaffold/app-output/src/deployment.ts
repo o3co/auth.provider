@@ -1,6 +1,7 @@
 /** A deployment's project from a list of modules: configuration from their fragments, the image and a guide. */
 
 import { entriesOf, mainSource } from "@mod/app-entries";
+import { askedOf } from "./asked/asked.ts";
 import {
 	applicationConf,
 	envExample,
@@ -117,6 +118,7 @@ export async function writeDeployment(
 				...guideLists(settings, writtenOf(fragments)),
 				cards: cardLines(packages.cards(names)),
 				askedOfDeployment: deploymentLines(packages.cards(names)),
+				...guideAsked(askedOf(names, packages.asks?.(names) ?? [])),
 				firstLogin: http.serves ? firstLoginLine(packages.release()) : "",
 				port: String(httpPort),
 				hostEnv: envName("http.host"),
@@ -126,6 +128,16 @@ export async function writeDeployment(
 			})) + beside.guide,
 	});
 }
+
+/** The guide's marks for what the modules ask: the lines, the lines under their heading, and the values decided, each after a line break. */
+const guideAsked = ({ chosen, decides }: { chosen: string[]; decides: string[] }) => ({
+	asked: chosen.join("\n"),
+	askedSection:
+		chosen.length === 0
+			? ""
+			: ["## Store, users, audit and mail", "", ...chosen, "", ""].join("\n"),
+	decides: decides.map((line) => `\n${line}`).join(""),
+});
 
 /** The install stage's install: with packages outside the release, what it checks against copied, and checked after. */
 const installed = (beside: Beside["image"]) =>
