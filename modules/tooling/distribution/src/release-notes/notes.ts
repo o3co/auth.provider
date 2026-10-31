@@ -7,6 +7,20 @@ const dated = /^\d{4}-\d{2}-\d{2}$/;
  */
 const relativeLink = /\]\((?![a-z][a-z\d+.-]*:|[#/])/gi;
 
+/** A repository URL a link can be made from: https, a path not ending `/` or `.git`, nothing else. */
+const plain = (repository: string) => {
+	const url = URL.parse(repository);
+	return (
+		url?.protocol === "https:" &&
+		url.username === "" &&
+		url.password === "" &&
+		url.search === "" &&
+		url.hash === "" &&
+		/^\/.*[^/]$/.test(url.pathname) &&
+		!url.pathname.endsWith(".git")
+	);
+};
+
 /**
  * The release's notes: the body of the version's section of the changelog, from its heading to the
  * next version's or the end, each link relative to the repository pointed at the file in the version's
@@ -19,9 +33,9 @@ export function notesOf(
 	repository: string | undefined,
 ): { readonly notes: string } | { readonly problem: string } {
 	if (repository === undefined) return { problem: "package.json states no repository" };
-	if (!repository.startsWith("https://") || repository.endsWith(".git")) {
+	if (!plain(repository)) {
 		return {
-			problem: `package.json's repository is ${repository}; state it as a plain https URL, without git+ or .git`,
+			problem: `package.json's repository is ${repository}; state it as a plain https URL with a path, without git+, .git, a trailing /, credentials, a query or a fragment`,
 		};
 	}
 	const lines = changelog.split("\n");

@@ -69,9 +69,15 @@ describe("the release's notes, from the version's section of the changelog", () 
 			"https://github.com/o3co/auth.provider.git",
 			"git@github.com:o3co/auth.provider",
 			"ssh://git@github.com/o3co/auth.provider",
+			"https://github.com/o3co/auth.provider/",
+			"https://github.com/o3co/auth.provider.git/",
+			"https://user:token@github.com/o3co/auth.provider",
+			"https://github.com/o3co/auth.provider#main",
+			"https://github.com/o3co/auth.provider?tab=readme",
+			"https://github.com",
 		]) {
 			expect(notesOf(changelog, "1.2.0", stated), stated).toEqual({
-				problem: `package.json's repository is ${stated}; state it as a plain https URL, without git+ or .git`,
+				problem: `package.json's repository is ${stated}; state it as a plain https URL with a path, without git+, .git, a trailing /, credentials, a query or a fragment`,
 			});
 		}
 	});
