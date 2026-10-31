@@ -1,8 +1,7 @@
 # outbound
 
 ## Responsibilities
-- Offers the only path for outbound HTTP requests, under the operator's destination policy.
-- Applies `outbound-policy`'s destination policy to every request, its URL before sending and its addresses before connecting, and cuts each at the limits it answers; holds requests to `max-concurrent`.
+- Sends every outbound HTTP request, applying `outbound-policy`'s destination policy to its URL before sending and its addresses before connecting.
 - Holds only the counts of requests and lookups running in this process, so it is safe on many instances.
 
 ## Not here
@@ -20,7 +19,7 @@
 - Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
 - A request goes only to a URL the policy admits; a name is resolved once, as the URL writes it (a trailing dot kept), and the request connects only to the first of the addresses the policy checked, all it resolved to.
 - outbound alone sets `User-Agent` (`auth-provider`), `Accept-Encoding`, `Host` and the headers that frame and carry the message.
-- A credential goes only as a request's `credential`, under the internal module `credential`'s rules. A redirect never carries it, being refused.
+- A credential goes only as a request's `credential`, under the internal module `credential`'s rules.
 - A 3xx other than 304 is refused as a redirect; a 101, an encoded answer, a body past the size cap, or headers past Node's 16 KiB are unavailable, and the connection is closed; other 1xx answers are waited past.
 - Every TLS connection, direct or through the proxy's tunnel, takes `tls-options`' floor, as the internal module `tls` says.
 - One deadline, the policy's limit, covers resolving (or the tunnel), connecting, the headers and the body; the body is cut at the policy's size.
@@ -28,9 +27,9 @@
 - Names resolve as the system does, hosts file included: by default (`resolution`: `helper`) in helper processes, a helper that does not start refusing boot; with `in-process`, here, no deadline stopping one. See the internal modules `resolver-process` and `lookups`.
 - Of those lookups, names a caller marks `outsideChosen` resolve in a pool of their own, its share as `lookups` says, so an outside party's slow names never hold every lookup. `outbound.limits` answers each caller's share (`lookupsOf`), so a caller given none refuses boot.
 - A `proxy` (an http origin alone, as the URL parser writes it, without credentials; `proxy-authorization` apart) carries every https request, but to `direct-hosts` (list internal hosts there too), by CONNECT with TLS to the destination inside. Then outbound resolves no name but the proxy's own, as one of the deployment's lookups: it checks the name and any address in the URL; the proxy checks where a name resolves (boot warns so). A refused tunnel is `proxy-refused`.
-- Boot warns that `proxy-authorization` goes in the clear unless the proxy is a loopback address written as one (`address-reach`'s `isLoopbackAddress`), judged as written.
+- Boot warns that `proxy-authorization` goes in the clear unless the proxy is a loopback address written as one, judged as written.
 - Plain http, a `plain-loopback` or `plain-internal` pair's, never goes through the proxy: outbound resolves the name and checks every address itself, a `plain-loopback` pair's by `isLoopbackAddress`.
-- For plain http taken as such a pair's (signed material too), to a host and port `plain-ipv4` names (hosts compared as the policy's lists compare them), the name is resolved to IPv4 addresses alone: every one of those is checked by the policy, the first reached, and an IPv6 one is neither checked nor reached. Other ports of the name, https to it, and plain http not taken as the pair's resolve every family.
+- For plain http taken as such a pair's (signed material too), to a host and port `plain-ipv4` names, the name is resolved to IPv4 addresses alone: every one of those is checked by the policy, the first reached, and an IPv6 one is neither checked nor reached. Other ports of the name, https to it, and plain http not taken as the pair's resolve every family.
 - A `plain-ipv4` entry names, by name and once, a pair `plain-loopback` or `plain-internal` names; else boot is refused, naming neither host nor port.
 - Each boot that names `plain-internal` pairs warns `outbound.plain_internal`, with their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
 - List in `plain-internal` only peers on a network trusted against reading and changing what passes, such as one task, a closed cluster network or a service mesh; where possible, use https with an internal CA and `internal-hosts` instead. ECS Service Connect writes each name in the hosts file with an IPv4 address and an IPv6 one, which in the environment reported does not reach: name its pair in `plain-ipv4` too.
