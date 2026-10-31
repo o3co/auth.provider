@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Pkg } from "@mod/guard-imports";
 import { expect, it, vi } from "vitest";
 import { packages, root } from "../../../test/root.ts";
 import { coverage } from "../coverage.ts";
@@ -12,6 +13,7 @@ import {
 	destinationCandidate,
 	looseningByName,
 	looseningCandidate,
+	privateReachOf,
 	type SurfaceInput,
 	secretByName,
 } from "../surface.ts";
@@ -219,4 +221,37 @@ it("holds the coverage to the workspace: every setting, route and runbook sectio
 			.replaceAll(" ", "-"),
 	);
 	expect(coverage.manualTasks.map((t) => t.anchor).filter((a) => !anchors.includes(a))).toEqual([]);
+});
+
+it("lists who may reach private addresses by their own declaration, and while it is read, by an owner's list", () => {
+	const at = (name: string, manifest: Pkg["manifest"]): Pkg => ({
+		name,
+		dir: `/${name}`,
+		manifest,
+		card: undefined,
+		files: [],
+	});
+	const owner = at("@x/policy", { narrower: { type: "Narrower", property: "internal" } });
+	expect(
+		privateReachOf([
+			owner,
+			at("@x/b", { narrower: "internal" }),
+			at("@x/a", { narrower: "internal" }),
+			at("@x/other", { narrower: "private" }),
+			at("@x/none", {}),
+		]),
+	).toEqual(["@x/a", "@x/b"]);
+	expect(
+		privateReachOf([
+			at("@x/listing", { internalBy: ["@x/listed"] }),
+			at("@x/b", { narrower: "internal" }),
+		]),
+	).toEqual(["@x/listed"]);
+	expect(
+		privateReachOf([
+			owner,
+			at("@x/listing", { internalBy: ["@x/listed", "@x/b"] }),
+			at("@x/b", { narrower: "internal" }),
+		]),
+	).toEqual(["@x/b", "@x/listed"]);
 });
