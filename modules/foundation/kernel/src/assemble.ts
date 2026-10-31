@@ -92,7 +92,9 @@ export async function assembleWatching(
 			};
 	// A deployment or environment its refused section does not hold validly is no ground to refuse on.
 	if (!unsure.has("deployment")) checkReplicas(modules, sections, kernel.deployment, refusals);
-	if (!unsure.has("environment")) checkProduction(modules, sections, kernel.environment, refusals);
+	const allowed = unsure.has("environment")
+		? []
+		: checkProduction(modules, sections, kernel.environment, refusals);
 	// One preflight before any factory runs: every structural gap is named in one refusal, and a
 	// refused boot has built nothing, so no stop hook is left to run.
 	const parts = indexParts(modules, refusals);
@@ -124,6 +126,10 @@ export async function assembleWatching(
 		if (outcome.ok) sinks.push(outcome.value as LogSink);
 	}
 	sinkList = sinks;
+	// Once the sinks are built, so the lines reach them: what production would refuse, at each start.
+	for (const { where, reason } of allowed) {
+		runtime.log.warn("kernel.allowed_in_development", { at: where, reason });
+	}
 	for (const [contract, item] of providers) {
 		const outcome = await outcomeOf(item);
 		if (outcome.ok) builtContracts.set(contract, outcome.value);

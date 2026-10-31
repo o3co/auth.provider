@@ -79,14 +79,17 @@ export function checkReplicas(
 	}
 }
 
-/** In production, each module's own refusals of what its section must not hold there. */
+/**
+ * Each module's own refusals of what its section must not hold in production: refused there, and in
+ * development answered, to be warned. A check that cannot be read refuses its module in either.
+ */
 export function checkProduction(
 	modules: readonly Module[],
 	sections: Map<Module, unknown>,
 	environment: KernelSettings["environment"],
 	refusals: Refusal[],
-): void {
-	if (environment !== "production") return;
+): readonly Refusal[] {
+	const allowed: Refusal[] = [];
 	for (const module of modules) {
 		if (module.section !== undefined && !sections.has(module)) continue;
 		// A function only: anything written in its place is no check.
@@ -101,6 +104,8 @@ export function checkProduction(
 			refusals.push({ where: module.name, reason: "its production check failed" });
 			continue;
 		}
-		for (const { key, reason } of read) refusals.push({ where: `${module.name}.${key}`, reason });
+		const found = read.map(({ key, reason }) => ({ where: `${module.name}.${key}`, reason }));
+		(environment === "production" ? refusals : allowed).push(...found);
 	}
+	return allowed;
 }
