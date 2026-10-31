@@ -209,7 +209,6 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `kernel.deployment` | `@mod/kernel` |  | `single`: modules unsafe on several instances (the memory store, mail that only logs) are taken |
 | `kernel.environment` | `@mod/kernel` | `"production"` | `development`: plain-http origins and pages are taken |
 | `login-passkey.attempts` | `@mod/login-passkey` | `20` | raised, up to 100: more requests from one source in each window |
-| `login-passkey.counts-as-mfa` | `@mod/login-passkey` | `true` | `true` (the default): a passkey login whose user was verified meets a required second factor alone |
 | `login-passkey.password-exempt-group` | `@mod/login-passkey` |  | its members keep password logins where passkey holders are refused them |
 | `login-password.account-attempts` | `@mod/login-password` | `10` | raised, up to 100: more failed guesses at one identifier before each next one waits |
 | `login-password.attempts` | `@mod/login-password` | `20` | raised, up to 100: more password guesses from one source in each window |
