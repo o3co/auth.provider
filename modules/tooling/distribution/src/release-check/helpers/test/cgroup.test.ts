@@ -1,5 +1,5 @@
+import { DockerFailed } from "@mod/docker-client";
 import { describe, expect, it } from "vitest";
-import { DockerFailed } from "../../containers/docker.ts";
 import { pidsCurrent } from "../cgroup.ts";
 
 const reading =

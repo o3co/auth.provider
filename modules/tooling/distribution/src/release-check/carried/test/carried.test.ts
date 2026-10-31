@@ -1,6 +1,6 @@
+import { type Docker, DockerFailed } from "@mod/docker-client";
 import { describe, expect, it } from "vitest";
 import { withContainer } from "../../containers/container.ts";
-import { type Docker, DockerFailed } from "../../containers/docker.ts";
 import { carried } from "../carried.ts";
 
 /** A daemon whose one-off container prints `found`, its arguments kept in `asked`. */

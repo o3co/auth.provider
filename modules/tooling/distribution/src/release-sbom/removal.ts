@@ -1,4 +1,4 @@
-import { DockerFailed } from "../release-check/containers/docker.ts";
+import { DockerFailed } from "@mod/docker-client";
 
 /**
  * Which of the images an `image rm` was to remove are still there, told with Docker's answer, by

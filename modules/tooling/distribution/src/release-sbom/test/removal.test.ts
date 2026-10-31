@@ -1,8 +1,8 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { docker } from "@mod/docker-client";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
-import { docker } from "../../release-check/containers/docker.ts";
 import { endOf, notRemoved } from "../removal.ts";
 
 // A `docker` of its own first on the path, answering as each test's script says.

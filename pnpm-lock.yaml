@@ -4482,6 +4482,9 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../docker-client
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial

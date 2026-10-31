@@ -1,5 +1,5 @@
 /** The processes a container takes, read from its cgroup where the host keeps the count. */
-import { DockerFailed } from "../containers/docker.ts";
+import { DockerFailed } from "@mod/docker-client";
 
 const counts = ["/sys/fs/cgroup/pids.current", "/sys/fs/cgroup/pids/pids.current"] as const;
 

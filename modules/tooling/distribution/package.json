@@ -22,6 +22,7 @@
 	"dependencies": {
 		"@mod/combinations": "workspace:*",
 		"@mod/create-app": "workspace:*",
+		"@mod/docker-client": "workspace:*",
 		"@mod/trial": "workspace:*",
 		"typescript": "6.0.3",
 		"yaml": "2.9.1"

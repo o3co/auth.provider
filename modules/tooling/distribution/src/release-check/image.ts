@@ -2,14 +2,14 @@
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, join } from "node:path";
+import { DockerFailed, docker, dockerWithin } from "@mod/docker-client";
 import { trialLayer } from "@mod/trial";
 import { carried } from "./carried/carried.ts";
 import { type Container, withContainer } from "./containers/container.ts";
-import { DockerFailed, docker } from "./containers/docker.ts";
 import { refusalsIn } from "./refused.ts";
 
-export const commandWithin = 60_000;
-export const buildWithin = 15 * 60_000;
+export const commandWithin = dockerWithin.control;
+export const buildWithin = dockerWithin.build;
 const bootWithin = 3 * 60_000;
 
 /** Why Docker cannot build and run the images, or nothing when it can. */
