@@ -175,6 +175,20 @@ const errorOf = (outcome: GrantOutcome) => (outcome.kind === "error" ? outcome.e
 const saidOf = (outcome: GrantOutcome) =>
 	outcome.kind === "error" ? `${outcome.error}: ${outcome.description}` : "issued";
 
+/** A subject check comparing a token's standing time with its subject's boundary, as subject-tokens does. */
+const standingChecked = defineModule(
+	{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+	(m) => [
+		m.contribute(subjectChecks).by(async (c) => {
+			const revocation = await c.get(subjectRevocation);
+			return {
+				holds: async (t) =>
+					(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+			};
+		}),
+	],
+);
+
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
 const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
@@ -443,7 +457,7 @@ describe("jwt-bearer", () => {
 		expect(saidOf(await s.grant(late))).toBe("invalid_grant: assertion replayed");
 	});
 
-	it("gives no token where its subject's boundary is recorded while the policies judge, after the first check [guarantee-4-a]", async () => {
+	it("issues where its subject's boundary is recorded while the policies judge a token the next verification refuses, as it stands from before it [guarantee-4-a]", async () => {
 		const revoking = defineModule(
 			{ name: "revoking", replicaSafe: true, takes: [revocations] },
 			(m) => [
@@ -461,32 +475,25 @@ describe("jwt-bearer", () => {
 		);
 		const s = await serve(undefined, issuer, undefined, trustedUpstream, outboundModule, [
 			revoking,
+			standingChecked,
 		]);
-		const made = await assertion({ ...base, iat: now / 1000 });
-		expect(saidOf(await s.grant(made))).toBe("invalid_grant: assertion revoked");
+		const outcome = await s.grant(await assertion({ ...base, iat: now / 1000 }));
+		if (outcome.kind !== "issued") expect.unreachable("the boundary comes after the grant's check");
+		expect(await s.verify(String(outcome.body.access_token))).toEqual({
+			kind: "invalid",
+			reason: "revoked",
+		});
 	});
 
 	it("issues on a stale read of its subject's boundary a token the next verification refuses, as it stands from the assertion's making less the skew [guarantee-4-a]", async () => {
 		const lagging = laggingRevocation();
-		const checked = defineModule(
-			{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
-			(m) => [
-				m.contribute(subjectChecks).by(async (c) => {
-					const revocation = await c.get(subjectRevocation);
-					return {
-						holds: async (t) =>
-							(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
-					};
-				}),
-			],
-		);
 		const s = await serve(
 			undefined,
 			issuer,
 			undefined,
 			trustedUpstream,
 			outboundModule,
-			[checked],
+			[standingChecked],
 			true,
 			lagging.module,
 		);
