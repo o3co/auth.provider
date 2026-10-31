@@ -8,11 +8,13 @@ export const configFiles = "@mod/config-files";
 
 /** An npm package name, scoped or not: what the app's imports and dependencies can name. */
 const packageName = /^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
+/** The longest name npm takes for a package, its scope included. */
+const longestPackageName = 214;
 
 /** Refuses, before anything is written, a name the app could not import or depend on. */
 export function namesPackages(names: readonly string[]): void {
 	for (const name of names) {
-		if (!packageName.test(name) || name.length > 214) {
+		if (!packageName.test(name) || name.length > longestPackageName) {
 			throw new Error(`${name} is not a package name`);
 		}
 	}
