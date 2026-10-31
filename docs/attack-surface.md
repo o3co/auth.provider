@@ -189,7 +189,7 @@ Secrets kept in stores (sealed transactions, secret hashes) are in each module's
 | `device-grant.attempts` | `@mod/device-grant` | `5` | raised, up to 100: more guesses at a user code in each window |
 | `device-grant.attempts-window` | `@mod/device-grant` | `"5m"` | shortened: the guesses `attempts` allows come back sooner |
 | `device-grant.code-lifetime` | `@mod/device-grant` | `"10m"` | past the default ten minutes, up to an hour: a user code can be guessed and a device code used that long |
-| `dpop.nonce.required` | `@mod/dpop` | `"never"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
+| `dpop.nonce.required` | `@mod/dpop` | `"as"` | `never`: no nonce is asked, so a proof made ahead is taken within its window |
 | `exchange-id-tokens.max-age` | `@mod/exchange-id-tokens` | `"10m"` | past the default ten minutes, up to an hour: an older id_token is taken for an exchange |
 | `external-jwt.key-set-max-age` | `@mod/external-jwt` | `"1d"` | past the default day, up to 30: a key set is still used that long after its fetch while no new one can be had, a key removed upstream among it |
 | `federation-grants-connect.identity-check` | `@mod/federation-grants-connect` | `"required"` | `none`: a callback whose upstream account another user holds is not refused |

@@ -206,7 +206,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
   - DPoP:
     - A proof is accepted once (its `jti` is kept where it is never evicted and survives a crash and a failover).
     - `htu` is compared with a URL built from the issuer, never from request headers.
-    - Nonces are checked when configured.
+    - A nonce is asked at the token endpoint by default (`dpop.nonce.required = as`), so a proof made ahead is refused there; `never` asks none, and every start warns `dpop.nonce_not_asked`.
   - A token bound to a key or certificate is refused when presented under another scheme, so a binding cannot be stripped.
 - **Left to you:**
   - Keeping the issuer's path when your proxy forwards requests: a proxy that strips it breaks every DPoP proof.
