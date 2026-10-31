@@ -356,9 +356,10 @@ describe("redis", () => {
 
 	it("boots a user held to the store's own keys, needing the confirmation key only where it confirms", async () => {
 		expect(await asUser(["~acl:{*", "&*", "+@all"], [], null, "acl")).toBe("booted");
-		expect(await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl")).toContain(
-			"acl:#confirm",
-		);
+		const refused = await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl");
+		// Named by the setting that sets it, never by the prefix's value.
+		expect(refused).toContain("<redis.prefix>:#confirm");
+		expect(refused).not.toContain("acl:");
 	});
 
 	it("boots while no replica takes writes: that leaves the commands undetermined, never refused", async () => {

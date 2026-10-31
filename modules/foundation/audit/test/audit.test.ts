@@ -291,6 +291,24 @@ it("counts as lost the events still under way at the stop deadline, and stops on
 	]);
 });
 
+it("counts an event recorded after stop that its receiver fails, as any other loss", async () => {
+	const failing = receiving("failing", async () => {
+		throw new Error("down");
+	});
+	const assembly = await app(["failing"], [failing]);
+	await assembly.stop(1000);
+	// A handler still running past stop records; its receiver fails.
+	assembly.get(audit).record({ kind: "login.failed" });
+	await settled();
+	await settled();
+	expect(assembly.get(audit).lost()).toEqual({ failing: 1 });
+	expect(lostSeries(assembly)).toEqual([{ labels: { receiver: "failing" }, value: 1 }]);
+	expect(warned()).toContainEqual([
+		"audit.receiver_losing",
+		{ receiver: "failing", lost: 1, failure: "Error" },
+	]);
+});
+
 it("counts each receiver's lost events as a metric", async () => {
 	const failing = receiving("failing", async () => {
 		throw new Error("down");

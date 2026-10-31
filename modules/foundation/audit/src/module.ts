@@ -102,7 +102,7 @@ function lanesOver(
 		losing: 0,
 	}));
 	type Lane = (typeof lanes)[number];
-	/** Past the stop deadline: what settles after is neither taken nor lost again. */
+	/** Past the stop deadline: a delivery under way then, already lost as `stopped`, is neither taken nor lost again when it settles. */
 	let closed = false;
 	const underWay = new Set<Promise<void>>();
 	/** `failure` is the kind alone (`backlog`, `stopped`, or the error's name), never a message a receiver wrote. */
@@ -138,19 +138,22 @@ function lanesOver(
 					continue;
 				}
 				lane.pending += 1;
+				// One recorded after the stop deadline (a handler still running) is counted as any other.
+				const late = closed;
+				const counts = () => late || !closed;
 				// Deferred, so record returns first, and a receiver that throws at once fails like one that rejects.
 				const delivery = Promise.resolve()
 					.then(() => lane.receiver.receive(stamped))
 					.then(
 						() => {
-							if (!closed) took(lane);
+							if (counts()) took(lane);
 						},
 						(error: unknown) => {
-							if (!closed) lose(lane, error instanceof Error ? error.name : "thrown");
+							if (counts()) lose(lane, error instanceof Error ? error.name : "thrown");
 						},
 					)
 					.finally(() => {
-						if (!closed) lane.pending -= 1;
+						if (counts()) lane.pending -= 1;
 						underWay.delete(delivery);
 					});
 				underWay.add(delivery);
