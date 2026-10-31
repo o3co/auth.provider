@@ -1,8 +1,9 @@
 import type { ClientSource } from "@mod/clients";
 import { codeGrantType } from "@mod/code-grant";
 import { composedGrants } from "@mod/grants";
+import { withinHosts } from "@mod/host-entries";
 import type { BuildContext } from "@mod/kernel";
-import { outboundLimits, withinHosts } from "@mod/outbound-policy";
+import { outboundLimits } from "@mod/outbound-policy";
 import { documentUrl } from "./document/document.ts";
 import { readingOver, readingTakes } from "./document/reading.ts";
 import { fetchingWith } from "./fetching/fetching.ts";

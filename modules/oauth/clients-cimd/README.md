@@ -39,4 +39,4 @@
 - Kept documents, remembered refusals and running fetches, in this process only (see `fetching`). Safe on multiple instances.
 
 ## Depends on
-- `kernel`, `clients`, `client-documents`, `client-allowance`, `outbound`, `outbound-policy`, `grants`, `code-grant`, `refresh`, `issuer`, `url-setting` (`isLoopbackName`)
+- `kernel`, `clients`, `client-documents`, `client-allowance`, `outbound`, `outbound-policy`, `host-entries` (the hosts its sections name, and whether a document's host is among them), `grants`, `code-grant`, `refresh`, `issuer`, `url-setting` (`isLoopbackName`)

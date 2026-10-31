@@ -1131,6 +1131,9 @@ importers:
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../../foundation/host-entries
       '@mod/issuer':
         specifier: workspace:*
         version: link:../issuer
