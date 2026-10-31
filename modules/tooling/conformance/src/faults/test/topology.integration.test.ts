@@ -1,6 +1,6 @@
+import { dockerSync, dockerWithin } from "@mod/docker-client";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { ask, askAll, microsOf } from "../../ask/ask.ts";
-import { dockerSync } from "../../docker/docker.ts";
 import { type Reply, startRelay } from "../../relay/relay.ts";
 import { encode, rawClient } from "../../relay/test/client.ts";
 import { roleOf } from "../../store-wire/store-wire.ts";
@@ -13,12 +13,10 @@ afterEach(async () => {
 	running = [];
 });
 afterAll(() => {
-	const left = dockerSync("control", [
-		"ps",
-		"-aq",
-		"--filter",
-		`label=conformance.owner=${process.pid}`,
-	]).trim();
+	const left = dockerSync(
+		["ps", "-aq", "--filter", `label=conformance.owner=${process.pid}`],
+		dockerWithin.control,
+	).trim();
 	expect(left).toBe("");
 });
 const topology = async (spec: Parameters<typeof startTopology>[0]) => {
@@ -56,16 +54,13 @@ const linkOf = async (node: Node) => {
 };
 /** The networks this process's topologies left, by id. */
 const networks = () =>
-	dockerSync("control", [
-		"network",
-		"ls",
-		"-q",
-		"--filter",
-		`label=conformance.owner=${process.pid}`,
-	]).trim();
+	dockerSync(
+		["network", "ls", "-q", "--filter", `label=conformance.owner=${process.pid}`],
+		dockerWithin.control,
+	).trim();
 const exists = (what: "container" | "network" | "volume", name: string) => {
 	try {
-		dockerSync("control", [what, "inspect", name], { stdio: "ignore" });
+		dockerSync([what, "inspect", name], dockerWithin.control, { stdio: "ignore" });
 		return true;
 	} catch {
 		return false;
@@ -86,7 +81,7 @@ describe("a Redis topology", () => {
 		const t = await topology({ replicas: 1 });
 		const names = t.nodes.map((n) => n.name);
 		const volumes = names.flatMap((n) =>
-			dockerSync("control", ["inspect", "-f", "{{range .Mounts}}{{.Name}} {{end}}", n])
+			dockerSync(["inspect", "-f", "{{range .Mounts}}{{.Name}} {{end}}", n], dockerWithin.control)
 				.trim()
 				.split(" ")
 				.filter(Boolean),
@@ -106,12 +101,10 @@ describe("a Redis topology", () => {
 			startTopology({ replicas: 1, settings: ["--no-such-setting", "x"] }),
 		).rejects.toThrow();
 		expect(networks()).toBe(before);
-		const left = dockerSync("control", [
-			"ps",
-			"-aq",
-			"--filter",
-			`label=conformance.owner=${process.pid}`,
-		]).trim();
+		const left = dockerSync(
+			["ps", "-aq", "--filter", `label=conformance.owner=${process.pid}`],
+			dockerWithin.control,
+		).trim();
 		expect(left).toBe("");
 	});
 });

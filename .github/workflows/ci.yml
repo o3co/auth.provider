@@ -677,8 +677,8 @@ jobs:
         run: |
           set -euo pipefail
           cd modules/tooling/conformance
-          image=$(node --input-type=module -e 'import { appClockImage } from "./src/clock/clock.ts"; process.stdout.write(appClockImage());')
-          lib=$(node --input-type=module -e 'import { appLibfaketimeIn } from "./src/clock/clock.ts"; process.stdout.write(appLibfaketimeIn(process.argv[1]));' "$image")
+          image=$(node --input-type=module -e 'import { appClockImage } from "./src/clock/clock.ts"; process.stdout.write(await appClockImage());')
+          lib=$(node --input-type=module -e 'import { appLibfaketimeIn } from "./src/clock/clock.ts"; process.stdout.write(await appLibfaketimeIn(process.argv[1]));' "$image")
           mkdir -p "$RUNNER_TEMP/faketime"
           container=$(docker create "$image")
           docker cp "$container:$lib" "$RUNNER_TEMP/faketime/libfaketimeMT.so.1"

@@ -19,9 +19,9 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { optIns } from "@mod/combinations";
+import { docker } from "@mod/docker-client";
 import { readBundles } from "../contract.ts";
 import { packedOf } from "../release/seal.ts";
-import { docker } from "../release-check/containers/docker.ts";
 import { buildWithin, commandWithin, images, overridesFile } from "../release-check/image.ts";
 import { type Bom, coverageProblems, type Declared, insideBom, npmNamed } from "./boms.ts";
 import { endOf, notRemoved } from "./removal.ts";

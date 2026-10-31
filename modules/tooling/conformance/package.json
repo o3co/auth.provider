@@ -15,6 +15,7 @@
 	"dependencies": {
 		"@mod/combinations": "workspace:*",
 		"@mod/create-app": "workspace:*",
+		"@mod/docker-client": "workspace:*",
 		"@mod/trial": "workspace:*",
 		"vitest": "5.0.5"
 	}

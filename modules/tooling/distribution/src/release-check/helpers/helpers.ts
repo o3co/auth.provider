@@ -1,8 +1,8 @@
 /** The resolver's helper processes in an app's image, run as a deployment constrains it. */
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { docker } from "@mod/docker-client";
 import type { Container } from "../containers/container.ts";
-import { docker } from "../containers/docker.ts";
 import { pidsCurrent } from "./cgroup.ts";
 
 /** The part of `images` a scene drives: booting the image with constraints, a look while ready. */

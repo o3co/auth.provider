@@ -1,6 +1,6 @@
 /** A container a check runs, owned for its whole life: named, labelled, timed, and removed. */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { type Docker, DockerFailed, docker as dockerClient } from "./docker.ts";
+import { type Docker, DockerFailed, docker as dockerClient } from "@mod/docker-client";
 
 export interface ContainerOptions {
 	/** The check's run: part of each name, and the label every container of it carries. */
