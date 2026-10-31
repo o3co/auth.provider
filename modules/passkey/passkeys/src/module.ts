@@ -62,14 +62,20 @@ export default defineModule(
 			}
 			return keptPasskeys(store, tokenOf(c), c.clock.now);
 		}),
-		m.provide(passkeys).by(async (c) =>
-			passkeysOver({
+		m.provide(passkeys).by(async (c) => {
+			// The operator's choice, yet said at every start: whoever holds the authenticator passes.
+			if (c.section["user-verification"] === "discouraged") {
+				c.log.warn("passkeys.user_unverified", {
+					reason: "the authenticator is not asked to verify its user",
+				});
+			}
+			return passkeysOver({
 				ceremonies: await c.get(ceremonies),
 				records: await passkeysOf(c),
 				challenges: await challengesOf(c),
 				verification: c.section["user-verification"],
-			}),
-		),
+			});
+		}),
 		m.provide(registrations).by(async (c) => {
 			const held = await holdingOf(c);
 			if ("refused" in held) return c.refuse("passkeys", held.refused);

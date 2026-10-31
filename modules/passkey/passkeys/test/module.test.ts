@@ -8,7 +8,7 @@ import {
 	kernelConfig,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { passkeyWitnessStandIn as witnessStandIn } from "@mod/passkey-witness/testing";
 import webauthn from "@mod/webauthn/module";
 import {
@@ -72,6 +72,30 @@ const composition = (witnesses: { readonly module: ReturnType<typeof defineModul
 });
 const boot = (witnesses: { readonly module: ReturnType<typeof defineModule> }[]) =>
 	assemble(composition(witnesses));
+
+it("warns at every start where the authenticator is not asked to verify its user", async () => {
+	const warned = async (verification?: "discouraged") => {
+		const recorded = recordingLog();
+		await assemble({
+			...composition([]),
+			config: {
+				...kernelConfig(),
+				...webauthnConfig(),
+				...passkeysConfig(verification ? { "user-verification": verification } : {}),
+			},
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+		return recorded.lines().filter((line) => line.event === "passkeys.user_unverified");
+	};
+	expect(await warned("discouraged")).toEqual([
+		{
+			level: "warn",
+			event: "passkeys.user_unverified",
+			fields: { reason: "the authenticator is not asked to verify its user" },
+		},
+	]);
+	expect(await warned()).toEqual([]);
+});
 
 it("takes all it names, with a witnessing and without", async () => {
 	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
