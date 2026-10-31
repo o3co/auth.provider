@@ -233,8 +233,9 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 
 ## scaffold
 
+- `@mod/app-entries` (assembly, `modules/scaffold/app-entries`): Writes a generated app's entries, its start and the scripts its composed modules call for, and holds how each boots, refuses, checks 0.17's variables, writes and stops.
 - `@mod/app-output` (assembly, `modules/scaffold/app-output`): Writes a generated project: a deployment of the modules it is given, with its configuration from their fragments, the environment's and the local layer's examples, an image and the operator's guide.
-  - `entries` (`src/entries`): a generated app's entries besides `start`.
+  - `asked` (`src/asked`): what each composed module asks of the deployment, as its manifest declares it, rendered for the guide.
   - `fragments` (`src/fragments`): Reads each module's fragment (its section's example, `config.example` beside its package.json) as data.
   - `lockfile` (`src/lockfile`): Holds a pnpm lockfile to what was recorded of the packages outside the release when an app was generated: the version its root depends on, the content, the dependencies declared, and one copy of each package the app's overrides hold.
   - `reading` (`src/lockfile/reading`): a pnpm lockfile read as data, and the words of its keys and references.
