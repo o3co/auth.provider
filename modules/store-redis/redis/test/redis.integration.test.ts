@@ -42,9 +42,9 @@ let replica = "";
 let secondReplica = "";
 let network = "";
 
-const within = { encoding: "utf8", killSignal: "SIGKILL" } as const;
+/** A docker call killed past a minute, as long as its hook may take, so a stalled daemon fails the test. */
 const docker = (...args: string[]) =>
-	execFileSync("docker", args, { ...within, timeout: args[0] === "run" ? 180_000 : 60_000 }).trim();
+	execFileSync("docker", args, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
 const cli = (target: string, ...args: string[]) => docker("exec", target, "redis-cli", ...args);
 /** Whether the target answers PING; a container still starting answers nothing yet. */
 const pings = (target: string) => {
