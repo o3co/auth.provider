@@ -36,7 +36,7 @@
 - Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, either case) are never read; with one set and no `proxy`, boot is refused, naming the variable alone, unless `direct-despite-proxy` is set.
 
 ## Depends on
-- `kernel`, `tls-options` (the TLS floor), `outbound-policy`, `host-entries` (also `hostEntryOf` and `withinHosts`, to read and compare `plain-ipv4`'s pairs), `address-reach` (`isLoopbackAddress`), `url-setting` (the proxy's origin)
+- `kernel`, `tls-options` (the TLS floor), `outbound-policy`, `host-entries` (also `hostPair`, `hostEntryOf` and `withinHosts`, to read and compare `plain-ipv4`'s pairs), `address-reach` (`isLoopbackAddress`), `url-setting` (the proxy's origin)
 
 ## Vocabulary
 - failure: why outbound is unavailable, for a caller to log by, with no value and no body: `timeout` (the deadline came), `too-large` (a body or headers past the cap), `unreachable` (no address, no connection, or the connection lost), `unsupported-answer` (a 101 or an encoded answer), `busy` (past `max-concurrent`), `proxy-refused`.

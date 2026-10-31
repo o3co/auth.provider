@@ -3,6 +3,7 @@ import {
 	hostEntry,
 	hostEntryOf,
 	hostList,
+	hostPair,
 	listed,
 	normalized,
 	withinHosts,
@@ -170,6 +171,26 @@ describe("a setting's host entry", () => {
 		expect(
 			hostList.safeParse(["a.example", "*"]).error?.issues.map((i) => [i.path, i.message]),
 		).toEqual([[[1], "not a host, or a name led by a dot"]]);
+	});
+});
+
+describe("a setting's host:port pair", () => {
+	it("takes a pair as hostEntryOf reads one, refusing anything else in one message", () => {
+		for (const pair of ["a.example:8080", "10.0.0.1:80", "[fd00::1]:65535"]) {
+			expect(hostPair.safeParse(pair).success, pair).toBe(true);
+		}
+		for (const pair of [
+			"a.example",
+			"fd00::1:80",
+			".a.example:80",
+			"a.example:08080",
+			"a.example:65536",
+		]) {
+			expect(
+				hostPair.safeParse(pair).error?.issues.map((i) => i.message),
+				pair,
+			).toEqual(["not a host:port pair"]);
+		}
 	});
 });
 
