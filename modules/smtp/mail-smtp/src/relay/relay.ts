@@ -48,6 +48,7 @@ export function mailboxOf(from: string): Mailbox | undefined {
 const beyondAscii = /[^\p{ASCII}]/u;
 /** The longest wait for the relay to end the connection after QUIT. */
 const QUIT_MS = 1000;
+const sendSteps = { connect: 1, greeting: 1, idle: 2 } as const;
 
 /** `To` written here, alone and in angle brackets; the library composes the rest. */
 async function compose(to: string, from: Mailbox, letter: Letter): Promise<Buffer> {
@@ -170,7 +171,10 @@ export function relayOver(
 	const { host, port, security, deadlineMs } = settings;
 	// Held to the floor once, its own keys last, as `tls-options` knows them, so nothing loosens it.
 	const tls = Object.freeze(heldToFloor(settings.floor, {}));
-	const stepMs = Math.max(1, Math.floor(deadlineMs / 4));
+	const stepMs = Math.max(
+		1,
+		Math.floor(deadlineMs / (sendSteps.connect + sendSteps.greeting + sendSteps.idle)),
+	);
 	const converse = async (held: Held, to: string, message: Buffer) => {
 		const socket = await openSocket(settings, open, stepMs, held);
 		const connection = new SMTPConnection({
@@ -182,9 +186,9 @@ export function relayOver(
 			ignoreTLS: security === "none",
 			// A copy per connection: the library may write into what it is given.
 			tls: { ...tls },
-			connectionTimeout: stepMs,
-			greetingTimeout: stepMs,
-			socketTimeout: stepMs * 2,
+			connectionTimeout: stepMs * sendSteps.connect,
+			greetingTimeout: stepMs * sendSteps.greeting,
+			socketTimeout: stepMs * sendSteps.idle,
 			logger: false,
 			debug: false,
 			transactionLog: false,
