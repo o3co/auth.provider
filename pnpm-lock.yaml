@@ -4973,6 +4973,9 @@ importers:
       '@mod/external-jwt':
         specifier: workspace:*
         version: link:../../foundation/external-jwt
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../../foundation/host-entries
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel

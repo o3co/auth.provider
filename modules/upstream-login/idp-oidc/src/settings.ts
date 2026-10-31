@@ -1,9 +1,9 @@
 import { type Algorithm, algorithmsSetting } from "@mod/external-jwt";
+import { hostEntryOf } from "@mod/host-entries";
 import { setting } from "@mod/kernel";
 import {
 	browsedRefusalText,
 	destinationRefusal,
-	hostEntryOf,
 	type OutboundRefusals,
 } from "@mod/outbound-policy";
 import {

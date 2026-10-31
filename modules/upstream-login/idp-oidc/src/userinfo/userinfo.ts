@@ -1,6 +1,7 @@
+import { withinHosts } from "@mod/host-entries";
 import { Unavailable } from "@mod/kernel";
 import type { Narrower, Outbound, OutboundResponse } from "@mod/outbound";
-import { destinationRefusal, type OutboundRefusals, withinHosts } from "@mod/outbound-policy";
+import { destinationRefusal, type OutboundRefusals } from "@mod/outbound-policy";
 import { UpstreamRefused, type UpstreamTokens } from "@mod/upstreams";
 
 /**

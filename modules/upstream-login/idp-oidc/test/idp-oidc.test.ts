@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { type Algorithm, externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
+import { withinHosts } from "@mod/host-entries";
 import {
 	assemble,
 	contract,
@@ -20,7 +21,7 @@ import {
 	outbound,
 } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
-import { type OutboundRefusals, outboundRefusals, withinHosts } from "@mod/outbound-policy";
+import { type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
 import { testTlsOptions } from "@mod/tls-options/testing";
 import {
 	type AuthorizationStart,
