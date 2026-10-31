@@ -6,6 +6,34 @@ interface Field {
 	readonly value: string;
 }
 
+/** What a field's value reads, and where the text goes on past it. */
+interface ValueRead {
+	readonly value: string;
+	readonly at: number;
+}
+
+/** A quoted value from its opening `"`, `\\` escaping the character after it; undefined unclosed or followed by more than a separator. */
+function quotedValueAt(text: string, at: number): ValueRead | undefined {
+	let value = "";
+	for (at++; text[at] !== '"'; at++) {
+		if (text[at] === "\\") at++;
+		if (at >= text.length) return undefined;
+		value += text[at];
+	}
+	at++;
+	while (text[at] === " " || text[at] === "\t") at++;
+	if (at < text.length && text[at] !== ";" && text[at] !== ",") return undefined;
+	return { value, at };
+}
+
+/** A bare value up to the next separator, trimmed; undefined where it holds a `"`. */
+function bareValueAt(text: string, at: number): ValueRead | undefined {
+	const stop = text.slice(at).search(/[;,]/);
+	const raw = stop === -1 ? text.slice(at) : text.slice(at, at + stop);
+	if (raw.includes('"')) return undefined;
+	return { value: raw.trim(), at: at + raw.length };
+}
+
 /** The elements of an XFCC header, each its key=value fields; undefined where its grammar breaks. */
 function elementsOf(text: string): Field[][] | undefined {
 	const elements: Field[][] = [[]];
@@ -17,24 +45,10 @@ function elementsOf(text: string): Field[][] | undefined {
 		if (key === "") return undefined;
 		at += end + 1;
 		while (text[at] === " " || text[at] === "\t") at++;
-		let value = "";
-		if (text[at] === '"') {
-			for (at++; text[at] !== '"'; at++) {
-				if (text[at] === "\\") at++;
-				if (at >= text.length) return undefined;
-				value += text[at];
-			}
-			at++;
-			while (text[at] === " " || text[at] === "\t") at++;
-			if (at < text.length && text[at] !== ";" && text[at] !== ",") return undefined;
-		} else {
-			const stop = text.slice(at).search(/[;,]/);
-			const raw = stop === -1 ? text.slice(at) : text.slice(at, at + stop);
-			if (raw.includes('"')) return undefined;
-			value = raw.trim();
-			at += raw.length;
-		}
-		elements[elements.length - 1]?.push({ key, value });
+		const read = text[at] === '"' ? quotedValueAt(text, at) : bareValueAt(text, at);
+		if (!read) return undefined;
+		at = read.at;
+		elements[elements.length - 1]?.push({ key, value: read.value });
 		if (at >= text.length) return elements;
 		if (text[at] === ",") elements.push([]);
 		at++;
