@@ -12,6 +12,7 @@ import events from "../audit-events.ts";
 import { type Decision, refusal } from "../decision.ts";
 import { type Flow, flowOver, flowTakes, type Place } from "../flow/flow.ts";
 import type { Settings } from "../section.ts";
+import { urlFrom } from "../url.ts";
 
 export const path = "/oauth/authorize";
 
@@ -46,8 +47,7 @@ export function routeWith({
 	rule,
 }: RouteParts): Pick<Route, "handle" | "unavailable"> {
 	const audited = declaredAudit(recorder, events);
-	const urlWith = (params: Iterable<readonly [string, string]>) =>
-		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
+	const urlWith = urlFrom(self);
 
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
 		if (request.method === "POST") {
@@ -80,27 +80,21 @@ export function routeWith({
 		const state = stateText !== undefined && stateText.length <= maxState ? stateText : undefined;
 		const back = (params: Record<string, string>) =>
 			answerTo(redirectUri, { ...params, state, iss: issuer });
-		const reply = (d: Decision) =>
-			d.kind === "unavailable"
-				? unavailableAnswer
-				: d.kind === "answer"
-					? oauthError(400, d.error, d.description)
-					: found(
-							302,
-							d.kind === "send"
-								? d.to
-								: back(
-										d.kind === "code"
-											? { code: d.code }
-											: {
-													error: d.error,
-													// Held to RFC 6749's characters, as the token endpoint's: a rule or policy may say anything.
-													...(d.description
-														? { error_description: errorDescription(d.description) }
-														: {}),
-												},
-									),
-						);
+		/** The answer a decision makes: here, on to another page, or back to the client. */
+		const responseOf = (d: Decision) => {
+			if (d.kind === "unavailable") return unavailableAnswer;
+			if (d.kind === "answer") return oauthError(400, d.error, d.description);
+			if (d.kind === "send") return found(302, d.to);
+			if (d.kind === "code") return found(302, back({ code: d.code }));
+			return found(
+				302,
+				back({
+					error: d.error,
+					// Held to RFC 6749's characters, as the token endpoint's: a rule or policy may say anything.
+					...(d.description ? { error_description: errorDescription(d.description) } : {}),
+				}),
+			);
+		};
 		// The form's refusals are read here and answered by the flow, which logs the browser in first.
 		// A parameter the rule reads, sent twice, is the rule's to answer (RFC 8707 §2's invalid_target).
 		const ruled = repeated.map((name) => rule.repeated?.(name)).find((r) => r !== undefined);
@@ -133,11 +127,11 @@ export function routeWith({
 			if (decided.kind === "unavailable") {
 				log.warn("authorize.unavailable", { what: decided.what, route: path });
 			}
-			return reply(decided);
+			return responseOf(decided);
 		} catch (error) {
 			if (!isUnavailable(error)) throw error;
 			log.warn("authorize.unavailable", { what: error.what, route: path });
-			return reply(refusal("temporarily_unavailable"));
+			return responseOf(refusal("temporarily_unavailable"));
 		}
 	};
 	return { handle: answer, unavailable: { response: unavailableAnswer } };
