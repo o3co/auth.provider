@@ -15,7 +15,6 @@ import {
 import {
 	answerOf,
 	authorizationUrl,
-	basicAuthorization,
 	endSessionUrl,
 	guarded,
 	idTokenReaderOf,
@@ -34,6 +33,12 @@ import {
 import { z } from "zod";
 import { descriptionUrl, hostsOf, narrowerOf, type Settings, sentFor } from "./settings.ts";
 import { describedUserinfoRefusal, userinfoOf } from "./userinfo/userinfo.ts";
+
+/** A value form-urlencoded, as URLSearchParams writes it: a space is `+`. */
+const formEncoded = (value: string) => new URLSearchParams({ "": value }).toString().slice(1);
+/** The HTTP Basic client authentication, each part form-urlencoded first (RFC 6749 §2.3.1); for now its own, until upstream-client's token post takes it. */
+const basicAuthorization = (clientId: string, secret: string) =>
+	`Basic ${Buffer.from(`${formEncoded(clientId)}:${formEncoded(secret)}`).toString("base64")}`;
 
 const description = z.looseObject({
 	issuer: z.string(),
