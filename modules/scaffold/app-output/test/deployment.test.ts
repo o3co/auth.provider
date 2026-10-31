@@ -72,6 +72,33 @@ it("writes the deployment of the modules from the packages given", async () => {
 	expect(guide).not.toContain("A first login");
 });
 
+it("writes a composed type's entry sample in the local layer's example alone, never in the configuration file or the env example", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	const sample = {
+		from: "@c/type/entry.example",
+		text: 'type = "t"\nurl = "https://t.example.invalid"\n',
+	};
+	await writeDeployment(
+		target,
+		["@mod/http", "@c/owner", "@c/type"],
+		{
+			...fakePackages(),
+			samples: (names) =>
+				[
+					{ name: "@c/owner", takes: [{ map: "owner.entries", of: "@c/contract" }] },
+					{ name: "@c/type", sampleOf: "@c/contract", sample },
+				].filter((s) => names.includes(s.name)),
+		},
+		readme,
+	);
+	expect(await read(target, "config/local.conf.example")).toContain(
+		'# owner.entries.t {\n# \ttype = "t"\n# \turl = "https://t.example.invalid"\n# }',
+	);
+	for (const file of ["config/application.conf", ".env.example"]) {
+		expect(await read(target, file)).not.toMatch(/owner|t\.example\.invalid|OWNER_/);
+	}
+});
+
 it("points at the release's documents and the cards that ask of the deployment", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	const release = { version: "1.2.3", repository: "https://example.invalid/auth" };

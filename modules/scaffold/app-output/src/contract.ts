@@ -5,7 +5,9 @@ export {
 	fragmentFile,
 	fragmentsIn,
 	fragmentsOf,
+	type Sampled,
 	type Setting,
+	sampleFile,
 	settingsOf,
 } from "./fragments/contract.ts";
 export {

@@ -2,14 +2,14 @@
 
 ## Responsibilities
 - Writes a generated project: a deployment of the modules it is given, with its configuration from their fragments, the environment's and the local layer's examples, an image and the operator's guide.
-- Maps each fragment's keys to the environment and the local layer, through the internal module `fragments`: the boundary that keeps module words out of the environment's.
+- Maps each fragment's keys to the environment and the local layer, and the entry samples of the types composed, through the internal module `fragments`: the boundary that keeps module words out of the environment's.
 - Holds what every generated project shares: the target's check, the package name check and the manifest.
 - States what it takes from where the packages come from (`Packages`); the caller implements it.
 
 ## Not here
 - Where the packages come from (a workspace or a bundle's index), and what the app depends on to have them: the caller's, through `Packages`.
 - Which modules a project composes, and the values of its guide's own template marks: the caller's.
-- What each module's configuration means, and its fragment (`config.example` beside its package.json): each module's.
+- What each module's configuration means, and its fragment (`config.example` beside its package.json) and entry sample (`entry.example`): each module's.
 - The app's entries and how they boot: `app-entries`.
 
 ## Offers
@@ -19,9 +19,9 @@
   - The README lists each composed module's card as installed, and points at the `## Deployment` section of each card that has one, and at the release's walk to a first login where its repository is stated.
   - The guide lists what the composed modules ask of the deployment, and the values the operator decides, from each one's own declaration, through the internal module `asked`.
   - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
-- `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), the release (`Release`), and, where the caller has them, what each name declares for the guide (`asks`, as `Asked`).
+- `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), the release (`Release`), and, where the caller has them, what each name declares for the guide (`asks`, as `Asked`) and of entry samples (`samples`, as `Sampled`).
 - `namesPackages` and `vacant`, for a caller to refuse a plan before it composes.
-- `fragmentsIn`, `fragmentsOf`, `fragmentFile` and `settingsOf` (internal module `fragments`); `outsideLock` (`lockfile`).
+- `fragmentsIn`, `fragmentsOf`, `fragmentFile`, `sampleFile` and `settingsOf` (internal module `fragments`); `outsideLock` (`lockfile`).
 - `Packages.outside`, where the caller has packages outside the release: what the app is given beside them, see the internal module `outside`; `appZod`, the zod every app depends on.
 
 ## Invariants

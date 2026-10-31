@@ -7,6 +7,8 @@ import {
 	fragmentsIn,
 	fragmentsOf,
 	type Packages,
+	type Sampled,
+	sampleFile,
 } from "@mod/app-output";
 import type { Outside, Read } from "./outside/contract.ts";
 import { dependenciesOf, workspacePackages } from "./project.ts";
@@ -33,6 +35,20 @@ const askedIn = (name: string, manifest: Readonly<Record<string, unknown>> | und
 	...(typeof manifest?.registersAs === "string" ? { registersAs: manifest.registersAs } : {}),
 });
 
+/** What a manifest declares of entry samples: the maps it takes them for (`takesSamples`), or the contract its own sample is of (`sampleOf`), with the sample's text. */
+const sampledIn = (
+	name: string,
+	manifest: Readonly<Record<string, unknown>> | undefined,
+	sample: { readonly from: string; readonly text: string } | undefined,
+): Sampled => ({
+	name,
+	...(Array.isArray(manifest?.takesSamples)
+		? { takes: manifest.takesSamples as { map: string; of: string }[] }
+		: {}),
+	...(typeof manifest?.sampleOf === "string" ? { sampleOf: manifest.sampleOf } : {}),
+	...(sample ? { sample } : {}),
+});
+
 /** A repository URL as a manifest states it, a string or `{ url }`, plain https and no `.git`. */
 const repositoryOf = (stated: unknown): string | undefined => {
 	const url = typeof stated === "string" ? stated : (stated as { url?: unknown } | undefined)?.url;
@@ -47,6 +63,8 @@ export interface Indexed {
 		readonly package: string;
 		readonly entry: string;
 		readonly fragment?: string;
+		/** The member's entry sample, as the release wrote it. */
+		readonly sample?: string;
 		readonly references?: boolean;
 		readonly deployment?: boolean;
 		/** The member's manifest, as the release wrote it. */
@@ -104,6 +122,18 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 				return dir === undefined
 					? []
 					: [askedIn(name, JSON.parse(readFileSync(join(dir, "package.json"), "utf8")))];
+			}),
+		samples: (names) =>
+			names.flatMap((name) => {
+				const dir = dirs().get(name);
+				if (dir === undefined) return [];
+				const file = join(dir, sampleFile);
+				const sample = existsSync(file)
+					? { from: file, text: readFileSync(file, "utf8") }
+					: undefined;
+				return [
+					sampledIn(name, JSON.parse(readFileSync(join(dir, "package.json"), "utf8")), sample),
+				];
 			}),
 		release: () => {
 			const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -167,6 +197,14 @@ export function publishedIn(index: Indexed, beside?: Beside): Packages {
 			names.flatMap((name) =>
 				outside.has(name) || !byName.has(name) ? [] : [askedIn(name, byName.get(name)?.manifest)],
 			),
+		// Nor of entry samples.
+		samples: (names) =>
+			names.flatMap((name) => {
+				const entry = outside.has(name) ? undefined : byName.get(name);
+				if (entry === undefined) return [];
+				const sample = entry.sample === undefined ? undefined : { from: name, text: entry.sample };
+				return [sampledIn(name, entry.manifest, sample)];
+			}),
 		release: () => ({
 			version: index.version,
 			...(index.repository ? { repository: index.repository } : {}),

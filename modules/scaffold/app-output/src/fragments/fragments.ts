@@ -6,7 +6,7 @@ import { parse } from "@o3co/ts.hocon";
 /** The file beside a package's manifest that holds its section's example. */
 export const fragmentFile = "config.example";
 
-type Tree = { readonly [key: string]: unknown };
+export type Tree = { readonly [key: string]: unknown };
 
 /** One section's example, as its owner wrote it: placeholders only. */
 export interface Fragment {
@@ -39,7 +39,7 @@ const spanningSections: ReadonlyMap<string, string> = new Map([
 	["audit.receivers", "[REPLACE-RECEIVER-NAMES]"],
 ]);
 
-const isTree = (value: unknown): value is Tree =>
+export const isTree = (value: unknown): value is Tree =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The most a fragment's text may hold, and its keys and values together (what reaches the examples). */
@@ -62,7 +62,7 @@ const written = (value: unknown): boolean =>
 			: typeof value !== "string" || !unwritten(value);
 
 /** One fragment's tree, read as data: no substitution resolved or kept, no file included, nothing over its bounds. */
-function treeOf(from: string, text: string): unknown {
+export function treeOf(from: string, text: string): unknown {
 	if (Buffer.byteLength(text) > textBytes) throw new Error(`${from}: over ${textBytes} bytes`);
 	const refuse = {
 		readFileSync: noInclude,
@@ -172,7 +172,7 @@ export function writtenOf(fragments: readonly Fragment[]): Written[] {
 	);
 }
 
-const hoconKey = (key: string) => (/^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key));
+export const hoconKey = (key: string) => (/^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key));
 
 /** HOCON for the fragments, nested as they nest: `line` writes each leaf it keeps; a block keeping none is left out. */
 function render(
@@ -207,11 +207,14 @@ const commented = (text: string) => text.replace(/^/gm, "# ");
 const example = (header: string, values: readonly string[]) =>
 	`${[`${prose}${header}`, ...values.map(commented)].join("\n")}\n`;
 
-/** Each list with its placeholders, and each value that spans sections, by its dotted key. */
-export function localConfExample(fragments: readonly Fragment[]): string {
+/** Each list with its placeholders, each value that spans sections, by its dotted key, then each entry sample under its map. */
+export function localConfExample(
+	fragments: readonly Fragment[],
+	samples: readonly string[] = [],
+): string {
 	return example(
 		"Copy to config/local.conf, uncomment each key and replace its placeholders; git and the image leave that file out.",
-		writtenOf(fragments).map((w) => `${w.key} = ${w.example}`),
+		[...writtenOf(fragments).map((w) => `${w.key} = ${w.example}`), ...samples],
 	);
 }
 

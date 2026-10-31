@@ -1,22 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { createServer } from "node:net";
 import { docker as dockerRun, dockerSync, dockerWithin } from "@mod/docker-client";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { freePort } from "./checks.ts";
 import { configured, installed } from "./full-app.ts";
 
 const image = "redis:7.4-alpine";
 let container = "";
 let redisUrl = "";
 let app: ChildProcess | undefined;
-
-async function freePort(): Promise<number> {
-	return new Promise((resolve) => {
-		const server = createServer().listen(0, "127.0.0.1", () => {
-			const address = server.address();
-			server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
-		});
-	});
-}
 
 async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms = 30_000) {
 	const end = Date.now() + ms;
