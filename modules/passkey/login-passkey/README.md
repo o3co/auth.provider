@@ -14,7 +14,7 @@
   - Every refusal is `401` `{"error": "passkey_login_failed"}`. Other errors: `csrf` (403), `repeated_parameter`, `invalid_redirect`, `invalid_request` (400), too many requests (429), a login's body other than JSON (415), `temporarily_unavailable` (503, a store) or `service_unavailable` (503, requests not counted).
 - Contribution to `login-gates`: the amr a passkey login proves, `pop`, and `mfa` where `counts-as-mfa` and the authenticator verified the user; and the gate `credential-policy`.
 - Audit events (declared in `./audit-events`): `passkey.session.opened`, `passkey.session.held`, `passkey.session.refused` (`reason`), `passkey.password_refused`, each with the `source` where `request-source` determined it.
-- Operator section: `counts-as-mfa` (default true, and no weakening: holding the key and the user verified in one operation make a multi-factor cryptographic authenticator, so it warns of nothing), `attempts` per source on each route (1–100, default 20) in `window` (1m–1d, default `15m`), `password` (`allowed`, the default, or `refused-when-held`), `password-exempt-group`.
+- Operator section: `counts-as-mfa` (default true, and no weakening: holding the key and the user verified in one operation make a multi-factor cryptographic authenticator, so it warns of nothing), `attempts` per source on each route (1–100, default 20) in `window` (1m–1d, default `15m`), `password` (`allowed`, the default, or `refused-when-held`), `password-exempt-group` (under `refused-when-held`, every start warns `login-passkey.password_exempt_group`).
 
 ## Invariants
 - Checks run in this order on both routes: `csrf`, then attempts per source; on the login, then repeated parameters, the destination, the assertion's presence.
