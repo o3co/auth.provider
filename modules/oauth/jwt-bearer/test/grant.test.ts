@@ -442,6 +442,29 @@ describe("jwt-bearer", () => {
 		expect(saidOf(await s.grant(late))).toBe("invalid_grant: assertion replayed");
 	});
 
+	it("gives no token where its subject's boundary is recorded while the policies judge, after the first check [guarantee-4-a]", async () => {
+		const revoking = defineModule(
+			{ name: "revoking", replicaSafe: true, takes: [revocations] },
+			(m) => [
+				m.contribute(issuancePolicies).by(async (c) => {
+					const recorded = await c.get(revocations);
+					return {
+						name: "revoking",
+						judge: async () => {
+							await recorded.record("alice", { keepDelegations: false });
+							return { kind: "allowed" as const };
+						},
+					};
+				}),
+			],
+		);
+		const s = await serve(undefined, issuer, undefined, trustedUpstream, outboundModule, [
+			revoking,
+		]);
+		const made = await assertion({ ...base, iat: now / 1000 });
+		expect(saidOf(await s.grant(made))).toBe("invalid_grant: assertion revoked");
+	});
+
 	it("gives no token for an assertion made before its subject's revocation, nor one that says not when once there is one", async () => {
 		const s = await serve();
 		const made = await assertion({ ...base, iat: now / 1000 });
