@@ -66,10 +66,12 @@ export function judging(
 
 /**
  * The issuing `issue` does once the judgment allows it, without asking the policies itself: the
- * token signed, and what keeps it, done only once it is handed out.
+ * token signed, and what keeps it, done only once it is handed out. `askedAt` is when `issue` was
+ * asked, before the policies were: the token's `iat`, and where its lifetime runs from.
  */
 export type IssueAccess = (
 	grant: IssuanceRequest["grant"],
+	askedAt: number,
 	limits?: IssueLimits,
 ) => Promise<{ readonly access: IssuedAccess; readonly keep?: () => void }>;
 
@@ -103,7 +105,9 @@ function checkedRequest(request: IssuanceRequest): IssuanceRequest {
 
 /**
  * `admits` and `issue` over the judgment and the issuing, alike for tokens and its stand-in. A
- * token's lifetime is answered from when its issuing is done, its signing included.
+ * token's `iat` and lifetime run from when `issue` was asked, before the policies answer, so a
+ * subject boundary recorded while they do refuses it; what the client is told is left of its
+ * lifetime runs from when its issuing is done, its signing included.
  */
 export function issuing(
 	judge: (request: IssuanceRequest) => Promise<Admitted>,
@@ -116,9 +120,11 @@ export function issuing(
 			// One frozen copy, taken before anything waits, is both what the policies judge and what is
 			// signed: a caller changing its own grant or limits meanwhile changes neither.
 			const taken = deepFreeze(structuredClone({ request: checkedRequest(request), limits }));
+			// When it was asked, with that copy: the token's iat, so the policies' wait cannot move it past a boundary.
+			const askedAt = now();
 			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
-			const { access, keep } = await issueAccess(taken.request.grant, taken.limits);
+			const { access, keep } = await issueAccess(taken.request.grant, askedAt, taken.limits);
 			// Less than a second left once signed, its end come, its cap passed or its signing slow: handed
 			// to no one, and nothing of it kept.
 			const leftMs = access.expiresAt - now();

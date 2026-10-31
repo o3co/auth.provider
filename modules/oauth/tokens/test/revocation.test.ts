@@ -1,24 +1,16 @@
 import { inspect } from "node:util";
 import http from "@mod/http/module";
-import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
-import { issuerConfig } from "@mod/issuer/testing";
-import { assemble, kernelConfig, Unavailable } from "@mod/kernel";
+import { assemble, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import keysModule from "@mod/keys/module";
-import { keysConfig } from "@mod/keys/testing";
 import senderBindingModule from "@mod/sender-binding/module";
 import { denylistAllowanceMs } from "@mod/token-denylist";
 import { beforeEach, expect, it } from "vitest";
-import {
-	type AccessGrant,
-	type IssueLimits,
-	referenceOf,
-	type Tokens,
-	tokens,
-} from "../src/contract.ts";
+import { referenceOf, tokens } from "../src/contract.ts";
 import tokensModule from "../src/module.ts";
 import { tokensConfig } from "../src/testing.ts";
+import { composedConfig, issueFor } from "./composed.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 const start = 1_800_000_000_000;
@@ -35,23 +27,13 @@ const logged = recordingLog();
 const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
 
-/** Issues through `issue`, which nothing here refuses, and answers what it issued. */
-async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
-	const issued = await t.issue({ grant, grantType: "test" }, limits);
-	if (issued.kind !== "issued") throw new Error(`refused by ${issued.policy}`);
-	return issued.access;
-}
-
 /** Tokens over revoked tokens kept in memory, on a place clock that may run apart from ours. */
 async function boot() {
 	const { module: revoked, place } = revokedInMemory(() => now);
 	const app = await assemble({
 		modules: [http, keysModule, issuerModule, senderBindingModule, tokensModule, revoked],
 		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...keysConfig(),
-			...issuerConfig(),
+			...composedConfig(),
 			...tokensConfig({ revocation: "denylist", "access-token-lifetime": "1h" }),
 		},
 		runtime,

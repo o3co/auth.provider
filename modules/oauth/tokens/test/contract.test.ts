@@ -1,47 +1,36 @@
 import { randomBytes } from "node:crypto";
-import http from "@mod/http/module";
-import { httpConfig } from "@mod/http/testing";
-import issuerModule from "@mod/issuer/module";
-import { issuerConfig } from "@mod/issuer/testing";
 import { type Assembly, assemble, defineModule, kernelConfig, type Random } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
-import keysModule from "@mod/keys/module";
-import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
-import senderBindingModule from "@mod/sender-binding/module";
 import { denylistAllowanceMs } from "@mod/token-denylist";
 import { expect, it } from "vitest";
-import {
-	type AccessGrant,
-	type IssuancePolicy,
-	type IssueLimits,
-	issuancePolicies,
-	subjectChecks,
-	type Tokens,
-	tokens,
-} from "../src/contract.ts";
-import tokensModule from "../src/module.ts";
+import { type IssuancePolicy, issuancePolicies, subjectChecks, tokens } from "../src/contract.ts";
 import {
 	type TokensUnderTest,
 	tokensConfig,
 	tokensContract,
 	tokensStandIn,
 } from "../src/testing.ts";
+import { composedConfig, composedModules, issueFor } from "./composed.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 /**
  * What both runs share: a clock the contract moves, a binding kind the composition knows, and a
- * subject check answering revoked for the subjects the contract revoked.
+ * subject check answering revoked for a token issued up to its subject's boundary, as subject-tokens does.
  */
 function around(random?: Random) {
 	let now = 1_800_000_000_000;
-	const revoked = new Set<string>();
+	/** Each revoked subject's boundary: when the contract revoked it. */
+	const revoked = new Map<string, number>();
 	const known = { member: "one", tokenType: "ONE" };
 	const runtime = quietRuntime({ clock: { now: () => now }, ...(random ? { random } : {}) });
 	const module = defineModule({ name: "around", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(senderBindings).by(() => ({ ...known, read: async () => ({ kind: "absent" }) })),
 		m.contribute(subjectChecks).by(() => ({
-			holds: async (token) => (revoked.has(token.subject) ? "revoked" : "holds"),
+			holds: async (token) =>
+				token.issuedAt <= (revoked.get(token.subject) ?? Number.NEGATIVE_INFINITY)
+					? "revoked"
+					: "holds",
 		})),
 	]);
 	const place = (app: Assembly): TokensUnderTest => ({
@@ -52,17 +41,10 @@ function around(random?: Random) {
 		},
 		known,
 		revokeSubject: (subject) => {
-			revoked.add(subject);
+			revoked.set(subject, now);
 		},
 	});
 	return { runtime, module, place };
-}
-
-/** Issues through `issue`, which nothing here refuses, and answers what it issued. */
-async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
-	const issued = await t.issue({ grant, grantType: "test" }, limits);
-	if (issued.kind !== "issued") throw new Error(`refused by ${issued.policy}`);
-	return issued.access;
 }
 
 /** The policies given, contributed. */
@@ -71,41 +53,63 @@ const contributing = (policies: readonly IssuancePolicy[] = []) =>
 		policies.map((policy) => m.contribute(issuancePolicies).by(() => policy)),
 	);
 
-tokensContract(
-	"tokens over keys and a simulated store",
-	async ({ revocable, policies, lifetimeSeconds }) => {
-		const { runtime, module, place } = around();
-		const app = await assemble({
-			modules: [
-				http,
-				keysModule,
-				issuerModule,
-				senderBindingModule,
-				tokensModule,
-				revokedInMemory(() => runtime.clock.now()).module,
-				module,
-				contributing(policies),
-			],
-			config: {
-				...kernelConfig(),
-				...httpConfig(),
-				...keysConfig(),
-				...issuerConfig(),
-				...tokensConfig(
-					{
-						revocation: revocable ? "denylist" : "unsupported",
-						...(lifetimeSeconds === undefined
-							? {}
-							: { "access-token-lifetime": `${lifetimeSeconds}s` }),
-					},
-					{ subjects: "checked" },
-				),
-			},
-			runtime,
-		});
-		return place(app);
-	},
-);
+/** tokens itself, over keys and a simulated store. */
+const overKeys: Parameters<typeof tokensContract>[1] = async ({
+	revocable,
+	policies,
+	lifetimeSeconds,
+}) => {
+	const { runtime, module, place } = around();
+	const app = await assemble({
+		modules: [
+			...composedModules,
+			revokedInMemory(() => runtime.clock.now()).module,
+			module,
+			contributing(policies),
+		],
+		config: {
+			...composedConfig(),
+			...tokensConfig(
+				{
+					revocation: revocable ? "denylist" : "unsupported",
+					...(lifetimeSeconds === undefined
+						? {}
+						: { "access-token-lifetime": `${lifetimeSeconds}s` }),
+				},
+				{ subjects: "checked" },
+			),
+		},
+		runtime,
+	});
+	return place(app);
+};
+
+tokensContract("tokens over keys and a simulated store", overKeys);
+
+it("fails a token whose subject's boundary is recorded while the policies judge it, as a token exchange's would be [guarantee-4-e]", async () => {
+	let place: TokensUnderTest | undefined;
+	const revoking: IssuancePolicy = {
+		name: "revokes",
+		judge: async () => {
+			place?.advance(2_000);
+			place?.revokeSubject("s");
+			place?.advance(3_000);
+			return { kind: "allowed" };
+		},
+	};
+	place = await overKeys({ revocable: true, policies: [revoking] });
+	const asked = Math.floor(place.now() / 1000);
+	const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
+	const { token } = await issueFor(place.tokens, grant);
+	// Stamped the second issue was asked, before the policy's wait, so the boundary covers it.
+	expect(JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString()).iat).toBe(
+		asked,
+	);
+	expect(await place.tokens.verifyAccess(token)).toEqual({
+		kind: "invalid",
+		reason: "revoked",
+	});
+});
 
 tokensContract("the stand-in", async ({ revocable, policies, lifetimeSeconds }) => {
 	const { runtime, module, place } = around();
@@ -185,6 +189,6 @@ it("the stand-in takes all it names, revocable or not", async () => {
 			runtime,
 		};
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
-		expect((await takesUnused(input))["tokens"], String(revocable)).toBeUndefined();
+		expect((await takesUnused(input)).tokens, String(revocable)).toBeUndefined();
 	}
 });
