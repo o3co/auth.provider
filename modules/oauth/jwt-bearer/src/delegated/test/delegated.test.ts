@@ -172,7 +172,11 @@ function assembly(
 			...issuerConfig({ url: issuer }),
 			...clientsConfig([
 				confidentialClient({ id: "app", sections: allowed }),
-				confidentialClient({ id: "other", sections: allowed }),
+				// Its accept-unbound is unread: a confidential client's authentication stands in for a key.
+				confidentialClient({
+					id: "other",
+					sections: { ...allowed, "jwt-bearer": { "accept-unbound": true } },
+				}),
 				publicClient({ id: "phone", sections: allowed }),
 				publicClient({
 					id: "old-phone",
@@ -415,6 +419,19 @@ describe("delegated issuers", () => {
 			);
 			expect(d.spent).toEqual([expect.any(String)]);
 			expect(saidOf(await s.grant("old-phone", a, proved))).toBe("issued");
+		});
+
+		it("is told of accept-unbound at boot only where it takes effect: a public client's, with delegated issuers", async () => {
+			const warned = async (section?: Record<string, unknown>) => {
+				const logged = recordingLog();
+				await serve(section ? [] : [delegating().module], logged.log, section);
+				return logged
+					.lines()
+					.filter((e) => e.event === "jwt-bearer.accept_unbound")
+					.map((e) => e.fields);
+			};
+			expect(await warned()).toEqual([{ client: "old-phone" }]);
+			expect(await warned({ "delegated-issuers": [] })).toEqual([]);
 		});
 
 		it("reads accept-unbound for registered clients alone: one a source names cannot give it to itself", async () => {
