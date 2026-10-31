@@ -1,11 +1,11 @@
 import { type Client, clients } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import { issuer } from "@mod/issuer";
-import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
+import type { BuildContext, Log } from "@mod/kernel";
 import { type IdTokenHints, idTokenHints } from "@mod/oidc";
 import { sessions } from "@mod/session";
 import { type Closed, type Closing, closingFrom, closingTakes } from "../closing/closing.ts";
-import { type CarriedRequest, carriedParam, confirmPath } from "../confirm/confirm.ts";
+import { type CarriedRequest, carriedParam, confirmPath, unavailable } from "../confirm/confirm.ts";
 import type { LogoutReturn, UpstreamEnd } from "../contract.ts";
 import { frontChannelPage, returnUrl } from "../page/page.ts";
 import { returnsTo } from "../registration/registration.ts";
@@ -42,7 +42,6 @@ interface Refusal {
 }
 const refused = (error: string, description: string): Refusal => ({ error, description });
 const unverified = refused("invalid_token", "id_token_hint verification failed");
-const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
 const repeated = refused("invalid_request", "repeated parameter");
 const mismatched = refused(
 	"invalid_request",
@@ -212,16 +211,8 @@ export function endingOver(p: EndingParts) {
 			token,
 		);
 	};
-	return async (request: HttpRequest): Promise<HttpResponse> => {
-		try {
-			return await end(request);
-		} catch (error) {
-			if (!isUnavailable(error)) throw error;
-			// Answered here, so http never sees it: logged by what failed.
-			p.log.warn("rp-logout.unavailable", { what: error.what });
-			return unavailable;
-		}
-	};
+	// A check that cannot tell throws Unavailable on, which the route's declared answer answers.
+	return end;
 }
 
 /** What `endingFrom` takes from the composition. */

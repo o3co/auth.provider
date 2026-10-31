@@ -7,7 +7,7 @@ import { clientsConfig, publicClient } from "@mod/clients/testing";
 import { sessionRedemptions } from "@mod/code-grant";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
-import { type HttpResponse, type Route, routes } from "@mod/http";
+import { type HttpResponse, listening, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
@@ -185,7 +185,11 @@ export async function harness(
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig(options.noPublicOrigin ? {} : { "public-origin": issuer }),
+			...httpConfig({
+				...(options.noPublicOrigin ? {} : { "public-origin": issuer }),
+				// `served` reaches http on loopback, as the issuer's https origin behind a proxy.
+				"trusted-proxies": ["127.0.0.1"],
+			}),
 			...keysConfig(),
 			...issuerConfig({ url: issuer }),
 			...usersConfig([]),
@@ -266,6 +270,43 @@ export async function harness(
 			text: typeof body === "string" ? body : undefined,
 		};
 	};
+	/**
+	 * A request through http itself, on its port: for what http alone answers, as Unavailable. It
+	 * comes through the trusted proxy for a browser at one address, a POST from the issuer's own
+	 * pages; a `303` on to the logout's own `GET` is followed with the same headers, as `call` does.
+	 */
+	const served = async (
+		method: "GET" | "POST",
+		path: string,
+		params: Record<string, string>,
+		headers: Record<string, string> = {},
+	): Promise<{ status: number; cacheControl: string | null; json: unknown }> => {
+		const url = new URL(path, `http://127.0.0.1:${app.get(listening).port()}`);
+		const form = new URLSearchParams(params);
+		if (method === "GET") url.search = form.toString();
+		const res = await fetch(url, {
+			method,
+			redirect: "manual",
+			headers: {
+				"x-forwarded-proto": "https",
+				"x-forwarded-for": "203.0.113.7",
+				...(method === "POST" ? { origin: issuer } : {}),
+				...headers,
+			},
+			...(method === "POST" ? { body: form } : {}),
+		});
+		const location = res.headers.get("location");
+		if (res.status === 303 && location?.startsWith("/oauth/logout?")) {
+			await res.body?.cancel();
+			const query = Object.fromEntries(new URL(location, issuer).searchParams);
+			return served("GET", "/oauth/logout", query, headers);
+		}
+		const text = await res.text();
+		const json = res.headers.get("content-type")?.startsWith("application/json")
+			? JSON.parse(text)
+			: undefined;
+		return { status: res.status, cacheControl: res.headers.get("cache-control"), json };
+	};
 	/** A request to the confirmation's routes, as `call` makes one to the logout's. */
 	const confirming = async (
 		method: "GET" | "POST",
@@ -306,6 +347,7 @@ export async function harness(
 		login,
 		hintFor,
 		call,
+		served,
 		advance: (ms: number) => {
 			now += ms;
 		},

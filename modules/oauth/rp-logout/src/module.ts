@@ -7,7 +7,7 @@ import { outboundRefusals } from "@mod/outbound-policy";
 import { requestsPerSource } from "@mod/rate-limit";
 import { participants } from "@mod/session-participants";
 import { loopbackPagesRefused } from "@mod/url-setting";
-import { confirmFrom, confirmPath, confirmTakes } from "./confirm/confirm.ts";
+import { confirmFrom, confirmPath, confirmTakes, unavailable } from "./confirm/confirm.ts";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom, endingTakes } from "./ending/ending.ts";
 import { type Notices, noticesFrom, noticesTakes } from "./notices/notices.ts";
@@ -89,6 +89,7 @@ export default defineModule(
 			changesState: false,
 			// Each page signs a confirmation: counted with the logout's own requests.
 			uses: [counted(c)],
+			unavailable: { response: unavailable },
 			handle: (await c.get(confirming)).show,
 		})),
 		m.contribute(routes).by(async (c) => ({
@@ -98,6 +99,7 @@ export default defineModule(
 			// A POST without a valid confirmation asks again, signing another: counted as the page is, after
 			// the CSRF check, which an own-site policy runs before any per-source one.
 			uses: [use(csrfChecked), counted(c)],
+			unavailable: { response: unavailable },
 			handle: (await c.get(confirming)).take,
 		})),
 		...(["GET", "POST"] as const).map((method) =>
@@ -112,6 +114,7 @@ export default defineModule(
 					"RP-initiated logout is a navigation from the RP's site by design; without asking, it closes only the session the browser holds, where a hint the provider signed names it.",
 				// Counted before any hint is checked, which reads keys and the store.
 				uses: [counted(c)],
+				unavailable: { response: unavailable },
 				handle: await c.get(ending),
 			})),
 		),
