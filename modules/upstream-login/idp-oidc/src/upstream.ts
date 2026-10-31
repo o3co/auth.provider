@@ -1,11 +1,6 @@
 import type { ExternalJwt } from "@mod/external-jwt";
 import type { Clock, Log } from "@mod/kernel";
-import {
-	DestinationRefused,
-	jsonObjectOf,
-	type Outbound,
-	type OutboundResponse,
-} from "@mod/outbound";
+import { DestinationRefused, jsonObjectOf, type Outbound } from "@mod/outbound";
 import {
 	browsedRefusalText,
 	destinationRefusal,
@@ -20,6 +15,7 @@ import {
 	idTokenReaderOf,
 	refreshAnswerOf,
 	tokenAnswerOf,
+	tokenPostOf,
 } from "@mod/upstream-client";
 import {
 	type AuthorizationStart,
@@ -33,12 +29,6 @@ import {
 import { z } from "zod";
 import { descriptionUrl, hostsOf, narrowerOf, type Settings, sentFor } from "./settings.ts";
 import { describedUserinfoRefusal, userinfoOf } from "./userinfo/userinfo.ts";
-
-/** A value form-urlencoded, as URLSearchParams writes it: a space is `+`. */
-const formEncoded = (value: string) => new URLSearchParams({ "": value }).toString().slice(1);
-/** The HTTP Basic client authentication, each part form-urlencoded first (RFC 6749 §2.3.1); for now its own, until upstream-client's token post takes it. */
-const basicAuthorization = (clientId: string, secret: string) =>
-	`Basic ${Buffer.from(`${formEncoded(clientId)}:${formEncoded(secret)}`).toString("base64")}`;
 
 const description = z.looseObject({
 	issuer: z.string(),
@@ -194,24 +184,17 @@ export async function opened(
 					);
 		return { ...login, amr: read.data.amr ?? [] };
 	};
-	const post = s["token-auth"] === "client_secret_post";
 	/** Posts a grant to the token endpoint, with the client's secret as the operator says. */
-	const granting = (grant: Readonly<Record<string, string>>): Promise<OutboundResponse> => {
-		const form = new URLSearchParams({
-			...grant,
-			...(post ? { client_id: client, client_secret: s["client-secret"] } : {}),
-		});
-		const headers = {
-			"content-type": "application/x-www-form-urlencoded",
-			accept: "application/json",
-		};
-		const sent = post ? {} : { credential: basicAuthorization(client, s["client-secret"]) };
-		return outbound.fetch(
-			endpoints.token,
-			{ method: "POST", headers, body: form.toString(), ...sent },
-			narrowerOf(hosts, from.token),
-		);
-	};
+	const granting = tokenPostOf(
+		outbound,
+		endpoints.token,
+		{
+			id: client,
+			auth: s["token-auth"] === "client_secret_post" ? "form" : "basic",
+			secret: async () => s["client-secret"],
+		},
+		narrowerOf(hosts, from.token),
+	);
 	/**
 	 * The login and the tokens of a code; its scopes are what an answer without a scope stands for.
 	 * UserInfo is read where `userinfo` names it: a login's code, never a delegation's.
