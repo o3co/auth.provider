@@ -185,7 +185,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/sender-binding` (feature, `modules/oauth/sender-binding`): Owns the sender binding of tokens: the extension point of binding kinds, reading which binding a request proves, and the shape of a binding a token carries.
 - `@mod/session-grant` (feature, `modules/oauth/session-grant`): Contributes the grant `session`: a client beside the user's browser (first-party, or a backend for its frontend) gets an access token for the user of the browser's session.
 - `@mod/session-tokens` (feature, `modules/oauth/session-tokens`): Ends a session's access tokens when the session closes; `tokens` knows nothing of sessions.
-- `@mod/subject-tokens` (feature, `modules/oauth/subject-tokens`): Fails an access token that was issued before its subject's revocation.
+- `@mod/subject-tokens` (feature, `modules/oauth/subject-tokens`): Fails an access token that stood before its subject's revocation.
 - `@mod/token-control` (feature, `modules/oauth/token-control`): Answers the introspection endpoint (RFC 7662) and the revocation endpoint (RFC 7009).
   - `introspection` (`src/introspection`): the handler of `POST /oauth/introspect` (RFC 7662).
   - `revocation` (`src/revocation`): the handler of `POST /oauth/revoke` (RFC 7009), for access tokens and the kinds contributed.
@@ -201,6 +201,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/token-exchange` (feature, `modules/oauth/token-exchange`): Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
 - `@mod/tokens` (feature, `modules/oauth/tokens`): Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
   - `issuance` (`src/issuance`): the judgment `admits` and `issue` share, and the issuing `issue` does over it.
+  - `standing` (`src/standing`): a token's standing time, as its claim writes and reads it.
 - `@mod/userinfo` (feature, `modules/oauth/userinfo`): Serves OIDC's userinfo: admits the access token a request presents, checks the session it was issued in, and answers `sub` and the claims `oidc` releases for its scope and the selection `claims-selection` kept for the token.
 - `@mod/verified-email` (feature, `modules/oauth/verified-email`): Contributes the issuance policy `verified-email`: no access token for a subject whose email users has not stated verified.
 
