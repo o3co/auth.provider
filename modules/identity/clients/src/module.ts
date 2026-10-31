@@ -72,6 +72,37 @@ const byName = (sections: readonly Section<unknown>[]) => new Map(sections.map((
 const registered = contract<ReadonlyMap<string, Client>>("clients.registered");
 const secrets = contract<SecretChecker>("clients.secrets");
 
+/** Each registered client read, by id, and every refusal of the entries, each at its place. */
+async function registeredOf(
+	entries: readonly ClientRecord[],
+	known: ReadonlyMap<string, Section<unknown>>,
+	methods: ReadonlySet<string>,
+) {
+	const found = new Map<string, Client>();
+	const issues: { where: string; reason: string }[] = [];
+	for (const [i, entry] of entries.entries()) {
+		if (!methods.has(entry.method)) {
+			issues.push({
+				where: `clients.registered.${i}.method`,
+				reason: "unknown authentication method",
+			});
+		}
+		const read = await readRecord(entry, known, "registered");
+		if ("client" in read) {
+			found.set(entry.id, read.client);
+			issues.push(...refusedAtBoot(entry, read.client, known, `clients.registered.${i}`));
+		} else {
+			issues.push(
+				...read.issues.map((issue) => ({
+					where: `clients.registered.${i}.sections.${issue.path}`,
+					reason: issue.message,
+				})),
+			);
+		}
+	}
+	return { found, issues };
+}
+
 export default defineModule(
 	{
 		name: "clients",
@@ -93,28 +124,7 @@ export default defineModule(
 		m.provide(registered).by(async (c) => {
 			const known = byName(await c.collect(metadataSections));
 			const methods = new Set((await c.collect(authMethods)).map((a) => a.name));
-			const found = new Map<string, Client>();
-			const issues: { where: string; reason: string }[] = [];
-			for (const [i, entry] of c.section.registered.entries()) {
-				if (!methods.has(entry.method)) {
-					issues.push({
-						where: `clients.registered.${i}.method`,
-						reason: "unknown authentication method",
-					});
-				}
-				const read = await readRecord(entry, known, "registered");
-				if ("client" in read) {
-					found.set(entry.id, read.client);
-					issues.push(...refusedAtBoot(entry, read.client, known, `clients.registered.${i}`));
-				} else {
-					issues.push(
-						...read.issues.map((issue) => ({
-							where: `clients.registered.${i}.sections.${issue.path}`,
-							reason: issue.message,
-						})),
-					);
-				}
-			}
+			const { found, issues } = await registeredOf(c.section.registered, known, methods);
 			if (issues.length > 0) return c.refuseAll(issues);
 			return found;
 		}),
