@@ -15,7 +15,7 @@ const { type, ...own } = JSON.parse(
 );
 
 /** The type the module contributes to upstreams, booted with an outbound that answers nothing. */
-async function contributed(): Promise<IdpType | undefined> {
+async function contributed(): Promise<IdpType> {
 	const types = contract<readonly IdpType[]>("types");
 	const app = await assemble({
 		modules: [
@@ -36,21 +36,23 @@ async function contributed(): Promise<IdpType | undefined> {
 		config: kernelConfig(),
 		runtime: quietRuntime(),
 	});
-	return app.get(types)[0];
+	const [type] = app.get(types);
+	if (!type) throw new Error("no type contributed");
+	return type;
 }
 
 it("ships an entry sample of the type it contributes", async () => {
-	expect((await contributed())?.type).toBe(type);
+	expect((await contributed()).type).toBe(type);
 });
 
 it("names in its entry sample only keys its settings take", async () => {
-	const settings = (await contributed())?.settings as unknown as { shape: object };
+	const settings = (await contributed()).settings as unknown as { shape: object };
 	expect(Object.keys(own).filter((key) => !(key in settings.shape))).toEqual([]);
 });
 
 it("names in its entry sample every key its settings require", async () => {
 	type Field = { safeParse(value: unknown): { success: boolean } };
-	const { shape } = (await contributed())?.settings as unknown as { shape: Record<string, Field> };
+	const { shape } = (await contributed()).settings as unknown as { shape: Record<string, Field> };
 	const required = Object.entries(shape).filter(([, field]) => !field.safeParse(undefined).success);
 	expect(required.map(([key]) => key).filter((key) => !(key in own))).toEqual([]);
 });
