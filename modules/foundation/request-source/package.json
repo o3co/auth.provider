@@ -8,6 +8,7 @@
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
+		"@mod/address-reach": "workspace:*",
 		"@mod/client-certificate": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"zod": "4.6.7"
