@@ -445,11 +445,11 @@ export async function issuersIn(
 	});
 	// Told once each boot, by place: the operator's values are never written out.
 	if (trust.kind === "trusted") {
-		for (const w of trust.warnings) c.log.warn(w.event, { at: w.where });
+		for (const w of trust.warnings) c.log.warn(w.event, { key: w.where });
 		const selfIssued = selfIssuedOf(section.issuers);
 		if (selfIssued.length > 0) {
 			c.log.warn("jwt-bearer.self_issued_signers", {
-				at: selfIssued.map((s) => s.where).join(","),
+				key: selfIssued.map((s) => s.where).join(","),
 			});
 		}
 	}
