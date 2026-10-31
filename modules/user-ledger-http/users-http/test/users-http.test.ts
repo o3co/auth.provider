@@ -676,7 +676,7 @@ describe("users-http", () => {
 			[
 				["ledger.example"],
 				`http://${pair}/ledger/authenticate`,
-				"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+				"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public; plain http also needs its host:port in outbound.plain-loopback, or, for a URL of your own configuration on a private network, in outbound.plain-internal",
 			],
 			[
 				["127.0.0.1"],
