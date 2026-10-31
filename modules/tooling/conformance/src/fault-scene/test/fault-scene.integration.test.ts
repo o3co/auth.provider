@@ -67,11 +67,12 @@ describe("a fault scene's deployment", () => {
 	});
 
 	it("fails past its bound naming what it waited on, while no replica acknowledges", async () => {
-		await on({ name: "fault-scene-unrecovered", scene }, async (d) => {
+		const settings = ["--min-replicas-max-lag", "2"];
+		await on({ name: "fault-scene-unrecovered", scene, settings }, async (d) => {
 			const replicas = d.topology.replicas();
 			for (const r of replicas) d.topology.pause(r, true);
 			try {
-				// Their last acknowledgements age past the topology's max lag (2 s): none is good.
+				// Their last acknowledgements age past the scene's own max lag (2 s): none is good.
 				const end = performance.now() + 10_000;
 				for (;;) {
 					const info = await d.topology.primary().ask("INFO", "replication");

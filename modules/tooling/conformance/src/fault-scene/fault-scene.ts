@@ -5,8 +5,8 @@ import { startTopology, type Topology } from "../faults/topology.ts";
 import type { Match, Upstream } from "../relay/relay.ts";
 import type { Reply } from "../relay/resp.ts";
 
-/** What every node of a topology with replicas starts with: a write needs one replica, lagging no more than 2 s. */
-const replicated = ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "2"];
+/** What every node of a topology with replicas starts with: a write needs one replica, lagging no more than Redis's default 10 s, so a scene checking anything but NOREPLICAS never fails on a short acknowledgement stall. */
+const replicated = ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "10"];
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface Deployed {
@@ -165,7 +165,9 @@ export async function ready(i: Instance, ms = 30_000): Promise<void> {
 
 /**
  * Until the primary has every replica the topology names online again, within 30 s: a node started
- * again answers before its replicas are back, and a write needs one of them.
+ * again answers before its replicas are back, and a write needs one of them. Then until it takes
+ * writes (`recovered`): a replica online is not yet one `min-replicas-to-write` counts, so the step
+ * that ends a fault waits for that itself and no scene's next write meets NOREPLICAS.
  */
 export async function replicasOnline(d: Deployed): Promise<void> {
 	const end = performance.now() + 30_000;
@@ -174,10 +176,11 @@ export async function replicasOnline(d: Deployed): Promise<void> {
 		const info = await d.topology.primary().ask("INFO", "replication");
 		const text = info.kind === "bulk" ? (info.data?.toString() ?? "") : "";
 		const online = text.split("\n").filter((l) => /^slave\d+:.*state=online/.test(l)).length;
-		if (online >= want) return;
+		if (online >= want) break;
 		if (performance.now() > end) throw new Error(`${online} of ${want} replicas online`);
 		await pause(100);
 	}
+	await recovered(d);
 }
 
 /** A node's `min-replicas-to-write`, or a failure naming it where the node does not answer it. */
