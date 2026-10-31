@@ -106,6 +106,55 @@ it("redeems a challenge made for a requester only for that requester, taking it 
 	expect((await passkeys.assert(await ask("app"), "app")).kind).toBe("asserted");
 });
 
+it("redeems a challenge made for a module's requester by that module's alone, whatever another module's id", async () => {
+	const { passkeys, authenticator } = await kept();
+	const client = { by: "webauthn-login", id: "C" };
+	const browser = { by: "login-passkey", id: "C" };
+	const ask = async (requester: { by: string; id: string }) =>
+		authenticator.get((await passkeys.challenge(requester)).options as RequestOptions, at);
+	// An assertion made for a client, redeemed by the browser login with that client's id as its mark.
+	const forClient = await ask(client);
+	expect(await passkeys.assert(forClient, browser)).toEqual({
+		kind: "refused",
+		reason: "challenge",
+	});
+	// The reverse: one made for a browser, redeemed by the token endpoint under the same id.
+	const forBrowser = await ask(browser);
+	expect(await passkeys.assert(forBrowser, client)).toEqual({
+		kind: "refused",
+		reason: "challenge",
+	});
+	expect((await passkeys.assert(await ask(client), client)).kind).toBe("asserted");
+	// The two parts are kept apart, so no split of one string reads as another.
+	const split = await ask({ by: "x", id: "y\u0000z" });
+	expect(await passkeys.assert(split, { by: "x\u0000y", id: "z" })).toEqual({
+		kind: "refused",
+		reason: "challenge",
+	});
+});
+
+it("throws, before the store is read, a requester whose part is no non-empty string", async () => {
+	const { passkeys, answer } = await kept();
+	const response = await answer();
+	for (const requester of [
+		{ by: "", id: "C" },
+		{ by: "webauthn-login", id: "" },
+		{ by: 1, id: "C" },
+		{ id: "C" },
+		null,
+	]) {
+		await expect(passkeys.challenge(requester as never), JSON.stringify(requester)).rejects.toThrow(
+			TypeError,
+		);
+		await expect(
+			passkeys.assert(response, requester as never),
+			JSON.stringify(requester),
+		).rejects.toThrow(TypeError);
+	}
+	// The challenge the answer was made for is still there: no throw took it.
+	expect((await passkeys.assert(response, "app")).kind).toBe("asserted");
+});
+
 it("refuses a challenge kept for no requester, whoever redeems it", async () => {
 	const { passkeys, ceremonies, stores, authenticator } = await kept();
 	const { options, challenge } = ceremonies.request([], "preferred");
