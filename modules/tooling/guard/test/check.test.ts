@@ -2,13 +2,8 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { type Pkg, surfacesOf } from "@mod/guard-imports";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import {
-	branchingImports,
-	check,
-	dependencyCards,
-	heavyDependencyCards,
-	measures,
-} from "../src/contract.ts";
+import { branchingImports, dependencyCards, heavyDependencyCards } from "../src/budget/budget.ts";
+import { check, measures } from "../src/contract.ts";
 import { budget, pkg, root } from "./workspace.ts";
 
 // A fixture with exports has its contract surface built by the type checker, which is slow when the machine is busy.

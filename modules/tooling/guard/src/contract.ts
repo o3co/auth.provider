@@ -18,7 +18,6 @@ import { branchesOf, clockReads, commentsOf, randomReads } from "./source.ts";
 import { budgetsAsTest, type Scope } from "./units.ts";
 import type { Doc } from "./workspace.ts";
 
-export { branchingImports, dependencyCards, heavyDependencyCards } from "./budget/budget.ts";
 export type { Doc, Measure, Pkg, Violation };
 
 /** The configuration: the budget numbers, beside the rules guard-imports reads. */
