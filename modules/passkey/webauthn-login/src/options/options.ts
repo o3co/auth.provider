@@ -2,6 +2,7 @@ import { type HttpRequest, jsonAnswer, type Route, use } from "@mod/http";
 import type { BuildContext } from "@mod/kernel";
 import { type Passkeys, passkeys } from "@mod/passkeys";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
+import { requesterFor } from "../requester.ts";
 import type { Settings } from "../section.ts";
 
 /** The client the options are for; false unless named as one non-empty string. */
@@ -32,7 +33,7 @@ export function optionsRoute(passkeys: Passkeys, window: Window): Route {
 			if (requester === false) {
 				return jsonAnswer(400, { error: "invalid_request" });
 			}
-			return jsonAnswer(200, (await passkeys.challenge(requester)).options);
+			return jsonAnswer(200, (await passkeys.challenge(requesterFor(requester))).options);
 		},
 	};
 }
