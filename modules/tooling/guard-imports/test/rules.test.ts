@@ -1207,6 +1207,29 @@ describe("guard-imports", () => {
 			]);
 		});
 
+		it("counts a value whose type parameter is itself a URL, any compound assignment, and a parenthesised target", () => {
+			const forms = pkg(
+				"@c/forms",
+				{
+					"src/module.ts": [
+						'import type { ConfiguredUrl } from "@c/urls";',
+						'import type { Narrower } from "@c/policy";',
+						"export function f<T extends ConfiguredUrl & { extra: true }>(url: T) { const s: Narrower = { internal: url }; return s; }",
+						"export const plus = (n: { internal?: string }, url: ConfiguredUrl) => { n.internal += url; };",
+						"export const wrapped = (n: { internal?: string }, url: ConfiguredUrl) => { (n.internal) = url; };",
+					].join("\n"),
+					"templates/main.ts.template": "export const plus = (n) => { n.internal += {{url}}; };\n",
+				},
+				{ exports: { ".": "./src/module.ts" }, dependencies: { "@c/urls": "*", "@c/policy": "*" } },
+			);
+			expect(found([urls, owner(), forms])).toEqual([
+				"@c/forms/src/module.ts:3 internal",
+				"@c/forms/src/module.ts:4 internal",
+				"@c/forms/src/module.ts:5 internal",
+				"@c/forms/templates/main.ts.template:1 internal",
+			]);
+		});
+
 		it("counts a plain .mjs source by type, and a template of a source by the property's name", () => {
 			const scripted = pkg(
 				"@c/scripted",

@@ -41,13 +41,9 @@ const keyNames = (checker: ts.TypeChecker, expression: ts.Expression, owned: str
 	return checker.isTypeAssignableTo(literal, key);
 };
 
-/** The operators that write their left side. */
-const assigns = new Set([
-	ts.SyntaxKind.EqualsToken,
-	ts.SyntaxKind.QuestionQuestionEqualsToken,
-	ts.SyntaxKind.BarBarEqualsToken,
-	ts.SyntaxKind.AmpersandAmpersandEqualsToken,
-]);
+/** Whether an operator writes its left side: `=` and every compound assignment (`+=`, `??=`, …). */
+const assigns = (kind: ts.SyntaxKind) =>
+	kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
 
 /** The type of the value a property is written with: its initializer, its shorthand name, or its getter's return. */
 const writtenType = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
@@ -78,7 +74,7 @@ const isTarget = (node: ts.Node): boolean => {
 	if (parent === undefined) return false;
 	if (ts.isParenthesizedExpression(parent)) return isTarget(parent);
 	if (ts.isBinaryExpression(parent))
-		return parent.left === node && assigns.has(parent.operatorToken.kind);
+		return parent.left === node && assigns(parent.operatorToken.kind);
 	if (ts.isForOfStatement(parent) || ts.isForInStatement(parent))
 		return parent.initializer === node;
 	if (ts.isPropertyAssignment(parent))
@@ -130,10 +126,11 @@ export function typedReading(checker: ts.TypeChecker, wanted: ts.Type, owned: st
 		if (value === undefined) return false;
 		const held = checker.getNonNullableType(value);
 		if (held.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never | ts.TypeFlags.Unknown)) return false;
-		// A type parameter is read by what it may be bound to: the helper writes it, whoever calls.
+		// A type parameter counts where the property's type may be bound to it (the helper writes it,
+		// whoever calls), or where it is of that type itself.
 		if (holdsTypeParameter(held)) {
 			const constraint = checker.getBaseConstraintOfType(held);
-			return constraint === undefined || checker.isTypeAssignableTo(wanted, constraint);
+			if (constraint === undefined || checker.isTypeAssignableTo(wanted, constraint)) return true;
 		}
 		return checker.isTypeAssignableTo(held, wanted);
 	};
@@ -142,10 +139,17 @@ export function typedReading(checker: ts.TypeChecker, wanted: ts.Type, owned: st
 		keys: (key) => keyNames(checker, key, owned),
 		literal: (element) => holds(writtenType(checker, element)),
 		// A target is judged by its own type, and a direct assignment by its value's too.
-		target: (access) =>
-			holds(checker.getTypeAtLocation(access)) ||
-			(ts.isBinaryExpression(access.parent) &&
-				holds(checker.getTypeAtLocation(access.parent.right))),
+		target: (access) => {
+			if (holds(checker.getTypeAtLocation(access))) return true;
+			// A direct assignment, its target parenthesised or not, is judged by its value too.
+			let at: ts.Node = access;
+			while (ts.isParenthesizedExpression(at.parent)) at = at.parent;
+			return (
+				ts.isBinaryExpression(at.parent) &&
+				at.parent.left === at &&
+				holds(checker.getTypeAtLocation(at.parent.right))
+			);
+		},
 		member: (written) => holds(checker.getTypeAtLocation(written)),
 	};
 }

@@ -16,10 +16,10 @@ Internal module of `owned-property`: where a source writes the owned property, b
 
 ## Invariants
 - A write: an object literal's property of the owned name, a literal spread into another included: a property, a shorthand, a getter (its return), or a computed key whose type that name fits (a union, a template, a mapped string such as `Lowercase<string>`, or a string of no known value). Any other key is not counted.
-- A write too: an access to the property that is written to, directly (`n.internal = …`, `n["internal"] = …`, `??=`, `||=`, `&&=`), as a `for … of` or `for … in` head, or as a destructuring pattern's target (renamed, nested or in an array: `({ url: n.internal } = s)`, `[n.internal] = v`); a class field initialised under its name; a constructor's parameter property of that name.
+- A write too: an access to the property that is written to, with `=` or any compound assignment (`n.internal = …`, `n["internal"] += …`, `??=`), its target parenthesised or not, as a `for … of` or `for … in` head, or as a destructuring pattern's target (renamed, nested or in an array: `({ url: n.internal } = s)`, `[n.internal] = v`); a class field initialised under its name; a constructor's parameter property of that name.
 - A destructuring pattern is no object literal: its own keys write locals, so `({ internal } = s)` writes nothing of the property.
 - Typed, a write counts where what it writes, `undefined` aside, may be of the property's type: a literal's value, a target's own type (and a direct assignment's value), a field's initializer. A value of type `any`, `unknown` or `never` does not count.
-- A type parameter is read by what it may be bound to, its constraint (unknown for a bare one): a key holding one counts where the owned name fits it, a value holding one where the property's type does. A generic helper's write is counted at the helper, whoever calls it.
+- A type parameter is read by what it may be bound to, its constraint (unknown for a bare one): a key holding one counts where the owned name fits it, a value holding one where the property's type does, or where it is of that type itself. A generic helper's write is counted at the helper, whoever calls it.
 - By name, every form above counts whatever it writes, a template's imports being filled in only when it is written out; a computed key or an element access counts unless it is a literal of another name.
 
 ## Depends on

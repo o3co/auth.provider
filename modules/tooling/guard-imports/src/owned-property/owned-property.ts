@@ -17,7 +17,7 @@ const options: ts.CompilerOptions = {
 	types: [],
 };
 
-/** Where shipped code writes an `internal` property: its file and line. */
+/** Where shipped code writes the owned property: its file and line. */
 interface Written {
 	readonly pkg: Pkg;
 	readonly file: string;
@@ -32,9 +32,9 @@ export interface Owned {
 }
 
 /**
- * Each object literal property of the owned property's name, in the shipped code of `packages`,
- * whose value is of the type the owner's type gives that property (`undefined` aside); a value of no
- * known type (`any`) or of none (`never`) is not counted.
+ * Each write of the owned property in the shipped code of `packages`, as `writes` finds and judges it
+ * by the type the owner's type gives that property, and in their templates by name; or why the owner's
+ * type cannot be read.
  */
 function writtenIn(
 	s: Scope,
