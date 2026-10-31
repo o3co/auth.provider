@@ -42,7 +42,10 @@ let replica = "";
 let secondReplica = "";
 let network = "";
 
-/** A docker call killed past a minute, as long as its hook may take, so a stalled daemon fails the test. */
+/**
+ * A docker call killed past a minute, as long as its hook may take, so a stalled daemon fails the test.
+ * Its own, not `docker-client`'s: an adapter's tests take no assembly package (G10).
+ */
 const docker = (...args: string[]) =>
 	execFileSync("docker", args, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
 const cli = (target: string, ...args: string[]) => docker("exec", target, "redis-cli", ...args);
