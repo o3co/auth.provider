@@ -130,7 +130,13 @@ export function grantingWith(p: GrantingParts): Omit<Grant, "grantType"> {
 		if (await revoked()) return assertionRevoked;
 		const { scope } = allowed;
 		const { audience } = asked;
-		const access = { subject: checked.subject, issuedTo: client.id, audience, scope };
+		const access = {
+			subject: checked.subject,
+			issuedTo: client.id,
+			audience,
+			scope,
+			standingAt: madeAt - skewMs,
+		};
 		// Asked before the assertion is used up, so a refusal leaves it usable.
 		const admitted = await admits(access);
 		if (admitted.kind === "refused") return admitted;
