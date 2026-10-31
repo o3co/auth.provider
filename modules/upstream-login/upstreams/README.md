@@ -4,7 +4,7 @@
 - Says what an upstream IdP is to this provider: the IdP types that open one, what an opened upstream does, and who receives a login's upstream tokens.
 
 ## Not here
-- Logging a browser in through an upstream, the IdPs' settings and opening them at boot (the implementation).
+- Logging a browser in through an upstream, the IdPs' settings and opening them at boot (the implementation, `federation`).
 - What differs per IdP: discovery, keys, the token request, the id_token checks (the type).
 - What IdP types share as OAuth clients of an upstream (`upstream-client`).
 - Keeping upstream tokens (the receivers).
@@ -33,7 +33,7 @@
 - A login's tokens are taken once and go only to a session of the subject that logged in; their lifetime counts from the hand-over.
 
 ## Depends on
-- `kernel`, `session` (the session a receiver is told), `http` (what a continuation is asked and answers); implemented by `federation`.
+- `kernel`, `session` (the session a receiver is told), `http` (what a continuation is asked and answers)
 
 ## Vocabulary
 - IdP type: what one kind of upstream IdP does differently.
