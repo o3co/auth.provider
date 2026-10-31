@@ -126,9 +126,11 @@ export interface Tokens extends TokenValidity<AccessCheck> {
 	admits(request: IssuanceRequest): Promise<Admitted>;
 	/**
 	 * Issues once every policy, its own first, allows it; throws Unavailable when one cannot tell.
-	 * Refuses, as its own rule, a token with less than a second left once signed, its cap passed or
-	 * its signing slow: policy `tokens`, reason `no_lifetime_left`, the client's word `expired`. Such
-	 * a token is handed to no one, and nothing of it is kept.
+	 * The token's `iat` is when `issue` was asked, before the policies are, and its lifetime runs
+	 * from there, their wait included; what it answers is left runs from signing. Refuses, as its
+	 * own rule, a token with less than a second left once signed, its cap passed, its lifetime spent
+	 * in the policies' wait or its signing slow: policy `tokens`, reason `no_lifetime_left`, the
+	 * client's word `expired`. Such a token is handed to no one, and nothing of it is kept.
 	 */
 	issue(request: IssuanceRequest, limits?: IssueLimits): Promise<Issued>;
 	verifyAccess(token: string): Promise<AccessCheck>;
