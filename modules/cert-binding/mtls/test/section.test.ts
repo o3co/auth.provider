@@ -64,7 +64,7 @@ it("reads no anchor from text without a certificate block", () => {
 	expect(anchorOf("   ")).toBeUndefined();
 });
 
-it("takes revocation hosts as outbound reads a host list, and refuses anything else", () => {
+it("takes revocation hosts as host-entries reads a host list, and refuses anything else", () => {
 	const parsedWith = (hosts: readonly string[]) =>
 		section.safeParse({
 			mode: "pki",
