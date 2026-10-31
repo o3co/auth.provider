@@ -225,6 +225,42 @@ it("warns at each boot that names plain-internal pairs, telling their count alon
 	expect(JSON.stringify(recorded.lines())).not.toContain("internal:");
 });
 
+it("warns at each boot of each other loosening set, by a count or a reason, never a host", async () => {
+	const warned = async (outboundSettings: Record<string, unknown>) => {
+		const recorded = recordingLog();
+		await assemble({
+			modules: [outboundModule, tlsOptionsForTests],
+			config: { ...kernelConfig(), outbound: outboundSettings },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+		expect(JSON.stringify(recorded.lines())).not.toMatch(/example|localhost/);
+		return recorded.lines().map((line) => [line.level, line.event, line.fields]);
+	};
+	expect(
+		await warned({
+			"plain-loopback": ["localhost:8080"],
+			"plain-ipv4": ["localhost:8080"],
+			"internal-hosts": ["keys.example", "ledger.example"],
+		}),
+	).toEqual([
+		["warn", "outbound.plain_loopback", { count: 1 }],
+		["warn", "outbound.plain_ipv4", { count: 1 }],
+		["warn", "outbound.internal_hosts", { count: 2 }],
+	]);
+	expect(await warned({ "allow-any-public": true, resolution: "in-process" })).toEqual([
+		[
+			"warn",
+			"outbound.any_public_host",
+			{ reason: "any public host is reached by name, not only those outbound.allow lists" },
+		],
+		[
+			"warn",
+			"outbound.resolution_in_process",
+			{ reason: "names resolve in the app's own process, not in helpers" },
+		],
+	]);
+});
+
 it("refuses boot without tls-options, naming it: no TLS connection goes without the floor", async () => {
 	const refused = await assemble({
 		modules: [outboundModule],
