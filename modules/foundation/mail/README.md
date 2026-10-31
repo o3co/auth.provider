@@ -31,7 +31,7 @@
 - A message whose expiry has come is unavailable and is not sent.
 - Failures are unavailable or limited, never with the remote side's words.
 - The plain-text part refuses a missing value and a value that breaks a line, and never reads a placeholder inside a value.
-- The logging-only sender refuses boot unless `accept-unsent` is set, is not safe on multiple instances, and logs no address and no value.
+- The logging-only sender refuses boot unless `accept-unsent` is set, which every start warns of (`mail.unsent_accepted`); it is not safe on multiple instances, and logs no address and no value.
 
 ## Data
 - None stored; the logging-only sender's hash key lives for the process.
