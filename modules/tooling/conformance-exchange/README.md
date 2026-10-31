@@ -13,7 +13,7 @@
 ## Offers
 - Area `exchange` and the shape of its part
 - Scene builder (builds the key, identity, OAuth and code parts, with refresh, introspection and revocation, from the form written in a scene)
-- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run, named to the evidence as `@mod/conformance-exchange#faults` by the run itself; the area's own run and its pattern runs leave them out
+- The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-exchange#faults` by the run itself; the area's own run and its pattern runs leave them out
 
 ## Invariants
 - The legacy set-up, the needs the legacy system cannot provide, and the differences it answers differently, live only in `src/legacy.ts`.
