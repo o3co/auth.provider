@@ -25,7 +25,7 @@ Each key not written keeps its module's default.
 4. `APP_CONFIG={{local}},{{application}} pnpm start`
 
 Both examples hold every value in a comment: a copy left as it is sets nothing, and boot refuses each key still needed.
-To try it on this machine over plain http, set `http.public-origin` and `issuer.url` to `http://localhost:{{port}}`, `http.insecure-origin` to `true`, and `kernel.environment` to `development`: an http public origin boots only with both, and its cookies cannot be made secure. A deployment keeps an https origin, leaves `http.insecure-origin` `false` and `kernel.environment` `production`.
+To try it on this machine over plain http, set `http.public-origin` and `issuer.url` to `http://127.0.0.1:{{port}}`, `http.insecure-origin` to `true`, and `kernel.environment` to `development`: an http public origin boots only with both, and its cookies cannot be made secure. A deployment keeps an https origin, leaves `http.insecure-origin` `false` and `kernel.environment` `production`.
 A secret's placeholder begins `REPLACE-`; uncommented as it is, boot refuses it. Make one of random bytes, such as `REPLACE-32-RANDOM-BYTES-BASE64`, with `openssl rand -base64 32`. Delete the line of an optional key left unset.
 
 {{firstLogin}}Until every key the modules need is written, the app writes each refusal on standard error, one per line, and exits 78; a refusal of a key it reads from the environment says where to write it (its variable in `.env`, or the key in `{{local}}`).

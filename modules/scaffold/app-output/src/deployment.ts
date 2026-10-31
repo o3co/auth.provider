@@ -236,7 +236,7 @@ function httpLines(http: { readonly serves: boolean; readonly live: boolean }) {
 	const port = envName("http.port");
 	return {
 		tryHttp: http.serves
-			? `To try it on this machine over plain http, set \`http.public-origin\` and \`issuer.url\` to \`http://localhost:${httpPort}\`, \`http.insecure-origin\` to \`true\`, and \`kernel.environment\` to \`development\`: an http public origin boots only with both, and its cookies cannot be made secure. A deployment keeps an https origin, leaves \`http.insecure-origin\` \`false\` and \`kernel.environment\` \`production\`.\n`
+			? `To try it on this machine over plain http, set \`http.public-origin\` and \`issuer.url\` to \`http://127.0.0.1:${httpPort}\`, \`http.insecure-origin\` to \`true\`, and \`kernel.environment\` to \`development\`: an http public origin boots only with both, and its cookies cannot be made secure. A deployment keeps an https origin, leaves \`http.insecure-origin\` \`false\` and \`kernel.environment\` \`production\`.\n`
 			: "",
 		dockerRun: http.serves
 			? `docker run --env-file .env -e ${host}=0.0.0.0 -e ${port}=${httpPort} ${config} -p ${httpPort}:${httpPort} auth-provider`
