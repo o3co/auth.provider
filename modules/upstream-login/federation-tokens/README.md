@@ -33,7 +33,7 @@
 - Test configuration builders and the contract test of both store interfaces (`./testing`).
 
 ## Invariants
-- A token goes out only to a client the operator made a receiver (`receives`). Any other is answered `403`: its body's `error` is the route's own word, `forbidden`, and its challenge RFC 6750's, `insufficient_scope`, in its token's scheme.
+- A token goes out only to a client whose `receives` is set; each such client is warned at every start (`federation-tokens.receives`, naming it). Any other is answered `403`: its body's `error` is the route's own word, `forbidden`, and its challenge RFC 6750's, `insufficient_scope`, in its token's scheme.
 - A token goes out only for a presented access token `caller` accepts: its audience names its client, its family has not ended, and its session enters at `use` for the same subject (one short of a requirement does not).
 - The session is checked again before answering.
 - Only a bearer token goes out (any case). Any other type answers `502`, and the record stays.
@@ -55,5 +55,4 @@
 - `kernel`, `http`, `request-source`, `clients`, `redirect-uris`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, and through its internal modules `tokens`, `sender-binding`, `session-tokens`, `seal`
 
 ## Vocabulary
-- receiver: a client the operator lets receive upstream tokens.
 - entry: one IdP's sealed tokens in a session's record, with its version.

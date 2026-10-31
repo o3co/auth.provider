@@ -194,6 +194,10 @@ export async function routesIn(c: BuildContext<Settings>, renewal: Renewal): Pro
 		audit: await c.get(audit),
 		log: c.log,
 	};
+	// Told at every start by client: each is handed its sessions' upstream tokens.
+	for (const client of flow.clients.registered()) {
+		if (receives(client)) c.log.warn("federation-tokens.receives", { client: client.id });
+	}
 	const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 	return {
 		method: "POST",
