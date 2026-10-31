@@ -3,6 +3,7 @@ export {
 	hostEntry,
 	hostEntryOf,
 	hostList,
+	hostPair,
 	listed,
 	normalized,
 	pairOf,

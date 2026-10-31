@@ -9,6 +9,7 @@
 ## Offers
 - `hostEntryOf` (an entry, or taking a port a `host:port` pair) → `HostEntry`: a name (`under` for `.name`) or an address, with its `port` when read as a pair; none where the entry is no host or no pair.
 - `hostEntry`: a setting holding one host or `.name` entry, refused as "not a host, or a name led by a dot"; `hostList`: a list of them, none unless set.
+- `hostPair`: a setting holding one `host:port` pair, refused as "not a host:port pair".
 - `listed` (a host as `normalized` spells it, entries): whether it is among entries read by the operator's entry rule, `hostEntryOf`.
 - `withinHosts` (a URL, hosts): whether its host is among hosts in the caller's spelling, each compared normalized; `.name` is read as an entry.
 - `normalized` (a host): its one spelling to compare by, or none.
