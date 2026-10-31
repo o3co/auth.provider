@@ -21,10 +21,10 @@ import { basename, join, resolve } from "node:path";
 import { optIns } from "@mod/combinations";
 import { readBundles } from "../contract.ts";
 import { packedOf } from "../release/seal.ts";
-import { DockerFailed, docker } from "../release-check/containers/docker.ts";
+import { docker } from "../release-check/containers/docker.ts";
 import { buildWithin, commandWithin, images, overridesFile } from "../release-check/image.ts";
 import { type Bom, coverageProblems, type Declared, insideBom, npmNamed } from "./boms.ts";
-import { notRemoved } from "./removal.ts";
+import { endOf, notRemoved } from "./removal.ts";
 
 const [given, into] = process.argv.slice(2);
 if (!given || !into) {
@@ -50,16 +50,6 @@ const packed = files.map(packedOf);
 const byName = Object.fromEntries(files.map((f) => [packedOf(f).name, f]));
 const problems: string[] = [];
 const scratch = mkdtempSync(join(tmpdir(), "release-sbom-"));
-
-/** A docker command's end as its status and streams, a failure (one past its time too) answered, not thrown. */
-const answered = (command: Promise<string>) =>
-	command.then(
-		(stdout) => ({ status: 0, stdout, stderr: "" }),
-		(error: unknown) =>
-			error instanceof DockerFailed
-				? { status: error.code ?? 1, stdout: error.wrote, stderr: error.told || error.message }
-				: { status: 1, stdout: "", stderr: String(error) },
-	);
 
 const sbom = (dir: string, scope: "--prod" | "--dev") =>
 	JSON.parse(
@@ -179,7 +169,7 @@ try {
 		const id = await docker(["image", "inspect", "--format", "{{.Id}}", image], commandWithin);
 		// Writing out and reading the whole image take no longer than building it.
 		await docker(["save", image, "-o", join(scratch, "image.tar")], buildWithin);
-		const scanned = await answered(
+		const scanned = await endOf(
 			docker(
 				[
 					"run",
@@ -206,8 +196,8 @@ try {
 	} finally {
 		// Removed however the build or the listing ended, the base stage's image too, and held to be gone.
 		const removing = [image, `${run}:base`];
-		const answer = await answered(docker(["image", "rm", "-f", ...removing], commandWithin));
-		const listed = await answered(
+		const answer = await endOf(docker(["image", "rm", "-f", ...removing], commandWithin));
+		const listed = await endOf(
 			docker(["image", "ls", "--format", "{{.Repository}}:{{.Tag}}"], commandWithin),
 		);
 		const left = notRemoved(removing, answer, listed);
