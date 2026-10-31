@@ -41,7 +41,7 @@ const section = z.strictObject({
 		.pipe(z.number().int().min(0).max(300))
 		.prefault("30s")
 		.describe(
-			"How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds.",
+			"How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. Set it no lower than your issuers' real clock drift: narrowing it can admit an assertion a wider skew refused at a revocation.",
 		),
 });
 

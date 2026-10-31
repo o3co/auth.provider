@@ -140,7 +140,7 @@ From `@mod/exchange-id-tokens`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `exchange-id-tokens.max-age` | string | `10m` |  |  |  | The oldest an id_token may be, from its `iat`, from 1m to 1h. |
-| `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. |
+| `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. Set it no lower than your issuers' real clock drift: narrowing it can admit an id_token a wider skew refused at a revocation. |
 | `exchange-id-tokens.apple.upstream` | string | `apple` when `exchange-id-tokens.apple` is set |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
 | `exchange-id-tokens.apple.clients` | map |  | when `exchange-id-tokens.apple` is set |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
 | `exchange-id-tokens.apple.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256"]` when `exchange-id-tokens.apple` is set |  |  |  | The algorithms Apple's id_tokens may be signed with: asymmetric ones only, RS256 by default. |
@@ -289,7 +289,7 @@ From `@mod/jwt-bearer`.
 | `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is","conditions":{"subject-prefix":"REPLACE-SUBJECT-PREFIX"}}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. An entry's keys are `issuer`; `keys`, or `jwks-uri` with `accept-key-set-elsewhere`, or neither; `subject`, `upstream`, `subject-is-key-thumbprint`, `self-issued-prefix`, `conditions`, `accept-any-subject`, `ceiling`, `max-assertion-lifetime`, `clock-skew`, `profile` and `client`; and `algorithms`, which only an entry without `keys` takes; `jwt-bearer`'s internal module `issuers` says what each takes. |
 | `jwt-bearer.delegated-issuers` | list of string | `[]` |  |  |  | Issuers whose assertions another module checks by its own rules, each exactly as sent: their audience is an app, not this server, so RFC 7523 §3 does not hold. Each needs the one module that checks it. |
 | `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | How far ahead its `exp` an assertion may be when it is taken, and how far its `exp` may be from its `iat`, from `1s` to `1d` in whole seconds. |
-| `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
+| `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. Set it no lower than your issuers' real clock drift: narrowing it can admit an assertion a wider skew refused at a revocation. |
 
 ## kernel
 
