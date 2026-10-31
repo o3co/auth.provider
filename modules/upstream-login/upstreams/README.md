@@ -4,7 +4,7 @@
 - Says what an upstream IdP is to this provider: the IdP types that open one, what an opened upstream does, and who receives a login's upstream tokens.
 
 ## Not here
-- Logging a browser in through an upstream, the IdPs' settings and opening them at boot (the implementation, `federation`).
+- Logging a browser in through an upstream, the IdPs' settings and opening them at boot (the implementation; see the owner map).
 - What differs per IdP: discovery, keys, the token request, the id_token checks (the type).
 - What IdP types share as OAuth clients of an upstream (`upstream-client`).
 - Keeping upstream tokens (the receivers).
