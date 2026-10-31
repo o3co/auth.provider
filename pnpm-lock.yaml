@@ -2264,6 +2264,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
