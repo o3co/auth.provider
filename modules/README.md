@@ -281,6 +281,7 @@ What each module contains is described by that module's contract card (each modu
 | Conformance test base | contract | conformance |
 | Running each pattern's conformance areas on its app, and leaving out as `not-in-pattern` the scenes it cannot hold | contract | conformance |
 | The local layer that boots a generated app for a test or a conformance run, from each composed module's trial file | contract | trial |
+| Running the docker client within a time, and how each of its commands fails, for every package that drives Docker | contract | docker-client |
 | An https front before a running app, for a harness's outside party | contract | conformance-front |
 | A way out from a harness's app to a party on this machine by its name alone (an HTTP CONNECT proxy on loopback, as `outbound.proxy`) | contract | conformance-tunnel |
 | Starting the legacy build, and registering legacy set-ups | contract | conformance-legacy |
