@@ -35,7 +35,7 @@ export function witnessingOver(p: WitnessingParts): PasskeyWitnessing {
 	const audited = declaredAudit(p.audit, events);
 	const inconsistent = (subject: string, at: Asked) => {
 		audited.record("passkey.enrollment_inconsistent", { subject, attributes: { at } });
-		p.log.warn("passkey.enrollment_inconsistent", { at });
+		p.log.warn("passkey.enrollment_inconsistent", { asked: at });
 		return new Unavailable("passkeys");
 	};
 	/**
