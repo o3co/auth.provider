@@ -2,14 +2,14 @@ import { isUnavailable } from "@mod/kernel";
 import { DestinationRefused, type SignedNarrower, type SignedOutbound } from "@mod/outbound";
 import type { Fetched, Sources } from "./pki/contract.ts";
 
-/**
- * Revocation sources over signed outbound: a server failing or no answer in time and size is an
- * outage; a destination not allowed, or any other answer, is a refusal.
- */
 /** A server failing (5xx), busy (429) or timed out (408): it may answer later, and says nothing of the certificate. */
 const mayAnswerLater = (status: number) =>
 	(status >= 500 && status <= 599) || status === 429 || status === 408;
 
+/**
+ * Revocation sources over signed outbound: a server failing or no answer in time and size is an
+ * outage; a destination not allowed, or any other answer, is a refusal.
+ */
 export function sourcesOver(
 	outbound: SignedOutbound,
 	reach: SignedNarrower,
