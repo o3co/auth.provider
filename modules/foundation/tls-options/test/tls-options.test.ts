@@ -1,7 +1,7 @@
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
-import { describe, expect, it, vi } from "vitest";
-import { isFloor, type TlsOptions, tlsOptions } from "../src/contract.ts";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { heldToFloor, isFloor, type TlsOptions, tlsOptions } from "../src/contract.ts";
 import tlsOptionsModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { type Handshake, handshakeWith, type Offer, tlsOptionsFor } from "../src/testing.ts";
@@ -21,13 +21,18 @@ function outcomeOf(met: Handshake): string {
 	if (alert === 40 && peerCode === "ERR_SSL_NO_SHARED_CIPHER") return "refused: suite";
 	return `other: ${met.code} (alert ${alert}) / ${peerCode}`;
 }
-/** Each peer's handshake under `options`. */
-const kinds = async (options: TlsOptions) =>
+/** Each peer's handshake under a client held to `floor`. */
+const kinds = async (floor: TlsOptions) =>
 	Object.fromEntries(
 		await Promise.all(
-			offers.map(async (offer) => [offer, outcomeOf(await handshakeWith(options, offer))] as const),
+			offers.map(
+				async (offer) =>
+					[offer, outcomeOf(await handshakeWith(heldToFloor(floor, {}), offer))] as const,
+			),
 		),
 	);
+/** The suites the section takes by default, as a floor names them. */
+const defaultSuites = section.parse({}).suites.join(":");
 
 describe("the TLS peers a client's options are held against", () => {
 	it("each offers the one version and suite it says", async () => {
@@ -81,17 +86,19 @@ describe("the section's options", () => {
 		});
 		// TLS 1.3 alone refuses a TLS 1.2 peer in its handshake.
 		const only13 = tlsOptionsFor({ "min-version": "TLSv1.3", suites: ["TLS_AES_128_GCM_SHA256"] });
-		expect(outcomeOf(await handshakeWith(only13, "ecdhe-aead"))).toBe("refused: version");
+		expect(outcomeOf(await handshakeWith(heldToFloor(only13, {}), "ecdhe-aead"))).toBe(
+			"refused: version",
+		);
 	});
 
 	it("are a floor only as tls-options made them: a spread, an assigned copy, a cast or a frozen value written elsewhere is none", () => {
 		// @ts-expect-error A weaker floor written by hand is no TlsOptions.
 		const written: TlsOptions = { minVersion: "TLSv1.2", ciphers: "ALL:@SECLEVEL=0" };
 		const made = tlsOptionsFor({});
-		const spread: TlsOptions = { ...made, ciphers: "ALL:@SECLEVEL=0" };
+		const spread: TlsOptions = { ...made, ...{ ciphers: "ALL:@SECLEVEL=0" } };
 		const assigned: TlsOptions = Object.assign({}, made, { minVersion: "TLSv1.1" });
-		const cast = { minVersion: "TLSv1.2", ciphers: made.ciphers } as TlsOptions;
-		const frozen = Object.freeze({ minVersion: "TLSv1.2", ciphers: made.ciphers });
+		const cast = { minVersion: "TLSv1.2", ciphers: defaultSuites } as unknown as TlsOptions;
+		const frozen = Object.freeze({ minVersion: "TLSv1.2", ciphers: defaultSuites });
 		expect([made, written, spread, assigned, cast, frozen].map(isFloor)).toEqual([
 			true,
 			false,
@@ -100,7 +107,98 @@ describe("the section's options", () => {
 			false,
 			false,
 		]);
-		expect(Object.keys(made)).toEqual(["minVersion", "ciphers"]);
+		expect(Object.keys(made)).toEqual(["minVersion", "ciphers", "rejectUnauthorized"]);
+	});
+
+	it("hold a caller's options to the floor, its own keys last over whatever the caller passed", () => {
+		const floor = tlsOptionsFor({});
+		const loosened = {
+			minVersion: "TLSv1",
+			ciphers: "ALL:@SECLEVEL=0",
+			rejectUnauthorized: false,
+			ca: "the caller's authority",
+		} as const;
+		expect(heldToFloor(floor, loosened)).toEqual({
+			ca: "the caller's authority",
+			minVersion: "TLSv1.2",
+			ciphers: defaultSuites,
+			rejectUnauthorized: true,
+		});
+		// Nor any key that would take the connection past the floor, whatever its value.
+		for (const key of [
+			"secureContext",
+			"secureProtocol",
+			"secureOptions",
+			"checkServerIdentity",
+			"pskCallback",
+		]) {
+			expect(() => heldToFloor(floor, { [key]: undefined }), key).toThrow(
+				`options held to the TLS floor take none of ${key}, which would loosen it`,
+			);
+		}
+		// Nor one that options hide from a first look and show to a later one, as a Proxy may: what is
+		// checked is what is given.
+		let looked = 0;
+		const shifting = new Proxy(
+			{},
+			{
+				ownKeys: () => ["checkServerIdentity"],
+				getOwnPropertyDescriptor: () =>
+					looked++ === 0
+						? undefined
+						: { value: () => undefined, enumerable: true, configurable: true },
+			},
+		);
+		expect(Object.hasOwn(heldToFloor(floor, shifting), "checkServerIdentity")).toBe(false);
+		// What it gives is the caller's options, no floor; a floor copied by hand is refused.
+		expect(isFloor(heldToFloor(floor, {}))).toBe(false);
+		const copied = { ...floor } as TlsOptions;
+		expect(() => heldToFloor(copied, {})).toThrow(TypeError);
+	});
+
+	it("check the peer's certificate where NODE_TLS_REJECT_UNAUTHORIZED is 0, which bare options do not", async () => {
+		vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
+		const held = heldToFloor(tlsOptionsFor({}), {});
+		expect(await handshakeWith({}, "tls1.3", false)).toMatchObject({ kind: "agreed" });
+		expect(await handshakeWith(held, "tls1.3", false)).toMatchObject({
+			kind: "refused",
+			code: "DEPTH_ZERO_SELF_SIGNED_CERT",
+		});
+		// The caller's own authority is still believed.
+		expect(await handshakeWith(held, "tls1.3")).toMatchObject({ kind: "agreed" });
+	});
+
+	it("are no floor where an older tls-options made them, without the certificate check", () => {
+		// As tls-options made a floor before it carried `rejectUnauthorized`: marked and frozen, its keys then.
+		const older = { minVersion: "TLSv1.2", ciphers: defaultSuites };
+		Object.defineProperty(older, Symbol.for("@mod/tls-options.floor"), {
+			value: true,
+			enumerable: false,
+		});
+		Object.freeze(older);
+		expect(isFloor(older)).toBe(false);
+		expect(() => heldToFloor(older as unknown as TlsOptions, {})).toThrow(TypeError);
+	});
+
+	it("are no floor where a key is inherited, hidden or behind a getter, as a spread would not copy it", () => {
+		const marked = (floor: object) => {
+			Object.defineProperty(floor, Symbol.for("@mod/tls-options.floor"), { value: true });
+			return Object.freeze(floor);
+		};
+		const keys = { minVersion: "TLSv1.2", ciphers: defaultSuites };
+		const inherited = marked(Object.assign(Object.create({ rejectUnauthorized: true }), keys));
+		const hidden = marked(
+			Object.defineProperty({ ...keys }, "rejectUnauthorized", { value: true, enumerable: false }),
+		);
+		let asked = 0;
+		const getter = marked(
+			Object.defineProperty({ ...keys }, "rejectUnauthorized", {
+				get: () => asked++ === 0,
+				enumerable: true,
+			}),
+		);
+		expect([inherited, hidden, getter].map(isFloor)).toEqual([false, false, false]);
+		expect(isFloor(marked({ ...keys, rejectUnauthorized: true }))).toBe(true);
 	});
 
 	it("are a floor however many copies of the package are loaded", async () => {
@@ -149,6 +247,33 @@ describe("the section's options", () => {
 			said.map((message) => ["suites", message]),
 		);
 	});
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+it("warns at every boot where NODE_TLS_REJECT_UNAUTHORIZED is 0, naming the variable alone", async () => {
+	const warned = async (value: string) => {
+		vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", value);
+		const recording = recordingLog();
+		await assemble({
+			modules: [tlsOptionsModule],
+			config: kernelConfig(),
+			runtime: quietRuntime({ log: recording.log }),
+		});
+		return recording.lines().filter((line) => line.event.startsWith("tls-options."));
+	};
+	expect(await warned("0")).toEqual([
+		{
+			level: "warn",
+			event: "tls-options.reject_unauthorized_ignored",
+			fields: {
+				variable: "NODE_TLS_REJECT_UNAUTHORIZED",
+				reason:
+					"the provider's own connections check certificates; trust a private authority by NODE_EXTRA_CA_CERTS",
+			},
+		},
+	]);
+	expect(await warned("1")).toEqual([]);
 });
 
 it("gives its options frozen, as its section reads them", async () => {

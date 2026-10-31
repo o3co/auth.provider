@@ -77,7 +77,7 @@ const narrowing = {
 		.pipe(z.number().int().min(1).max(86_400))
 		.optional()
 		.describe(
-			"How far ahead its `exp`, and how far back its `iat`, this issuer's assertion may be when it is taken, no longer than the section's.",
+			"How far ahead its `exp` this issuer's assertion may be when it is taken, and how far its `exp` may be from its `iat`, no longer than the section's.",
 		),
 	"clock-skew": setting
 		.duration("s")

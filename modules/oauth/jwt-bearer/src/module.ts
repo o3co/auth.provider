@@ -60,7 +60,7 @@ const section = z.strictObject({
 		.pipe(z.number().int().min(1).max(86_400))
 		.prefault("1h")
 		.describe(
-			"How far ahead its `exp`, and how far back its `iat`, an assertion may be when it is taken, from `1s` to `1d` in whole seconds.",
+			"How far ahead its `exp` an assertion may be when it is taken, and how far its `exp` may be from its `iat`, from `1s` to `1d` in whole seconds.",
 		),
 	"clock-skew": setting
 		.duration("s")

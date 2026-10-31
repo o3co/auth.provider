@@ -1,5 +1,5 @@
 import type { ExternalJwt } from "@mod/external-jwt";
-import type { Clock } from "@mod/kernel";
+import type { Clock, Log } from "@mod/kernel";
 import { jsonObjectOf, type Outbound } from "@mod/outbound";
 import {
 	authorizationUrl,
@@ -22,8 +22,9 @@ export function opened(
 	s: Settings,
 	outbound: Outbound,
 	jwt: ExternalJwt,
-	at: { readonly clock: Clock },
+	at: { readonly clock: Clock; readonly log: Log; readonly idp: string },
 ): Upstream {
+	if (s["accept-missing-iss"]) at.log.warn("idp-google.iss_not_required", { idp: at.idp });
 	const client = s["client-id"];
 	const skewMs = s["clock-skew"] * 1000;
 	const hostOf = (url: string) => new URL(url).hostname;
@@ -80,8 +81,8 @@ export function opened(
 			guarded(async () => {
 				// Mix-up: an answer from another issuer, or an empty iss, is refused before its code is used.
 				if (exchange.iss !== undefined && exchange.iss !== issuer) throw new UpstreamRefused();
-				// No iss only where the operator does not ask for it.
-				if (exchange.iss === undefined && s["require-iss"]) throw new UpstreamRefused();
+				// No iss only where the operator accepts its absence.
+				if (exchange.iss === undefined && !s["accept-missing-iss"]) throw new UpstreamRefused();
 				const answer = await post(
 					new URLSearchParams({
 						grant_type: "authorization_code",

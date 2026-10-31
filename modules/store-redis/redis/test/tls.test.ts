@@ -1,10 +1,10 @@
 import type { AddressInfo, Socket } from "node:net";
 import { createServer, getCACertificates, type Server, setDefaultCACertificates } from "node:tls";
 import { assemble, type BootRefused, defineModule, kernelConfig } from "@mod/kernel";
-import { tlsOptions } from "@mod/tls-options";
+import { heldToFloor, tlsOptions } from "@mod/tls-options";
 import { type Offer, peerOptions, testTlsOptions } from "@mod/tls-options/testing";
 import { Redis } from "ioredis";
-import { afterAll, expect, it } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { clientDebugs, clientOptions, inTheClear } from "../src/client/client.ts";
 import redisModule from "../src/module.ts";
 
@@ -68,11 +68,28 @@ it("passes the client no TLS over redis, and over rediss the floor's own keys al
 	expect(clientOptions(settings("redis://127.0.0.1:6379"), testTlsOptions)).not.toHaveProperty(
 		"tls",
 	);
+	// The floor's own keys are tls-options' to name.
+	expect(clientOptions(settings("rediss://127.0.0.1:6379"), testTlsOptions).tls).toEqual(
+		heldToFloor(testTlsOptions, {}),
+	);
 	const loosened = { ...testTlsOptions, rejectUnauthorized: false };
-	expect(clientOptions(settings("rediss://127.0.0.1:6379"), loosened).tls).toEqual({
-		minVersion: testTlsOptions.minVersion,
-		ciphers: testTlsOptions.ciphers,
-	});
+	expect(() => clientOptions(settings("rediss://127.0.0.1:6379"), loosened)).toThrow(TypeError);
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+// Before any peer below is trusted: the platform's store holds its authority only once `peer` adds it.
+it("checks the server's certificate where NODE_TLS_REJECT_UNAUTHORIZED is 0, until its authority is trusted", async () => {
+	vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
+	const { server: options, ca } = await peerOptions("tls1.3");
+	const server = createServer(options, (socket) => socket.on("error", () => {}));
+	server.on("connection", (socket: Socket) => held.add(socket));
+	await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+	servers.push(server);
+	const { port } = server.address() as AddressInfo;
+	expect(await handshake(port)).toMatch(/self-signed certificate/);
+	setDefaultCACertificates([...getCACertificates("default"), ca]);
+	expect(await handshake(port)).toBe("agreed");
 });
 
 it("holds a rediss connection to tls-options' floor, the client passing its suites to the handshake [oidc-core-16.17-b]", async () => {

@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import rpLogout from "../src/module.ts";
 import { registration } from "../src/registration/registration.ts";
 import { section } from "../src/section.ts";
 
@@ -45,4 +46,16 @@ it("sends a client back nowhere and asks for the session on both channels, where
 			"backchannel-logout-session-required": true,
 		},
 	});
+});
+
+it("takes an https error page, http only on a loopback host, and refuses a loopback one in production", () => {
+	expect(section.parse({ "error-page": "https://pages.example/logout-error" })["error-page"]).toBe(
+		"https://pages.example/logout-error",
+	);
+	expect(section.safeParse({ "error-page": "http://pages.example/logout-error" }).success).toBe(
+		false,
+	);
+	const loopback = section.parse({ "error-page": "http://127.0.0.1:8080/logout-error" });
+	expect(rpLogout.refusedInProduction?.(loopback)?.map((r) => r.key)).toEqual(["error-page"]);
+	expect(rpLogout.refusedInProduction?.(section.parse({}))).toEqual([]);
 });

@@ -53,7 +53,7 @@
 - Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.
 
 ## Depends on
-- `kernel`, `store`, `tls-options` (`tlsOptions`, `isFloor`), `url-setting` (`isLoopbackName`, inside `client`)
+- `kernel`, `store`, `tls-options` (`tlsOptions`, `isFloor`; more inside `client`), `url-setting` (inside `client`)
 
 ## Vocabulary
 - slot: the range of keys one node holds; a partition fits in one.

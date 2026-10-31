@@ -170,8 +170,15 @@ async function peer(
 	return { port, refused, close: () => new Promise((resolve) => listening.close(() => resolve())) };
 }
 
-/** The handshake a client with `options` comes to with a peer offering `offer` alone, trusting its certificate. */
-export async function handshakeWith(options: ConnectionOptions, offer: Offer): Promise<Handshake> {
+/**
+ * The handshake a client with `options` comes to with a peer offering `offer` alone, trusting its
+ * certificate unless `trusted` is false.
+ */
+export async function handshakeWith(
+	options: ConnectionOptions,
+	offer: Offer,
+	trusted = true,
+): Promise<Handshake> {
 	const { server, ca } = await peerOptions(offer);
 	const p = await peer(server);
 	try {
@@ -181,7 +188,7 @@ export async function handshakeWith(options: ConnectionOptions, offer: Offer): P
 				host: "127.0.0.1",
 				port: p.port,
 				servername: "localhost",
-				ca,
+				...(trusted ? { ca } : {}),
 			});
 			socket.once("secureConnect", () => {
 				resolve({

@@ -17,7 +17,7 @@
 - Past `concurrent-sends`, a send is unavailable at once, opening no connection, logged as `mail-smtp.busy` with the purpose. A send ends at its answer or its deadline; a name lookup its deadline gave up on holds no socket and is bounded by the resolver's pool, not by this count.
 - `tls` is TLS from the first byte. `starttls` always uses STARTTLS and sends nothing more when it is missing or refused.
 - The certificate is always checked against `host`; no environment variable turns that off.
-- TLS is held to BCP 195 (RFC 9325) alone: `tls-options`' floor, its `minVersion` and `ciphers` copied last over the relay's own options, so nothing loosens it. A floor `tls-options` did not make refuses boot.
+- TLS is held to BCP 195 (RFC 9325) alone: `tls-options`' floor, held to by its `heldToFloor` (the floor's own keys last over the relay's own options), so nothing loosens it. A floor `tls-options` did not make refuses boot.
 - `none` boots only when `host` is a loopback host by its name (`url-setting`'s `isLoopbackName`), an address written without brackets, logs one warn line at boot, and sends nothing when the connected peer is not a loopback address (`address-reach`'s `isLoopbackAddress`).
 - Neither plaintext nor the choice of this sender depends on the environment's name (`NODE_ENV`).
 - AUTH is sent only over the connection `security` asks for, and only when an account is set.

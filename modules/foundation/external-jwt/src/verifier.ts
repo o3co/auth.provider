@@ -123,8 +123,10 @@ function claimsFault(claims: Claims, policy: Policy, now: number): Reason | unde
 	if (nbfMs !== undefined && nbfMs > now + skew) return "not-yet";
 	if (iatMs !== undefined && iatMs > now + skew) return "future-iat";
 	if (policy.maxLifetimeMs !== undefined) {
-		const reach = policy.maxLifetimeMs + skew;
-		if (expMs - now > reach || (iatMs !== undefined && now - iatMs > reach)) return "too-long";
+		if (expMs - now > policy.maxLifetimeMs + skew) return "too-long";
+		// The lifetime it was issued for is on the issuer's clock alone, so no skew widens it; an `iat`
+		// further behind than the longest lifetime is refused by it too, `exp` not being past.
+		if (iatMs !== undefined && expMs - iatMs > policy.maxLifetimeMs) return "too-long";
 	}
 	const expected = policy.expect;
 	if (expected?.iss !== undefined && claims.iss !== expected.iss) return "issuer";

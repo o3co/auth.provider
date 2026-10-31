@@ -15,6 +15,10 @@ Internal module of `rp-logout`: the front-channel page.
 
 ## Invariants
 - Each frame is sandboxed, allowing only scripts and its own origin, so the client's page can clear its own cookies and nothing more: no top navigation, forms, popups or downloads.
+- Each frame's URL gets `iss`, and `sid` when its client asked for the session (OpenID Connect Front-Channel Logout 1.0 §2).
+- A frame whose origin a Content-Security-Policy host source cannot name is left out, and counted for `ending` to log.
+- It declares it loads only the frames' origins and its one script.
+- Without a place to go next, the page has no script and stays.
 
 ## Depends on
 - `http` (the type of what a page loads)

@@ -243,8 +243,10 @@ From `@mod/http`.
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
 | `http.insecure-origin` | boolean | `false` |  | `HTTP_INSECURE_ORIGIN` | `false` | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it, and only with `kernel.environment = development`, as a production deployment refuses it. |
 | `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  | when `http.client-certificate` is set |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
-| `http.client-certificate.header` | string | `client-cert` when `http.client-certificate` is set |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
-| `http.client-certificate.chain-header` | string | `client-cert-chain` when `http.client-certificate` is set |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
+| `http.client-certificate.header` | string | `client-cert` when `http.client-certificate` is set and `http.client-certificate.dialect` is `rfc9440` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.header` | string |  | when `http.client-certificate` is set and `http.client-certificate.dialect` is `pem` |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.header` | string | `x-forwarded-client-cert` when `http.client-certificate` is set and `http.client-certificate.dialect` is `xfcc` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
+| `http.client-certificate.chain-header` | string | `client-cert-chain` when `http.client-certificate` is set and `http.client-certificate.dialect` is `rfc9440` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
 | `http.headers-timeout` | string | `10s` |  |  |  | How long a client may take to send a request's headers, from 1s to 1m, such as 10s; past it the request is answered 408 and its connection closed. |
 | `http.request-timeout` | string | `30s` |  |  |  | How long a client may take to send a whole request, its body included, from 1s to 5m and no less than headers-timeout, such as 30s; past it the request is answered 408 and its connection closed. |
 | `http.max-connections` | integer (1–1000000) | `10000` |  |  |  | The most connections held open at once, from 1 to 1000000; one past it is closed as it arrives. |
@@ -286,7 +288,7 @@ From `@mod/jwt-bearer`.
 |---|---|---|---|---|---|---|
 | `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is","conditions":{"subject-prefix":"REPLACE-SUBJECT-PREFIX"}}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. An entry's keys are `issuer`; `keys`, or `jwks-uri` with `accept-key-set-elsewhere`, or neither; `subject`, `upstream`, `subject-is-key-thumbprint`, `self-issued-prefix`, `conditions`, `accept-any-subject`, `ceiling`, `max-assertion-lifetime`, `clock-skew`, `profile` and `client`; and `algorithms`, which only an entry without `keys` takes; `jwt-bearer`'s internal module `issuers` says what each takes. |
 | `jwt-bearer.delegated-issuers` | list of string | `[]` |  |  |  | Issuers whose assertions another module checks by its own rules, each exactly as sent: their audience is an app, not this server, so RFC 7523 §3 does not hold. Each needs the one module that checks it. |
-| `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | How far ahead its `exp`, and how far back its `iat`, an assertion may be when it is taken, from `1s` to `1d` in whole seconds. |
+| `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | How far ahead its `exp` an assertion may be when it is taken, and how far its `exp` may be from its `iat`, from `1s` to `1d` in whole seconds. |
 | `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
 
 ## kernel
@@ -308,8 +310,8 @@ From `@mod/keys`.
 |---|---|---|---|---|---|---|
 | `keys.signing.kid` | string |  | yes | `KEYS_SIGNING_KID` | `signing-1` | The key id tokens signed with this key carry, unique in the ring. |
 | `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `RS256` | The algorithm the provider signs with. |
-| `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
-| `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
+| `keys.signing.private-key` | string |  | when `keys.signing.alg` is `EdDSA`, `ES256` or `RS256` | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
+| `keys.signing.secret` | string |  | when `keys.signing.alg` is `HS256` |  |  | The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read. |
 | `keys.signing.secret-encoding` | hex \| base64 \| utf8 |  |  |  |  | How `secret` is read: `hex`, `base64` (strict) or `utf8`, the text's own bytes, as 0.17 and policy-verifier read it; a value not of the reading named is refused. Unset, hex or else base64. |
 | `keys.next.kid` | string |  | when `keys.next` is set |  |  | The key id of the key that signs next, unique in the ring. |
 | `keys.next.alg` | EdDSA \| ES256 \| RS256 |  | when `keys.next` is set |  |  | The algorithm the next key will sign with. |
@@ -462,21 +464,21 @@ From `@mod/mtls`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mtls.mode` | self-signed \| pki |  | yes | `MTLS_MODE` | `self-signed` | How a client certificate binds: `self-signed` binds any certificate that parses; `pki` checks a path to an anchor. |
-| `mtls.anchors` | list of string |  |  |  |  | The trust anchors, as PEM text holding one certificate each. |
-| `mtls.max-intermediates` | integer (0–14) | `4` |  |  |  | At most this many certificates between the leaf and an anchor. |
-| `mtls.min-rsa-bits` | integer (2048–16384) | `2048` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
-| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | when `mtls.revocation` is set |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
-| `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
-| `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
-| `mtls.revocation.nonce` | boolean | `true` when `mtls.revocation` is set |  |  |  | Whether an OCSP request carries a nonce. |
-| `mtls.revocation.skew` | string | `5m` when `mtls.revocation` is set |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
-| `mtls.revocation.ocsp-fresh` | string | `10m` when `mtls.revocation` is set |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
-| `mtls.revocation.crl-ttl` | string | `1h` when `mtls.revocation` is set |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
-| `mtls.revocation.failure-lifetime` | string | `30s` when `mtls.revocation` is set |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
-| `mtls.revocation.crl-entries` | integer (1–65536) | `256` when `mtls.revocation` is set |  |  |  | How many CRLs are kept. |
-| `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` when `mtls.revocation` is set |  |  |  | How many OCSP answers are kept. |
-| `mtls.revocation.timeout` | string | `3s` when `mtls.revocation` is set |  |  |  | How long one fetch may take, from 1ms to 1m. |
-| `mtls.revocation.max-fetches` | integer (1–64) | `4` when `mtls.revocation` is set |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
+| `mtls.anchors` | list of string |  | when `mtls.mode` is `pki` |  |  | The trust anchors, as PEM text holding one certificate each. |
+| `mtls.max-intermediates` | integer (0–14) | `4` when `mtls.mode` is `pki` |  |  |  | At most this many certificates between the leaf and an anchor. |
+| `mtls.min-rsa-bits` | integer (2048–16384) | `2048` when `mtls.mode` is `pki` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
+| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | when `mtls.mode` is `pki` |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
+| `mtls.revocation.on-unavailable` | reject \| allow |  | when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
+| `mtls.revocation.hosts` | list of string |  | when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
+| `mtls.revocation.nonce` | boolean | `true` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | Whether an OCSP request carries a nonce. |
+| `mtls.revocation.skew` | string | `5m` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
+| `mtls.revocation.ocsp-fresh` | string | `10m` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
+| `mtls.revocation.crl-ttl` | string | `1h` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
+| `mtls.revocation.failure-lifetime` | string | `30s` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
+| `mtls.revocation.crl-entries` | integer (1–65536) | `256` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many CRLs are kept. |
+| `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many OCSP answers are kept. |
+| `mtls.revocation.timeout` | string | `3s` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How long one fetch may take, from 1ms to 1m. |
+| `mtls.revocation.max-fetches` | integer (1–64) | `4` when `mtls.mode` is `pki` and `mtls.revocation.mode` is `crl`, `ocsp` or `both` |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
 
 ## oidc
 
@@ -601,6 +603,7 @@ From `@mod/rp-logout`.
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
 | `rp-logout.confirm-within` | string | `5m` |  |  |  | How long a logout that asks the person waits for them, from 1m to 15m: the request the logout carries to the confirmation, and the confirmation page. |
+| `rp-logout.error-page` | string |  |  |  |  | Where a browser's refused logout request is sent, with `error` and `error_description` in its query: an https URL (http only on a loopback host, with `kernel.environment = development`). Without it, every refusal is answered as JSON. |
 | `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
 | `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
@@ -972,7 +975,7 @@ From `@mod/idp-google`.
 | `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
 | `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
 | `federation.idps.<name>.access` | offline \| online | `offline` |  | `offline` asks for a refresh token, so Google shows its consent screen at every login; `online` asks none. |
-| `federation.idps.<name>.require-iss` | boolean | `true` |  | Asks every callback for `iss`, which Google says it always sends. |
+| `federation.idps.<name>.accept-missing-iss` | boolean | `false` |  | Takes a callback without `iss`, which Google says it always sends; warned of at every start. |
 | `federation.idps.<name>.authorization-endpoint` | string | `https://accounts.google.com/o/oauth2/v2/auth` |  | Where the browser is sent to log in at Google; Google's own unless named. |
 | `federation.idps.<name>.token-endpoint` | string | `https://oauth2.googleapis.com/token` |  | Where a code is exchanged for tokens; Google's own unless named. |
 | `federation.idps.<name>.jwks-uri` | string | `https://www.googleapis.com/oauth2/v3/certs` |  | Where the keys that sign Google's id_tokens are read; Google's own unless named. |

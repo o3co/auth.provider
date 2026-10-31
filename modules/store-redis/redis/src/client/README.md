@@ -14,7 +14,7 @@ Internal module of `redis`: the client's options, and what the URL and the envir
 - `queryRefusal` (a URL) → why it is refused, if it is; `inTheClear` (a URL); `clientDebugs` (`DEBUG`'s value).
 
 ## Invariants
-- Under `rediss`, TLS takes `tls-options`' floor alone (BCP 195): its `minVersion` and `ciphers`, copied last, and no other TLS option. Under `redis`, no TLS options at all, as the client takes up TLS for any it is given.
+- Under `rediss`, TLS is held to `tls-options`' floor (BCP 195) by its `heldToFloor`, and no other TLS option is given: the floor alone. Under `redis`, no TLS options at all, as the client takes up TLS for any it is given.
 - A URL with a query, an empty one too, is refused, as the client takes each name of it as an option over the ones given it. The reason names where each option the table holds is written instead, never a value nor another name.
 - In the clear: `redis` at a host not loopback by its name (`url-setting`'s `isLoopbackName`), so what the store keeps and the URL's password are readable and changeable on the way.
 - `DEBUG` is read as the `debug` library reads it, for `ioredis:redis`, the log that writes the commands sent, AUTH's password among them.
@@ -22,4 +22,4 @@ Internal module of `redis`: the client's options, and what the URL and the envir
 - `address-family` is passed only when set, so the client resolves either family as before.
 
 ## Depends on
-- `tls-options` (the floor's type), `url-setting` (`isLoopbackName`), the Redis client (its options' type).
+- `tls-options` (the floor's type, `heldToFloor`), `url-setting` (`isLoopbackName`), the Redis client (its options' type).
