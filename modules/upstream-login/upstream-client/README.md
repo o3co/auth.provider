@@ -18,7 +18,7 @@
 - `guarded` (a type's call) → what it gives, or what it throws.
 
 ## Invariants
-- A client's secret goes only to the token endpoint, in each token post alone (outbound follows no redirect): as HTTP Basic, or after the grant in the form; asked for at each post, so one signed per call is fresh.
+- A client's secret goes only to the token endpoint, in each token post alone (outbound follows no redirect): as HTTP Basic, or after the grant in the form; asked for at each post, so one signed per call is fresh. The narrower is the caller's: it narrows where the post may go, never widens it.
 - A credential, the client's ID and secret among them, that is blank (empty or whitespace alone) or not well-formed text (half a surrogate pair) refuses boot; any other is taken as written.
 - federation's parameters are set first: `response_type` `code`, the client ID, the redirect URI, the scopes joined by spaces, the state and the PKCE challenge with its method.
 - A type's own parameter with the name of one of federation's is dropped; it never replaces it.
