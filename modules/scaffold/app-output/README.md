@@ -8,7 +8,7 @@
 
 ## Not here
 - Where the packages come from (a workspace or a bundle's index), and what the app depends on to have them: the caller's, through `Packages`.
-- Which modules a project composes, and the values of its guide's template marks of its own (a pattern's use and card, the full template's opt-ins): the caller's.
+- Which modules a project composes, and the values of its guide's own template marks: the caller's.
 - What each module's configuration means, and its fragment (`config.example` beside its package.json): each module's.
 
 ## Offers
@@ -19,8 +19,7 @@
   - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
 - `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), and the release (`Release`).
 - `namesPackages` and `vacant`, for a caller to refuse a plan before it composes; `mainSource`, the app's entry; `kernel` and `configFiles`, the packages every app depends on (its entry reads its configuration files through `config-files`).
-- `fragmentsIn`, `fragmentsOf`, `fragmentFile` and `settingsOf`: the internal module `fragments`'s.
-- `outsideLock`: see the internal module `lockfile`.
+- `fragmentsIn`, `fragmentsOf`, `fragmentFile` and `settingsOf` (internal module `fragments`); `outsideLock` (`lockfile`).
 - `Packages.outside`, where the caller has packages outside the release: what the app is given beside them, see the internal module `outside`; `appZod`, the zod every app depends on.
 
 ## Invariants
@@ -30,7 +29,8 @@
 - The manifest names the pnpm the workspace builds with, and the app also depends on `zod` at the packages' version.
 - A scalar its owner's example gives in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer; the guide and the env example say such a value goes in the local layer.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
-- The image follows Node 24's latest, neither patch nor digest pinned, so a build takes Node's security fixes over repeating the last build; it pins corepack by version and installs the locked production dependencies in a stage of their own; the stage the app runs in starts again from Node's image and takes out the corepack and the yarn Node's image bundles, so no package manager but npm is in it, and runs node under `tini` as a user other than root.
+- The image follows one Node 24 minor, patch and digest unpinned, so a build takes its patches; a minor is fixed only until a newer one is out, so the operator moves `FROM` to the latest 24.x minor at each Node security release.
+- It pins corepack by version and installs the locked production dependencies in a stage of their own; the stage the app runs in starts again from Node's image and takes out the corepack and the yarn Node's image bundles, so no package manager but npm is in it, and runs node under `tini` as a user other than root.
 - Only an app composing `http` is given its port and interface in the image and the guide, and only one composing `http-ops` is checked for liveness (`/_healthcheck`, after a start period) or told of its endpoints.
 - The app reads the configuration files `APP_CONFIG` lists, comma-separated, layered in order; the generated configuration file when unset.
 - The app exits 78 on a refused boot, told by the kernel's mark (`BootRefused.is`), writing each refusal on standard error, every line handed on before it exits.

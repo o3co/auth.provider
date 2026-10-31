@@ -10,7 +10,7 @@ name: umbrella-e2e
 #
 # It runs by hand only and is no required check: once for each release,
 # dispatched with the release branch as its ref before the branch's pull request
-# to main (docs/releasing.md, "Before the tag", step 7), so it tests the head
+# to main (docs/releasing.md, "Before the tag", step 8), so it tests the head
 # the release takes.
 #
 # Red means this change breaks the umbrella's contract — or the umbrella's

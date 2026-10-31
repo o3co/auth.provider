@@ -37,7 +37,7 @@
 - A failed exchange is logged with the IdP and its kind only.
 - An unavailable upstream is 503.
 - The start is declared as the user's own navigation, and the callback as the IdP's redirect or posted form, each in place of a policy keeping other sites out; both change state.
-- A login reports the upstream's login time as when the user authenticated, on our clock (a time before the start but within the IdP's fresh login allowance before the start's second counts as the start, to the millisecond), or that it is unknown.
+- A login reports when the user logged in upstream, on our clock (one within the allowance before the start's second is the start, to the millisecond), or unknown; the allowance is applied here alone: the session carries the time, never the allowance.
 - After `prompt=login` or a max age, a login counts only when the upstream says when the user logged in.
 - Fresh enough, after `prompt=login` or with a max age: by the IdP's `fresh-login-allowance` (its type's clock allowance by default), as `round-trip`'s card says.
 - The fresh login allowance narrows only how far back a login time reaches: a time ahead of ours that the type's clock allowance passes, or any time the upstream says, is taken as the upstream says it.
