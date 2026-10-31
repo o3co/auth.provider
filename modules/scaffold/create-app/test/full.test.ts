@@ -68,10 +68,10 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	for (const name of optIns()) expect(readme).toContain(`- \`${name}\``);
 });
 
-it("names in its guide each key no module's example holds", async () => {
+it("names in its guide each key no module's example holds, in the lines the modules declare", async () => {
 	const readme = await read(await generated(), "README.md");
-	const named = (key: string) =>
-		readme.split("\n").some((l) => l.startsWith("- ") && l.includes(`\`${key}\``));
+	const line = (key: string) =>
+		readme.split("\n").find((l) => l.startsWith("- ") && l.includes(`\`${key}\``));
 	for (const key of [
 		"authorize.step-up-page",
 		"federation.held-page",
@@ -83,11 +83,16 @@ it("names in its guide each key no module's example holds", async () => {
 		"mail-smtp.password",
 		"clients.registered",
 	]) {
-		expect(named(key), key).toBe(true);
+		expect(line(key), key).toBeDefined();
 	}
-	for (const heading of ["Pages the operator serves", "Secrets"]) {
+	expect(line("federation.held-page")).toContain("public origin");
+	// No key named by hand: the guide's two lists are the modules' own, kernel's line first and once.
+	for (const heading of ["Keys no example holds", "Pages the operator serves", "Secrets"]) {
 		expect(readme).not.toContain(`## ${heading}`);
 	}
+	expect(readme).toContain("## Settings the composed modules ask for\n\n- ");
+	expect(readme.split("## Values the operator decides\n\n- `kernel.deployment`: ")).toHaveLength(2);
+	expect(readme.split("- `kernel.deployment`: ")).toHaveLength(2);
 });
 
 it("writes a witness-backfill script where the enrollment witness is kept, and none where it is not", async () => {
