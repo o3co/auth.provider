@@ -84,7 +84,7 @@ const writtenType = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementL
 };
 
 /** What an owner holds to declaration: its package, and the type its contract exports with the property. */
-interface Owned {
+export interface Owned {
 	readonly owner: Pkg;
 	readonly type: string;
 	readonly property: string;
@@ -232,30 +232,49 @@ const ownedOf = (value: unknown): { type: string; property: string } | undefined
 		: undefined;
 };
 
+/** What the workspace's manifests state of a property held to declaration, read once for every reader. */
+export interface PropertyDeclarations {
+	/** The packages stating, in `narrowerOwner`, the type and property they hold to declaration. */
+	readonly owners: readonly Owned[];
+	/** The packages whose `narrowerOwner` names no type and property. */
+	readonly malformed: readonly Pkg[];
+	/** The packages declaring, in `narrower`, the property they write, whatever its value. */
+	readonly declaring: readonly Pkg[];
+}
+
+/**
+ * The owners' `narrowerOwner` and the writers' `narrower` in `packages`. While it is switched over, an
+ * object in `narrower` is read as an owner's statement too.
+ */
+export function propertyDeclarations(packages: readonly Pkg[]): PropertyDeclarations {
+	const owners: Owned[] = [];
+	const malformed: Pkg[] = [];
+	const declaring: Pkg[] = [];
+	for (const p of packages) {
+		const writes = p.manifest.narrower;
+		const legacy = typeof writes === "object" && writes !== null && !Array.isArray(writes);
+		const stated = p.manifest.narrowerOwner ?? (legacy ? writes : undefined);
+		if (stated !== undefined) {
+			const owned = ownedOf(stated);
+			if (owned === undefined) malformed.push(p);
+			else owners.push({ owner: p, ...owned });
+		}
+		if (writes !== undefined && !legacy) declaring.push(p);
+	}
+	return { owners, malformed, declaring };
+}
+
 /**
  * G32: shipped code writes the property an owner holds to declaration (the narrower's `internal`,
  * which reaches private addresses) only in the packages that declare it, `narrower` in their manifest
  * stating the property and their card stating that; each declaring package writes one. The owner
- * states the type and the property in its own `narrower`.
+ * states the type and the property in its `narrowerOwner`.
  */
 export function ownedPropertyRules(s: Scope) {
 	const rule = "G32 an owned property is written only by the packages declaring it";
-	const owners: Owned[] = [];
-	const declaring: Pkg[] = [];
-	for (const p of s.packages) {
-		const value = p.manifest.narrower;
-		if (value === undefined) continue;
-		// An object is an owner's statement; anything else, a writer's declaration.
-		if (typeof value !== "object" || value === null || Array.isArray(value)) {
-			declaring.push(p);
-			continue;
-		}
-		const owned = ownedOf(value);
-		if (owned === undefined) {
-			s.report(rule, p.name, "narrower names no type and property it holds to declaration");
-		} else {
-			owners.push({ owner: p, ...owned });
-		}
+	const { owners, malformed, declaring } = propertyDeclarations(s.packages);
+	for (const p of malformed) {
+		s.report(rule, p.name, "narrowerOwner names no type and property it holds to declaration");
 	}
 	// The workspace's rules say how many owners there must be: none stating it leaves writes unheld.
 	const required = s.budget.declaredProperties ?? 0;
@@ -274,7 +293,7 @@ export function ownedPropertyRules(s: Scope) {
 		return;
 	}
 	for (const other of others) {
-		s.report(rule, owned.owner.name, `narrower: ${other.owner.name} states it owns it too`);
+		s.report(rule, owned.owner.name, `narrowerOwner: ${other.owner.name} states it owns it too`);
 	}
 	if (others.length > 0) return;
 	const { property } = owned;
@@ -297,7 +316,7 @@ export function ownedPropertyRules(s: Scope) {
 	// The owner too: it states the property, and writes none.
 	const written = writtenIn(s, owned, s.packages);
 	if (typeof written === "string") {
-		s.report(rule, owned.owner.name, `narrower, but it ${written}`);
+		s.report(rule, owned.owner.name, `narrowerOwner, but it ${written}`);
 		return;
 	}
 	for (const name of declared) {

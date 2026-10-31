@@ -18,7 +18,7 @@
   - G29: a test file composing every module a feature bridge `joins` and a module contributing to the bridge's points composes the bridge too, so no contribution that decides an answer is silently lost.
   - G30: outside the package each `./audit-events` declares through (`audit`), shipped code records an event only through the declared wrapper (`declaredAudit`), never on the contract's own `record`, so every event reaches the audit event reference.
   - G31: a contract a manifest declares `takenBy` (contract name → the packages that may take it) is imported, in shipped code, by those packages alone, by name, alias, namespace or re-export; the declaration names the modules of the kernel `takenBy` the contract declares, no more and no fewer.
-  - G32: the property an owner holds to declaration (the narrower's `internal`, which reaches private addresses) is written in shipped code only by the packages declaring it in their manifest and card (the `owned-property` internal module).
+  - G32: the property an owner holds to declaration (the narrower's `internal`, which reaches private addresses) is written in shipped code only by the packages declaring it in their manifest and card.
 
 ## Not here
 - Hostile code: the rules hold our own code to its design, written the ordinary way; a form written to slip past them, a dependency's behaviour, prototype or reflection tricks, custom loaders and file-system races are review's.
@@ -29,7 +29,7 @@
 - `readWorkspace` (root → its packages, as pnpm lists them, minus the root), `scopeOf` (packages, rules, where findings go → the scope every rule reads: what a manifest declares apart from what a source is seen to say, each file's `facts` by one lexical program over every package's sources and the files the caller adds (a fork's helper), and the package whose directory holds a path), `surfacesOf` (packages → each one's public surface).
 - `importRules` (scope, surfaces): every rule above, reported through the scope; `importViolations` (packages, rules → the findings).
 - The readers the other checks build on: `parse`, `packageOf`, `importsOf`, `importedNames`; `budgetsAsTest`, whether a file counts as a test (a published contract test suite does).
-- `lexicalAnalysis` and the facts' types (`FileFacts`, `Edge`, …): the `facts` card's; `Kinds`, `Rules`, `Scope`: `scopeOf`'s.
+- `lexicalAnalysis` and the facts' types (`FileFacts`, `Edge`, …): the `facts` card's; `Kinds`, `Rules`, `Scope`: `scopeOf`'s; `propertyDeclarations`: `owned-property`'s.
 
 ## Invariants
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.

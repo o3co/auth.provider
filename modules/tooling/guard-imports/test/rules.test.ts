@@ -906,7 +906,7 @@ describe("guard-imports", () => {
 				{
 					exports: { ".": "./src/contract.ts" },
 					dependencies: { "@c/urls": "*" },
-					narrower: owned,
+					narrowerOwner: owned,
 				},
 				"foundation",
 			);
@@ -995,12 +995,12 @@ describe("guard-imports", () => {
 				{
 					exports: { ".": "./src/contract.ts" },
 					dependencies: { "@c/urls": "*" },
-					narrower: { type: "Narrower", property: "internal" },
+					narrowerOwner: { type: "Narrower", property: "internal" },
 				},
 				"foundation",
 			);
 			expect(found([urls, hidden])).toEqual([
-				"@c/policy narrower, but it exports no Narrower with internal",
+				"@c/policy narrowerOwner, but it exports no Narrower with internal",
 			]);
 		});
 
@@ -1062,10 +1062,10 @@ describe("guard-imports", () => {
 			]);
 			const second = { ...owner(), name: "@c/second" };
 			expect(found([urls, owner(), second, declaring("@c/declared")])).toEqual([
-				"@c/policy narrower: @c/second states it owns it too",
+				"@c/policy narrowerOwner: @c/second states it owns it too",
 			]);
 			expect(found([urls, owner({ type: "Narrower" })])).toEqual([
-				"@c/policy narrower names no type and property it holds to declaration",
+				"@c/policy narrowerOwner names no type and property it holds to declaration",
 			]);
 		});
 
@@ -1178,11 +1178,28 @@ describe("guard-imports", () => {
 
 		it("refuses an owner naming a type its contract does not export, or a property its type lacks", () => {
 			expect(found([urls, owner({ type: "Narowwer", property: "internal" })])).toEqual([
-				"@c/policy narrower, but it exports no Narowwer with internal",
+				"@c/policy narrowerOwner, but it exports no Narowwer with internal",
 			]);
 			expect(found([urls, owner({ type: "Narrower", property: "interal" })])).toEqual([
-				"@c/policy narrower, but it exports no Narrower with interal",
+				"@c/policy narrowerOwner, but it exports no Narrower with interal",
 			]);
+		});
+
+		it("reads an object in narrower as an owner's statement while it is switched over", () => {
+			const legacy = pkg(
+				"@c/policy",
+				{ "src/narrower.ts": narrower, "src/contract.ts": sending.join("\n") },
+				{
+					exports: { ".": "./src/contract.ts" },
+					dependencies: { "@c/urls": "*" },
+					narrower: { type: "Narrower", property: "internal" },
+				},
+				"foundation",
+			);
+			expect(found([urls, legacy, declaring("@c/declared"), writer("@c/other")])).toContain(
+				"@c/other/src/module.ts:5 internal",
+			);
+			expect(found([urls, legacy, declaring("@c/declared")])).toEqual([]);
 		});
 
 		it("reads the type and the property the owner states, never a name of guard's own", () => {
@@ -1198,7 +1215,7 @@ describe("guard-imports", () => {
 				{
 					exports: { ".": "./src/contract.ts" },
 					dependencies: { "@c/urls": "*" },
-					narrower: { type: "Limits", property: "private" },
+					narrowerOwner: { type: "Limits", property: "private" },
 				},
 				"foundation",
 			);

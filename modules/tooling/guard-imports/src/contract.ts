@@ -30,6 +30,11 @@ export type {
 	Unresolved,
 } from "./facts/facts.ts";
 export { type LexicalAnalysis, lexicalAnalysis } from "./facts/facts.ts";
+export {
+	type Owned,
+	type PropertyDeclarations,
+	propertyDeclarations,
+} from "./owned-property/owned-property.ts";
 export { budgetsAsTest, type Kinds, type Rules, type Scope, scopeOf } from "./scope.ts";
 export { type ImportUse, importedNames, importsOf, packageOf, parse } from "./source.ts";
 export type { Surface } from "./surface/surface.ts";
