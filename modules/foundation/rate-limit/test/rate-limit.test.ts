@@ -696,6 +696,23 @@ describe("the policies for routes", () => {
 		]);
 	});
 
+	it("warns at every start where the section says open, and not where it says closed", async () => {
+		const warned = async (section?: Record<string, unknown>) => {
+			const { recorded } = await serving(section);
+			await stop();
+			stop = async () => {};
+			return recorded.lines().filter((line) => line.level === "warn");
+		};
+		expect(await warned({ "fail-mode": "open" })).toEqual([
+			{
+				level: "warn",
+				event: "rate-limit.fail_open",
+				fields: { reason: "a request limit lets requests through while the store cannot count" },
+			},
+		]);
+		expect(await warned()).toEqual([]);
+	});
+
 	it("refuses boot on a fail mode other than open or closed", async () => {
 		await expect(serving({ "fail-mode": "half" })).rejects.toBeInstanceOf(BootRefused);
 	});
