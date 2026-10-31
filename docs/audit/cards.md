@@ -35,6 +35,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/config-files` (foundation, `modules/foundation/config-files`): Reads an app's configuration files: layers HOCON files into one tree for `kernel`'s `assemble`, which checks each module's section.
 - `@mod/cookies` (foundation, `modules/foundation/cookies`): Builds `Set-Cookie` values for the names routes give, by one rule for this deployment.
 - `@mod/external-jwt` (foundation, `modules/foundation/external-jwt`): Checks a JWT signed by a key from outside (header, key, signature, times, issuer, audience, subject), and keeps each key set fetched from a URL once in the process; knows no feature.
+- `@mod/host-entries` (foundation, `modules/foundation/host-entries`): How an operator writes a host in configuration (a name, `.name` for it and the names under it, an address, or a `host:port` pair), and whether a host is among such entries.
 - `@mod/http` (foundation, `modules/foundation/http`): Owns the HTTP entry point: it connects the routes that modules contribute and applies the policies each route declares.
   - `bodies` (`src/bodies`): the values a request is sent with, by name, from its body as its route takes it and from its query alike.
   - `cors` (`src/cors`): the answers to cross-origin requests, for the routes that declare them.
