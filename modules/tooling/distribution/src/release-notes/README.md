@@ -15,5 +15,7 @@ Internal module of `distribution`: the release's notes, from the version's secti
 ## Invariants
 - The section is the one whose heading is `## [<version>] - <date>`, the version matched as written, so a prerelease takes its own section; it runs to the next version's heading or the end of the file.
 - No section, two sections, a heading not dated (`YYYY-MM-DD`) or an empty section refuses it.
-- A link relative to the repository points at the file in the version's tag (`<repository>/blob/v<version>/<path>`), the repository as the workspace's `package.json` states it, as the release page has no repository to resolve it in; a link with a scheme, or led by `#` or `/`, stays as written, and no repository stated refuses it. `CHANGELOG.md` keeps its links relative.
+- A link relative to the repository points at the file in the version's tag (`<repository>/blob/v<version>/<path>`), the repository as the workspace's `package.json` states it, as the release page has no repository to resolve it in; a link with a scheme, or led by `#` or `/`, stays as written. `CHANGELOG.md` keeps its links relative.
+- Any `](` reads as a link, in a code span, an image, `](<…>)` or `](./…)` too; a reference's `[ref]: path` stays relative.
+- No repository stated, or one not a plain https URL (`git+`, `.git`, ssh or scp), refuses it.
 - It loads Node's own modules and the package's files alone, as it runs where the release publishes.

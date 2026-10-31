@@ -63,6 +63,19 @@ describe("the release's notes, from the version's section of the changelog", () 
 		});
 	});
 
+	it("refuse notes for a repository that is not a plain https URL, naming the form to state", () => {
+		for (const stated of [
+			"git+https://github.com/o3co/auth.provider.git",
+			"https://github.com/o3co/auth.provider.git",
+			"git@github.com:o3co/auth.provider",
+			"ssh://git@github.com/o3co/auth.provider",
+		]) {
+			expect(notesOf(changelog, "1.2.0", stated), stated).toEqual({
+				problem: `package.json's repository is ${stated}; state it as a plain https URL, without git+ or .git`,
+			});
+		}
+	});
+
 	it("refuse a version with two sections", () => {
 		expect(
 			notesOf(`${changelog}\n## [1.1.0] - 2026-09-01\n\n- Again.\n`, "1.1.0", repository),
