@@ -107,6 +107,10 @@ export default defineModule(
 				c.log.warn("mfa-binding-proof.never_asked", {
 					reason: "a first counting factor binds with no binding proof asked",
 				});
+			} else if (p.mode === "when-available" && p.proofs.length === 0) {
+				c.log.warn("mfa-binding-proof.none_available", {
+					reason: "no binding proof is composed, so a first counting factor binds with none asked",
+				});
 			}
 			return {
 				admits: async ({ subject, kind, transaction, passed, from }) => {

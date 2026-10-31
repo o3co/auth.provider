@@ -14,7 +14,7 @@
 
 ## Invariants
 - Whether a counting factor is held is `mfa-reading`'s `countingHeld`, judged against the witness: a subject it marks while holding none is unavailable at `asks`, before `begin`.
-- A proof is asked only of a subject holding no counting factor: the first available, or under `always` the first contributed; `always` with none composed refuses to boot. Under `never`, none is asked, which every start warns of (`mfa-binding-proof.never_asked`).
+- A proof is asked only of a subject holding no counting factor: the first available, or under `always` the first contributed; `always` with none composed refuses to boot, and `when-available` with none composed asks none, which every start warns of (`mfa-binding-proof.none_available`). Under `never`, none is asked, which every start warns of (`mfa-binding-proof.never_asked`).
 - A challenge is sealed to the subject, and keeps the proof's name, what it kept and its end; a pass is sealed to the subject, with its end, the transaction and the kind.
 - A pass begins only the binding of the transaction and kind it names, before the challenge's end.
 - Sealed values come back only from `mfa-flows`' transactions: one that will not open is unavailable.

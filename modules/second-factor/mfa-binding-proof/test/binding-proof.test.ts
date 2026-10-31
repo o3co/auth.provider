@@ -205,14 +205,14 @@ it("lets mfa begin a first binding only with the subject's pass, for the transac
 	expect(await decided.begin("bob", "code", bob, "t"), "past its end").toEqual(required);
 });
 
-it("warns at every start where it asks nothing, and not by default", async () => {
+it("warns at every start where it asks nothing, under never or with no proof composed, and not by default", async () => {
 	const warned = async (mode?: "never") => {
 		const from = logged.lines().length;
 		await serve(mode);
 		return logged
 			.lines()
 			.slice(from)
-			.filter((line) => line.event === "mfa-binding-proof.never_asked");
+			.filter((line) => line.event.startsWith("mfa-binding-proof."));
 	};
 	expect(await warned("never")).toEqual([
 		{
@@ -223,6 +223,16 @@ it("warns at every start where it asks nothing, and not by default", async () =>
 	]);
 	await stop();
 	expect(await warned()).toEqual([]);
+	await stop();
+	const from = logged.lines().length;
+	await serve(undefined, []);
+	expect(logged.lines().slice(from)).toContainEqual({
+		level: "warn",
+		event: "mfa-binding-proof.none_available",
+		fields: {
+			reason: "no binding proof is composed, so a first counting factor binds with none asked",
+		},
+	});
 });
 
 it("asks nothing under never, and the first contributed under always", async () => {
