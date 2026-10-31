@@ -12,8 +12,11 @@ import {
 	type Store,
 } from "@mod/store";
 import { type Redis, ReplyError } from "ioredis";
-import { confirmationRounds } from "./round/round.ts";
+import { confirmationPipeline, confirmationRounds } from "./round/round.ts";
 import * as scripts from "./scripts.ts";
+
+/** How many keys SCAN is asked for at a time. */
+const scanPage = 200;
 
 type Raw = { value: string; version: string; expiresAt: string | null };
 
@@ -86,12 +89,8 @@ export async function refusedCommands(
 			problems.add(`the server refuses ${name}: allow it`);
 		} else if (!noReplicas(message)) throw error;
 	};
-	const round = confirmer.pipeline().call("ROLE").info("server");
-	const sent = ["ROLE", "INFO"];
-	if (replication !== undefined) {
-		round.set(`${prefix}:#confirm`, "1", "PX", 60_000);
-		sent.push("SET");
-	}
+	const round = confirmationPipeline(confirmer, prefix, replication !== undefined);
+	const sent = ["ROLE", "INFO", ...(replication !== undefined ? ["SET"] : [])];
 	if (replication === "replicas") {
 		// Answers within its millisecond, once a confirmation's WAIT before it has.
 		round.call("WAIT", 0, 1);
@@ -418,7 +417,13 @@ export function redisStore(
 				const head = `${prefix}:{${enc(space.name)}:`;
 				let reply: [string, string[]];
 				try {
-					reply = await client.scan(cursor ?? "0", "MATCH", `${literal(head)}*}:v:*`, "COUNT", 200);
+					reply = await client.scan(
+						cursor ?? "0",
+						"MATCH",
+						`${literal(head)}*}:v:*`,
+						"COUNT",
+						scanPage,
+					);
 				} catch {
 					throw new Unavailable("store");
 				}
