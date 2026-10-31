@@ -274,6 +274,24 @@ describe("mtls", () => {
 		expect(reaching.sent.every(([, , n]) => n.timeoutMs === 1234)).toBe(true);
 	});
 
+	it("warns at every start where any certificate that parses binds, and not under PKI", async () => {
+		const warned = async (section: unknown) => {
+			const recorded = recordingLog();
+			await boot(section, { run: quietRuntime({ log: recorded.log }) });
+			return recorded.lines().filter((line) => line.level === "warn");
+		};
+		expect(await warned({ mode: "self-signed" })).toEqual([
+			{
+				level: "warn",
+				event: "mtls.self_signed",
+				fields: {
+					reason: "any certificate that parses binds, with no path to an anchor and no revocation",
+				},
+			},
+		]);
+		expect(await warned((await pki()).section)).toEqual([]);
+	});
+
 	it("judges the leaf's end and the CRL's next update by the runtime's clock, logging a refusal", async () => {
 		const { root, intermediate, client, section } = await pki();
 		const recorded = recordingLog();
