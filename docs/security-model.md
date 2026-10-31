@@ -131,7 +131,7 @@ To shorten a delay: shorten `tokens.access-token-lifetime`, compose `subject-tok
 
 - **Guaranteed:**
   - In a production deployment (`kernel.environment`, `production` by default), boot refuses what each module declares a production deployment must not hold: a plain-http public origin or issuer, a page on a loopback host over plain http, an `http://localhost` WebAuthn origin. A declaration that throws refuses its module, never showing what it threw.
-  - The app serves nothing while any setting is refused. Refusals come in two stages, each reported together by setting path: what the sections, the modules' takes and the production checks show, before anything is built; then what a module's build refuses, after the builds' stop hooks have run.
+  - The app serves nothing while any setting is refused. Refusals come in two stages, each reported together by setting path: the preflight's, before anything is built (the sections, the modules' takes, whether each module is safe on several instances (`replicaSafe`), the production checks and duplicate providers); then what a module's build refuses, after the builds' stop hooks have run.
   - Key material has no default.
   - A sample value left in place (`REPLACE-…`) is refused.
 - **Left to you:**
