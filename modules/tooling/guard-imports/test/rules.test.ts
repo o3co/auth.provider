@@ -1098,6 +1098,38 @@ describe("guard-imports", () => {
 			]);
 		});
 
+		it("counts an assignment and a class field of the owned property under the same type rule", () => {
+			const assigning = pkg(
+				"@c/assigning",
+				{
+					"src/module.ts": [
+						'import { type ConfiguredUrl, read } from "@c/urls";',
+						'import type { Narrower } from "@c/policy";',
+						'const url = read("http://x/");',
+						"export const dotted = (n: { internal?: ConfiguredUrl }) => { n.internal = url; };",
+						'export const indexed = (n: { internal?: ConfiguredUrl }) => { n["internal"] = url; };',
+						"export const kept = (n: { internal?: ConfiguredUrl }) => { n.internal ??= url; };",
+						"export class Field { internal = url; }",
+						"export class Parameter { constructor(readonly internal: ConfiguredUrl) {} }",
+						"export class Typed implements Narrower { readonly internal?: ConfiguredUrl; }",
+						// Not counted: another type, a read, a comparison, another name.
+						"export const flag = (n: { internal?: boolean }) => { n.internal = true; };",
+						"export const read2 = (n: Narrower) => n.internal;",
+						"export const same = (n: Narrower) => n.internal === url;",
+						"export const other = (n: { hosts?: ConfiguredUrl }) => { n.hosts = url; };",
+					].join("\n"),
+				},
+				{ exports: { ".": "./src/module.ts" }, dependencies: { "@c/urls": "*", "@c/policy": "*" } },
+			);
+			expect(found([urls, owner(), assigning])).toEqual([
+				"@c/assigning/src/module.ts:4 internal",
+				"@c/assigning/src/module.ts:5 internal",
+				"@c/assigning/src/module.ts:6 internal",
+				"@c/assigning/src/module.ts:7 internal",
+				"@c/assigning/src/module.ts:8 internal",
+			]);
+		});
+
 		it("counts a plain .mjs source by type, and a template of a source by the property's name", () => {
 			const scripted = pkg(
 				"@c/scripted",

@@ -50,7 +50,12 @@ const namesOwned = (checker: ts.TypeChecker, name: ts.PropertyName | undefined, 
 	if (!ts.isComputedPropertyName(name)) {
 		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === owned;
 	}
-	const key = checker.getTypeAtLocation(name.expression);
+	return keyNames(checker, name.expression, owned);
+};
+
+/** Whether a key written as an expression (a computed key, an element access) may be the owned name. */
+const keyNames = (checker: ts.TypeChecker, expression: ts.Expression, owned: string) => {
+	const key = checker.getTypeAtLocation(expression);
 	const literal = checker.getStringLiteralType(owned);
 	if (holdsTypeParameter(key)) {
 		const constraint = checker.getBaseConstraintOfType(key);
@@ -58,6 +63,14 @@ const namesOwned = (checker: ts.TypeChecker, name: ts.PropertyName | undefined, 
 	}
 	return checker.isTypeAssignableTo(literal, key);
 };
+
+/** The operators that write their left side. */
+const assigns = new Set([
+	ts.SyntaxKind.EqualsToken,
+	ts.SyntaxKind.QuestionQuestionEqualsToken,
+	ts.SyntaxKind.BarBarEqualsToken,
+	ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+]);
 
 /** The type of the value a property is written with: its initializer, its shorthand name, or its getter's return. */
 const writtenType = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
@@ -124,23 +137,42 @@ function writtenIn(
 	for (const { p, path, file } of files) {
 		const source = program.getSourceFile(path);
 		if (!source) continue;
+		/** Records a write at `at` where its value, `undefined` aside, is of the property's type. */
+		const count = (at: ts.Node, value: ts.Type | undefined) => {
+			if (value === undefined) return;
+			const type = checker.getNonNullableType(value);
+			if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never | ts.TypeFlags.Unknown)) return;
+			// A type parameter is read by what it may be bound to: the helper writes it, whoever calls.
+			const generic = holdsTypeParameter(type);
+			const constraint = generic ? checker.getBaseConstraintOfType(type) : undefined;
+			const bindable =
+				generic && (constraint === undefined || checker.isTypeAssignableTo(wanted, constraint));
+			if (!bindable && !checker.isTypeAssignableTo(type, wanted)) return;
+			const { line } = source.getLineAndCharacterOfPosition(at.getStart());
+			written.push({ pkg: p, file, line: line + 1 });
+		};
 		const visit = (node: ts.Node): void => {
 			if (ts.isObjectLiteralExpression(node)) {
 				for (const element of node.properties) {
-					if (!namesOwned(checker, element.name, owned)) continue;
-					const value = writtenType(checker, element);
-					if (value === undefined) continue;
-					const type = checker.getNonNullableType(value);
-					if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never | ts.TypeFlags.Unknown)) continue;
-					// A type parameter is read by what it may be bound to: the helper writes it, whoever calls.
-					const generic = holdsTypeParameter(type);
-					const constraint = generic ? checker.getBaseConstraintOfType(type) : undefined;
-					const bindable =
-						generic && (constraint === undefined || checker.isTypeAssignableTo(wanted, constraint));
-					if (!bindable && !checker.isTypeAssignableTo(type, wanted)) continue;
-					const { line } = source.getLineAndCharacterOfPosition(element.getStart());
-					written.push({ pkg: p, file, line: line + 1 });
+					if (namesOwned(checker, element.name, owned))
+						count(element, writtenType(checker, element));
 				}
+			} else if (ts.isBinaryExpression(node) && assigns.has(node.operatorToken.kind)) {
+				// An assignment to the property, by name or by an element access.
+				const target = node.left;
+				const named =
+					(ts.isPropertyAccessExpression(target) && target.name.text === owned) ||
+					(ts.isElementAccessExpression(target) &&
+						keyNames(checker, target.argumentExpression, owned));
+				if (named) count(node, checker.getTypeAtLocation(node.right));
+			} else if (ts.isPropertyDeclaration(node) && node.initializer !== undefined) {
+				// A class field initialised under the property's name.
+				if (namesOwned(checker, node.name, owned))
+					count(node, checker.getTypeAtLocation(node.initializer));
+			} else if (ts.isParameterPropertyDeclaration(node, node.parent)) {
+				// A constructor's parameter property, written by whoever constructs it.
+				if (namesOwned(checker, node.name as ts.PropertyName, owned))
+					count(node, checker.getTypeAtLocation(node));
 			}
 			ts.forEachChild(node, visit);
 		};
