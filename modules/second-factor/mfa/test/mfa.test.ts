@@ -11,7 +11,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { isLabel } from "@mod/labels";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
@@ -48,7 +48,11 @@ import { memoryFactors } from "./stores.ts";
 let shift = 0;
 /** Where set, the clock stands at this time (before the shift), so a test can judge a window's very edge. */
 let stopped: number | undefined;
-const runtime = quietRuntime({ clock: { now: () => (stopped ?? Date.now()) + shift } });
+const logged = recordingLog();
+const runtime = quietRuntime({
+	clock: { now: () => (stopped ?? Date.now()) + shift },
+	log: logged.log,
+});
 let stop = async () => {};
 afterEach(async () => {
 	shift = 0;
@@ -1401,6 +1405,25 @@ describe("an enrollment witness", () => {
 		expect(await decided.unclaimedWritten("gus")).toBe(1);
 		await place.records.remove(claimKeyOf("card", "c-8"));
 		expect(await decided.unclaimedWritten("gus")).toBe(2);
+	});
+
+	it("warns at every start where a session needs no second factor, and not where it is required", async () => {
+		const warned = async (mode: "required" | "optional") => {
+			const from = logged.lines().length;
+			await serve({ mode });
+			return logged
+				.lines()
+				.slice(from)
+				.filter((line) => line.event === "mfa.not_required");
+		};
+		expect(await warned("optional")).toEqual([
+			{
+				level: "warn",
+				event: "mfa.not_required",
+				fields: { reason: "using a session needs no second factor" },
+			},
+		]);
+		expect(await warned("required")).toEqual([]);
 	});
 
 	it("tells whether every session needs a second factor, as the mode says", async () => {
