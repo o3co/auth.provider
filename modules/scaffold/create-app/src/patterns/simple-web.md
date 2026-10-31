@@ -4,4 +4,4 @@
 - Composes: the login and its session, logout (a client's too), authorization, consent, OpenID Connect with its userinfo, refresh, and the token endpoint with introspection and revocation.
 - The deployment serves the login page (`authorize.login-page`), and the consent page (`consent.page`) only for clients that are not first-party.
 - With its default axes, no outside system; another `--axis` brings its own, as "Settings the composed modules ask for" below says. A client's back-channel logout goes only to the hosts in `outbound.allow`.
-- With the default users axis, users are listed in `users.registered`, which no example holds: write it in the local layer. With a user ledger (`--axis @mod/users=@mod/users-http`), write none: boot refuses both.
+- With the default users axis, users are listed in the configuration; `--axis @mod/users=@mod/users-http` takes them from a user ledger instead.
