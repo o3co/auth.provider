@@ -148,7 +148,13 @@ export default defineModule(
 					"needs exactly one module that checks subject revocation, or the section stating none",
 				);
 			}
-			// The operator's choice, yet said at every start: no access token issued can be revoked.
+			// The operator's choices, yet said at every start: a revoked subject's tokens live on; no
+			// access token issued can be revoked.
+			if (unchecked) {
+				c.log.warn("tokens.subjects_unchecked", {
+					reason: "a revoked subject's access tokens are taken until they expire",
+				});
+			}
 			if (!denylisted(c.section)) {
 				c.log.warn("tokens.revocation_unsupported", {
 					reason: "an access token issued cannot be revoked before it expires",

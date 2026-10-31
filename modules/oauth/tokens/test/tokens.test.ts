@@ -187,7 +187,7 @@ describe("tokens", () => {
 				...assembly({ revocation }),
 				runtime: quietRuntime({ ...runtime, log: recorded.log }),
 			});
-			return recorded.lines().filter((line) => line.level === "warn");
+			return recorded.lines().filter((line) => line.event === "tokens.revocation_unsupported");
 		};
 		expect(await warned("unsupported")).toEqual([
 			{
@@ -260,6 +260,28 @@ it("refuses to start unless exactly one module checks subjects, or the section s
 	await expect(boot(stated, { extra: [check("a")] })).rejects.toMatchObject(refused);
 	await boot(unchecked, { extra: [check("a")] });
 	await boot(stated);
+});
+
+it("warns at every start where the section states that no module checks subjects", async () => {
+	const check = defineModule({ name: "check", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
+	]);
+	const warned = async (section: Record<string, unknown>, extra: Module[] = []) => {
+		const recorded = recordingLog();
+		await assemble({
+			...assembly(section, { extra }),
+			runtime: quietRuntime({ ...runtime, log: recorded.log }),
+		});
+		return recorded.lines().filter((line) => line.event === "tokens.subjects_unchecked");
+	};
+	expect(await warned({ revocation: "denylist" })).toEqual([
+		{
+			level: "warn",
+			event: "tokens.subjects_unchecked",
+			fields: { reason: "a revoked subject's access tokens are taken until they expire" },
+		},
+	]);
+	expect(await warned({ revocation: "denylist", "subject-check": undefined }, [check])).toEqual([]);
 });
 
 it("says whether subjects are checked: false only where the section states none", async () => {
