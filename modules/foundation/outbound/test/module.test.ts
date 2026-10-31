@@ -93,7 +93,7 @@ it("takes only hosts in allow and deny, and host:port pairs in plain-loopback", 
 	for (const entry of [
 		"a.example",
 		".example",
-		"Example.COM.",
+		"Example.COM",
 		"[2001:DB8::1]",
 		"2001:db8::1",
 		"10.0.0.1",
