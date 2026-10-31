@@ -21,7 +21,6 @@ import type {
 	StoredSession,
 	SubjectSessions,
 } from "../store.ts";
-import { authenticatedAtOf, checkAuthenticatedAt } from "./authenticated.ts";
 import { listingOver } from "./listing/listing.ts";
 import { fromStored, type SessionRecord, toStored } from "./record.ts";
 
@@ -275,7 +274,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		return { cookie: jar.write("session", secret, Math.max(1, Math.floor(forMs / 1000))) };
 	};
 	const open: Sessions["complete"] = async (request, facts) => {
-		checkAuthenticatedAt(facts);
+		sessionRules.checkAuthenticatedAt(facts);
 		// The earlier session is closed first; the login fails if that close cannot even be added to the closings.
 		const earlier = await handleIn(request);
 		if (earlier) await close(earlier);
@@ -286,7 +285,9 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		const context = {
 			subject: facts.subject,
 			amr: [...facts.amr],
-			...authenticatedAtOf(facts, openedAt, log),
+			...sessionRules.authenticatedAtOf(facts, openedAt, () =>
+				log.warn("session-lifecycle.authentication_time_capped"),
+			),
 			...(attributes === undefined ? {} : { attributes }),
 		};
 		const record: SessionRecord = { format: 2, state: "open", ...context, openedAt };
