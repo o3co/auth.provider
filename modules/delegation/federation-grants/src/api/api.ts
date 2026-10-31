@@ -68,8 +68,10 @@ const error = (
 /** One answer, byte for byte, for an unknown grant and another client's or subject's. */
 const notFound = () => error(404, "grant_not_found");
 const iso = (ms: number | undefined) => (ms === undefined ? undefined : new Date(ms).toISOString());
+/** The most characters of a text a caller sent that reach audit: federation-grants' own cap. */
+const auditTextMax = 200;
 /** Text a caller sent, cut short before it reaches audit. */
-const cut = (text: string) => text.slice(0, 200);
+const cut = (text: string) => text.slice(0, auditTextMax);
 
 /** The status, word and audited reason each outcome of a token request short of a token is answered with. */
 const refusals: Record<
