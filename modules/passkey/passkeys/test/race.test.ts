@@ -14,6 +14,9 @@ import { passkeysOver } from "../src/passkeys.ts";
 import { keptPasskeys } from "../src/records.ts";
 import { heldState, memoryStores, writeToken } from "./stores.ts";
 
+/** The requester the tests ask and redeem as. */
+const asking = { by: "test", id: "app" };
+
 const at = { origin: testOrigin };
 const rp = { id: "rp.example", name: "RP", origins: [testOrigin], topOrigins: [], timeoutMs: 1000 };
 
@@ -54,8 +57,8 @@ async function raced(kimsWrite: "lands" | "fails") {
 	});
 	const samsAnswer = await records.register("sam", sams, 10);
 	const login = async (authenticator: ReturnType<typeof softwareAuthenticator>) => {
-		const { options } = await passkeys.challenge("app");
-		return passkeys.assert(authenticator.get(options as RequestOptions, at), "app");
+		const { options } = await passkeys.challenge(asking);
+		return passkeys.assert(authenticator.get(options as RequestOptions, at), asking);
 	};
 	// What the store holds, read raw before any later write.
 	const held = await heldState(stores.passkeys, ["sam", "kim"], [id]);

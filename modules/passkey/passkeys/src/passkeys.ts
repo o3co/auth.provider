@@ -23,13 +23,9 @@ const partOf = (requester: Requester, part: "by" | "id") => {
 };
 // A digest keeps the challenge's record one size, whatever the requester sent; its two parts are
 // written as one JSON list, so no split of one string reads as another.
-const digestOf = (requester: string | Requester) =>
+const digestOf = (requester: Requester) =>
 	createHash("sha256")
-		.update(
-			typeof requester === "string"
-				? requester
-				: JSON.stringify([partOf(requester, "by"), partOf(requester, "id")]),
-		)
+		.update(JSON.stringify([partOf(requester, "by"), partOf(requester, "id")]))
 		.digest("base64url");
 
 /** Assertions by the passkeys webauthn keeps, each found by the credential it names. */

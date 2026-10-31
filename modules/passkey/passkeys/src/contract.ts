@@ -13,11 +13,11 @@ export interface Requester {
 /** Assertions by the discoverable passkeys this package keeps. Throws Unavailable when the store cannot tell. */
 export interface Passkeys {
 	/** The same for everyone: reads nothing and lists no credential. Only `requester` redeems it. */
-	challenge(requester: string | Requester): Promise<{ readonly options: unknown }>;
+	challenge(requester: Requester): Promise<{ readonly options: unknown }>;
 	/** `requester` is who redeems: a challenge made for another is refused as `challenge`. */
 	assert(
 		response: unknown,
-		requester: string | Requester,
+		requester: Requester,
 	): Promise<
 		| {
 				readonly kind: "asserted";
