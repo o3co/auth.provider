@@ -1,6 +1,7 @@
 /** A deployment's project from a list of modules: configuration from their fragments, the image and a guide. */
 
-import { entriesOf } from "./entries/contract.ts";
+import { entriesOf, mainSource } from "@mod/app-entries";
+import { askedOf } from "./asked/asked.ts";
 import {
 	applicationConf,
 	envExample,
@@ -13,15 +14,7 @@ import {
 } from "./fragments/contract.ts";
 import { type Beside, besideRelease } from "./outside/contract.ts";
 import type { Card, Packages, Release } from "./packages.ts";
-import {
-	filled,
-	mainSource,
-	manifestOf,
-	vacant,
-	withKernel,
-	writeProject,
-	zod,
-} from "./project.ts";
+import { filled, manifestOf, vacant, withKernel, writeProject, zod } from "./project.ts";
 
 /** The files the generated project names in its guide, each written where the guide says. */
 const paths = {
@@ -125,6 +118,7 @@ export async function writeDeployment(
 				...guideLists(settings, writtenOf(fragments)),
 				cards: cardLines(packages.cards(names)),
 				askedOfDeployment: deploymentLines(packages.cards(names)),
+				...guideAsked(askedOf(names, packages.asks?.(names) ?? [])),
 				firstLogin: http.serves ? firstLoginLine(packages.release()) : "",
 				port: String(httpPort),
 				hostEnv: envName("http.host"),
@@ -134,6 +128,16 @@ export async function writeDeployment(
 			})) + beside.guide,
 	});
 }
+
+/** The guide's marks for what the modules ask: the lines, the lines under their heading, and the values decided. */
+const guideAsked = ({ chosen, decides }: { chosen: string[]; decides: string[] }) => ({
+	asked: chosen.join("\n"),
+	askedSection:
+		chosen.length === 0
+			? ""
+			: ["## Settings the composed modules ask for", "", ...chosen, "", ""].join("\n"),
+	decides: decides.join("\n"),
+});
 
 /** The install stage's install: with packages outside the release, what it checks against copied, and checked after. */
 const installed = (beside: Beside["image"]) =>

@@ -12,7 +12,7 @@
 - What each module's configuration means, and its fragment (`config.example` beside its package.json): each module's.
 - What the full template and a selection compose: `combinations`.
 - The local layer that boots a generated app for a test or a conformance run: `trial`.
-- The project's files, from the configuration and its examples to the image, the guide and the app's entry, and what they are held to: `app-output`.
+- The project's files, from the configuration and its examples to the image and the guide, and what they are held to: `app-output`; the app's entries and how they boot: `app-entries`.
 - The configuration, audit event and route references, and each package's `reference.conf`: `references`.
 
 ## Offers
@@ -23,6 +23,7 @@
 - A pattern's README opens with its use and carries its card; the full template's names the opt-in features not added; a listed app's names the modules listed.
 
 ## Invariants
+- Each composed module's own declaration says what it asks of the deployment, kernel's `kernel.deployment` line too, and `app-output` renders it; create-app writes none of it.
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken.
 - A module, sink, added feature or axis choice not named as an npm package is refused, before anything is written; so is a name the workspace lacks, one that is not a feature, a pattern or group not known, and axes or groups for full.
 - With a workspace, each dependency links to the workspace's package; a module the workspace does not hold is refused. Built into a bundle and given none, it reads the bundle's index: the app depends on each public bundle at the index's version, imports public entries, and takes the fragments the index holds; a module it does not hold is refused, but a package outside the release named `npm:`.

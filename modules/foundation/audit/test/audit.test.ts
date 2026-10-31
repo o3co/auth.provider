@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
@@ -314,4 +316,12 @@ it("lets each receiver hold 1000 deliveries at once when the operator sets no li
 it("takes every handle its takes name", async () => {
 	const config = { ...kernelConfig(), audit: { receivers: ["log"] } };
 	expect((await takesUnused({ modules: [auditModule], config })).audit).toBeUndefined();
+});
+
+it("names its own receiver, for when no adapter is composed, as its manifest declares (`registersAs`)", async () => {
+	const { registersAs } = JSON.parse(
+		readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"),
+	) as { registersAs: string };
+	const config = { ...kernelConfig(), audit: { receivers: [registersAs] } };
+	await expect(assemble({ modules: [auditModule], config })).resolves.toBeDefined();
 });

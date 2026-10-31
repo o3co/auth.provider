@@ -2752,8 +2752,17 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/scaffold/app-entries:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/scaffold/app-output:
     dependencies:
+      '@mod/app-entries':
+        specifier: workspace:*
+        version: link:../app-entries
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
@@ -2793,6 +2802,9 @@ importers:
         specifier: 7.8.5
         version: 7.8.5
     devDependencies:
+      '@mod/app-entries':
+        specifier: workspace:*
+        version: link:../app-entries
       '@mod/docker-client':
         specifier: workspace:*
         version: link:../../tooling/docker-client
@@ -4639,6 +4651,9 @@ importers:
 
   modules/tooling/references:
     dependencies:
+      '@mod/app-entries':
+        specifier: workspace:*
+        version: link:../../scaffold/app-entries
       '@mod/app-output':
         specifier: workspace:*
         version: link:../../scaffold/app-output

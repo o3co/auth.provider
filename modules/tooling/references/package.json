@@ -8,6 +8,7 @@
 		"configuration": "node src/write-configuration.ts"
 	},
 	"dependencies": {
+		"@mod/app-entries": "workspace:*",
 		"@mod/app-output": "workspace:*",
 		"@mod/combinations": "workspace:*",
 		"@mod/config-files": "workspace:*",

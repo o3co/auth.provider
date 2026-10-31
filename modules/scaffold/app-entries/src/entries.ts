@@ -1,4 +1,4 @@
-import { configFiles, filled, type KeysWritten, kernel, refusedPart } from "../project.ts";
+import { configFiles, filled, type KeysWritten, kernel, refusedPart } from "./start.ts";
 
 /**
  * The app's entries besides `start`, each for an app that composes its package: the same modules,

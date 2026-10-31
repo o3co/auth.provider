@@ -4,6 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "foundation",
+	"asks": [
+		"No mail is sent (`mail.accept-unsent = true`)."
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
