@@ -842,7 +842,7 @@ describe("federation", () => {
 		expect(await prompted("second-before")).toBe(401);
 	});
 
-	it("logs in a browser that set a max age only with an upstream login within it and the allowance, even one before the start, and needs the login time only under a max age or prompt=login", async () => {
+	it("logs in a browser that set a max age only with an upstream login within it and the allowance, even one before the start, and needs the login time only under a max age or prompt=login [guarantee-2-c]", async () => {
 		const s = await serve({
 			answers: answering(
 				["none", { subject: "u-alice", amr: [] }],
@@ -869,7 +869,7 @@ describe("federation", () => {
 			corp: { type: "test", issuer: "https://idp.example", ...more },
 		});
 
-		it("narrows what prompt=login and a max age allow to the one set, the type's clock allowance kept", async () => {
+		it("narrows what prompt=login and a max age allow to the one set, the type's clock allowance kept [guarantee-2-c]", async () => {
 			const s = await serve({
 				federation: { idps: corp({ "fresh-login-allowance": "5s" }) },
 				answers: answering(
