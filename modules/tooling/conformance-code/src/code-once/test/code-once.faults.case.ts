@@ -1,5 +1,6 @@
 import {
 	confirmation,
+	type Execution,
 	failover,
 	faultRun,
 	hostLibfaketime,
@@ -49,6 +50,16 @@ const onceUnder = (i: Instance, c: Code, first: { command: Parameters<typeof sam
 	const effects = successes(i, codeUse(c));
 	expect(effects.length).toBeGreaterThan(0);
 	expect(effects.every((e) => sameMark(first.command, e.command))).toBe(true);
+};
+
+/**
+ * Sent at least once, and every send a resend of the first under its mark: a send left unanswered
+ * past its command timeout goes again, and the mark answers it as it first did, so it is one write.
+ */
+const oneWrite = (sent: readonly Execution[]) => {
+	const [first, ...resends] = sent;
+	expect(first).toBeDefined();
+	if (first) expect(resends.every((e) => sameMark(first.command, e.command))).toBe(true);
 };
 
 describe("an authorization code redeemed once under faults", () => {
@@ -198,9 +209,10 @@ describe("an authorization code redeemed once under faults", () => {
 			expect(said(await atA)).toEqual(issued);
 			second.release();
 			expect(said(await atB)).toEqual(refused);
-			// Both uses reached Redis on what they read; only the first took effect.
-			expect(a.relay.executions(codeUse(c))).toHaveLength(1);
-			expect(b.relay.executions(codeUse(c))).toHaveLength(1);
+			// Both uses reached Redis on what they read; only the first took effect, b's never.
+			oneWrite(a.relay.executions(codeUse(c)));
+			oneWrite(b.relay.executions(codeUse(c)));
+			expect(b.relay.executions(codeUse(c)).some((e) => e.succeeded)).toBe(false);
 			expect(successes(a, codeUse(c)).length + successes(b, codeUse(c)).length).toBe(1);
 			await refusedAsUsed(b, c);
 		});

@@ -1,5 +1,6 @@
 import {
 	confirmation,
+	type Execution,
 	failover,
 	type Instance,
 	instanceOf,
@@ -49,6 +50,16 @@ async function refusedAsSpent(i: Instance, token: string) {
 	expect(said(await refreshAt(i, token))).toEqual(refused);
 	expect(said(await refreshAt(i, await familyAt(i)))).toEqual(issued);
 }
+
+/**
+ * Sent at least once, and every send a resend of the first under its mark: a send left unanswered
+ * past its command timeout goes again, and the mark answers it as it first did, so it is one write.
+ */
+const oneWrite = (sent: readonly Execution[]) => {
+	const [first, ...resends] = sent;
+	expect(first).toBeDefined();
+	if (first) expect(resends.every((e) => sameMark(first.command, e.command))).toBe(true);
+};
 
 describe("a refresh token rotated once under faults", () => {
 	it("rotates a refresh token once whose rotation's answer is lost once, the resend taking the first answer [guarantee-5-b] {fault:Lr}", async () => {
@@ -214,9 +225,10 @@ describe("a refresh token rotated once under faults", () => {
 			expect(said(winner)).toEqual(issued);
 			second.release();
 			expect(said(await atB)).toEqual(refused);
-			// Both rotations reached Redis on what they read; only the first took effect.
-			expect(a.relay.executions(rotationFrom(token))).toHaveLength(1);
-			expect(b.relay.executions(rotationFrom(token))).toHaveLength(1);
+			// Both rotations reached Redis on what they read; only the first took effect, b's never.
+			oneWrite(a.relay.executions(rotationFrom(token)));
+			oneWrite(b.relay.executions(rotationFrom(token)));
+			expect(b.relay.executions(rotationFrom(token)).some((e) => e.succeeded)).toBe(false);
 			expect(
 				successes(a, rotationFrom(token)).length + successes(b, rotationFrom(token)).length,
 			).toBe(1);
