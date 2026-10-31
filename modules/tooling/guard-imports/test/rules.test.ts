@@ -1042,11 +1042,15 @@ describe("guard-imports", () => {
 					silent("@c/silent", "internal"),
 					silent("@c/listing", ["internal"]),
 					silent("@c/other-word", "private"),
+					silent("@c/flagged", true),
+					silent("@c/cased", "Internal"),
 					writer("@c/unstated", "internal"),
 				]),
 			).toEqual([
 				'@c/listing narrower is ["internal"], not exactly "internal"',
 				'@c/other-word narrower is "private", not exactly "internal"',
+				'@c/flagged narrower is true, not exactly "internal"',
+				'@c/cased narrower is "Internal", not exactly "internal"',
 				"@c/unstated card states `narrower`: `internal`",
 				"@c/silent narrower: internal, but it writes none",
 			]);
@@ -1156,6 +1160,15 @@ describe("guard-imports", () => {
 				"@c/scripted/templates/main.ts.template:2 internal",
 				"@c/scripted/templates/main.ts.template:3 internal",
 				"@c/scripted/templates/guard.ts.part:1 internal",
+			]);
+		});
+
+		it("refuses an owner naming a type its contract does not export, or a property its type lacks", () => {
+			expect(found([urls, owner({ type: "Narowwer", property: "internal" })])).toEqual([
+				"@c/policy narrower, but it exports no Narowwer with internal",
+			]);
+			expect(found([urls, owner({ type: "Narrower", property: "interal" })])).toEqual([
+				"@c/policy narrower, but it exports no Narrower with interal",
 			]);
 		});
 
