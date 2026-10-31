@@ -1,6 +1,6 @@
 import { connect as netConnect, type Socket } from "node:net";
 import { isLoopbackAddress } from "@mod/address-reach";
-import type { TlsOptions } from "@mod/tls-options";
+import { heldToFloor, type TlsOptions } from "@mod/tls-options";
 import addressparser from "nodemailer/lib/addressparser";
 import MailComposer from "nodemailer/lib/mail-composer";
 import SMTPConnection from "nodemailer/lib/smtp-connection";
@@ -168,12 +168,8 @@ export function relayOver(
 	open: Open = (host, port) => netConnect({ host, port }),
 ): (letter: Letter) => Promise<"sent" | "limited"> {
 	const { host, port, security, deadlineMs } = settings;
-	// The floor read once, its own keys alone and last, so nothing loosens it.
-	const tls = Object.freeze({
-		rejectUnauthorized: true,
-		minVersion: settings.floor.minVersion,
-		ciphers: settings.floor.ciphers,
-	});
+	// Held to the floor once, its own keys last, as `tls-options` knows them, so nothing loosens it.
+	const tls = Object.freeze(heldToFloor(settings.floor, {}));
 	const stepMs = Math.max(1, Math.floor(deadlineMs / 4));
 	const converse = async (held: Held, to: string, message: Buffer) => {
 		const socket = await openSocket(settings, open, stepMs, held);

@@ -1,4 +1,4 @@
-import type { TlsOptions } from "@mod/tls-options";
+import { heldToFloor, type TlsOptions } from "@mod/tls-options";
 import type { RedisOptions } from "ioredis";
 
 /** What of the section the client's options are made from. */
@@ -42,14 +42,12 @@ export function clientDebugs(debug: string | undefined): boolean {
 }
 
 /**
- * The client's options. Over `rediss`, TLS holds to `floor`, its own keys alone and last; over
- * `redis` there is no TLS, which the client would take up for any `tls` given.
+ * The client's options. Over `rediss`, TLS is held to `floor` (`heldToFloor`: its own keys alone, as
+ * `tls-options` knows them); over `redis` there is no TLS, which the client would take up for any
+ * `tls` given.
  */
 export function clientOptions(s: ClientSettings, floor: TlsOptions): RedisOptions {
-	const tls =
-		new URL(s.url).protocol === "rediss:"
-			? { tls: { minVersion: floor.minVersion, ciphers: floor.ciphers } }
-			: {};
+	const tls = new URL(s.url).protocol === "rediss:" ? { tls: heldToFloor(floor, {}) } : {};
 	const family = s["address-family"];
 	return {
 		lazyConnect: true,
