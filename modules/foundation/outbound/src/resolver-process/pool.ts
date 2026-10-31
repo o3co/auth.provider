@@ -1,6 +1,7 @@
 /** A pool of name lookups run in one helper process, which is ended where no one waits on any. */
 import { isIP } from "node:net";
 import { type HelperProcess, type StartHelper, startHelper } from "./process.ts";
+import { restartSchedule } from "./schedule.ts";
 
 /** Why a lookup gives no addresses: the name's own answer, the helper failing, or the pool stopped. */
 export type ResolutionFailure = "not-found" | "too-many" | "fault" | "refusing" | "stopped";
@@ -113,21 +114,11 @@ export function resolverPool(options: {
 	let stopped = false;
 	/** Places held: every lookup not yet released, those of a helper being ended among them. */
 	let held = 0;
-	let backoff = poolLimits.backoffMs;
-	let recovering = false;
+	const schedule = restartSchedule(now, poolLimits);
 	let restartTimer: NodeJS.Timeout | undefined;
 	let recheckTimer: NodeJS.Timeout | undefined;
-	let refusingUntil = 0;
-	const faults: number[] = [];
-	const abandons: number[] = [];
 	let starting: { resolve: () => void; reject: (error: Error) => void } | undefined;
 	let firstStart: Promise<void> | undefined;
-
-	const recent = (times: number[]) => {
-		const since = now() - poolLimits.windowMs;
-		while (times.length > 0 && (times[0] as number) <= since) times.shift();
-		return times.length;
-	};
 
 	/** Keeps the parent alive while someone waits on the helper's lookups, and lets it go otherwise. */
 	const hold = (h: Helper) => {
@@ -223,41 +214,33 @@ export function resolverPool(options: {
 		}
 		if (stopped) return;
 		if (h.reason === "abandoned") {
-			abandons.push(now());
+			schedule.abandoned();
 			spawn();
 			return;
 		}
-		faults.push(now());
-		recovering = true;
-		if (recent(faults) > poolLimits.faultRestarts) {
-			refusingUntil = (faults[0] as number) + poolLimits.windowMs;
-			warn("outbound.resolver_restarts", { pool, restarts: recent(faults) });
-			restartTimer = background(spawn, Math.max(0, refusingUntil - now()));
+		const next = schedule.faulted();
+		if ("refusingUntil" in next) {
+			warn("outbound.resolver_restarts", { pool, restarts: next.restarts });
+			restartTimer = background(spawn, Math.max(0, next.refusingUntil - now()));
 			return;
 		}
-		restartTimer = background(spawn, backoff);
-		backoff = Math.min(backoff * 2, poolLimits.maxBackoffMs);
+		restartTimer = background(spawn, next.delayMs);
 	};
 
 	/** Whether every running lookup of the helper is left without anyone waiting; then it is ended, within its window. */
 	const abandoned = (h: Helper) => {
 		if (h.state !== "ready" || h.running.size === 0) return;
 		if ([...h.running.values()].some((r) => r.interest > 0)) return;
-		if (recent(abandons) >= poolLimits.abandonRestarts) {
-			// Kept for now, its places held; looked at again once the window lets one more go.
-			if (recheckTimer === undefined) {
-				const at = (abandons[0] as number) + poolLimits.windowMs;
-				recheckTimer = background(
-					() => {
-						recheckTimer = undefined;
-						if (helper === h) abandoned(h);
-					},
-					Math.max(0, at - now()),
-				);
-			}
-			return;
-		}
-		isolate(h, "abandoned");
+		const allowed = schedule.abandonable();
+		if (allowed === true) return isolate(h, "abandoned");
+		// Kept for now, its places held; looked at again once the window lets one more go.
+		recheckTimer ??= background(
+			() => {
+				recheckTimer = undefined;
+				if (helper === h) abandoned(h);
+			},
+			Math.max(0, allowed.recheckAt - now()),
+		);
 	};
 
 	const answerOf = (running: Running, message: Record<string, unknown>) => {
@@ -299,11 +282,7 @@ export function resolverPool(options: {
 		h.running.delete(m.id as number);
 		held -= 1;
 		running.settle(outcome);
-		if (recovering) {
-			recovering = false;
-			backoff = poolLimits.backoffMs;
-			warn("outbound.resolver_recovered", { pool });
-		}
+		if (schedule.recovered()) warn("outbound.resolver_recovered", { pool });
 		hold(h);
 		// Those left running may all be left by now: the last one waited on has ended.
 		abandoned(h);
@@ -347,7 +326,7 @@ export function resolverPool(options: {
 		},
 		run: (name, family) => {
 			if (stopped) return undefined;
-			if (now() < refusingUntil) {
+			if (schedule.refusing()) {
 				const refused = Promise.reject(new ResolutionFailed("refusing"));
 				// An answer no one waits on is let go unread, as any other.
 				refused.catch(() => {});
