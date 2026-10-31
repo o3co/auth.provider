@@ -335,6 +335,28 @@ describe("session entry", () => {
 		expect(await s.enter(withCookie(second))).toBeDefined();
 	});
 
+	it("keeps a session's authentication time across a raise, known or unknown, the raise's time kept apart [guarantee-2-b]", async () => {
+		const { s, withCookie } = await boot();
+		for (const authenticatedAt of [now - 60_000, "unknown"] as const) {
+			const done = await s.complete(testRequest(), { ...facts(), authenticatedAt });
+			const before = done.session.context;
+			expect(before.authenticatedAtUnknown).toBe(authenticatedAt === "unknown" || undefined);
+			now += 5000;
+			const raised = await s.raise(withCookie(pair(done.cookies[0])), ["otp"]);
+			// Read again, as the code's issue reads the session after authorize's check.
+			const read = await s.enter(withCookie(pair(raised?.cookies[0])));
+			for (const context of [raised?.session.context, read?.context]) {
+				expect(context, String(authenticatedAt)).toMatchObject({
+					authenticatedAt: before.authenticatedAt,
+					raisedAt: now,
+				});
+				expect(context?.authenticatedAtUnknown, String(authenticatedAt)).toBe(
+					before.authenticatedAtUnknown,
+				);
+			}
+		}
+	});
+
 	it("tells by handle the entry a session gives its holder", async () => {
 		const { s, login, handleOf } = await boot();
 		const cookie = await login();
