@@ -7,7 +7,7 @@ import { sharedRounds } from "./rounds.ts";
 const confirmKeyMs = 60_000;
 
 /**
- * One trip on the confirming connection: ROLE, INFO server and, but where `write` is false, the
+ * One trip on the confirming connection: ROLE, INFO server and, unless `write` is false, the
  * confirmation key; the boot check and every confirmation round send it alike.
  */
 export const confirmationPipeline = (confirmer: Redis, prefix: string, write = true) => {
