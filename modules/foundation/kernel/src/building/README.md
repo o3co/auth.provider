@@ -6,7 +6,7 @@ Internal module of `kernel`: building the provisions and contributions, each onc
 - Builds an item on request with its build context, caching it for every later request; refuses a cycle, a contract no module provides, a take beyond the module's takes and one a contract's `takenBy` does not name, each recorded even where the taker catches the throw.
 
 ## Not here
-- The takes' preflight (`takes`). Reading sections and the duplicate providers, the order the stages build in, checking late references and refusing the boot (the package's assembly). Running the hooks and the periodic tasks (`lifecycle`).
+- The takes' preflight (`takes`). Reading sections and the duplicate providers, the order the stages build in, checking late references and refusing the boot (the package's assembly). Running the start hooks (the package's assembly), and the periodic tasks and the stop hooks (`lifecycle`).
 
 ## Offers
 - `buildingWith` (the runtime, the environment, the checked sections, who provides and contributes, the takes each module is held to, the refusals, a test's watch) → `build` (an item, the stack of builds asking it), the points collected with their checks' outcomes, the late references named, the contracts built, the hooks and periodic tasks registered, and `assembledWith` (readiness), from which late references and readiness answer.
