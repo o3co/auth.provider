@@ -1,11 +1,11 @@
 # kinds
 
 ## Responsibilities
-- Names the kinds a package's manifest may be, and which way a dependency between kinds may point: the one place either is written. That the bottom level (common, protocol) depends on nothing at all is `guard`'s G2, beside `mayNeed`, which answers by level alone.
+- Names the kinds a package's manifest may be, and which way a dependency between kinds may point: the one place either is written. That the bottom level (common, protocol) depends on nothing at all is `guard-imports`' G2, beside `mayNeed`, which answers by level alone.
 
 ## Not here
 - Composing modules by their kinds: `combinations`.
-- Checking each package's dependencies against them, and the budget's other words for kinds: `guard`.
+- Checking each package's dependencies against them: `guard-imports`. The budget's other words for kinds: `guard`.
 
 ## Offers
 - `kinds`: the words a manifest's `kind` may name, each one word; `Kind`, one of them.
