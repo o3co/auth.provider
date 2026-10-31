@@ -29,6 +29,8 @@ export interface Kinds {
 /** What the rules read beside the workspace: the kinds, and where a test file lies. */
 export interface Rules extends Kinds {
 	readonly testFile: string;
+	/** How many packages must state a property they hold to declaration (G32); none where unset. */
+	readonly declaredProperties?: number;
 }
 
 /** What every rule reads, and where it reports. */

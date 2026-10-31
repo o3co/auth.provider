@@ -231,7 +231,7 @@ it("lists who may reach private addresses by their own declaration of the owner'
 		card: undefined,
 		files: [],
 	});
-	const owner = at("@x/policy", { narrower: { type: "Narrower", property: "internal" } });
+	const owner = at("@x/policy", { narrowerOwner: { type: "Narrower", property: "internal" } });
 	expect(
 		privateReachOf([
 			owner,
@@ -242,4 +242,6 @@ it("lists who may reach private addresses by their own declaration of the owner'
 		]),
 	).toEqual(["@x/a", "@x/b"]);
 	expect(privateReachOf([at("@x/b", { narrower: "internal" })])).toEqual([]);
+	const second = at("@x/second", { narrowerOwner: { type: "Narrower", property: "internal" } });
+	expect(privateReachOf([owner, second, at("@x/b", { narrower: "internal" })])).toEqual([]);
 });

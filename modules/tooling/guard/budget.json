@@ -17,6 +17,7 @@
 	"commentShare": 0.1,
 	"commentFloor": 40,
 	"laidOutValues": 2,
+	"declaredProperties": 1,
 	"testFile": "(^|/)test/|\\.test\\.ts$|\\.case\\.ts$",
 	"fixtureFile": "(^|/)test/fixtures/|\\.vectors\\.ts$",
 	"generatedFile": "\\.bundled\\.mjs$",
