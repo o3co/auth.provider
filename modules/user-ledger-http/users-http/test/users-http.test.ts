@@ -314,10 +314,37 @@ describe("users-http", () => {
 		}
 	});
 
-	it("answers unavailable to a 404", async () => {
+	it("answers none to a 404 or a 410 saying it knows no such user, as a lookup does, unlogged", async () => {
 		const { ledger } = await open();
-		script = () => ({ status: 404 });
-		await expect(ledger.verify("alice", "correct horse")).rejects.toSatisfy(isUnavailable);
+		for (const answer of [notFound, gone]) {
+			script = () => answer;
+			expect(await ledger.verify("alice", "correct horse"), JSON.stringify(answer)).toEqual({
+				kind: "none",
+			});
+		}
+		expect(logged).toEqual([]);
+	});
+
+	it("answers unavailable to a 404 or a 410 that does not say it knows no such user, logging its status", async () => {
+		const { ledger } = await open();
+		const answers: Answer[] = [
+			{ status: 404 },
+			{ status: 410 },
+			{ status: 404, text: "not_found" },
+			{ status: 404, json: { error: "gone" } },
+			{ status: 410, json: { error: "not_found" } },
+			{ status: 404, json: ["not_found"] },
+		];
+		for (const answer of answers) {
+			script = () => answer;
+			await expect(
+				ledger.verify("alice", "correct horse"),
+				JSON.stringify(answer),
+			).rejects.toSatisfy(isUnavailable);
+		}
+		expect(logged).toEqual(
+			answers.map(({ status }) => ["users-http.ledger_failed", { status, reason: "unmarked" }]),
+		);
 	});
 
 	it("answers unavailable to a 401 or 403 that challenges its credential as Bearer", async () => {
@@ -372,10 +399,10 @@ describe("users-http", () => {
 	});
 
 	it("logs the status of a ledger's failure, and nothing it sent", async () => {
-		script = () => ({ status: 404, text: "ledger detail" });
+		script = () => ({ status: 500, text: "ledger detail" });
 		const { ledger } = await open();
 		await expect(ledger.verify("alice", "pw-1")).rejects.toSatisfy(isUnavailable);
-		expect(logged).toEqual([["users-http.ledger_failed", { status: 404 }]]);
+		expect(logged).toEqual([["users-http.ledger_failed", { status: 500 }]]);
 	});
 
 	it("logs the kind of each other failure, and nothing it sent", async () => {

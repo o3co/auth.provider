@@ -6,6 +6,8 @@ import type { BuildContext } from "@mod/kernel";
 import { type Decision, recorded, refusal } from "../decision.ts";
 
 const prompts = new Set(["none", "login", "consent", "select_account"]);
+/** The longest `nonce` taken, in characters. */
+const longestNonce = 256;
 
 /** What a request asks, once its form is checked. */
 export interface Checked {
@@ -45,7 +47,7 @@ export function checkRequest(
 	if (!challengeShape.test(challenge))
 		return refusal("invalid_request", "code_challenge is malformed");
 	const nonce = one("nonce");
-	if (nonce !== undefined && nonce.length > 256)
+	if (nonce !== undefined && nonce.length > longestNonce)
 		return refusal("invalid_request", "nonce too long");
 	const prompt = new Set((one("prompt") ?? "").split(" ").filter((p) => p !== ""));
 	if ([...prompt].some((p) => !prompts.has(p)) || (prompt.has("none") && prompt.size > 1)) {

@@ -4,7 +4,9 @@ import {
 	defineModule,
 	type KernelSettings,
 	kernelConfig,
+	type Module,
 } from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
 import { memoryStore } from "../src/memory.ts";
@@ -170,4 +172,20 @@ it("refuses durable or replicated spaces unless volatility is accepted, and is u
 	await expect(
 		assemble({ modules: [storeModule], config: config(true, "multi") }),
 	).rejects.toBeInstanceOf(BootRefused);
+});
+
+it("warns at every start that boots durable or replicated spaces on memory, naming them", async () => {
+	const warned = async (...owners: Module[]) => {
+		const recorded = recordingLog();
+		await assemble({
+			modules: [storeModule, ...owners],
+			config: { ...kernelConfig(), store: { "accept-volatile": true } },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+		return recorded.lines().filter((line) => line.level === "warn");
+	};
+	expect(await warned(durable, replicated)).toEqual([
+		{ level: "warn", event: "store.volatile_accepted", fields: { spaces: "kept,copied" } },
+	]);
+	expect(await warned()).toEqual([]);
 });

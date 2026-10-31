@@ -89,6 +89,18 @@ const mayActFor = (subject: Exchanged, party: { readonly sub: string; readonly i
 			(iss === undefined || iss === party.iss),
 	);
 
+/** The refusal of the `resource` asked, where one is and it is not the audience issued; none otherwise. */
+const resourceMismatch = (param: GrantInput["param"], audience: string): Refusal | undefined => {
+	const resource = param("resource");
+	// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
+	const malformed = resource ? resourceRefusal(resource) : undefined;
+	if (malformed) return refused(malformed, "invalid_target");
+	if (resource && resource !== audience) {
+		return refused("resource is not the audience issued", "invalid_target");
+	}
+	return undefined;
+};
+
 export function exchangeGrant(parts: Parts): Grant {
 	// In their names' order, so a family is read and joined before a session, however composed.
 	const ties = parts.ties.toSorted((a, b) => (a.name < b.name ? -1 : 1));
@@ -152,13 +164,8 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (audience === undefined || !clientAllowance.allowsAudience(client, audience, parts.issuer)) {
 			return refused("audience is not one the client may be issued", "invalid_target");
 		}
-		const resource = param("resource");
-		// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
-		const malformed = resource ? resourceRefusal(resource) : undefined;
-		if (malformed) return refused(malformed, "invalid_target");
-		if (resource && resource !== audience) {
-			return refused("resource is not the audience issued", "invalid_target");
-		}
+		const mismatch = resourceMismatch(param, audience);
+		if (mismatch) return mismatch;
 		return { scope: [...allowed.scope], audience: [audience] };
 	};
 
@@ -179,13 +186,8 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (audience === undefined || !held.includes(audience)) {
 			return refused("audience is not one the subject token and the client hold", "invalid_target");
 		}
-		const resource = param("resource");
-		// RFC 8693 §2.1: an absolute URI without a fragment, read as resource-indicators reads one.
-		const malformed = resource ? resourceRefusal(resource) : undefined;
-		if (malformed) return refused(malformed, "invalid_target");
-		if (resource && resource !== audience) {
-			return refused("resource is not the audience issued", "invalid_target");
-		}
+		const mismatch = resourceMismatch(param, audience);
+		if (mismatch) return mismatch;
 		return { scope: asked.length > 0 ? [...new Set(asked)] : ceiling, audience: [audience] };
 	};
 
@@ -239,36 +241,41 @@ export function exchangeGrant(parts: Parts): Grant {
 		};
 	};
 
+	/** What the request asks, read and checked before any token is: the first that does not hold refuses it. */
+	const readRequest = ({ client, param }: GrantInput) => {
+		if (client.kind !== "confidential" && !parts.publicExchange(client)) {
+			return { kind: "error", error: "invalid_client", status: 401 } satisfies Refusal;
+		}
+		const asked = askedLifetime(param(lifetimeParam));
+		if (Number.isNaN(asked)) {
+			return refused(`${lifetimeParam} must be a whole number of seconds from 2, in ASCII digits`);
+		}
+		const requested = param("requested_token_type");
+		if (requested !== undefined && requested !== accessTokenType) {
+			return refused("requested_token_type is not supported");
+		}
+		const [subjectToken, subjectType] = [param("subject_token"), param("subject_token_type")];
+		const [actorToken, actorType] = [param("actor_token"), param("actor_token_type")];
+		if (!subjectToken || !subjectType) {
+			return refused("subject_token and subject_token_type are required");
+		}
+		if (Boolean(actorToken) !== Boolean(actorType)) {
+			return refused("actor_token and actor_token_type go together");
+		}
+		const actorParam = actorToken && actorType ? { token: actorToken, type: actorType } : undefined;
+		return { asked, subjectToken, subjectType, actorParam };
+	};
+
 	return {
 		grantType,
 		readsAmbient: "none",
 		// It reads `audience` and `resource` itself, by its own exact rule.
 		targets: true,
 		handle: async (input) => {
-			const { client, param } = input;
-			if (client.kind !== "confidential" && !parts.publicExchange(client)) {
-				return { kind: "error", error: "invalid_client", status: 401 };
-			}
-			const asked = askedLifetime(param(lifetimeParam));
-			if (Number.isNaN(asked)) {
-				return refused(
-					`${lifetimeParam} must be a whole number of seconds from 2, in ASCII digits`,
-				);
-			}
-			const requested = param("requested_token_type");
-			if (requested !== undefined && requested !== accessTokenType) {
-				return refused("requested_token_type is not supported");
-			}
-			const [subjectToken, subjectType] = [param("subject_token"), param("subject_token_type")];
-			const [actorToken, actorType] = [param("actor_token"), param("actor_token_type")];
-			if (!subjectToken || !subjectType) {
-				return refused("subject_token and subject_token_type are required");
-			}
-			if (Boolean(actorToken) !== Boolean(actorType)) {
-				return refused("actor_token and actor_token_type go together");
-			}
-			const actorParam =
-				actorToken && actorType ? { token: actorToken, type: actorType } : undefined;
+			const { client } = input;
+			const request = readRequest(input);
+			if (isRefusal(request)) return request;
+			const { asked, subjectToken, subjectType, actorParam } = request;
 
 			const check = async () => {
 				const subject = await presented(client, "subject", subjectToken, subjectType);

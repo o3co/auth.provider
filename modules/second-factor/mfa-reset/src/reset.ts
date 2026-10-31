@@ -23,6 +23,8 @@ type Stop = "sessions" | "factors" | "parts" | "lock";
 
 const wellFormed = (text: unknown, max = Number.POSITIVE_INFINITY): text is string =>
 	typeof text === "string" && text.length > 0 && text.length <= max && text.isWellFormed();
+/** The most UTF-16 code units a requester may name, as the card bounds it. */
+const longestRequestedBy = 256;
 const typeOf = (error: unknown) => (error instanceof Error ? error.name : typeof error);
 
 /**
@@ -45,7 +47,7 @@ export function resetOver(p: ResetParts): MfaReset {
 	): Promise<Ran> => {
 		const { requestedBy } = options;
 		if (!wellFormed(subject)) throw new RangeError("subject");
-		if (requestedBy !== undefined && !wellFormed(requestedBy, 256)) {
+		if (requestedBy !== undefined && !wellFormed(requestedBy, longestRequestedBy)) {
 			throw new RangeError("requestedBy");
 		}
 		let failure: { readonly at: Stop; readonly error: unknown } | undefined;

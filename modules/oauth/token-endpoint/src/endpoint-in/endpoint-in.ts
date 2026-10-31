@@ -18,13 +18,13 @@ export const endpointTakes = [
 
 /** The endpoint's handler over the contracts the assembly gives, dispatching to the grants composed. */
 export const endpointIn = async (c: BuildContext<unknown>, composed: readonly Grant[]) =>
-	tokenEndpoint(
-		await c.get(clients),
-		await c.get(tokens),
-		await c.collect(sessionIssuances),
-		await c.get(senderBinding),
-		await c.get(clientBindings),
-		new Map(composed.map((g) => [g.grantType, g])),
-		await c.get(targets),
-		await c.get(audit),
-	);
+	tokenEndpoint({
+		clients: await c.get(clients),
+		tokens: await c.get(tokens),
+		told: await c.collect(sessionIssuances),
+		bindings: await c.get(senderBinding),
+		required: await c.get(clientBindings),
+		grants: new Map(composed.map((g) => [g.grantType, g])),
+		targets: await c.get(targets),
+		audit: await c.get(audit),
+	});

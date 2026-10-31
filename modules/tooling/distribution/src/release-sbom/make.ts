@@ -21,6 +21,7 @@ import { basename, join, resolve } from "node:path";
 import { optIns } from "@mod/combinations";
 import { docker } from "@mod/docker-client";
 import { readBundles } from "../contract.ts";
+import { largestOutputBytes } from "../limits.ts";
 import { packedOf } from "../release/seal.ts";
 import { buildWithin, commandWithin, images, overridesFile } from "../release-check/image.ts";
 import { type Bom, coverageProblems, type Declared, insideBom, npmNamed } from "./boms.ts";
@@ -56,7 +57,7 @@ const sbom = (dir: string, scope: "--prod" | "--dev") =>
 		execFileSync(
 			"pnpm",
 			["sbom", "--sbom-format", "cyclonedx", "--sbom-spec-version", config.cyclonedx, scope],
-			{ cwd: dir, encoding: "utf8", maxBuffer: 1 << 28 },
+			{ cwd: dir, encoding: "utf8", maxBuffer: largestOutputBytes },
 		),
 	) as Bom;
 /** A project installed from the tarballs alone, as the release check installs one; nothing it holds runs. */
@@ -135,7 +136,10 @@ try {
 			files: new Map(
 				bundled.map((path) => [
 					path,
-					execFileSync("tar", ["-xzOf", f, path], { encoding: "utf8", maxBuffer: 1 << 28 }),
+					execFileSync("tar", ["-xzOf", f, path], {
+						encoding: "utf8",
+						maxBuffer: largestOutputBytes,
+					}),
 				]),
 			),
 		};

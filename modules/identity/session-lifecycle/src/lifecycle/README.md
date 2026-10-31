@@ -29,7 +29,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - Retiring a secret, and the session a record shows.
 - The record codec, to and from what the store keeps.
 - A close calls the participants through `session`'s `closingParticipants`, and logs each that failed by name and kind.
-- `authenticatedAtOf`: the authentication time a login reports, the opening where it names `opening`, or that it is unknown. `checkAuthenticatedAt`: a `TypeError`, naming no value, for one neither epoch milliseconds (0 to 8.64e15), `opening` nor unknown, thrown before a login closes or opens anything.
+- A login's authentication time as `session`'s rules read it (`checkAuthenticatedAt`, thrown before a login closes or opens anything; `authenticatedAtOf`).
 - A reported time later than the opening is capped to the opening, and only the cap is logged.
 
 ## Invariants

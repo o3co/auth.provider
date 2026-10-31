@@ -1,7 +1,7 @@
 /** The audit index's generated parts: the cards, and what each package depends on. */
 import { readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { readWorkspace } from "@mod/guard-imports";
+import type { Pkg } from "@mod/guard-imports";
 
 /** An internal module, by its card. */
 export interface Internal {
@@ -40,8 +40,7 @@ export function cardLine(card: string): string | undefined {
 }
 
 /** Every workspace package but the root, by its directory, with its internal modules. */
-export function auditIndexIn(root: string): Entry[] {
-	const packages = readWorkspace(root);
+export function auditIndexIn(root: string, packages: readonly Pkg[]): Entry[] {
 	const names = new Set(packages.map((p) => p.name));
 	return packages
 		.map((p) => {

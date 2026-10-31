@@ -1,11 +1,11 @@
 /** The attack surface reference: what reaches the provider from outside, and what it reaches out to. */
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
+import type { Pkg } from "@mod/guard-imports";
 import type { RouteSeen } from "../assembled.ts";
 import { clientSectionsOf, idpTypesOf, sectionsIn } from "../configuration.ts";
 import { routesIn } from "../routes.ts";
-import { workspacePackages } from "../workspace.ts";
 import { type Coverage, coverage } from "./coverage.ts";
 
 /** A setting as the reference reads it: its key path, the package that owns it, and its default. */
@@ -211,12 +211,15 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 	].join("\n")}\n`;
 }
 
-/** Everything the reference is made from, read from the workspace at `root`. */
-export async function attackSurfaceIn(root: string): Promise<SurfaceInput> {
+/** Everything the reference is made from, read from the workspace at `root` and its packages. */
+export async function attackSurfaceIn(
+	root: string,
+	packages: readonly Pkg[],
+): Promise<SurfaceInput> {
 	const sections = [
-		...(await sectionsIn(root)),
-		...(await clientSectionsOf(root)),
-		...(await idpTypesOf(root)),
+		...(await sectionsIn(packages)),
+		...(await clientSectionsOf(root, packages)),
+		...(await idpTypesOf(root, packages)),
 	];
 	// A key held in several variants is one setting of its owner, its first default shown.
 	const settings = [
@@ -230,8 +233,7 @@ export async function attackSurfaceIn(root: string): Promise<SurfaceInput> {
 				]),
 		).values(),
 	].toReversed();
-	const packages = [...workspacePackages(root)].map(([name, dir]) => {
-		const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+	const listed = packages.map(({ name, manifest }) => {
 		return {
 			name,
 			...(manifest.network ? { network: manifest.network as string } : {}),
@@ -240,9 +242,9 @@ export async function attackSurfaceIn(root: string): Promise<SurfaceInput> {
 			internalBy: (manifest.internalBy ?? []) as string[],
 		};
 	});
-	const sorted = packages.sort((a, b) => (a.name < b.name ? -1 : 1));
+	const sorted = listed.sort((a, b) => (a.name < b.name ? -1 : 1));
 	return {
-		routes: await routesIn(root),
+		routes: await routesIn(root, packages),
 		settings: settings.sort((a, b) => (a.key < b.key ? -1 : 1)),
 		packages: sorted.map(({ internalBy: _, ...p }) => p),
 		composed: full(optIns()),

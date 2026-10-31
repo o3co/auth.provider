@@ -18,6 +18,12 @@ export default defineModule(
 				c.refuse("mtls", "http forwards no client certificate: name its client-certificate form");
 			}
 			const s = c.section;
+			// The operator's choice, yet said at every start: a certificate binds without being checked.
+			if (s.mode === "self-signed") {
+				c.log.warn("mtls.self_signed", {
+					reason: "any certificate that parses binds, with no path to an anchor and no revocation",
+				});
+			}
 			let pki: Checking["pki"];
 			if (s.mode === "pki") {
 				const anchors = s.anchors.map(anchorOf).filter((der) => der !== undefined);

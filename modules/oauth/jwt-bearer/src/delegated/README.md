@@ -11,7 +11,7 @@ Internal module of `jwt-bearer`: an assertion of a delegated issuer, which anoth
 
 ## Offers
 - `sentIssuerOf` (assertion) → the `iss` as sent, unverified, where it is read as a JWT and names one as a string.
-- `checkedBy`, `spentBy` (delegate, assertion) → its answer, read at this boundary.
+- `checkedBy` (delegate, assertion) → its answer, read at this boundary. The delegate's `spend` is read as a ledger's is, by the package's `spentAt`.
 - `holds` (the request's binding, a digest) → whether the request proves by DPoP the key the digest names: `BASE64URL(SHA-256(jkt))`.
 - Client metadata section `jwt-bearer`: `accept-unbound` (default false); `acceptsUnbound` (client).
 

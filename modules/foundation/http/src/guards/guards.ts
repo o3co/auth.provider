@@ -6,6 +6,23 @@ export type GuardedRoute = Route & {
 	readonly guard?: (request: HttpRequest) => Promise<HttpResponse | "pass">;
 };
 
+/** A policy a route uses: its rule, with the options the route gave it. */
+interface Step {
+	readonly rule: PolicyRule;
+	readonly options: unknown;
+}
+
+/** The guard applying steps in their order; the first that answers ends the request. */
+const guardOf =
+	(steps: readonly Step[]) =>
+	async (request: HttpRequest): Promise<HttpResponse | "pass"> => {
+		for (const { rule, options } of steps) {
+			const answer = await rule.apply(request, options);
+			if (answer !== "pass") return answer;
+		}
+		return "pass";
+	};
+
 /** Routes guarded by their policies, matched by value (never label), each with a frozen copy of what it uses; or a policy with no rule, or two. */
 export function withPolicies(
 	routes: readonly Route[],
@@ -35,16 +52,7 @@ export function withPolicies(
 				),
 			);
 			if (steps.length === 0) return route;
-			return Object.freeze({
-				...route,
-				guard: async (request: HttpRequest) => {
-					for (const { rule, options } of steps) {
-						const answer = await rule.apply(request, options);
-						if (answer !== "pass") return answer;
-					}
-					return "pass" as const;
-				},
-			});
+			return Object.freeze({ ...route, guard: guardOf(steps) });
 		}),
 	};
 }

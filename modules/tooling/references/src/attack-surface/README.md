@@ -21,4 +21,4 @@ Internal module of `references`: the attack surface reference, what reaches the 
 - Every setting, route and runbook section the coverage names is in the workspace.
 
 ## Depends on
-- The package's configuration rows, route reading and workspace list; `combinations` (the full template and its opt-ins).
+- The package's configuration rows, route reading and the workspace's packages as `guard-imports`' `readWorkspace` reads them; `combinations` (the full template and its opt-ins).
