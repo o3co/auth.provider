@@ -84,6 +84,8 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/login-attributes` (feature, `modules/identity/login-attributes`): Decides which of a login's attributes are kept: `users`' named set, within caps.
   - `keeping` (`src/keeping`): keeping a login's attributes within caps.
 - `@mod/login-gates` (feature, `modules/identity/login-gates`): Passes a confirmed login through the gates, then has `session` open it.
+  - `returns` (`src/returns`): where a login may send the browser back to.
+  - `running` (`src/running`): a login through the gates, and a held one resumed.
 - `@mod/login-password` (feature, `modules/identity/login-password`): Provides the password login endpoint: verifies with `users`, and logs in through `login-gates`, naming the session's opening as the login's authentication time (`opening`), so a gate's wait never ages it.
 - `@mod/session` (feature, `modules/identity/session`): Owns the contract of user sessions: their cookie, their listing under their subject, and their lifecycle (open → closing → closed), as every implementation keeps them; a session is opened only once listed, so a revocation finds every live one.
   - `rules` (`src/rules`): the rules every implementation of `sessions` keeps alike, the stand-in too, offered as `sessionRules`.

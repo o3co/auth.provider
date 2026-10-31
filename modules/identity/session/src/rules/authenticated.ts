@@ -1,13 +1,15 @@
 import type { AuthContext, LoginFacts } from "../contract.ts";
 
 const namedTimes: readonly string[] = ["opening", "unknown"];
+/** The latest time ECMAScript holds, in epoch milliseconds (8.64e15, a hundred million days). */
+const latestEpochMs = 8.64e15;
 
 /** A `TypeError`, naming no value, for an authentication time neither epoch milliseconds, `opening` nor `unknown`. */
 export function checkAuthenticatedAt(facts: LoginFacts): void {
 	const at = facts.authenticatedAt;
 	const held =
 		typeof at === "number"
-			? Number.isFinite(at) && at >= 0 && at <= 8.64e15
+			? Number.isFinite(at) && at >= 0 && at <= latestEpochMs
 			: namedTimes.includes(at);
 	if (!held)
 		throw new TypeError('authenticatedAt must be epoch milliseconds, "opening" or "unknown"');
