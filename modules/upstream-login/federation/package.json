@@ -4,6 +4,12 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "adapter",
+	"takesSamples": [
+		{
+			"map": "federation.idps",
+			"of": "@mod/upstreams"
+		}
+	],
 	"replaces": "@mod/upstreams",
 	"default": true,
 	"asks": [
