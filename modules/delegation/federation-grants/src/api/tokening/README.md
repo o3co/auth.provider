@@ -1,6 +1,6 @@
 # tokening
 
-Internal module of `federation-grants`' `api`: a grant's token, and its status.
+Internal module of `api`: a grant's token, and its status.
 
 ## Responsibilities
 - Answers a grant's upstream token through `refresh`, noting its use, and each outcome short of a token with its status and audited reason; and a grant's status as the client asks it.

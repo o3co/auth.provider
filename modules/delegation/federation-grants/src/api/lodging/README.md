@@ -1,6 +1,6 @@
 # lodging
 
-Internal module of `federation-grants`' `api`: a grant lodged, and a grant renewed.
+Internal module of `api`: a grant lodged, and a grant renewed.
 
 ## Responsibilities
 - Lodges a pending grant with its first intent, and renews a grant with a new one: each read from the body, counted against the client's lodgings, written, and answered with the link a browser opens to connect.
@@ -16,4 +16,4 @@ Internal module of `federation-grants`' `api`: a grant lodged, and a grant renew
 - Lodgings and renewals are counted together per client, whatever subject they name; past the pair's cap, the intents that end first are pushed out, and end.
 
 ## Depends on
-- `clients`, `http`, `kernel`; `grant`, `body.ts`, the api's common parts.
+- `clients`, `http`; `grant`, `body.ts`, the api's common parts.

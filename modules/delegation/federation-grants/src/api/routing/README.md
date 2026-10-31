@@ -1,6 +1,6 @@
 # routing
 
-Internal module of `federation-grants`' `api`: the routes a grant answers by id.
+Internal module of `api`: the routes a grant answers by id.
 
 ## Responsibilities
 - Reads a route's body, then the grant's owner, then, where the route judges it, the subject's boundary and the grant's end, before the route answers.

@@ -1,6 +1,6 @@
 # revoking
 
-Internal module of `federation-grants`' `api`: a grant revoked by its client.
+Internal module of `api`: a grant revoked by its client.
 
 ## Responsibilities
 - Writes a grant revoked, without credentials, and audits it once, when this request's write revoked it.
