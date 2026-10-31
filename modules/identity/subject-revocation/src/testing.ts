@@ -143,6 +143,41 @@ export const subjectRevocationStandIn = defineModule(
 	],
 );
 
+/**
+ * The stand-in, with reads that can lag: from `lag()` until `catchUp()`, a compare or a check answers
+ * by the boundaries as they stood at `lag()`, as a replica behind its primary would, while a record
+ * moves them on. For a test of a grant whose read of the boundary answered stale.
+ */
+export function laggingRevocation() {
+	let behind: Map<string, Boundaries> | undefined;
+	const boundaries = new Map<string, Boundaries>();
+	const module = defineModule(
+		{ name: "subject-revocation", replicaSafe: false, takes: [revocationFollowers] },
+		(m) => [
+			m.provide(revocations).by(async (c) => {
+				const write: Write = async (subject, keep) => {
+					boundaries.set(subject, recorded(boundaries.get(subject), c.clock.now(), keep));
+				};
+				return {
+					record: followedBy(write, await c.collect(revocationFollowers), c.log),
+					compare: async (subject, time, kind, allowanceMs) =>
+						compared(time, (behind ?? boundaries).get(subject)?.[kind], allowanceMs),
+				};
+			}),
+			m.provide(subjectRevocation).by(async (c) => subjectRevocationOf(await c.get(revocations))),
+		],
+	);
+	return {
+		module,
+		lag: () => {
+			behind = new Map(boundaries);
+		},
+		catchUp: () => {
+			behind = undefined;
+		},
+	};
+}
+
 /** A place that keeps subject-revocation's boundaries, as one implementation of its store interface offers it. */
 export interface BoundaryPlace {
 	readonly boundaries: BoundaryStore;

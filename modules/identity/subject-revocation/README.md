@@ -13,7 +13,7 @@
 - Extension point `revocationFollowers`: `follow(subject, { keepDelegations })`, called after each `record` has written the boundary, one at a time in collect order; a follower that leaves any of its work for later fails. Each must be safe to call again and to run from several hosts at once: concurrent revocations and a repeated `record` both call it again.
 - Store interface for boundaries (per subject: save unless held / read / write from what it holds, kept without end), and what it needs from a store (never evicted, survives a crash, does not come back on failover).
 - The store needs no confirmed reads: the state is on the refusing side, and each `record` is reported only after its confirmed write.
-- `./testing`: contract tests of both revocation interfaces and of the store interface, for every implementation, and a stand-in of both interfaces keeping boundaries in memory on the composition's clock by the same rules, which the contract test runs on too.
+- `./testing`: contract tests of both revocation interfaces and of the store interface, for every implementation, a stand-in of both interfaces keeping boundaries in memory on the composition's clock by the same rules, and one whose reads can lag behind its records (`laggingRevocation`), which the contract test runs on too.
 
 ## Invariants
 - A kept `delegations` boundary stays where it was; a subject has none until a revocation moves it.
