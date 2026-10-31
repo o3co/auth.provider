@@ -43,9 +43,6 @@ const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 /** A host and a port, as `hostEntryOf` reads a pair. */
 export const isPair = (pair: string) => hostEntryOf(pair, { port: true }) !== undefined;
 
-/** Whether an operator's list entry reads as one. */
-export const isListEntry = (entry: string) => hostEntryOf(entry) !== undefined;
-
 /** Checks a URL before any name is resolved; `signed` material takes plain http at the caller's hosts. */
 export function admitUrl(
 	raw: string,
