@@ -9,7 +9,7 @@ import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
@@ -33,7 +33,8 @@ afterEach(async () => {
 	await stop();
 });
 
-const runtime = quietRuntime({ clock: { now: () => now } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 const asked: Asked = {
 	clientId: "app",
 	range: ["read", "write"],
@@ -141,6 +142,7 @@ async function serve(
 			}),
 			...clientsConfig([
 				publicClient({ id: "app" }),
+				publicClient({ id: "own", sections: { [clientSection.name]: { "first-party": true } } }),
 				publicClient({
 					id: "named",
 					sections: {
@@ -699,6 +701,18 @@ describe("consent's sections", () => {
 		expect(await clientSection.schema["~standard"].validate(value)).toEqual({
 			value: { "first-party": false, name: "Acme", host: "acme.example" },
 		});
+	});
+
+	it("warns at every start for each client the operator registered as first-party, by its id", async () => {
+		const from = logged.lines().length;
+		await serve();
+		const warned = logged
+			.lines()
+			.slice(from)
+			.filter((line) => line.event === "consent.first_party");
+		expect(warned).toEqual([
+			{ level: "warn", event: "consent.first_party", fields: { client: "own" } },
+		]);
 	});
 
 	it("takes a challenge's time written with its unit, in whole seconds from 1m to 1h, 10m unless set", () => {
