@@ -85,4 +85,26 @@ describe("the policy's settings", () => {
 		).toBe(false);
 		expect(policySettings.safeParse({ deny: ["*.example"] }).success).toBe(false);
 	});
+
+	it("reads a pair's IPv6 host in brackets alone", () => {
+		for (const key of ["plain-loopback", "plain-internal"]) {
+			expect(policySettings.safeParse({ [key]: ["[::1]:80"] }).success, key).toBe(true);
+			expect(policySettings.safeParse({ [key]: ["::1:80"] }).success, key).toBe(false);
+		}
+	});
+
+	it("refuses a host its one reading refuses, in pairs and in allow and deny alike", () => {
+		for (const host of ["a..b", "a_b", "10.5", "127.1", "host."]) {
+			for (const key of ["allow", "deny"]) {
+				expect(policySettings.safeParse({ [key]: [host] }).success, `${key} ${host}`).toBe(false);
+			}
+			for (const key of ["plain-loopback", "plain-internal"]) {
+				const pair = `${host}:80`;
+				expect(policySettings.safeParse({ [key]: [pair] }).success, `${key} ${pair}`).toBe(false);
+			}
+		}
+		// A dot leading a name covers the names under it in a host list; a pair names one host.
+		expect(policySettings.safeParse({ allow: [".a"] }).success).toBe(true);
+		expect(policySettings.safeParse({ "plain-loopback": [".a:80"] }).success).toBe(false);
+	});
 });

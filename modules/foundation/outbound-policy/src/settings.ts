@@ -1,8 +1,8 @@
 import { setting } from "@mod/kernel";
 import { z } from "zod";
-import { isHostEntry, isListEntry, isPair, pairOf } from "./policy.ts";
+import { isListEntry, isPair, pairOf } from "./policy.ts";
 
-const hostEntries = z.array(z.string().refine(isHostEntry, "not a host")).prefault([]);
+const hostEntries = z.array(z.string().refine(isListEntry, "not a host")).prefault([]);
 
 /** A list of hosts an operator writes: hosts, or `.name` for the name and the names under it. */
 export const hostList = z

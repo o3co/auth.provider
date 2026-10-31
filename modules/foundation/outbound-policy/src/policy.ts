@@ -54,23 +54,13 @@ export function normalized(host: string): string | undefined {
 	return carriedIPv4(name) ?? name;
 }
 
-const isHost = (host: string) =>
-	(isIP(unbracketed(host)) === 6 || !/[*:/?#@\\]/.test(host)) && normalized(host) !== undefined;
-
-/** Whether an operator's entry is a host, or `.name` for the name and every name under it. */
-export const isHostEntry = (entry: string) =>
-	entry.startsWith(".") ? isListEntry(entry) : isHost(entry);
-
 const splitPair = (pair: string) => {
 	const at = pair.lastIndexOf(":");
 	return { host: pair.slice(0, at), port: pair.slice(at + 1) };
 };
 
-/** A host and a port; the port is matched as written, so only its canonical form can be taken. */
-export function isPair(pair: string): boolean {
-	const { host, port } = splitPair(pair);
-	return /^[1-9][0-9]{0,4}$/.test(port) && Number(port) <= 65_535 && isHost(host);
-}
+/** A host and a port, as `hostEntryOf` reads a pair. */
+export const isPair = (pair: string) => hostEntryOf(pair, { port: true }) !== undefined;
 
 /** A pair spelled one way: its host as `normalized` spells hosts, its port as written. */
 export const pairOf = (pair: string) => {
@@ -78,15 +68,32 @@ export const pairOf = (pair: string) => {
 	return `${normalized(host)}:${port}`;
 };
 
-/** An operator's host list entry: a name, `.name` for it and every name under it, or an address. */
-export type HostEntry =
+/** An operator's host list entry: a name, `.name` for it and every name under it, or an address; read as a pair, with its port. */
+export type HostEntry = (
 	| { readonly kind: "name"; readonly name: string; readonly under: boolean }
-	| { readonly kind: "address"; readonly address: string };
+	| { readonly kind: "address"; readonly address: string }
+) & { readonly port?: number };
 
 const label = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
-/** An entry read as written, correcting only case and Unicode: `10.5`, a trailing dot or `_` is none. */
-export function hostEntryOf(entry: string): HostEntry | undefined {
+/**
+ * An entry read as written, correcting only case and Unicode: `10.5`, a trailing dot or `_` is none.
+ * Taking a port, a `host:port` pair: its host read so, never `.name`, an IPv6 address in brackets
+ * alone; its port 1–65535 without a leading zero, as written.
+ */
+export function hostEntryOf(
+	entry: string,
+	takes: { readonly port?: boolean } = {},
+): HostEntry | undefined {
+	if (takes.port) {
+		const { host, port } = splitPair(entry);
+		if (!/^[1-9][0-9]{0,4}$/.test(port) || Number(port) > 65_535 || isIP(host) === 6) {
+			return undefined;
+		}
+		const read = hostEntryOf(host);
+		if (read === undefined || (read.kind === "name" && read.under)) return undefined;
+		return { ...read, port: Number(port) };
+	}
 	const bare = unbracketed(entry);
 	const family = isIP(bare);
 	if (family === 6 || (family === 4 && bare === entry)) {

@@ -354,7 +354,7 @@ describe("host lists", () => {
 	it("reads an entry as written, correcting nothing but case and Unicode, and refuses anything else", () => {
 		expect(
 			["a.example", ".A.Example", "Bücher.example", "10.0.0.1", "fd00::1", "[FD00::1]"].map(
-				hostEntryOf,
+				(entry) => hostEntryOf(entry),
 			),
 		).toEqual([
 			{ kind: "name", name: "a.example", under: false },
@@ -392,6 +392,37 @@ describe("host lists", () => {
 			expect(hostEntryOf(entry), JSON.stringify(entry)).toBeUndefined();
 			expect(isListEntry(entry), JSON.stringify(entry)).toBe(false);
 		}
+	});
+
+	it("reads a host:port pair by the same reading, an IPv6 host in brackets and never .name", () => {
+		expect(
+			["A.Example:8080", "10.0.0.1:80", "[FD00::1]:65535"].map((pair) =>
+				hostEntryOf(pair, { port: true }),
+			),
+		).toEqual([
+			{ kind: "name", name: "a.example", under: false, port: 8080 },
+			{ kind: "address", address: "10.0.0.1", port: 80 },
+			{ kind: "address", address: "fd00::1", port: 65535 },
+		]);
+		for (const pair of [
+			"a.example",
+			"a.example:",
+			"a.example:0",
+			"a.example:08080",
+			"a.example:65536",
+			"fd00::1:80",
+			".a.example:80",
+			"a..b:80",
+			"a_b:80",
+			"10.5:80",
+			"127.1:80",
+			"a.example.:80",
+			"[10.0.0.1]:80",
+		]) {
+			expect(hostEntryOf(pair, { port: true }), pair).toBeUndefined();
+		}
+		// Without a port, a pair is no host.
+		expect(hostEntryOf("a.example:8080")).toBeUndefined();
 	});
 
 	it("matches a host exactly, or a name led by a dot and every name under it", () => {
