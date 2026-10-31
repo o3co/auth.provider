@@ -278,7 +278,7 @@ describe("users-http", () => {
 		expect(received[1]?.path).toBe("/ledger/authenticate?realm=a");
 	});
 
-	it("sends no credential when none is set, and then reads a challenged 401 as none, and a 403 as unavailable", async () => {
+	it("sends no credential when none is set, and then reads a challenged 401 as none, and a 403 as unavailable [guarantee-3-m]", async () => {
 		const app = await boot({ "verify-url": `http://${pair}/ledger/authenticate` });
 		const [ledger] = app.get(collected);
 		script = () => ({ status: 401, headers: { "www-authenticate": "Bearer" } });
@@ -297,7 +297,7 @@ describe("users-http", () => {
 		expect(received).toEqual([]);
 	});
 
-	it("answers none to a 401 alone: a 403, which a proxy before the ledger may send while it fails, is unavailable", async () => {
+	it("answers none to a 401 alone: a 403, which a proxy before the ledger may send while it fails, is unavailable [guarantee-3-m]", async () => {
 		const { ledger } = await open();
 		expect(await ledger.verify("nobody", "x")).toEqual({ kind: "none" });
 		expect(await ledger.verify("alice", "x")).toEqual({ kind: "none" });
@@ -349,7 +349,7 @@ describe("users-http", () => {
 		);
 	});
 
-	it("answers unavailable to a 401 or 403 that challenges its credential as Bearer", async () => {
+	it("answers unavailable to a 401 or 403 that challenges its credential as Bearer [guarantee-3-m]", async () => {
 		const { ledger } = await open();
 		const challenges = [
 			"Bearer",
@@ -762,7 +762,7 @@ describe("users-http looking a user up by subject", () => {
 		expect(logged).toEqual([]);
 	});
 
-	it("answers unavailable to a 401 or 403, challenged or not, and to every other answer it cannot read", async () => {
+	it("answers unavailable to a 401 or 403, challenged or not, and to every other answer it cannot read [guarantee-3-m]", async () => {
 		const { ledger } = await looking();
 		const answers: Answer[] = [
 			{ status: 401 },
