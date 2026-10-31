@@ -13,7 +13,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { type AccessTokenSigning, accessTokenSigning } from "@mod/keys";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
@@ -178,6 +178,25 @@ describe("tokens", () => {
 		const issued = await issueFor(t, grant);
 		expect(await t.revokeAccess(issued.token)).toEqual({ kind: "unsupported" });
 		expect(t.revocable()).toBe(false);
+	});
+
+	it("warns at every start where revocation is unsupported, and not where it is a denylist", async () => {
+		const warned = async (revocation: string) => {
+			const recorded = recordingLog();
+			await assemble({
+				...assembly({ revocation }),
+				runtime: quietRuntime({ ...runtime, log: recorded.log }),
+			});
+			return recorded.lines().filter((line) => line.level === "warn");
+		};
+		expect(await warned("unsupported")).toEqual([
+			{
+				level: "warn",
+				event: "tokens.revocation_unsupported",
+				fields: { reason: "an access token issued cannot be revoked before it expires" },
+			},
+		]);
+		expect(await warned("denylist")).toEqual([]);
 	});
 
 	it("refuses to start until revocation is decided", async () => {

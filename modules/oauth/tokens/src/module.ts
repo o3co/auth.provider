@@ -148,6 +148,12 @@ export default defineModule(
 					"needs exactly one module that checks subject revocation, or the section stating none",
 				);
 			}
+			// The operator's choice, yet said at every start: no access token issued can be revoked.
+			if (!denylisted(c.section)) {
+				c.log.warn("tokens.revocation_unsupported", {
+					reason: "an access token issued cannot be revoked before it expires",
+				});
+			}
 			const conditions = [...(await c.collect(accessConditions)), ...subjects];
 			const denylist = denylistOver(
 				denylisted(c.section) ? await c.get(revokedTokens) : undefined,
