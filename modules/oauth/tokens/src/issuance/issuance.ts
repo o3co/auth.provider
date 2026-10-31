@@ -73,6 +73,9 @@ export type IssueAccess = (
 	limits?: IssueLimits,
 ) => Promise<{ readonly access: IssuedAccess; readonly keep?: () => void }>;
 
+/** The least a token may have left once signed: a second. */
+const leastLeftMs = 1000;
+
 /** tokens' own refusal of a token with less than a second left once signed. */
 const noLifetimeLeft = {
 	kind: "refused",
@@ -119,7 +122,7 @@ export function issuing(
 			// Less than a second left once signed, its end come, its cap passed or its signing slow: handed
 			// to no one, and nothing of it kept.
 			const leftMs = access.expiresAt - now();
-			if (leftMs < 1000) return noLifetimeLeft;
+			if (leftMs < leastLeftMs) return noLifetimeLeft;
 			keep?.();
 			// Rounded up, so a token signed at once answers its whole lifetime.
 			return { kind: "issued", access: { ...access, expiresIn: Math.ceil(leftMs / 1000) } };

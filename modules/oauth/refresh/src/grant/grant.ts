@@ -47,16 +47,27 @@ async function stillValid(family: Family, checks: Checks): Promise<number | unde
 	return valid ? endsAt : undefined;
 }
 
-export function refreshGrant(
-	stores: Stores,
-	revoker: Revoker,
-	checks: Checks,
-	random: Random,
-	issuer: string,
-	now: () => number,
-	recorder: Pick<Audit, "record">,
-	selections: Pick<ClaimsSelections, "forRefreshed">,
-): Grant {
+export interface GrantParts {
+	readonly stores: Stores;
+	readonly revoker: Revoker;
+	readonly checks: Checks;
+	readonly random: Random;
+	readonly issuer: string;
+	readonly now: () => number;
+	readonly recorder: Pick<Audit, "record">;
+	readonly selections: Pick<ClaimsSelections, "forRefreshed">;
+}
+
+export function refreshGrant({
+	stores,
+	revoker,
+	checks,
+	random,
+	issuer,
+	now,
+	recorder,
+	selections,
+}: GrantParts): Grant {
 	const recorded = declaredAudit(recorder, events);
 	/** Ends the family a reuse showed, and records it. */
 	const reused = async (id: string, family: Family) => {
@@ -170,15 +181,14 @@ export async function grantOver(c: BuildContext<Settings>) {
 	const { stores, revoker } = await settlingIn(c);
 	c.every(c.section["sweep-interval"] * 1000, () => revoker.sweep());
 	const checks = { sessions: await c.get(sessions), revocation: await c.get(subjectRevocation) };
-	const issuerUrl = (await c.get(issuer)).url;
-	return refreshGrant(
+	return refreshGrant({
 		stores,
 		revoker,
 		checks,
-		c.random.bytes,
-		issuerUrl,
-		c.clock.now,
-		await c.get(audit),
-		await c.get(claimsSelections),
-	);
+		random: c.random.bytes,
+		issuer: (await c.get(issuer)).url,
+		now: c.clock.now,
+		recorder: await c.get(audit),
+		selections: await c.get(claimsSelections),
+	});
 }
