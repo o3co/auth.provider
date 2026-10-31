@@ -5,6 +5,7 @@
 - Answers the boot questions a caller asks of it: why a URL is refused and what to set, and where a credential may not go.
 
 ## Not here
+- How an entry and a pair are read, and whether a host is among such entries or a caller's hosts: `host-entries`, which every module reading hosts takes.
 - Sending, resolving names, connecting, the proxy and the answers: `outbound`, which owns the operator's section `outbound` and applies this policy to every request. What a destination means to a feature: the caller's.
 
 ## Offers
@@ -18,7 +19,6 @@
 - `outbound.limits`: at boot, where a request under a narrowing is cut (`timeoutMs`, `maxBytes`): the operator's caps narrowed, never widened, the same limits the sender cuts it at.
 - `policySettings`: the keys a section takes for the policy (`allow`, `allow-any-public`, `deny`, `plain-loopback`, `plain-internal`, `internal-hosts`, the size caps and `timeout`).
 - `policyOf` (the settings) → the policy: admitting a URL, admitting the addresses it resolved to and answering those checked, explaining a refusal, the credential rule, whether a host is listed, and the limits a request is cut at.
-- How an entry and a pair are read, and whether a host is among such entries or a caller's hosts: `host-entries`, which every module reading hosts takes.
 - `DestinationRefused` (`reason`); `DestinationRefused.is` tells one by its mark, even bundled twice.
 
 ## Invariants
