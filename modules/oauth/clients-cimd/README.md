@@ -11,7 +11,7 @@
 
 ## Offers
 - Composition definition only: a contribution to `clientSources`, and the metadata item `client_id_metadata_document_supported` (`true`).
-- Operator section: `allow` and `deny` (host names, read as `outbound` reads a list entry; `.name` also takes the names under it), `allow-any-host` (default false), `scopes` and `audiences` (the ceiling; default empty), `max-size` (default `5KiB`), `timeout` (default `5s`), `cache-lifetime` (default `10m`), `cache-entries` (default 256), `refused-lifetime` (default `1m`), `max-concurrent` (default 8). Times and sizes are written with a unit.
+- Operator section: `allow` and `deny` (host names, read as `host-entries` reads a list entry; `.name` also takes the names under it), `allow-any-host` (default false), `scopes` and `audiences` (the ceiling; default empty), `max-size` (default `5KiB`), `timeout` (default `5s`), `cache-lifetime` (default `10m`), `cache-entries` (default 256), `refused-lifetime` (default `1m`), `max-concurrent` (default 8). Times and sizes are written with a unit.
 - `offline_access` among the ceiling's `scopes` refuses boot at that entry: offline access is not offered, so it would allow nothing.
 
 ## Invariants
