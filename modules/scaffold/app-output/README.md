@@ -20,7 +20,7 @@
   - The guide lists what the composed modules ask of the deployment, and the values the operator decides, from each one's own declaration, through the internal module `asked`.
   - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
 - `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), the release (`Release`), and, where the caller has them, what each name declares for the guide (`asks`, as `Asked`).
-- `namesPackages` and `vacant`, for a caller to refuse a plan before it composes; `kernel` and `configFiles`, the packages every app depends on (its entry reads its configuration files through `config-files`).
+- `namesPackages` and `vacant`, for a caller to refuse a plan before it composes.
 - `fragmentsIn`, `fragmentsOf`, `fragmentFile` and `settingsOf` (internal module `fragments`); `outsideLock` (`lockfile`).
 - `Packages.outside`, where the caller has packages outside the release: what the app is given beside them, see the internal module `outside`; `appZod`, the zod every app depends on.
 
@@ -39,7 +39,7 @@
 - Writes the target only; reads its templates and the fragment files it is pointed at.
 
 ## Depends on
-- `app-entries`: the app's entries, and `kernel` and `configFiles`, which this package offers again.
+- `app-entries`: the app's entries, and `kernel` and `configFiles`, the packages every app depends on.
 - The HOCON library, through `fragments`; `yaml` and `semver`, through `lockfile` and `outside`.
 
 ## Vocabulary
