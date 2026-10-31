@@ -65,7 +65,7 @@ What an outside party can reach, and what the provider reaches out to, grows onl
 
 Each change an operator must act on to upgrade carries a numbered notice, `U-<minor>-<n>` numbered within the minor version that brings the change (`U-0.19-3`), at its line in the changelog and at its entry in [the migration guide](migration.md). A notice states what to change, and how to tell whether a deployment is affected. An operator checks off the notices between the version they run and the one they move to; a release with none says so.
 
-In the migration guide, a notice is an item that starts with its anchor and bold id (`<a id="u-0.19-3"></a>**U-0.19-3. …**`), says what to change, and ends with an **Affected:** line; the minor's section opens with a table of its notices (notice, what to do, affected). The changelog line links to it (`docs/migration.md#u-0.19-3`). Once a release, a release candidate included, carries a notice, its number stays: a later notice takes the next number.
+In the migration guide, a notice is an item that starts with its anchor, its bold id and a colon, then its bold headline (`<a id="u-0.19-3"></a>**U-0.19-3**: **…**`), says what to change, and ends with what it affects (`Affected: …`, its last sentence or its last sub-item); the minor's section opens with a table of its notices (notice, what to do, affected). The changelog line links to it (`docs/migration.md#u-0.19-3`). Once a release, a release candidate included, carries a notice, its number stays: a later notice takes the next number.
 
 ## What a release publishes
 
