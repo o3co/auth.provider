@@ -75,11 +75,11 @@ it("refuses a plain-http public origin unless it is accepted explicitly, and the
 	expect(app.get(site).secureCookies).toBe(false);
 });
 
-it("warns at every start that takes a plain-http public origin, and not otherwise", async () => {
+it("is warned at every start that takes a plain-http public origin, as kernel warns what production refuses, and not otherwise", async () => {
 	const warned = async (settings: Record<string, unknown>) => {
 		const { runtime, count } = warning();
 		await boot(settings, { environment: "development", runtime });
-		return count("http.insecure_origin");
+		return count("kernel.allowed_in_development");
 	};
 	expect(await warned({ "public-origin": "http://as.example", "insecure-origin": true })).toBe(1);
 	expect(await warned({ "public-origin": "https://as.example" })).toBe(0);
