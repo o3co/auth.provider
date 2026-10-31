@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { reachedAddress } from "@mod/address-reach";
 import { certificateOf } from "@mod/client-certificate";
 import type { Source } from "./contract.ts";
 import type { TrustedProxies } from "./settings.ts";
@@ -16,14 +17,7 @@ function withoutPort(text: string): string {
  */
 export function canonical(text: string): string | undefined {
 	const host = withoutPort(text.trim()).replace(/%.*$/, "");
-	const family = isIP(host);
-	if (family === 4) return host;
-	if (family !== 6) return undefined;
-	const compressed = new URL(`http://[${host}]`).hostname.slice(1, -1);
-	const v4 = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(compressed);
-	if (!v4) return compressed;
-	const [high, low] = [Number.parseInt(v4[1] ?? "", 16), Number.parseInt(v4[2] ?? "", 16)];
-	return [high >> 8, high & 255, low >> 8, low & 255].join(".");
+	return isIP(host) === 0 ? undefined : reachedAddress(host);
 }
 
 export const trusts = (proxies: TrustedProxies, address: string | undefined) =>
