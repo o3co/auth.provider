@@ -19,9 +19,9 @@
 - The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet. That install runs as the runner's own user, in directories the check made, so what it writes is the runner's to remove.
 - Each app's image is looked in before it boots, with no network: a package manager it holds, npm aside, is a problem told (corepack, pnpm or yarn on its PATH, or the corepack and the yarn Node's image bundles where it keeps them), as the app runs node alone.
 - Without Docker, the release check exits 1 at once: no boot is skipped.
-- The processes a container takes are read from its cgroup (`cgroup`): v2's count, or v1's under its pids controller, only where v2's file is not there; any other failure, Docker's included, is thrown.
+- The helpers scene is the internal module `helpers`.
 - Every docker command, and each container, goes through `containers`: a command within a minute (a build fifteen); the install's container and each boot's run under one deadline (fifteen minutes; three for a boot, a minute of it to be ready or end, failing where it does neither, each look five seconds) and are removed at the end, however the work ends.
 - Each launch of the check is a run of its own, named by a random id, so no name or label of an earlier one is ever its own; it sweeps its run's containers by label at its end, a container still there a problem told. What a killed check left is removed by hand while no check runs (`containers`' card).
 
 ## Depends on
-- The package's build; `create-app` (its patterns), `trial` (the layer each image boots on); pnpm, to pack and install; Docker, to build and run images.
+- The package's build; `create-app` (its patterns), `trial` (the layer each image boots on); pnpm, to pack and install; Docker, to build and run images; `tar`, run, to list a tarball's files.

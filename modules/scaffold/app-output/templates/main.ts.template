@@ -16,7 +16,7 @@ const app = await loadConfig(source)
 	.catch(refused);
 // Taken before starting, so a signal while starting stops once started instead of killing.
 let started: Promise<void> = Promise.resolve();
-// Run once: a second signal waits for the first stop instead of stopping again.
+// Run once: a second signal, the same or the other, waits for the first stop instead of stopping again.
 let stopping: Promise<void> | undefined;
 const stop = () =>
 	(stopping ??= (async () => {
@@ -25,7 +25,8 @@ const stop = () =>
 		await app.stop();
 		process.exit(0);
 	})());
-process.once("SIGTERM", stop);
-process.once("SIGINT", stop);
+// Kept for every signal: with none listening, a repeated one would take Node's default and kill mid-stop.
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
 started = app.start();
 await started;

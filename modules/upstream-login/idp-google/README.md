@@ -13,7 +13,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `google`)
-- IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both well-formed text), `access` (`offline` (default) or `online`), `require-iss` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Google's own), `algorithms` (`external-jwt`'s `algorithmsSetting`, default RS256), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional), `hosted-domains` (optional, lowercase domains)
+- IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both well-formed text), `access` (`offline` (default) or `online`), `accept-missing-iss` (default false), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Google's own), `algorithms` (`external-jwt`'s `algorithmsSetting`, default RS256), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional), `hosted-domains` (optional, lowercase domains)
 
 ## Invariants
 - Every request goes through `outbound`, narrowed to the one endpoint's host.
@@ -22,7 +22,7 @@
 - Boot is refused, at its key, on an `authorization-endpoint` or `end-session-endpoint`, which the browser goes to, that `outbound.refusals`' `browsedRefusal` refuses: plain http is taken at a loopback name alone, Google being a public service.
 - Google's own default endpoints are put to that policy too.
 - A callback carrying an `iss` other than exactly `https://accounts.google.com`, an empty one included, is refused before its code is used.
-- A callback without `iss` is refused while `require-iss` holds.
+- A callback without `iss` is refused unless `accept-missing-iss` is set, which every start warns of (`idp-google.iss_not_required`, with the IdP's name).
 - The id_token is checked under `algorithms` (`external-jwt`'s `algorithmsSetting`, RS256 by default), Google's issuer exactly, the client among its audiences, and `clock-skew`.
 - An id_token that gives `at_hash` must give the access token's; one that does not refuses the exchange.
 - An id_token naming an audience other than the client is refused; with several, its `azp` must be the client.

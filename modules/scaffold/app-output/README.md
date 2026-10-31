@@ -35,7 +35,7 @@
 - The app reads the configuration files `APP_CONFIG` lists, comma-separated, layered in order; the generated configuration file when unset.
 - The app exits 78 on a refused boot, told by the kernel's mark (`BootRefused.is`), writing each refusal on standard error, every line handed on before it exits.
 - A refusal of a key the configuration reads from the environment says, after its reason, where to write it: its variable in `.env`, or the key in the local layer (the local layer alone for a value of several lines); a refusal of anything else is written as it is. The hint comes from a table written when the app was generated, from what writes `application.conf`: an app whose configuration files changed since may be told of a variable they no longer read.
-- The app's entries check, as they boot, the variables 0.17 read that the environment sets and no configuration file reads, by `config-files`' `legacyVariablesCheck` alone: its warning goes once to standard error as `warn config-files:` and boot goes on; its refusal refuses boot. `APP_LEGACY_VARIABLES` (`warn`, `refuse`, `ignore`) chooses, read there.
+- The app's entry checks, as it boots, the variables 0.17 read that the environment sets and no configuration file reads, by `config-files`' `legacyVariablesCheck` alone: its warning goes once to standard error as `warn config-files:` and boot goes on; its refusal refuses boot. `APP_LEGACY_VARIABLES` (`warn`, `refuse`, `ignore`) chooses, read there.
 - SIGTERM or SIGINT stops the app, draining; one that comes while it starts stops it once started, and a second one waits for the first stop instead of stopping again.
 
 ## Data

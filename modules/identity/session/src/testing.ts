@@ -10,12 +10,12 @@ import {
 	type Entry,
 	type EntryLevel,
 	entryJudge,
-	type LoginFacts,
 	type Session,
 	type Sessions,
 	sessionRules,
 	sessions,
 } from "./contract.ts";
+import { authenticatedAtOf, checkAuthenticatedAt } from "./rules/authenticated.ts";
 
 export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 	return {
@@ -315,6 +315,17 @@ export function sessionsContract(
 				authenticatedAt: opened + 60_000,
 			});
 			expect(done.session.context.authenticatedAt).toBe(opened);
+		});
+
+		it("takes a login naming its authentication time the opening as authenticated when the session opens, known", async () => {
+			const place = await open();
+			const opened = place.now();
+			const done = await place.sessions.complete(place.request(), {
+				...facts(place),
+				authenticatedAt: "opening",
+			});
+			expect(done.session.context.authenticatedAt).toBe(opened);
+			expect(done.session.context.authenticatedAtUnknown).toBeUndefined();
 		});
 
 		it("throws a TypeError, naming no value, for an authentication time that is no time, closing nothing", async () => {
@@ -626,18 +637,6 @@ function keptAtLogin(given: unknown, log: Log): SourcedAttributes | undefined {
 	return kept;
 }
 
-/** The authentication time the stand-in keeps from a login: the one reported, at most the opening. */
-function authenticatedAtOf(
-	facts: LoginFacts,
-	openedAt: number,
-	log: Log,
-): Pick<AuthContext, "authenticatedAt" | "authenticatedAtUnknown"> {
-	const reported = facts.authenticatedAt;
-	if (reported === "unknown") return { authenticatedAt: openedAt, authenticatedAtUnknown: true };
-	if (reported > openedAt) log.warn("session.authentication_time_capped");
-	return { authenticatedAt: Math.min(reported, openedAt) };
-}
-
 /** A session's amr once a raise adds `amr`, and what the raise added, each value once. */
 function raisedBy(held: readonly string[], amr: readonly string[]) {
 	const raisedAmr = [...new Set(amr)];
@@ -775,9 +774,7 @@ export const sessionStandIn = defineModule(
 				enterFor: (request, level) => enterAt(handleIn(request), level),
 				entryOf: (handle, level = "use") => enterAt(handle, level),
 				complete: async (request, facts) => {
-					const at = facts.authenticatedAt;
-					if (at !== "unknown" && !(Number.isFinite(at) && at >= 0 && at <= 8.64e15))
-						throw new TypeError('authenticatedAt must be epoch milliseconds or "unknown"');
+					checkAuthenticatedAt(facts);
 					const carried = handleIn(request);
 					if (carried !== undefined) await close(carried);
 					const handle = random();
@@ -787,7 +784,9 @@ export const sessionStandIn = defineModule(
 					const context = Object.freeze({
 						subject: facts.subject,
 						amr: Object.freeze([...facts.amr]),
-						...authenticatedAtOf(facts, openedAt, c.log),
+						...authenticatedAtOf(facts, openedAt, () =>
+							c.log.warn("session.authentication_time_capped"),
+						),
 						...(attributes === undefined ? {} : { attributes }),
 					});
 					const until = openedAt + lifetimeMs;

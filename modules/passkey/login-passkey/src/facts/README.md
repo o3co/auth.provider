@@ -13,7 +13,7 @@ Internal module of `login-passkey`: the login's facts for what an assertion prov
 
 ## Invariants
 - The amr is `pop`, and `mfa-extensions`' second factor (`mfa`) only where the user was verified and `counts-as-mfa` is on; whether the passkey is backed up changes nothing.
-- The authentication time is the challenge's time, on `kernel`'s clock.
+- The authentication time is the session's opening (`opening`), so a gate's wait never ages it.
 - The attributes are those `users` accepts, under `login-attributes`' source name for users.
 
 ## Depends on

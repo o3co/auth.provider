@@ -18,4 +18,4 @@ Internal module of `conformance`: what an area's fault scene does with its deplo
 - Holds no feature vocabulary: the scene, its matches and its requests are the area's.
 
 ## Depends on
-- `deployment`, `faults` (the topology), `relay` (a match, an upstream), `promotion` through the topology.
+- `deployment`, `faults` (the topology), `relay` (a match, an upstream), `ask` (a command to a server a relay points at), `promotion` through the topology.

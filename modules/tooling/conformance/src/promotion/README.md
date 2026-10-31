@@ -18,4 +18,4 @@ Internal module of `conformance`: promoting a replica of a Redis topology's prim
 - What it must have done (holding writes, detaching the candidate, reattaching, releasing) counts only where Redis answered `OK`, and a read of the replication state only where Redis answered it; a refusal fails the promotion, before anything changes where it comes first.
 
 ## Depends on
-- The relay's answer.
+- The relay's answer; `ask` (its `ok` and `textOf`).

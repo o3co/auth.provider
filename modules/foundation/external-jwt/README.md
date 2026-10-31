@@ -26,7 +26,7 @@
 - Each key is read under one algorithm (RFC 8725 §3.1), by the caller's whole list and never the header: its own `alg` where allowed, else the one allowed algorithm its kind and curve fit. A key naming none that two allowed algorithms fit is used under neither, an answer of no key that fetching again does not change.
 - The claims are one JSON object in UTF-8 with a numeric `exp`; `nbf` and `iat`, where given, are numeric.
 - On `kernel`'s clock, with the caller's allowance on each side, a token is expired at `exp`, not yet valid before `nbf`, and refused for an `iat` in the future.
-- With a longest lifetime, neither `exp` ahead nor `iat` behind may pass it.
+- With a longest lifetime, `exp` may be no further ahead than it with the caller's allowance, and `exp` − `iat` no longer than it without one, so `iat` may lie no further behind.
 - An expected audience is met by any one of the token's audiences; a list of audiences holds only strings.
 - A key set is fetched when first needed and used an hour from when its fetch began; before then, only for a key it lacks, never for one it holds twice.
 - One fetch runs at a time, shared by every check waiting for it; fetches are at least a minute apart, whether they worked or not.

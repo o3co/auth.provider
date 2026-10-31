@@ -16,9 +16,9 @@
 - Pattern mode, with `CONFORMANCE_PATTERN` naming a pattern on the new system: `full` is the full template, `full+opt-ins` adds every feature that opts in
   - An area may adapt its part to the app's modules (`onNew`'s third argument): a set-up with a party the app reaches at loopback, started before it and stopped after it, or a reason to leave the scene out because the app chose an alternative, which even `full+opt-ins` leaves out
   - With `full+opt-ins`, a scene whose modules the app lacks fails
-- The pattern runs (the script `patterns`, internal module `patterns`)
+- The pattern runs (the script `patterns`, internal module `patterns`), and their list as the runs `spec-checklist` reads (the script `evidence-runs`)
 - Audit events (`auditEvents`, internal module `audit`): the need a scene states to read them, and a running target's trail
-- Starting a process and waiting for it to respond, in a process group of its own where asked (then killed with what it started, and a stop, a kill, a refusal or a timeout answered only once the whole group has ended, zombies left alone; a group is never signalled once its id may be another's); a free port.
+- Starting a process and waiting for it to respond, in a process group of its own where asked (then killed with what it started, and a stop, a kill, a refusal or a timeout answered only once the whole group has ended, zombies left alone; a group is never signalled once its id may be another's); a free port; the environment a process starts from, only `PATH` and `HOME` (`baseEnv`).
 - Shared tools: a throwaway Redis (on the settings its caller gives, as `drivers` does; paused as a hung store is and, resumed, back once it answers again, within ten seconds), a second start that can cause a storage failure, a fake HTTP server for a scene's outside parties (keeps every request, its body as text and as bytes, and answers as the area's script says, in JSON, text or bytes; plain http at loopback)
   - A fake's script that fails fails the scene when the fake stops
 - Test tools (`./testing`): a fake SMTP relay for a scene's mail (plain SMTP at loopback, on a free port each run; keeps every message, decoded, and finds the latest to an address)

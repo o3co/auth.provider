@@ -27,7 +27,7 @@
 - The world keeps no file but its front's and the metadata document's, under `under` where given: the client certificate's are removed once read back. Where the app does not start, the front, the document's server and the tunnel are closed and the run's files removed before the failure is told.
 
 ## Depends on
-- `conformance`, `conformance-code`, `conformance-oauth`, `conformance-front`, `conformance-tunnel`, `spec-checklist`, `openid-client`, `undici`; a JDK and Maven for the Nimbus adapter, Go for the Go adapter, Python for the Authlib adapter.
+- `conformance`, `conformance-code`, `conformance-device`, `conformance-exchange`, `conformance-oauth`, `conformance-front`, `conformance-tunnel`, `spec-checklist`, `openid-client`, `undici`; a JDK and Maven for the Nimbus adapter, Go for the Go adapter, Python for the Authlib adapter.
 
 ## Vocabulary
 - adapter: a library's small program that runs one flow per start, told by its first input line.

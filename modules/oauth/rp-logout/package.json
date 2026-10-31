@@ -28,6 +28,7 @@
 		"@mod/request-source": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/session-participants": "workspace:*",
+		"@mod/url-setting": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {

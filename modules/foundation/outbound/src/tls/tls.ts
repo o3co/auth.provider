@@ -1,4 +1,4 @@
-import type { TlsOptions } from "@mod/tls-options";
+import { heldToFloor, type TlsOptions } from "@mod/tls-options";
 
 /**
  * How each TLS connection is made: the floor it holds to (`tls-options`), and the authorities a
@@ -10,14 +10,11 @@ export interface Tls {
 }
 
 /**
- * A connection's TLS options: the test's authorities, then the floor's own keys alone, so nothing
- * loosens it and nothing else rides in with it.
+ * A connection's TLS options: the test's authorities, held to the floor (its own keys last, as
+ * `tls-options` knows them), so nothing loosens it and nothing else rides in with it.
  */
-export const tlsOf = (tls: Tls) => ({
-	...(tls.ca === undefined ? {} : { ca: tls.ca }),
-	minVersion: tls.floor.minVersion,
-	ciphers: tls.floor.ciphers,
-});
+export const tlsOf = (tls: Tls) =>
+	heldToFloor(tls.floor, tls.ca === undefined ? {} : { ca: tls.ca });
 
 /** What each refused handshake said, by the failure outbound gave for it. */
 const handshakes = new WeakMap<object, string>();

@@ -44,9 +44,14 @@ onLegacy(codeArea, {
 		"store-fault:session-grant",
 	],
 	differs: [
+		// Ours answers a POST to the authorization endpoint with a 303 to the GET with the same
+		// parameters, where the session's SameSite=Lax cookie is read; the legacy build reads the form in place.
+		"authorize-post-read-in-place",
 		// A fresh login a client asks for: max_age=0 asks a new one, and a return that dropped its demand is refused.
 		"max-age-zero-asks-a-new-login",
 		"return-keeps-its-demand",
+		// The legacy build counts max_age from the password, so a second factor slower than max_age is refused.
+		"max-age-from-the-second-factor",
 		// An acr no way of logging in can meet is dropped at boot, and answered as one not known.
 		"unmeetable-acr-entry",
 		// Ours passes over an acr asked by acr_values and not met, and reads the acr a claims parameter asks for.

@@ -4,6 +4,7 @@ Internal module of `interop-oidf`: the suite at its pinned version, started and 
 
 ## Offers
 - `startSuite`: the suite's source at the pinned tag, its store in memory (never a directory of this machine: a run's store is thrown away, and Docker Desktop's shared directories can refuse its writes), a Python of its own for the scripts, its containers under a Compose project of their own, named from the start's whole directory, in a directory of its own; its nginx answering with the harness's certificate (one naming the suite's host), trusted alone by its fingerprint; its API.
+- `suiteOrigin`: the suite's public origin, `https://localhost.emobix.co.uk:8443`.
 - `hostForSuite`: the name the suite's containers reach this machine by (`host.docker.internal`) and the address to listen on for it; on Linux the name is given the bridge's gateway, in IPv4 alone (`host-gateway` adds an IPv6 address the suite's Java may pick and find no route to).
 
 ## Invariants

@@ -4,12 +4,12 @@ import type { Session } from "@mod/session";
 import { describe, expect, it } from "vitest";
 import { consentDecisionWith } from "../consent-decision.ts";
 
-/** A registered client, first-party or not, as `consent`'s section says. */
-const clientOf = (id: string, firstParty: boolean): Client => ({
+/** A client, first-party or not as `consent`'s section says, registered by the operator unless said. */
+const clientOf = (id: string, firstParty: boolean, registered = true): Client => ({
 	id,
 	kind: "confidential",
 	method: "client_secret_basic",
-	registered: true,
+	registered,
 	section: <T>(section: { name: string }) =>
 		(section.name === clientSection.name ? { "first-party": firstParty } : {}) as T,
 });
@@ -58,5 +58,24 @@ describe("consent-decision", () => {
 			() => "",
 		);
 		expect(await decided).toBeUndefined();
+	});
+
+	it("refuses a silent request with consent_required, so no code, unless its client is first-party or the subject agreed to its whole scope [rfc9700-4.11.2-a]", async () => {
+		const decision = consentDecisionWith({
+			consents: {
+				asking: true,
+				ask: async () => "https://as.example/consent",
+				covers: async (_, __, range) => range.every((scope) => scope === "read"),
+			},
+		});
+		const session = { context: { subject: "alice" } } as Session;
+		const silent = (client: Client, scope: readonly string[]) =>
+			decision.decide(client, session, scope, new Set(["none"]), () => "");
+		const required = { kind: "refuse", error: "consent_required", reason: "consent_required" };
+		expect(await silent(clientOf("third", false), ["read", "write"])).toMatchObject(required);
+		// A client a source names is never first-party, whatever its section says.
+		expect(await silent(clientOf("named", true, false), ["write"])).toMatchObject(required);
+		expect(await silent(clientOf("third", false), ["read"])).toBeUndefined();
+		expect(await silent(clientOf("app", true), ["write"])).toBeUndefined();
 	});
 });
