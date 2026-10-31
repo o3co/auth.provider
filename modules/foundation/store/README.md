@@ -11,7 +11,7 @@
 - Writes: if absent, on a version, remove on a version or a value, take once, a batch in one partition under conditions, and `mutate`, whose pure function runs again on each retry.
   - `batchAcross`, where a store offers it: a batch over keys of any partition, and of any spaces declaring the same guarantees. A store without it leaves it out.
 - Expiry after a duration, at a time, none, keep, or extend only; counting in a fixed window.
-- The space declaration extension point, and the composition definition with `accept-volatile` (default false), which lets spaces needing durable or replicated boot on memory.
+- The space declaration extension point, and the composition definition with `accept-volatile` (default false), which lets spaces needing durable or replicated boot on memory; every start that boots such spaces so warns `store.volatile_accepted`, naming them.
 - `./testing`: the contract test, test configuration builders, and a simulated replicated store that loses what a space's missing guarantees allow (unconfirmed writes on failover, writes not durable on restart, entries not kept from eviction under memory pressure).
 
 ## Invariants
