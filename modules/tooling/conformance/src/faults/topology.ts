@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { docker as dockerAt, dockerSync, dockerWithin } from "@mod/docker-client";
 import { ask, askAll, microsOf, ok, textOf } from "../ask/ask.ts";
 import { clockImage, faketimeEnv } from "../clock/clock.ts";
-import { dockerAsync as dockerAt, dockerSync } from "../docker/docker.ts";
 import { type PromoteOptions, promote } from "../promotion/promotion.ts";
 import type { Reply, Upstream } from "../relay/relay.ts";
 
@@ -10,10 +10,10 @@ export const redisImage =
 	"redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499";
 const owner = "conformance.owner";
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-/** A control call (list, inspect, kill, start, pause, remove), within its deadline. */
-const docker = (...args: string[]) => dockerSync("control", args).trim();
+/** A control call (list, inspect, kill, start, pause, remove), within its time. */
+const docker = (...args: string[]) => dockerSync(args, dockerWithin.control);
 /** A node's `docker run`, without holding the process while it works, so several start at once. */
-const dockerAsync = async (...args: string[]) => (await dockerAt("run", args)).trim();
+const dockerAsync = (...args: string[]) => dockerAt(args, dockerWithin.run);
 const field = (info: string, name: string) =>
 	new RegExp(`^${name}:(.*)$`, "m").exec(info)?.[1]?.trim();
 
@@ -71,7 +71,7 @@ export async function startTopology(spec: TopologySpec) {
 	const id = `${process.pid}-${randomBytes(4).toString("hex")}`;
 	const network = `conformance-net-${id}`;
 	// The image comes first: a build that fails leaves no network behind.
-	const image = spec.clock ? clockImage(redisImage) : redisImage;
+	const image = spec.clock ? await clockImage(redisImage) : redisImage;
 	const clockEnv = spec.clock ? faketimeEnv(spec.clock) : [];
 	const ports = new Map<string, Upstream>();
 	const portOf = (name: string): Upstream => {

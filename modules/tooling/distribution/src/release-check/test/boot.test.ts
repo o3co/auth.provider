@@ -1,6 +1,6 @@
+import { type Docker, DockerFailed } from "@mod/docker-client";
 import { describe, expect, it } from "vitest";
 import { withContainer } from "../containers/container.ts";
-import { type Docker, DockerFailed } from "../containers/docker.ts";
 import { settled } from "../image.ts";
 
 /** A daemon whose container's state is `state` while it is there. */

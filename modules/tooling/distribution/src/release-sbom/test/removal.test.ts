@@ -1,8 +1,8 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { docker } from "@mod/docker-client";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
-import { docker } from "../../release-check/containers/docker.ts";
 import { endOf, notRemoved } from "../removal.ts";
 
 // A `docker` of its own first on the path, answering as each test's script says.
@@ -51,7 +51,7 @@ it("tells a command past its time as such, beside what the client wrote before i
 	);
 	client("exec sleep 30");
 	expect((await endOf(docker(["image", "ls"], 300))).stderr).toBe(
-		"docker image did not answer within 0.3 seconds",
+		"docker image ls did not answer within 0.3 seconds",
 	);
 });
 

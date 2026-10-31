@@ -2772,6 +2772,9 @@ importers:
         specifier: 7.8.5
         version: 7.8.5
     devDependencies:
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../../tooling/docker-client
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -4089,6 +4092,9 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../docker-client
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
@@ -4482,6 +4488,9 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../docker-client
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
@@ -4501,6 +4510,12 @@ importers:
       '@mod/tls-options':
         specifier: workspace:*
         version: link:../../foundation/tls-options
+
+  modules/tooling/docker-client:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/guard:
     dependencies:

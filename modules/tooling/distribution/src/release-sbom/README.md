@@ -25,4 +25,4 @@ Internal module of `distribution`: the release's lists of what it ships (SBOMs),
 - The same test holds each artifact to be taken by the id the job that made it gave, never by name; the release check to test the very tarballs kept; no job or step that holds the release to be skipped but by success; every action from outside GitHub to be pinned by its commit; and the API site to keep the token out of its checkouts and its install, giving it to its push alone.
 
 ## Depends on
-- The package's `release` (the tarballs read) and `release-check` (the install, the image and its docker client); `combinations` (the features that opt in); pnpm, Docker and tar, run.
+- The package's `release` (the tarballs read) and `release-check` (the install and the image); `docker-client` (its docker commands); `combinations` (the features that opt in); pnpm, Docker and tar, run.

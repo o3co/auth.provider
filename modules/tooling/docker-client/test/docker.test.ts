@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DockerFailed, docker } from "../docker.ts";
+import { DockerFailed, docker, dockerSync } from "../src/contract.ts";
 
 /** Puts a `docker` client running `script` alone on the PATH. */
 const client = (script: string) => {
@@ -157,5 +157,93 @@ describe("a docker command", () => {
 	it("timed out at once where no time is left, starting nothing", async () => {
 		client("echo started >&2; exit 1");
 		expect(await failure(docker(["info"], 0))).toMatchObject({ kind: "timeout" });
+	});
+});
+
+describe("a docker command given its input", () => {
+	it("reads it on its standard input", async () => {
+		client("cat");
+		expect(await docker(["build", "-q", "-"], 5_000, { input: "FROM alpine\n" })).toBe(
+			"FROM alpine",
+		);
+		expect(dockerSync(["inspect", "-"], 5_000, { input: "a recipe" })).toBe("a recipe");
+	});
+});
+
+describe("a docker command held until it answers", () => {
+	/** What a held command threw, or nothing. */
+	const thrown = (run: () => unknown) => {
+		try {
+			run();
+			return undefined;
+		} catch (error) {
+			return error;
+		}
+	};
+
+	it("names an object's command in two words, as a failure tells it", async () => {
+		client("exec sleep 30");
+		expect(thrown(() => dockerSync(["network", "rm", "n-1"], 300))).toMatchObject({
+			command: "network rm",
+			message: "docker network rm did not answer within 0.3 seconds",
+		});
+		expect(await failure(docker(["image", "inspect", "t"], 300))).toMatchObject({
+			command: "image inspect",
+			message: "docker image inspect did not answer within 0.3 seconds",
+		});
+	});
+
+	it("answers what the client wrote, trimmed, as `docker` does", () => {
+		client('echo "  $1 $2 $3  "');
+		expect(dockerSync(["network", "create", "n-1"], 5_000)).toBe("network create n-1");
+	});
+
+	it("fails as `docker` sorts it: absent, failed with what it told and wrote, unstarted", () => {
+		client('echo "Error: No such container: rc-1" >&2; exit 1');
+		expect(thrown(() => dockerSync(["rm", "-f", "rc-1"], 5_000))).toMatchObject({
+			kind: "absent",
+			command: "rm",
+		});
+		client('echo "out" ; echo "daemon refused" >&2; exit 2');
+		const failed = thrown(() => dockerSync(["ps"], 5_000));
+		expect(failed).toBeInstanceOf(DockerFailed);
+		expect(failed).toMatchObject({
+			kind: "failed",
+			code: 2,
+			told: "daemon refused\n",
+			wrote: "out\n",
+		});
+		vi.stubEnv("PATH", mkdtempSync(join(tmpdir(), "no-docker-")));
+		expect(thrown(() => dockerSync(["ps"], 5_000))).toMatchObject({ kind: "unstarted" });
+	});
+
+	it("timed out where the client outlasts its time, the client ended and what it told kept", () => {
+		client('echo "waiting" >&2; exec sleep 30');
+		const started = performance.now();
+		expect(thrown(() => dockerSync(["kill", "-s", "KILL", "n"], 1_500))).toMatchObject({
+			kind: "timeout",
+			message: "docker kill did not answer within 1.5 seconds",
+			told: "waiting\n",
+		});
+		expect(performance.now() - started).toBeLessThan(5_000);
+		expect(thrown(() => dockerSync(["ps"], 0))).toMatchObject({ kind: "timeout" });
+	});
+
+	it("takes no command that starts a process of its own, running nothing for it", () => {
+		const dir = mkdtempSync(join(tmpdir(), "docker-held-"));
+		const ran = join(dir, "ran");
+		client(`touch ${ran}`);
+		for (const args of [
+			["build", "-"],
+			["run", "redis"],
+			["image", "build", "."],
+			["compose", "up"],
+			["info"],
+		]) {
+			expect(() => dockerSync(args, 5_000), args.join(" ")).toThrow(TypeError);
+		}
+		expect(existsSync(ran)).toBe(false);
+		dockerSync(["image", "inspect", "t"], 5_000);
+		expect(existsSync(ran)).toBe(true);
 	});
 });

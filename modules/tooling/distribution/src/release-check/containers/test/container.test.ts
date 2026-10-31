@@ -1,6 +1,6 @@
+import { type Docker, DockerFailed, type DockerFailure } from "@mod/docker-client";
 import { describe, expect, it } from "vitest";
 import { type Container, type ContainerOptions, sweptRun, withContainer } from "../container.ts";
-import { type Docker, DockerFailed, type DockerFailure } from "../docker.ts";
 
 const failed = (kind: DockerFailure, command: string) =>
 	new DockerFailed(kind, command, `docker ${command}: ${kind}`);
