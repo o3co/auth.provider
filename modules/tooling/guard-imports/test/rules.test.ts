@@ -1163,6 +1163,19 @@ describe("guard-imports", () => {
 			]);
 		});
 
+		it("refuses a workspace with fewer owners than its rules ask for, and asks none where they do not say", () => {
+			const asking = { ...budget, declaredProperties: 1 };
+			const under = (packages: Pkg[]) =>
+				check(packages, asking)
+					.filter((v) => v.rule.startsWith("G32"))
+					.map((v) => `${v.where} ${v.detail}`);
+			expect(under([urls])).toEqual([
+				"workspace 1 package(s) must state what they hold to declaration, 0 do",
+			]);
+			expect(under([urls, owner(), declaring("@c/declared")])).toEqual([]);
+			expect(found([urls])).toEqual([]);
+		});
+
 		it("refuses an owner naming a type its contract does not export, or a property its type lacks", () => {
 			expect(found([urls, owner({ type: "Narowwer", property: "internal" })])).toEqual([
 				"@c/policy narrower, but it exports no Narowwer with internal",

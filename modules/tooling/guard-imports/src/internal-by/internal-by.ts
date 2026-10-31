@@ -257,6 +257,15 @@ export function internalByRules(s: Scope) {
 			owners.push({ owner: p, ...owned });
 		}
 	}
+	// The workspace's rules say how many owners there must be: none stating it leaves writes unheld.
+	const required = s.budget.declaredProperties ?? 0;
+	if (owners.length < required) {
+		s.report(
+			rule,
+			"workspace",
+			`${required} package(s) must state what they hold to declaration, ${owners.length} do`,
+		);
+	}
 	const [owned, ...others] = owners;
 	if (owned === undefined) {
 		for (const p of declaring) {

@@ -14,6 +14,7 @@ Internal module of `guard-imports`: G32, that the property an owner holds to dec
 
 ## Invariants
 - The owner is the one package whose `narrower` is `{ type, property }`; its contract exports that type (declared there or re-exported), whose property gives the type counted. The owner's own code is held to it too: it states the property, and writes none.
+- The workspace's rules say how many packages must state what they hold to declaration (`declaredProperties`); fewer are refused, so removing an owner's statement never leaves its writes unchecked. Unset, none is asked.
 - A writer declares `narrower` as exactly the property's name, a string, and its card states it as `` `narrower`: `internal` ``.
 - Counted: an object literal's property of the owned property's name, anywhere in shipped `.ts` and `.mjs` code, a literal spread into another included, whose value, `undefined` aside, is of that type: a property, a shorthand, a getter (its return), or a computed key whose type that name fits (a union, a template, a mapped string such as `Lowercase<string>`, or a string of no known value). Any other key is not counted.
 - Counted too, by the same rule: an assignment to the property (`n.internal = …`, `n["internal"] = …`, `??=`, `||=` and `&&=` alike), a class field initialised under its name, and a constructor's parameter property of that name.
