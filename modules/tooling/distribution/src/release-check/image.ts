@@ -8,8 +8,8 @@ import { type Container, withContainer } from "./containers/container.ts";
 import { DockerFailed, docker } from "./containers/docker.ts";
 import { refusalsIn } from "./refused.ts";
 
-const commandWithin = 60_000;
-const buildWithin = 15 * 60_000;
+export const commandWithin = 60_000;
+export const buildWithin = 15 * 60_000;
 const bootWithin = 3 * 60_000;
 
 /** Why Docker cannot build and run the images, or nothing when it can. */

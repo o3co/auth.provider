@@ -1,7 +1,7 @@
-import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { ask, askAll, microsOf, ok, textOf } from "../ask/ask.ts";
 import { clockImage, faketimeEnv } from "../clock/clock.ts";
+import { dockerAsync as dockerAt, dockerSync } from "../docker/docker.ts";
 import { type PromoteOptions, promote } from "../promotion/promotion.ts";
 import type { Reply, Upstream } from "../relay/relay.ts";
 
@@ -10,14 +10,10 @@ export const redisImage =
 	"redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499";
 const owner = "conformance.owner";
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
-/** Docker, without holding the process while it works, so several containers start at once. */
-const dockerAsync = (...args: string[]) =>
-	new Promise<string>((resolve, reject) =>
-		execFile("docker", args, { encoding: "utf8" }, (error, out) =>
-			error ? reject(error) : resolve(out.trim()),
-		),
-	);
+/** A control call (list, inspect, kill, start, pause, remove), within its deadline. */
+const docker = (...args: string[]) => dockerSync("control", args).trim();
+/** A node's `docker run`, without holding the process while it works, so several start at once. */
+const dockerAsync = async (...args: string[]) => (await dockerAt("run", args)).trim();
 const field = (info: string, name: string) =>
 	new RegExp(`^${name}:(.*)$`, "m").exec(info)?.[1]?.trim();
 
