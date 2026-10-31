@@ -9,6 +9,7 @@ import {
 	idTokenReaderOf,
 	refreshAnswerOf,
 	tokenAnswerOf,
+	tokenPostOf,
 } from "@mod/upstream-client";
 import { type Upstream, UpstreamRefused } from "@mod/upstreams";
 import { isLoopbackName } from "@mod/url-setting";
@@ -71,24 +72,13 @@ export function opened(
 		},
 		at.clock,
 	);
-	/** Posts to the token endpoint with the client's secret in the form, the only host it goes to. */
-	const post = async (fields: Record<string, string>) =>
-		outbound.fetch(
-			s["token-endpoint"],
-			{
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-					accept: "application/json",
-				},
-				body: new URLSearchParams({
-					...fields,
-					client_id: client,
-					client_secret: await secret(),
-				}).toString(),
-			},
-			{ hosts: [hostOf(s["token-endpoint"])] },
-		);
+	// Apple's client secret is a JWT signed per call, so tokenPostOf asks for it at each post.
+	const post = tokenPostOf(
+		outbound,
+		s["token-endpoint"],
+		{ id: client, auth: "form", secret },
+		{ hosts: [hostOf(s["token-endpoint"])] },
+	);
 	const end = s["end-session-endpoint"];
 	return {
 		issuer,
