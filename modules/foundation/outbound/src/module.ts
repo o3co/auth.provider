@@ -270,11 +270,15 @@ export default defineModule(
 			// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
 			const plainInternal = c.section["plain-internal"].length;
 			if (plainInternal > 0) c.log.warn("outbound.plain_internal", { count: plainInternal });
+			// Neither names the proxy: a log line carries no value.
 			if (proxy !== undefined) {
-				const host = new URL(proxy).hostname;
-				c.log.warn("outbound.proxy_checks_addresses", { host });
-				if (c.section["proxy-authorization"] && !isLoopbackAddress(host)) {
-					c.log.warn("outbound.proxy_credentials_in_clear", { host });
+				c.log.warn("outbound.proxy_checks_addresses", {
+					reason: "the proxy, not outbound, resolves names and checks where they lead",
+				});
+				if (c.section["proxy-authorization"] && !isLoopbackAddress(new URL(proxy).hostname)) {
+					c.log.warn("outbound.proxy_credentials_in_clear", {
+						reason: "the proxy's credentials go in the clear",
+					});
 				}
 			}
 			const present = proxyVariables.filter((name) => (process.env[name] ?? "") !== "");

@@ -204,6 +204,8 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 		expect(warned().slice(from), host).toEqual(["outbound.proxy_checks_addresses"]);
 	}
 	expect(JSON.stringify(recorded.lines())).not.toContain("dGVzdA==");
+	// Nor the proxy itself: a log line carries no value.
+	expect(JSON.stringify(recorded.lines())).not.toMatch(/proxy\.example|127\.|localhost|::1/);
 });
 
 it("warns at each boot that names plain-internal pairs, telling their count alone", async () => {
