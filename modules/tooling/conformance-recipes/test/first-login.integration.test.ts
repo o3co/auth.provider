@@ -17,7 +17,7 @@ import {
 
 const workspace = join(import.meta.dirname, "..", "..", "..", "..");
 const recipe = join(workspace, "docs", "recipe-first-login.md");
-const origin = "http://localhost:8080";
+const origin = "http://127.0.0.1:8080";
 const callback = "http://localhost:3000/callback";
 const password = "correct horse battery";
 const verifier = "v".repeat(43);
