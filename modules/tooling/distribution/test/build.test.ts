@@ -40,6 +40,7 @@ beforeAll(() => {
 		`import { kernel } from "./contract.ts";\nexport default kernel;\n`,
 	);
 	write("modules/base/kernel/config.example", "kernel {}\n");
+	write("modules/feature/app/entry.example", 'type = "app"\n');
 	write("modules/base/kernel/trial.conf", "kernel {}\n");
 	write("modules/base/kernel/README.md", "# kernel\n\n## Deployment\n- A server it reaches.\n");
 	write("modules/base/kernel/reference.conf", "kernel {\n}\n");
@@ -134,7 +135,7 @@ it("builds each shipped bundle: its members' files built and named publicly, the
 	expect(feature.peerDependenciesMeta).toBeUndefined();
 });
 
-it("writes the index a bundle asks for: each shipped member's manifest, public names and section example", () => {
+it("writes the index a bundle asks for: each shipped member's manifest, public names, section example and entry sample", () => {
 	const out = join(root, "dist-index");
 	const repository = "https://github.com/o3co/auth.provider";
 	buildBundles({ bundles: bundles(), release: { version: "0.18.0", repository }, out });
@@ -148,6 +149,7 @@ it("writes the index a bundle asks for: each shipped member's manifest, public n
 			package: "@o3co/auth-provider-feature",
 			entry: "@o3co/auth-provider-feature/app",
 			manifest: expect.objectContaining({ name: "@mod/app", kind: "feature" }),
+			sample: 'type = "app"\n',
 		},
 		{
 			name: "@mod/kernel",
