@@ -56,14 +56,14 @@ const reader = defineModule(
 	],
 );
 
-/** The assembly of a composition with dpop, its section where given, and the issuer at `at`. */
+/** The assembly of a composition with dpop, its section where given (else asking no nonce), and the issuer at `at`. */
 const assembly = (dpopSection?: unknown, spent = spentInMemory(), at = issuer) => ({
 	modules: [http, issuerModule, senderBindingModule, dpop, reader, spent.module],
 	config: {
 		...kernelConfig(),
 		...httpConfig(),
 		...issuerConfig({ url: at }),
-		...(dpopSection === undefined ? {} : { dpop: dpopSection }),
+		dpop: dpopSection ?? { nonce: { required: "never" } },
 	},
 	runtime,
 });
@@ -120,10 +120,8 @@ describe("dpop", () => {
 	});
 
 	it("names among the issuer's metadata the algorithms it takes proofs in", async () => {
-		expect(await publishedAlgorithms({ algorithms: ["ES256", "EdDSA"] })).toEqual([
-			"ES256",
-			"EdDSA",
-		]);
+		const section = { algorithms: ["ES256", "EdDSA"], nonce: { required: "never" } };
+		expect(await publishedAlgorithms(section)).toEqual(["ES256", "EdDSA"]);
 	});
 
 	it("names all four algorithms by default", async () => {
@@ -142,7 +140,15 @@ describe("dpop", () => {
 		]) {
 			await expect(boot(refused), JSON.stringify(refused)).rejects.toThrow();
 		}
-		expect((await boot({ "proof-window": "5m" })).get(senderBinding)).toBeDefined();
+		const never = { required: "never" };
+		expect((await boot({ "proof-window": "5m", nonce: never })).get(senderBinding)).toBeDefined();
+	});
+
+	it("asks a nonce at the token endpoint by default, so boot needs the nonce's secret", async () => {
+		const refused = await boot({}).catch((error: unknown) => error);
+		expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["dpop.nonce.secret"]);
+		const secret = randomBytes(32).toString("base64");
+		await expect(boot({ nonce: { secret } })).resolves.toBeDefined();
 	});
 
 	it("reads none from a request without a proof, spending nothing", async () => {

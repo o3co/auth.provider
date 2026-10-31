@@ -24,7 +24,7 @@ const section = z.strictObject({
 		.strictObject({
 			required: z
 				.enum(["never", "as", "as+rs"])
-				.prefault("never")
+				.prefault("as")
 				.describe(
 					"Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources.",
 				),
