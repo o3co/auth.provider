@@ -305,6 +305,7 @@ What each module contains is described by that module's contract card (each modu
 | Repo layout (where packages go) | setting | the workspace definition |
 | Generating a project: the command, the plan, and where the packages come from (the workspace or a bundle's index) | contract | create-app |
 | A generated project's files (a listed app, or a deployment of full or a pattern: the module list, configuration gathered from the modules' fragments, env and local examples, Dockerfile, README) | template | app-output |
+| A generated app's entries (its start and the scripts its composed modules call for: how each boots, refuses, checks 0.17's variables, writes and stops) | template | app-entries |
 | The patterns: each one's use, selection, conformance areas and card, and the operator's choice over them | template | create-app (`patterns`) |
 | The generated references: the configuration reference, each package's `reference.conf`, the audit event reference and the route reference | contract | references |
 | What is composed together by default (a feature's wiring, the bridges between features), a selection's composition (what it needs to run, each axis's adapter), the full template, and the features that opt in | contract | combinations |
