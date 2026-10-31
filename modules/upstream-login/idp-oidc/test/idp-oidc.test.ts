@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { type Algorithm, externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
+import { withinHosts } from "@mod/host-entries";
 import {
 	assemble,
 	contract,
@@ -20,7 +21,7 @@ import {
 	outbound,
 } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
-import { type OutboundRefusals, outboundRefusals, withinHosts } from "@mod/outbound-policy";
+import { type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
 import { testTlsOptions } from "@mod/tls-options/testing";
 import {
 	type AuthorizationStart,
@@ -638,6 +639,17 @@ describe("idp-oidc", () => {
 		}
 		const taken = ["idp-cdn.example", ".idp-cdn.example", "192.0.2.1", "[2001:db8::1]"];
 		expect(settings.parse({ ...base, "endpoint-hosts": taken })["endpoint-hosts"]).toEqual(taken);
+	});
+
+	it("takes an endpoint-hosts name in another script, its marks included, and refuses an address with a zone", () => {
+		const settings = settingsOf(asymmetric, policyRefusing());
+		const base = { issuer, "client-id": "c", "client-secret": "s" };
+		expect(settings.parse({ ...base, "endpoint-hosts": ["कि.example"] })["endpoint-hosts"]).toEqual(
+			["कि.example"],
+		);
+		const issues = settings.safeParse({ ...base, "endpoint-hosts": ["fe80::1%eth0"] }).error
+			?.issues;
+		expect(issues?.map((i) => i.path)).toEqual([["endpoint-hosts", 0]]);
 	});
 
 	it("refuses at boot, under issuer and naming it, a description's token endpoint or key set outbound's policy refuses", async () => {

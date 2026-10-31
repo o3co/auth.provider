@@ -167,7 +167,7 @@ describe("plain-internal in the settings", () => {
 		expect(policySettings.parse({ "allow-any-public": true })["plain-internal"]).toEqual([]);
 		const both = policySettings.safeParse({
 			"allow-any-public": true,
-			"plain-loopback": ["LOCALHOST.:8080"],
+			"plain-loopback": ["LOCALHOST:8080"],
 			"plain-internal": ["localhost:8080"],
 		});
 		expect(both.success).toBe(false);

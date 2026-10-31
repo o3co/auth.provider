@@ -13,7 +13,7 @@
 - `credentialHeaderRefusal` (`credential`'s): why a credential may not go as a header named so.
 - `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` (`plainInternal` and `browsedRefusal` too), `outbound.credentials` and `outbound.limits` from the section.
 - A JSON call: `postJson` posts a body as JSON, asking JSON back, its credential under the credential rule below (a Bearer token, or as given in the header named); a send that fails throws what its caller makes of `sendFailureOf`'s kind: the policy's reason, a `failure` (Vocabulary), or `no-answer`. `jsonObjectOf` reads one frozen UTF-8 object, at the status named, `200` by default.
-- Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, `max-lookups`, `resolution`, the proxy, `direct-hosts` (a host list, as `outbound-policy` reads one) and `plain-ipv4`; its keys are in the configuration reference.
+- Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, `max-lookups`, `resolution`, the proxy, `direct-hosts` (a host list, as `host-entries` reads one) and `plain-ipv4`; its keys are in the configuration reference.
 
 ## Invariants
 - Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
@@ -27,7 +27,7 @@
 - Names resolve as the system does, hosts file included: by default (`resolution`: `helper`) in helper processes, a helper that does not start refusing boot; with `in-process`, here, no deadline stopping one. See the internal modules `resolver-process` and `lookups`.
 - Of those lookups, names a caller marks `outsideChosen` resolve in a pool of their own, its share as `lookups` says, so an outside party's slow names never hold every lookup. `outbound.limits` answers each caller's share (`lookupsOf`), so a caller given none refuses boot.
 - A `proxy` (an http origin alone, as the URL parser writes it, without credentials; `proxy-authorization` apart) carries every https request, but to `direct-hosts` (list internal hosts there too), by CONNECT with TLS to the destination inside. Then outbound resolves no name but the proxy's own, as one of the deployment's lookups: it checks the name and any address in the URL; the proxy checks where a name resolves. A refused tunnel is `proxy-refused`.
-- Plain http, a `plain-loopback` or `plain-internal` pair's, never goes through the proxy: outbound resolves the name and checks every address itself, a `plain-loopback` pair's by `isLoopbackAddress`.
+- Plain http, a `plain-loopback` or `plain-internal` pair's, never goes through the proxy: outbound resolves the name and checks every address itself.
 - For plain http taken as such a pair's (signed material too), to a host and port `plain-ipv4` names, the name is resolved to IPv4 addresses alone: every one of those is checked by the policy, the first reached, and an IPv6 one is neither checked nor reached. Other ports of the name, https to it, and plain http not taken as the pair's resolve every family.
 - A `plain-ipv4` entry names, by name and once, a pair `plain-loopback` or `plain-internal` names; else boot is refused, naming neither host nor port.
 - Each start warns of each list it is given by the entries' count alone, never a host: `outbound.plain_internal` (what goes to those pairs, passwords, tokens, credentials and keys, is in the clear), `outbound.plain_loopback`, `outbound.plain_ipv4`, `outbound.internal_hosts`.
@@ -36,7 +36,7 @@
 - Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, either case) are never read; with one set and no `proxy`, boot is refused, naming the variable alone, unless `direct-despite-proxy` is set.
 
 ## Depends on
-- `kernel`, `tls-options` (the TLS floor), `outbound-policy` (also `withinHosts`, to compare `plain-ipv4`'s hosts), `address-reach` (`isLoopbackAddress`), `url-setting` (the proxy's origin)
+- `kernel`, `tls-options` (the TLS floor), `outbound-policy`, `host-entries` (also `hostEntryOf` and `withinHosts`, to read and compare `plain-ipv4`'s pairs), `address-reach` (`isLoopbackAddress`), `url-setting` (the proxy's origin)
 
 ## Vocabulary
 - failure: why outbound is unavailable, for a caller to log by, with no value and no body: `timeout` (the deadline came), `too-large` (a body or headers past the cap), `unreachable` (no address, no connection, or the connection lost), `unsupported-answer` (a 101 or an encoded answer), `busy` (past `max-concurrent`), `proxy-refused`.

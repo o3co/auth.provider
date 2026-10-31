@@ -80,7 +80,7 @@ flowchart LR
 
 | Package | Kind | Depends on |
 |---|---|---|
-| `@mod/mtls` | feature | `@mod/client-certificate`, `@mod/issuer`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/sender-binding` |
+| `@mod/mtls` | feature | `@mod/client-certificate`, `@mod/host-entries`, `@mod/issuer`, `@mod/kernel`, `@mod/outbound`, `@mod/sender-binding` |
 
 ### delegation
 
@@ -100,6 +100,7 @@ flowchart LR
 | `@mod/config-files` | foundation | `@mod/kernel` |
 | `@mod/cookies` | foundation | `@mod/http`, `@mod/kernel`, `@mod/request-source` |
 | `@mod/external-jwt` | foundation | `@mod/kernel`, `@mod/keys`, `@mod/outbound` |
+| `@mod/host-entries` | foundation | `@mod/address-reach` |
 | `@mod/http` | foundation | `@mod/client-certificate`, `@mod/kernel`, `@mod/request-source`, `@mod/url-setting` |
 | `@mod/http-ops` | feature | `@mod/http`, `@mod/kernel`, `@mod/metrics` |
 | `@mod/kernel` | common | none |
@@ -107,8 +108,8 @@ flowchart LR
 | `@mod/labels` | foundation | none |
 | `@mod/mail` | foundation | `@mod/kernel` |
 | `@mod/metrics` | foundation | `@mod/kernel` |
-| `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/tls-options`, `@mod/url-setting` |
-| `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/kernel`, `@mod/url-setting` |
+| `@mod/outbound` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/outbound-policy`, `@mod/tls-options`, `@mod/url-setting` |
+| `@mod/outbound-policy` | foundation | `@mod/address-reach`, `@mod/host-entries`, `@mod/kernel`, `@mod/url-setting` |
 | `@mod/rate-limit` | foundation | `@mod/audit`, `@mod/http`, `@mod/kernel`, `@mod/metrics`, `@mod/request-source`, `@mod/store` |
 | `@mod/records` | capability | `@mod/kernel`, `@mod/store` |
 | `@mod/request-source` | foundation | `@mod/address-reach`, `@mod/client-certificate`, `@mod/kernel` |
@@ -158,7 +159,7 @@ flowchart LR
 | `@mod/client-allowance` | feature | `@mod/clients`, `@mod/kernel` |
 | `@mod/client-assertion` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/token-endpoint`, `@mod/url-setting` |
 | `@mod/client-credentials` | feature | `@mod/client-allowance`, `@mod/grants`, `@mod/issuer`, `@mod/kernel` |
-| `@mod/clients-cimd` | feature | `@mod/client-allowance`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/refresh`, `@mod/url-setting` |
+| `@mod/clients-cimd` | feature | `@mod/client-allowance`, `@mod/client-documents`, `@mod/clients`, `@mod/code-grant`, `@mod/grants`, `@mod/host-entries`, `@mod/issuer`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/refresh`, `@mod/url-setting` |
 | `@mod/code-grant` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/grants`, `@mod/issuer`, `@mod/kernel`, `@mod/sender-binding`, `@mod/session`, `@mod/tokens` |
 | `@mod/consent` | feature | `@mod/audit`, `@mod/client-documents`, `@mod/clients`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session`, `@mod/url-setting` |
 | `@mod/device-grant` | feature | `@mod/audit`, `@mod/client-allowance`, `@mod/clients`, `@mod/csrf`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/rate-limit`, `@mod/request-source`, `@mod/session`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/tokens`, `@mod/url-setting` |
@@ -167,7 +168,7 @@ flowchart LR
 | `@mod/exchange-id-tokens` | feature | `@mod/clients`, `@mod/external-jwt`, `@mod/kernel`, `@mod/subject-revocation`, `@mod/token-exchange`, `@mod/users` |
 | `@mod/grants` | feature | `@mod/clients`, `@mod/http`, `@mod/kernel`, `@mod/sender-binding`, `@mod/tokens` |
 | `@mod/issuer` | feature | `@mod/http`, `@mod/kernel`, `@mod/url-setting` |
-| `@mod/jwt-bearer` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/external-jwt`, `@mod/grants`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/resource-indicators`, `@mod/sender-binding`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/users` |
+| `@mod/jwt-bearer` | feature | `@mod/client-allowance`, `@mod/clients`, `@mod/external-jwt`, `@mod/grants`, `@mod/host-entries`, `@mod/http`, `@mod/issuer`, `@mod/kernel`, `@mod/keys`, `@mod/outbound`, `@mod/resource-indicators`, `@mod/sender-binding`, `@mod/subject-revocation`, `@mod/token-endpoint`, `@mod/users` |
 | `@mod/jwt-bearer-id-tokens` | feature | `@mod/exchange-id-tokens`, `@mod/jwt-bearer`, `@mod/kernel` |
 | `@mod/jwt-bearer-users` | feature | `@mod/jwt-bearer`, `@mod/kernel`, `@mod/users` |
 | `@mod/logout` | feature | `@mod/audit`, `@mod/csrf`, `@mod/http`, `@mod/kernel`, `@mod/request-source`, `@mod/session` |
@@ -321,7 +322,7 @@ flowchart LR
 | `@mod/idp-apple` | feature | `@mod/external-jwt`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |
 | `@mod/idp-github` | feature | `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |
 | `@mod/idp-google` | feature | `@mod/external-jwt`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |
-| `@mod/idp-oidc` | feature | `@mod/external-jwt`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |
+| `@mod/idp-oidc` | feature | `@mod/external-jwt`, `@mod/host-entries`, `@mod/kernel`, `@mod/outbound`, `@mod/outbound-policy`, `@mod/upstream-client`, `@mod/upstreams`, `@mod/url-setting` |
 | `@mod/rp-logout-federation` | feature | `@mod/federation-tokens`, `@mod/kernel`, `@mod/rp-logout` |
 | `@mod/upstream-client` | feature | `@mod/external-jwt`, `@mod/kernel`, `@mod/outbound`, `@mod/upstreams`, `@mod/url-setting` |
 | `@mod/upstream-handoff` | feature | `@mod/kernel`, `@mod/login-gates`, `@mod/seal`, `@mod/session`, `@mod/upstreams` |

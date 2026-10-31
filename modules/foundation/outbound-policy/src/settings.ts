@@ -1,13 +1,9 @@
+import { hostList, pairOf } from "@mod/host-entries";
 import { setting } from "@mod/kernel";
 import { z } from "zod";
-import { isHostEntry, isListEntry, isPair, pairOf } from "./policy.ts";
+import { isListEntry, isPair } from "./policy.ts";
 
-const hostEntries = z.array(z.string().refine(isHostEntry, "not a host")).prefault([]);
-
-/** A list of hosts an operator writes: hosts, or `.name` for the name and the names under it. */
-export const hostList = z
-	.array(z.string().refine(isListEntry, "not a host, or a name led by a dot"))
-	.prefault([]);
+const hostEntries = z.array(z.string().refine(isListEntry, "not a host")).prefault([]);
 
 /** The destination policy and caps an operator sets, the keys a section takes as its own. */
 export const policySettings = z

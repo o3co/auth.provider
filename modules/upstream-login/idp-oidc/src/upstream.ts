@@ -1,11 +1,11 @@
 import type { ExternalJwt } from "@mod/external-jwt";
+import { withinHosts } from "@mod/host-entries";
 import type { Clock, Log } from "@mod/kernel";
 import { DestinationRefused, jsonObjectOf, type Outbound } from "@mod/outbound";
 import {
 	browsedRefusalText,
 	destinationRefusal,
 	type OutboundRefusals,
-	withinHosts,
 } from "@mod/outbound-policy";
 import {
 	answerOf,

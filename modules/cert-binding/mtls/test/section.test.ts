@@ -78,6 +78,18 @@ it("takes revocation hosts as outbound reads a host list, and refuses anything e
 	}
 });
 
+it("takes a revocation host in another script, its marks included, and refuses an address with a zone", () => {
+	const parsedWith = (hosts: readonly string[]) =>
+		section.safeParse({
+			mode: "pki",
+			anchors: ["x"],
+			"min-rsa-bits": 3072,
+			revocation: { mode: "crl", "on-unavailable": "reject", hosts },
+		}).success;
+	expect(parsedWith(["कि.example"])).toBe(true);
+	expect(parsedWith(["fe80::1%eth0"])).toBe(false);
+});
+
 it("reads each revocation time written with its unit, within its bounds, and refuses a bare number", () => {
 	const takes = (more: Record<string, unknown>) =>
 		section.safeParse({

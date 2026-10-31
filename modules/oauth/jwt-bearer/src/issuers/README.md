@@ -35,7 +35,7 @@ Internal module of `jwt-bearer`: the trusted issuers, each entry of the section'
 - Boot is refused on a delegated issuer named twice, that no module checks or two do (naming them), that is an entry's issuer, or that a self-issued prefix starts, so no assertion is read by two rules; each at its place (`jwt-bearer.delegated-issuers.<i>`). And on assertions delegated for an issuer the list does not name.
 
 ## Depends on
-- `external-jwt` (key sources), `clients` (the registered clients), `client-allowance` (a client's grants), `keys` (reading a PEM), `outbound-policy` (the key set's host), the package's contract and `signers`, `kernel` (the build context)
+- `external-jwt` (key sources), `clients` (the registered clients), `client-allowance` (a client's grants), `keys` (reading a PEM), `host-entries` (the key set's host), the package's contract and `signers`, `kernel` (the build context)
 
 ## Vocabulary
 - Trusted issuer: an issuer whose assertions are accepted.

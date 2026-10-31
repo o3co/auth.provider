@@ -1,9 +1,9 @@
 import { clientAllowance } from "@mod/client-allowance";
 import { clients } from "@mod/clients";
 import { type ExternalJwt, externalJwt, type Policy } from "@mod/external-jwt";
+import { withinHosts } from "@mod/host-entries";
 import { type BuildContext, type Refusal, setting } from "@mod/kernel";
 import { publicPem } from "@mod/keys";
-import { withinHosts } from "@mod/outbound-policy";
 import { z } from "zod";
 import { conditionsSetting } from "../conditions/conditions.ts";
 import {

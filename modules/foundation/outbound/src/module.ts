@@ -1,9 +1,9 @@
 import { isLoopbackAddress } from "@mod/address-reach";
+import { hostList } from "@mod/host-entries";
 import { type BuildContext, contract, defineModule } from "@mod/kernel";
 import {
 	type CredentialPolicy,
 	credentialPolicy,
-	hostList,
 	type Narrower,
 	type OutboundLimits,
 	type OutboundRefusals,
