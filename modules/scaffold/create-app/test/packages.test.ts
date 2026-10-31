@@ -5,6 +5,13 @@ import { expect, it } from "vitest";
 import { packagesFor } from "../src/packages.ts";
 import { workspacePackages } from "../src/project.ts";
 
+/** A member's declarations for the guide, as its manifest holds them. */
+const declared = {
+	name: "@mod/audit-http",
+	adapts: "@mod/audit",
+	registersAs: "http",
+	asks: ["Audit events posted to a receiver (`audit-http.url`)."],
+};
 /** An index as distribution writes it into a bundle: members' manifests, public names and examples. */
 const indexed = () => {
 	const file = join(mkdtempSync(join(tmpdir(), "create-app-")), "index.json");
@@ -25,6 +32,7 @@ const indexed = () => {
 				entry("tokens", "oauth"),
 				entry("authorize", "oauth", 'authorize {\n  login-page = "REPLACE-LOGIN-PAGE"\n}\n'),
 				{ ...entry("redis", "store-redis"), deployment: true },
+				{ ...entry("audit-http", "audit-receivers"), manifest: declared },
 			],
 		}),
 	);
@@ -98,3 +106,14 @@ it("points at each composed module's card, section defaults and Deployment secti
 	]);
 	expect(linked.release()).toMatchObject({ repository: "https://github.com/o3co/auth.provider" });
 });
+
+it("gives what each module declares for the guide, from the index's manifests or the workspace's", () => {
+	expect(
+		packagesFor({}, indexed()).asks?.(["@mod/audit-http", "@mod/tokens", "@mod/nowhere"]),
+	).toEqual([declared, { name: "@mod/tokens" }]);
+	const root = join(import.meta.dirname, "..", "..", "..", "..");
+	const linked = packagesFor({ workspace: root }, join(tmpdir(), "no-index.json"));
+	expect(linked.asks?.(["@mod/audit-stdout"])).toEqual([
+		{ name: "@mod/audit-stdout", adapts: "@mod/audit", registersAs: "stdout" },
+	]);
+}, 30_000);

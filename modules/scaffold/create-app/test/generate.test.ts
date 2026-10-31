@@ -134,11 +134,9 @@ it("reads its fragments' scalars from env and writes their lists locally, with a
 	expect(guide).toContain(
 		"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
 	);
-	// Its store is kept in memory: accepted, one instance, and Redis named for more.
+	// Its store is kept in memory: accepted, one instance. The deployment's line is kernel's to word.
 	expect(guide).toContain("the memory store accepted (`store.accept-volatile = true`)");
-	expect(guide).toContain(
-		"- `kernel.deployment`: `single`: the store is kept in this process, so the deployment runs as one instance; list `@mod/redis` to keep it in Redis and run several.",
-	);
+	expect(guide).toContain("- `kernel.deployment`: `single`");
 });
 
 it("promises no http, port or health check to a listed app that composes no http", async () => {
