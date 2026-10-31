@@ -7,7 +7,6 @@ import { composed, full } from "@mod/combinations";
 import { describe, expect, it, vi } from "vitest";
 import { generate, patterns } from "../src/contract.ts";
 import { generatePattern } from "../src/pattern.ts";
-import { auditReceiversLine, auditReceiversOf, chosenLines } from "../src/patterns/chosen.ts";
 import { type Choice, selectionOf } from "../src/patterns/pattern.ts";
 import { patternNamed } from "../src/patterns/patterns.ts";
 import {
@@ -41,37 +40,17 @@ const modulesOf = (name: string, choice?: Choice) =>
 	composed(selectionOf(patternNamed(name), choice));
 const cardFile = (name: string) => join(import.meta.dirname, "..", "src", "patterns", `${name}.md`);
 
-it("names in audit.receivers each composed adapter's receiver, and audit's own log only when none is", () => {
-	const of = (modules: readonly string[]) => auditReceiversOf((m) => modules.includes(m));
-	expect(of(["@mod/audit-stdout"])).toEqual(["stdout"]);
-	expect(of(["@mod/audit-http", "@mod/audit-stdout"])).toEqual(["http", "stdout"]);
-	expect(of([])).toEqual(["log"]);
-	expect(chosenLines(["@mod/audit", "@mod/audit-stdout"])).toContain(
-		"- Audit events named in `audit.receivers = [stdout]`.",
-	);
-	expect(chosenLines(["@mod/audit"])).toContain(
-		"- Audit events named in `audit.receivers = [log]`.",
-	);
-	// The README's value says the same.
-	expect(auditReceiversLine(["@mod/audit-stdout"])).toBe("`stdout`");
-	expect(auditReceiversLine(["@mod/audit-http", "@mod/audit-stdout"])).toBe("`http`, `stdout`");
-	expect(auditReceiversLine([])).toBe("`log`, audit's own, writing events to the log");
-});
-
-it("tells a federation app taking users from a ledger to give it the lookup by subject", () => {
-	const ledger =
-		"- A federation login finds its user through the ledger's lookup by subject (`users-http.subject-url`), or by upstream identity (`users-http.upstream-url`).";
-	expect(chosenLines(["@mod/federation", "@mod/users-http"])).toContain(ledger);
-	expect(chosenLines(["@mod/users-http"])).not.toContain(ledger);
-});
-
-it("tells a federation app whose logins a second factor holds to set the page they go on at", () => {
-	const held =
-		"- A federation login a second factor holds goes on at `federation.held-page`, a page on the public origin; without it, the browser stops at the factor's answer.";
-	expect(chosenLines(["@mod/federation", "@mod/mfa-flows"])).toContain(held);
-	expect(chosenLines(["@mod/federation"])).not.toContain(held);
-	expect(chosenLines(["@mod/mfa-flows"])).not.toContain(held);
-});
+it("writes in a pattern's guide what each composed module declares it asks, audit's receiver its own where no adapter is composed", async () => {
+	const target = join(await mkdtemp(join(tmpdir(), "create-app-")), "app");
+	const root = join(import.meta.dirname, "..", "..", "..", "..");
+	await generatePattern({ target, template: "simple-web", workspace: root });
+	const guide = readFileSync(join(target, "README.md"), "utf8");
+	expect(guide).toContain("- Audit events named in `audit.receivers = [log]`.");
+	expect(guide).toContain("- `log`: audit's own receiver, writing events to the log.");
+	expect(guide).toContain("- `tokens.revocation`: `denylist`, or `unsupported`");
+	// kernel's line, once: the template holds none of its own.
+	expect(guide.split("- `kernel.deployment`: ")).toHaveLength(2);
+}, 60_000);
 
 // http-ops comes only through its bridge to http: a manifest gone wrong would drop liveness,
 // readiness and the two instruments without a word.
