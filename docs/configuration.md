@@ -762,7 +762,7 @@ From `@mod/tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `2s` to `1d` in whole seconds. |
+| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds. |
 | `tokens.revocation` | denylist \| unsupported |  | yes | `TOKENS_REVOCATION` | `denylist` | Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported. |
 | `tokens.issuance-timeout` | string | `10s` |  |  |  | How long the issuance policies may take together, from `1s` to `1m`; past it, the issuance is unavailable. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |
