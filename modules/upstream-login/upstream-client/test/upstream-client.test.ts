@@ -1,11 +1,12 @@
 import { Unavailable } from "@mod/kernel";
+import type { Outbound, OutboundRequest } from "@mod/outbound";
 import { UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { basicAuthorization } from "../src/basic.ts";
 import {
 	answerOf,
 	authorizationUrl,
-	basicAuthorization,
 	clientSetting,
 	credentialSetting,
 	endpointSetting,
@@ -14,6 +15,7 @@ import {
 	refreshAnswerOf,
 	scopeSetting,
 	tokenAnswerOf,
+	tokenPostOf,
 } from "../src/contract.ts";
 
 const start = {
@@ -312,5 +314,64 @@ describe("upstream-client", () => {
 		expect(endSessionUrl("https://idp.example/logout", { state: "st", clientId: "cid" })).toBe(
 			"https://idp.example/logout?state=st&client_id=cid",
 		);
+	});
+});
+
+describe("a token post", () => {
+	/** An outbound that keeps every request it is asked for and answers an empty JSON object. */
+	const recorded = () => {
+		const asked: { url: string; request: OutboundRequest | undefined; narrower: unknown }[] = [];
+		const outbound: Outbound = {
+			fetch: async (url, request, narrower) => {
+				asked.push({ url, request, narrower });
+				return { status: 200, headers: new Map(), body: new TextEncoder().encode("{}") };
+			},
+		};
+		return { outbound, asked };
+	};
+	const hosts = { hosts: ["idp.example"] };
+
+	it("sends the secret as HTTP Basic, the grant alone in the form", async () => {
+		const { outbound, asked } = recorded();
+		const post = tokenPostOf(
+			outbound,
+			"https://idp.example/token",
+			{ id: "cid", auth: "basic", secret: async () => "s3cr:et" },
+			hosts,
+		);
+		await post({ grant_type: "refresh_token", refresh_token: "r" });
+		expect(asked).toEqual([
+			{
+				url: "https://idp.example/token",
+				narrower: hosts,
+				request: {
+					method: "POST",
+					headers: {
+						"content-type": "application/x-www-form-urlencoded",
+						accept: "application/json",
+					},
+					body: "grant_type=refresh_token&refresh_token=r",
+					credential: basicAuthorization("cid", "s3cr:et"),
+				},
+			},
+		]);
+	});
+
+	it("sends the ID and secret in the form after the grant, asking for the secret at each post", async () => {
+		const { outbound, asked } = recorded();
+		let signed = 0;
+		const post = tokenPostOf(
+			outbound,
+			"https://idp.example/token",
+			{ id: "cid", auth: "form", secret: async () => `jwt-${++signed}` },
+			hosts,
+		);
+		await post({ grant_type: "authorization_code", code: "c" });
+		await post({ grant_type: "refresh_token", refresh_token: "r" });
+		expect(asked.map((a) => a.request?.body)).toEqual([
+			"grant_type=authorization_code&code=c&client_id=cid&client_secret=jwt-1",
+			"grant_type=refresh_token&refresh_token=r&client_id=cid&client_secret=jwt-2",
+		]);
+		expect(asked.every((a) => a.request?.credential === undefined)).toBe(true);
 	});
 });

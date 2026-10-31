@@ -1,5 +1,5 @@
 import { createConnection, createServer, type Socket } from "node:net";
-import { type Command, commandOf, frames, type Reply } from "./resp.ts";
+import { type Command, commandOf, type Frame, frames, type Reply } from "./resp.ts";
 
 export type { Command, Reply } from "./resp.ts";
 
@@ -276,6 +276,61 @@ export async function startRelay(options: RelayOptions) {
 		}
 	};
 
+	/** Resolves each observer of `command` whose answer, `frame`, came out as it asked. */
+	const observe = (command: Command, frame: Frame, execution: (m: Match) => Execution) => {
+		const succeededBy = (m: Match) => m.succeeded(frame.value);
+		for (const o of observers.filter((x) => x.match.request(command))) {
+			if (succeededBy(o.match) === (o.outcome === "succeeded")) {
+				observers = observers.filter((x) => x !== o);
+				o.done.resolve(execution(o.match));
+			}
+		}
+	};
+	/**
+	 * Drops `frame`, the answer `i` of those `read`, where a drop matches it and it shows a write,
+	 * cutting `link`; true where it did. A matched answer showing no write ends the drop as failed.
+	 */
+	const dropIfMatched = (
+		link: Link,
+		command: Command,
+		frame: Frame,
+		read: readonly Frame[],
+		i: number,
+		execution: (m: Match) => Execution,
+	): boolean => {
+		const succeededBy = (m: Match) => m.succeeded(frame.value);
+		const drop = drops.find(
+			(d) =>
+				!d.ended &&
+				(d.fired
+					? (d.resends?.(d.fired.command, command) ?? false)
+					: d.rule.match.request(command)),
+		);
+		if (drop && succeededBy(drop.rule.match)) {
+			const later = read.slice(i + 1);
+			const collateral = link.asked.map((x, at) => ({
+				command: x.command,
+				answered: at < later.length,
+			}));
+			const dropped = { ...execution(drop.rule.match), collateral };
+			cut(link);
+			if (drop.fired) drop.resent.push(dropped);
+			else {
+				drop.fired = dropped;
+				drop.rule.done.resolve(dropped);
+				if (!drop.resends) drop.ended = true;
+			}
+			return true;
+		}
+		if (drop && !drop.fired) {
+			const why = `the matched answer showed no write (${command.name}), so no fault happened`;
+			failures.push(why);
+			drop.ended = true;
+			drop.rule.done.reject(new Error(why));
+		}
+		return false;
+	};
+
 	const fromServer = (link: Link, chunk: Buffer, reader: ReturnType<typeof frames>) => {
 		let read: ReturnType<typeof reader.push>;
 		try {
@@ -290,55 +345,19 @@ export async function startRelay(options: RelayOptions) {
 			if (!asked) return fail(link, "an answer to no request");
 			const { command, queued } = asked;
 			const at = performance.now();
-			const succeededBy = (m: Match) => m.succeeded(frame.value);
 			const execution = (m?: Match): Execution => ({
 				connection: link.id,
 				command,
 				reply: frame.value,
-				succeeded: m ? succeededBy(m) : false,
+				succeeded: m ? m.succeeded(frame.value) : false,
 				at,
 			});
 			executions.push(execution());
-			if (!queued) {
-				for (const o of observers.filter((x) => x.match.request(command))) {
-					if (succeededBy(o.match) === (o.outcome === "succeeded")) {
-						observers = observers.filter((x) => x !== o);
-						o.done.resolve(execution(o.match));
-					}
-				}
-			}
+			if (!queued) observe(command, frame, execution);
 			if (cutHere) continue;
-			if (!queued) {
-				const drop = drops.find(
-					(d) =>
-						!d.ended &&
-						(d.fired
-							? (d.resends?.(d.fired.command, command) ?? false)
-							: d.rule.match.request(command)),
-				);
-				if (drop && succeededBy(drop.rule.match)) {
-					const later = read.slice(i + 1);
-					const collateral = link.asked.map((x, at) => ({
-						command: x.command,
-						answered: at < later.length,
-					}));
-					const dropped = { ...execution(drop.rule.match), collateral };
-					cut(link);
-					cutHere = true;
-					if (drop.fired) drop.resent.push(dropped);
-					else {
-						drop.fired = dropped;
-						drop.rule.done.resolve(dropped);
-						if (!drop.resends) drop.ended = true;
-					}
-					continue;
-				}
-				if (drop && !drop.fired) {
-					const why = `the matched answer showed no write (${command.name}), so no fault happened`;
-					failures.push(why);
-					drop.ended = true;
-					drop.rule.done.reject(new Error(why));
-				}
+			if (!queued && dropIfMatched(link, command, frame, read, i, execution)) {
+				cutHere = true;
+				continue;
 			}
 			send(link, "down", frame.bytes);
 		}

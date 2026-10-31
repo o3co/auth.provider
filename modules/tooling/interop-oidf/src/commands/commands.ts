@@ -17,12 +17,15 @@ export type Command = (
 	},
 ) => Promise<{ readonly stdout: string; readonly stderr?: string }>;
 
+/** The most a command may write to either stream before it is stopped. */
+const largestCommandOutputBytes = 64 * 1024 * 1024;
+
 /** The system's commands, killed past their time or at the deadline. */
 export const systemCommand: Command = async (cmd, args, options) => {
 	const { stdout, stderr } = await promisify(execFile)(cmd, [...args], {
 		timeout: options.timeoutMs,
 		killSignal: "SIGKILL",
-		maxBuffer: 64 * 1024 * 1024,
+		maxBuffer: largestCommandOutputBytes,
 		...(options.signal ? { signal: options.signal } : {}),
 		...(options.env ? { env: options.env } : {}),
 		...(options.cwd ? { cwd: options.cwd } : {}),

@@ -205,13 +205,15 @@ export interface Asking {
 
 /** The most pnpm may answer with, for one setting. */
 const answerBytes = 64 * 1024;
+/** How long pnpm is given to answer for one setting, where the caller names no time. */
+const settingTimeoutMs = 10_000;
 
 /**
  * A setting of pnpm's in the project, as it reads its own and the operator's configuration; none
  * where unset. What pnpm says besides its answer is never passed on: a setting may hold a secret.
  */
 function configIn(project: string, key: string, asking: Asking): string | undefined {
-	const timeout = asking.timeoutMs ?? 10_000;
+	const timeout = asking.timeoutMs ?? settingTimeoutMs;
 	let value: string;
 	try {
 		value = execFileSync(asking.pnpm ?? "pnpm", ["config", "get", key], {

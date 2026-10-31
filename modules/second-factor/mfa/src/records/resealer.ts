@@ -1,7 +1,15 @@
 import { isUnavailable } from "@mod/kernel";
 import type { Resealer, Seal } from "@mod/seal";
 import type { FactorStore } from "../store.ts";
-import { factorsOf, fencesOf, listKeyOf, sealContext, storedList, subjectOf } from "./records.ts";
+import {
+	type Factor,
+	factorsOf,
+	fencesOf,
+	listKeyOf,
+	sealContext,
+	storedList,
+	subjectOf,
+} from "./records.ts";
 
 /** Walks every factor list, sealing again secrets a past key sealed; ones it cannot open are left. */
 export function resealerOver(store: FactorStore, seal: Seal): Resealer {
@@ -15,6 +23,24 @@ export function resealerOver(store: FactorStore, seal: Seal): Resealer {
 			if (!isUnavailable(error)) throw error;
 			return undefined;
 		}
+	};
+	/** One factor of a list sealed again: `done` where the store took it, `left` where no key opens it, `same` otherwise. */
+	const resealFactor = async (
+		key: string,
+		subject: string,
+		factor: Factor,
+	): Promise<"done" | "left" | "same"> => {
+		const next = resealed(subject, factor.id, factor.secret);
+		if (next === undefined) return "left";
+		if (next === factor.secret) return "same";
+		const changed = await store.update(key, (current) => {
+			const all = factorsOf(current);
+			if (all.find((f) => f.id === factor.id)?.secret !== factor.secret) return undefined;
+			const moved = all.map((f) => (f.id === factor.id ? { ...f, secret: next } : f));
+			return { value: storedList(subject, moved, fencesOf(current)) };
+		});
+		const after = changed && factorsOf(changed.after).find((f) => f.id === factor.id);
+		return after?.secret === next ? "done" : "same";
 	};
 	return {
 		name: "mfa",
@@ -34,17 +60,9 @@ export function resealerOver(store: FactorStore, seal: Seal): Resealer {
 						continue;
 					}
 					for (const factor of factors) {
-						const next = resealed(subject, factor.id, factor.secret);
-						if (next === undefined) left++;
-						if (next === undefined || next === factor.secret) continue;
-						const changed = await store.update(key, (current) => {
-							const all = factorsOf(current);
-							if (all.find((f) => f.id === factor.id)?.secret !== factor.secret) return undefined;
-							const moved = all.map((f) => (f.id === factor.id ? { ...f, secret: next } : f));
-							return { value: storedList(subject, moved, fencesOf(current)) };
-						});
-						const after = changed && factorsOf(changed.after).find((f) => f.id === factor.id);
-						if (after?.secret === next) done++;
+						const outcome = await resealFactor(key, subject, factor);
+						if (outcome === "done") done++;
+						if (outcome === "left") left++;
 					}
 				}
 				cursor = page.cursor;

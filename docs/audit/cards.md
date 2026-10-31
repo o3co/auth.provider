@@ -245,7 +245,10 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 ## second-factor
 
 - `@mod/mfa` (feature, `modules/second-factor/mfa`): Owns each subject's second factors: a kind's secret, sealed, and its state.
+  - `binding` (`src/binding`): a factor begun, its pending proof, and its binding.
+  - `clearing` (`src/clearing`): a reset's clearing of a subject's factors and its mark, and a first binding refused.
   - `records` (`src/records`): how the factor lists and the claims on unique values are kept in `factorStore`, and sealed again.
+  - `standing` (`src/standing`): whether a subject's counting factors stand.
 - `@mod/mfa-binding` (feature, `modules/second-factor/mfa-binding`): Owns the contract for binding a new second factor: beginning it, judging its first proof, and writing it. The proofs asked before a first binding are another thing: `mfa-binding-proof`.
 - `@mod/mfa-binding-proof` (feature, `modules/second-factor/mfa-binding-proof`): Asks a subject with no counting second factor for another proof, such as owning a contact, before a first counting factor is bound, and gives the pass `mfa`'s `begin` takes.
 - `@mod/mfa-email` (feature, `modules/second-factor/mfa-email`): Contributes a code sent by mail as a kind of second factor (`email`), and owns how a code is mailed to the account's address, which `mfa-email-proof`'s proof before a first binding uses too.
