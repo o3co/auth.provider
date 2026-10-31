@@ -17,6 +17,8 @@ type Stop = "sessions" | "passkeys";
 
 const wellFormed = (text: unknown, max = Number.POSITIVE_INFINITY): text is string =>
 	typeof text === "string" && text.length > 0 && text.length <= max && text.isWellFormed();
+/** The most UTF-16 code units a requester may name, as the card bounds it. */
+const longestRequestedBy = 256;
 const typeOf = (error: unknown) => (error instanceof Error ? error.name : typeof error);
 
 /** The operator's reset, and the passkeys' step alone for a reset that moves the boundaries itself. */
@@ -25,7 +27,7 @@ export function resetOver(p: ResetParts): { reset: PasskeyReset; part: PasskeyRe
 		reset: async (subject, options = {}): Promise<PasskeyResetOutcome> => {
 			const { requestedBy } = options;
 			if (!wellFormed(subject)) throw new RangeError("subject");
-			if (requestedBy !== undefined && !wellFormed(requestedBy, 256)) {
+			if (requestedBy !== undefined && !wellFormed(requestedBy, longestRequestedBy)) {
 				throw new RangeError("requestedBy");
 			}
 			let failure: { readonly at: Stop; readonly error: unknown } | undefined;
