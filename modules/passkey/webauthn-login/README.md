@@ -27,7 +27,7 @@
 - A challenge made for another client is one of those refusals.
 - The audit event holds no credential id and nothing else the request sent.
 - The subject is the passkey's holder.
-- The authentication time is when the challenge was made, and is what the revocation boundary is compared with.
+- The authentication time is when the challenge was made, and is what the revocation boundary is compared with, here and as the access token's standing time at each verification.
 - Scope and audience are the client's allowance (`client-allowance`); beyond it, `invalid_scope`.
 - The access token is the client's, bound to the request's binding, with amr `pop` and the authentication time, issued through `tokens`' issuance policies without a session; a refusal starts no family. The policies are first asked once `passkeys` has taken the challenge, since only then is the holder known.
 - The amr is `pop` whatever the passkey's backup eligibility: no attestation is asked, so nothing tells how the key is kept.
