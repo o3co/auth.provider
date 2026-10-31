@@ -30,7 +30,7 @@ const bulk = (text: string) => `$${text.length}\r\n${text}\r\n`;
  * settings may change; a command named in `refused` is refused for want of permission. The check's
  * script answers as the real one reports: each command in `scripts.refused` refused in the words of
  * `scripts.wording`'s Redis, each in `scripts.keysRefusedIn` refused its key in those words, and
- * each write NOREPLICAS while `writes.noReplicas`; with
+ * each write NOREPLICAS while `writes.noReplicas`, a SET refused its key while `writes.keysRefused`; with
  * `scripts.keysRefused`, the script is refused its keys before it runs.
  */
 export function fakeRedis() {
@@ -44,7 +44,7 @@ export function fakeRedis() {
 		keysRefused: false,
 		keysRefusedIn: [] as string[],
 	};
-	const writes = { noReplicas: false };
+	const writes = { noReplicas: false, keysRefused: false };
 	/** The run id each connection's server answers, by the order the connections came: the last for any after. */
 	const servers = {
 		runIds: ["abc"],
@@ -102,6 +102,7 @@ export function fakeRedis() {
 			return "-ERR user_script:1: Script attempted to access nonexistent global variable 'cjson'\r\n";
 		}
 		if (name === "EVAL") return bulk(`${runIdOf(connection)}\n{"now":"0","entries":[],"n":1}`);
+		if (name === "SET" && writes.keysRefused) return "-NOPERM No permissions to access a key\r\n";
 		if (name === "SET" && writes.noReplicas)
 			return "-NOREPLICAS Not enough good replicas to write.\r\n";
 		if (name === "PING") return "+PONG\r\n";
