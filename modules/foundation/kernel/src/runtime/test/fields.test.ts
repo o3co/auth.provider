@@ -9,6 +9,8 @@ it("refuses, by its type, a log field taking a line's own name, and takes any ot
 	const typed: { at: string } = { at: "x" };
 	// @ts-expect-error the same, given as a value typed so
 	log.warn("e", typed);
+	// A value typed by an index signature alone, as LogFields, passes whatever it holds: the type
+	// refuses a name it can see, and the sink drops the rest.
 	const given: LogFields = { key: "k", n: 1 };
 	log.warn("e", { ...given, more: true });
 	// A union of field shapes, as a caller choosing one by its case passes.
