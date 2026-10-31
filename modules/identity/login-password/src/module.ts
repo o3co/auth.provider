@@ -10,6 +10,9 @@ import { z } from "zod";
 import events from "./audit-events.ts";
 import { answer, loginWith, proves } from "./login.ts";
 
+/** An identifier's first wait past its failed attempts, doubled after each. */
+const firstWaitMs = 1000;
+
 const section = z.strictObject({
 	attempts: z
 		.number()
@@ -72,10 +75,10 @@ export default defineModule(
 			const window = { limit: c.section.attempts, ms: c.section.window * 1000 };
 			const budgets = await c.get(lockouts);
 			const windowMs = c.section["account-window"] * 1000;
-			// Waits double from a second to the longest; no budget or hard limit ever holds one for good.
+			// Waits double from the first to the longest; no budget or hard limit ever holds one for good.
 			const policy: LockoutPolicy = {
 				threshold: c.section["account-attempts"],
-				backoffMs: 1000,
+				backoffMs: firstWaitMs,
 				maxBackoffMs: c.section["account-max-wait"] * 1000,
 				budget: Number.MAX_SAFE_INTEGER,
 				budgetWindowMs: windowMs,
