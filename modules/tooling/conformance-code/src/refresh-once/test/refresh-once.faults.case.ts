@@ -13,7 +13,7 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import { familyAt, faultScene, on, refreshAt, said } from "../../faults/test/faults.ts";
+import { familyAt, faultScene, on, oneWrite, refreshAt, said } from "../../faults/test/faults.ts";
 import { familyRead, isStoreOperation, rotationFrom, sessionRead } from "../../faults/test/wire.ts";
 
 const scene = faultScene({ refresh: {} });
@@ -214,9 +214,10 @@ describe("a refresh token rotated once under faults", () => {
 			expect(said(winner)).toEqual(issued);
 			second.release();
 			expect(said(await atB)).toEqual(refused);
-			// Both rotations reached Redis on what they read; only the first took effect.
-			expect(a.relay.executions(rotationFrom(token))).toHaveLength(1);
-			expect(b.relay.executions(rotationFrom(token))).toHaveLength(1);
+			// Both rotations reached Redis on what they read; only the first took effect, b's never.
+			oneWrite(a.relay.executions(rotationFrom(token)));
+			oneWrite(b.relay.executions(rotationFrom(token)));
+			expect(b.relay.executions(rotationFrom(token)).some((e) => e.succeeded)).toBe(false);
 			expect(
 				successes(a, rotationFrom(token)).length + successes(b, rotationFrom(token)).length,
 			).toBe(1);

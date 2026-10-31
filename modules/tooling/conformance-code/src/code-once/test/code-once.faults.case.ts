@@ -15,7 +15,7 @@ import {
 	successes,
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
-import { type Code, codeAt, on, redeemAt, said } from "../../faults/test/faults.ts";
+import { type Code, codeAt, on, oneWrite, redeemAt, said } from "../../faults/test/faults.ts";
 import { codeNoted, codeRecord, codeUse, isStoreOperation } from "../../faults/test/wire.ts";
 
 const refused = [400, "invalid_grant"];
@@ -198,9 +198,10 @@ describe("an authorization code redeemed once under faults", () => {
 			expect(said(await atA)).toEqual(issued);
 			second.release();
 			expect(said(await atB)).toEqual(refused);
-			// Both uses reached Redis on what they read; only the first took effect.
-			expect(a.relay.executions(codeUse(c))).toHaveLength(1);
-			expect(b.relay.executions(codeUse(c))).toHaveLength(1);
+			// Both uses reached Redis on what they read; only the first took effect, b's never.
+			oneWrite(a.relay.executions(codeUse(c)));
+			oneWrite(b.relay.executions(codeUse(c)));
+			expect(b.relay.executions(codeUse(c)).some((e) => e.succeeded)).toBe(false);
 			expect(successes(a, codeUse(c)).length + successes(b, codeUse(c)).length).toBe(1);
 			await refusedAsUsed(b, c);
 		});
