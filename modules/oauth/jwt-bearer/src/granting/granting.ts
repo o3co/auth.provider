@@ -120,10 +120,14 @@ export function grantingWith(p: GrantingParts): Omit<Grant, "grantType"> {
 		// boundary is widened by the section's skew, as an issuer's clock may run that far ahead: an
 		// issuer's own narrower skew narrows what is taken, never this, so narrowing it lets none back.
 		const madeAt = Math.min(checked.issuedAt ?? 0, p.now());
-		const revoked = await boundaries.compare(checked.subject, madeAt, "sessions", skewMs);
-		if (revoked === "revoked") {
-			return { kind: "error", error: "invalid_grant", description: "assertion revoked" };
-		}
+		const revoked = async () =>
+			(await boundaries.compare(checked.subject, madeAt, "sessions", skewMs)) === "revoked";
+		const assertionRevoked = {
+			kind: "error",
+			error: "invalid_grant",
+			description: "assertion revoked",
+		} as const;
+		if (await revoked()) return assertionRevoked;
 		const { scope } = allowed;
 		const { audience } = asked;
 		const access = { subject: checked.subject, issuedTo: client.id, audience, scope };
@@ -133,6 +137,7 @@ export function grantingWith(p: GrantingParts): Omit<Grant, "grantType"> {
 		if (checked.expiresAt - p.now() < leastLeftMs) return refusedGrant("expired");
 		if ((await spend()) === "replayed")
 			return { kind: "error", error: "invalid_grant", description: "assertion replayed" };
+		if (await revoked()) return assertionRevoked;
 		// Cut to the assertion's end: one with less than a second left once signed, `tokens` refuses.
 		const issued = await issue(access, { notAfter: checked.expiresAt });
 		if (issued.kind === "refused") return issued;

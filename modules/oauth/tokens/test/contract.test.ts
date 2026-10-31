@@ -1,32 +1,17 @@
 import { randomBytes } from "node:crypto";
-import http from "@mod/http/module";
-import { httpConfig } from "@mod/http/testing";
-import issuerModule from "@mod/issuer/module";
-import { issuerConfig } from "@mod/issuer/testing";
 import { type Assembly, assemble, defineModule, kernelConfig, type Random } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
-import keysModule from "@mod/keys/module";
-import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
-import senderBindingModule from "@mod/sender-binding/module";
 import { denylistAllowanceMs } from "@mod/token-denylist";
 import { expect, it } from "vitest";
-import {
-	type AccessGrant,
-	type IssuancePolicy,
-	type IssueLimits,
-	issuancePolicies,
-	subjectChecks,
-	type Tokens,
-	tokens,
-} from "../src/contract.ts";
-import tokensModule from "../src/module.ts";
+import { type IssuancePolicy, issuancePolicies, subjectChecks, tokens } from "../src/contract.ts";
 import {
 	type TokensUnderTest,
 	tokensConfig,
 	tokensContract,
 	tokensStandIn,
 } from "../src/testing.ts";
+import { composedConfig, composedModules, issueFor } from "./composed.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 /**
@@ -58,13 +43,6 @@ function around(random?: Random) {
 	return { runtime, module, place };
 }
 
-/** Issues through `issue`, which nothing here refuses, and answers what it issued. */
-async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
-	const issued = await t.issue({ grant, grantType: "test" }, limits);
-	if (issued.kind !== "issued") throw new Error(`refused by ${issued.policy}`);
-	return issued.access;
-}
-
 /** The policies given, contributed. */
 const contributing = (policies: readonly IssuancePolicy[] = []) =>
 	defineModule({ name: "policies", replicaSafe: false, takes: [] }, (m) =>
@@ -77,20 +55,13 @@ tokensContract(
 		const { runtime, module, place } = around();
 		const app = await assemble({
 			modules: [
-				http,
-				keysModule,
-				issuerModule,
-				senderBindingModule,
-				tokensModule,
+				...composedModules,
 				revokedInMemory(() => runtime.clock.now()).module,
 				module,
 				contributing(policies),
 			],
 			config: {
-				...kernelConfig(),
-				...httpConfig(),
-				...keysConfig(),
-				...issuerConfig(),
+				...composedConfig(),
 				...tokensConfig(
 					{
 						revocation: revocable ? "denylist" : "unsupported",
@@ -185,6 +156,6 @@ it("the stand-in takes all it names, revocable or not", async () => {
 			runtime,
 		};
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
-		expect((await takesUnused(input))["tokens"], String(revocable)).toBeUndefined();
+		expect((await takesUnused(input)).tokens, String(revocable)).toBeUndefined();
 	}
 });

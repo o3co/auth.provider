@@ -155,6 +155,29 @@ export function tokensContract(
 			});
 		});
 
+		it("runs a token's lifetime from when issue was asked, through the policies' wait, and what is left from signing", async () => {
+			let place: TokensUnderTest | undefined;
+			/** A policy taking `ms` to answer, the clock moving meanwhile. */
+			const waiting = (ms: number): IssuancePolicy => ({
+				name: "waits",
+				judge: async () => {
+					place?.advance(ms);
+					return { kind: "allowed" };
+				},
+			});
+			place = await open({ revocable: true, policies: [waiting(5_000)], lifetimeSeconds: 60 });
+			const asked = Math.floor(place.now() / 1000) * 1000;
+			const issued = await issueFor(place.tokens, grant);
+			expect([issued.expiresAt, issued.expiresIn]).toEqual([asked + 60_000, 55]);
+			// A lifetime the wait outlasts leaves none: refused, handed to no one.
+			place = await open({ revocable: true, policies: [waiting(3_000)], lifetimeSeconds: 2 });
+			expect(await place.tokens.issue({ grant, grantType: "test" })).toMatchObject({
+				kind: "refused",
+				policy: "tokens",
+				reason: "no_lifetime_left",
+			});
+		});
+
 		it("issues where no policy refuses, the same token for any grant type, and admits alike", async () => {
 			const place = await open({ revocable: true, policies: [allowing] });
 			const request = { grant, grantType: "client_credentials" };
@@ -615,9 +638,9 @@ export function tokensStandIn(
 					};
 				};
 				const judge = judging(await c.collect(issuancePolicies), c.clock.now);
-				const issueAccess: IssueAccess = async (grant, limits) => {
+				const issueAccess: IssueAccess = async (grant, askedAt, limits) => {
 					const lifetime = lifetimeOf(limits?.lifetimeSeconds, configured);
-					const { iat, exp } = expiryOf(c.clock.now(), lifetime, limits?.notAfter);
+					const { iat, exp } = expiryOf(askedAt, lifetime, limits?.notAfter);
 					const id = tokenId(c.random);
 					const token = `stand-in.${id}`;
 					const binding = limits?.binding;

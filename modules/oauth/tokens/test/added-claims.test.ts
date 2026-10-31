@@ -1,14 +1,10 @@
 import { generateKeyPairSync } from "node:crypto";
-import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
-import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { accessTokenSigning } from "@mod/keys";
-import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
-import senderBindingModule from "@mod/sender-binding/module";
 import { describe, expect, it } from "vitest";
 import {
 	type AccessGrant,
@@ -17,7 +13,7 @@ import {
 	issuancePolicies,
 	tokens,
 } from "../src/contract.ts";
-import tokensModule from "../src/module.ts";
+import { composedModules } from "./composed.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 const runtime = quietRuntime();
@@ -30,15 +26,7 @@ const payloadOf = (token: string) =>
 
 async function boot(extra: Module[] = []) {
 	const app = await assemble({
-		modules: [
-			http,
-			keysModule,
-			issuerModule,
-			senderBindingModule,
-			tokensModule,
-			revokedInMemory(() => runtime.clock.now()).module,
-			...extra,
-		],
+		modules: [...composedModules, revokedInMemory(() => runtime.clock.now()).module, ...extra],
 		config: {
 			...kernelConfig(),
 			...httpConfig({}),
