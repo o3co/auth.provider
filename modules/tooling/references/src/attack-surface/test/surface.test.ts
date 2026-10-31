@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { root } from "../../../test/root.ts";
+import { packages, root } from "../../../test/root.ts";
 import { coverage } from "../coverage.ts";
 import {
 	answersHead,
@@ -144,12 +144,12 @@ it("lists destinations by their names and the coverage's, the coverage's with wh
 
 it("holds, committed, the reference generated from the workspace as it is now", async () => {
 	expect(readFileSync(attackSurfaceFile(root), "utf8")).toBe(
-		attackSurfaceOf(await attackSurfaceIn(root)),
+		attackSurfaceOf(await attackSurfaceIn(root, packages)),
 	);
 });
 
 it("classifies every setting whose name could weaken a guarantee, and every one the security model names as a choice", async () => {
-	const { settings } = await attackSurfaceIn(root);
+	const { settings } = await attackSurfaceIn(root, packages);
 	const keys = new Set(settings.map((s) => s.key));
 	/** The nearest key a setting row holds: a key written below a map (`a.<name>.b`) is the map's row. */
 	const nearest = (key: string): string | undefined => {
@@ -196,7 +196,7 @@ it("classifies every setting whose name could weaken a guarantee, and every one 
 });
 
 it("holds the coverage to the workspace: every setting, route and runbook section it names is there", async () => {
-	const { settings, routes } = await attackSurfaceIn(root);
+	const { settings, routes } = await attackSurfaceIn(root, packages);
 	const keys = new Set(settings.map((s) => s.key));
 	const named = [
 		...coverage.secrets,

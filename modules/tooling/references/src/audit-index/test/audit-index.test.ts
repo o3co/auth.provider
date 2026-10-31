@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
-import { root } from "../../../test/root.ts";
+import { packages, root } from "../../../test/root.ts";
 import {
 	auditIndexIn,
 	cardLine,
@@ -74,7 +74,7 @@ it("draws the directories each depends on, never itself, and lists each package'
 });
 
 it("reads every workspace package, run-time workspace dependencies alone", () => {
-	const entries = auditIndexIn(root);
+	const entries = auditIndexIn(root, packages);
 	const references = entries.find((e) => e.name === "@mod/references");
 	expect(references?.dir).toBe("modules/tooling/references");
 	expect(references?.dependsOn).toContain("@mod/guard-imports");
@@ -84,7 +84,7 @@ it("reads every workspace package, run-time workspace dependencies alone", () =>
 });
 
 it("holds, committed, the card list and the dependencies generated from the workspace as it is now", () => {
-	const entries = auditIndexIn(root);
+	const entries = auditIndexIn(root, packages);
 	expect(readFileSync(cardsFile(root), "utf8")).toBe(cardsOf(entries));
 	expect(readFileSync(dependenciesFile(root), "utf8")).toBe(dependenciesOf(entries));
 });

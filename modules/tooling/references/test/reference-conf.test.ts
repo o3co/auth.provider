@@ -10,7 +10,7 @@ import {
 	referenceConfOf,
 	sectionsIn,
 } from "../src/configuration.ts";
-import { root } from "./root.ts";
+import { packages, root } from "./root.ts";
 import {
 	accepts,
 	type Node,
@@ -23,11 +23,13 @@ import {
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
 
-const sections = sectionsIn(root);
+const sections = sectionsIn(packages);
 /** Each section held to the rules: the operator's, those modules add to client records, and the IdP types' settings. */
-const checked = Promise.all([sections, clientSectionsOf(root), idpTypesOf(root)]).then(
-	([own, clients, types]) => [...own, ...clients, ...types],
-);
+const checked = Promise.all([
+	sections,
+	clientSectionsOf(root, packages),
+	idpTypesOf(root, packages),
+]).then(([own, clients, types]) => [...own, ...clients, ...types]);
 const nodes = (s: ClientSection) => nodesOf(s.schema as unknown as Node, [s.section]);
 
 it("writes a section's defaults as HOCON: each described, a unit value bare, a key without a default or within an optional object as a comment", () => {

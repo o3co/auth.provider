@@ -1,14 +1,13 @@
 /** What the full template with every opt-in contributes, assembled in memory on the trial's settings and never started. */
-import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
 import { loadConfig } from "@mod/config-files";
 import { generate } from "@mod/create-app";
+import type { Pkg } from "@mod/guard-imports";
 import { assemble, contract, defineModule, type ExtensionPoint } from "@mod/kernel";
 import { trialLayer } from "@mod/trial";
-import { workspacePackages } from "./workspace.ts";
 
 /** A section's schema, as a module gives it: a Standard Schema that can describe itself. */
 export interface Schema {
@@ -82,8 +81,8 @@ export interface Assembled {
 let assembled: Promise<Assembled> | undefined;
 
 /** What full with every opt-in composes at three points, each in module order, by contributor; assembled once. */
-export function assembledIn(root: string): Promise<Assembled> {
-	assembled ??= collectedIn(root);
+export function assembledIn(root: string, packages: readonly Pkg[]): Promise<Assembled> {
+	assembled ??= collectedIn(root, packages);
 	return assembled;
 }
 
@@ -93,13 +92,11 @@ interface Point<T, R> {
 	readonly read: (contribution: T) => R;
 }
 
-async function collectedIn(root: string): Promise<Assembled> {
-	const packages = workspacePackages(root);
+async function collectedIn(root: string, packages: readonly Pkg[]): Promise<Assembled> {
 	const entryOf = async (name: string, entry: string) => {
-		const dir = packages.get(name);
-		if (!dir) throw new Error(`${name}: not in the workspace`);
-		const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
-		return import(join(dir, manifest.exports[entry]));
+		const p = packages.find((p) => p.name === name);
+		if (!p) throw new Error(`${name}: not in the workspace`);
+		return import(join(p.dir, p.manifest.exports?.[entry] as string));
 	};
 	const names = full(optIns()).map((name) => (name === redis ? memory : name));
 	const modules = await Promise.all(

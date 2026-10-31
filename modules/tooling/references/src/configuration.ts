@@ -1,9 +1,8 @@
 /** The configuration reference: every module's section, from its schema and its fragment, as one document. */
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Fragment, fragmentsIn, kernel, settingsOf } from "@mod/app-output";
+import type { Pkg } from "@mod/guard-imports";
 import { assembledIn, type Contributed, type Schema } from "./assembled.ts";
-import { workspacePackages } from "./workspace.ts";
 
 /** The part of a JSON Schema the reference reads. */
 export interface JsonSchema {
@@ -247,11 +246,9 @@ export const unfixedKeys = (rows: readonly Row[], read: readonly string[]): stri
 	read.filter((key) => !rows.some((row) => row.key === key));
 
 /** Every section of the workspace. */
-export async function sectionsIn(root: string): Promise<Section[]> {
+export async function sectionsIn(packages: readonly Pkg[]): Promise<Section[]> {
 	const found = [];
-	for (const [name, dir] of workspacePackages(root)) {
-		if (dir === root) continue;
-		const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+	for (const { name, dir, manifest } of packages) {
 		const entry: string | undefined = manifest.exports?.["./module"];
 		const module = entry
 			? ((await import(join(dir, entry))).default as { name: string; section?: Schema })
@@ -282,7 +279,8 @@ export async function sectionsIn(root: string): Promise<Section[]> {
 			});
 		} else if (fragment && name === kernel) {
 			// The kernel reads its own section, by the schema its contract exports.
-			const own = (await import(join(dir, manifest.exports["."]))).kernelSection as Schema;
+			const own = (await import(join(dir, manifest.exports?.["."] as string)))
+				.kernelSection as Schema;
 			const read = own["~standard"].jsonSchema?.input({ target: "draft-2020-12" });
 			const rows = read
 				? rowsOf(read as JsonSchema, [fragment.section], at)
@@ -309,13 +307,23 @@ const asSections = (found: readonly Contributed[], path: (name: string) => strin
 		.sort((a, b) => (a.section < b.section ? -1 : 1));
 
 /** Every client metadata section the full template with every opt-in composes, by name. */
-export async function clientSectionsOf(root: string): Promise<ClientSection[]> {
-	return asSections((await assembledIn(root)).clientSections, (name) => ["sections", name]);
+export async function clientSectionsOf(
+	root: string,
+	packages: readonly Pkg[],
+): Promise<ClientSection[]> {
+	return asSections((await assembledIn(root, packages)).clientSections, (name) => [
+		"sections",
+		name,
+	]);
 }
 
 /** Every IdP type's settings the full template with every opt-in composes, by type, under one IdP of `federation`. */
-export async function idpTypesOf(root: string): Promise<ClientSection[]> {
-	return asSections((await assembledIn(root)).idpTypes, () => ["federation", "idps", "<name>"]);
+export async function idpTypesOf(root: string, packages: readonly Pkg[]): Promise<ClientSection[]> {
+	return asSections((await assembledIn(root, packages)).idpTypes, () => [
+		"federation",
+		"idps",
+		"<name>",
+	]);
 }
 
 /** A value in a table cell, on one line: a string of several lines as JSON writes it, `\n` and all. */
