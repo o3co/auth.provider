@@ -147,6 +147,8 @@ APP_CONFIG=config/local.conf,config/application.conf pnpm start
 
 設定に不足や誤りがあると、アプリは問題 1 件ごとに `refused <setting or module>: <reason>` という行を標準エラー出力に書き出し、終了ステータス 78 で終了します。設定を修正して、再度起動してください。修正すると、次の段階の拒否が表示されることがあります。
 
+この例のような試しの設定では、起動のたびに警告が出ます。誤りではなく、想定どおりのものです: `http.insecure_origin` (公開の origin が平文の http で、session の cookie が暗号化されずに流れる)、`store.volatile_accepted` (状態をメモリに置く。その space の名を添える)、`consent.first_party` (first-party として登録した client ごと。同意を省く)。他の人が使う配備では、これらを逆に設定し、警告は出なくなります。
+
 デフォルトのポートと上記のローカル用 issuer を使う場合は、次のコマンドで起動を確認します。
 
 ```sh
