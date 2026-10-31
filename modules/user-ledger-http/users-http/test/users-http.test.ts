@@ -676,7 +676,7 @@ describe("users-http", () => {
 			[
 				["ledger.example"],
 				`http://${pair}/ledger/authenticate`,
-				"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+				"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public; plain http also needs its host:port in outbound.plain-loopback, or, for a URL of your own configuration on a private network, in outbound.plain-internal",
 			],
 			[
 				["127.0.0.1"],
@@ -821,13 +821,13 @@ describe("users-http looking a user up by subject", () => {
 		]);
 	});
 
-	it("refuses to start with no URL, or with a credential and URLs at two origins", async () => {
+	it("refuses to start with no URL, at verify-url, or with a credential and URLs at two origins", async () => {
 		// A second origin outbound takes: the next port at loopback, where nothing need answer.
 		const otherPair = `127.0.0.1:${Number(pair.split(":")[1]) + 1}`;
 		const other = `http://${otherPair}/ledger/subject`;
 		const bootBoth = (section: unknown) => boot(section, [], undefined, [pair, otherPair]);
 		for (const [section, where] of [
-			[{ credential }, "users-http"],
+			[{ credential }, "users-http.verify-url"],
 			[settings({ "subject-url": other }), "users-http.credential"],
 			[settings({ "subject-url": `https://${pair}/ledger/subject` }), "users-http.credential"],
 		] as const) {
@@ -840,6 +840,14 @@ describe("users-http looking a user up by subject", () => {
 			expect(refusals.map((r) => r.where)).toEqual([where]);
 			expect(refusals.map((r) => r.reason).join()).not.toContain(credential);
 		}
+		await expect(bootBoth({ credential })).rejects.toMatchObject({
+			refusals: [
+				{
+					where: "users-http.verify-url",
+					reason: "needs one of verify-url, subject-url, upstream-url",
+				},
+			],
+		});
 		await expect(boot(settings({ "subject-url": subjectUrl() }))).resolves.toBeDefined();
 		await expect(
 			bootBoth({ "verify-url": `http://${pair}/ledger/authenticate`, "subject-url": other }),

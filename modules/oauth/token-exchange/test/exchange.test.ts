@@ -241,7 +241,11 @@ async function serve(
 				confidentialClient({ id: "app", sections: allowed }),
 				confidentialClient({
 					id: "gate",
-					sections: { ...allowed, "token-exchange": { "others-tokens": true } },
+					// Its public-exchange is unread, a confidential client being allowed the grant always.
+					sections: {
+						...allowed,
+						"token-exchange": { "others-tokens": true, "public-exchange": true },
+					},
 				}),
 				publicClient({ id: "spa", sections: allowed }),
 				publicClient({
@@ -1366,7 +1370,7 @@ describe("token-exchange: an answer told by its kind", () => {
 	});
 });
 
-it("warns at every start for each client that exchanges while public or exchanges others' tokens, by its id", async () => {
+it("warns at every start for each client that exchanges while public or exchanges others' tokens, by its id, and not of a confidential client's public-exchange", async () => {
 	const from = logged.lines().length;
 	await serve();
 	const warned = logged

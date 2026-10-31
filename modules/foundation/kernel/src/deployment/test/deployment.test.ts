@@ -58,7 +58,7 @@ describe("the deployment's environment", () => {
 		expect(built).toEqual([]);
 	});
 
-	it("asks a module's production check only with a section that passed, and never in development", async () => {
+	it("asks a module's production check only with a section that passed, in either environment", async () => {
 		const asked: unknown[] = [];
 		const m = defineModule({
 			name: "m",
@@ -71,10 +71,70 @@ describe("the deployment's environment", () => {
 			takes: [],
 		});
 		await refusalsOf(assemble({ modules: [m], config: { ...production, m: { n: "x" } } }));
-		await assemble({ modules: [m], config: { ...development, m: { n: 1 } } });
 		expect(asked).toEqual([]);
-		await assemble({ modules: [m], config: { ...production, m: { n: 1 } } });
-		expect(asked).toEqual([{ n: 1 }]);
+		await assemble({ modules: [m], config: { ...development, m: { n: 1 } } });
+		await assemble({ modules: [m], config: { ...production, m: { n: 2 } } });
+		expect(asked).toEqual([{ n: 1 }, { n: 2 }]);
+	});
+
+	it("warns in development each value production would refuse, by its key and the module's reason, never the value", async () => {
+		const recorded = recordingLog();
+		const runtime = {
+			clock: { now: () => 0 },
+			random: { bytes: (n: number) => new Uint8Array(n) },
+			log: recorded.log,
+		};
+		const twice = defineModule({
+			name: "twice",
+			replicaSafe: true,
+			section: z.strictObject({ a: z.string(), b: z.string() }),
+			refusedInProduction: () => [
+				{ key: "a", reason: "is plain http" },
+				{ key: "b.c", reason: "is on loopback" },
+			],
+			takes: [],
+		});
+		const plain = { origin: { url: `http://${secret}.example` }, twice: { a: secret, b: secret } };
+		await assemble({ modules: [origin, twice], config: { ...development, ...plain }, runtime });
+		const warned = recorded.lines().filter((l) => l.event === "kernel.allowed_in_development");
+		expect(warned).toEqual([
+			{
+				level: "warn",
+				event: "kernel.allowed_in_development",
+				fields: { at: "origin.url", reason: "is plain http" },
+			},
+			{
+				level: "warn",
+				event: "kernel.allowed_in_development",
+				fields: { at: "twice.a", reason: "is plain http" },
+			},
+			{
+				level: "warn",
+				event: "kernel.allowed_in_development",
+				fields: { at: "twice.b.c", reason: "is on loopback" },
+			},
+		]);
+		expect(JSON.stringify(recorded.lines())).not.toContain(secret);
+		// Production refuses the same, and warns none of it.
+		const before = recorded.lines().length;
+		await refusalsOf(assemble({ modules: [origin], config: { ...production, ...plain }, runtime }));
+		expect(
+			recorded
+				.lines()
+				.slice(before)
+				.filter((l) => l.event === "kernel.allowed_in_development"),
+		).toEqual([]);
+	});
+
+	it("refuses in development too a production check that cannot be read", async () => {
+		const broken = defineModule({
+			name: "broken",
+			replicaSafe: true,
+			refusedInProduction: () => [{ key: "", reason: "r" }],
+			takes: [],
+		});
+		const refused = await refusalsOf(assemble({ modules: [broken], config: development }));
+		expect(refused).toEqual([{ where: "broken", reason: "its production check failed" }]);
 	});
 
 	it("holds a check that throws to its module, with a fixed reason, never the thrown value, and goes on", async () => {

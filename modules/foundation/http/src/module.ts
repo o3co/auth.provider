@@ -32,10 +32,6 @@ export default defineModule(
 	(m) => [
 		m.provide(site).by((c) => {
 			const origin = c.section["public-origin"];
-			// Taken only in development, yet said at every start: the session's cookie goes in the clear.
-			if (c.section["insecure-origin"]) {
-				c.log.warn("http.insecure_origin", { reason: "a plain-http public origin is taken" });
-			}
 			return Object.freeze({
 				origin,
 				secureCookies: !origin?.startsWith("http:"),
