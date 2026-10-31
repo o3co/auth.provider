@@ -103,5 +103,10 @@ export function withinHosts(raw: string, hosts: readonly string[]): boolean {
 /** One host a setting takes from an operator: a host, or `.name` for the name and the names under it. */
 export const hostEntry = z.string().refine(isListEntry, "not a host, or a name led by a dot");
 
+/** One `host:port` pair a setting takes from an operator, as `hostEntryOf` reads a pair. */
+export const hostPair = z
+	.string()
+	.refine((pair) => hostEntryOf(pair, { port: true }) !== undefined, "not a host:port pair");
+
 /** A list of hosts an operator writes, as `hostEntry` reads each; none unless set. */
 export const hostList = z.array(hostEntry).prefault([]);

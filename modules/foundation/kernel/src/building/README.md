@@ -9,7 +9,10 @@ Internal module of `kernel`: building the provisions and contributions, each onc
 - The takes' preflight (`takes`). Reading sections and the duplicate providers, the order the stages build in, checking late references and refusing the boot (the package's assembly). Running the start hooks (the package's assembly), and the periodic tasks and the stop hooks (`lifecycle`).
 
 ## Offers
-- `buildingWith` (the runtime, the environment, the checked sections, who provides and contributes, the takes each module is held to, the refusals, a test's watch) → `build` (an item, the stack of builds asking it), the points collected with their checks' outcomes, the late references named, the contracts built, the hooks and periodic tasks registered, and `assembledWith` (readiness), from which late references and readiness answer.
+- `buildingWith` (the runtime, the environment, the checked sections, who provides and contributes, the takes each module is held to, the refusals, a test's watch) → the parts below.
+  - `build` (an item, the stack of builds asking it); the points collected with their checks' outcomes; the late references named; the hooks and periodic tasks registered.
+  - `provided`: a contract → the interface its provision built, recorded as the build succeeds, or none.
+  - `assembledWith` (readiness), from which late references and readiness answer.
 - `checkPoint`: freezes a point's contributions one level and checks its rule (count, and duplicate keys at a `keyed` point). `recordFailure`: records why a build failed, unless the refusal behind it is recorded already. `Buildable`, `TakesWatch`.
 
 ## Invariants
