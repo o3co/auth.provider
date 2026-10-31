@@ -160,27 +160,36 @@ it("throws, before the store is read, a requester whose part is no non-empty str
 	expect((await passkeys.assert(response, app)).kind).toBe("asserted");
 });
 
-it("takes and refuses an assertion challenge kept as format 1, as 0.18 opened it, whatever it names", async () => {
+it("takes and refuses an assertion challenge kept as format 1, though its digest is the id's, as it names no asker", async () => {
 	const { passkeys, ceremonies, stores, authenticator } = await kept();
-	const { options, challenge } = ceremonies.request([], "preferred");
-	// 0.18 kept the SHA-256 of a raw client_id: one chosen to read as another module's requester.
-	const chosen = createHash("sha256").update('["login-passkey","chosen"]').digest("base64url");
-	const before = { v: 1, kind: "assertion", requester: chosen, at: 1_000 };
-	await stores.challenges.open(challenge, before as unknown as StoredChallenge, 120_000);
-	const response = authenticator.get(options as RequestOptions, at);
 	const browser = { by: "login-passkey", id: "chosen" };
-	expect(await passkeys.assert(response, browser)).toEqual({
+	const digestOf = (text: string) => createHash("sha256").update(text).digest("base64url");
+	/** A format 1 assertion record kept for `requester`, and an answer to its challenge. */
+	const opened = async (requester: string) => {
+		const { options, challenge } = ceremonies.request([], "preferred");
+		const before = { v: 1, kind: "assertion", requester, at: 1_000 };
+		await stores.challenges.open(challenge, before as unknown as StoredChallenge, 120_000);
+		return { challenge, response: authenticator.get(options as RequestOptions, at) };
+	};
+	// The one format 1 content that format 2's digest of the id matches: only the missing asker refuses it.
+	const same = await opened(digestOf("chosen"));
+	expect(await passkeys.assert(same.response, browser)).toEqual({
 		kind: "refused",
 		reason: "challenge",
 	});
 	// Taken: the same answer is refused again, its record the taken mark.
-	expect(await passkeys.assert(response, browser)).toEqual({
+	expect(await passkeys.assert(same.response, browser)).toEqual({
 		kind: "refused",
 		reason: "challenge",
 	});
-	const mark = {} as StoredChallenge;
-	const left = await stores.challenges.take(challenge, mark);
+	const left = await stores.challenges.take(same.challenge, {} as StoredChallenge);
 	expect(left?.before).toMatchObject({ taken: true });
+	// 0.18's digest of a raw client_id chosen to read as another module's requester, as Astra found it.
+	const chosen = await opened(digestOf('["login-passkey","chosen"]'));
+	expect(await passkeys.assert(chosen.response, browser)).toEqual({
+		kind: "refused",
+		reason: "challenge",
+	});
 });
 
 it("redeems a format 2 assertion challenge for its own requester alone, another module's or another id refused", async () => {
