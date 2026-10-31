@@ -1511,6 +1511,9 @@ importers:
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../../foundation/host-entries
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -1526,9 +1529,6 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
-      '@mod/outbound-policy':
-        specifier: workspace:*
-        version: link:../../foundation/outbound-policy
       '@mod/resource-indicators':
         specifier: workspace:*
         version: link:../resource-indicators
