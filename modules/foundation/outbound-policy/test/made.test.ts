@@ -103,6 +103,15 @@ describe("the policy's settings", () => {
 				expect(policySettings.safeParse({ [key]: [pair] }).success, `${key} ${pair}`).toBe(false);
 			}
 		}
+		// An IPv6 address with a zone has no canonical form, so no request's address is ever it.
+		for (const key of ["allow", "deny"]) {
+			for (const host of ["::1%eth0", "2606:4700:4700::1111%eth0", "[::1%eth0]"]) {
+				expect(policySettings.safeParse({ [key]: [host] }).success, `${key} ${host}`).toBe(false);
+			}
+		}
+		for (const key of ["plain-loopback", "plain-internal"]) {
+			expect(policySettings.safeParse({ [key]: ["[::1%eth0]:443"] }).success, key).toBe(false);
+		}
 		// A dot leading a name covers the names under it in a host list; a pair names one host.
 		expect(policySettings.safeParse({ allow: [".a"] }).success).toBe(true);
 		expect(policySettings.safeParse({ "plain-loopback": [".a:80"] }).success).toBe(false);
