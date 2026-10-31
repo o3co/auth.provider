@@ -123,6 +123,7 @@ describe("tokens", () => {
 			id: issued.id,
 			grant,
 			expiresAt: now + 60_000,
+			standingAt: now,
 			tokenType: "Bearer",
 		});
 		now = start + 60_000;
@@ -213,7 +214,8 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 	const t = await boot({ revocation: "unsupported" }, { extra: [condition] });
 	const issued = await issueFor(t, grant);
 	expect((await t.verifyAccess(issued.token)).kind).toBe("valid");
-	expect(seen).toEqual([{ id: issued.id, subject: "s", issuedAt: Math.floor(now / 1000) * 1000 }]);
+	const second = Math.floor(now / 1000) * 1000;
+	expect(seen).toEqual([{ id: issued.id, subject: "s", issuedAt: second, standingAt: second }]);
 	answer = "revoked";
 	expect(await t.verifyAccess(issued.token)).toEqual({ kind: "invalid", reason: "revoked" });
 	down.unavailable("holds");

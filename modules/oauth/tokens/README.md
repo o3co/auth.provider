@@ -4,7 +4,7 @@
 - Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
 - Revokes through `token-denylist`'s denylist, over the store interface it offers and `tokens` passes on.
 - Applies `added-claims`' rules to the claims a grant adds, at `issue`, at `admits` and when a token is read back.
-- Its internal module `issuance` holds how `admits` and `issue` judge a request, and how `issue` issues over the judgment.
+- Its internal module `issuance` holds how `admits` and `issue` judge a request, and how `issue` issues over the judgment; `standing`, a token's standing time as its claim writes and reads it.
 
 ## Not here
 - The procedures that lead to issuance, authenticating the requester, and other token kinds.
@@ -12,11 +12,11 @@
 
 ## Offers
 - Issuance only through `issue`, policies first: `issue(request: grant, grant type, session, `continuing` (set by an issuing side whose grant the policies already let through); limits)` → issued, or refused by the first policy to refuse.
-- What it issues for: a grant (subject, issued-to, audience, scope; optionally an actor chain, `amr`, an authentication time, `acr` and the `claims` it adds), an expiry cap, a binding, and a lifetime other than the section's (2–86400 s) → the token, its id, expiry, token type and the added claims' names.
-- Verification → the id, the grant (its added claims frozen), the token type (Bearer, or the bound kind's) and the binding; the validity check `sender-binding` admits a request at a resource by.
+- What it issues for: a grant (subject, issued-to, audience, scope; optionally an actor chain, `amr`, an authentication time, `acr`, a standing time and the `claims` it adds), an expiry cap, a binding, and a lifetime other than the section's (2–86400 s) → the token, its id, expiry, token type and the added claims' names.
+- Verification → the id, the grant (its added claims frozen), the standing time (its standing claim, else its issue), the token type (Bearer, or the bound kind's) and the binding; the validity check `sender-binding` admits a request at a resource by.
 - Issued-to, for the revoking side to check the owner: answered for revoked tokens and within the allowance past expiry too; never for authorization.
 - Revocation, directly or by a reference to an issued token (its shape is `tokens`' own), within the allowance past expiry; or unsupported, which `revocable` tells and every start warns of (`tokens.revocation_unsupported`). Whether subjects are checked, which `subjectsChecked` tells: false only where the section states `subject-check = none`, which every start warns of (`tokens.subjects_unchecked`).
-- Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked. A policy reads session-built state late (`c.late`), else boot cycles.
+- Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time, standing time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked. A policy reads session-built state late (`c.late`), else boot cycles.
 - `token-denylist`'s store interface for revoked tokens and its needs, passed on: a store wiring wires `tokens` and implements it.
 - `jwks_uri` among `issuer`'s metadata: `keys`' key set path on the origin `issuer` names its endpoints on (`endpointOrigin`), the public origin wherever one is written.
 - Operator section: `access-token-lifetime` (written with its unit, `2s` to `1d` in whole seconds, default `1h`, counted from when `issue` is asked, the policies' wait included: a lifetime no longer than that wait leaves none, and the token is refused; a second's lifetime, its `iat` cut to the second, would leave less than a second once signed).
@@ -33,7 +33,7 @@
 - An added claim follows `added-claims`' rules, its shape, reserved names and limits; one outside them is the grant's maker's mistake (TypeError at `issue` and `admits`, a 500 with no audit), and a token read back with one is refused as `shape`.
 - A token over 16 KiB, or an actor chain over 16, is neither issued (TypeError) nor read.
 - An access token ends after its lifetime from its issue, capped at the expiry cap given. What `issue` answers of what is left, and its refusal of a token with less than a second, are `issuance`'s.
-- An access token's `iat` is the second `issue` was asked, taken before the policies are asked, so a subject boundary recorded while they answer refuses the token; its lifetime runs from there, what the client is told of it from signing. A grant asks `issue` right after its last check against the boundary, with nothing awaited between.
+- An access token's `iat` is the second `issue` was asked, taken before the policies are asked, so a subject boundary recorded while they answer refuses the token; its lifetime runs from there, what the client is told of it from signing. A grant tied to no session gives its standing time instead, which the subject check compares: `o3co_standing_at`, whole seconds, floored, never after `iat`, never moving the lifetime; a claim of another shape is `shape`.
 
 ## Depends on
 - `kernel`, `keys`, `issuer`, `sender-binding`, `added-claims`, `token-denylist`

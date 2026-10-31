@@ -68,7 +68,8 @@ export const tokenId = (random: Random) => Buffer.from(random.bytes(16)).toStrin
 
 /** A grant as a token keeps it: no empty amr, no time it does not know, the time to the second and never after `iat`. */
 export function keptGrant(grant: AccessGrant, iat: number): AccessGrant {
-	const { amr, authenticatedAtUnknown, acr, ...known } = grant;
+	// The standing time is the token's, read back beside the grant, never in it.
+	const { amr, authenticatedAtUnknown, acr, standingAt: _standing, ...known } = grant;
 	const { authenticatedAt: stated, ...rest } = known;
 	const authenticatedAt = authenticatedAtUnknown ? undefined : stated;
 	if (acr === "" || (authenticatedAt !== undefined && !Number.isFinite(authenticatedAt))) {

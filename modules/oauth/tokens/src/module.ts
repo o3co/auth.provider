@@ -16,6 +16,7 @@ import { type IssueAccess, issuing, judging } from "./issuance/issuance.ts";
 import { expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import { section } from "./section.ts";
+import { standingOf } from "./standing/standing.ts";
 import { type Act, checkingWith, compactLimit } from "./verification.ts";
 
 const actOf = (actor: Actor): Act => ({
@@ -113,9 +114,11 @@ export default defineModule(
 			const issueAccess: IssueAccess = async (grant, askedAt, limits) => {
 				const lifetimeSeconds = lifetimeOf(limits?.lifetimeSeconds, lifetime);
 				const { iat, exp } = expiryOf(askedAt, lifetimeSeconds, limits?.notAfter);
+				const standing = standingOf(grant, iat);
 				const claims = {
 					iss,
 					...grantClaims(keptGrant(grant, iat)),
+					...(standing === undefined ? {} : { o3co_standing_at: standing }),
 					iat,
 					exp,
 					jti: tokenId(c.random),
@@ -156,6 +159,7 @@ export default defineModule(
 						id: checked.access.id,
 						subject: checked.access.grant.subject,
 						issuedAt: checked.issuedAt,
+						standingAt: checked.access.standingAt,
 					};
 					for (const condition of conditions) {
 						if ((await condition.holds(issuedFor)) === "revoked") {

@@ -21,6 +21,7 @@ import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issu
 import { defaultLifetimeSeconds, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import type { section } from "./section.ts";
+import { standingOf } from "./standing/standing.ts";
 
 export type TokensSettings = z.input<typeof section>;
 
@@ -542,15 +543,23 @@ export function tokensContract(
 			});
 		});
 
-		it("fails a token whose subject was revoked after it was issued", async () => {
+		it("fails a token whose subject was revoked after it stood, its standing its grant's else its issue, though issued after [guarantee-4-a]", async () => {
 			const place = await open({ revocable: true });
+			const checkedAt = place.now();
 			const issued = await issueFor(place.tokens, grant);
 			const other = await issueFor(place.tokens, { ...grant, subject: "t" });
 			place.revokeSubject("s");
-			expect(await place.tokens.verifyAccess(issued.token)).toEqual({
-				kind: "invalid",
-				reason: "revoked",
-			});
+			place.advance(1_500);
+			const stale = await issueFor(place.tokens, { ...grant, standingAt: checkedAt });
+			for (const token of [issued.token, stale.token]) {
+				expect(await place.tokens.verifyAccess(token)).toEqual({
+					kind: "invalid",
+					reason: "revoked",
+				});
+			}
+			const fresh = await place.tokens.verifyAccess((await issueFor(place.tokens, grant)).token);
+			const second = Math.floor(place.now() / 1000) * 1000;
+			expect(fresh.kind === "valid" && fresh.standingAt).toBe(second);
 			expect((await place.tokens.verifyAccess(other.token)).kind).toBe("valid");
 		});
 	});
@@ -589,6 +598,7 @@ export function tokensStandIn(
 					grant: AccessGrant;
 					id: string;
 					issuedAt: number;
+					standingAt: number;
 					expiresAt: number;
 					binding?: Binding;
 				};
@@ -621,7 +631,8 @@ export function tokensStandIn(
 					const kept = live(token);
 					if (!kept) return { kind: "invalid", reason: "expired" };
 					if (await denylist.holds(kept.id)) return { kind: "invalid", reason: "revoked" };
-					const issuedFor = { id: kept.id, subject: kept.grant.subject, issuedAt: kept.issuedAt };
+					const { id, issuedAt, standingAt } = kept;
+					const issuedFor = { id, subject: kept.grant.subject, issuedAt, standingAt };
 					for (const condition of conditions) {
 						if ((await condition.holds(issuedFor)) === "revoked")
 							return { kind: "invalid", reason: "revoked" };
@@ -633,6 +644,7 @@ export function tokensStandIn(
 						id: kept.id,
 						grant: kept.grant,
 						expiresAt: kept.expiresAt,
+						standingAt: kept.standingAt,
 						tokenType,
 						...(kept.binding ? { binding: { ...kept.binding, tokenType } } : {}),
 					};
@@ -661,6 +673,7 @@ export function tokensStandIn(
 								grant: keptGrant(grant, iat),
 								id,
 								issuedAt: iat * 1000,
+								standingAt: (standingOf(grant, iat) ?? iat) * 1000,
 								expiresAt: exp * 1000,
 								...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
 							});
