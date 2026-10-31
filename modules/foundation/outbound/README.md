@@ -12,7 +12,8 @@
 - `outbound`: fetch a URL with a request and a narrower, answering status, headers and body, or throwing a destination refusal or unavailable with its failure. `isOutboundUnavailable` tells that unavailable by its mark, not its class, so a second bundled copy's is told too.
 - `outbound.signed`: the same for signed material, with the narrower's hosts always named.
 - `credentialHeaderRefusal` (`credential`'s): why a credential may not go as a header named so.
-- `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` (`plainInternal` and `browsedRefusal` too), `outbound.credentials` and `outbound.limits` from the section; reading an answer as JSON (one frozen UTF-8 object, at the status named, `200` by default).
+- `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` (`plainInternal` and `browsedRefusal` too), `outbound.credentials` and `outbound.limits` from the section.
+- A JSON call (internal module `json`): `postJson`, `sendFailureOf` and `jsonObjectOf` (one frozen UTF-8 object, at the status named, `200` by default).
 - Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, `max-lookups`, `resolution`, the proxy, `direct-hosts` (a host list, as `outbound-policy` reads one) and `plain-ipv4`; its keys are in the configuration reference.
 
 ## Invariants

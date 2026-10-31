@@ -1,9 +1,16 @@
-import { contract, deepFreeze, Unavailable } from "@mod/kernel";
+import { contract, Unavailable } from "@mod/kernel";
 import type { Narrower } from "@mod/outbound-policy";
 
 // The destination policy's own, as `fetch` takes and throws them.
 export { DestinationRefused, type Narrower, type RefusalReason } from "@mod/outbound-policy";
 export { credentialHeaderRefusal } from "./credential/credential.ts";
+export {
+	type JsonAnswer,
+	type JsonPost,
+	jsonObjectOf,
+	postJson,
+	sendFailureOf,
+} from "./json/json.ts";
 
 /** Why no usable answer came, for a caller to log by; it carries no value and no body. */
 export type OutboundFailure =
@@ -68,27 +75,6 @@ export interface Outbound {
 }
 
 export const outbound = contract<Outbound>("outbound");
-
-/** An answer read as JSON: one object from the status asked for (`200` unless named), frozen, or any other answer with its status. */
-export type JsonAnswer =
-	| { readonly kind: "object"; readonly value: Readonly<Record<string, unknown>> }
-	| { readonly kind: "other"; readonly status: number };
-
-export function jsonObjectOf(answer: OutboundResponse, status = 200): JsonAnswer {
-	const other = { kind: "other", status: answer.status } as const;
-	if (answer.status !== status) return other;
-	try {
-		const value: unknown = JSON.parse(
-			new TextDecoder("utf-8", { fatal: true }).decode(answer.body),
-		);
-		const isObject = typeof value === "object" && value !== null && !Array.isArray(value);
-		return isObject
-			? { kind: "object", value: deepFreeze(value as Record<string, unknown>) }
-			: other;
-	} catch {
-		return other;
-	}
-}
 
 /** What a caller of signed material narrows: the hosts it fetches from are always named. */
 export interface SignedNarrower extends Narrower {
