@@ -1,4 +1,5 @@
 import {
+	type Asked,
 	type Card,
 	fragmentsOf,
 	type OutsideModules,
@@ -13,6 +14,28 @@ const fragmentTexts: Readonly<Record<string, string>> = {
 	"@mod/keys":
 		'keys { signing { kid = "k1", private-key = """-----BEGIN PRIVATE KEY-----\nREPLACE\n-----END PRIVATE KEY-----""" } }',
 };
+
+/** What the modules above declare for the guide, as their manifests would. */
+const declared: readonly Asked[] = [
+	{
+		name: "@mod/kernel",
+		asks: [
+			{
+				line: "`kernel.deployment`: `single` for one instance, `multi` for several.",
+				decides: true,
+			},
+		],
+	},
+	{
+		name: "@mod/tokens",
+		asks: [
+			{
+				line: "`tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
+				decides: true,
+			},
+		],
+	},
+];
 
 /** Packages as a caller would give them: the fragments above, published under `@o3co/x-`. */
 export function fakePackages(
@@ -43,5 +66,6 @@ export function fakePackages(
 			),
 		release: () => release,
 		...(outside ? { outside: () => outside } : {}),
+		asks: (names) => declared.filter((d) => names.includes(d.name)),
 	};
 }

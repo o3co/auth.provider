@@ -6,6 +6,9 @@
 	"kind": "adapter",
 	"replaces": "@mod/upstreams",
 	"default": true,
+	"asks": [
+		"A login a gate holds goes on at `federation.held-page`, a page on the public origin; without it, the browser stops at the gate's answer."
+	],
 	"exports": {
 		"./module": "./src/module.ts",
 		"./testing": "./src/testing.ts",

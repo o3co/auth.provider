@@ -19,6 +19,7 @@
 		"create-app": "node src/main.ts"
 	},
 	"devDependencies": {
+		"@mod/app-entries": "workspace:*",
 		"@mod/docker-client": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/trial": "workspace:*",

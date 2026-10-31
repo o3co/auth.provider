@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mainSource } from "@mod/app-output";
+import { mainSource } from "@mod/app-entries";
 import { addable, needed } from "@mod/combinations";
 import { trialLayer } from "@mod/trial";
 import { expect, it, vi } from "vitest";
@@ -134,11 +134,10 @@ it("reads its fragments' scalars from env and writes their lists locally, with a
 	expect(guide).toContain(
 		"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
 	);
-	// Its store is kept in memory: accepted, one instance, and Redis named for more.
+	// Its store is kept in memory: accepted, one instance, said in store's line; the deployment's is kernel's.
 	expect(guide).toContain("the memory store accepted (`store.accept-volatile = true`)");
-	expect(guide).toContain(
-		"- `kernel.deployment`: `single`: the store is kept in this process, so the deployment runs as one instance; list `@mod/redis` to keep it in Redis and run several.",
-	);
+	expect(guide.split("- `kernel.deployment`: ")).toHaveLength(2);
+	expect(guide).toContain("- `kernel.deployment`: `single` for one instance, `multi` for several.");
 });
 
 it("promises no http, port or health check to a listed app that composes no http", async () => {

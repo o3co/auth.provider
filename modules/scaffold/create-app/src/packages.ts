@@ -1,6 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { type Card, fragmentsIn, fragmentsOf, type Packages } from "@mod/app-output";
+import {
+	type Ask,
+	type Asked,
+	type Card,
+	fragmentsIn,
+	fragmentsOf,
+	type Packages,
+} from "@mod/app-output";
 import type { Outside, Read } from "./outside/contract.ts";
 import { dependenciesOf, workspacePackages } from "./project.ts";
 
@@ -18,6 +25,14 @@ const installed = (
 const asksOfDeployment = (card: string) =>
 	existsSync(card) && /^## Deployment$/m.test(readFileSync(card, "utf8"));
 
+/** What a manifest declares for the guide: its lines, the owner it adapts, and the name it registers under it. */
+const askedIn = (name: string, manifest: Readonly<Record<string, unknown>> | undefined): Asked => ({
+	name,
+	...(Array.isArray(manifest?.asks) ? { asks: manifest.asks as Ask[] } : {}),
+	...(typeof manifest?.adapts === "string" ? { adapts: manifest.adapts } : {}),
+	...(typeof manifest?.registersAs === "string" ? { registersAs: manifest.registersAs } : {}),
+});
+
 /** A repository URL as a manifest states it, a string or `{ url }`, plain https and no `.git`. */
 const repositoryOf = (stated: unknown): string | undefined => {
 	const url = typeof stated === "string" ? stated : (stated as { url?: unknown } | undefined)?.url;
@@ -34,6 +49,8 @@ export interface Indexed {
 		readonly fragment?: string;
 		readonly references?: boolean;
 		readonly deployment?: boolean;
+		/** The member's manifest, as the release wrote it. */
+		readonly manifest?: Readonly<Record<string, unknown>>;
 	}[];
 	/** Sealed by the release: each bundle's integrity, by its public name, and zod's. */
 	readonly integrity?: Readonly<Record<string, string>>;
@@ -80,6 +97,13 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 						deployment: dir !== undefined && asksOfDeployment(join(dir, "README.md")),
 					}),
 				};
+			}),
+		asks: (names) =>
+			names.flatMap((name) => {
+				const dir = dirs().get(name);
+				return dir === undefined
+					? []
+					: [askedIn(name, JSON.parse(readFileSync(join(dir, "package.json"), "utf8")))];
 			}),
 		release: () => {
 			const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -138,6 +162,11 @@ export function publishedIn(index: Indexed, beside?: Beside): Packages {
 					...installed(entry, { references: references === true, deployment: deployment === true }),
 				};
 			}),
+		// A package outside the release declares nothing for the guide.
+		asks: (names) =>
+			names.flatMap((name) =>
+				outside.has(name) || !byName.has(name) ? [] : [askedIn(name, byName.get(name)?.manifest)],
+			),
 		release: () => ({
 			version: index.version,
 			...(index.repository ? { repository: index.repository } : {}),

@@ -7,6 +7,10 @@
 	"narrower": "internal",
 	"adapts": "@mod/audit",
 	"default": true,
+	"registersAs": "http",
+	"asks": [
+		"Audit events posted to a receiver (`audit-http.url`)."
+	],
 	"exports": {
 		"./testing": "./src/testing.ts",
 		"./module": "./src/module.ts"

@@ -5,6 +5,12 @@
 	"type": "module",
 	"kind": "feature",
 	"storeWiring": true,
+	"asks": [
+		{
+			"line": "`tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
+			"decides": true
+		}
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
