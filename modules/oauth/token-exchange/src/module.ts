@@ -62,10 +62,18 @@ export default defineModule(
 			.contribute(exchangeVerifiers)
 			.by(async (c) => selfIssued(await c.get(tokens), (await c.get(issuer)).url)),
 		m.contribute(grants).by(async (c) => {
+			const issuing = await c.get(tokens);
+			// An exchange issues anew from a token made before a subject's revocation, so its subject must be checked.
+			if (!issuing.subjectsChecked()) {
+				return c.refuse(
+					"token-exchange",
+					"tokens.subject-check is none, so a token made before a subject's revocation could be exchanged for a new one: compose a subject check and leave tokens.subject-check unset, or leave token-exchange out",
+				);
+			}
 			const verifiers = await c.collect(exchangeVerifiers);
 			return exchangeGrant({
 				verifiers: new Map(verifiers.map((verifier) => [verifier.tokenType, verifier])),
-				tokens: await c.get(tokens),
+				tokens: issuing,
 				ties: await c.collect(tokenTies),
 				issuer: (await c.get(issuer)).url,
 				maxActorDepth: c.section["max-actor-depth"],

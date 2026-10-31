@@ -176,11 +176,15 @@ async function serve(
 		sessionTokens?: Module[];
 		/** The session's tie composed before the family's. */
 		reversed?: boolean;
+		/** What tokens says of its subject check. */
+		subjectsChecked?: boolean;
 	} = {},
 ) {
 	const tied = options.tied ?? ties();
 	const revoked: string[] = [];
-	const standIn = tokensStandIn();
+	const standIn = tokensStandIn(
+		options.subjectsChecked === undefined ? {} : { subjectsChecked: options.subjectsChecked },
+	);
 	// The stand-in, with every revocation noted.
 	const watched = {
 		...standIn,
@@ -541,6 +545,17 @@ describe("token-exchange: bindings", () => {
 		};
 		const outcome = await s.exchange("app", { ...subject, ...actor }, keyOf("k1"));
 		expect(said(outcome)).toEqual(["invalid_request", unbound]);
+	});
+});
+
+describe("token-exchange: the subject check", () => {
+	it("refuses to boot where tokens checks no subject, naming tokens.subject-check, and boots where it does [guarantee-4-e]", async () => {
+		await expect(serve({ subjectsChecked: false })).rejects.toMatchObject({
+			refusals: [
+				{ where: "token-exchange", reason: expect.stringContaining("tokens.subject-check") },
+			],
+		});
+		await serve({ subjectsChecked: true });
 	});
 });
 

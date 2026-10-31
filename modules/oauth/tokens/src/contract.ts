@@ -117,6 +117,8 @@ export interface IssueLimits {
 /** Its `verifyAccess` is the validity `sender-binding` checks a token by at a resource. */
 export interface Tokens extends TokenValidity<AccessCheck> {
 	revocable(): boolean;
+	/** Whether access tokens are checked against subject revocation: false where the section states `subject-check = none`. */
+	subjectsChecked(): boolean;
 	/**
 	 * Whether an access token may be issued for the request; the same judgment `issue` makes, but for
 	 * the lifetime, which only `issue`'s limits and signing fix.

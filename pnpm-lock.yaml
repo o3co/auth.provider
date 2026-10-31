@@ -1624,6 +1624,9 @@ importers:
       '@mod/subject-revocation-store':
         specifier: workspace:*
         version: link:../../templates/subject-revocation-store
+      '@mod/subject-tokens':
+        specifier: workspace:*
+        version: link:../subject-tokens
       '@mod/tls-options':
         specifier: workspace:*
         version: link:../../foundation/tls-options

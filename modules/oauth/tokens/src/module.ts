@@ -236,6 +236,7 @@ export default defineModule(
 			};
 			const access: Tokens = {
 				revocable: () => denylist.revocable,
+				subjectsChecked: () => !unchecked,
 				...issuing(judge, issueAccess, c.clock.now),
 				verifyAccess: async (token) => {
 					const checked = await check(token);
