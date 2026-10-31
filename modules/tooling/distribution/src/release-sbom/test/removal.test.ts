@@ -50,9 +50,8 @@ it("tells a command past its time as such, beside what the client wrote before i
 		"Pulling from anchore/syft\ndocker run did not answer within 1.5 seconds",
 	);
 	client("exec sleep 30");
-	// The client names the command it ran, an object's as its first word or both.
-	expect((await endOf(docker(["image", "ls"], 300))).stderr).toMatch(
-		/^docker image( ls)? did not answer within 0\.3 seconds$/,
+	expect((await endOf(docker(["image", "ls"], 300))).stderr).toBe(
+		"docker image ls did not answer within 0.3 seconds",
 	);
 });
 
