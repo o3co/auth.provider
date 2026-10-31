@@ -28,8 +28,6 @@ export interface Pkg {
 		readonly network?: string | readonly string[];
 		/** Contracts it exports, by name, and the packages alone that may import each. */
 		readonly takenBy?: unknown;
-		/** The packages that may write the narrower's `internal` (G32). */
-		readonly internalBy?: unknown;
 		/** What an owner holds to declaration, `{ type, property }`; a writer's declaration, that property (G32). */
 		readonly narrower?: unknown;
 		/** The one shipped file that may start a helper process, mapped to the helper's file (guard's G26). */

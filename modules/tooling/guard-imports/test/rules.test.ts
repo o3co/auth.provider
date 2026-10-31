@@ -874,7 +874,7 @@ describe("guard-imports", () => {
 		]);
 	});
 
-	describe("G32 internal by the packages the narrower's owner lists", () => {
+	describe("G32 internal by the packages declaring it", () => {
 		const urls = pkg("@c/urls", {
 			"src/contract.ts": [
 				"declare const brand: unique symbol;",
@@ -891,7 +891,11 @@ describe("guard-imports", () => {
 			"export type { Narrower };",
 			"export const send = (url: string, n?: Narrower) => (n?.internal === undefined ? url : n.internal);",
 		];
-		const policy = (internalBy: unknown, own: string[] = [], owned?: unknown) =>
+		/** The owner, stating what it holds to declaration, its contract writing `own` beside. */
+		const owner = (
+			owned: unknown = { type: "Narrower", property: "internal" },
+			own: string[] = [],
+		) =>
 			pkg(
 				"@c/policy",
 				{
@@ -902,16 +906,10 @@ describe("guard-imports", () => {
 				{
 					exports: { ".": "./src/contract.ts" },
 					dependencies: { "@c/urls": "*" },
-					...(internalBy === undefined ? {} : { internalBy }),
-					...(owned === undefined ? {} : { narrower: owned }),
+					narrower: owned,
 				},
 				"foundation",
 			);
-		/** The owner stating what it holds to declaration, and listing no package. */
-		const owner = (
-			owned: unknown = { type: "Narrower", property: "internal" },
-			own: string[] = [],
-		) => policy(undefined, own, owned);
 		/** A package writing `internal` in each way the rule counts, and in ways it does not. */
 		const writer = (name: string, declared?: unknown, card = `# ${name}\n`) => ({
 			...pkg(
@@ -971,69 +969,32 @@ describe("guard-imports", () => {
 				.filter((v) => v.rule.startsWith("G32"))
 				.map((v) => `${v.where} ${v.detail}`);
 
-		it("passes a package the list names, writing internal in each way", () => {
-			expect(found([urls, policy(["@c/listed"]), writer("@c/listed")])).toEqual([]);
-		});
-
-		it("refuses each internal a package the list leaves out writes, and counts no other field, binding or test", () => {
-			expect(found([urls, policy(["@c/listed"]), writer("@c/listed"), writer("@c/other")])).toEqual(
-				[
-					"@c/other/src/module.ts:5 internal",
-					"@c/other/src/module.ts:6 internal",
-					"@c/other/src/module.ts:9 internal",
-					"@c/other/src/module.ts:10 internal",
-					"@c/other/src/module.ts:11 internal",
-					"@c/other/src/module.ts:16 internal",
-					"@c/other/src/module.ts:17 internal",
-					"@c/other/src/module.ts:21 internal",
-					"@c/other/src/module.ts:22 internal",
-					"@c/other/src/module.ts:23 internal",
-					"@c/other/src/module.ts:24 internal",
-				],
-			);
-		});
-
 		it("counts the owner too: it states internal, and writes none", () => {
 			const leak = [
 				'import { read } from "@c/urls";',
 				'export const leak = () => send("x", { internal: read("http://x/") });',
 			];
-			expect(found([urls, policy(["@c/listed"], leak), writer("@c/listed")])).toEqual([
+			expect(found([urls, owner(undefined, leak), declaring("@c/declared")])).toEqual([
 				"@c/policy/src/contract.ts:5 internal",
 			]);
 		});
 
-		it("refuses a list where the owner's contract exports no Narrower with internal", () => {
+		it("refuses an owner whose contract exports no type of that name with the property", () => {
 			const hidden = pkg(
 				"@c/policy",
 				{
 					"src/contract.ts":
 						'import type { ConfiguredUrl } from "@c/urls";\ninterface Narrower { readonly internal?: ConfiguredUrl }\nexport const send = (n?: Narrower) => n;\n',
 				},
-				{ exports: { ".": "./src/contract.ts" }, dependencies: { "@c/urls": "*" }, internalBy: [] },
+				{
+					exports: { ".": "./src/contract.ts" },
+					dependencies: { "@c/urls": "*" },
+					narrower: { type: "Narrower", property: "internal" },
+				},
 				"foundation",
 			);
 			expect(found([urls, hidden])).toEqual([
-				"@c/policy internalBy, but it exports no Narrower with internal",
-			]);
-		});
-
-		it("refuses a list naming a package that writes none, no workspace package, or one twice, and one not a list", () => {
-			const silent = pkg("@c/silent", { "src/module.ts": "export const x = 1;\n" });
-			expect(
-				found([
-					urls,
-					policy(["@c/listed", "@c/silent", "@c/gone", "@c/listed"]),
-					writer("@c/listed"),
-					silent,
-				]),
-			).toEqual([
-				"@c/policy internalBy names @c/listed twice",
-				"@c/policy internalBy: @c/silent writes no internal",
-				"@c/policy internalBy: @c/gone is no workspace package",
-			]);
-			expect(found([urls, policy("@c/listed"), writer("@c/listed")])).toEqual([
-				"@c/policy internalBy is no list of package names",
+				"@c/policy narrower, but it exports no Narrower with internal",
 			]);
 		});
 
@@ -1041,13 +1002,7 @@ describe("guard-imports", () => {
 			expect(found([urls, owner(), declaring("@c/declared")])).toEqual([]);
 		});
 
-		it("passes a package either the list names or that declares, while both are read", () => {
-			expect(
-				found([urls, policy(["@c/listed"]), writer("@c/listed"), declaring("@c/declared")]),
-			).toEqual([]);
-		});
-
-		it("refuses each internal a package neither declaring nor listed writes", () => {
+		it("refuses each internal a package not declaring it writes, and counts no other field, binding or test", () => {
 			expect(found([urls, owner(), declaring("@c/declared"), writer("@c/other")])).toEqual([
 				"@c/other/src/module.ts:5 internal",
 				"@c/other/src/module.ts:6 internal",
