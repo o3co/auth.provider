@@ -7,15 +7,15 @@ const dated = /^\d{4}-\d{2}-\d{2}$/;
  */
 const relativeLink = /\]\((?![a-z][a-z\d+.-]*:|[#/])/gi;
 
-/** A repository URL a link can be made from: https, a path not ending `/` or `.git`, nothing else. */
+/**
+ * A repository URL a link can be made from: https, a path not ending `/` or `.git`, nothing else,
+ * written as the URL parser spells it, so no credentials, query, fragment or space slips by.
+ */
 const plain = (repository: string) => {
 	const url = URL.parse(repository);
 	return (
 		url?.protocol === "https:" &&
-		url.username === "" &&
-		url.password === "" &&
-		url.search === "" &&
-		url.hash === "" &&
+		repository === url.origin + url.pathname &&
 		/^\/.*[^/]$/.test(url.pathname) &&
 		!url.pathname.endsWith(".git")
 	);
