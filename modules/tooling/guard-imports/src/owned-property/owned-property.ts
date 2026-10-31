@@ -124,6 +124,8 @@ export interface PropertyDeclarations {
 	readonly malformed: readonly Pkg[];
 	/** The packages declaring, in `narrower`, the property they write, whatever its value. */
 	readonly declaring: readonly Pkg[];
+	/** Those of them declaring exactly the one owner's property: none where there is no owner, or two. */
+	readonly writers: readonly Pkg[];
 }
 
 /** The owners' `narrowerOwner` and the writers' `narrower` in `packages`. */
@@ -140,7 +142,12 @@ export function propertyDeclarations(packages: readonly Pkg[]): PropertyDeclarat
 		}
 		if (p.manifest.narrower !== undefined) declaring.push(p);
 	}
-	return { owners, malformed, declaring };
+	const [only, ...others] = owners;
+	const writers =
+		only === undefined || others.length > 0
+			? []
+			: declaring.filter((p) => p.manifest.narrower === only.property);
+	return { owners, malformed, declaring, writers };
 }
 
 /**
@@ -151,7 +158,7 @@ export function propertyDeclarations(packages: readonly Pkg[]): PropertyDeclarat
  */
 export function ownedPropertyRules(s: Scope) {
 	const rule = "G32 an owned property is written only by the packages declaring it";
-	const { owners, malformed, declaring } = propertyDeclarations(s.packages);
+	const { owners, malformed, declaring, writers } = propertyDeclarations(s.packages);
 	for (const p of malformed) {
 		s.report(rule, p.name, "narrowerOwner names no type and property it holds to declaration");
 	}
@@ -176,19 +183,12 @@ export function ownedPropertyRules(s: Scope) {
 	}
 	if (others.length > 0) return;
 	const { property } = owned;
-	const declared = new Set<string>();
+	const declared = new Set(writers.map((p) => p.name));
 	for (const p of declaring) {
-		const value = p.manifest.narrower;
-		if (value !== property) {
-			s.report(
-				rule,
-				p.name,
-				`narrower is ${JSON.stringify(value)}, not exactly ${JSON.stringify(property)}`,
-			);
-			continue;
-		}
-		declared.add(p.name);
-		if (!(p.card ?? "").includes(`\`narrower\`: \`${property}\``)) {
+		if (!declared.has(p.name)) {
+			const value = JSON.stringify(p.manifest.narrower);
+			s.report(rule, p.name, `narrower is ${value}, not exactly ${JSON.stringify(property)}`);
+		} else if (!(p.card ?? "").includes(`\`narrower\`: \`${property}\``)) {
 			s.report(rule, p.name, `card states \`narrower\`: \`${property}\``);
 		}
 	}

@@ -212,16 +212,12 @@ export function attackSurfaceOf(input: SurfaceInput): string {
 }
 
 /**
- * The packages that may reach private addresses at URLs of the operator's configuration: those
- * declaring the property the one owner holds to declaration, as guard-imports reads the manifests.
+ * The packages that may reach private addresses at URLs of the operator's configuration: the writers
+ * guard-imports judges to declare the property the one owner holds to declaration.
  */
 export function privateReachOf(packages: readonly Pkg[]): readonly string[] {
-	const { owners, declaring } = propertyDeclarations(packages);
-	const [owned, ...others] = owners;
-	if (owned === undefined || others.length > 0) return [];
-	return declaring
-		.filter(({ manifest }) => manifest.narrower === owned.property)
-		.map(({ name }) => name)
+	return propertyDeclarations(packages)
+		.writers.map(({ name }) => name)
 		.sort();
 }
 
