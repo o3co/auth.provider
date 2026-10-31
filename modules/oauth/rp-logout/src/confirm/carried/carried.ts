@@ -78,13 +78,15 @@ export async function heldClaims(
 
 /** Signs and checks carried requests, and holds a carried return to its client's registration now. */
 export function carriedWith(p: CarriedParts) {
-	/** A carried request and its time, where it holds. */
-	const read = async (token: string | undefined) => {
-		const claims = await heldClaims(p, token, carriedType, p.logoutUrl);
+	/** The session a token of `type` for `audience` names and what it carries, where it holds. */
+	const boundTo = async (token: string | undefined, type: string, audience: string) => {
+		const claims = await heldClaims(p, token, type, audience);
 		const sid = claims?.sid;
 		if (typeof sid !== "string" || sid === "") return undefined;
 		return { sid, ...carriedFrom(claims) };
 	};
+	/** A carried request and its time, where it holds. */
+	const read = (token: string | undefined) => boundTo(token, carriedType, p.logoutUrl);
 	return {
 		/** A request `ending` checked, signed to be carried in the browser's URL. */
 		carry: (request: CarriedRequest): Promise<string> => {
@@ -93,6 +95,7 @@ export function carriedWith(p: CarriedParts) {
 			return p.keys.sign({ ...at, sid: request.sid, ...carriedClaims(request) }, carriedType);
 		},
 		read,
+		boundTo,
 		/** The request a token carries, where it holds. */
 		carried: async (token: string | undefined): Promise<CarriedRequest | undefined> => {
 			const found = await read(token);

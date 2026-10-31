@@ -143,6 +143,26 @@ it("refuses to boot unless the operator accepts that nothing is sent, and on man
 	await expect(boot([contractTemplates])).resolves.toBeDefined();
 });
 
+it("warns at every start that the logging-only sender sends nothing", async () => {
+	const warned = async () => {
+		const from = recorded.lines().length;
+		await boot([reset]);
+		return recorded
+			.lines()
+			.slice(from)
+			.filter((line) => line.level === "warn");
+	};
+	const once = [
+		{
+			level: "warn",
+			event: "mail.unsent_accepted",
+			fields: { reason: "the logging-only sender sends nothing" },
+		},
+	];
+	expect(await warned()).toEqual(once);
+	expect(await warned()).toEqual(once);
+});
+
 it("names the purpose that has no template when it refuses to boot", async () => {
 	const bare = defineModule({ name: "bare-owner", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(mailPurposes).by(() => ({ purpose: "bare" })),

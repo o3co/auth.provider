@@ -1,4 +1,4 @@
-import { clients } from "@mod/clients";
+import { type Clients, clients } from "@mod/clients";
 import { externalJwt } from "@mod/external-jwt";
 import { defineModule } from "@mod/kernel";
 import { revocations } from "@mod/subject-revocation";
@@ -6,8 +6,18 @@ import { exchangeVerifiers } from "@mod/token-exchange";
 import { upstreamNames, users } from "@mod/users";
 import { idTokenChecks, usedIdTokens } from "./contract.ts";
 import { fixedIssuers, type Issuers } from "./issuers.ts";
-import { kinds, section } from "./section.ts";
+import { kinds, type Settings, section } from "./section.ts";
 import { idTokenChecksOver, idTokens, type Taken } from "./verifier.ts";
+
+/** Where the section names a client that is not registered, the first such; none when every one is. */
+async function unknownClientIn(s: Settings, known: Pick<Clients, "find">) {
+	for (const kind of kinds) {
+		for (const id of Object.keys(s[kind]?.clients ?? {})) {
+			if ((await known.find(id)) === undefined) return `exchange-id-tokens.${kind}.clients.${id}`;
+		}
+	}
+	return undefined;
+}
 
 /** The module over the given issuers; the composed one is over the fixed issuers alone. */
 export const exchangeIdTokensOver = (issuers: Issuers) =>
@@ -32,17 +42,8 @@ export const exchangeIdTokensOver = (issuers: Issuers) =>
 			})),
 			// The checks any grant takes them by; the exchange is one such grant.
 			m.provide(idTokenChecks).by(async (c) => {
-				const known = await c.get(clients);
-				for (const kind of kinds) {
-					for (const id of Object.keys(c.section[kind]?.clients ?? {})) {
-						if ((await known.find(id)) === undefined) {
-							return c.refuse(
-								`exchange-id-tokens.${kind}.clients.${id}`,
-								"is no registered client",
-							);
-						}
-					}
-				}
+				const unknown = await unknownClientIn(c.section, await c.get(clients));
+				if (unknown !== undefined) return c.refuse(unknown, "is no registered client");
 				const jwt = await c.get(externalJwt);
 				const skewMs = c.section["clock-skew"] * 1000;
 				const taken: Taken[] = kinds.flatMap((kind) => {

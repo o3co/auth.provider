@@ -7,6 +7,7 @@ import { authenticateClient, oauthError } from "@mod/token-endpoint";
 import { type Tokens, tokens } from "@mod/tokens";
 import events from "../audit-events.ts";
 import type { RevocableKind } from "../contract.ts";
+import { tokenOf } from "../request.ts";
 
 /** RFC 7009 §2.2: 200 with no body, whatever was or was not revoked. */
 const answered: HttpResponse = { status: 200, headers: noStore };
@@ -52,11 +53,8 @@ export function revocation(
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
 		const authenticated = await authenticateClient(clients, request, audit);
 		if (authenticated.kind === "refused") return authenticated.response;
-		if (request.form.repeated().length > 0) {
-			return oauthError(400, "invalid_request", "repeated parameter");
-		}
-		const token = request.form.single("token");
-		if (!token) return oauthError(400, "invalid_request", "token is required");
+		const token = tokenOf(request);
+		if (typeof token !== "string") return token;
 		const hint = request.form.single("token_type_hint");
 		// The hinted kind first (§2.1); kinds are keyed by hint, so at most one matches.
 		const ordered = [

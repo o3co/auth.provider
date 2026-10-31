@@ -9,14 +9,7 @@ import { type Closing, closingFrom, closingTakes } from "../closing/closing.ts";
 import type { LogoutReturn, UpstreamEnd } from "../contract.ts";
 import { frontChannelPage, loggedOutPage, returnUrl } from "../page/page.ts";
 import type { Settings } from "../section.ts";
-import {
-	type Carried,
-	carriedClaims,
-	carriedFrom,
-	carriedParam,
-	carriedWith,
-	heldClaims,
-} from "./carried/carried.ts";
+import { type Carried, carriedClaims, carriedParam, carriedWith } from "./carried/carried.ts";
 
 export { type CarriedRequest, carriedParam } from "./carried/carried.ts";
 
@@ -107,12 +100,8 @@ export function confirmWith(p: ConfirmParts) {
 	};
 
 	/** The session the confirmation was shown for and what it carries, where it is valid. */
-	const boundTo = async (confirmation: string | undefined) => {
-		const claims = await heldClaims(p, confirmation, confirmationType, p.confirmUrl);
-		const sid = claims?.sid;
-		if (typeof sid !== "string" || sid === "") return undefined;
-		return { sid, ...carriedFrom(claims) };
-	};
+	const confirmed = (confirmation: string | undefined) =>
+		carrying.boundTo(confirmation, confirmationType, p.confirmUrl);
 
 	const show = async (request: HttpRequest): Promise<HttpResponse> => {
 		// A request not carried by a token of this module's, or one past its time, is none: no return.
@@ -124,7 +113,7 @@ export function confirmWith(p: ConfirmParts) {
 
 	const take = async (request: HttpRequest): Promise<HttpResponse> => {
 		if (request.fields.repeated().length > 0) return repeated;
-		const bound = await boundTo(request.fields.single("confirmation"));
+		const bound = await confirmed(request.fields.single("confirmation"));
 		const handle = await p.sessions.handleOf(request);
 		if (handle === undefined) return notSignedIn(bound ? await current(bound) : {});
 		// Another session than the one the page was shown for, or no valid binding: asked again, nothing closed.

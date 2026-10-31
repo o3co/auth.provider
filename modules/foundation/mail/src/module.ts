@@ -12,6 +12,8 @@ export default defineModule(
 			if (!c.section["accept-unsent"]) {
 				return c.refuse("mail.accept-unsent", "this sender sends nothing; set true to accept that");
 			}
+			// Accepted, yet said at every start: no code or link mailed reaches its user.
+			c.log.warn("mail.unsent_accepted", { reason: "the logging-only sender sends nothing" });
 			const prepare = await preparer(c);
 			// A key per process: the hash links lines of one run, yet a known address cannot be looked up.
 			const key = c.random.bytes(32);

@@ -7,7 +7,7 @@ import { refreshGrantType } from "../contract.ts";
 import { allowanceMs, fromStoredRedemption, toStoredRedemption } from "../record.ts";
 import type { Settings } from "../section.ts";
 import { type Revoker, type Stores, settlingIn } from "../settle/settle.ts";
-import { founding } from "./found.ts";
+import { familyFieldsOf, founding } from "./found.ts";
 
 export function starting(
 	stores: Stores,
@@ -51,23 +51,7 @@ export function starting(
 			await revoker.revokeFamily(id);
 			throw new Unavailable("refresh");
 		}
-		return found.found(
-			id,
-			{
-				clientId: redeemed.client.id,
-				subject: redeemed.subject,
-				scope: redeemed.scope,
-				audience: redeemed.audience,
-				session: redeemed.session,
-				authenticatedAt: redeemed.authenticatedAt,
-				...(redeemed.authenticatedAtUnknown ? { authenticatedAtUnknown: true as const } : {}),
-				amr: redeemed.amr,
-				...(redeemed.acr ? { acr: redeemed.acr } : {}),
-				...(binding ? { binding } : {}),
-			},
-			redeemed.access,
-			expiresAt,
-		);
+		return found.found(id, familyFieldsOf(redeemed, binding), redeemed.access, expiresAt);
 	};
 }
 

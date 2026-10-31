@@ -35,7 +35,7 @@
 - `grantServers`: the index of first-party grants, each grant type by the module that serves it, as that module's manifest declares (`grantTypes`); a test holds the two alike. A type it does not list, a name every object has included, answers none.
 
 ## Depends on
-- `kernel`, `http`, `clients`, `sender-binding`, `tokens`; kept by `token-endpoint`.
+- `kernel`, `http`, `clients`, `sender-binding`, `tokens`
 
 ## Vocabulary
 - grant: a procedure that issues tokens, chosen by grant type name.

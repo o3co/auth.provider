@@ -13,7 +13,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { type AccessTokenSigning, accessTokenSigning } from "@mod/keys";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
@@ -108,6 +108,16 @@ const assembly = (
 	runtime,
 });
 
+/** The lines naming `event` that booting this assembly logs. */
+async function warnedOf(event: string, ...args: Parameters<typeof assembly>) {
+	const recorded = recordingLog();
+	await assemble({
+		...assembly(...args),
+		runtime: quietRuntime({ ...runtime, log: recorded.log }),
+	});
+	return recorded.lines().filter((line) => line.event === event);
+}
+
 async function assembled(...args: Parameters<typeof assembly>) {
 	return assemble(assembly(...args));
 }
@@ -180,6 +190,19 @@ describe("tokens", () => {
 		expect(t.revocable()).toBe(false);
 	});
 
+	it("warns at every start where revocation is unsupported, and not where it is a denylist", async () => {
+		const warned = (revocation: string) =>
+			warnedOf("tokens.revocation_unsupported", { revocation });
+		expect(await warned("unsupported")).toEqual([
+			{
+				level: "warn",
+				event: "tokens.revocation_unsupported",
+				fields: { reason: "an access token issued cannot be revoked before it expires" },
+			},
+		]);
+		expect(await warned("denylist")).toEqual([]);
+	});
+
 	it("refuses to start until revocation is decided", async () => {
 		await expect(boot({})).rejects.toBeInstanceOf(BootRefused);
 	});
@@ -241,6 +264,22 @@ it("refuses to start unless exactly one module checks subjects, or the section s
 	await expect(boot(stated, { extra: [check("a")] })).rejects.toMatchObject(refused);
 	await boot(unchecked, { extra: [check("a")] });
 	await boot(stated);
+});
+
+it("warns at every start where the section states that no module checks subjects", async () => {
+	const check = defineModule({ name: "check", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(subjectChecks).by(() => ({ holds: async () => "holds" as const })),
+	]);
+	const warned = (section: Record<string, unknown>, extra: Module[] = []) =>
+		warnedOf("tokens.subjects_unchecked", section, { extra });
+	expect(await warned({ revocation: "denylist" })).toEqual([
+		{
+			level: "warn",
+			event: "tokens.subjects_unchecked",
+			fields: { reason: "a revoked subject's access tokens are taken until they expire" },
+		},
+	]);
+	expect(await warned({ revocation: "denylist", "subject-check": undefined }, [check])).toEqual([]);
 });
 
 it("says whether subjects are checked: false only where the section states none", async () => {
