@@ -416,7 +416,7 @@ it("refuses a token whose cap has passed, handing none out", async () => {
 	});
 });
 
-it("stamps iat when issue was asked, before the policies' wait: a boundary recorded meanwhile refuses it [guarantee-4-e]", async () => {
+it("stamps iat as the second issue was asked, though a policy took five seconds to answer", async () => {
 	const waiting = defineModule({ name: "waiting", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(issuancePolicies).by(() => ({
 			name: "waiting",
