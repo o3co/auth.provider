@@ -4,6 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"asks": [
+		"`authorize.step-up-page`: the page that raises authentication, written in the local layer (optional)."
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
