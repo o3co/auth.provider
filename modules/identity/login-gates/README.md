@@ -2,8 +2,8 @@
 
 ## Responsibilities
 - Passes a confirmed login through the gates, then has `session` open it.
-- Resumes a held login with the gates after the one that held it.
-- Decides where a login may send the browser back to, for every way of logging in.
+- Resumes a held login with the gates after the one that held it (internal module `running`).
+- Decides where a login may send the browser back to, for every way of logging in (internal module `returns`).
 
 ## Not here
 - Authentication methods (the callers), opening a session (`session`) and each gate's decision (the gate).
