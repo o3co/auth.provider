@@ -57,7 +57,7 @@ beforeAll(async () => {
 	);
 	redisUrl = `redis://127.0.0.1:${port}`;
 	await waitFor("redis start", pings);
-}, 60_000);
+}, dockerWithin.run + 60_000);
 
 afterAll(() => {
 	app?.kill("SIGKILL");
