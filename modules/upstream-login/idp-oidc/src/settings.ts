@@ -1,5 +1,5 @@
 import { type Algorithm, algorithmsSetting } from "@mod/external-jwt";
-import { hostEntryOf } from "@mod/host-entries";
+import { hostList } from "@mod/host-entries";
 import { setting } from "@mod/kernel";
 import {
 	browsedRefusalText,
@@ -100,12 +100,9 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 			algorithms: algorithmsSetting(asymmetric, ["RS256", "ES256", "EdDSA"]).describe(
 				"The algorithms an id_token may be signed with: asymmetric ones only, by default one for each kind of key. Two for one kind (RS256 and PS256) leave a key of the IdP's set naming no alg unused.",
 			),
-			"endpoint-hosts": z
-				.array(z.string().refine((entry) => hostEntryOf(entry) !== undefined, "a host, or .name"))
-				.prefault([])
-				.describe(
-					"Hosts besides the issuer's its endpoints may be on, as host-entries reads a host list.",
-				),
+			"endpoint-hosts": hostList.describe(
+				"Hosts besides the issuer's its endpoints may be on, as host-entries reads a host list.",
+			),
 			"read-userinfo": z
 				.boolean()
 				.prefault(false)
