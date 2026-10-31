@@ -247,7 +247,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `exported` (`src/exported`): Tells whether a package's `exports` maps a subpath to a target node would load for an app's import, read as node's resolver reads it, without running the package.
   - `outside` (`src/outside`): Reads the packages outside the release an operator had pnpm install into a project: each one's record, its declaration and its files.
   - `patterns` (`src/patterns`): Holds the patterns: each a deployment's use and the selection that composes it, in one file (`<name>.ts`) with a card of at most 10 lines (`<name>.md`).
-- `@mod/kinds` (assembly, `modules/scaffold/kinds`): Names the kinds a package's manifest may be, and which way a dependency between kinds may point: the one place either is written. That the bottom level (common, protocol) depends on nothing at all is `guard`'s G2, beside `mayNeed`, which answers by level alone.
+- `@mod/kinds` (assembly, `modules/scaffold/kinds`): Names the kinds a package's manifest may be, and which way a dependency between kinds may point: the one place either is written. That the bottom level (common, protocol) depends on nothing at all is `guard-imports`' G2, beside `mayNeed`, which answers by level alone.
 - `@mod/trial` (assembly, `modules/scaffold/trial`): Builds the local layer that boots a generated app for a test or a conformance run, from the trial file of each module the app composes; it holds no module's values.
 
 ## second-factor
