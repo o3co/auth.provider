@@ -12,6 +12,7 @@ export {
 	type ExtensionPoint,
 	type ExtensionRule,
 	extensionPoint,
+	type Handle,
 } from "./handles.ts";
 export { type Probe, probes, type Readiness, type ReadinessReport } from "./lifecycle/readiness.ts";
 export {
@@ -25,7 +26,13 @@ export {
 	type Parts,
 	type Provision,
 } from "./module.ts";
-export { BootRefused, isUnavailable, type Refusal, Unavailable } from "./refusal.ts";
+export {
+	BootRefused,
+	BuildRefused,
+	isUnavailable,
+	type Refusal,
+	Unavailable,
+} from "./refusal/refusal.ts";
 export { logSinks } from "./runtime/log.ts";
 export type {
 	Clock,

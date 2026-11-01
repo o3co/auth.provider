@@ -18,14 +18,16 @@ function setUp(list: readonly Probe[]) {
 	let now = 0;
 	const runtime = quietRuntime({ clock: { now: () => now }, log: recorded.log });
 	let context: BuildContext<unknown> | undefined;
-	const asker = defineModule({ name: "asker" }, (m) => [
+	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(contract<object>("asker")).by((c) => {
 			context = c;
 			return {};
 		}),
 	]);
 	const contributors = list.map((probe, i) =>
-		defineModule({ name: `c${i}` }, (m) => [m.contribute(probes).by(() => probe)]),
+		defineModule({ name: `c${i}`, replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(probes).by(() => probe),
+		]),
 	);
 	return {
 		/** The fields of each warn line so far. */
@@ -280,6 +282,26 @@ describe("readiness", () => {
 		expect(await none.report(10)).toEqual({ answer: "ready", probes: [] });
 	});
 
+	it("answers unready, every probe down, where stop began while the probes ran, though they pass", async () => {
+		let pass: (() => void) | undefined;
+		const s = setUp([
+			{ name: "slow", check: () => new Promise<void>((resolve) => (pass = resolve)) },
+			passing("quick"),
+		]);
+		const app = await s.app;
+		const asked = s.report(1000);
+		await vi.waitFor(() => expect(pass).toBeDefined());
+		await app.stop(1000);
+		pass?.();
+		expect(await asked).toEqual({
+			answer: "unready",
+			probes: [
+				{ name: "slow", up: false },
+				{ name: "quick", up: false },
+			],
+		});
+	});
+
 	it("reports every probe down without checking once stop begins", async () => {
 		let runs = 0;
 		const s = setUp([
@@ -316,14 +338,14 @@ describe("readiness", () => {
 	});
 
 	it("rejects when asked during assembly, and after a refused assembly", async () => {
-		const early = defineModule({ name: "early" }, (m) => [
+		const early = defineModule({ name: "early", replicaSafe: true, takes: [] }, (m) => [
 			m.provide(contract<object>("early")).by((c) => c.readinessReport(1000)),
 		]);
 		expect(await refusalsOf(assemble({ modules: [early], config: single }))).toEqual([
 			{ where: "early", reason: "failed during assembly" },
 		]);
 		let held: BuildContext<unknown> | undefined;
-		const holder = defineModule({ name: "holder" }, (m) => [
+		const holder = defineModule({ name: "holder", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(contract<object>("holder")).by((c) => {
 				held = c;
 				return {};

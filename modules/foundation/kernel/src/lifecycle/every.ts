@@ -1,3 +1,4 @@
+import { thrownKind } from "../refusal/refusal.ts";
 import type { Log } from "../runtime/runtime.ts";
 
 /** A task run at a fixed interval while the app runs; runs never overlap. */
@@ -19,7 +20,7 @@ export function periodic(
 			.catch((error: unknown) => {
 				log.warn("kernel.every_failed", {
 					module: where,
-					kind: error instanceof Error ? error.name : typeof error,
+					kind: thrownKind(error),
 				});
 			})
 			.finally(() => {

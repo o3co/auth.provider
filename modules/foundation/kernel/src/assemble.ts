@@ -1,24 +1,40 @@
-import { readSections } from "./config/sections.ts";
-import type { KernelSettings } from "./config/settings.ts";
-import type { Contract, ExtensionPoint } from "./handles.ts";
-import { periodic } from "./lifecycle/every.ts";
 import {
-	isTimerMs,
-	type Probe,
-	probes,
-	type ReadinessReport,
-	readinessOf,
-} from "./lifecycle/readiness.ts";
-import { type StopHook, stopWithin } from "./lifecycle/stop.ts";
-import type { BuildContext, Module } from "./module.ts";
-import { BootRefused, type Refusal, RefusalSignal } from "./refusal.ts";
+	type Buildable,
+	buildingWith,
+	checkPoint,
+	recordFailure,
+	type TakesWatch,
+} from "./building/building.ts";
+import { readSections } from "./config/sections.ts";
+import { checkProduction, checkReplicas } from "./deployment/deployment.ts";
+import type { Contract, ExtensionPoint } from "./handles.ts";
+import { isTimerMs, type Probe, probes, readinessOf } from "./lifecycle/readiness.ts";
+import { stopWithin } from "./lifecycle/stop.ts";
+import type { Module } from "./module.ts";
+import { BootRefused, type Refusal } from "./refusal/refusal.ts";
 import { guardedLog, logSinks, routedLog } from "./runtime/log.ts";
-import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime/runtime.ts";
+import {
+	hearStandardStreams,
+	type LogSink,
+	type Runtime,
+	systemClock,
+	systemRandom,
+} from "./runtime/runtime.ts";
+import { checkTakes } from "./takes/takes.ts";
 
 export interface Assembly {
+	/** The contract's interface; one no module provides throws an Error at once. */
 	get<T>(contract: Contract<T>): T;
+	/**
+	 * Runs the start hooks in the order registered, one at a time; the first that rejects stops the
+	 * rest and the periodic tasks from starting, and `start` rejects with it. It has no deadline and
+	 * is called once: a second call runs the hooks and starts the periodic tasks again.
+	 */
 	start(): Promise<void>;
-	/** Without a deadline, the kernel section's `stop-deadline`. */
+	/**
+	 * Without a deadline, the kernel section's `stop-deadline`. It is called once: each call runs the
+	 * stop hooks again, and calls made side by side are not joined, so the caller stops once.
+	 */
 	stop(deadlineMs?: number): Promise<void>;
 }
 
@@ -28,41 +44,13 @@ export interface AssemblyInput {
 	readonly runtime?: Runtime;
 }
 
-type Hook = () => Promise<void> | void;
-/** One provision or contribution, as assembly builds it. */
-type Item = { readonly module: Module; readonly create: (c: BuildContext<unknown>) => unknown };
 /** A top-level build as a value; a failure's refusal is recorded already. */
 type Built = { readonly ok: true; readonly value: unknown } | { readonly ok: false };
 
-/** Failure of something this item needed; the original refusal is already recorded. */
-class DependencyFailed extends Error {}
-
-function checkReplicas(
-	modules: readonly Module[],
-	sections: Map<Module, unknown>,
-	deployment: KernelSettings["deployment"],
-	refusals: Refusal[],
-): void {
-	if (deployment !== "multi") return;
-	for (const module of modules) {
-		// A section that failed its schema is refused already; the declaration expects a checked one.
-		if (module.section !== undefined && !sections.has(module)) continue;
-		const safe =
-			typeof module.replicaSafe === "function"
-				? module.replicaSafe(sections.get(module))
-				: (module.replicaSafe ?? true);
-		if (!safe)
-			refusals.push({
-				where: module.name,
-				reason: "declares itself unsafe for multiple instances",
-			});
-	}
-}
-
 /** Who provides each contract and who contributes to each point; a contract provided twice is refused. */
 function indexParts(modules: readonly Module[], refusals: Refusal[]) {
-	const providers = new Map<Contract<unknown>, Item>();
-	const contributions = new Map<ExtensionPoint<unknown>, Item[]>();
+	const providers = new Map<Contract<unknown>, Buildable>();
+	const contributions = new Map<ExtensionPoint<unknown>, Buildable[]>();
 	for (const module of modules) {
 		for (const provision of module.provides ?? []) {
 			if (providers.has(provision.contract)) {
@@ -86,18 +74,20 @@ function refuseIfAny(refusals: readonly Refusal[]): void {
 	if (refusals.length > 0) throw new BootRefused(refusals);
 }
 
-/** Records why a build failed, unless the refusal behind it is recorded already. */
-function recordFailure(error: unknown, where: string, refusals: Refusal[]): void {
-	if (error instanceof RefusalSignal) refusals.push(...error.refusals);
-	else if (!(error instanceof DependencyFailed)) {
-		refusals.push({ where, reason: "failed during assembly" });
-	}
+/** Builds the modules; it waits on each factory without a deadline (`stop-deadline` bounds stopping alone). */
+export function assemble(input: AssemblyInput): Promise<Assembly> {
+	return assembleWatching(input);
 }
 
-export async function assemble(input: AssemblyInput): Promise<Assembly> {
+/** `assemble`, with the takes it holds and the takes taken told to a test's watch (`./testing`). */
+export async function assembleWatching(
+	input: AssemblyInput,
+	watch?: TakesWatch,
+): Promise<Assembly> {
 	const modules = input.modules;
 	const refusals: Refusal[] = [];
-	const { kernel, sections } = readSections(modules, input.config, refusals);
+	const { kernel, unsure, sections } = readSections(modules, input.config, refusals);
+	hearStandardStreams();
 	let sinkList: readonly LogSink[] | undefined;
 	// A runtime a test passes keeps its log, without threshold or sinks; its calls still never throw.
 	const runtime: Runtime = input.runtime
@@ -107,144 +97,30 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 				random: systemRandom,
 				log: routedLog(kernel.logging.level, systemClock, () => sinkList),
 			};
-	checkReplicas(modules, sections, kernel.deployment, refusals);
-	refuseIfAny(refusals);
-	const { providers, contributions } = indexParts(modules, refusals);
+	// A deployment or environment its refused section does not hold validly is no ground to refuse on.
+	if (!unsure.has("deployment")) checkReplicas(modules, sections, kernel.deployment, refusals);
+	const allowed = unsure.has("environment")
+		? []
+		: checkProduction(modules, sections, kernel.environment, refusals);
+	// One preflight before any factory runs: every structural gap is named in one refusal, and a
+	// refused boot has built nothing, so no stop hook is left to run.
+	const parts = indexParts(modules, refusals);
+	const { providers, contributions } = parts;
+	const heldTakes = checkTakes(modules, sections, parts, refusals);
+	for (const [module, handles] of heldTakes) watch?.held(module.name, handles);
 	refuseIfAny(refusals);
 
-	const built = new Map<Item, Promise<unknown>>();
-	const builtContracts = new Map<Contract<unknown>, unknown>();
-	const startHooks: Hook[] = [];
-	const stopHooks: StopHook[] = [];
-	const periodics: ReturnType<typeof periodic>[] = [];
-
-	/** Which builds each unfinished build is waiting on, so a cycle across branches is seen. */
-	const waits = new Map<Item, Set<Item>>();
-	/** Contracts named by late references, with who named them; checked once everything is built. */
-	const lateNamed: { contract: Contract<unknown>; by: string }[] = [];
-	let stopping = false;
-	/** Set once assembly succeeds; late references and readiness are refused until then. */
-	let assembled:
-		| { readonly readiness: (deadlineMs: number) => Promise<ReadinessReport> }
-		| undefined;
-	/** Points some module collected, each with its check's outcome: one check, one refusal, however many collect it. */
-	const collected = new Map<ExtensionPoint<unknown>, readonly unknown[] | undefined>();
-	const waitsOn = (from: Item, to: Item, seen = new Set<Item>()): boolean => {
-		if (from === to) return true;
-		if (seen.has(from)) return false;
-		seen.add(from);
-		return [...(waits.get(from) ?? [])].some((next) => waitsOn(next, to, seen));
-	};
-	/** A module a contract does not name taking it is refused, recorded even where the taker catches the throw. */
-	const mayTake = (contract: Contract<unknown>, item: Item) => {
-		const { takenBy } = contract;
-		if (takenBy === undefined || takenBy.includes(item.module.name)) return;
-		refusals.push({
-			where: item.module.name,
-			reason:
-				takenBy.length === 0
-					? `${contract.label} is taken by no module`
-					: `${contract.label} is taken by ${takenBy.join(", ")} alone`,
-		});
-		throw new DependencyFailed();
-	};
-	/** What a factory sees while `item` is built; `next` is the stack its requests extend. */
-	const contextFor = (item: Item, next: readonly Item[]): BuildContext<unknown> => ({
-		...runtime,
-		section: sections.get(item.module),
-		get: async <T>(contract: Contract<T>) => {
-			mayTake(contract as Contract<unknown>, item);
-			const provider = providers.get(contract as Contract<unknown>);
-			if (!provider) {
-				refusals.push({
-					where: item.module.name,
-					reason: `no module provides ${contract.label}`,
-				});
-				throw new DependencyFailed();
-			}
-			return (await build(provider, next)) as T;
-		},
-		collect: async <T>(point: ExtensionPoint<T>) => {
-			const list = contributions.get(point as ExtensionPoint<unknown>) ?? [];
-			const values: T[] = [];
-			// Each collector builds the contributions itself, so a cycle through it is still seen.
-			for (const contributor of list) values.push((await build(contributor, next)) as T);
-			const key = point as ExtensionPoint<unknown>;
-			if (collected.has(key)) {
-				const checked = collected.get(key);
-				if (checked === undefined) throw new DependencyFailed();
-				return checked as readonly T[];
-			}
-			try {
-				const checked = checkPoint(point, values, refusals);
-				collected.set(key, checked);
-				return checked;
-			} catch (error) {
-				collected.set(key, undefined);
-				throw error;
-			}
-		},
-		late: <T>(contract: Contract<T>) => {
-			mayTake(contract as Contract<unknown>, item);
-			lateNamed.push({ contract: contract as Contract<unknown>, by: item.module.name });
-			return () => {
-				if (!assembled) throw new Error(`${contract.label} is used before assembly is done`);
-				return builtContracts.get(contract as Contract<unknown>) as T;
-			};
-		},
-		readinessReport: (deadlineMs) => {
-			if (!assembled) {
-				return Promise.reject(new Error("readiness is asked before assembly is done"));
-			}
-			return assembled.readiness(deadlineMs);
-		},
-		onStart: (hook) => startHooks.push(hook),
-		onStop: (hook) => stopHooks.push({ module: item.module.name, run: hook }),
-		every: (intervalMs, task) => {
-			if (!isTimerMs(intervalMs)) {
-				throw new RefusalSignal([
-					{
-						where: item.module.name,
-						reason: "the every interval must be a whole number of ms, 1 to 2^31-1",
-					},
-				]);
-			}
-			periodics.push(periodic(intervalMs, task, runtime.log, item.module.name));
-		},
-		refuse: (where, reason) => {
-			throw new RefusalSignal([{ where, reason }]);
-		},
-		refuseAll: (list) => {
-			throw new RefusalSignal(
-				list.length > 0 ? list : [{ where: item.module.name, reason: "refused" }],
-			);
-		},
+	const { build, collected, lateNamed, provided, hooks, assembledWith } = buildingWith({
+		runtime,
+		environment: kernel.environment,
+		sections,
+		parts,
+		heldTakes,
+		refusals,
+		watch,
 	});
-	const build = (item: Item, stack: readonly Item[]): Promise<unknown> => {
-		const requester = stack.at(-1);
-		// Before the cache: joining an unfinished build that waits on the requester would never settle.
-		if (stack.includes(item) || (requester && waitsOn(item, requester))) {
-			refusals.push({ where: item.module.name, reason: "dependency cycle" });
-			return Promise.reject(new DependencyFailed());
-		}
-		if (requester) waits.set(requester, (waits.get(requester) ?? new Set()).add(item));
-		const existing = built.get(item);
-		if (existing) return existing;
-		const context = contextFor(item, [...stack, item]);
-		const promise = (async () => {
-			try {
-				return await item.create(context);
-			} catch (error) {
-				recordFailure(error, item.module.name, refusals);
-				throw new DependencyFailed();
-			}
-		})();
-		// Cached for every later request; a failure nobody awaits must not surface as unhandled.
-		promise.catch(() => {});
-		built.set(item, promise);
-		return promise;
-	};
-	const outcomeOf = (item: Item): Promise<Built> =>
+	let stopping = false;
+	const outcomeOf = (item: Buildable): Promise<Built> =>
 		build(item, []).then(
 			(value) => ({ ok: true, value }),
 			() => ({ ok: false }),
@@ -257,10 +133,12 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 		if (outcome.ok) sinks.push(outcome.value as LogSink);
 	}
 	sinkList = sinks;
-	for (const [contract, item] of providers) {
-		const outcome = await outcomeOf(item);
-		if (outcome.ok) builtContracts.set(contract, outcome.value);
+	// Once the sinks are built, so the lines reach them: what production would refuse, at each start.
+	for (const { where, reason } of allowed) {
+		runtime.log.warn("kernel.allowed_in_development", { key: where, reason });
 	}
+	// Each provision records its interface as it is built.
+	for (const item of providers.values()) await outcomeOf(item);
 	let probeList: readonly Probe[] = [];
 	for (const [point, list] of contributions) {
 		const outcomes: Built[] = [];
@@ -281,70 +159,33 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 			refusals.push({ where: by, reason: `no module provides ${contract.label}` });
 		}
 	}
-	refuseIfAny(refusals);
-	assembled = { readiness: readinessOf(probeList, runtime, () => stopping) };
+	if (refusals.length > 0) {
+		// Taken first: a context a build kept may still add refusals, from a stop hook too.
+		const refused = new BootRefused(refusals);
+		// What the builds started, ended before refusing: the hooks registered so far, in reverse.
+		await stopWithin(kernel["stop-deadline"] * 1000, [], hooks.stop, runtime.log, {
+			during: "refusal",
+		});
+		throw refused;
+	}
+	assembledWith(readinessOf(probeList, runtime, () => stopping));
 
 	return {
 		get: <T>(contract: Contract<T>) => {
-			if (!builtContracts.has(contract as Contract<unknown>)) {
-				throw new Error(`${contract.label} is not provided`);
-			}
-			return builtContracts.get(contract as Contract<unknown>) as T;
+			const found = provided(contract as Contract<unknown>);
+			if (!found) throw new Error(`${contract.label} is not provided`);
+			return found.value as T;
 		},
 		start: async () => {
-			for (const hook of startHooks) await hook();
-			for (const task of periodics) task.start();
+			for (const hook of hooks.start) await hook();
+			for (const task of hooks.periodics) task.start();
 		},
 		stop: async (deadlineMs = kernel["stop-deadline"] * 1000) => {
 			if (!isTimerMs(deadlineMs)) {
 				throw new TypeError("the stop deadline must be a whole number of ms, 1 to 2^31-1");
 			}
 			stopping = true;
-			await stopWithin(deadlineMs, periodics, stopHooks, runtime.log);
+			await stopWithin(deadlineMs, hooks.periodics, hooks.stop, runtime.log);
 		},
 	};
-}
-
-/** Freezes each contribution one level and checks the point's rule; a break records and throws. */
-function checkPoint<T>(point: ExtensionPoint<T>, values: T[], refusals: Refusal[]): readonly T[] {
-	// One level only: the values a contribution holds (schemas and the like) keep internal state.
-	for (const value of values) if (value !== null && typeof value === "object") Object.freeze(value);
-	const rule = point.rule;
-	switch (rule.multiplicity) {
-		case "one":
-			if (values.length !== 1) {
-				refusals.push({
-					where: point.label,
-					reason: `needs exactly one contribution (${values.length})`,
-				});
-				throw new DependencyFailed();
-			}
-			break;
-		case "some":
-			if (values.length === 0) {
-				refusals.push({ where: point.label, reason: "needs at least one contribution" });
-				throw new DependencyFailed();
-			}
-			break;
-		case "keyed": {
-			const seen = new Set<string>();
-			const twice = new Set<string>();
-			for (const value of values) {
-				const key = rule.keyOf(value);
-				if (seen.has(key)) twice.add(key);
-				seen.add(key);
-			}
-			for (const key of twice) {
-				refusals.push({
-					where: `${point.label}:${key}`,
-					reason: "more than one contribution for the same key",
-				});
-			}
-			if (twice.size > 0) throw new DependencyFailed();
-			break;
-		}
-		case "many":
-			break;
-	}
-	return Object.freeze(values);
 }

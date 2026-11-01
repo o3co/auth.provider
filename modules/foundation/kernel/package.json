@@ -4,6 +4,12 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "common",
+	"asks": [
+		{
+			"line": "`kernel.deployment`: `single` for one instance, `multi` for several.",
+			"decides": true
+		}
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts"
