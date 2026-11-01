@@ -6,13 +6,17 @@ export const defaultLifetimeSeconds = 3600;
 
 /** The longest lifetime an access token is issued with, a day. */
 const maxLifetimeSeconds = 86_400;
+/** The shortest, two seconds: one second, its iat cut to the second, leaves less than a second once signed. */
+const minLifetimeSeconds = 2;
 /** How far ahead of the clock a token's iat is taken, for clocks that differ between hosts. */
 const iatAheadMs = 60_000;
 
 export function lifetimeOf(asked: number | undefined, configured: number): number {
 	if (asked === undefined) return configured;
-	if (Number.isInteger(asked) && asked >= 1 && asked <= maxLifetimeSeconds) return asked;
-	throw new RangeError("tokens: a lifetime asked is 1 to 86400 whole seconds");
+	if (Number.isInteger(asked) && asked >= minLifetimeSeconds && asked <= maxLifetimeSeconds) {
+		return asked;
+	}
+	throw new RangeError("tokens: a lifetime asked is 2 to 86400 whole seconds");
 }
 
 /** iat and exp in epoch seconds: the lifetime from now, capped at `notAfter` (epoch ms), never before iat. */
@@ -64,7 +68,8 @@ export const tokenId = (random: Random) => Buffer.from(random.bytes(16)).toStrin
 
 /** A grant as a token keeps it: no empty amr, no time it does not know, the time to the second and never after `iat`. */
 export function keptGrant(grant: AccessGrant, iat: number): AccessGrant {
-	const { amr, authenticatedAtUnknown, acr, ...known } = grant;
+	// The standing time is the token's, read back beside the grant, never in it.
+	const { amr, authenticatedAtUnknown, acr, standingAt: _standing, ...known } = grant;
 	const { authenticatedAt: stated, ...rest } = known;
 	const authenticatedAt = authenticatedAtUnknown ? undefined : stated;
 	if (acr === "" || (authenticatedAt !== undefined && !Number.isFinite(authenticatedAt))) {

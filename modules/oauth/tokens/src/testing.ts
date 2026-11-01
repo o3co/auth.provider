@@ -17,10 +17,11 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issuance.ts";
+import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issuance/issuance.ts";
 import { defaultLifetimeSeconds, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import type { section } from "./section.ts";
+import { standingOf } from "./standing/standing.ts";
 
 export type TokensSettings = z.input<typeof section>;
 
@@ -46,7 +47,7 @@ export interface TokensUnderTest {
 	advance(ms: number): void;
 	/** A binding kind the composition knows: the `cnf` member it writes, and its token type. */
 	readonly known: { readonly member: string; readonly tokenType: string };
-	/** From now on, the composition's subject check answers revoked for this subject. */
+	/** From now on, the composition's subject check answers revoked for this subject's tokens issued up to now. */
 	revokeSubject(subject: string): void;
 }
 
@@ -60,6 +61,8 @@ export function tokensContract(
 		readonly revocable: boolean;
 		/** Issuance policies the composition contributes. */
 		readonly policies?: readonly IssuancePolicy[];
+		/** The access-token lifetime the composition is configured with; the section's default where absent. */
+		readonly lifetimeSeconds?: number;
 	}) => Promise<TokensUnderTest>,
 ): void {
 	const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: ["read"] };
@@ -150,6 +153,29 @@ export function tokensContract(
 			expect(await place.tokens.verifyAccess(ahead.token)).toMatchObject({
 				kind: "valid",
 				grant: { authenticatedAt: issuedAt },
+			});
+		});
+
+		it("runs a token's lifetime from when issue was asked, through the policies' wait, and what is left from signing", async () => {
+			let place: TokensUnderTest | undefined;
+			/** A policy taking `ms` to answer, the clock moving meanwhile. */
+			const waiting = (ms: number): IssuancePolicy => ({
+				name: "waits",
+				judge: async () => {
+					place?.advance(ms);
+					return { kind: "allowed" };
+				},
+			});
+			place = await open({ revocable: true, policies: [waiting(5_000)], lifetimeSeconds: 60 });
+			const asked = Math.floor(place.now() / 1000) * 1000;
+			const issued = await issueFor(place.tokens, grant);
+			expect([issued.expiresAt, issued.expiresIn]).toEqual([asked + 60_000, 55]);
+			// A lifetime the wait outlasts leaves none: refused, handed to no one.
+			place = await open({ revocable: true, policies: [waiting(3_000)], lifetimeSeconds: 2 });
+			expect(await place.tokens.issue({ grant, grantType: "test" })).toMatchObject({
+				kind: "refused",
+				policy: "tokens",
+				reason: "no_lifetime_left",
 			});
 		});
 
@@ -403,16 +429,17 @@ export function tokensContract(
 			}
 		});
 
-		it("issues for the lifetime the issuing side asks, up to a day, and refuses any other as its mistake", async () => {
+		it("issues for the lifetime the issuing side asks, two seconds to a day, and refuses any other as its mistake", async () => {
 			const place = await open({ revocable: true });
 			const longer = await issueFor(place.tokens, grant, { lifetimeSeconds: 86_400 });
 			expect(longer.expiresIn).toBe(86_400);
+			expect((await issueFor(place.tokens, grant, { lifetimeSeconds: 2 })).expiresIn).toBe(2);
 			const capped = await issueFor(place.tokens, grant, {
 				lifetimeSeconds: 86_400,
 				notAfter: place.now() + 120_000,
 			});
 			expect(capped.expiresIn).toBe(120);
-			for (const lifetimeSeconds of [0, 86_401, 1.5, Number.NaN]) {
+			for (const lifetimeSeconds of [0, 1, 86_401, 1.5, Number.NaN]) {
 				await expect(
 					issueFor(place.tokens, grant, { lifetimeSeconds }),
 					String(lifetimeSeconds),
@@ -420,11 +447,35 @@ export function tokensContract(
 			}
 		});
 
+		it("applies the configured access-token lifetime where a grant gives none", async () => {
+			const place = await open({ revocable: true });
+			expect((await issueFor(place.tokens, grant)).expiresIn).toBe(defaultLifetimeSeconds);
+			const set = await open({ revocable: true, lifetimeSeconds: 600 });
+			expect((await issueFor(set.tokens, grant)).expiresIn).toBe(600);
+		});
+
 		it("caps a token's expiry at what it was issued for", async () => {
 			const place = await open({ revocable: true });
 			const issued = await issueFor(place.tokens, grant, { notAfter: place.now() + 120_000 });
 			expect(issued.expiresAt).toBeLessThanOrEqual(place.now() + 120_000);
 			expect(issued.expiresIn).toBe(120);
+		});
+
+		it("refuses, as its own rule, a token its cap leaves less than a second, and issues one a second", async () => {
+			const place = await open({ revocable: true });
+			for (const ahead of [-10_000, 0, 999]) {
+				expect(
+					await place.tokens.issue({ grant, grantType: "test" }, { notAfter: place.now() + ahead }),
+					String(ahead),
+				).toEqual({
+					kind: "refused",
+					policy: "tokens",
+					reason: "no_lifetime_left",
+					description: "expired",
+				});
+			}
+			const issued = await issueFor(place.tokens, grant, { notAfter: place.now() + 1000 });
+			expect(issued.expiresIn).toBe(1);
 		});
 
 		it("revokes a token, and only that one, directly or by its reference", async () => {
@@ -492,15 +543,23 @@ export function tokensContract(
 			});
 		});
 
-		it("fails a token whose subject was revoked after it was issued", async () => {
+		it("fails a token whose subject was revoked after it stood, its standing its grant's else its issue, though issued after", async () => {
 			const place = await open({ revocable: true });
+			const checkedAt = place.now();
 			const issued = await issueFor(place.tokens, grant);
 			const other = await issueFor(place.tokens, { ...grant, subject: "t" });
 			place.revokeSubject("s");
-			expect(await place.tokens.verifyAccess(issued.token)).toEqual({
-				kind: "invalid",
-				reason: "revoked",
-			});
+			place.advance(1_500);
+			const stale = await issueFor(place.tokens, { ...grant, standingAt: checkedAt });
+			for (const token of [issued.token, stale.token]) {
+				expect(await place.tokens.verifyAccess(token)).toEqual({
+					kind: "invalid",
+					reason: "revoked",
+				});
+			}
+			const fresh = await place.tokens.verifyAccess((await issueFor(place.tokens, grant)).token);
+			const second = Math.floor(place.now() / 1000) * 1000;
+			expect(fresh.kind === "valid" && fresh.standingAt).toBe(second);
 			expect((await place.tokens.verifyAccess(other.token)).kind).toBe("valid");
 		});
 	});
@@ -514,112 +573,136 @@ export function tokensContract(
  * fails as shape when no binding kind of the composition writes its member, as tokens' does.
  */
 export function tokensStandIn(
-	options: { readonly revocable?: boolean; readonly lifetimeSeconds?: number } = {},
+	options: {
+		readonly revocable?: boolean;
+		readonly lifetimeSeconds?: number;
+		/** What `subjectsChecked` answers; checked unless a test says otherwise. */
+		readonly subjectsChecked?: boolean;
+	} = {},
 ) {
-	return defineModule({ name: "tokens" }, (m) => [
-		m.provide(tokens).by(async (c) => {
-			const revocable = options.revocable ?? true;
-			const conditions = [
-				...(await c.collect(accessConditions)),
-				...(await c.collect(subjectChecks)),
-			];
-			type Kept = {
-				grant: AccessGrant;
-				id: string;
-				issuedAt: number;
-				expiresAt: number;
-				binding?: Binding;
-			};
-			// The token type of each binding kind of the composition, by its `cnf` member, as tokens reads it.
-			const kinds = new Map(
-				(await c.collect(senderBindings)).map((kind) => [kind.member, kind.tokenType]),
-			);
-			const issued = new Map<string, Kept>();
-			// tokens' own denylist, over a store in memory.
-			const revoked = new Set<string>();
-			const denylist = denylistOver(
-				revocable
-					? {
-							save: async (id) => {
-								const kept = revoked.has(id);
-								revoked.add(id);
-								return kept ? "exists" : "created";
-							},
-							holds: async (id) => revoked.has(id),
-						}
-					: undefined,
-				c.clock,
-			);
-			const live = (token: string, allowanceMs = 0) => {
-				const kept = issued.get(token);
-				return kept && kept.expiresAt + allowanceMs > c.clock.now() ? kept : undefined;
-			};
-			const verify = async (token: string): Promise<AccessCheck> => {
-				if (!issued.has(token)) return { kind: "invalid", reason: "shape" };
-				const kept = live(token);
-				if (!kept) return { kind: "invalid", reason: "expired" };
-				if (await denylist.holds(kept.id)) return { kind: "invalid", reason: "revoked" };
-				const issuedFor = { id: kept.id, subject: kept.grant.subject, issuedAt: kept.issuedAt };
-				for (const condition of conditions) {
-					if ((await condition.holds(issuedFor)) === "revoked")
-						return { kind: "invalid", reason: "revoked" };
-				}
-				const tokenType = kept.binding ? kinds.get(kept.binding.member) : "Bearer";
-				if (tokenType === undefined) return { kind: "invalid", reason: "shape" };
-				return {
-					kind: "valid",
-					id: kept.id,
-					grant: kept.grant,
-					expiresAt: kept.expiresAt,
-					tokenType,
-					...(kept.binding ? { binding: { ...kept.binding, tokenType } } : {}),
-				};
-			};
-			const judge = judging(await c.collect(issuancePolicies), c.clock.now);
-			const issueAccess: IssueAccess = async (grant, limits) => {
+	return defineModule(
+		{
+			name: "tokens",
+			replicaSafe: false,
+			takes: [accessConditions, subjectChecks, senderBindings, issuancePolicies],
+		},
+		(m) => [
+			m.provide(tokens).by(async (c) => {
+				const revocable = options.revocable ?? true;
 				const configured = options.lifetimeSeconds ?? defaultLifetimeSeconds;
-				const lifetime = lifetimeOf(limits?.lifetimeSeconds, configured);
-				const { iat, exp } = expiryOf(c.clock.now(), lifetime, limits?.notAfter);
-				const id = tokenId(c.random);
-				const token = `stand-in.${id}`;
-				const binding = limits?.binding;
-				issued.set(token, {
-					grant: keptGrant(grant, iat),
-					id,
-					issuedAt: iat * 1000,
-					expiresAt: exp * 1000,
-					...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
-				});
-				return {
-					token,
-					id,
-					expiresAt: exp * 1000,
-					expiresIn: exp - iat,
-					tokenType: binding?.tokenType ?? "Bearer",
-					...(grant.claims ? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) } : {}),
+				const conditions = [
+					...(await c.collect(accessConditions)),
+					...(await c.collect(subjectChecks)),
+				];
+				type Kept = {
+					grant: AccessGrant;
+					id: string;
+					issuedAt: number;
+					standingAt: number;
+					expiresAt: number;
+					binding?: Binding;
 				};
-			};
-			const stand: Tokens = {
-				revocable: () => denylist.revocable,
-				...issuing(judge, issueAccess),
-				verifyAccess: verify,
-				issuedToOf: async (token) => {
-					const kept = live(token, denylistAllowanceMs);
-					return kept ? { kind: "issued", issuedTo: kept.grant.issuedTo } : { kind: "invalid" };
-				},
-				revokeAccess: async (token) => {
-					if (!denylist.revocable) return { kind: "unsupported" };
-					const kept = live(token, denylistAllowanceMs);
-					return kept ? denylist.revoke(kept.id, kept.expiresAt) : { kind: "invalid" };
-				},
-				revokeReferenced: async (reference) => {
-					const referenced = namedBy(reference);
-					return referenced
-						? denylist.revoke(referenced.id, referenced.expiresAt)
-						: { kind: "invalid" };
-				},
-			};
-			return stand;
-		}),
-	]);
+				// The token type of each binding kind of the composition, by its `cnf` member, as tokens reads it.
+				const kinds = new Map(
+					(await c.collect(senderBindings)).map((kind) => [kind.member, kind.tokenType]),
+				);
+				const issued = new Map<string, Kept>();
+				// tokens' own denylist, over a store in memory.
+				const revoked = new Set<string>();
+				const denylist = denylistOver(
+					revocable
+						? {
+								save: async (id) => {
+									const kept = revoked.has(id);
+									revoked.add(id);
+									return kept ? "exists" : "created";
+								},
+								holds: async (id) => revoked.has(id),
+							}
+						: undefined,
+					c.clock,
+				);
+				const live = (token: string, allowanceMs = 0) => {
+					const kept = issued.get(token);
+					return kept && kept.expiresAt + allowanceMs > c.clock.now() ? kept : undefined;
+				};
+				const verify = async (token: string): Promise<AccessCheck> => {
+					if (!issued.has(token)) return { kind: "invalid", reason: "shape" };
+					const kept = live(token);
+					if (!kept) return { kind: "invalid", reason: "expired" };
+					if (await denylist.holds(kept.id)) return { kind: "invalid", reason: "revoked" };
+					const { id, issuedAt, standingAt } = kept;
+					const issuedFor = { id, subject: kept.grant.subject, issuedAt, standingAt };
+					for (const condition of conditions) {
+						if ((await condition.holds(issuedFor)) === "revoked")
+							return { kind: "invalid", reason: "revoked" };
+					}
+					const tokenType = kept.binding ? kinds.get(kept.binding.member) : "Bearer";
+					if (tokenType === undefined) return { kind: "invalid", reason: "shape" };
+					return {
+						kind: "valid",
+						id: kept.id,
+						grant: kept.grant,
+						expiresAt: kept.expiresAt,
+						standingAt: kept.standingAt,
+						tokenType,
+						...(kept.binding ? { binding: { ...kept.binding, tokenType } } : {}),
+					};
+				};
+				const judge = judging(await c.collect(issuancePolicies), c.clock.now);
+				const issueAccess: IssueAccess = async (grant, askedAt, limits) => {
+					const lifetime = lifetimeOf(limits?.lifetimeSeconds, configured);
+					const { iat, exp } = expiryOf(askedAt, lifetime, limits?.notAfter);
+					const id = tokenId(c.random);
+					const token = `stand-in.${id}`;
+					const binding = limits?.binding;
+					return {
+						access: {
+							token,
+							id,
+							expiresAt: exp * 1000,
+							expiresIn: exp - iat,
+							tokenType: binding?.tokenType ?? "Bearer",
+							...(grant.claims
+								? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) }
+								: {}),
+						},
+						// Kept only once handed out, so a token refused leaves nothing.
+						keep: () => {
+							issued.set(token, {
+								grant: keptGrant(grant, iat),
+								id,
+								issuedAt: iat * 1000,
+								standingAt: (standingOf(grant, iat) ?? iat) * 1000,
+								expiresAt: exp * 1000,
+								...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
+							});
+						},
+					};
+				};
+				const stand: Tokens = {
+					revocable: () => denylist.revocable,
+					subjectsChecked: () => options.subjectsChecked ?? true,
+					...issuing(judge, issueAccess, c.clock.now),
+					verifyAccess: verify,
+					issuedToOf: async (token) => {
+						const kept = live(token, denylistAllowanceMs);
+						return kept ? { kind: "issued", issuedTo: kept.grant.issuedTo } : { kind: "invalid" };
+					},
+					revokeAccess: async (token) => {
+						if (!denylist.revocable) return { kind: "unsupported" };
+						const kept = live(token, denylistAllowanceMs);
+						return kept ? denylist.revoke(kept.id, kept.expiresAt) : { kind: "invalid" };
+					},
+					revokeReferenced: async (reference) => {
+						const referenced = namedBy(reference);
+						return referenced
+							? denylist.revoke(referenced.id, referenced.expiresAt)
+							: { kind: "invalid" };
+					},
+				};
+				return stand;
+			}),
+		],
+	);
 }

@@ -7,8 +7,8 @@ import type {
 	IssuedAccess,
 	IssueLimits,
 	Tokens,
-} from "./contract.ts";
-import { actorSnapshot } from "./limits.ts";
+} from "../contract.ts";
+import { actorSnapshot } from "../limits.ts";
 
 /** How far ahead of the clock an authentication time may be, as 0.17 allowed. */
 export const authenticatedAheadMs = 300_000;
@@ -64,11 +64,27 @@ export function judging(
 	};
 }
 
-/** The issuing `issue` does once the judgment allows it, without asking the policies itself. */
+/**
+ * The issuing `issue` does once the judgment allows it, without asking the policies itself: the
+ * token signed, and what keeps it, done only once it is handed out. `askedAt` is when `issue` was
+ * asked, before the policies were: the token's `iat`, and where its lifetime runs from.
+ */
 export type IssueAccess = (
 	grant: IssuanceRequest["grant"],
+	askedAt: number,
 	limits?: IssueLimits,
-) => Promise<IssuedAccess>;
+) => Promise<{ readonly access: IssuedAccess; readonly keep?: () => void }>;
+
+/** The least a token may have left once signed: a second. */
+const leastLeftMs = 1000;
+
+/** tokens' own refusal of a token with less than a second left once signed. */
+const noLifetimeLeft = {
+	kind: "refused",
+	policy: "tokens",
+	reason: "no_lifetime_left",
+	description: "expired",
+} as const;
 
 /**
  * The request with the claims its grant adds checked and copied, before anything else reads them;
@@ -87,10 +103,16 @@ function checkedRequest(request: IssuanceRequest): IssuanceRequest {
 	};
 }
 
-/** `admits` and `issue` over the judgment and the issuing, alike for tokens and its stand-in. */
+/**
+ * `admits` and `issue` over the judgment and the issuing, alike for tokens and its stand-in. A
+ * token's `iat` and lifetime run from when `issue` was asked, before the policies answer, so a
+ * subject boundary recorded while they do refuses it; what the client is told is left of its
+ * lifetime runs from when its issuing is done, its signing included.
+ */
 export function issuing(
 	judge: (request: IssuanceRequest) => Promise<Admitted>,
 	issueAccess: IssueAccess,
+	now: () => number,
 ): Pick<Tokens, "admits" | "issue"> {
 	return {
 		admits: async (request) => judge(checkedRequest(request)),
@@ -98,9 +120,18 @@ export function issuing(
 			// One frozen copy, taken before anything waits, is both what the policies judge and what is
 			// signed: a caller changing its own grant or limits meanwhile changes neither.
 			const taken = deepFreeze(structuredClone({ request: checkedRequest(request), limits }));
+			// When it was asked, with that copy: the token's iat, so the policies' wait cannot move it past a boundary.
+			const askedAt = now();
 			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
-			return { kind: "issued", access: await issueAccess(taken.request.grant, taken.limits) };
+			const { access, keep } = await issueAccess(taken.request.grant, askedAt, taken.limits);
+			// Less than a second left once signed, its end come, its cap passed or its signing slow: handed
+			// to no one, and nothing of it kept.
+			const leftMs = access.expiresAt - now();
+			if (leftMs < leastLeftMs) return noLifetimeLeft;
+			keep?.();
+			// Rounded up, so a token signed at once answers its whole lifetime.
+			return { kind: "issued", access: { ...access, expiresIn: Math.ceil(leftMs / 1000) } };
 		},
 	};
 }

@@ -1,23 +1,16 @@
+import { inspect } from "node:util";
 import http from "@mod/http/module";
-import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
-import { issuerConfig } from "@mod/issuer/testing";
-import { assemble, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { assemble, Unavailable } from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import keysModule from "@mod/keys/module";
-import { keysConfig } from "@mod/keys/testing";
 import senderBindingModule from "@mod/sender-binding/module";
 import { denylistAllowanceMs } from "@mod/token-denylist";
 import { beforeEach, expect, it } from "vitest";
-import {
-	type AccessGrant,
-	type IssueLimits,
-	referenceOf,
-	type Tokens,
-	tokens,
-} from "../src/contract.ts";
+import { referenceOf, tokens } from "../src/contract.ts";
 import tokensModule from "../src/module.ts";
 import { tokensConfig } from "../src/testing.ts";
+import { composedConfig, issueFor } from "./composed.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 const start = 1_800_000_000_000;
@@ -30,15 +23,9 @@ const lifetimeMs = 3_600_000;
 const after = (ms: number) => {
 	now = start + ms;
 };
-const runtime = quietRuntime({ clock: { now: () => now } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
-
-/** Issues through `issue`, which nothing here refuses, and answers what it issued. */
-async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
-	const issued = await t.issue({ grant, grantType: "test" }, limits);
-	if (issued.kind !== "issued") throw new Error(`refused by ${issued.policy}`);
-	return issued.access;
-}
 
 /** Tokens over revoked tokens kept in memory, on a place clock that may run apart from ours. */
 async function boot() {
@@ -46,10 +33,7 @@ async function boot() {
 	const app = await assemble({
 		modules: [http, keysModule, issuerModule, senderBindingModule, tokensModule, revoked],
 		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...keysConfig(),
-			...issuerConfig(),
+			...composedConfig(),
 			...tokensConfig({ revocation: "denylist", "access-token-lifetime": "1h" }),
 		},
 		runtime,
@@ -140,4 +124,34 @@ it("answers unavailable, never valid or invalid, while the revoked tokens' place
 	await expect(t.revokeReferenced(referenceOf(issued))).rejects.toBeInstanceOf(Unavailable);
 	place.down = false;
 	expect(await t.verifyAccess(token)).toMatchObject({ kind: "valid" });
+});
+
+it("keeps no access token it issues, nor its signature, in tokens' own place or the log [oidc-core-16.4-a] [rfc6749-10.3-a]", async () => {
+	const { place, token } = await boot();
+	const kept = JSON.stringify([place.asked, logged.lines()]);
+	for (const secret of [token, token.split(".")[2] ?? token]) expect(kept).not.toContain(secret);
+});
+
+it("keeps no access token it checks or revokes, only the token's id, and logs none [rfc9700-4.9.3-a] [oidc-core-16.4-a] [rfc6749-10.3-a]", async () => {
+	const { place, t, token } = await boot();
+	const checked = await t.verifyAccess(token);
+	if (checked.kind !== "valid") throw new Error(`refused: ${checked.reason}`);
+	expect(await t.issuedToOf(token)).toEqual({ kind: "issued", issuedTo: "c" });
+	expect(await t.revokeAccess(token)).toEqual({ kind: "revoked" });
+	expect(await t.verifyAccess(token)).toEqual({ kind: "invalid", reason: "revoked" });
+	place.down = true;
+	const failed = await t.verifyAccess(token).then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+	expect(failed).toBeInstanceOf(Unavailable);
+	place.down = false;
+	after(lifetimeMs + denylistAllowanceMs);
+	expect(await t.verifyAccess(token)).toMatchObject({ kind: "invalid" });
+	// The place was asked, by the id alone.
+	expect(place.asked).toContainEqual(["save", checked.id, expect.any(Number)]);
+	// Neither the token nor its signature, without which it cannot be rebuilt, reached the place, the
+	// log, or the failure thrown while the place was down (on its way to the caller's log), causes and all.
+	const kept = JSON.stringify([place.asked, logged.lines(), inspect(failed, { depth: 5 })]);
+	for (const secret of [token, token.split(".")[2] ?? token]) expect(kept).not.toContain(secret);
 });
