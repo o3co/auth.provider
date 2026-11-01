@@ -1,4 +1,5 @@
-import { factors } from "@mod/mfa";
+import { factorManaging } from "@mod/mfa-managing";
+import { factorReading } from "@mod/mfa-reading";
 import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
 import { clock, during, serve, takingTheCodesPlace, transactionCookie } from "./harness.ts";
@@ -6,7 +7,7 @@ import { clock, during, serve, takingTheCodesPlace, transactionCookie } from "./
 /** What an operator's reset does to a subject (`mfa-reset`), here without it: both boundaries, and the factors removed between them. */
 const resetting = async (s: Awaited<ReturnType<typeof serve>>, subject: string) => {
 	await s.app.get(revocations).record(subject, { keepDelegations: true });
-	await s.app.get(factors).clear(subject);
+	await s.app.get(factorManaging).clear(subject);
 	await s.app.get(revocations).record(subject, { keepDelegations: true });
 };
 
@@ -28,10 +29,10 @@ describe("a binding a reset or a revocation comes into", () => {
 		};
 		const reset = await enrolling("max", () => resetting(s, "max"));
 		expect([reset.status, reset.body]).toEqual([401, { error: "login_required" }]);
-		expect(await s.app.get(factors).held("max")).toEqual([]);
+		expect(await s.app.get(factorReading).held("max")).toEqual([]);
 		const revoked = await enrolling("nia", () => s.app.get(revocations).record("nia"));
 		expect([revoked.status, revoked.body]).toEqual([401, { error: "login_required" }]);
-		expect(await s.app.get(factors).held("nia")).toEqual([]);
+		expect(await s.app.get(factorReading).held("nia")).toEqual([]);
 	});
 	it("leaves the codes unseen, answering 401, where a revocation lands after the reissue wrote them and before the last check", async () => {
 		const s = await serve();
@@ -40,7 +41,7 @@ describe("a binding a reset or a revocation comes into", () => {
 		clock.shift += 1000;
 		// The revocation lands once a write holds the codes: the reissue's, after the bind's.
 		const onceWritten = async () => {
-			const held = await s.app.get(factors).held("ula");
+			const held = await s.app.get(factorReading).held("ula");
 			if (!held.some((f) => f.kind === "backup")) {
 				during.written = onceWritten;
 				return;
@@ -57,7 +58,10 @@ describe("a binding a reset or a revocation comes into", () => {
 		});
 		expect([done.status, done.body]).toEqual([401, { error: "login_required" }]);
 		// Written and seen by no one: a reset clears them, and the subject can reissue them.
-		expect((await s.app.get(factors).held("ula")).map((f) => f.kind)).toEqual(["code", "backup"]);
+		expect((await s.app.get(factorReading).held("ula")).map((f) => f.kind)).toEqual([
+			"code",
+			"backup",
+		]);
 	});
 
 	it("answers 409 clearing the transaction where another factor took the codes' place in a binding on the password alone", async () => {
@@ -112,7 +116,7 @@ describe("a binding a reset or a revocation comes into", () => {
 			"login_required",
 			undefined,
 		]);
-		expect((await s.app.get(factors).held("uma")).map((f) => f.kind)).toEqual(["code"]);
+		expect((await s.app.get(factorReading).held("uma")).map((f) => f.kind)).toEqual(["code"]);
 		expect(s.events.some((e) => e.kind === "mfa.recovery_codes.generated")).toBe(false);
 	});
 
@@ -138,7 +142,7 @@ describe("a binding a reset or a revocation comes into", () => {
 			undefined,
 		]);
 		// mfa-revocation moves the fence as the revocation completes, so the write is fenced.
-		expect((await s.app.get(factors).held("uma")).map((f) => f.kind)).toEqual([]);
+		expect((await s.app.get(factorReading).held("uma")).map((f) => f.kind)).toEqual([]);
 		expect(s.events.some((e) => e.kind === "mfa.recovery_codes.generated")).toBe(false);
 	});
 });

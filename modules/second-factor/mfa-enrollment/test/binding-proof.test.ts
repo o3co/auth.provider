@@ -1,8 +1,9 @@
 import { testRequest } from "@mod/http/testing";
 import { defineModule, Unavailable } from "@mod/kernel";
-import { factors } from "@mod/mfa";
 import { bindingProofs } from "@mod/mfa-binding-proof";
 import { factorKinds, type Sending } from "@mod/mfa-extensions";
+import { factorManaging } from "@mod/mfa-managing";
+import { factorReading } from "@mod/mfa-reading";
 import { sessions } from "@mod/session";
 import { revocations } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,7 +20,7 @@ import {
 /** How the binding proof answers its next send, and whether it can read what it checks; each sent one keeps its own code. */
 const contact = { sent: 0, answer: undefined as Sending | undefined, unreadable: false };
 /** A binding proof asked of every subject: it sends a code and takes that code back. */
-const contactProof = defineModule({ name: "contact-proof" }, (m) => [
+const contactProof = defineModule({ name: "contact-proof", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(bindingProofs).by(() => ({
 		name: "contact",
 		available: async () => true,
@@ -35,7 +36,7 @@ const contactProof = defineModule({ name: "contact-proof" }, (m) => [
 ]);
 /** A counting kind that refuses to give a secret while `limited`. */
 const told = { limited: false };
-const toldKind = defineModule({ name: "kind-told" }, (m) => [
+const toldKind = defineModule({ name: "kind-told", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -46,8 +47,8 @@ const toldKind = defineModule({ name: "kind-told" }, (m) => [
 		verify: async () => ({ kind: "invalid" as const }),
 	})),
 ]);
-/** A counting kind declaring two amr values, as a WebAuthn one does; a proof adds one. */
-const pairKind = defineModule({ name: "kind-pair" }, (m) => [
+/** A counting kind declaring two amr values; a proof adds one. */
+const pairKind = defineModule({ name: "kind-pair", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "pair",
 		amr: ["hwk", "swk"],
@@ -59,6 +60,19 @@ const pairKind = defineModule({ name: "kind-pair" }, (m) => [
 			proof === secret
 				? { kind: "valid" as const, state: null, amr: ["hwk"] }
 				: { kind: "invalid" as const },
+	})),
+]);
+/** A kind that does not count and adds no `mfa`, as email's is by default: a way back a subject binds. */
+const mailedKind = defineModule({ name: "kind-mailed", replicaSafe: true, takes: [] }, (m) => [
+	m.contribute(factorKinds).by(() => ({
+		kind: "mailed",
+		amr: ["email"],
+		addsSecondFactor: false,
+		guessable: true,
+		counts: false,
+		enroll: async () => ({ secret: "m1", show: {} }),
+		verify: async (secret: string, _state: unknown, proof: string) =>
+			proof === secret ? { kind: "valid" as const, state: null } : { kind: "invalid" as const },
 	})),
 ]);
 afterEach(() => {
@@ -84,7 +98,7 @@ const boundOnProof = async (s: Served, tx: string, kind = "code") => {
 	const enroll = (more: Record<string, string>) =>
 		s.call("POST", "/session/mfa/enrollment", { kind, transaction_id: tx, ...more });
 	const begun = await enroll({ proof: `c-${contact.sent}` });
-	const proof = kind === "code" ? `${begun.body.secret}:0` : "p1";
+	const proof = kind === "code" ? `${begun.body.secret}:0` : kind === "mailed" ? "m1" : "p1";
 	return s.call("POST", "/session/mfa/enrollment/complete", { transaction_id: tx, proof });
 };
 
@@ -137,6 +151,32 @@ describe("a binding proof before a first factor", () => {
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
 	});
 
+	it("lets no login go on, nor raises a session, on a first factor bound on it of a kind that does not count", async () => {
+		const s = await serve({ mode: "required" }, [contactProof, mailedKind]);
+		const { tx } = await s.heldLogin("una");
+		await s.call("POST", "/session/mfa/enrollment", { kind: "mailed", transaction_id: tx });
+		const atLogin = await boundOnProof(s, tx, "mailed");
+		// Answered as one bound on the password alone: the factor, and the login asked again.
+		expect([atLogin.status, (atLogin.body.factor as { kind: string }).kind]).toEqual([
+			200,
+			"mailed",
+		]);
+		expect(atLogin.body).not.toHaveProperty("redirect_to");
+		expect(s.jar().has("__Host-session")).toBe(false);
+		expect((await s.app.get(factorReading).held("una")).map((f) => f.kind)).toEqual(["mailed"]);
+		const optional = await serve({}, [contactProof, mailedKind]);
+		await optional.signIn("uli");
+		const old = optional.jar().get("__Host-session");
+		const asked = await optional.call("POST", "/session/mfa/enrollment", { kind: "mailed" });
+		const inSession = await boundOnProof(optional, String(asked.body.transaction), "mailed");
+		expect([inSession.status, (inSession.body.factor as { kind: string }).kind]).toEqual([
+			200,
+			"mailed",
+		]);
+		expect(optional.jar().get("__Host-session")).toBe(old);
+		expect(await amrOf(optional)).toEqual(["pwd"]);
+	});
+
 	it("counts a factor whose kind declares several amr values at once, by the amr its first proof adds", async () => {
 		const s = await serve({ mode: "required" }, [contactProof, pairKind]);
 		const { tx } = await s.heldLogin("pam");
@@ -167,7 +207,7 @@ describe("a binding proof before a first factor", () => {
 		const request = testRequest({ headers: new Map([["cookie", cookie]]) });
 		const entry = await s.app.get(sessions).enterFor(request, "credentials");
 		expect(entry.kind).toBe("entered");
-		expect(await s.app.get(factors).rename("ora", factor, "a")).toBe("renamed");
+		expect(await s.app.get(factorManaging).rename("ora", factor, "a")).toBe("renamed");
 	});
 
 	it("writes no recovery codes when the session cannot be raised to show them", async () => {
@@ -177,7 +217,7 @@ describe("a binding proof before a first factor", () => {
 		sessionsDown.failNext("raise");
 		const done = await boundOnProof(s, String(asked.body.transaction));
 		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
-		const held = await s.app.get(factors).held("rae");
+		const held = await s.app.get(factorReading).held("rae");
 		expect(held.map((f) => f.kind)).toEqual(["code"]);
 		expect(codesTouched(s, "rae")).toBe(false);
 	});
@@ -193,7 +233,7 @@ describe("a binding proof before a first factor", () => {
 		// The raise retired the old cookie: the new one goes out with the failure.
 		expect(s.jar().get("__Host-session")).not.toBe(old);
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
-		expect((await s.app.get(factors).held("rex")).map((f) => f.kind)).toEqual(["code"]);
+		expect((await s.app.get(factorReading).held("rex")).map((f) => f.kind)).toEqual(["code"]);
 	});
 
 	it("closes a login's opened session and answers 409 clearing its transaction where another factor took the codes' place, the factor standing", async () => {
@@ -208,7 +248,10 @@ describe("a binding proof before a first factor", () => {
 			undefined,
 			undefined,
 		]);
-		expect((await s.app.get(factors).held("ned")).map((f) => f.kind)).toEqual(["code", "code"]);
+		expect((await s.app.get(factorReading).held("ned")).map((f) => f.kind)).toEqual([
+			"code",
+			"code",
+		]);
 	});
 
 	it("answers 409 with the raised session's cookie where another factor took the codes' place, the session staying raised", async () => {
@@ -240,17 +283,17 @@ describe("a binding proof before a first factor", () => {
 		const unwritten = await boundOnProof(s, String(asked.body.transaction));
 		expect([unwritten.status, unwritten.body.recovery_codes]).toEqual([200, undefined]);
 		expect([codesTouched(s, "pia"), codesTouched(s, "pip")]).toEqual([false, false]);
-		expect((await s.app.get(factors).held("pip")).map((f) => f.kind)).toEqual(["code"]);
+		expect((await s.app.get(factorReading).held("pip")).map((f) => f.kind)).toEqual(["code"]);
 	});
 
 	it("writes no recovery codes when a login's first factor cannot go on to show them", async () => {
 		const s = await serve({ mode: "required" }, [contactProof]);
 		const { tx } = await s.heldLogin("sam");
 		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
-		sessionsDown.failNext("complete");
+		sessionsDown.failNext("open");
 		const done = await boundOnProof(s, tx);
 		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
-		const held = await s.app.get(factors).held("sam");
+		const held = await s.app.get(factorReading).held("sam");
 		expect(held.map((f) => f.kind)).toEqual(["code"]);
 		expect(codesTouched(s, "sam")).toBe(false);
 	});
@@ -263,7 +306,7 @@ describe("a binding proof before a first factor", () => {
 		const done = await boundOnProof(s, tx);
 		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
 		expect(s.jar().get("__Host-session")).toBeUndefined();
-		expect((await s.app.get(factors).held("sid")).map((f) => f.kind)).toEqual(["code"]);
+		expect((await s.app.get(factorReading).held("sid")).map((f) => f.kind)).toEqual(["code"]);
 	});
 
 	it("writes no recovery codes when a revocation completes while the session is raised, or the login goes on", async () => {
@@ -284,7 +327,7 @@ describe("a binding proof before a first factor", () => {
 			"login_required",
 			undefined,
 		]);
-		expect((await s.app.get(factors).held("uli")).map((f) => f.kind)).toEqual(["code"]);
+		expect((await s.app.get(factorReading).held("uli")).map((f) => f.kind)).toEqual(["code"]);
 		const { tx } = await s.heldLogin("val");
 		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
 		revokedAsItEnters("val");
@@ -294,7 +337,7 @@ describe("a binding proof before a first factor", () => {
 			"login_required",
 			undefined,
 		]);
-		expect((await s.app.get(factors).held("val")).map((f) => f.kind)).toEqual(["code"]);
+		expect((await s.app.get(factorReading).held("val")).map((f) => f.kind)).toEqual(["code"]);
 		expect([codesTouched(s, "uli"), codesTouched(s, "val")]).toEqual([false, false]);
 	});
 

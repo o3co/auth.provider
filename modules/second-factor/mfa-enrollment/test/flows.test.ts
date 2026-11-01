@@ -1,7 +1,7 @@
 import { contract, defineModule } from "@mod/kernel";
-import { factors } from "@mod/mfa";
 import { type Enrolled, factorKinds } from "@mod/mfa-extensions";
 import { flowParts } from "@mod/mfa-flows";
+import { factorReading } from "@mod/mfa-reading";
 import { seal } from "@mod/seal";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,7 @@ import { holding } from "../src/held.ts";
 import { clock, serve } from "./harness.ts";
 
 /** A kind that sends a challenge, and takes what the challenge kept as the proof after it. */
-const _sending = defineModule({ name: "kind-sending" }, (m) => [
+const _sending = defineModule({ name: "kind-sending", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "sending",
 		amr: ["otp"],
@@ -27,7 +27,7 @@ const _sending = defineModule({ name: "kind-sending" }, (m) => [
 
 /** How the told kind answers its next enrollment; its secret is the value no two factors may hold. */
 const told = { answer: undefined as Enrolled | undefined };
-const toldKind = defineModule({ name: "kind-told" }, (m) => [
+const toldKind = defineModule({ name: "kind-told", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -209,7 +209,7 @@ const verifies = { guess: 0 };
 afterEach(() => {
 	verifies.guess = 0;
 });
-const slowOnce = defineModule({ name: "kind-slow-once" }, (m) => [
+const slowOnce = defineModule({ name: "kind-slow-once", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "once",
 		amr: ["hwk"],
@@ -230,7 +230,7 @@ const slowOnce = defineModule({ name: "kind-slow-once" }, (m) => [
 		},
 	})),
 ]);
-const _slowGuess = defineModule({ name: "kind-slow-guess" }, (m) => [
+const _slowGuess = defineModule({ name: "kind-slow-guess", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "guess",
 		amr: ["otp"],
@@ -305,7 +305,7 @@ describe("mfa under races and misuse", () => {
 			[200, undefined],
 			[409, "mfa_enrollment_conflict"],
 		]);
-		const held = await s.app.get(factors).held("ray");
+		const held = await s.app.get(factorReading).held("ray");
 		expect(held.filter((f) => f.kind === "backup")).toHaveLength(1);
 	});
 
@@ -325,7 +325,7 @@ describe("mfa under races and misuse", () => {
 			{ jar: held },
 		);
 		expect([done.status, done.body.error]).toEqual([401, "login_required"]);
-		const kept = await s.app.get(factors).held("lou");
+		const kept = await s.app.get(factorReading).held("lou");
 		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
 
@@ -350,7 +350,7 @@ describe("mfa under races and misuse", () => {
 		);
 		// The start held no pending, so there is nothing to complete.
 		expect([done.status, done.body.error]).toEqual([400, "invalid_request"]);
-		const kept = await s.app.get(factors).held("lou");
+		const kept = await s.app.get(factorReading).held("lou");
 		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
 
@@ -358,17 +358,20 @@ describe("mfa under races and misuse", () => {
 		/** Holds a pending in a transaction, as one sealed by an earlier release, without its first mark. */
 		const forging =
 			contract<(tx: string, subject: string, secret: string) => Promise<boolean>>("test.forging");
-		const forger = defineModule({ name: "forger" }, (m) => [
-			m.provide(forging).by(async (c) => {
-				const sealed = await c.get(seal);
-				const held = (await c.get(flowParts)).transactions;
-				return (tx, subject, secret) =>
-					holding(held).hold(
-						tx,
-						sealed.seal(JSON.stringify({ kind: "code", secret }), `${subject}\npending`),
-					);
-			}),
-		]);
+		const forger = defineModule(
+			{ name: "forger", replicaSafe: false, takes: [flowParts, seal] },
+			(m) => [
+				m.provide(forging).by(async (c) => {
+					const sealed = await c.get(seal);
+					const held = (await c.get(flowParts)).transactions;
+					return (tx, subject, secret) =>
+						holding(held).hold(
+							tx,
+							sealed.seal(JSON.stringify({ kind: "code", secret }), `${subject}\npending`),
+						);
+				}),
+			],
+		);
 		const s = await serve({ mode: "required" }, [forger]);
 		const { tx } = await s.heldLogin("lou");
 		const held = new Map(s.jar());
@@ -381,7 +384,7 @@ describe("mfa under races and misuse", () => {
 			{ jar: held },
 		);
 		expect([done.status, done.body.error]).toEqual([401, "login_required"]);
-		const kept = await s.app.get(factors).held("lou");
+		const kept = await s.app.get(factorReading).held("lou");
 		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
 });
@@ -423,7 +426,7 @@ describe("mfa bodies", () => {
 			{ headers: { "mfa-transaction": tx } },
 		);
 		expect([done.status, (done.body.factor as { label?: string }).label]).toEqual([200, undefined]);
-		const held = await s.app.get(factors).held("nina");
+		const held = await s.app.get(factorReading).held("nina");
 		expect(held.filter((f) => "label" in f)).toEqual([]);
 		const up = await s.call("POST", "/session/mfa/step-up", {}, json);
 		const pendingless = await complete({
