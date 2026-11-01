@@ -1,3 +1,4 @@
+import { algorithmsSetting, knownAlgorithms } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
 import {
 	browsedRefusalText,
@@ -15,10 +16,12 @@ const section = clientSetting.extend({
 		.describe(
 			"`offline` asks for a refresh token, so Google shows its consent screen at every login; `online` asks none.",
 		),
-	"require-iss": z
+	"accept-missing-iss": z
 		.boolean()
-		.prefault(true)
-		.describe("Asks every callback for `iss`, which Google says it always sends."),
+		.prefault(false)
+		.describe(
+			"Takes a callback without `iss`, which Google says it always sends; warned of at every start.",
+		),
 	"authorization-endpoint": endpoint
 		.prefault("https://accounts.google.com/o/oauth2/v2/auth")
 		.describe("Where the browser is sent to log in at Google; Google's own unless named."),
@@ -28,6 +31,9 @@ const section = clientSetting.extend({
 	"jwks-uri": endpoint
 		.prefault("https://www.googleapis.com/oauth2/v3/certs")
 		.describe("Where the keys that sign Google's id_tokens are read; Google's own unless named."),
+	algorithms: algorithmsSetting(knownAlgorithms, ["RS256"]).describe(
+		"The algorithms Google's id_tokens may be signed with: asymmetric ones only, RS256 by default, the one Google signs with.",
+	),
 	"clock-skew": setting
 		.duration("s")
 		.pipe(z.number().int().min(0).max(300))

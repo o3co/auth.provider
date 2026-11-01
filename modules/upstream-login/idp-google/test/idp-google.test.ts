@@ -3,7 +3,7 @@ import { externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
 import { testSigner } from "@mod/external-jwt/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
@@ -13,6 +13,7 @@ import {
 } from "@mod/outbound";
 import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import type { OutboundRefusals } from "@mod/outbound-policy";
+import { testTlsOptions } from "@mod/tls-options/testing";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { beforeAll, describe, expect, it } from "vitest";
 import { settingsOf } from "../src/settings.ts";
@@ -97,7 +98,9 @@ async function open(world: { token?: Handler; settings?: Record<string, unknown>
 	};
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound" }, (m) => [m.provide(outbound).by(() => stub)]),
+			defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
+				m.provide(outbound).by(() => stub),
+			]),
 			externalJwtModule,
 		],
 		config: kernelConfig(),
@@ -109,7 +112,9 @@ async function open(world: { token?: Handler; settings?: Record<string, unknown>
 		...endpoints,
 		...world.settings,
 	});
-	return { upstream: opened(read, stub, app.get(externalJwt), { clock }), asked };
+	const recorded = recordingLog();
+	const at = { clock, log: recorded.log, idp: "google" };
+	return { upstream: opened(read, stub, app.get(externalJwt), at), asked, warned: recorded.lines };
 }
 
 const start: AuthorizationStart = {
@@ -158,7 +163,7 @@ describe("idp-google", () => {
 		expect((await open()).upstream.issuer).toBe("https://accounts.google.com");
 	});
 
-	it("asks Google for offline access, the login's nonce and the freshness the browser asked", async () => {
+	it("asks Google for offline access, the login's nonce and the freshness the browser asked [oidc-core-3.1.2.1-y] [oidc-core-7.2.1-a] [rfc9700-2.1.1-f] [rfc9700-2.1.1-h] [rfc9700-2.1.2-a]", async () => {
 		const { upstream } = await open();
 		const url = new URL(upstream.authorizationUrl({ ...start, prompt: "login", maxAgeSeconds: 0 }));
 		expect(`${url.origin}${url.pathname}`).toBe(endpoints["authorization-endpoint"]);
@@ -236,9 +241,11 @@ describe("idp-google", () => {
 	});
 
 	it("takes the endpoints the browser goes to over plain http only at a loopback name, refusing another at its key", () => {
-		const paths = outboundOver(outboundSection.parse({ "allow-any-public": true }), async () => [
-			"93.184.216.34",
-		]);
+		const paths = outboundOver(
+			outboundSection.parse({ "allow-any-public": true }),
+			async () => ["93.184.216.34"],
+			{ floor: testTlsOptions },
+		);
 		const { explained, plainInternal, browsedRefusal } = paths;
 		const policy: OutboundRefusals = { explained, plainInternal, browsedRefusal };
 		const keysOf = (more: Record<string, unknown>) =>
@@ -360,7 +367,7 @@ describe("idp-google", () => {
 		expect(settings.safeParse({ ...both, "hosted-domains": ["corp.example"] }).success).toBe(true);
 	});
 
-	it("takes an id_token's at_hash only as the access token's", async () => {
+	it("takes an id_token's at_hash only as the access token's [oidc-core-3.1.3.5-a]", async () => {
 		const full = createHash("sha256").update("at").digest();
 		const half = full.subarray(0, 16).toString("base64url");
 		const exchanged = async (claims: Record<string, unknown>) => {
@@ -401,13 +408,15 @@ describe("idp-google", () => {
 		expect(await profileOf({})).toBeUndefined();
 	});
 
-	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless iss is not asked", async () => {
-		const { upstream, asked } = await open({ token: async () => granted() });
+	it("refuses a callback without Google's iss before its code is used, an empty one always, a missing one unless its absence is accepted, comparing it code point by code point [rfc9700-2.1-e] [rfc9700-2.1-f] [rfc9700-4.4.2.1-a] [rfc9700-4.4.2.2-b] [oidc-discovery-5-c]", async () => {
+		const { upstream, asked, warned } = await open({ token: async () => granted() });
+		expect(warned()).toEqual([]);
 		for (const iss of [
 			undefined,
 			"",
 			"accounts.google.com",
 			`${issuer}/`,
+			issuer.toUpperCase(),
 			"https://evil.example",
 		]) {
 			expect(await outcome(upstream.exchange(exchange({ iss }))), String(iss)).toBe("refused");
@@ -415,8 +424,11 @@ describe("idp-google", () => {
 		expect(asked).toEqual([]);
 		const lenient = await open({
 			token: async () => granted(),
-			settings: { "require-iss": false },
+			settings: { "accept-missing-iss": true },
 		});
+		expect(lenient.warned()).toEqual([
+			{ level: "warn", event: "idp-google.iss_not_required", fields: { idp: "google" } },
+		]);
 		expect(await lenient.upstream.exchange(exchange({ iss: undefined }))).toMatchObject({
 			subject: "g-alice",
 		});
@@ -426,7 +438,33 @@ describe("idp-google", () => {
 		expect(lenient.asked.filter((a) => a.url === endpoints["token-endpoint"])).toHaveLength(1);
 	});
 
-	it("refuses an id_token that does not hold for this client and login", async () => {
+	it("refuses 0.18's require-iss as an unknown key, naming it", () => {
+		const read = settings.safeParse({
+			"client-id": "c",
+			"client-secret": "s",
+			"require-iss": false,
+		});
+		expect(read.success).toBe(false);
+		expect(read.error?.issues).toEqual([
+			expect.objectContaining({ code: "unrecognized_keys", keys: ["require-iss"] }),
+		]);
+	});
+
+	it("takes an id_token under the algorithms its settings name, RS256 alone by default", async () => {
+		const signed = await idToken({}, elliptic);
+		expect(await exchangedWith(signed)).toBe("refused");
+		const { upstream } = await open({
+			token: async () => granted({ id_token: signed }),
+			settings: { algorithms: ["ES256"] },
+		});
+		expect(await upstream.exchange(exchange())).toMatchObject({ subject: "g-alice" });
+		const client = { "client-id": "c", "client-secret": "s" };
+		for (const algorithms of [["HS256"], ["none"], []]) {
+			expect(settings.safeParse({ ...client, algorithms }).success, String(algorithms)).toBe(false);
+		}
+	});
+
+	it("refuses an id_token that does not hold for this client and login [oidc-core-2-v] [oidc-core-3.1.3.7-b] [oidc-core-3.1.3.7-d] [oidc-core-3.1.3.7-e] [oidc-core-3.1.3.7-h] [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-3.1.3.7-k] [oidc-core-16.3-a] [rfc9700-2.1.1-e] [rfc9700-4.5.3.2-a]", async () => {
 		const cases = {
 			"an unpublished key": await idToken({}, stranger),
 			"a key under a kid not in the set": await idToken({}, await testSigner("RS256", "g9")),
@@ -438,6 +476,10 @@ describe("idp-google", () => {
 			"two audiences, the other party authorized": await idToken({
 				aud: ["client", "other"],
 				azp: "other",
+			}),
+			"another audience beside the client, the client authorized": await idToken({
+				aud: ["client", "other"],
+				azp: "client",
 			}),
 			"an empty subject": await idToken({ sub: "" }),
 			"no issue time": await idToken({ iat: undefined }),
@@ -462,15 +504,13 @@ describe("idp-google", () => {
 		expect(await exchangedWith(await idToken({ iat: seconds + 31 }))).toBe("refused");
 	});
 
-	it("accepts an id_token for two audiences with this client as azp, or naming another client of the project as azp", async () => {
-		const shared = await idToken({ aud: ["client", "other"], azp: "client" });
-		expect(await exchangedWith(shared)).toMatchObject({ subject: "g-alice" });
+	it("accepts an id_token naming another client of the project as azp, for this client alone", async () => {
 		// Cross-client identity: Google names another client of the project as azp.
 		const crossClient = await idToken({ azp: "android-client" });
 		expect(await exchangedWith(crossClient)).toMatchObject({ subject: "g-alice" });
 	});
 
-	it("refuses an answer without an id_token and a 400 invalid_grant, and is unavailable when Google cannot be reached", async () => {
+	it("refuses an answer without an id_token and a 400 invalid_grant, and is unavailable when Google cannot be reached [oidc-core-3.1.3.5-a]", async () => {
 		const bare = await open({ token: async () => granted({ id_token: undefined }) });
 		expect(await outcome(bare.upstream.exchange(exchange()))).toBe("refused");
 		const denied = await open({ token: async () => answer({ error: "invalid_grant" }, 400) });
