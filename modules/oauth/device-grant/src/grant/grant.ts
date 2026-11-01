@@ -101,10 +101,17 @@ export function grantWith(
 			// The token ends no later than the approving session, as a code redemption's does.
 			const entry = approval.session ? await open.entryOf(approval.session) : undefined;
 			if (entry && entry.kind !== "entered") return refused("invalid_grant");
-			const judged = await issue(grantOf(before, approval), {
-				...sessionOf(approval),
-				...(entry ? { notAfter: entry.endsAt } : {}),
-			});
+			const judged = await issue(
+				{
+					...grantOf(before, approval),
+					// Bound to no session, the token stands from the authentication its boundary was compared with.
+					...(approval.session ? {} : { standingAt: approval.authenticatedAt }),
+				},
+				{
+					...sessionOf(approval),
+					...(entry ? { notAfter: entry.endsAt } : {}),
+				},
+			);
 			if (judged.kind === "refused") return judged;
 			// A logout that came while the token was being made: it is never answered, so reaches no one.
 			if (!(await stillOpen(approval))) return refused("invalid_grant");
