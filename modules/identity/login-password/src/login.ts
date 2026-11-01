@@ -42,8 +42,10 @@ export function loginWith(parts: {
 		subject?: string,
 	) => void;
 	readonly log: Log;
+	/** `kernel`'s clock, read once before the password is verified: when the login's proof began. */
+	readonly now: () => number;
 }) {
-	const { known, gates, budgets, policy, windowMs, recordLogin, log } = parts;
+	const { known, gates, budgets, policy, windowMs, recordLogin, log, now } = parts;
 	return async (request: HttpRequest): Promise<HttpResponse> => {
 		if (request.fields.repeated().length > 0) {
 			return answer(400, { error: "repeated_parameter" });
@@ -73,6 +75,7 @@ export function loginWith(parts: {
 				{ headers: { "retry-after": String(seconds) } },
 			);
 		}
+		const provenSince = now();
 		const verified = await known.verify(username, password).catch(async (error) => {
 			// A guess never judged is handed back; the run goes on without it.
 			if (isUnavailable(error))
@@ -91,6 +94,8 @@ export function loginWith(parts: {
 			// Authenticated here, so as fresh as the session it opens, however long a gate holds it first.
 			authenticatedAt: "opening" as const,
 			attributes: attributesOf(verified.user),
+			// session compares it with the subject's boundary, however late the ledger answered.
+			provenSince,
 		};
 		const outcome = await gates.login(request, facts, done).catch(async (error) => {
 			// A gate that cannot tell judged nothing either: the guess is handed back.
@@ -98,8 +103,8 @@ export function loginWith(parts: {
 				await budgets.abandoned(accountAttempts, key, policy, reserved.reservation);
 			throw error;
 		});
-		// A login a gate refused fails as a wrong password does, in its answer and its count alike.
-		if (outcome.kind === "refused") {
+		// A login a gate refused, or session revoked, fails as a wrong password does, in its answer and its count alike.
+		if (outcome.kind === "refused" || outcome.kind === "revoked") {
 			recordLogin(request, "failed");
 			return answer(401, { error: "invalid_credentials" });
 		}

@@ -26,6 +26,7 @@ import secretHashModule from "@mod/secret-hash/module";
 import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn, stubSessions } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
+import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { type Users, users } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -52,6 +53,8 @@ interface Setup {
 	readonly extra?: Module[];
 	/** A log in place of the quiet one. */
 	readonly log?: ReturnType<typeof recordingLog>;
+	/** A clock the test moves, in place of the host's. */
+	readonly clock?: { at: number };
 }
 
 async function serve(setup: Setup = {}) {
@@ -92,7 +95,11 @@ async function serve(setup: Setup = {}) {
 			"login-password": setup.login ?? {},
 			...(setup.logins ? {} : { "login-gates": setup.gates ?? {} }),
 		},
-		runtime: setup.log ? quietRuntime({ log: setup.log.log }) : runtime,
+		runtime: setup.log
+			? quietRuntime({ log: setup.log.log })
+			: setup.clock
+				? quietRuntime({ clock: { now: () => setup.clock?.at ?? 0 } })
+				: runtime,
 	});
 	await app.start();
 	stop = () => app.stop(1000);
@@ -510,6 +517,60 @@ it("names the session's opening as the login's authentication time, so a gate's 
 	const context = (await app.get(sessions).enter(request))?.context;
 	expect(context?.authenticatedAt).toBeGreaterThanOrEqual(passedAt);
 	expect(context).not.toHaveProperty("authenticatedAtUnknown");
+});
+
+/** users, its `verify` running `during` first, as a ledger slow to answer. */
+const slowUsers = (during: () => Promise<void>) =>
+	switchedModule(usersModule, users, {
+		wrap: (inner: Users): Users =>
+			new Proxy({} as Users, {
+				get: (_target, prop) => {
+					if (prop === "verify") {
+						return async (...args: Parameters<Users["verify"]>) => {
+							await during();
+							return inner.verify(...args);
+						};
+					}
+					const member = Reflect.get(inner, prop);
+					return typeof member === "function" ? member.bind(inner) : member;
+				},
+			}),
+	} as never);
+
+it("states the time taken before the password is verified as the proof's start session compares", async () => {
+	const clock = { at: 1_800_000_000_000 };
+	const seen: unknown[] = [];
+	const gate = defineModule({ name: "gate", replicaSafe: false, takes: [] }, (m) => [
+		m.contribute(loginGates).by(() => ({
+			name: "watching",
+			hold: async (_request, facts) => {
+				seen.push(facts.provenSince);
+				return { kind: "pass" as const };
+			},
+		})),
+	]);
+	const users = slowUsers(async () => {
+		clock.at += 5000;
+	});
+	const { login } = await serve({ clock, users, extra: [gate] });
+	expect((await login(right)).status).toBe(200);
+	expect(seen).toEqual([1_800_000_000_000]);
+});
+
+it("refuses, as a wrong password and with no cookie, a login whose verification answered after a revocation it began before", async () => {
+	const clock = { at: 1_800_000_000_000 };
+	let revoke = async () => {};
+	const users = slowUsers(async () => {
+		// The revocation lands while the ledger checks the password; the answer comes two seconds on.
+		await revoke();
+		clock.at += 2000;
+	});
+	const { app, login } = await serve({ clock, users });
+	revoke = async () => void (await app.get(subjectRevocation).revoke("alice"));
+	const res = await login(right);
+	expect(res.status).toBe(401);
+	expect(res.body).toEqual({ error: "invalid_credentials" });
+	expect(res.headers.getSetCookie().some((c) => c.startsWith("session"))).toBe(false);
 });
 
 describe("login-password attempts per account", () => {
