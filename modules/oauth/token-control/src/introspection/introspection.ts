@@ -8,6 +8,7 @@ import { determinedSource } from "@mod/request-source";
 import { authenticateClient, oauthError } from "@mod/token-endpoint";
 import { type AccessCheck, type Tokens, tokens } from "@mod/tokens";
 import events from "../audit-events.ts";
+import { tokenOf } from "../request.ts";
 
 const inactive: HttpResponse = jsonAnswer(200, { active: false });
 
@@ -28,6 +29,9 @@ function activeAnswer(issuer: string, checked: Valid): HttpResponse {
 		...(checked.binding ? { cnf: { [checked.binding.member]: checked.binding.confirmation } } : {}),
 	});
 }
+
+/** What `introspectionIn` takes. */
+export const introspectionTakes = [clients, tokens, issuer, audit];
 
 /** The introspection route's handler and its answer to Unavailable, which records it. */
 /** The introspection handler over the contracts the assembly gives. */
@@ -51,11 +55,8 @@ export function introspection(
 		const caller = authenticated.client;
 		if (caller.kind !== "confidential")
 			return oauthError(401, "invalid_client", "public clients may not introspect");
-		if (request.form.repeated().length > 0) {
-			return oauthError(400, "invalid_request", "repeated parameter");
-		}
-		const token = request.form.single("token");
-		if (!token) return oauthError(400, "invalid_request", "token is required");
+		const token = tokenOf(request);
+		if (typeof token !== "string") return token;
 		const checked = await tokens.verifyAccess(token);
 		if (checked.kind === "invalid" || !clientAllowance.maySee(caller, checked.grant.audience)) {
 			return inactive;
