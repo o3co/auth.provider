@@ -364,10 +364,6 @@ describe("a revocation of the subject since the challenge was made", () => {
 		const opening = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
-					complete: async () => ({
-						session: { id: "opened-1", context: {} as never },
-						cookies: ["session=opened-1; Path=/"],
-					}),
 					open: async () => ({
 						kind: "opened",
 						session: { id: "opened-1", context: {} as never },
@@ -497,6 +493,7 @@ describe("the gate credential-policy", () => {
 			subject,
 			amr: ["pwd"],
 			authenticatedAt: Date.now(),
+			provenSince: Date.now(),
 			attributes: { source: loginSource.users, values: { groups } },
 		});
 
