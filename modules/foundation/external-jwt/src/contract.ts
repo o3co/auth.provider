@@ -1,6 +1,7 @@
 import { contract } from "@mod/kernel";
-import type { VerifyAlgorithm } from "@mod/keys";
+import { type VerifyAlgorithm, verifyAlgorithms } from "@mod/keys";
 import type { Narrower } from "@mod/outbound";
+import { z } from "zod";
 
 export type Jwk = Readonly<Record<string, unknown>>;
 
@@ -33,6 +34,7 @@ export interface Policy {
 	readonly algorithms: readonly Algorithm[];
 	/** How far the issuer's clock may be from `kernel`'s. */
 	readonly skewMs: number;
+	/** The longest a token may live: `exp` ahead of now, with the skew, and `exp` − `iat`, without it. */
 	readonly maxLifetimeMs?: number;
 	/** The header's `typ`, compared as RFC 7515 says. */
 	readonly typ?: string;
@@ -58,13 +60,21 @@ export type Reason =
 	| "audience"
 	| "subject";
 
+/**
+ * What a verifier answers: valid, invalid with its reason, or unavailable. An invalid answer found
+ * once the signature held, a claim refused after it, carries `signed: true`; one before carries none.
+ */
 export type Verified =
 	| {
 			readonly kind: "valid";
 			readonly header: Readonly<Record<string, unknown>>;
 			readonly claims: Readonly<Record<string, unknown>>;
 	  }
-	| { readonly kind: "invalid"; readonly reason: Reason }
+	| {
+			readonly kind: "invalid";
+			readonly reason: Reason;
+			readonly signed?: true;
+	  }
 	| { readonly kind: "unavailable" };
 
 export interface Verifier {
@@ -79,3 +89,36 @@ export interface ExternalJwt {
 }
 
 export const externalJwt = contract<ExternalJwt>("external-jwt");
+
+/** The asymmetric algorithms a verifier knows, as `algorithms` answers them, for a section declared before any verifier is had. */
+export const knownAlgorithms: readonly Algorithm[] = verifyAlgorithms;
+
+/**
+ * The setting a caller's section names the algorithms it takes by: a list, not empty, of the
+ * asymmetric ones given (never none nor a shared secret), `byDefault` where unwritten. A default
+ * outside them is refused as one the operator wrote is. The caller describes it in its own words.
+ */
+export const algorithmsSetting = (
+	asymmetric: readonly Algorithm[],
+	byDefault: readonly Algorithm[],
+) =>
+	z
+		.array(z.enum(asymmetric as [Algorithm, ...Algorithm[]]))
+		.min(1)
+		.prefault([...byDefault]);
+
+/**
+ * A header's `typ` as RFC 7515 compares it, as a media type: its type alone, its parameters and the
+ * space around it dropped, without case and without `application/`; the one reading a policy's `typ`
+ * is compared by, for a caller to sort tokens by. None where it is no string. Whether the header is
+ * verified is the caller's to know.
+ */
+export const typOf = (header: Readonly<Record<string, unknown>>): string | undefined => {
+	const typ = Object.hasOwn(header, "typ") ? header.typ : undefined;
+	return typeof typ === "string"
+		? (typ.split(";", 1)[0] ?? "")
+				.trim()
+				.toLowerCase()
+				.replace(/^application\//, "")
+		: undefined;
+};

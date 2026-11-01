@@ -12,6 +12,7 @@ import type {
 	Verified,
 	Verifier,
 } from "./contract.ts";
+import { typOf } from "./contract.ts";
 import { jwksAt, type KeySet } from "./jwks.ts";
 import { algorithms, type Candidate, fromJwk, fromPem, isAlgorithm, picked } from "./keys.ts";
 
@@ -21,11 +22,12 @@ type Claims = Readonly<Record<string, unknown>>;
 type Choose = (
 	alg: Algorithm,
 	kid: string | undefined,
+	allowed: readonly Algorithm[],
 ) => Promise<Candidate | "no-key" | "ambiguous-key" | "unavailable">;
 
-/** A `typ` as RFC 7515 compares it: without case and without `application/`. */
-const mediaTypeOf = (typ: unknown) =>
-	typeof typ === "string" ? typ.toLowerCase().replace(/^application\//, "") : undefined;
+/** A key read under another algorithm, or none, is no key for this one. */
+const settled = (pick: ReturnType<typeof picked>) => (pick === "unbound" ? "no-key" : pick);
+
 /** Claims are UTF-8, as RFC 7519 says; bytes that are not refuse them. */
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 const isTime = (value: unknown): value is number =>
@@ -59,7 +61,7 @@ export function externalJwtOver(deps: {
 			"inline" in keys
 				? keys.inline.flatMap((jwk) => fromJwk(jwk) ?? [])
 				: keys.pem.flatMap((given) => fromPem(given) ?? []);
-		return async (alg, kid) => picked(written, alg, kid);
+		return async (alg, kid, allowed) => settled(picked(written, alg, kid, allowed));
 	};
 	return {
 		algorithms,
@@ -69,13 +71,13 @@ export function externalJwtOver(deps: {
 
 /** Picks from the kept set, and from a fresh one only when the kept set has no key that fits. */
 function fromSet(set: KeySet): Choose {
-	return async (alg, kid) => {
+	return async (alg, kid, allowed) => {
 		const held = await set.keys();
-		const first = held ? picked(held, alg, kid) : undefined;
-		// An ambiguous pick is the set's own answer; fetching again would not settle it.
-		if (first !== undefined && first !== "no-key") return first;
+		const first = held ? picked(held, alg, kid, allowed) : undefined;
+		// An ambiguous or unbound pick is the set's own answer; fetching again would not settle it.
+		if (first !== undefined && first !== "no-key") return settled(first);
 		const again = await set.again();
-		return again ? picked(again, alg, kid) : "unavailable";
+		return again ? settled(picked(again, alg, kid, allowed)) : "unavailable";
 	};
 }
 
@@ -121,8 +123,10 @@ function claimsFault(claims: Claims, policy: Policy, now: number): Reason | unde
 	if (nbfMs !== undefined && nbfMs > now + skew) return "not-yet";
 	if (iatMs !== undefined && iatMs > now + skew) return "future-iat";
 	if (policy.maxLifetimeMs !== undefined) {
-		const reach = policy.maxLifetimeMs + skew;
-		if (expMs - now > reach || (iatMs !== undefined && now - iatMs > reach)) return "too-long";
+		if (expMs - now > policy.maxLifetimeMs + skew) return "too-long";
+		// The lifetime it was issued for is on the issuer's clock alone, so no skew widens it; an `iat`
+		// further behind than the longest lifetime is refused by it too, `exp` not being past.
+		if (iatMs !== undefined && expMs - iatMs > policy.maxLifetimeMs) return "too-long";
 	}
 	const expected = policy.expect;
 	if (expected?.iss !== undefined && claims.iss !== expected.iss) return "issuer";
@@ -139,27 +143,28 @@ function claimsFault(claims: Claims, policy: Policy, now: number): Reason | unde
 
 function verifierWith(choose: Choose, policy: Policy, clock: Clock): Verifier {
 	const invalid = (reason: Reason): Verified => ({ kind: "invalid", reason });
+	const signedInvalid = (reason: Reason): Verified => ({ kind: "invalid", reason, signed: true });
 	return {
 		verify: async (jwt) => {
 			const header = isCanonicalJws(jwt) ? headerOf(jwt) : undefined;
 			if (!header) return invalid("malformed");
 			// A JWT is encoded, and no critical extension is taken.
 			if (header.b64 !== undefined || header.crit !== undefined) return invalid("malformed");
-			if (policy.typ !== undefined && mediaTypeOf(header.typ) !== mediaTypeOf(policy.typ))
+			if (policy.typ !== undefined && typOf(header) !== typOf({ typ: policy.typ }))
 				return invalid("malformed");
 			const kid = header.kid;
 			if (kid !== undefined && typeof kid !== "string") return invalid("malformed");
 			const alg = header.alg;
 			if (!isAlgorithm(alg) || !policy.algorithms.includes(alg)) return invalid("algorithm");
-			const key = await choose(alg, kid);
+			const key = await choose(alg, kid, policy.algorithms);
 			if (key === "unavailable") return { kind: "unavailable" };
 			if (typeof key === "string") return invalid(key);
 			const payload = await signedPayload(jwt, key);
 			if (!payload) return invalid("signature");
 			const claims = claimsOf(payload);
-			if (!claims) return invalid("malformed");
+			if (!claims) return signedInvalid("malformed");
 			const fault = claimsFault(claims, policy, clock.now());
-			if (fault) return invalid(fault);
+			if (fault) return signedInvalid(fault);
 			return { kind: "valid", header: deepFreeze({ ...header }), claims: deepFreeze(claims) };
 		},
 	};
