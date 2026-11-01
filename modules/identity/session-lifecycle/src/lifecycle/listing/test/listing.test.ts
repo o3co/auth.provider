@@ -4,6 +4,7 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type Session, sessions } from "@mod/session";
+import { openedOf } from "@mod/session/testing";
 import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import sessionRequirements from "@mod/session-requirements/module";
@@ -16,7 +17,7 @@ import type { StoredSession } from "../../../store.ts";
 import { sessionLifecycleConfig } from "../../../testing.ts";
 
 let now = 1_800_000_000_000;
-const facts = () => ({ subject: "alice", amr: ["pwd"], authenticatedAt: now });
+const facts = () => ({ subject: "alice", amr: ["pwd"], authenticatedAt: now, provenSince: now });
 
 async function boot(log = recordingLog()) {
 	const stores = memoryStores();
@@ -52,7 +53,7 @@ async function boot(log = recordingLog()) {
 	const withCookie = (cookie: string) =>
 		testRequest({ headers: new Map([["cookie", cookie]]), source: { scheme: "https" } });
 	const login = async (given = facts()) =>
-		(await s.complete(testRequest(), given)).cookies[0]?.split(";")[0] ?? "";
+		openedOf(await s.open(testRequest(), given)).cookies[0]?.split(";")[0] ?? "";
 	const logged = (event: string) => log.lines().filter((line) => line.event === event);
 	return { app, s, stores, closed, login, withCookie, logged };
 }
@@ -68,7 +69,7 @@ it("puts a pushed-out session back for what it has left, so the next login pushe
 		cookies.push(await login());
 	}
 	stores.down.closing.failNext("add");
-	await expect(s.complete(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
+	await expect(s.open(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
 	// The stand-in's listing also answers each member's time left.
 	const kept = (await stores.listed.members("alice")) as readonly {
 		member: string;
@@ -94,7 +95,7 @@ it("puts a pushed-out session back for what it has left from its opening, though
 		await login();
 	}
 	stores.down.closing.failNext("add");
-	await expect(s.complete(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
+	await expect(s.open(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
 	const kept = (await stores.listed.members("alice")) as readonly {
 		member: string;
 		remainingMs: number;
@@ -117,7 +118,7 @@ async function pushOutRefused(
 		await login();
 	}
 	stores.down.closing.failNext("add");
-	await expect(s.complete(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
+	await expect(s.open(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
 	const kept = (await stores.listed.members("alice")) as readonly {
 		member: string;
 		remainingMs: number;
@@ -173,7 +174,7 @@ it("ends a session the put-back pushes out, so none is left open off the listing
 	// The opened session stays listed, so the listing is full again when the first is put back.
 	stores.down.closing.failNext("add");
 	stores.down.listed.failNext("remove");
-	await expect(s.complete(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
+	await expect(s.open(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
 	const listed = (await stores.listed.members("alice")).map(({ member }) => member);
 	expect(listed).toContain(first);
 	// The second login's session, the one ending first after the first's, was pushed out and ended.

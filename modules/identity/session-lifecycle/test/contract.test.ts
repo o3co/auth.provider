@@ -4,7 +4,12 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { sessions } from "@mod/session";
-import { type PlaceOptions, type SessionsPlace, sessionsContract } from "@mod/session/testing";
+import {
+	openedOf,
+	type PlaceOptions,
+	type SessionsPlace,
+	sessionsContract,
+} from "@mod/session/testing";
 import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
@@ -97,12 +102,15 @@ sessionsContract(
 	(options) => placeOver([], options),
 );
 
-const login = (place: SessionsPlace) =>
-	place.sessions.complete(place.request(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: place.now(),
-	});
+const login = async (place: SessionsPlace) =>
+	openedOf(
+		await place.sessions.open(place.request(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: place.now(),
+			provenSince: place.now(),
+		}),
+	);
 
 describe("entry requirements", () => {
 	it("are asked in name order", async () => {

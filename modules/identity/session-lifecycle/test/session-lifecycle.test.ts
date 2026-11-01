@@ -13,6 +13,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { type Session, sessions } from "@mod/session";
+import { openedOf } from "@mod/session/testing";
 import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
@@ -34,7 +35,12 @@ beforeEach(() => {
 	now = start;
 });
 const runtime = quietRuntime({ clock: { now: () => now } });
-const facts = (subject = "alice") => ({ subject, amr: ["pwd"], authenticatedAt: now });
+const facts = (subject = "alice") => ({
+	subject,
+	amr: ["pwd"],
+	authenticatedAt: now,
+	provenSince: now,
+});
 const pair = (setCookie: string | undefined) => setCookie?.split(";")[0] ?? "";
 const secretIn = (setCookie: string | undefined) => pair(setCookie).split("=")[1] ?? "";
 /** The handles the stores list under the subject, sorted. */
@@ -100,7 +106,7 @@ async function boot(
 	const withCookie = (cookie: string, scheme: "http" | "https" = "https") =>
 		testRequest({ headers: new Map([["cookie", cookie]]), source: { scheme } });
 	const login = async (subject = "alice", request = testRequest()) =>
-		pair((await s.complete(request, facts(subject))).cookies[0]);
+		pair(openedOf(await s.open(request, facts(subject))).cookies[0]);
 	const jar = app.get(cookies);
 	/** The handle the cookie enters (a TypeError when it enters nothing). */
 	const handleOf = async (cookie: string) => ((await s.enter(withCookie(cookie))) as Session).id;
@@ -110,7 +116,7 @@ async function boot(
 describe("session cookies", () => {
 	it("opens a session behind its own cookie, holding an unguessable secret for its lifetime", async () => {
 		const { s, withCookie, jar } = await boot();
-		const { cookies: set } = await s.complete(testRequest(), facts());
+		const { cookies: set } = openedOf(await s.open(testRequest(), facts()));
 		const secret = secretIn(set[0]);
 		expect(secret).toMatch(/^[A-Za-z0-9_-]{43}$/);
 		expect(set[0]).toBe(jar.write("session", secret, 3600));
@@ -120,7 +126,7 @@ describe("session cookies", () => {
 
 	it("hands out a handle no cookie leads to directly, and reaches it through the cookie index by the secret", async () => {
 		const { s, stores } = await boot();
-		const { session, cookies } = await s.complete(testRequest(), facts());
+		const { session, cookies } = openedOf(await s.open(testRequest(), facts()));
 		const secret = secretIn(cookies[0]);
 		const handle = session.id;
 		expect(handle).not.toBe(secret);
@@ -158,7 +164,7 @@ describe("session cookies", () => {
 
 	it("uses the lifetime it is given, to the millisecond", async () => {
 		const { s, withCookie, jar } = await boot({ lifetime: "2m" });
-		const { cookies: set } = await s.complete(testRequest(), facts());
+		const { cookies: set } = openedOf(await s.open(testRequest(), facts()));
 		expect(set[0]).toBe(jar.write("session", secretIn(set[0]), 120));
 		const started = now;
 		now = started + 119_999;
@@ -175,7 +181,7 @@ describe("session attributes", () => {
 		const dropped = () =>
 			recorded.lines().filter((line) => line.event === "session-lifecycle.attributes_dropped");
 		const login = (attributes: unknown) =>
-			s.complete(testRequest(), { ...facts(), attributes } as Parameters<typeof s.complete>[1]);
+			s.open(testRequest(), { ...facts(), attributes } as Parameters<typeof s.open>[1]);
 		await login(undefined);
 		await login({ source: "users", values: { email: "a@b.example", email_verified: true } });
 		expect(dropped()).toEqual([]);
@@ -222,8 +228,10 @@ describe("session attributes", () => {
 describe("session authentication time", () => {
 	it("keeps that a login's authentication time is unknown in the record, and nothing when it is known", async () => {
 		const { s, stores } = await boot();
-		const unknown = await s.complete(testRequest(), { ...facts(), authenticatedAt: "unknown" });
-		const known = await s.complete(testRequest(), facts());
+		const unknown = openedOf(
+			await s.open(testRequest(), { ...facts(), authenticatedAt: "unknown" }),
+		);
+		const known = openedOf(await s.open(testRequest(), facts()));
 		expect(stores.kept.peek(unknown.session.id)).toMatchObject({
 			format: 2,
 			authenticatedAt: now,
@@ -234,7 +242,9 @@ describe("session authentication time", () => {
 
 	it("keeps the opening apart from an earlier authentication time, and gives a raised cookie what is left from the opening", async () => {
 		const { s, stores, withCookie, jar } = await boot();
-		const done = await s.complete(testRequest(), { ...facts(), authenticatedAt: now - 1_000_000 });
+		const done = openedOf(
+			await s.open(testRequest(), { ...facts(), authenticatedAt: now - 1_000_000 }),
+		);
 		expect(stores.kept.peek(done.session.id)).toMatchObject({
 			format: 2,
 			openedAt: now,
@@ -248,10 +258,12 @@ describe("session authentication time", () => {
 	it("takes a login naming its authentication time the opening as authenticated when the session opens, known", async () => {
 		const recorded = recordingLog();
 		const { s, stores } = await boot({}, [], { log: recorded.log });
-		const done = await s.complete(testRequest(), {
-			...facts(),
-			authenticatedAt: "opening" as never,
-		});
+		const done = openedOf(
+			await s.open(testRequest(), {
+				...facts(),
+				authenticatedAt: "opening" as never,
+			}),
+		);
 		expect(done.session.context.authenticatedAt).toBe(now);
 		expect(stores.kept.peek(done.session.id)).toMatchObject({
 			format: 2,
@@ -262,19 +274,19 @@ describe("session authentication time", () => {
 		expect(
 			recorded.lines().filter((l) => l.event.startsWith("session-lifecycle.authentication")),
 		).toEqual([]);
-		const named = s.complete(testRequest(), { ...facts(), authenticatedAt: "now" as never });
+		const named = s.open(testRequest(), { ...facts(), authenticatedAt: "now" as never });
 		await expect(named).rejects.toThrow(TypeError);
 	});
 
 	it("refuses, before opening anything, a login whose authentication time is no time, never naming it", async () => {
 		const { s } = await boot();
 		for (const at of [-1, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
-			const opened = s.complete(testRequest(), { ...facts(), authenticatedAt: at });
+			const opened = s.open(testRequest(), { ...facts(), authenticatedAt: at });
 			await expect(opened, String(at)).rejects.toThrow(TypeError);
 			await expect(opened).rejects.not.toThrow(String(at));
 		}
 		for (const at of [0, 8.64e15]) {
-			const done = await s.complete(testRequest(), { ...facts(), authenticatedAt: at });
+			const done = openedOf(await s.open(testRequest(), { ...facts(), authenticatedAt: at }));
 			expect(done.session.context.authenticatedAt, String(at)).toBe(Math.min(at, now));
 		}
 	});
@@ -282,8 +294,10 @@ describe("session authentication time", () => {
 	it("logs only that it capped an authentication time later than the opening", async () => {
 		const recorded = recordingLog();
 		const { s } = await boot({}, [], { log: recorded.log });
-		await s.complete(testRequest(), facts());
-		const done = await s.complete(testRequest(), { ...facts(), authenticatedAt: now + 60_000 });
+		openedOf(await s.open(testRequest(), facts()));
+		const done = openedOf(
+			await s.open(testRequest(), { ...facts(), authenticatedAt: now + 60_000 }),
+		);
 		expect(done.session.context.authenticatedAt).toBe(now);
 		const capped = recorded
 			.lines()
@@ -319,7 +333,7 @@ describe("session authentication time", () => {
 
 	it("lets nobody into a record of the format before that says its authentication time is unknown", async () => {
 		const { s, stores, withCookie } = await boot();
-		const done = await s.complete(testRequest(), { ...facts(), authenticatedAt: "unknown" });
+		const done = openedOf(await s.open(testRequest(), { ...facts(), authenticatedAt: "unknown" }));
 		await stores.kept.records.change(done.session.id, (r) => {
 			const { openedAt: _, ...before } = r as unknown as Record<string, unknown>;
 			return { value: { ...before, format: 1 } as unknown as StoredSession };
@@ -341,7 +355,7 @@ describe("session entry", () => {
 	it("keeps a session's authentication time across a raise, known or unknown, the raise's time kept apart [guarantee-2-b]", async () => {
 		const { s, withCookie } = await boot();
 		for (const authenticatedAt of [now - 60_000, "unknown"] as const) {
-			const done = await s.complete(testRequest(), { ...facts(), authenticatedAt });
+			const done = openedOf(await s.open(testRequest(), { ...facts(), authenticatedAt }));
 			const before = done.session.context;
 			expect(before.authenticatedAtUnknown).toBe(authenticatedAt === "unknown" || undefined);
 			now += 5000;
@@ -445,7 +459,7 @@ describe("session entry", () => {
 		now += 15_000;
 		expect(await opening(testRequest(), { ...facts(), provenSince })).toEqual({ kind: "revoked" });
 		// Opened without the proof's start, the same login would be entered.
-		const unchecked = await s.complete(testRequest(), facts());
+		const unchecked = openedOf(await s.open(testRequest(), facts()));
 		const cookie = pair(unchecked.cookies[0]);
 		expect(
 			await s.enter(
@@ -537,20 +551,23 @@ describe("session entry", () => {
 		const { s, withCookie, login } = await boot({}, [], { random });
 		const first = await login();
 		for (const subject of ["bob", "carol"]) {
-			await expect(s.complete(testRequest(), facts(subject))).rejects.toSatisfy(isUnavailable);
+			await expect(s.open(testRequest(), facts(subject))).rejects.toSatisfy(isUnavailable);
 		}
 		expect((await s.enter(withCookie(first)))?.context.subject).toBe("alice");
 	});
 
-	it("fails an entry closed when subject revocation cannot tell", async () => {
+	it("fails a login and an entry closed when subject revocation cannot tell", async () => {
 		const withCookie = (cookie: string) =>
 			testRequest({ headers: new Map([["cookie", cookie]]), source: { scheme: "https" } });
+		// It answers the first login's own check, and then cannot tell.
+		let told = 0;
 		const failing = defineModule(
 			{ name: "subject-revocation", replicaSafe: true, takes: [] },
 			(m) => [
 				m.provide(subjectRevocation).by(() => ({
 					revoke: async () => {},
 					check: async () => {
+						if (told++ === 0) return "valid" as const;
 						throw new Error("cannot tell");
 					},
 				})),
@@ -569,17 +586,18 @@ describe("session entry", () => {
 			config: configWith(),
 			runtime,
 		});
-		const { cookies } = await other.get(sessions).complete(testRequest(), facts());
+		const { cookies } = openedOf(await other.get(sessions).open(testRequest(), facts()));
 		await expect(other.get(sessions).enter(withCookie(pair(cookies[0])))).rejects.toThrow(
 			"cannot tell",
 		);
+		await expect(other.get(sessions).open(testRequest(), facts())).rejects.toThrow("cannot tell");
 	});
 
 	it("fails a login closed when the session it replaces cannot even be added to the closings", async () => {
 		const { s, stores, withCookie, login } = await boot();
 		const first = await login();
 		stores.down.closing.failNext("add");
-		await expect(s.complete(withCookie(first), facts())).rejects.toSatisfy(isUnavailable);
+		await expect(s.open(withCookie(first), facts())).rejects.toSatisfy(isUnavailable);
 		expect(await s.enter(withCookie(first))).toBeDefined();
 	});
 
@@ -793,7 +811,7 @@ describe("session closing", () => {
 		await expect(s.close(handle)).rejects.toSatisfy(isUnavailable);
 		// As an older host meets a record a newer one wrote: the cookie is left as it is.
 		await expect(s.closeRequest(withCookie(cookie))).rejects.toSatisfy(isUnavailable);
-		await expect(s.complete(withCookie(cookie), facts())).rejects.toSatisfy(isUnavailable);
+		await expect(s.open(withCookie(cookie), facts())).rejects.toSatisfy(isUnavailable);
 		expect(stores.index.peek(cookie.split("=")[1] ?? "")).toBe(handle);
 		expect(stores.kept.peek(handle)).toMatchObject({ format: 3, state: "open" });
 	});
@@ -1116,7 +1134,7 @@ describe("session raise", () => {
 			runtime: quietRuntime({ clock: { now: () => now }, random }),
 		});
 		const s = other.get(sessions);
-		const { cookies } = await s.complete(testRequest(), facts());
+		const { cookies } = openedOf(await s.open(testRequest(), facts()));
 		now += 59_999;
 		ending = true;
 		const request = testRequest({
@@ -1181,7 +1199,7 @@ describe("each subject's sessions", () => {
 	it("lets no session in past its listing, even once the lifetime in force is longer", async () => {
 		const { stores, configured } = await boot();
 		const shorter = await configured({ lifetime: "1m" });
-		const { session } = await shorter.get(sessions).complete(testRequest(), facts());
+		const { session } = openedOf(await shorter.get(sessions).open(testRequest(), facts()));
 		const longer = (await configured({ lifetime: "1h" })).get(sessions);
 		now += 59_999;
 		expect((await longer.entryOf(session.id)).kind).toBe("entered");
@@ -1211,7 +1229,7 @@ describe("each subject's sessions", () => {
 				Buffer.from(new Uint8Array(32).fill(n)).toString("base64url"),
 			);
 			stores.lost.add(write);
-			await expect(s.complete(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
+			await expect(s.open(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
 			const indexed = stores.index.peek(secret as string) !== undefined;
 			expect(indexed).toBe(write === "cookies.save");
 			if (indexed) expect(await listed(stores, "alice")).toEqual([handle]);
@@ -1221,7 +1239,7 @@ describe("each subject's sessions", () => {
 	it("fails a login whose session it cannot list", async () => {
 		const { s, stores } = await boot();
 		stores.down.listed.failNext("add");
-		await expect(s.complete(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
+		await expect(s.open(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
 	});
 
 	it("closes a session all the same when it cannot be taken off the listing, logging it by kind", async () => {
@@ -1321,7 +1339,7 @@ describe("revoking a subject", () => {
 		await fill(login, stores.listingCap - 1);
 		const before = await listed(stores, "alice");
 		stores.down.closing.failNext("add");
-		await expect(s.complete(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
+		await expect(s.open(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
 		expect(await listed(stores, "alice")).toEqual(before);
 		expect(before).toContain(first);
 		await app.get(subjectRevocation).revoke("alice");
@@ -1333,7 +1351,7 @@ describe("revoking a subject", () => {
 		const [first, ...rest] = await fill(login, stores.listingCap);
 		const firstHandle = await handleOf(first as string);
 		const shorter = (await configured({ lifetime: "1m" })).get(sessions);
-		const { session, cookies } = await shorter.complete(testRequest(), facts());
+		const { session, cookies } = openedOf(await shorter.open(testRequest(), facts()));
 		expect(await shorter.enter(withCookie(pair(cookies[0])))).toBeDefined();
 		expect(closer.done).toEqual(["alice"]);
 		const after = await listed(stores, "alice");
