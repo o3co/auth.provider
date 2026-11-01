@@ -49,7 +49,7 @@ const section = z.strictObject({
 		.literal("none")
 		.optional()
 		.describe(
-			'"none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes and appendfsync always.',
+			'"none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes, appendfsync always and no-appendfsync-on-rewrite no.',
 		),
 	"server-settings": z
 		.strictObject({
@@ -66,6 +66,10 @@ const section = z.strictObject({
 				.enum(["always", "everysec", "no"])
 				.optional()
 				.describe("How often the server fsyncs its append-only file."),
+			"no-appendfsync-on-rewrite": z
+				.enum(["yes", "no"])
+				.optional()
+				.describe("Whether the server skips its fsyncs while it rewrites its append-only file."),
 			"min-replicas-to-write": z
 				.number()
 				.int()
@@ -194,13 +198,18 @@ async function durabilityProblems(
 ): Promise<string[]> {
 	const durable = declared.filter((s) => s.guarantees.includes("durable"));
 	if (durable.length === 0 || durability === "none") return [];
-	// Both are read, so a refusal names every setting left undeclared at once.
-	const [appendonly, appendfsync] = [await settings("appendonly"), await settings("appendfsync")];
-	const persisted = appendonly === "yes" && appendfsync === "always";
+	// Each is read, so a refusal names every setting left undeclared at once. A rewrite that skips
+	// its fsyncs loses an acknowledged write in a crash, as appendfsync other than always does.
+	const [appendonly, appendfsync, onRewrite] = [
+		await settings("appendonly"),
+		await settings("appendfsync"),
+		await settings("no-appendfsync-on-rewrite"),
+	];
+	const persisted = appendonly === "yes" && appendfsync === "always" && onRewrite === "no";
 	if (persisted) return [];
 	const names = durable.map((s) => s.name).join(", ");
 	return [
-		`set appendonly yes and appendfsync always on the server (docs/runbook.md, Redis), which the durable guarantee of these spaces needs: ${names}`,
+		`set appendonly yes, appendfsync always and no-appendfsync-on-rewrite no on the server (docs/runbook.md, Redis), which the durable guarantee of these spaces needs: ${names}`,
 	];
 }
 
