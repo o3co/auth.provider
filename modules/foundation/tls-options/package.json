@@ -1,0 +1,16 @@
+{
+	"name": "@mod/tls-options",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "foundation",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"zod": "4.6.7"
+	}
+}
