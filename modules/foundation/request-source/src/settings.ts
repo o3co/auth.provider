@@ -2,13 +2,16 @@ import { BlockList, isIP } from "node:net";
 import type { CertificateHeaders } from "@mod/client-certificate";
 import { z } from "zod";
 
+/** How many bits an address of a family (4 or 6, as `isIP` answers) holds. */
+const bitsOf = (family: number) => (family === 4 ? 32 : 128);
+
 /** A trusted proxy entry: an IP address with no zone, and a prefix length when a CIDR block. */
 function blockOf(entry: string) {
 	const found = /^([^/%]+)(?:\/(0|[1-9]\d{0,2}))?$/.exec(entry);
 	const address = found?.[1] ?? "";
 	const family = isIP(address);
 	const prefix = found?.[2] === undefined ? undefined : Number(found[2]);
-	const fits = prefix === undefined || prefix <= (family === 4 ? 32 : 128);
+	const fits = prefix === undefined || prefix <= bitsOf(family);
 	return found && family !== 0 && fits ? { address, family, prefix } : undefined;
 }
 
@@ -97,8 +100,8 @@ function coverAFamilyTogether(entries: readonly string[]): boolean {
 		const read = blockOf(entry);
 		// One that covers a family alone is refused at its own place.
 		if (!read || coversAFamily(entry)) continue;
-		const bits = read.family === 4 ? 32n : 128n;
-		const host = bits - BigInt(read.prefix ?? Number(bits));
+		const bits = bitsOf(read.family);
+		const host = BigInt(bits - (read.prefix ?? bits));
 		const value = read.family === 4 ? ipv4Number(read.address) : ipv6Number(read.address);
 		const start = (value >> host) << host;
 		const end = start | ((1n << host) - 1n);
