@@ -341,6 +341,11 @@ describe("a revocation of the subject since the challenge was made", () => {
 						session: { id: "opened-1", context: {} as never },
 						cookies: ["session=opened-1; Path=/"],
 					}),
+					open: async () => ({
+						kind: "opened",
+						session: { id: "opened-1", context: {} as never },
+						cookies: ["session=opened-1; Path=/"],
+					}),
 					close: async (id) => {
 						closed.push(id);
 						return { kind: "closed", cookies: [] };

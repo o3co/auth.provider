@@ -49,6 +49,8 @@ export function openingOver(p: OpeningParts) {
 			p.recorded.session(request, "held", subject);
 			return jsonAnswer(403, outcome.answer, { cookies: outcome.cookies });
 		}
+		// Any other outcome opened no session: session refused it, its subject revoked since the proof.
+		if (outcome.kind !== "opened") return refuse("revoked");
 		// session-lifecycle compares with the opening, so a revocation since the challenge ends it here.
 		if (await revoked()) {
 			await p.sessions.close(outcome.session.id);
