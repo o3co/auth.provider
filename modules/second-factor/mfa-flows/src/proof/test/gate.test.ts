@@ -30,7 +30,11 @@ describe("a login whose amr holds the second factor already", () => {
 	const loginWith = async (s: Awaited<ReturnType<typeof serve>>, subject: string, amr: string[]) =>
 		s.app
 			.get(logins)
-			.login(testRequest(), { subject, amr, authenticatedAt: Date.now() }, { redirect_to: "/" });
+			.login(
+				testRequest(),
+				{ subject, amr, authenticatedAt: Date.now(), provenSince: Date.now() },
+				{ redirect_to: "/" },
+			);
 
 	it("opens past the gate, a factor of its subject's never asked for", async () => {
 		const s = await serve({});
@@ -70,7 +74,12 @@ describe("a login whose amr holds the second factor already", () => {
 				},
 			} as unknown as Transactions,
 		});
-		const facts = { subject: "ola", amr: ["pop", secondFactorAmr], authenticatedAt: 1 };
+		const facts = {
+			subject: "ola",
+			amr: ["pop", secondFactorAmr],
+			authenticatedAt: 1,
+			provenSince: 1,
+		};
 		expect(await hold(testRequest(), facts, undefined, undefined)).toEqual({ kind: "pass" });
 		expect([asked, started]).toEqual([0, 0]);
 	});

@@ -88,7 +88,7 @@ it("hands login-gates the held facts' own proof's start, and answers a login ses
 	s.set.resumed = { kind: "revoked", cookies: [] };
 	const refused = await s.resume(undefined, held);
 	expect([refused.status, refused.body, refused.cookies]).toEqual([
-		403,
+		401,
 		{ json: { error: "login_required" } },
 		["mfa="],
 	]);

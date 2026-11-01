@@ -98,7 +98,7 @@ async function proved() {
 	});
 	const held = await gateOver({ factors, transactions })(
 		testRequest(),
-		{ subject: "sue", amr: ["pwd"], authenticatedAt: now },
+		{ subject: "sue", amr: ["pwd"], authenticatedAt: now, provenSince: now },
 		{},
 	);
 	if (held.kind !== "held") throw new Error("the login was not held");

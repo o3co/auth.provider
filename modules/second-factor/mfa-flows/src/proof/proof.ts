@@ -10,7 +10,7 @@ import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { Permits } from "../permits/permits.ts";
 import { auditedBy } from "../recording/recording.ts";
 import { loginRequired, revokedSince, unavailable } from "../requests/requests.ts";
-import type { Transaction } from "../transactions/records.ts";
+import type { HeldFacts, Transaction } from "../transactions/records.ts";
 import type { Transactions } from "../transactions/transactions.ts";
 import { challengeWith } from "./challenge.ts";
 import { provingWith } from "./proving.ts";
@@ -92,16 +92,23 @@ export function resumeOver(p: ResumeParts) {
 		carried?: Carried,
 		opened?: (handle: string) => Promise<void>,
 	) => {
-		const facts = t.facts ?? { subject: t.subject, amr: [] };
+		const facts: HeldFacts = t.facts ?? { subject: t.subject, amr: [] };
 		const amr = [...new Set([...facts.amr, ...proved])];
-		// Held with no time, it is unknown: never the opening's.
+		// Held with no time, it is unknown, never the opening's; with no proof's start, the transaction's.
 		const authenticatedAt = facts.authenticatedAt ?? "unknown";
-		const resuming = { ...facts, amr, authenticatedAt };
+		const resuming = {
+			...facts,
+			amr,
+			authenticatedAt,
+			provenSince: facts.provenSince ?? t.startedAt,
+		};
 		const resumed = await p.logins.resume(request, resuming, "mfa", t.done, t.from);
 		if (resumed.kind === "held")
 			return jsonAnswer(403, resumed.answer, { cookies: resumed.cookies });
-		// A gate refused it, or session did by the held facts' `provenSince`: the transaction is taken, its cookie goes.
-		if (resumed.kind === "refused" || resumed.kind === "revoked") {
+		// A gate refused it, or session did as a revocation since the held facts' `provenSince`: the cookie goes.
+		if (resumed.kind === "revoked")
+			return { ...loginRequired, cookies: [p.transactions.cleared()] };
+		if (resumed.kind === "refused") {
 			return jsonAnswer(403, { error: "login_required" }, { cookies: [p.transactions.cleared()] });
 		}
 		// Any other outcome opened nothing (a resume past its caller's deadline): refused as a gate would.
