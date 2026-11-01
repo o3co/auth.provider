@@ -4,12 +4,14 @@ import {
 	assemble,
 	BootRefused,
 	defineModule,
+	isUnavailable,
 	kernelConfig,
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { sessionStandIn } from "@mod/session/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
+import { sessions } from "@mod/session";
+import { sessionStandIn, stubSessions } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { expect, it } from "vitest";
 import {
@@ -25,14 +27,20 @@ import gatesModule from "../src/module.ts";
 /** A clock that stands still unless a test moves it. */
 const now = 1_800_000_000_000;
 const runtime = quietRuntime({ clock: { now: () => now } });
-const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: now };
+const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: now, provenSince: now };
 const from = { caller: "fed", carry: "sealed" };
 
-async function boot(extra: Module[], gates: Record<string, unknown> = {}, log = runtime.log) {
+async function boot(
+	extra: Module[],
+	gates: Record<string, unknown> = {},
+	log = runtime.log,
+	session: Module = sessionStandIn,
+	environment: "production" | "development" = "production",
+) {
 	const app = await assemble({
-		modules: [http, sessionStandIn, subjectRevocationStandIn, gatesModule, ...extra],
+		modules: [http, session, subjectRevocationStandIn, gatesModule, ...extra],
 		config: {
-			...kernelConfig(),
+			...kernelConfig({ environment }),
 			...httpConfig({ "public-origin": "https://as.example" }),
 			"login-gates": gates,
 		},
@@ -41,26 +49,34 @@ async function boot(extra: Module[], gates: Record<string, unknown> = {}, log = 
 	return app.get(logins);
 }
 
-/** Gates `a` and `b`, contributed out of name order, that record each call; and a caller `fed` told of opens. */
-function gated({ holding = [] as string[], throwing = [] as string[] } = {}) {
+/** Gates `a` and `b` (or `names`), contributed out of name order, that record each call; and a caller `fed` told of opens. */
+function gated({
+	holding = [] as string[],
+	throwing = [] as string[],
+	refusing = [] as string[],
+	rechecking = [] as string[],
+	names = ["b", "a"],
+} = {}) {
 	const ran: string[] = [];
 	const given: (LoginFrom | undefined)[] = [];
 	const told: [unknown, string][] = [];
 	const gate = (name: string) =>
-		defineModule({ name: `gate-${name}` }, (m) => [
+		defineModule({ name: `gate-${name}`, replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(loginGates).by(() => ({
 				name,
+				...(rechecking.includes(name) ? { rechecked: true } : {}),
 				hold: async (_request, asked, done, carried) => {
 					ran.push(`${name}:${asked.subject}:${JSON.stringify(done)}`);
 					given.push(carried);
 					if (throwing.includes(name)) throw new Unavailable(name);
+					if (refusing.includes(name)) return { kind: "refused" as const };
 					return holding.includes(name)
 						? { kind: "held" as const, answer: { by: name }, cookies: [`gate=${name}`] }
 						: { kind: "pass" as const };
 				},
 			})),
 		]);
-	const caller = defineModule({ name: "caller" }, (m) => [
+	const caller = defineModule({ name: "caller", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(openedAfterHold).by(() => ({
 			caller: "fed",
 			opened: async (session, carry) => {
@@ -68,7 +84,7 @@ function gated({ holding = [] as string[], throwing = [] as string[] } = {}) {
 			},
 		})),
 	]);
-	return { gates: [gate("b"), gate("a")], caller, ran, given, told };
+	return { gates: names.map(gate), caller, ran, given, told };
 }
 
 it("asks the gates in the order of their names and stops at the first that holds", async () => {
@@ -84,7 +100,7 @@ it("asks the gates in the order of their names and stops at the first that holds
 });
 
 it("answers a hold that sets no cookies with an empty list", async () => {
-	const bare = defineModule({ name: "gate-bare" }, (m) => [
+	const bare = defineModule({ name: "gate-bare", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "bare",
 			hold: async () => ({ kind: "held" as const, answer: null }),
@@ -179,7 +195,7 @@ it("still opens the login when the caller's opened throws, and logs the caller a
 		["sealed", "string"],
 	]) {
 		const recorded = recordingLog();
-		const failing = defineModule({ name: "failing" }, (m) => [
+		const failing = defineModule({ name: "failing", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(openedAfterHold).by(() => ({
 				caller: "fed",
 				opened: async () => {
@@ -200,7 +216,7 @@ it("still opens the login when the caller's opened throws, and logs the caller a
 
 it("answers whether the declared ways of logging in can prove every one of a set of amr", async () => {
 	const source = (name: string, amr: string[]) =>
-		defineModule({ name: `source-${name}` }, (m) => [
+		defineModule({ name: `source-${name}`, replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(amrSources).by(() => ({ name, amr })),
 		]);
 	const l = await boot([source("one", ["a"]), source("two", ["b", "c"])]);
@@ -210,9 +226,11 @@ it("answers whether the declared ways of logging in can prove every one of a set
 });
 
 const path = (name: string, at: string) =>
-	defineModule({ name }, (m) => [m.contribute(returnPaths).by(() => ({ path: at }))]);
+	defineModule({ name, replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(returnPaths).by(() => ({ path: at })),
+	]);
 
-it("lets a login return only to a listed target exactly, or a contributed path on the public origin", async () => {
+it("lets a login return only to a listed target exactly, or a contributed path on the public origin [rfc9700-4.1.3-b]", async () => {
 	const l = await boot([path("authorize", "/oauth/authorize"), path("device", "/device")], {
 		"return-targets": ["https://app.example/"],
 	});
@@ -235,6 +253,12 @@ it("lets a login return only to a listed target exactly, or a contributed path o
 		"https://as.example/oauth/authorize?x=1#",
 		"https://u:p@as.example/oauth/authorize?x=1",
 		"https://as.example/oauth/x/../authorize?x=1",
+		// Spellings the URL parser rewrites to the contributed path: a login returns as written only.
+		"https://as.example/oauth/authorize/../authorize?x=1",
+		"https://as.example/oauth/authorize/%2e%2e/authorize?x=1",
+		"https://as.example/oauth/authorize/.?x=1",
+		"https://as.example/oauth\\authorize?x=1",
+		"https://as.example\\oauth/authorize?x=1",
 		"https://as.example:8443/oauth/authorize?x=1",
 		"http://as.example/oauth/authorize?x=1",
 		"https://evil.example/oauth/authorize?x=1",
@@ -244,6 +268,94 @@ it("lets a login return only to a listed target exactly, or a contributed path o
 		expect(l.returnAllowed(near), near).toBe(false);
 	}
 	expect((await boot([])).returnAllowed("https://app.example/")).toBe(false);
+});
+
+it("lets a login return one name segment below a path contributed so, and nowhere deeper or around it [rfc9700-4.1.3-b]", async () => {
+	const below = defineModule({ name: "federation", replicaSafe: true, takes: [] }, (m) => [
+		m.contribute(returnPaths).by(() => ({ path: "/session/oauth/federation", segment: true })),
+	]);
+	const l = await boot([below, path("device", "/device")]);
+	for (const allowed of [
+		"https://as.example/session/oauth/federation/corp?link=1",
+		"https://as.example/session/oauth/federation/idp-2",
+		"https://as.example/session/oauth/federation/A_b-9?x=1",
+	]) {
+		expect(l.returnAllowed(allowed), allowed).toBe(true);
+	}
+	for (const near of [
+		// The path itself, two segments below, and the callback under a name.
+		"https://as.example/session/oauth/federation?link=1",
+		"https://as.example/session/oauth/federation/corp/callback?code=x",
+		"https://as.example/session/oauth/federation/corp/x",
+		// An empty segment, a dot segment, and an encoded or doubled slash.
+		"https://as.example/session/oauth/federation/?link=1",
+		"https://as.example/session/oauth/federation//corp",
+		"https://as.example/session/oauth/federation/..?link=1",
+		"https://as.example/session/oauth/federation/.?link=1",
+		"https://as.example/session/oauth/federation/x/../corp?link=1",
+		"https://as.example/session/oauth/federation/corp%2Fcallback",
+		"https://as.example/session/oauth/federation/%2E%2E",
+		"https://as.example/session/oauth/federation/c%41rp",
+		// Another origin, a port, and a fragment.
+		"https://evil.example/session/oauth/federation/corp",
+		"https://as.example:8443/session/oauth/federation/corp",
+		"https://as.example/session/oauth/federation/corp#x",
+		// A path contributed whole takes nothing below it.
+		"https://as.example/device/corp",
+		// A dot is no name's, nor a trailing slash; letters past ASCII are none.
+		"https://as.example/session/oauth/federation/corp.name",
+		"https://as.example/session/oauth/federation/corp/",
+		"https://as.example/session/oauth/federation/c\u00f3rp",
+		"https://as.example/session/oauth/federation/c%C3%B3rp",
+		// Spellings the URL parser rewrites to one segment below: a login returns as written only.
+		"https://as.example/session/oauth/federation/corp/../corp",
+		"https://as.example/session/oauth/federation/corp/%2e%2e/cor",
+		"https://as.example/session/oauth/federation\\corp",
+		"https://as.example\\session/oauth/federation/corp",
+	]) {
+		expect(l.returnAllowed(near), near).toBe(false);
+	}
+	// The path contributed whole too, beside its segment: each takes its own.
+	const both = await boot([
+		below,
+		defineModule({ name: "federation-whole", replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(returnPaths).by(() => ({ path: "/session/oauth/federation" })),
+		]),
+	]);
+	expect(
+		[
+			"https://as.example/session/oauth/federation?x=1",
+			"https://as.example/session/oauth/federation/corp",
+			"https://as.example/session/oauth/federation/corp/x",
+		].map((target) => both.returnAllowed(target)),
+	).toEqual([true, true, false]);
+	// A doubled slash at the root is no name below any path.
+	expect(l.returnAllowed("https://as.example//corp")).toBe(false);
+	// A segment is a name: letters, digits, `-` or `_`, up to 64.
+	expect(l.returnAllowed(`https://as.example/session/oauth/federation/${"a".repeat(64)}`)).toBe(
+		true,
+	);
+	expect(l.returnAllowed(`https://as.example/session/oauth/federation/${"a".repeat(65)}`)).toBe(
+		false,
+	);
+});
+
+it("refuses to start with a return path taking a segment that is no path below the root, or ends in a slash", async () => {
+	// The root, a path ending in a slash, an empty path (below which every segment at the root would
+	// match), and one not beginning with a slash.
+	for (const at of ["/", "/session/", "", "session"]) {
+		const below = defineModule({ name: "below", replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(returnPaths).by(() => ({ path: at, segment: true })),
+		]);
+		const refused = await boot([below]).catch((error: unknown) => error);
+		expect(BootRefused.is(refused), at).toBe(true);
+		expect((refused as BootRefused).refusals, at).toEqual([
+			{
+				where: "login-gates",
+				reason: `a return path taking a segment below it is a path below the root, beginning with a slash and not ending in one: ${at}`,
+			},
+		]);
+	}
 });
 
 it("refuses a return target with whitespace or a control character anywhere, though the URL parser drops some", async () => {
@@ -279,7 +391,8 @@ it("refuses to start with a return target that is not an https URL (http only on
 
 it("starts with a return target as http on a loopback host, and refuses http on any other host", async () => {
 	const local = ["http://localhost:3000/", "http://127.0.0.1:3000/home", "http://[::1]:3000/"];
-	const l = await boot([], { "return-targets": local });
+	// Plain http on a loopback host is for trying it on one machine: a development deployment.
+	const l = await boot([], { "return-targets": local }, runtime.log, sessionStandIn, "development");
 	for (const target of local) expect(l.returnAllowed(target), target).toBe(true);
 	for (const target of [
 		"http://app.example/",
@@ -309,4 +422,132 @@ it("opens the session at the authentication time the way of logging in reported,
 
 it("reads no return targets when the operator sets none", () => {
 	expect(gatesModule.section?.parse({})).toEqual({ "return-targets": [] });
+});
+
+/** Sessions that count the opens asked of them and open none: a test that opens one fails. */
+function unopened() {
+	const asked = { opens: 0 };
+	const module = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(sessions).by(() =>
+			stubSessions({
+				open: async () => {
+					asked.opens += 1;
+					throw new Error("no session opens in this test");
+				},
+			}),
+		),
+	]);
+	return { asked, module };
+}
+
+it("answers revoked, with no cookies and no caller told, where session refuses a login its subject was revoked since", async () => {
+	const refusing = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(sessions).by(() => stubSessions({ open: async () => ({ kind: "revoked" }) })),
+	]);
+	const { gates, caller, told } = gated({ holding: ["a"] });
+	const l = await boot([...gates, caller], {}, runtime.log, refusing);
+	expect((await l.login(testRequest(), facts, null, from)).kind).toBe("held");
+	expect(await l.resume(testRequest(), facts, "a", null, from)).toEqual({
+		kind: "revoked",
+		cookies: [],
+	});
+	expect(told).toEqual([]);
+	const ungated = await boot([], {}, runtime.log, refusing);
+	expect(await ungated.login(testRequest(), facts)).toEqual({ kind: "revoked", cookies: [] });
+});
+
+it("ends a login at the first gate that refuses, with no session, no cookies and no gate after it", async () => {
+	const { gates, ran } = gated({ refusing: ["a"] });
+	const { asked, module } = unopened();
+	const l = await boot(gates, {}, runtime.log, module);
+	expect(await l.login(testRequest(), facts)).toEqual({ kind: "refused", gate: "a", cookies: [] });
+	expect(ran).toEqual(["a:alice:null"]);
+	expect(asked.opens).toBe(0);
+});
+
+it("asks every rechecked gate before the one that held again on resume, by name and first, never the gates that hold", async () => {
+	const { gates, ran } = gated({
+		names: ["d", "c", "b", "a", "0"],
+		holding: ["c"],
+		rechecking: ["a", "b", "d"],
+	});
+	const l = await boot(gates);
+	expect((await l.login(testRequest(), facts)).kind).toBe("held");
+	ran.length = 0;
+	expect((await l.resume(testRequest(), facts, "c")).kind).toBe("opened");
+	// `0` passed already and is not rechecked; `d`, after the hold, runs once as any gate after it.
+	expect(ran).toEqual(["a:alice:null", "b:alice:null", "d:alice:null"]);
+});
+
+it("refuses a resumed login at the first rechecked gate that refuses, with no session, no gate after it and no caller told", async () => {
+	const { gates, caller, ran, told } = gated({
+		names: ["d", "c", "b", "a"],
+		holding: ["c"],
+		rechecking: ["a", "b"],
+		refusing: ["b"],
+	});
+	const { asked, module } = unopened();
+	const l = await boot([...gates, caller], {}, runtime.log, module);
+	expect(await l.resume(testRequest(), facts, "c", null, from)).toEqual({
+		kind: "refused",
+		gate: "b",
+		cookies: [],
+	});
+	expect(ran).toEqual(["a:alice:null", "b:alice:null"]);
+	expect([asked.opens, told]).toEqual([0, []]);
+});
+
+it("answers expired at or past the deadline before any rechecked gate runs", async () => {
+	const { gates, caller, ran } = gated({ names: ["b", "a"], holding: ["b"], rechecking: ["a"] });
+	const l = await boot([...gates, caller]);
+	expect(await l.resume(testRequest(), facts, "b", null, { ...from, deadline: now })).toEqual({
+		kind: "expired",
+	});
+	expect(ran).toEqual([]);
+});
+
+it("rejects with a rechecked gate's error, or throws TypeError where one holds, with no session and no gate after it", async () => {
+	const cases: [{ throwing?: string[]; holding: string[] }, (error: unknown) => boolean][] = [
+		[{ throwing: ["a"], holding: ["b"] }, isUnavailable],
+		[{ holding: ["a", "b"] }, (error) => error instanceof TypeError],
+	];
+	for (const [failing, expected] of cases) {
+		const { gates, ran } = gated({ names: ["c", "b", "a"], rechecking: ["a"], ...failing });
+		const { asked, module } = unopened();
+		const l = await boot(gates, {}, runtime.log, module);
+		await expect(l.resume(testRequest(), facts, "b")).rejects.toSatisfy(expected);
+		expect([ran, asked.opens]).toEqual([["a:alice:null"], 0]);
+	}
+});
+
+it("resumes through the gates composed now: one added before the hold runs only when rechecked, and the hold's own must be there", async () => {
+	const held = gated({ names: ["b"], holding: ["b"] });
+	const l = await boot(held.gates);
+	expect((await l.login(testRequest(), facts)).kind).toBe("held");
+	// The composition changes before the resume: two gates come before `b`, one of them rechecked.
+	const current = gated({ names: ["b", "a", "0"], holding: ["b"], rechecking: ["a"] });
+	const later = await boot(current.gates);
+	expect((await later.resume(testRequest(), facts, "b")).kind).toBe("opened");
+	expect(current.ran).toEqual(["a:alice:null"]);
+	// Without the gate that held, the resume is the caller's error, before any gate runs.
+	const without = gated({ names: ["a"], rechecking: ["a"] });
+	await expect(
+		(await boot(without.gates)).resume(testRequest(), facts, "b"),
+	).rejects.toBeInstanceOf(TypeError);
+	expect(without.ran).toEqual([]);
+});
+
+it("takes every handle its takes name", async () => {
+	const modules = [http, sessionStandIn, subjectRevocationStandIn, gatesModule];
+	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
+	expect((await takesUnused({ modules, config }))["login-gates"]).toBeUndefined();
+});
+
+it("refuses in production a return target on a loopback host", () => {
+	const ask = (targets: string[]) =>
+		gatesModule.refusedInProduction?.(gatesModule.section?.parse({ "return-targets": targets }));
+	expect(
+		ask(["https://app.example/back", "http://127.0.0.1:3000/back"])?.map((r) => r.key),
+	).toEqual(["return-targets"]);
+	expect(ask(["https://app.example/back"])).toEqual([]);
 });
