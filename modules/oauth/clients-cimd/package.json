@@ -10,9 +10,11 @@
 	},
 	"dependencies": {
 		"@mod/client-allowance": "workspace:*",
+		"@mod/client-documents": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
 		"@mod/grants": "workspace:*",
+		"@mod/host-entries": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
