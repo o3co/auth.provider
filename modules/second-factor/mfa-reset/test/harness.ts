@@ -73,7 +73,6 @@ const entering = {
 		return sessionsDown.wrap({
 			...kept,
 			raise: (...args: Parameters<Sessions["raise"]>) => held(kept.raise(...args)),
-			complete: (...args: Parameters<Sessions["complete"]>) => held(kept.complete(...args)),
 			open: (...args: Parameters<Sessions["open"]>) => held(kept.open(...args)),
 		});
 	},
@@ -293,7 +292,12 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 	/** A fresh browser, signed in by password. */
 	const signIn = async (subject = "alice") => {
 		jar = new Map();
-		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject,
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		keep(cookies);
 	};
@@ -314,7 +318,12 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 		from?: LoginFrom,
 	) => {
 		jar = new Map();
-		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject,
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		const outcome = await app.get(logins).login(testRequest(), facts, done, from);
 		keep(outcome.cookies);
 		return outcome;
