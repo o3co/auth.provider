@@ -1,0 +1,16 @@
+{
+	"name": "@mod/guard-imports",
+	"private": true,
+	"license": "Apache-2.0",
+	"kind": "verification",
+	"type": "module",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"typescript": "6.0.3"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}
