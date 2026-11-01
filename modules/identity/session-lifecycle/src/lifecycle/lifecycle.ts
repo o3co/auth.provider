@@ -58,8 +58,8 @@ export interface Lifecycle {
 	liveAt(handle: string): Promise<OpenRecord | undefined>;
 	entryAt(handle: string, level: EntryLevel): Promise<Entry>;
 	entryIn(request: HttpRequest, level: EntryLevel): Promise<Entry>;
-	/** As `open` over the request's earlier session; `rechecked`, the proof's start compared once saved. */
-	open(request: HttpRequest, facts: LoginFacts, rechecked: boolean): Promise<Opened>;
+	/** As `open` over the request's earlier session, the proof's start compared once saved. */
+	open(request: HttpRequest, facts: LoginFacts): Promise<Opened>;
 	close: Sessions["close"];
 	/** Closes the session the request's cookie opens, if any, and destroys the cookie it carries. */
 	closeIn: Sessions["closeRequest"];
@@ -232,7 +232,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		if (entry.kind === "absent") return entry;
 		return (await index.read(secret)) === handle ? entry : { kind: "absent" };
 	};
-	const open: Lifecycle["open"] = async (request, facts, rechecked) => {
+	const open: Lifecycle["open"] = async (request, facts) => {
 		sessionRules.checkAuthenticatedAt(facts);
 		sessionRules.checkProvenSince(facts);
 		// The earlier session is closed first; the login fails if that close cannot even be added to the closings.
@@ -254,7 +254,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		await created(kept.save(handle, toStored(record), lifetimeMs));
 		// Once saved: a boundary landing after this read is later than the opening, which entry compares.
 		const { provenSince } = facts;
-		if (rechecked && provenSince !== undefined) {
+		if (provenSince !== undefined) {
 			if ((await revocation.check(facts.subject, provenSince)) === "revoked") {
 				await close(handle);
 				return { kind: "revoked" };
