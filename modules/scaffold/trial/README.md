@@ -13,7 +13,7 @@
   - It reads the trial file of each module the app's entry imports, whatever names it imports them under, and the kernel's.
   - Each is read after those of what it depends on, then the caller's `layer`, as one HOCON document.
   - The sections in `leave` are dropped; the layer's appends join the trial files' lists.
-  - Each mark is made at each call: `TRIAL-FRESH-ED25519-PKCS8-PEM`, `TRIAL-FRESH-32-BYTES-BASE64` and `TRIAL-FRESH-32-BYTES-BASE64URL` fresh, `TRIAL-REDIS-URL` the caller's `redisUrl`.
+  - Each mark is made at each call: `TRIAL-FRESH-ED25519-PKCS8-PEM`, `TRIAL-FRESH-RSA-2048-PKCS8-PEM`, `TRIAL-FRESH-32-BYTES-BASE64` and `TRIAL-FRESH-32-BYTES-BASE64URL` fresh, `TRIAL-REDIS-URL` the caller's `redisUrl`.
 - `trialFile`: the trial file's name.
 
 ## Invariants

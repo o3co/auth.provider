@@ -93,6 +93,13 @@ const marks = (redisUrl: string): ReadonlyMap<string, () => string> =>
 					.privateKey.export({ type: "pkcs8", format: "pem" })
 					.toString(),
 		],
+		[
+			"TRIAL-FRESH-RSA-2048-PKCS8-PEM",
+			() =>
+				generateKeyPairSync("rsa", { modulusLength: 2048 })
+					.privateKey.export({ type: "pkcs8", format: "pem" })
+					.toString(),
+		],
 		["TRIAL-FRESH-32-BYTES-BASE64", () => randomBytes(32).toString("base64")],
 		["TRIAL-FRESH-32-BYTES-BASE64URL", () => randomBytes(32).toString("base64url")],
 		["TRIAL-REDIS-URL", () => redisUrl],
