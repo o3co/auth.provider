@@ -87,7 +87,12 @@ async function serve(
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
 		const { cookies } = openedOf(
-			await opened.open(testRequest(), { subject, amr, authenticatedAt }),
+			await opened.open(testRequest(), {
+				subject,
+				amr,
+				authenticatedAt,
+				provenSince: runtime.clock.now(),
+			}),
 		);
 		return withCookie(cookies[0] ?? "");
 	};
@@ -186,9 +191,13 @@ it("takes only a second factor proven recently as proven, never a recent sign-in
 	const { app } = await serve();
 	const now = runtime.clock.now();
 	const at = (amr: string[], extra = {}) =>
-		app
-			.get(secondFactors)
-			.provenRecently({ subject: "s", amr, authenticatedAt: now, ...extra } as never);
+		app.get(secondFactors).provenRecently({
+			subject: "s",
+			amr,
+			authenticatedAt: now,
+			provenSince: now,
+			...extra,
+		} as never);
 	expect(at(["pwd"])).toBe(false);
 	expect(at(["pwd", secondFactorAmr])).toBe(true);
 	expect(at(["pwd"], { raisedAmr: ["otp", secondFactorAmr], raisedAt: now })).toBe(true);
