@@ -30,7 +30,7 @@ import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { type Sessions, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import {
@@ -361,7 +361,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 	const signIn = async (subject = "alice") => {
 		jar = new Map();
 		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
+		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		keep(cookies);
 	};
 	/** Enrolls a code factor from a signed-in browser and answers its secret and the recovery codes. */
