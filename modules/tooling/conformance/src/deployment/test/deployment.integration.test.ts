@@ -1,0 +1,337 @@
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { area, type NewPart, onNew, sceneOf } from "../../areas.ts";
+import { hostLibfaketime } from "../../clock/clock.ts";
+import { startTopology, type Topology } from "../../faults/topology.ts";
+import type { Match } from "../../relay/relay.ts";
+import { type Instance, startDeployment } from "../deployment.ts";
+
+// A scene of no feature: the base's own modules on the Redis store.
+const probe = area<NewPart>("deployment-probe");
+onNew(probe, (part) => part);
+const scene = sceneOf(probe.part({ store: "pausable" }));
+const script: Match = { request: (c) => c.name === "EVAL", succeeded: () => true };
+// A scene whose app records an event on a request: a password login of no user fails.
+const audited = area<NewPart>("deployment-audit-probe");
+onNew(audited, (part) => part);
+const origin = "https://issuer.example";
+const loginScene = sceneOf(
+	audited.part({
+		modules: ["@mod/users", "@mod/login-password"],
+		store: "pausable",
+		config: {
+			http: { "trusted-proxies": ["127.0.0.1"], "public-origin": origin },
+			users: { registered: [] },
+		},
+	}),
+);
+const failedLogin = async (base: string) =>
+	(
+		await fetch(`${base}/session/login`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				origin,
+				"x-forwarded-proto": "https",
+				"x-forwarded-for": "198.51.100.50",
+				"x-forwarded-host": new URL(origin).host,
+			},
+			body: new URLSearchParams({ username: "nobody", password: "wrong" }),
+		})
+	).status;
+/** Runs on one instance of the login scene, on a topology of its own with a replica every write waits for, as the login's stores ask. */
+async function onLogin(name: string, scene: (a: Instance) => Promise<void>) {
+	const replicated = await startTopology({
+		replicas: 1,
+		settings: ["--min-replicas-to-write", "1", "--min-replicas-max-lag", "2"],
+	});
+	try {
+		const d = await startDeployment({
+			name,
+			scene: loginScene,
+			topology: replicated,
+			instances: 1,
+		});
+		try {
+			const [a] = d.instances;
+			if (!a) throw new Error("one instance");
+			await scene(a);
+		} finally {
+			await d.stop();
+		}
+	} finally {
+		await replicated.stop();
+	}
+}
+/** Answers once the app at `base` is ready: its store's first answers come after its start. */
+const readyAt = async (base: string) => {
+	for (let tries = 0; tries < 150; tries++) {
+		if ((await fetch(`${base}/readyz`)).status === 200) return;
+		await new Promise((resolve) => setTimeout(resolve, 200));
+	}
+	throw new Error("not ready");
+};
+
+/** Whether this is a fault run, which never skips what it can not do. */
+const faultRun = process.env.CONFORMANCE_FAULTS === "1";
+/**
+ * The live processes `pid` started, by pid; none once every instance it started has ended. One ended
+ * but not yet reaped (a zombie, `Z`) is not live: a stop answers once the group has ended, and Node
+ * reaps the leader only when its loop next turns.
+ */
+const childrenOf = (pid: number) => {
+	const read = (command: string, args: string[]) => {
+		try {
+			return execFileSync(command, args).toString();
+		} catch {
+			return "";
+		}
+	};
+	// pgrep leaves itself out; ps is then asked of those alone, so neither counts.
+	const children = read("pgrep", ["-P", String(pid)])
+		.split(/\s+/)
+		.filter(Boolean);
+	if (children.length === 0) return [];
+	return read("ps", ["-o", "pid=,stat=", "-p", children.join(",")])
+		.split("\n")
+		.map((line) => line.trim().split(/\s+/))
+		.filter(([child, stat]) => child && !stat?.startsWith("Z"))
+		.map(([child]) => child);
+};
+
+let topology: Topology;
+beforeAll(async () => {
+	topology = await startTopology({ replicas: 0 });
+});
+afterAll(async () => {
+	await topology?.stop();
+});
+
+describe("a deployment of a scene", () => {
+	it("runs its instances on one Redis, each behind a relay and a trace of its own", async () => {
+		const d = await startDeployment({ name: "two", scene, topology, instances: 2 });
+		try {
+			const [a, b] = d.instances;
+			if (!a || !b) throw new Error("two instances");
+			expect(a.baseUrl).not.toBe(b.baseUrl);
+			await fetch(`${a.baseUrl}/a`);
+			await fetch(`${b.baseUrl}/b`);
+			expect(a.requests().map((r) => r.path)).toEqual(["/a"]);
+			expect(b.requests().map((r) => r.path)).toEqual(["/b"]);
+			for (const i of d.instances) {
+				expect(i.relay.executions(script).length).toBeGreaterThan(0);
+				expect(i.relay.connections()[0]?.upstream).toEqual(topology.primary().upstream());
+			}
+			expect(d.record.instances).toBe(2);
+			// The probe's scene publishes no metadata: its instances are alike in that.
+			expect(d.record.identity).toBeNull();
+			expect(d.record.deployment).toBe("multi");
+			expect(new Set(d.record.settings).size).toBe(1);
+		} finally {
+			await d.stop();
+		}
+	});
+
+	it("kills an instance with SIGKILL and starts it again behind the same URL", async () => {
+		const d = await startDeployment({ name: "kill", scene, topology, instances: 1 });
+		try {
+			const [a] = d.instances;
+			if (!a) throw new Error("one instance");
+			await fetch(`${a.baseUrl}/before`);
+			const before = performance.now();
+			const ended = await a.kill();
+			// When it ended, on the clock the relay times what it saw by.
+			expect(ended.signal).toBe("SIGKILL");
+			expect(ended.endedAt).toBeGreaterThanOrEqual(before);
+			expect(ended.endedAt).toBeLessThanOrEqual(performance.now());
+			expect(a.running()).toBe(false);
+			expect((await fetch(`${a.baseUrl}/down`)).status).toBe(502);
+			await a.restart();
+			expect(a.running()).toBe(true);
+			expect((await fetch(`${a.baseUrl}/after`)).status).not.toBe(502);
+			expect(a.requests().map((r) => r.path)).toEqual(["/before", "/down", "/after"]);
+		} finally {
+			await d.stop();
+		}
+	});
+
+	it("starts an instance again with the certificates it trusts, as at its first start", async () => {
+		// A self-signed certificate made for the test; the driver refuses a file that holds none.
+		const dir = await mkdtemp(join(tmpdir(), "deployment-trusted-"));
+		const [key, cert] = [join(dir, "key.pem"), join(dir, "cert.pem")];
+		execFileSync(
+			"openssl",
+			[
+				"req",
+				"-x509",
+				"-newkey",
+				"ec",
+				"-pkeyopt",
+				"ec_paramgen_curve:P-256",
+				"-nodes",
+				"-keyout",
+				key,
+				"-out",
+				cert,
+				"-days",
+				"1",
+				"-subj",
+				"/CN=trusted.test",
+			],
+			{ stdio: "ignore" },
+		);
+		const pem = await readFile(cert, "utf8");
+		const d = await startDeployment({
+			name: "trusted",
+			scene,
+			topology,
+			instances: 1,
+			trustedCertificates: [cert],
+		});
+		try {
+			const [a] = d.instances;
+			if (!a) throw new Error("one instance");
+			expect((await fetch(`${a.baseUrl}/first`)).status).not.toBe(502);
+			// A start given a file that holds no certificate is refused: so is a restart given the deployment's.
+			await writeFile(cert, "not a certificate\n");
+			await a.kill();
+			await expect(a.restart()).rejects.toThrow(/trusted certificate file/);
+			await writeFile(cert, pem);
+			await a.restart();
+			expect(a.running()).toBe(true);
+			expect((await fetch(`${a.baseUrl}/again`)).status).not.toBe(502);
+		} finally {
+			await d.stop();
+		}
+	});
+
+	it("writes the scene's set-up beside the run's reports", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "conformance-faults-"));
+		const d = await startDeployment({
+			name: "recorded",
+			scene,
+			topology,
+			instances: 1,
+			redis: { "command-timeout": "2s" },
+			recordTo: dir,
+		});
+		await d.stop();
+		const record = JSON.parse(await readFile(join(dir, "recorded.json"), "utf8"));
+		expect(record).toMatchObject({
+			name: "recorded",
+			image: expect.stringMatching(/^redis:7\.4-alpine@sha256:/),
+			replicas: 0,
+			instances: 1,
+			deployment: "single",
+			relays: true,
+			redis: { replication: "none", "command-timeout": "2s" },
+		});
+		expect(record.redis.url).toBeUndefined();
+		expect(record.commit).toBe(
+			process.env.SPEC_EVIDENCE_COMMIT ??
+				execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+		);
+	});
+
+	// A fault run moves the clock or fails: a host without the library never skips it.
+	it.runIf(faultRun || hostLibfaketime())(
+		"moves an instance's clock, restarting it, and leaves the others' alone",
+		async () => {
+			const d = await startDeployment({ name: "clock", scene, topology, instances: 2 });
+			try {
+				const [a, b] = d.instances;
+				if (!a || !b) throw new Error("two instances");
+				await a.clock("+2h");
+				const dateOf = async (url: string) =>
+					Date.parse((await fetch(url)).headers.get("date") ?? "");
+				const now = Date.now();
+				expect(Math.abs((await dateOf(`${a.baseUrl}/`)) - (now + 7_200_000))).toBeLessThan(3000);
+				expect(Math.abs((await dateOf(`${b.baseUrl}/`)) - now)).toBeLessThan(3000);
+				expect(d.record.clocks).toEqual(["+2h", null]);
+			} finally {
+				await d.stop();
+			}
+		},
+	);
+
+	it.runIf(!faultRun && !hostLibfaketime())(
+		"refuses to move a clock where this host has no thread-safe libfaketime",
+		async () => {
+			const d = await startDeployment({ name: "no-clock", scene, topology, instances: 1 });
+			try {
+				await expect(d.instances[0]?.clock("+2h")).rejects.toThrow(/libfaketime/);
+			} finally {
+				await d.stop();
+			}
+		},
+	);
+
+	it("leaves no instance running where marking one fails, or writing the set-up does", async () => {
+		const blocked = await mkdtemp(join(tmpdir(), "conformance-blocked-"));
+		// A file where the marks' directory would be, so marking the first instance fails.
+		await writeFile(join(blocked, "conformance-instances"), "");
+		const temp = process.env.TMPDIR;
+		process.env.TMPDIR = blocked;
+		try {
+			await expect(
+				startDeployment({ name: "unmarked", scene, topology, instances: 2 }),
+			).rejects.toThrow();
+		} finally {
+			if (temp === undefined) delete process.env.TMPDIR;
+			else process.env.TMPDIR = temp;
+		}
+		expect(childrenOf(process.pid)).toEqual([]);
+		// A file where the set-up's directory would be, so its last write fails.
+		const recordTo = join(blocked, "conformance-instances", "records");
+		await expect(
+			startDeployment({ name: "unwritten", scene, topology, instances: 2, recordTo }),
+		).rejects.toThrow();
+		expect(childrenOf(process.pid)).toEqual([]);
+	});
+
+	it("keeps an instance's audit events on one trail across a restart, read once it is killed", async () => {
+		await onLogin("audit", async (a) => {
+			const trail = a.audit;
+			await readyAt(a.baseUrl);
+			const failed = async () =>
+				(await trail.during(() => failedLogin(a.baseUrl))).events.map((e) => e.kind);
+			expect(await failed()).toEqual(["login.failed"]);
+			await a.restart();
+			expect(a.audit).toBe(trail);
+			await readyAt(a.baseUrl);
+			expect(await failed()).toEqual(["login.failed"]);
+			await a.kill();
+			// Still read: a killed instance sends nothing more, and its trail answers.
+			const { result, events } = await a.audit.during(() => failedLogin(a.baseUrl));
+			expect(result).toBe(502);
+			expect(events).toEqual([]);
+		});
+	});
+
+	// A fault run moves the clock or fails: a host without the library never skips it.
+	it.runIf(faultRun || hostLibfaketime())(
+		"keeps an instance's audit events on one trail across a moved clock",
+		async () => {
+			await onLogin("audit-clock", async (a) => {
+				const trail = a.audit;
+				const failed = async () =>
+					(await trail.during(() => failedLogin(a.baseUrl))).events.map((e) => e.kind);
+				await readyAt(a.baseUrl);
+				expect(await failed()).toEqual(["login.failed"]);
+				await a.clock("+2h");
+				expect(a.audit).toBe(trail);
+				await readyAt(a.baseUrl);
+				expect(await failed()).toEqual(["login.failed"]);
+			});
+		},
+	);
+
+	it("fails its stop where a relay was asked for a fault that never happened", async () => {
+		const d = await startDeployment({ name: "unfired", scene, topology, instances: 1 });
+		d.instances[0]?.relay.dropReplyTo({ request: () => false, succeeded: () => true });
+		await expect(d.stop()).rejects.toThrow(/never happened/);
+	});
+});

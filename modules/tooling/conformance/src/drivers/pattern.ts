@@ -83,7 +83,7 @@ export function patternDriver(name: string): AreaDriver {
 	return {
 		can: () => true,
 		differs: () => false,
-		async start(scene) {
+		async start(scene, options) {
 			const { dir, modules } = await appOf();
 			const adapted = patternPartsOf(scene, modules);
 			const unfit = misfit(adapted, scene, modules);
@@ -108,7 +108,7 @@ export function patternDriver(name: string): AreaDriver {
 			// The app's mail goes to a fake relay, unless the scene names its own.
 			const smtp = modules.includes("@mod/mail-smtp") && !config["mail-smtp"];
 			const layers = parts.flatMap((p) => (p.layer === undefined ? [] : [p.layer]));
-			return started(dir, config, scene, store, { leave, parties, smtp }, layers);
+			return started(dir, config, scene, store, { leave, parties, smtp }, layers, options);
 		},
 	};
 }

@@ -1,22 +1,30 @@
-import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
+import { docker as dockerRun, dockerSync, dockerWithin } from "@mod/docker-client";
 import { describe, expect, it } from "vitest";
 import { startRedis } from "../src/driver.ts";
 
 const docker = (() => {
 	try {
-		execFileSync("docker", ["info"], { stdio: "ignore" });
+		dockerSync(["version"], dockerWithin.control, { stdio: "ignore" });
 		return true;
 	} catch {
 		return false;
 	}
 })();
 
-/** The names of the containers that exist with the label and value given. */
-const containers = (label: string) =>
-	execFileSync("docker", ["ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"], {
-		encoding: "utf8",
-	})
+/** The names of the containers that exist with every label and value given. */
+const containers = (...labels: string[]) =>
+	dockerSync(
+		[
+			"ps",
+			"-a",
+			...labels.flatMap((label) => ["--filter", `label=${label}`]),
+			"--format",
+			"{{.Names}}",
+		],
+		dockerWithin.control,
+	)
 		.split("\n")
 		.filter(Boolean);
 
@@ -54,10 +62,9 @@ describe.runIf(docker)("a throwaway Redis", () => {
 				expect(await answers(redis.url)).toBe(true);
 				// Docker bound the host port itself: the binding names none.
 				const [name] = containers(`conformance.owner=${process.pid}`);
-				const bindings = execFileSync(
-					"docker",
+				const bindings = dockerSync(
 					["inspect", "-f", "{{json .HostConfig.PortBindings}}", name ?? "none"],
-					{ encoding: "utf8" },
+					dockerWithin.control,
 				);
 				expect(JSON.parse(bindings)).toEqual({
 					"6379/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
@@ -91,19 +98,27 @@ describe.runIf(docker)("a throwaway Redis", () => {
 		async () => {
 			// No process holds this pid: the highest a system gives is far below it.
 			const gone = "conformance.owner=2147483646";
-			execFileSync("docker", [
-				"run",
-				"-d",
-				"--label",
-				gone,
-				"--label",
-				"conformance=redis",
-				"redis:7-alpine",
-			]);
-			expect(containers(gone)).toHaveLength(1);
+			// This run's own, so a run beside it, which leaves one of the same pid, is not counted here.
+			const ours = `conformance.test-run=${randomUUID()}`;
+			const created = await dockerRun(
+				[
+					"run",
+					"-d",
+					"--label",
+					gone,
+					"--label",
+					ours,
+					"--label",
+					"conformance=redis",
+					"redis:7-alpine",
+				],
+				dockerWithin.run,
+			);
+			// Told by docker's own answer: a run beside this one sweeps it too, so a listing may miss it.
+			expect(created.trim()).toMatch(/^[0-9a-f]{64}$/);
 			const redis = await startRedis();
 			await redis.stop();
-			expect(containers(gone)).toEqual([]);
+			expect(containers(gone, ours)).toEqual([]);
 		},
 		startsWithin,
 	);

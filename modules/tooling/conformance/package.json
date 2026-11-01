@@ -9,11 +9,13 @@
 		"./testing": "./src/testing.ts"
 	},
 	"scripts": {
-		"patterns": "node src/patterns/patterns.ts"
+		"patterns": "node src/patterns/patterns.ts",
+		"evidence-runs": "node src/patterns/patterns.ts --evidence-runs"
 	},
 	"dependencies": {
 		"@mod/combinations": "workspace:*",
 		"@mod/create-app": "workspace:*",
+		"@mod/docker-client": "workspace:*",
 		"@mod/trial": "workspace:*",
 		"vitest": "5.0.5"
 	}
