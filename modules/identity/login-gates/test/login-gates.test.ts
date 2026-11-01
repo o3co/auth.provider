@@ -27,7 +27,7 @@ import gatesModule from "../src/module.ts";
 /** A clock that stands still unless a test moves it. */
 const now = 1_800_000_000_000;
 const runtime = quietRuntime({ clock: { now: () => now } });
-const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: now };
+const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: now, provenSince: now };
 const from = { caller: "fed", carry: "sealed" };
 
 async function boot(
