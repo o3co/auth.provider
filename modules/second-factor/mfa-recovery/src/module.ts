@@ -9,7 +9,7 @@ const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const digest = (code: string) =>
 	createHash("sha256").update(code.toUpperCase().replaceAll("-", "")).digest("base64url");
 
-export default defineModule({ name: "mfa-recovery", replicaSafe: true }, (m) => [
+export default defineModule({ name: "mfa-recovery", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by((c) => {
 		/** 16 characters of 5 random bits each, 80 bits in all, shown as four groups of four. */
 		const freshCode = () => {
