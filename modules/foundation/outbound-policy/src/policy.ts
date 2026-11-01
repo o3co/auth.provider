@@ -1,10 +1,6 @@
 import { isIP } from "node:net";
-import {
-	carriedIPv4,
-	isLoopbackAddress,
-	isPrivateAddress,
-	isSpecialAddress,
-} from "@mod/address-reach";
+import { isLoopbackAddress, isPrivateAddress, isSpecialAddress } from "@mod/address-reach";
+import { listed, normalized, pairOf, withinHosts } from "@mod/host-entries";
 import { isLoopbackName } from "@mod/url-setting";
 import {
 	type Admitted,
@@ -39,93 +35,10 @@ const badPorts = new Set([
 	6669, 6679, 6697, 10080,
 ]);
 
+/** The port a URL of this protocol (`https:` or `http:`, as `URL.protocol` writes it) reaches when it names none. */
+export const defaultPortOf = (protocol: string) => (protocol === "https:" ? 443 : 80);
+
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
-
-/**
- * One spelling for a host, so allow, deny and a caller's hosts compare alike: lowercase, punycode,
- * canonical IP forms, no trailing dot, an IPv4 address carried in IPv6 as the IPv4 one.
- */
-export function normalized(host: string): string | undefined {
-	const bracketed = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
-	const parsed = URL.parse(`https://${bracketed}`);
-	if (!parsed) return undefined;
-	const name = unbracketed(parsed.hostname).replace(/\.$/, "");
-	if (name === "" || name.split(".").includes("")) return undefined;
-	return carriedIPv4(name) ?? name;
-}
-
-const isHost = (host: string) =>
-	(isIP(unbracketed(host)) === 6 || !/[*:/?#@\\]/.test(host)) && normalized(host) !== undefined;
-
-/** Whether an operator's entry is a host, or `.name` for the name and every name under it. */
-export const isHostEntry = (entry: string) =>
-	entry.startsWith(".") ? isListEntry(entry) : isHost(entry);
-
-const splitPair = (pair: string) => {
-	const at = pair.lastIndexOf(":");
-	return { host: pair.slice(0, at), port: pair.slice(at + 1) };
-};
-
-/** A host and a port; the port is matched as written, so only its canonical form can be taken. */
-export function isPair(pair: string): boolean {
-	const { host, port } = splitPair(pair);
-	return /^[1-9][0-9]{0,4}$/.test(port) && Number(port) <= 65_535 && isHost(host);
-}
-
-/** A pair spelled one way: its host as `normalized` spells hosts, its port as written. */
-export const pairOf = (pair: string) => {
-	const { host, port } = splitPair(pair);
-	return `${normalized(host)}:${port}`;
-};
-
-/** An operator's host list entry: a name, `.name` for it and every name under it, or an address. */
-export type HostEntry =
-	| { readonly kind: "name"; readonly name: string; readonly under: boolean }
-	| { readonly kind: "address"; readonly address: string };
-
-const label = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-
-/** An entry read as written, correcting only case and Unicode: `10.5`, a trailing dot or `_` is none. */
-export function hostEntryOf(entry: string): HostEntry | undefined {
-	const bare = unbracketed(entry);
-	const family = isIP(bare);
-	if (family === 6 || (family === 4 && bare === entry)) {
-		return { kind: "address", address: normalized(bare) ?? bare };
-	}
-	const under = entry.startsWith(".");
-	const name = under ? entry.slice(1) : entry;
-	if (/[^\p{L}\p{N}.-]/u.test(name)) return undefined;
-	const ascii = URL.parse(`https://${name}/`)?.hostname;
-	if (ascii === undefined || isIP(ascii) !== 0) return undefined;
-	return ascii.split(".").every((part) => label.test(part))
-		? { kind: "name", name: ascii, under }
-		: undefined;
-}
-
-/** Whether an operator's list entry reads as one. */
-export const isListEntry = (entry: string) => hostEntryOf(entry) !== undefined;
-
-const isListed = (host: string, entry: HostEntry | undefined) =>
-	entry?.kind === "address"
-		? host === entry.address
-		: entry !== undefined &&
-			(host === entry.name || (entry.under && host.endsWith(`.${entry.name}`)));
-
-/** Whether a host is listed: the same host, or a dotted name or any name under it. */
-export const listed = (host: string, entries: readonly string[]) =>
-	entries.some((entry) => isListed(host, hostEntryOf(entry)));
-
-/** `.name` is read as host lists are; any other entry is the one host it spells. */
-const matches = (host: string, entries: readonly string[]) =>
-	entries.some((entry) =>
-		entry.startsWith(".") ? isListed(host, hostEntryOf(entry)) : host === normalized(entry),
-	);
-
-/** Whether a URL's host is among the hosts, matched as a narrower's hosts are. */
-export function withinHosts(raw: string, hosts: readonly string[]): boolean {
-	const url = URL.parse(raw);
-	return url !== null && matches(normalized(url.hostname) ?? "", hosts);
-}
 
 /** Checks a URL before any name is resolved; `signed` material takes plain http at the caller's hosts. */
 export function admitUrl(
@@ -139,15 +52,15 @@ export function admitUrl(
 		throw new DestinationRefused("scheme");
 	}
 	if (url.username !== "" || url.password !== "") throw new DestinationRefused("userinfo");
-	const port = url.port === "" ? (url.protocol === "https:" ? 443 : 80) : Number(url.port);
+	const port = url.port === "" ? defaultPortOf(url.protocol) : Number(url.port);
 	if (badPorts.has(port)) throw new DestinationRefused("port");
 	const host = normalized(url.hostname);
-	if (host === undefined || matches(host, policy.deny)) throw new DestinationRefused("denied");
-	if (!policy.anyPublic && !matches(host, policy.allow)) {
+	if (host === undefined || listed(host, policy.deny)) throw new DestinationRefused("denied");
+	if (!policy.anyPublic && !listed(host, policy.allow)) {
 		throw new DestinationRefused("not-allowed");
 	}
 	// Signed material always names its hosts, none meaning none; other callers narrow when they name some.
-	if ((signed || narrower.hosts) && !matches(host, narrower.hosts ?? [])) {
+	if ((signed || narrower.hosts) && !withinHosts(raw, narrower.hosts ?? [])) {
 		throw new DestinationRefused("not-allowed");
 	}
 	const plain = url.protocol === "http:";
@@ -217,16 +130,21 @@ export function remedyOf(
 	switch (reason) {
 		case "not-allowed": {
 			const host = url ? normalized(url.hostname) : undefined;
-			return !policy.anyPublic && !matches(host ?? "", policy.allow)
-				? "name the host in outbound.allow, or set outbound.allow-any-public"
-				: "the host is not one the setting may reach";
+			if (policy.anyPublic || listed(host ?? "", policy.allow)) {
+				return "the host is not one the setting may reach";
+			}
+			const allow = "name the host in outbound.allow, or set outbound.allow-any-public";
+			// Plain http needs a plain list too: said now, so a second refusal does not name it after.
+			return url?.protocol === "http:"
+				? `${allow}; plain http also needs its host:port in outbound.plain-loopback, or, for a URL of your own configuration on a private network, in outbound.plain-internal`
+				: allow;
 		}
 		case "scheme":
 			return url?.protocol === "http:"
 				? "plain http reaches only a host:port that outbound.plain-loopback names, or, for a URL of your own configuration on a private network, one that outbound.plain-internal names; otherwise write the URL with https"
 				: "only https and http URLs are reached";
 		case "plain-public":
-			return "a host:port outbound.plain-internal names is reached over plain http at private or loopback addresses alone, and its name resolved to a public one: write the URL with https, or point the name at the private network";
+			return "a host:port outbound.plain-internal names is reached over plain http at private or loopback addresses alone, and its name resolved to a public one: write the URL with https, or point the name at the private network; where the network answers the name with an IPv6 address that does not reach as well (ECS Service Connect, say), name the host:port in outbound.plain-ipv4 too";
 		case "userinfo":
 			return "write the URL without a user or password";
 		case "port":
@@ -252,7 +170,7 @@ export function credentialRefusal(
 ): CredentialRefusal | undefined {
 	const parsed = urls.map((raw) => URL.parse(raw));
 	const named = (url: URL) => {
-		const port = url.port === "" ? 80 : Number(url.port);
+		const port = url.port === "" ? defaultPortOf(url.protocol) : Number(url.port);
 		const pair = `${normalized(url.hostname)}:${port}`;
 		return [...plainLoopback, ...plainInternal].some((listed) => pairOf(listed) === pair);
 	};
@@ -296,7 +214,7 @@ export function policyOf(settings: PolicySettings): Policy {
 	 * name resolved to it (an IPv4 address carried in IPv6 is the IPv4 one), and so does a special one.
 	 */
 	const checkedAddresses: Policy["admitAddresses"] = (addresses, admitted) => {
-		if (addresses.some((address) => matches(normalized(address) ?? address, rules.deny))) {
+		if (addresses.some((address) => listed(normalized(address) ?? address, rules.deny))) {
 			throw new DestinationRefused("denied");
 		}
 		return admitAddresses(addresses, admitted);
