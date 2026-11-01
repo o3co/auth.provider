@@ -1,6 +1,14 @@
 import { Unavailable } from "@mod/kernel";
 import { codePointOrder, type Json } from "@mod/store";
-import { type Changed, checkedCap, type KeyedSets, type Next, overCap } from "./records.ts";
+import {
+	type Attempt,
+	type Changed,
+	checkedCap,
+	type KeyedSets,
+	type Next,
+	overCap,
+	writeDeadline,
+} from "./records.ts";
 import { type DeferredSize, shardOf } from "./shards.ts";
 
 /** Jobs that all land in one shard of deferred work, and how many that shard keeps before it refuses. */
@@ -95,12 +103,14 @@ export function memoryRecords<T extends Json>(now: () => number, size: DeferredS
 			}),
 			create: async (
 				key: string,
-				value: T,
+				value: T | ((attempt: Attempt) => T),
 				lifetimeMs: number | "endless",
 			): Promise<"created" | "exists"> => {
 				if (live(key)) return "exists";
 				const until = lifetimeMs === "endless" ? Number.POSITIVE_INFINITY : now() + lifetimeMs;
-				kept.set(key, { value, until });
+				const made =
+					typeof value === "function" ? value({ deadline: writeDeadline(now()) }) : value;
+				kept.set(key, { value: made, until });
 				return "created";
 			},
 			read: async (key: string): Promise<T | undefined> => {
@@ -111,18 +121,18 @@ export function memoryRecords<T extends Json>(now: () => number, size: DeferredS
 			},
 			change: async (
 				key: string,
-				change: (current: T) => Changed<T> | undefined,
+				change: (current: T, attempt: Attempt) => Changed<T> | undefined,
 			): Promise<{ readonly before: T; readonly after: T } | undefined> => {
 				let found = live(key);
 				if (!found) return undefined;
 				if (other) {
 					// The change ran on what it read, then lost the race: it runs again on the other write.
-					change(found.value);
+					change(found.value, { deadline: writeDeadline(now()) });
 					found = { value: other(found.value), until: found.until };
 					kept.set(key, found);
 					other = undefined;
 				}
-				const changed = change(found.value);
+				const changed = change(found.value, { deadline: writeDeadline(now()) });
 				if (!changed) return { before: found.value, after: found.value };
 				const ms = changed.lifetimeMs;
 				const until =

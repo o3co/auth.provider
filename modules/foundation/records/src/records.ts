@@ -30,6 +30,11 @@ export interface Place {
 	readonly random: Random;
 }
 
+/** What a write hands the caller deciding it: the store-clock time past which that attempt is refused. */
+export interface Attempt {
+	readonly deadline: number;
+}
+
 /** A changed value, and its new lifetime from the write, or none to end it; without one, the lifetime stays. */
 export interface Changed<T> {
 	readonly value: T;
@@ -81,10 +86,10 @@ async function retried<A>(attempt: () => Promise<A | typeof again>): Promise<A> 
 // version would share a hashed mark, and the store would answer both as the one that wrote.
 const markFrom = (place: Place) => Buffer.from(place.random.bytes(16)).toString("base64url");
 /** Writes that land after this store-clock time are refused, so a lost send cannot act later. */
-const deadlineFrom = (now: number) => now + patienceMs;
+export const writeDeadline = (now: number) => now + patienceMs;
 const markedAt = (place: Place, now: number) => ({
 	idempotency: markFrom(place),
-	deadline: deadlineFrom(now),
+	deadline: writeDeadline(now),
 });
 
 /** Writes a mark of its own only while the key holds what was read, at that version or none. */
@@ -115,19 +120,22 @@ async function rewrite(
 	key: Key,
 	decide: (
 		current: Json | undefined,
+		attempt: Attempt,
 	) => { readonly value: Json; readonly expiry: Expiry } | undefined,
 ): Promise<{ readonly before: Json | undefined; readonly after: Json | undefined }> {
 	return retried(async () => {
 		const { entry, now } = await place.store.get(key);
 		const before = entry?.value;
-		const decided = decide(before);
+		// Decided knowing the deadline this attempt is written with, a retry deciding again with its own.
+		const marked = markedAt(place, now);
+		const decided = decide(before, { deadline: marked.deadline });
 		if (!decided) {
-			if (await confirmedAsRead(place, key, entry?.version, deadlineFrom(now))) {
+			if (await confirmedAsRead(place, key, entry?.version, marked.deadline)) {
 				return { before, after: before };
 			}
 			return again;
 		}
-		const options: WriteOptions = { expiry: decided.expiry, ...markedAt(place, now) };
+		const options: WriteOptions = { expiry: decided.expiry, ...marked };
 		const written = entry
 			? await untilAnswered(() => place.store.replaceIf(key, entry.version, decided.value, options))
 			: await untilAnswered(() => place.store.putIfAbsent(key, decided.value, options));
@@ -172,10 +180,13 @@ function recordsOf<T extends Json>(place: Place) {
 			const keys = page.keys.filter((k) => k.name === "record").map((k) => k.partition);
 			return page.cursor === undefined ? { keys } : { keys, cursor: page.cursor };
 		},
-		/** Places the record unless the key holds one. Throws Unavailable when the store cannot tell. */
+		/**
+		 * Places the record unless the key holds one; a value given as a function is made from the
+		 * attempt's deadline, again on each attempt. Throws Unavailable when the store cannot tell.
+		 */
 		create: async (
 			key: string,
-			value: T,
+			value: T | ((attempt: Attempt) => T),
 			lifetimeMs: number | "endless",
 		): Promise<"created" | "exists"> =>
 			retried(async () => {
@@ -184,8 +195,9 @@ function recordsOf<T extends Json>(place: Place) {
 					expiry: lifetimeMs === "endless" ? { kind: "never" } : { kind: "after", ms: lifetimeMs },
 					...marked,
 				};
+				const made = typeof value === "function" ? value({ deadline: marked.deadline }) : value;
 				const written = await untilAnswered(() =>
-					place.store.putIfAbsent(keyOf(key), value, options),
+					place.store.putIfAbsent(keyOf(key), made, options),
 				);
 				if (written.kind === "written") return "created";
 				if (written.kind !== "exists") throw new Unavailable("records");
@@ -215,14 +227,15 @@ function recordsOf<T extends Json>(place: Place) {
 			}),
 		/**
 		 * Changes the record from what it holds now; `change` runs again on a lost race, so it must be
-		 * pure. Lifetimes are relative and kept by the store. Nothing when the key holds no record.
+		 * pure, and is handed the deadline that attempt is written with. Lifetimes are relative and kept
+		 * by the store. Nothing when the key holds no record.
 		 */
 		change: async (
 			key: string,
-			change: (current: T) => Changed<T> | undefined,
+			change: (current: T, attempt: Attempt) => Changed<T> | undefined,
 		): Promise<{ readonly before: T; readonly after: T } | undefined> => {
-			const { before, after } = await rewrite(place, keyOf(key), (current) => {
-				const changed = current === undefined ? undefined : change(current as T);
+			const { before, after } = await rewrite(place, keyOf(key), (current, attempt) => {
+				const changed = current === undefined ? undefined : change(current as T, attempt);
 				return changed && { value: changed.value, expiry: expiryOf(changed.lifetimeMs) };
 			});
 			if (before === undefined) return undefined;
