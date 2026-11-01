@@ -36,9 +36,9 @@ import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
-import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { laggingRevocation, subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { issuancePolicies, tokens } from "@mod/tokens";
+import { issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -98,12 +98,27 @@ const recording = defineModule({ name: "recording", replicaSafe: true, takes: []
 	m.contribute(sessionIssuances).by(() => ({ issued: async () => {} })),
 ]);
 
+/** A subject check comparing a token's standing time with its subject's boundary, as subject-tokens does. */
+const standingChecked = defineModule(
+	{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+	(m) => [
+		m.contribute(subjectChecks).by(async (c) => {
+			const revocation = await c.get(subjectRevocation);
+			return {
+				holds: async (t) =>
+					(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+			};
+		}),
+	],
+);
+
 /** What `serve` assembles, with the stores and stand-ins it reaches into. */
 function assembly(
 	settings: Partial<DeviceGrantSettings> = {},
 	extra: Module[] = [],
 	site: { readonly "public-origin"?: string } = { "public-origin": origin },
 	recorded = true,
+	revocation: Module = subjectRevocationStandIn,
 ) {
 	const kept = recordsStandIn(() => now);
 	const down = {
@@ -137,7 +152,7 @@ function assembly(
 			clientAllowanceModule,
 			sessionStandIn,
 			sessionRequirements,
-			subjectRevocationStandIn,
+			revocation,
 			csrfStandIn,
 			cookiesModule,
 			rateLimitModule,
@@ -780,6 +795,28 @@ describe("polling", () => {
 		const later = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: later.user });
 		expect(await s.poll(later.code)).toMatchObject({ token_type: "Bearer" });
+	});
+
+	it("issues on a stale read of its subject's boundary, for an approval kept with no session, a token the next verification refuses, as it stands from the approval's authentication [guarantee-4-b]", async () => {
+		const lagging = laggingRevocation();
+		const s = await serve({}, [standingChecked], undefined, true, lagging.module);
+		const { code, user } = await s.started();
+		await s.verify(await s.login(), { action: "approve", user_code: user });
+		await s.tamper(code, (kept) => {
+			const { session: _, ...approval } = kept.approval as Record<string, unknown>;
+			return { ...kept, approval };
+		});
+		now += 1000;
+		lagging.lag();
+		await s.app.get(subjectRevocation).revoke("alice");
+		now += 1000;
+		const issued = await s.poll(code);
+		if (typeof issued === "string") expect.unreachable("the stale read lets it through");
+		lagging.catchUp();
+		expect(await s.app.get(tokens).verifyAccess(String(issued.access_token))).toEqual({
+			kind: "invalid",
+			reason: "revoked",
+		});
 	});
 
 	it("takes no approval from a session whose subject was revoked after it logged in", async () => {
