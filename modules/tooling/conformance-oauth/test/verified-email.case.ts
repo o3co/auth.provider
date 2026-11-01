@@ -43,7 +43,8 @@ const scene = (jwtBearer: boolean) =>
 		}),
 		oauthArea.part({
 			issuer,
-			clients: [client("app", [grantType]), client("svc", ["client_credentials"])],
+			// Each scene only the client of its grant, so it needs no other grant composed.
+			clients: jwtBearer ? [client("app", [grantType])] : [client("svc", ["client_credentials"])],
 			verifiedEmail: true,
 			...(jwtBearer
 				? {

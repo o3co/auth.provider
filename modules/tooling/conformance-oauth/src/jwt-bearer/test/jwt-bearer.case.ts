@@ -1,7 +1,7 @@
 import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import { areaTarget, faultyTarget, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type ClientScene, oauthScene } from "../src/main.ts";
+import { type ClientScene, oauthScene } from "../../main.ts";
 
 const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const issuer = "https://issuer.example";
@@ -30,7 +30,9 @@ const scene = (withGrant: boolean) =>
 				publicPem: pem(provider.publicKey, "spki"),
 			},
 		},
-		clients: [client("app", [grantType]), client("other", ["client_credentials"])],
+		// Without the grant composed, no client may be allowed it: boot refuses a grant nothing serves.
+		// Other is allowed the client credentials grant, not this one, so the endpoint has a grant either way.
+		clients: [client("app", withGrant ? [grantType] : []), client("other", ["client_credentials"])],
 		...(withGrant
 			? {
 					jwtBearer: {
@@ -93,7 +95,7 @@ describe("C. jwt-bearer when the grant is not offered", () => {
 		if (running?.kind === "running") await running.stop();
 	});
 
-	it("answers unsupported_grant_type", async () => {
+	it("answers unsupported_grant_type [rfc6749-5.2-f]", async () => {
 		if (running.kind !== "running") throw new Error(running.output);
 		const res = await post(running.baseUrl, { grant_type: grantType, assertion: assertion({}) });
 		expect([res.status, res.body.error]).toEqual([400, "unsupported_grant_type"]);
@@ -112,7 +114,7 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		if (running?.kind === "running") await running.stop();
 	});
 
-	it("issues a token that does not outlive the assertion", async () => {
+	it("issues a token that does not outlive the assertion [rfc6749-5.1-a] [rfc7521-4.1-c]", async () => {
 		const exp = Math.floor(Date.now() / 1000) + 120;
 		const res = await post(base, { grant_type: grantType, assertion: assertion({ exp }) });
 		expect(res.status).toBe(200);
@@ -127,7 +129,7 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		expect(claims.client_id).toBe("app");
 	});
 
-	it("refuses assertions that do not verify", async () => {
+	it("refuses assertions that do not verify [rfc7523-3-t] [rfc7521-5.2-m] [rfc7523-3-h] [rfc7521-5.2-g] [rfc7523-3-n] [rfc7521-5.2-k] [rfc7523-3-l] [rfc7521-5.2-i] [rfc7523-3-e] [rfc7521-5.2-d] [rfc7523-3-p] [rfc7523-3-r] [rfc7521-3-a] [rfc7523-2.1-a] [rfc7523-3.1-b] [rfc7521-4.1.1-a]", async () => {
 		const now = Math.floor(Date.now() / 1000);
 		const cases = [
 			assertion({}, stranger.privateKey),
@@ -148,6 +150,28 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		}
 	});
 
+	it("checks the client credentials sent beside the assertion, refusing a request whose credentials fail [rfc7523-3.1-a]", async () => {
+		const sent = (credentials: Record<string, string>) =>
+			fetch(`${base}/oauth/token`, {
+				method: "POST",
+				headers: { "content-type": "application/x-www-form-urlencoded" },
+				body: new URLSearchParams({
+					grant_type: grantType,
+					assertion: assertion({}),
+					...credentials,
+				}),
+			}).then(async (res) => [res.status, ((await res.json()) as { error?: string }).error]);
+		expect(await sent({ client_id: "app", client_secret: "wrong" })).toEqual([
+			401,
+			"invalid_client",
+		]);
+		expect(
+			await sent({ client_id: "nobody", client_secret: "app-secret-0123456789abcdef" }),
+		).toEqual([401, "invalid_client"]);
+		const accepted = (await post(base, { grant_type: grantType, assertion: assertion({}) })).status;
+		expect(accepted).toBe(200);
+	});
+
 	it("refuses a replayed assertion", async () => {
 		const a = assertion({});
 		expect((await post(base, { grant_type: grantType, assertion: a })).status).toBe(200);
@@ -156,7 +180,7 @@ describe.runIf(areaTarget().can("trusted-issuers"))("C. jwt-bearer with a truste
 		);
 	});
 
-	it("refuses a missing assertion and a client not allowed the grant", async () => {
+	it("refuses a missing assertion and a client not allowed the grant [rfc7521-4.1-a]", async () => {
 		expect((await post(base, { grant_type: grantType })).body.error).toBe("invalid_request");
 		const other = await post(base, { grant_type: grantType, assertion: assertion({}) }, "other");
 		expect([other.status, other.body.error]).toEqual([400, "unauthorized_client"]);

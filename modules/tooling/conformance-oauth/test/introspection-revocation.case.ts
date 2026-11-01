@@ -72,7 +72,7 @@ const revoke = (token: string, by = "app") => post("/oauth/revoke", { token, ...
 const listOf = (aud: unknown) => (Array.isArray(aud) ? aud : [aud]);
 
 describe("introspection", () => {
-	it("describes an active token to a client allowed its audience, without caching", async () => {
+	it("describes an active token to a client allowed its audience, without caching [rfc7662-2.2-a]", async () => {
 		const token = await issue();
 		const answer = await introspect(token);
 		expect(answer.status).toBe(200);
@@ -89,12 +89,30 @@ describe("introspection", () => {
 		expect(typeof answer.body.exp).toBe("number");
 	});
 
-	it("answers inactive to a client not allowed the token's audience, and for a token it cannot verify", async () => {
+	it("answers inactive to a client not allowed the token's audience, and for a token it cannot verify [rfc7662-2.2-b] [rfc7662-2.2-c] [rfc7662-4-f]", async () => {
 		expect((await introspect(await issue(), "stranger")).body).toEqual({ active: false });
 		expect((await introspect("not-a-token")).body).toEqual({ active: false });
 	});
 
-	it("refuses a public client and a wrong secret", async () => {
+	it("answers a signed token active only once its signature verifies: one byte of the signature changed, or the payload, is inactive [rfc7662-4-e]", async () => {
+		const token = await issue();
+		expect((await introspect(token)).body.active).toBe(true);
+		const [header = "", payload = "", signature = ""] = token.split(".");
+		const flipped = Buffer.from(signature, "base64url");
+		flipped[0] = (flipped[0] ?? 0) ^ 1;
+		const claims = JSON.parse(Buffer.from(payload, "base64url").toString());
+		const widened = Buffer.from(JSON.stringify({ ...claims, scope: "read write" })).toString(
+			"base64url",
+		);
+		for (const forged of [
+			`${header}.${payload}.${flipped.toString("base64url")}`,
+			`${header}.${widened}.${signature}`,
+		]) {
+			expect((await introspect(forged)).body).toEqual({ active: false });
+		}
+	});
+
+	it("refuses a public client and a wrong secret [rfc7662-2.1-d]", async () => {
 		const token = await issue();
 		expect((await introspect(token, "pub")).status).toBe(401);
 		const wrong = await post("/oauth/introspect", {
@@ -106,7 +124,7 @@ describe("introspection", () => {
 	});
 
 	it.skipIf(areaTarget().differs("introspection-without-token"))(
-		"refuses a request without a token",
+		"refuses a request without a token [rfc7662-2.1-a]",
 		async () => {
 			const missing = await post("/oauth/introspect", as("resource"));
 			expect([missing.status, missing.body.error]).toEqual([400, "invalid_request"]);
@@ -115,7 +133,7 @@ describe("introspection", () => {
 });
 
 describe("revocation", () => {
-	it("lets the issuing client revoke its access token", async () => {
+	it("lets the issuing client revoke its access token [rfc7009-2-b] [rfc7662-4-d]", async () => {
 		const token = await issue();
 		const answer = await revoke(token);
 		expect(answer.status).toBe(200);
@@ -133,7 +151,7 @@ describe("revocation", () => {
 		expect((await revoke("not-a-token")).status).toBe(200);
 	});
 
-	it("refuses a missing token and a wrong secret", async () => {
+	it("refuses a missing token and a wrong secret [rfc7009-2.1-a]", async () => {
 		const missing = await post("/oauth/revoke", as("app"));
 		expect([missing.status, missing.body.error]).toEqual([400, "invalid_request"]);
 		const wrong = await post("/oauth/revoke", {
@@ -142,6 +160,75 @@ describe("revocation", () => {
 			client_secret: "wrong",
 		});
 		expect([wrong.status, wrong.body.error]).toEqual([401, "invalid_client"]);
+	});
+});
+
+describe("introspection, revocation and the token endpoint: secrets kept out of refusals", () => {
+	/** An answer whole, its status, headers and body, as text a secret could be found in. */
+	async function answered(path: string, form: Record<string, string>) {
+		const res = await fetch(`${base}${path}`, {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams(form),
+		});
+		const headers = [...res.headers].map(([name, value]) => `${name}: ${value}`).join("\n");
+		return { status: res.status, text: `${headers}\n${await res.text()}` };
+	}
+
+	it("answers no client's secret, no other client's token and no part of the signing key in a refusal [guarantee-8-d]", async () => {
+		const others = await issue("other");
+		const key = pair.privateKey.export({ format: "jwk" });
+		const secrets: Record<string, string> = {
+			...Object.fromEntries(
+				["app", "other", "resource", "stranger"].map((id) => [`${id}'s secret`, secretOf(id)]),
+			),
+			"other's token": others,
+			"the signing key": String(key.d),
+			"the signing key's PEM": pair.privateKey
+				.export({ format: "pem", type: "pkcs8" })
+				.toString()
+				.split("\n")[1] as string,
+		};
+		const wrong = { client_id: "app", client_secret: secretOf("other") };
+		const refusals: Record<string, [string, Record<string, string>]> = {
+			"a wrong secret at the token endpoint": [
+				"/oauth/token",
+				{ grant_type: "client_credentials", ...wrong },
+			],
+			"an unknown client at the token endpoint": [
+				"/oauth/token",
+				{ grant_type: "client_credentials", client_id: "nobody", client_secret: secretOf("app") },
+			],
+			"a token sent as a code": [
+				"/oauth/token",
+				{ grant_type: "authorization_code", code: others, ...as("app") },
+			],
+			"a scope the client is not allowed": [
+				"/oauth/token",
+				{ grant_type: "client_credentials", scope: "admin", ...as("app") },
+			],
+			"a grant the client is not allowed": [
+				"/oauth/token",
+				{ grant_type: "client_credentials", ...as("resource") },
+			],
+			"introspection with a wrong secret": ["/oauth/introspect", { token: others, ...wrong }],
+			"introspection by a public client": ["/oauth/introspect", { token: others, ...as("pub") }],
+			"revocation with a wrong secret": ["/oauth/revoke", { token: others, ...wrong }],
+			"revocation without a token": ["/oauth/revoke", as("app")],
+		};
+		// The legacy build does not refuse an introspection without a token.
+		if (!areaTarget().differs("introspection-without-token")) {
+			refusals["introspection without a token"] = ["/oauth/introspect", as("resource")];
+		}
+		for (const [name, [path, form]] of Object.entries(refusals)) {
+			const { status, text } = await answered(path, form);
+			expect(status, name).toBeGreaterThanOrEqual(400);
+			const shown = Object.entries(secrets).filter(([, value]) => text.includes(value));
+			expect(
+				shown.map(([what]) => what),
+				name,
+			).toEqual([]);
+		}
 	});
 });
 

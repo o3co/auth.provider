@@ -88,10 +88,14 @@ onLegacy(oauthArea, {
 		"introspection-without-token",
 		// RFC 6749 §5.2
 		"assertion-with-secret",
+		// A client assertion given twice, or only half of one, is answered 400 invalid_request.
+		"malformed-assertion",
 		// A client assertion for the token endpoint, or naming its audience in a list, is taken.
 		"assertion-audience-beside-issuer",
 		// For an issuer with a path, the OpenID document is also served at the root.
 		"discovery-at-root-for-path-issuer",
+		// Without an authorization endpoint, response_types_supported is still published, as [].
+		"response-types-without-authorization-endpoint",
 		// jwt-bearer refuses an unverified email with the description it gives an unknown subject.
 		"email-refusal-description",
 		"resource-repeated",

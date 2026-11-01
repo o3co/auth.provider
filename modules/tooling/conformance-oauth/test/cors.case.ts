@@ -112,7 +112,7 @@ async function allowsOnlyTheListed(
 }
 
 describe("cross-origin requests", () => {
-	it("lets only a listed origin's page post a form and a DPoP proof to the token endpoint, and read the nonce, the challenge and the wait", async () => {
+	it("lets only a listed origin's page post a form and a DPoP proof to the token endpoint, and read the nonce, the challenge and the wait [oidc-discovery-3-aj]", async () => {
 		const { allowed, answer } = await allowsOnlyTheListed(
 			"/oauth/token",
 			"POST",
@@ -131,7 +131,7 @@ describe("cross-origin requests", () => {
 		);
 	});
 
-	it("lets only a listed origin's page revoke a token with a form", async () => {
+	it("lets only a listed origin's page revoke a token with a form [oidc-discovery-3-aj]", async () => {
 		const tokens = [await issue(), await issue()];
 		const { allowed } = await allowsOnlyTheListed(
 			"/oauth/revoke",
@@ -150,7 +150,7 @@ describe("cross-origin requests", () => {
 		"/.well-known/openid-configuration",
 		"/.well-known/oauth-authorization-server",
 		"/.well-known/jwks.json",
-	])("lets only a listed origin's page read %s", async (path) => {
+	])("lets only a listed origin's page read %s [oidc-discovery-3-aj]", async (path) => {
 		await allowsOnlyTheListed(path, "GET", () => ({}));
 	});
 });
