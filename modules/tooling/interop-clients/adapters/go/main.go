@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,7 +48,6 @@ type instruction struct {
 	} `json:"assertionIssuer"`
 	Subject     string `json:"subject"`
 	Backchannel *struct {
-		Port int    `json:"port"`
 		Path string `json:"path"`
 	} `json:"backchannel"`
 }
@@ -302,7 +300,8 @@ func (r *run) device() (any, error) {
 }
 
 // backchannelLogout signs in, ends the session at the end-session endpoint, and takes the logout token the
-// provider posts to the receiver the client registered, verified by go-oidc's VerifyLogout.
+// provider posts to the receiver the client registered, verified by go-oidc's VerifyLogout. The harness holds
+// that receiver and relays the post to this one, on a port of its own named with the logout.
 func (r *run) backchannelLogout() (any, error) {
 	if r.in.Backchannel == nil {
 		return nil, refused{"instruction", "no receiver named"}
@@ -318,7 +317,7 @@ func (r *run) backchannelLogout() (any, error) {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
-	listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(r.in.Backchannel.Port))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +338,8 @@ func (r *run) backchannelLogout() (any, error) {
 	}
 	raw, _ := in.token.Extra("id_token").(string)
 	ending.RawQuery = url.Values{"id_token_hint": {raw}, "post_logout_redirect_uri": {r.in.PostLogoutRedirectURI}, "state": {state}}.Encode()
-	answer, err := ask(map[string]any{"ask": "logout", "url": ending.String()})
+	receiver := "http://" + listener.Addr().String() + r.in.Backchannel.Path
+	answer, err := ask(map[string]any{"ask": "logout", "url": ending.String(), "receiver": receiver})
 	if err != nil {
 		return nil, err
 	}

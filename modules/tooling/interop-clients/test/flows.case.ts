@@ -37,7 +37,11 @@ async function run(flow: Flow, client: WorldClient, extra: Record<string, unknow
 				await browser.approve(String(ask.userCode));
 				return {};
 			}
-			if (ask.ask === "logout") return { location: await browser.endSession(String(ask.url)) };
+			if (ask.ask === "logout") {
+				// An adapter told of a back-channel names its receiver, which the provider's post reaches through the world's.
+				if (ask.receiver !== undefined) world.backchannel.relayTo(String(ask.receiver));
+				return { location: await browser.endSession(String(ask.url)) };
+			}
 			throw new Error(`the driver has no answer to ${ask.ask}`);
 		},
 		90_000,
@@ -619,7 +623,7 @@ describe(`${library.name}: told a session ended`, () => {
 			excusable(context, "backchannel-logout", async () => {
 				const result = await run("backchannel-logout", world.clients.backchannel, {
 					postLogoutRedirectUri: world.postLogoutRedirectUri,
-					backchannel: world.backchannel,
+					backchannel: { path: world.backchannel.path },
 				});
 				expect(result.sub).toBe(result.signedInSub);
 				expect(result.sid).toEqual(expect.any(String));
