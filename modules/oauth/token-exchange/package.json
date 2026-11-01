@@ -4,6 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"grantTypes": [
+		"urn:ietf:params:oauth:grant-type:token-exchange"
+	],
 	"optIn": true,
 	"exports": {
 		".": "./src/contract.ts",
@@ -15,12 +18,14 @@
 		"@mod/grants": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/resource-indicators": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
+		"@mod/keys": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/session-tokens": "workspace:*",

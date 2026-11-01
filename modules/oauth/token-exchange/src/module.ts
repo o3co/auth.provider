@@ -1,4 +1,4 @@
-import { metadataSections, type Section } from "@mod/clients";
+import { clients, metadataSections, type Section } from "@mod/clients";
 import { grants, tokenTies } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
@@ -18,10 +18,11 @@ const section = z.strictObject({
 		.describe("The longest chain of actors an exchanged token may carry."),
 	"max-lifetime": setting
 		.duration("s")
-		.pipe(z.number().int().min(1).max(86_400))
+		// From two seconds, the shortest lifetime `tokens` issues.
+		.pipe(z.number().int().min(2).max(86_400))
 		.optional()
 		.describe(
-			"The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime.",
+			"The longest lifetime an exchange may ask for, from 2s to 1d, even past `tokens`' lifetime.",
 		),
 });
 
@@ -47,25 +48,52 @@ const clientSection: Section<{
 	}),
 };
 
-export default defineModule({ name: "token-exchange", section }, (m) => [
-	m.contribute(metadataSections).by(() => clientSection),
-	m
-		.contribute(exchangeVerifiers)
-		.by(async (c) => selfIssued(await c.get(tokens), (await c.get(issuer)).url)),
-	m.contribute(grants).by(async (c) => {
-		const verifiers = await c.collect(exchangeVerifiers);
-		return exchangeGrant({
-			verifiers: new Map(verifiers.map((verifier) => [verifier.tokenType, verifier])),
-			tokens: await c.get(tokens),
-			ties: await c.collect(tokenTies),
-			issuer: (await c.get(issuer)).url,
-			maxActorDepth: c.section["max-actor-depth"],
-			...(c.section["max-lifetime"] === undefined
-				? {}
-				: { maxLifetimeSeconds: c.section["max-lifetime"] }),
-			othersTokens: (client) => client.section(clientSection)["others-tokens"],
-			publicExchange: (client) => client.section(clientSection)["public-exchange"],
-			now: c.clock.now,
-		});
-	}),
-]);
+export default defineModule(
+	// Its own verifiers are collected, so named; the tokens, the issuer and the ties are others'.
+	{
+		name: "token-exchange",
+		replicaSafe: true,
+		section,
+		takes: [tokens, issuer, exchangeVerifiers, tokenTies, clients],
+	},
+	(m) => [
+		m.contribute(metadataSections).by(() => clientSection),
+		m
+			.contribute(exchangeVerifiers)
+			.by(async (c) => selfIssued(await c.get(tokens), (await c.get(issuer)).url)),
+		m.contribute(grants).by(async (c) => {
+			const issuing = await c.get(tokens);
+			// An exchange issues anew from a token made before a subject's revocation, so its subject must be checked.
+			if (!issuing.subjectsChecked()) {
+				return c.refuse(
+					"token-exchange",
+					"tokens.subject-check is none, so a token made before a subject's revocation could be exchanged for a new one: compose a subject check and leave tokens.subject-check unset, or leave token-exchange out",
+				);
+			}
+			// Told at every start by client: each exchanges more than its own tokens, or while public;
+			// `public-exchange` is read for a public client alone, so a confidential one is not told of it.
+			for (const client of (await c.get(clients)).registered()) {
+				const { "others-tokens": others, "public-exchange": publicly } =
+					client.section(clientSection);
+				if (publicly && client.kind !== "confidential") {
+					c.log.warn("token-exchange.public_exchange", { client: client.id });
+				}
+				if (others) c.log.warn("token-exchange.others_tokens", { client: client.id });
+			}
+			const verifiers = await c.collect(exchangeVerifiers);
+			return exchangeGrant({
+				verifiers: new Map(verifiers.map((verifier) => [verifier.tokenType, verifier])),
+				tokens: issuing,
+				ties: await c.collect(tokenTies),
+				issuer: (await c.get(issuer)).url,
+				maxActorDepth: c.section["max-actor-depth"],
+				...(c.section["max-lifetime"] === undefined
+					? {}
+					: { maxLifetimeSeconds: c.section["max-lifetime"] }),
+				othersTokens: (client) => client.section(clientSection)["others-tokens"],
+				publicExchange: (client) => client.section(clientSection)["public-exchange"],
+				now: c.clock.now,
+			});
+		}),
+	],
+);
