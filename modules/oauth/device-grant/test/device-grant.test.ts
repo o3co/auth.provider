@@ -218,7 +218,7 @@ async function serve(...given: Parameters<typeof assembly>) {
 		subject = "alice",
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const facts = { subject, amr: ["pwd"], authenticatedAt };
+		const facts = { subject, amr: ["pwd"], authenticatedAt, provenSince: runtime.clock.now() };
 		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		return cookies[0]?.split(";")[0] ?? "";
 	};
