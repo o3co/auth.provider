@@ -5,13 +5,15 @@
 	"kind": "verification",
 	"type": "module",
 	"scripts": {
-		"guard": "node src/main.ts"
+		"guard": "node src/main.ts",
+		"change-record": "node src/change-record/main.ts"
 	},
 	"exports": {
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
-		"@mod/combinations": "workspace:*",
+		"@mod/guard-imports": "workspace:*",
+		"@mod/kinds": "workspace:*",
 		"typescript": "6.0.3"
 	}
 }
