@@ -58,6 +58,7 @@ async function serve() {
 			subject: "alice",
 			amr: ["pwd"],
 			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
 		}),
 	);
 	const cookie = completed.cookies[0]?.split(";")[0] ?? "";
