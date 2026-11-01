@@ -2,7 +2,6 @@ import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import type { BuildContext } from "@mod/kernel";
 import { type Logins, logins } from "@mod/login-gates";
 import { type PasskeyHolders, passkeyHolders } from "@mod/passkeys";
-import { type Sessions, sessions } from "@mod/session";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
 import { type Recorded, recordedIn, recordedTakes } from "../audited/audited.ts";
 import { type Asserted, factsIn, type factsOver, factsTakes } from "../facts/facts.ts";
@@ -12,7 +11,6 @@ export interface OpeningParts {
 	readonly holders: Pick<PasskeyHolders, "held">;
 	readonly revocation: Pick<SubjectRevocation, "check">;
 	readonly logins: Pick<Logins, "login">;
-	readonly sessions: Pick<Sessions, "close">;
 	readonly facts: ReturnType<typeof factsOver>;
 	readonly recorded: Recorded;
 }
@@ -21,8 +19,8 @@ const failed = { error: "passkey_login_failed" };
 
 /**
  * Opens the session an assertion proved, through the gates, asking the revocation of its subject
- * since the challenge was made before the gates (step 1), before a hold is handed on (step 5) and
- * once opened (step 6).
+ * since the challenge was made before the gates (step 1) and before a hold is handed on (step 5);
+ * once opened, `session` compares the challenge's time, `provenSince` (step 6).
  */
 export function openingOver(p: OpeningParts) {
 	return async (request: HttpRequest, asserted: Asserted, done: unknown): Promise<HttpResponse> => {
@@ -56,11 +54,6 @@ export function openingOver(p: OpeningParts) {
 		}
 		// session refused it: the subject was revoked since the challenge.
 		if (outcome.kind === "revoked") return refuse("revoked");
-		// session-lifecycle compares with the opening, so a revocation since the challenge ends it here.
-		if (await revoked()) {
-			await p.sessions.close(outcome.session.id);
-			return refuse("revoked");
-		}
 		p.recorded.session(request, "opened", subject);
 		return jsonAnswer(200, done, { cookies: outcome.cookies });
 	};
@@ -73,7 +66,6 @@ export const openingTakes = [
 	passkeyHolders,
 	subjectRevocation,
 	logins,
-	sessions,
 	...factsTakes,
 	...recordedTakes,
 ] as const;
@@ -83,7 +75,6 @@ export const openingIn = async (c: BuildContext<Settings>) =>
 		holders: await c.get(passkeyHolders),
 		revocation: await c.get(subjectRevocation),
 		logins: await c.get(logins),
-		sessions: await c.get(sessions),
 		facts: await factsIn(c),
 		recorded: await recordedIn(c),
 	});

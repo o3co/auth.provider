@@ -359,25 +359,8 @@ describe("a revocation of the subject since the challenge was made", () => {
 		expect(s.events.map((e) => e.kind)).not.toContain("passkey.session.held");
 	});
 
-	it("closes a session opened meanwhile before its cookie goes out (step 6)", async () => {
-		const closed: string[] = [];
-		const opening = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
-			m.provide(sessions).by(() =>
-				stubSessions({
-					open: async () => ({
-						kind: "opened",
-						session: { id: "opened-1", context: {} as never },
-						cookies: ["session=opened-1; Path=/"],
-					}),
-					close: async (id) => {
-						closed.push(id);
-						return { kind: "closed", cookies: [] };
-					},
-				}),
-			),
-		]);
+	it("refuses a login revoked while the gates run, once session compares its challenge's time (step 6)", async () => {
 		const s = await serve({
-			sessions: opening,
 			gate: async (facts) => {
 				await s.revoke(facts.subject);
 				return { kind: "pass" };
@@ -388,7 +371,6 @@ describe("a revocation of the subject since the challenge was made", () => {
 		expect(s.sessionCookie(answered.cookies)).toBe(false);
 		expect(s.events).toContainEqual(refusedBy("revoked"));
 		expect(s.events.map((e) => e.kind)).not.toContain("passkey.session.opened");
-		expect(closed).toEqual(["opened-1"]);
 	});
 });
 
