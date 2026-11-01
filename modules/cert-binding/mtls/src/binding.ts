@@ -13,7 +13,7 @@ export interface Checking {
 
 /**
  * What the client's certificate binds a token to: its SHA-256 thumbprint, once it is checked. A
- * refusal is an invalid certificate at issuance, and an invalid token at a resource (RFC 8705 §3).
+ * refusal is RFC 6749's invalid_client at issuance, and an invalid token at a resource (RFC 8705 §3).
  */
 export async function readCertificate(
 	certificate: ForwardedCertificate | undefined,
@@ -24,7 +24,7 @@ export async function readCertificate(
 	// Why is logged, not answered.
 	const refused = (reason: string): BindingRead => {
 		checking.log("mtls.certificate_refused", { reason });
-		const error = scene.kind === "resource" ? "invalid_token" : "invalid_certificate";
+		const error = scene.kind === "resource" ? "invalid_token" : "invalid_client";
 		return { kind: "refused", error, description: "certificate refused" };
 	};
 	if (certificate.kind === "malformed") return refused("forwarded unreadable");

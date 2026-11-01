@@ -23,13 +23,22 @@ function within(name: pkijs.GeneralName, base: pkijs.GeneralName): boolean {
 	);
 }
 
+/** Whether a subtree's minimum is 0, by its value's bytes, whatever their length: asn1js reads one of 4 bytes or more as 0. */
+const isZero = (minimum: number | asn1js.Integer) =>
+	typeof minimum === "number"
+		? minimum === 0
+		: minimum.valueBlock.valueHexView.every((b) => b === 0);
+
+/** An IP name constraint's bytes, the address and its mask: 4 + 4 for IPv4, 16 + 16 for IPv6. */
+const ipConstraintBytes = [8, 32];
+
 /** A subtree judged here: a DNS name, or an IPv4 or IPv6 network, without a depth limit. */
 function judged(subtree: pkijs.GeneralSubtree): boolean {
-	const minimum =
-		typeof subtree.minimum === "number" ? subtree.minimum : subtree.minimum.valueBlock.valueDec;
-	if (minimum !== 0 || subtree.maximum !== undefined) return false;
+	if (!isZero(subtree.minimum) || subtree.maximum !== undefined) return false;
 	if (subtree.base.type === generalName.dns) return true;
-	return subtree.base.type === generalName.ip && [8, 32].includes(bytesOf(subtree.base).length);
+	return (
+		subtree.base.type === generalName.ip && ipConstraintBytes.includes(bytesOf(subtree.base).length)
+	);
 }
 
 function allows(constraints: pkijs.NameConstraints, name: pkijs.GeneralName): boolean {
