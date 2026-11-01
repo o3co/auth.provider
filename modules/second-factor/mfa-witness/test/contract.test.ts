@@ -1,10 +1,74 @@
+import { kernelConfig } from "@mod/kernel";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { enrollmentWitnessContract, witnessProblems, witnessStandIn } from "../src/testing.ts";
 
 enrollmentWitnessContract("the stand-in", async () => witnessStandIn().witness);
+enrollmentWitnessContract(
+	"the stand-in without withdraw",
+	async () => witnessStandIn("enrollment-witness", { withdraw: false }).witness,
+);
+
+it("takes all its stand-in names", async () => {
+	const input = {
+		modules: [witnessStandIn().module],
+		config: kernelConfig(),
+		runtime: quietRuntime(),
+	};
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["enrollment-witness"]).toBeUndefined();
+});
 
 it("tells a witness answering from a lagging replica from one that keeps its promises", async () => {
 	const behind = witnessStandIn().witness;
 	const lagging = { ...behind, read: async () => false };
 	expect(await witnessProblems(lagging)).toContain("a read after an answered enroll misses it");
+});
+
+it("tells a witness whose withdraw takes any token's mark from one that keeps its promises", async () => {
+	const kept = witnessStandIn().witness;
+	const careless = { ...kept, withdraw: (subject: string) => kept.clear(subject) };
+	expect(await witnessProblems(careless)).toContain("a withdraw takes another token's mark");
+});
+
+it("leaves withdraw out of a stand-in made without it, so a caller tells it is not offered", () => {
+	const without = witnessStandIn("enrollment-witness", { withdraw: false }).witness;
+	expect([typeof without.withdraw, "withdraw" in without]).toEqual(["undefined", false]);
+	expect(typeof witnessStandIn().witness.withdraw).toBe("function");
+});
+
+enrollmentWitnessContract(
+	"the stand-in without markedWith",
+	async () => witnessStandIn("enrollment-witness", { markedWith: false }).witness,
+);
+
+it("tells a witness whose markedWith misses the mark from one that keeps its promises", async () => {
+	const kept = witnessStandIn().witness;
+	const blind = { ...kept, markedWith: async () => undefined };
+	expect(await witnessProblems(blind)).toContain("markedWith misses the token an enroll owned");
+});
+
+it("tells a witness offering markedWith without withdraw from one that keeps its promises", async () => {
+	const { withdraw, ...rest } = witnessStandIn().witness;
+	expect(typeof withdraw).toBe("function");
+	expect(await witnessProblems(rest)).toContain("markedWith is offered without withdraw");
+});
+
+it("holds the next markedWith at its hook until the hook settles, then reads the mark as it stands", async () => {
+	const stand = witnessStandIn();
+	let resume = () => {};
+	stand.next.beforeMarkedWith = () => new Promise<void>((go) => (resume = go));
+	const held = stand.witness.markedWith?.("ann");
+	stand.marks.set("ann", "later");
+	resume();
+	expect(await held).toBe("later");
+	expect(await stand.witness.markedWith?.("ann")).toBe("later");
+});
+
+it("leaves markedWith out of a stand-in made without it or without withdraw", () => {
+	for (const options of [{ markedWith: false }, { withdraw: false }]) {
+		const without = witnessStandIn("enrollment-witness", options).witness;
+		expect("markedWith" in without, JSON.stringify(options)).toBe(false);
+	}
+	expect(typeof witnessStandIn().witness.markedWith).toBe("function");
 });
