@@ -13,6 +13,8 @@ export interface UserScene {
 	readonly email?: string;
 	/** Whether the user's account states that email verified; stated by neither when left out. */
 	readonly emailVerified?: boolean;
+	/** The name the user's account states, as its `name` claim. */
+	readonly name?: string;
 }
 
 /** An upstream identity: an IdP's name and the upstream subject there. */
@@ -28,6 +30,8 @@ export interface LedgerScene {
 	readonly credential: string;
 	/** How long the deployment waits for an answer. */
 	readonly timeoutMs?: number;
+	/** Where a user is looked up by upstream identity, `POST {"idp", "subject"}`, on the same host; with no lookup by subject beside it. */
+	readonly upstreamUrl?: string;
 }
 
 /** A ledger that revokes subjects over HTTP, from its sources with its credential. */
@@ -60,6 +64,8 @@ export interface IdentityPart {
 	readonly recentAuthenticationSeconds?: number;
 	/** The https origins whose pages may read the routes that take cross-origin requests. */
 	readonly corsOrigins?: readonly string[];
+	/** How a request limit answers while the store cannot count (`rate-limit.fail-mode`); the deployment's default unless set. */
+	readonly rateLimitWhileStoreFails?: "open" | "closed";
 }
 
 export const identityArea = area<IdentityPart>("identity");
