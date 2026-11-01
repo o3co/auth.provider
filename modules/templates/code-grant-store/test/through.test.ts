@@ -100,6 +100,7 @@ it("redeems a code once through code-grant wired to records, and revokes what it
 				subject: "alice",
 				amr: ["pwd"],
 				authenticatedAt: runtime.clock.now(),
+				provenSince: runtime.clock.now(),
 			}),
 		);
 		const code = await app.get(codes).issue({
