@@ -14,7 +14,7 @@ Internal module of `http`: the answers to cross-origin requests, for the routes 
 
 ## Invariants
 - Answers vary by `Origin`, a route's own `Vary` kept.
-- An answer names the request's origin only when it is listed.
+- An answer names the request's origin only when it is listed; `access-control-*` headers the route wrote itself pass as written.
 - An answer never names `*`.
 - An answer never allows credentials.
 - A preflight from a listed origin, for a method a declared route takes, names the methods of the path's declared routes, the request headers the route takes, and a max age of 600 seconds.

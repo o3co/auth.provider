@@ -13,8 +13,8 @@ import {
 	type Route,
 	routes,
 	use,
-} from "../src/contract.ts";
-import http from "../src/module.ts";
+} from "../../contract.ts";
+import http from "../../module.ts";
 
 const runtime = quietRuntime({
 	clock: { now: () => 0 },
@@ -48,7 +48,7 @@ const rules: readonly PolicyRule[] = [
 
 /** A module contributing the test's rules, these marks, then these routes. */
 function owner(list: readonly Route[], given: readonly Mark[] = [ownSite, perSource]): Module {
-	return defineModule({ name: "owner" }, (m) => [
+	return defineModule({ name: "owner", replicaSafe: false, takes: [] }, (m) => [
 		...rules.map((rule) => m.contribute(policies).by(() => rule)),
 		...given.map((mark) => m.contribute(marks).by(() => mark)),
 		...list.map((route) => m.contribute(routes).by(() => route)),
@@ -98,9 +98,9 @@ describe("a route's declared guarantees", () => {
 		expect((await fetch(`${base}/read`)).status).toBe(204);
 	});
 
-	it("counts a policy only by the mark of its own value, never by its name", async () => {
+	it("counts a policy only by the mark of its own value, never by its name [guarantee-9-b]", async () => {
 		const named = policy("test.site");
-		const module = defineModule({ name: "named" }, (m) => [
+		const module = defineModule({ name: "named", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(policies).by(() => applying(named, () => "pass")),
 		]);
 		const declared = assemble({
@@ -136,7 +136,7 @@ describe("a route's declared guarantees", () => {
 		]);
 	});
 
-	it("takes a mark only for the methods it names: a state-changing GET needs a reason", async () => {
+	it("takes a mark only for the methods it names: a state-changing GET needs a reason [guarantee-9-b]", async () => {
 		const get = (uses: readonly PolicyUse[], more: Partial<Route>): Route => ({
 			method: "GET",
 			path: "/start",
@@ -156,7 +156,7 @@ describe("a route's declared guarantees", () => {
 		expect((await fetch(`${base}/start`)).status).toBe(204);
 	});
 
-	it("refuses a mark and a reason together, an empty reason, and a reason where nothing changes", async () => {
+	it("refuses a mark and a reason together, an empty reason, and a reason where nothing changes [guarantee-9-b]", async () => {
 		const booting = serveWith(
 			owner([
 				post("/both", [use(site), use(limit, open)], { unlimited: "counted elsewhere" }),
@@ -183,7 +183,7 @@ describe("a route's declared guarantees", () => {
 		]);
 	});
 
-	it("checks a route that declares nothing as well: a GET must say, and any other must keep both or say why", async () => {
+	it("checks a route that declares nothing as well: a GET must say, and any other must keep both or say why [guarantee-9-b] [guarantee-10-b] [oidc-core-3.1.2.3-e]", async () => {
 		const booting = serveWith(
 			owner([{ method: "GET", path: "/silent", handle: answered }, post("/bare", [])]),
 		);

@@ -2,8 +2,8 @@ import { connect } from "node:net";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { afterEach, expect, it } from "vitest";
-import { listening, type RequestEnd, requestEnds, routes } from "../src/contract.ts";
-import http from "../src/module.ts";
+import { listening, type RequestEnd, requestEnds, routes } from "../../contract.ts";
+import http from "../../module.ts";
 
 let now = 0;
 const runtime = quietRuntime({
@@ -22,7 +22,7 @@ afterEach(async () => {
 	hang = { reached: Promise.withResolvers<void>(), released: Promise.withResolvers<void>() };
 });
 
-const handlers = defineModule({ name: "handlers" }, (m) => [
+const handlers = defineModule({ name: "handlers", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(routes).by(() => ({
 		method: "GET",
 		changesState: false,
@@ -61,7 +61,7 @@ const handlers = defineModule({ name: "handlers" }, (m) => [
 
 /** A module observing each request's end into `ends`. */
 function observing(ends: RequestEnd[]): Module {
-	return defineModule({ name: "observer" }, (m) => [
+	return defineModule({ name: "observer", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(requestEnds).by(() => ({ ended: (end) => ends.push(end) })),
 	]);
 }
@@ -125,7 +125,7 @@ it("tells a clock set back as 0 ms", async () => {
 
 it("drops an observer's throw, still telling the others and serving", async () => {
 	const ends: RequestEnd[] = [];
-	const throwing = defineModule({ name: "throwing" }, (m) => [
+	const throwing = defineModule({ name: "throwing", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(requestEnds).by(() => ({
 			ended: () => {
 				throw new Error("boom");
@@ -145,7 +145,7 @@ it("drops an observer's rejection, raising no unhandled rejection, still telling
 	process.on("unhandledRejection", spy);
 	try {
 		const ends: RequestEnd[] = [];
-		const rejecting = defineModule({ name: "rejecting" }, (m) => [
+		const rejecting = defineModule({ name: "rejecting", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(requestEnds).by(() => ({
 				ended: async () => {
 					throw new Error("boom");

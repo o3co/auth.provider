@@ -6,6 +6,11 @@ import { fieldsOf, paramsOf, type Values, valuesOf } from "./values.ts";
 
 const limit = 64 * 1024;
 
+/** The statuses refusing a body: one that cannot be read, one past the limit, one of a type the route does not take. */
+const badRequest = 400;
+const tooLarge = 413;
+const unsupportedType = 415;
+
 const typeOf = (message: IncomingMessage) =>
 	message.headers["content-type"]?.split(";")[0]?.trim().toLowerCase();
 
@@ -34,9 +39,9 @@ async function formOf(message: IncomingMessage): Promise<Values | number> {
 	const bytes = await bytesOf(message);
 	if (!bytes) return valuesOf(new Map());
 	try {
-		return paramsOf(utf8.decode(bytes)) ?? 400;
+		return paramsOf(utf8.decode(bytes)) ?? badRequest;
 	} catch {
-		return 400;
+		return badRequest;
 	}
 }
 
@@ -48,15 +53,15 @@ const kinds: ReadonlyMap<string | undefined, BodyKind> = new Map([
 /** A JSON object body, or the status that answers one that cannot be read. */
 async function jsonOf(message: IncomingMessage): Promise<Record<string, unknown> | number> {
 	const bytes = await bytesOf(message);
-	if (!bytes) return 413;
+	if (!bytes) return tooLarge;
 	try {
 		const text = utf8.decode(bytes);
 		const value: unknown = JSON.parse(text);
 		const object = typeof value === "object" && value !== null && !Array.isArray(value);
 		// A name given twice is read as either value by one parser or another.
-		return object && !repeatsName(text) ? deepFreeze(value as Record<string, unknown>) : 400;
+		return object && !repeatsName(text) ? deepFreeze(value as Record<string, unknown>) : badRequest;
 	} catch {
-		return 400;
+		return badRequest;
 	}
 }
 
@@ -81,7 +86,8 @@ export async function bodyOf(
 	const kind = (await isEmpty(message)) ? "none" : kinds.get(typeOf(message));
 	// A route that declares no bodies reads a form when one is sent, and ignores any other.
 	if (takes === undefined) return readForm(message);
-	if (kind === undefined || !takes.includes(kind)) return asForm(valuesOf(new Map()), 415);
+	if (kind === undefined || !takes.includes(kind))
+		return asForm(valuesOf(new Map()), unsupportedType);
 	if (kind !== "json") return readForm(message);
 	const json = await jsonOf(message);
 	if (typeof json === "number") return asForm(valuesOf(new Map()), json);

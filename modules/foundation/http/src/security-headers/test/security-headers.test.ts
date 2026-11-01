@@ -3,9 +3,9 @@ import { connect } from "node:net";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Loads, listening, type Route, routes } from "../src/contract.ts";
-import http from "../src/module.ts";
-import { declared } from "./declared.ts";
+import { type Loads, listening, type Route, routes } from "../../contract.ts";
+import http from "../../module.ts";
+import { declared } from "../../serving/test/declared.ts";
 
 const quiet = quietRuntime({
 	clock: { now: () => 0 },
@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 async function serveWith(list: readonly Route[]) {
-	const handlers = defineModule({ name: "handlers" }, (m) =>
+	const handlers = defineModule({ name: "handlers", replicaSafe: false, takes: [] }, (m) =>
 		list.map((route) => m.contribute(routes).by(() => declared(route))),
 	);
 	const app = await assemble({
@@ -91,7 +91,7 @@ describe("security headers", () => {
 		{ method: "GET", path: "/void", handle: () => undefined as never },
 	];
 
-	it("go on every answer, whatever answers it, with the route's own headers kept", async () => {
+	it("go on every answer, whatever answers it, with the route's own headers kept [rfc9700-4.16-a] [rfc9700-4.16-b] [rfc9700-4.16-d] [rfc9700-4.16-e] [oidc-core-3.1.2.3-e]", async () => {
 		const base = await serveWith(answering);
 		const asked: [string, RequestInit, number][] = [
 			["/page", {}, 200],
@@ -118,7 +118,7 @@ describe("security headers", () => {
 		expect((await fetch(`${base}/page`)).headers.get("vary")).toBe("Accept");
 	});
 
-	it("replace a route's own, its policy included", async () => {
+	it("replace a route's own, its policy included [rfc9700-4.16-a]", async () => {
 		const base = await serveWith([
 			{
 				method: "GET",
@@ -192,6 +192,19 @@ describe("an answer that declares what it loads", () => {
 		expect(await policyOf("/page")).toBe(`${strict}; frame-src https://a.example`);
 		expect(await policyOf("/script")).toBe(`${strict}; script-src ${hash}`);
 		expect(await policyOf("/none")).toBe(strict);
+	});
+
+	it("lets a page post its forms to this origin alone where it says so, nothing else widened", async () => {
+		const base = await serveWith([
+			page({ forms: "self" }),
+			{ ...page({ forms: "self", scripts: [script] }), path: "/moving" },
+		]);
+		const policyOf = async (path: string) =>
+			(await fetch(`${base}${path}`)).headers.get("content-security-policy");
+		const formOnly =
+			"default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+		expect(await policyOf("/page")).toBe(formOnly);
+		expect(await policyOf("/moving")).toBe(`${formOnly}; script-src ${hash}`);
 	});
 
 	it("takes its declaration over a policy of its own", async () => {
