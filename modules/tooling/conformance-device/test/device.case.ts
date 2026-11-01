@@ -28,7 +28,8 @@ const scene = deviceScene({
 			publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
 		},
 	},
-	clients: [client("tv", [deviceGrant]), client("svc", ["client_credentials"])],
+	// svc is allowed no grant, so not the device grant, and the scene needs no other grant composed.
+	clients: [client("tv", [deviceGrant]), client("svc", [])],
 	users: [
 		{ identifier: "alice", password: "correct horse battery" },
 		{ identifier: "bob", password: "battery staple horse" },
@@ -110,7 +111,7 @@ const verify = (cookie: string, json: Record<string, string>, origin = issuer) =
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe.runIf(areaTarget().can("device-grant"))("the device authorization grant", () => {
-	it("gives an allowed client codes, and refuses a client not allowed the grant", async () => {
+	it("gives an allowed client codes, and refuses a client not allowed the grant [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a]", async () => {
 		const given = await authorize();
 		expect(given.status).toBe(200);
 		expect(given.body).toMatchObject({
@@ -123,7 +124,7 @@ describe.runIf(areaTarget().can("device-grant"))("the device authorization grant
 		expect([refused.status, refused.body.error]).toEqual([400, "unauthorized_client"]);
 	});
 
-	it("issues a token once to the device whose code a signed-in user approved", async () => {
+	it("issues a token once to the device whose code a signed-in user approved [rfc8628-3.2-a]", async () => {
 		const { device_code: code = "", user_code: user = "" } = (await authorize()).body;
 		expect((await poll(code)).body.error).toBe("authorization_pending");
 		const cookie = await login("alice", "correct horse battery");
@@ -137,6 +138,24 @@ describe.runIf(areaTarget().can("device-grant"))("the device authorization grant
 		await wait(5100);
 		expect((await poll(code)).body.error).toBe("invalid_grant");
 	}, 30_000);
+
+	it("takes a device code only under the device grant type, from the client authenticated [rfc8628-3.4-a] [rfc8628-3.4-c] [rfc8628-3.4-d]", async () => {
+		const { device_code: code = "" } = (await authorize()).body;
+		const asked = (form: Record<string, string>) =>
+			post("/oauth/token", { device_code: code, ...form }, proxied("198.51.100.42"));
+		for (const grant_type of ["device_code", "urn:ietf:params:oauth:grant-type:device-code"]) {
+			const other = await asked({ grant_type, ...credentials("tv") });
+			expect([other.status, other.body.error], grant_type).toEqual([400, "unsupported_grant_type"]);
+		}
+		const unnamed = await asked({ grant_type: deviceGrant });
+		expect([unnamed.status, unnamed.body.error]).toEqual([401, "invalid_client"]);
+		const unproved = await asked({ grant_type: deviceGrant, client_id: "tv" });
+		expect([unproved.status, unproved.body.error]).toEqual([401, "invalid_client"]);
+		const wrong = await asked({ grant_type: deviceGrant, client_id: "tv", client_secret: "wrong" });
+		expect([wrong.status, wrong.body.error]).toEqual([401, "invalid_client"]);
+		// None of these touched the code: the device's own poll still finds it pending.
+		expect((await poll(code)).body.error).toBe("authorization_pending");
+	});
 
 	it("slows a device that polls too often", async () => {
 		const { device_code: code = "" } = (await authorize()).body;
@@ -153,7 +172,7 @@ describe.runIf(areaTarget().can("device-grant"))("the device authorization grant
 		expect((await poll(code)).body.error).toBe("access_denied");
 	});
 
-	it("asks the verification interface for a session and same-origin evidence", async () => {
+	it("asks the verification interface for a session and same-origin evidence [guarantee-9-a]", async () => {
 		const { user_code: user = "" } = (await authorize()).body;
 		const none = await verify("", { action: "lookup", user_code: user });
 		expect([none.status, none.body.error]).toEqual([401, "login_required"]);
