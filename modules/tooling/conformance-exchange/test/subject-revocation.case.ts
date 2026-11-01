@@ -192,6 +192,7 @@ describe.runIf(areaTarget().can(ledgerRevocation))(
 			for (const token of issued) expect(await active(token)).toBe(true);
 
 			const before = told.received.length;
+			const sentAt = performance.now();
 			expect(await revoke(subject)).toEqual({ status: 200, json: { complete: true } });
 			const answeredAt = performance.now();
 
@@ -227,9 +228,10 @@ describe.runIf(areaTarget().can(ledgerRevocation))(
 			for (const token of issued) expect(await active(token)).toBe(false);
 			expect(refusal(await exchange(tokens.access_token))).toEqual([400, "invalid_request"]);
 
-			// The boundary is the deadline of the write that recorded it, compared in seconds: a login a
-			// second past the revocation's answer is still before it, refused as a wrong password is.
-			await wait(answeredAt + 1100 - performance.now());
+			// The boundary is the deadline of the write that recorded it, its patience (10 s) past a send
+			// after the revocation was sent: a login 9 s past that is still before it, refused as a wrong
+			// password is.
+			await wait(sentAt + 9_000 - performance.now());
 			expect(await loginAnswer()).toEqual([401, "invalid_credentials"]);
 			// Past the window U-0.19-126 states, a login lets the user in again.
 			await wait(answeredAt + revocationWindowMs - performance.now());
