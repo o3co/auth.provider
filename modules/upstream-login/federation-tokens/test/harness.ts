@@ -158,7 +158,12 @@ export async function harness(
 	const { route, receivers, all } = app.get(probed);
 	/** A session opened for `subject`. */
 	const login = async (subject = "alice") => {
-		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject,
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		return openedOf(await app.get(sessions).open(testRequest(), facts)).session;
 	};
 	/** An access token issued to `client` in the session, whose audience names the client and whose subject is the session's. */
