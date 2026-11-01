@@ -268,7 +268,12 @@ it("passes where an ask came from to the proof unread", async () => {
 it("holds the sessions it composes to mfa's entry requirement: a subject holding a factor changes credentials only after proving one", async () => {
 	const { passOf, bindCode, sessions: open } = await serve();
 	expect((await bindCode("ann", await passOf("ann"))).kind).toBe("bound");
-	const facts = { subject: "ann", amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+	const facts = {
+		subject: "ann",
+		amr: ["pwd"],
+		authenticatedAt: runtime.clock.now(),
+		provenSince: runtime.clock.now(),
+	};
 	const { cookies } = openedOf(await open.open(testRequest(), facts));
 	const cookie = cookies.map((c) => c.split(";")[0]).join("; ");
 	const request = testRequest({
