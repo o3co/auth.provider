@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
+import {
+	assemble,
+	BuildRefused,
+	contract,
+	defineModule,
+	isUnavailable,
+	kernelConfig,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type Space, type Store, spaces, store } from "@mod/store";
 import { type SimulatedStore, simulatedStore } from "@mod/store/testing";
@@ -28,7 +35,7 @@ async function open() {
 	const app = await assemble({
 		modules: [
 			simulated.module,
-			defineModule({ name: "user" }, (m) => [
+			defineModule({ name: "user", replicaSafe: false, takes: [store] }, (m) => [
 				m.contribute(spaces).by(() => space),
 				m.provide(opened).by((c) => c.get(store)),
 			]),
@@ -119,6 +126,39 @@ it("settles a create and a change whose answers were lost, so each takes effect 
 		before: { n: 2 },
 		after: { n: 2 },
 	});
+});
+
+it("hands a create and a change the deadline each attempt is written with, a retried attempt its own", async () => {
+	const { simulated, place, records } = await open();
+	/** The deadline each create or change was sent to the store with, in order. */
+	const written: number[] = [];
+	const spied = new Proxy(place.store, {
+		get: (target, prop) => {
+			const member = Reflect.get(target, prop);
+			if (prop !== "putIfAbsent" && prop !== "replaceIf") return member.bind(target);
+			return (...args: unknown[]) => {
+				written.push((args.at(-1) as { deadline: number }).deadline);
+				return member.apply(target, args);
+			};
+		},
+	});
+	const watched = recordsIn<Counted>({ ...place, store: spied });
+	expect(await watched.create("d", ({ deadline }) => ({ n: deadline }), 60_000)).toBe("created");
+	expect((await records.change("d", (r) => ({ value: r })))?.after).toEqual({ n: written[0] });
+	// Another writer comes first, and the store clock moves on before the retry.
+	simulated.beforeNext("replaceIf", space.name, async () => {
+		await records.change("d", (r) => ({ value: { n: r.n + 1 } }));
+		simulated.shiftClock(4000);
+	});
+	const handed: number[] = [];
+	const after = await watched.change("d", (_r, { deadline }) => {
+		handed.push(deadline);
+		return { value: { n: deadline } };
+	});
+	expect(handed).toEqual(written.slice(1));
+	expect(handed).toHaveLength(2);
+	expect(handed[1]).toBeGreaterThan(handed[0] ?? Number.POSITIVE_INFINITY);
+	expect(after?.after).toEqual({ n: handed[1] });
 });
 
 it("refuses a create that reaches the store after its deadline, and leaves no record", async () => {
@@ -878,16 +918,28 @@ it("looks up any string under a secret, empty or odd, and refuses none for its s
 });
 
 it("refuses a space opened for records and for secret records on one store, in either order", async () => {
-	const refusal = "a space holds records or secret records, not both: records-test";
+	// The boot's refusal, named by the space: assembly reports its where and reason as written.
+	const refusedBy = (opening: () => unknown) => {
+		try {
+			opening();
+		} catch (error) {
+			return BuildRefused.is(error) ? { where: error.where, reason: error.reason } : error;
+		}
+		return undefined;
+	};
+	const refusal = {
+		where: "records-test",
+		reason: "a space holds records or secret records, not both",
+	};
 	const first = await open();
 	recordsIn<Counted>(first.place);
 	recordsIn<Counted>(first.place);
-	expect(() => secretRecordsIn<Counted>(first.place)).toThrow(refusal);
+	expect(refusedBy(() => secretRecordsIn<Counted>(first.place))).toEqual(refusal);
 	const second = await open();
 	// Secret records keep their names as records of the same space: that is not a second kind.
 	secretRecordsIn<Counted>(second.place).named;
 	secretRecordsIn<Counted>(second.place);
-	expect(() => recordsIn<Counted>(second.place)).toThrow(refusal);
+	expect(refusedBy(() => recordsIn<Counted>(second.place))).toEqual(refusal);
 	// Another store, or another space, holds its own kind.
 	secretRecordsIn<Counted>((await open()).place);
 	recordsIn<Counted>({ ...second.place, space: { ...space, name: "records-test.other" } });
