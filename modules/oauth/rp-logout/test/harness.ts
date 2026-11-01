@@ -203,9 +203,12 @@ export async function harness(
 	/** A session for the subject, with the cookie that opens it. */
 	const login = async (subject = "alice") => {
 		const done = openedOf(
-			await app
-				.get(sessions)
-				.open(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() }),
+			await app.get(sessions).open(testRequest(), {
+				subject,
+				amr: ["pwd"],
+				authenticatedAt: runtime.clock.now(),
+				provenSince: runtime.clock.now(),
+			}),
 		);
 		return { session: done.session, cookie: (done.cookies[0] ?? "").split(";")[0] ?? "" };
 	};
@@ -375,7 +378,11 @@ export function readEndingSessions(lifetimeMs: number) {
 			const kept = new Map<string, Kept>();
 			const sessionOf = (id: string, r: Kept) => ({
 				id,
-				context: { subject: r.subject, amr: ["pwd"], authenticatedAt: r.openedAt },
+				context: {
+					subject: r.subject,
+					amr: ["pwd"],
+					authenticatedAt: r.openedAt,
+				},
 			});
 			return stubSessions({
 				handleOf: async (request) => {
