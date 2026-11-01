@@ -1,0 +1,24 @@
+{
+	"name": "@mod/client-credentials",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"grantTypes": [
+		"client_credentials"
+	],
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/client-allowance": "workspace:*",
+		"@mod/grants": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/clients": "workspace:*",
+		"vitest": "5.0.5"
+	}
+}
