@@ -4,6 +4,7 @@ import {
 	isLoopbackAddress,
 	isPrivateAddress,
 	isSpecialAddress,
+	reachedAddress,
 } from "../src/contract.ts";
 
 const blocks: Record<string, { inside: readonly string[]; outside: readonly string[] }> = {
@@ -165,6 +166,21 @@ describe("carriedIPv4", () => {
 			undefined,
 			undefined,
 			undefined,
+		]);
+	});
+});
+
+describe("reachedAddress", () => {
+	it("spells an address as a connection reaches it: IPv6 compressed in lower case, IPv4 mapped into it as IPv4", () => {
+		expect(
+			["10.0.0.1", "[::1]", "2001:DB8:0:0::1", "::ffff:10.0.0.1", "[::FFFF:a00:1]"].map(
+				reachedAddress,
+			),
+		).toEqual(["10.0.0.1", "::1", "2001:db8::1", "10.0.0.1", "10.0.0.1"]);
+		// A translated or compatible form carries IPv4 but is reached as IPv6.
+		expect(["::ffff:0:a00:1", "::a00:1"].map(reachedAddress)).toEqual([
+			"::ffff:0:a00:1",
+			"::a00:1",
 		]);
 	});
 });
