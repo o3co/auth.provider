@@ -26,7 +26,7 @@ import {
 } from "../src/testing.ts";
 
 /** The IdP names the registered users below link through, as a federation would declare them. */
-const named = defineModule({ name: "test-idps" }, (m) => [
+const named = defineModule({ name: "test-idps", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(upstreamNames).by(() => ({
 		declaredBy: "test-idps",
 		names: ["example", "corp:eu", "idp", "i"].map((name) => ({
@@ -121,7 +121,7 @@ it("matches identifiers exactly", async () => {
 	expect((await u.verify("Zoe\u0308", "p")).kind).toBe("none");
 });
 
-it("refuses to start on identifiers a person could mistake, or a shared subject", async () => {
+it("refuses to start on identifiers a person could mistake, or a shared subject [oidc-core-5.7-a]", async () => {
 	for (const pair of [
 		["Alice", "alice"],
 		["Zo\u00eb", "Zoe\u0308"],
@@ -155,7 +155,7 @@ it("refuses to start on an empty identifier or subject, or a plain password, nam
 	]);
 });
 
-it("refuses to start on a subject that is not 1 to 255 ASCII characters, the identifier standing in where it is left out", async () => {
+it("refuses to start on a subject that is not 1 to 255 ASCII characters, the identifier standing in where it is left out [oidc-core-2-c]", async () => {
 	const where = async (registered: unknown[]) =>
 		((await boot(registered).catch((error) => error)) as BootRefused).refusals.map((r) => r.where);
 	for (const user of [
@@ -169,7 +169,7 @@ it("refuses to start on a subject that is not 1 to 255 ASCII characters, the ide
 	expect((await named.get(users).bySubject("s-alice")).kind).toBe("user");
 });
 
-it("refuses to start on an attribute value users does not accept, naming the attribute but never the value", async () => {
+it("refuses to start on an attribute value users does not accept, naming the attribute but never the value [guarantee-8-a]", async () => {
 	const refused = async (attributes: Record<string, unknown>) =>
 		((await boot([testUser("a", "p", { attributes })]).catch((error) => error)) as BootRefused)
 			.refusals;
@@ -178,6 +178,9 @@ it("refuses to start on an attribute value users does not accept, naming the att
 		["picture", "http://pic.example/a.png"],
 		["picture", "https://PIC.example/a.png"],
 		["email", "a@victim.test/x"],
+		["email", "a..b@example.com"],
+		["email", "josé@example.com"],
+		["name", ""],
 		["name", "Al\u202Eice"],
 		["groups", ["admins", "st\u0000aff"]],
 		["email_verified", "true"],
@@ -205,6 +208,23 @@ it("refuses to start on an attribute value users does not accept, naming the att
 		kind: "user",
 		user: { subject: "s-a", attributes: accepted },
 	});
+});
+
+it("refuses to start on an email's verification without the email, as a ledger's is left out", async () => {
+	for (const verified of [true, false]) {
+		const attributes = { name: "Alice", email_verified: verified };
+		const refused = (await boot([testUser("a", "p", { attributes })]).catch(
+			(error) => error,
+		)) as BootRefused;
+		expect(refused.refusals, String(verified)).toEqual([
+			{
+				where: "users.registered.0.attributes.email_verified",
+				reason: "only beside the user's email",
+			},
+		]);
+	}
+	const beside = { email: "alice@example.com", email_verified: false };
+	await expect(boot([testUser("a", "p", { attributes: beside })])).resolves.toBeDefined();
 });
 
 it("links an upstream identity as its IdP's name and upstream subject, matched exactly, and once", async () => {
