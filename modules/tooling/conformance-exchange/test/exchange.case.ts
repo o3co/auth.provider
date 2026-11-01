@@ -6,6 +6,11 @@ import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ExchangeScene, exchangeScene } from "../src/main.ts";
 
+/** The request parameter asking a lifetime, by the target: the legacy build reads `expires_in`. */
+const lifetimeParam = areaTarget().differs("lifetime-asked-as-expires-in")
+	? "expires_in"
+	: "o3co_expires_in";
+
 const issuer = "https://issuer.example";
 const callback = "https://app.example/cb";
 const api = "https://api.example";
@@ -188,7 +193,7 @@ describe("token exchange of tokens no session holds", () => {
 	startedFor(scene);
 
 	describe("token exchange", () => {
-		it("gives an allowed client an access token for its own token, narrowed to the scope it asks", async () => {
+		it("gives an allowed client an access token for its own token, narrowed to the scope it asks [rfc8693-2.2.1-a] [rfc8693-2.2.1-b] [rfc8693-2.2.1-c] [rfc6749-5.1-a]", async () => {
 			const subject = await tokensFor();
 			const issued = await exchange("gateway", subject.access_token, { scope: "read" });
 			expect(issued.status).toBe(200);
@@ -240,19 +245,31 @@ describe("token exchange of tokens no session holds", () => {
 			return Number(claims.exp) - Number(claims.iat);
 		};
 
-		it("issues for a shorter expires_in, and answers that lifetime", async () => {
+		it("issues for a shorter lifetime asked, and answers that lifetime [rfc8693-2.2.1-d] [rfc6749-5.1-b]", async () => {
 			const { access_token: token } = await tokensFor();
-			const issued = await exchange("gateway", token, { expires_in: "60" });
+			const issued = await exchange("gateway", token, { [lifetimeParam]: "60" });
 			expect(issued.status).toBe(200);
 			expect(lifetimeOf(issued.body.access_token)).toBe(60);
 			expect(Number(issued.body.expires_in)).toBeGreaterThan(0);
 			expect(Number(issued.body.expires_in)).toBeLessThanOrEqual(60);
 		});
 
-		it("cuts a longer expires_in to the cap, never refusing it", async () => {
+		it.skipIf(areaTarget().differs("lifetime-asked-as-expires-in"))(
+			"reads a request's expires_in, registered for answers alone, as an unknown parameter: it asks nothing, and a malformed one is not refused",
+			async () => {
+				const { access_token: token } = await tokensFor();
+				for (const asked of ["60", "soon"]) {
+					const issued = await exchange("gateway", token, { expires_in: asked });
+					expect([asked, issued.status]).toEqual([asked, 200]);
+					expect(lifetimeOf(issued.body.access_token), asked).toBeGreaterThan(60);
+				}
+			},
+		);
+
+		it("cuts a longer lifetime asked to the cap, never refusing it", async () => {
 			const { access_token: token } = await tokensFor();
 			for (const asked of ["7200", "9999999999"]) {
-				const issued = await exchange("gateway", token, { expires_in: asked });
+				const issued = await exchange("gateway", token, { [lifetimeParam]: asked });
 				expect(issued.status).toBe(200);
 				expect(lifetimeOf(issued.body.access_token)).toBeLessThanOrEqual(maxLifetimeSeconds);
 				expect(Number(issued.body.expires_in)).toBeLessThanOrEqual(maxLifetimeSeconds);
@@ -262,10 +279,10 @@ describe("token exchange of tokens no session holds", () => {
 			}
 		});
 
-		it("refuses an expires_in that is not a positive whole number of seconds, or sent twice", async () => {
+		it("refuses a lifetime asked that is not a positive whole number of seconds, or sent twice [rfc6749-3.2-d] [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const { access_token: token } = await tokensFor();
 			for (const asked of ["soon", "0", "-60", "1.5"]) {
-				expect(refusal(await exchange("gateway", token, { expires_in: asked }))).toEqual([
+				expect(refusal(await exchange("gateway", token, { [lifetimeParam]: asked }))).toEqual([
 					400,
 					"invalid_request",
 				]);
@@ -274,15 +291,15 @@ describe("token exchange of tokens no session holds", () => {
 				["grant_type", exchangeGrant],
 				["subject_token", token ?? ""],
 				["subject_token_type", accessType],
-				["expires_in", "60"],
-				["expires_in", "120"],
+				[lifetimeParam, "60"],
+				[lifetimeParam, "120"],
 			]);
 			expect(refusal(twice)).toEqual([400, "invalid_request"]);
 		});
 	});
 
-	describe("token exchange: a binding washed off", () => {
-		it("refuses a DPoP-bound subject token without a proof, or with another key's", async () => {
+	describe("token exchange: a binding washed off [guarantee-6-b]", () => {
+		it("refuses a DPoP-bound subject token without a proof, or with another key's [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const bound = await own("gateway", {}, holder);
 			expect(bound.token_type).toBe("DPoP");
 			expect(refusal(await exchange("gateway", bound.access_token))).toEqual([
@@ -295,7 +312,7 @@ describe("token exchange of tokens no session holds", () => {
 			]);
 		});
 
-		it("binds the token it issues to the same key", async () => {
+		it("binds the token it issues to the same key [rfc9449-5-b] [rfc9449-6.1-a]", async () => {
 			const bound = await own("gateway", {}, holder);
 			const issued = await exchange("gateway", bound.access_token, {}, holder);
 			expect([issued.status, issued.body.token_type]).toEqual([200, "DPoP"]);
@@ -303,14 +320,14 @@ describe("token exchange of tokens no session holds", () => {
 			expect(claimsOf(issued.body.access_token).cnf).toEqual({ jkt: thumbprint });
 		});
 
-		it("refuses a DPoP-bound actor token without a proof", async () => {
+		it("refuses a DPoP-bound actor token without a proof [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const subject = await own("gateway");
 			const actor = await own("gateway", {}, holder);
 			const answer = await exchange("gateway", subject.access_token, actedBy(actor.access_token));
 			expect(refusal(answer)).toEqual([400, "invalid_request"]);
 		});
 
-		it("never issues a bearer token for an actor that proved its DPoP key", async () => {
+		it("never issues a bearer token for an actor that proved its DPoP key [rfc9449-5-b]", async () => {
 			const subject = await tokensFor();
 			const actor = await own("gateway", {}, holder);
 			const issued = await exchange(
@@ -325,7 +342,7 @@ describe("token exchange of tokens no session holds", () => {
 	});
 
 	describe("token exchange: a forged actor", () => {
-		it("refuses an actor token it cannot verify", async () => {
+		it("refuses an actor token it cannot verify [rfc8693-2.1-h] [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const subject = await tokensFor();
 			const now = Math.floor(Date.now() / 1000);
 			const forged = await new SignJWT({
@@ -345,14 +362,14 @@ describe("token exchange of tokens no session holds", () => {
 			expect(refusal(answer)).toEqual([400, "invalid_request"]);
 		});
 
-		it("refuses an actor token that does not name the calling client", async () => {
+		it("refuses an actor token that does not name the calling client [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const subject = await tokensFor();
 			const actor = await own("other");
 			const answer = await exchange("gateway", subject.access_token, actedBy(actor.access_token));
 			expect(refusal(answer)).toEqual([400, "invalid_request"]);
 		});
 
-		it("refuses an actor past the chain's limit, and drops the chain without an actor", async () => {
+		it("refuses an actor past the chain's limit, and drops the chain without an actor [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const actor = await own("gateway");
 			const delegated = await exchange(
 				"gateway",
@@ -373,7 +390,7 @@ describe("token exchange of tokens no session holds", () => {
 	});
 
 	describe("token exchange: a missed revocation", () => {
-		it("refuses a revoked access token", async () => {
+		it("refuses a revoked access token [rfc7009-2-b] [rfc8693-2.1-g] [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const { access_token: token = "" } = await tokensFor();
 			const revoked = await post("/oauth/revoke", "gateway", {
 				token,
@@ -383,7 +400,7 @@ describe("token exchange of tokens no session holds", () => {
 			expect(refusal(await exchange("gateway", token))).toEqual([400, "invalid_request"]);
 		});
 
-		it("ends the tokens it issued with the subject's family, and refuses the family's tokens after", async () => {
+		it("ends the tokens it issued with the subject's family, and refuses the family's tokens after [rfc7662-4-d] [rfc8693-2.1-g] [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const subject = await tokensFor();
 			const issued = await exchange("gateway", subject.access_token);
 			expect(await active(issued.body.access_token)).toBe(true);
@@ -415,12 +432,12 @@ describe("token exchange of tokens no session holds", () => {
 			expect(refusal(await exchange("spa", token))).toEqual([401, "invalid_client"]);
 		});
 
-		it("refuses a client not allowed the grant", async () => {
+		it("refuses a client not allowed the grant [rfc6749-5.2-a]", async () => {
 			const { access_token: token } = await own("svc");
 			expect(refusal(await exchange("svc", token))).toEqual([400, "unauthorized_client"]);
 		});
 
-		it("never widens the scope past the subject token's", async () => {
+		it("never widens the scope past the subject token's [rfc8693-2.2.2-a] [rfc6749-5.2-a]", async () => {
 			const { access_token: token } = await own("gateway", { scope: "read" });
 			expect(refusal(await exchange("gateway", token, { scope: "read write" }))).toEqual([
 				400,
@@ -428,7 +445,7 @@ describe("token exchange of tokens no session holds", () => {
 			]);
 		});
 
-		it("never widens the audience past the subject token's, and takes only a resource it issues for", async () => {
+		it("never widens the audience past the subject token's, and takes only a resource it issues for [rfc8693-2.2.2-a] [rfc8693-2.2.2-c] [rfc6749-5.2-a]", async () => {
 			const { access_token: token } = await own("gateway");
 			const held = [claimsOf(token).aud].flat();
 			const outside = [api, admin].find((a) => !held.includes(a)) ?? "";
@@ -441,7 +458,7 @@ describe("token exchange of tokens no session holds", () => {
 			).toEqual([400, "invalid_target"]);
 		});
 
-		it("issues access tokens only", async () => {
+		it("issues access tokens only [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 			const { access_token: token } = await own("gateway");
 			for (const type of ["refresh_token", "id_token"]) {
 				const answer = await exchange("gateway", token, {
@@ -456,7 +473,7 @@ describe("token exchange of tokens no session holds", () => {
 describe("token exchange of a session's token", () => {
 	startedFor(exchangeScene(given));
 
-	it("ends at logout a token issued for a session's token that has no family, and refuses that token after", async () => {
+	it("ends at logout a token issued for a session's token that has no family, and refuses that token after [rfc8693-2.1-g] [rfc8693-2.2.2-a] [rfc8693-2.2.2-b] [rfc6749-5.2-a]", async () => {
 		browser.forget();
 		const subject = await tokensFor("direct");
 		expect(subject).not.toHaveProperty("refresh_token");
@@ -476,9 +493,9 @@ describe("token exchange: a cap below the subject token's life", () => {
 	const cap = 120;
 	startedFor(exchangeScene({ ...given, sessionless: true, maxLifetimeSeconds: cap }));
 
-	it("cuts a longer expires_in to the cap", async () => {
+	it("cuts a longer lifetime asked to the cap", async () => {
 		const { access_token: token } = await tokensFor();
-		const issued = await exchange("gateway", token, { expires_in: "7200" });
+		const issued = await exchange("gateway", token, { [lifetimeParam]: "7200" });
 		expect(issued.status).toBe(200);
 		const claims = claimsOf(issued.body.access_token);
 		const lifetime = Number(claims.exp) - Number(claims.iat);
