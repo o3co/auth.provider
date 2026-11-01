@@ -36,7 +36,7 @@ function following(failing: readonly string[] = []) {
 
 const compositions = {
 	"subject-revocation": () => {
-		const stores = memoryBoundaries();
+		const stores = memoryBoundaries(() => now);
 		const store = defineModule({ name: "boundaries", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(boundaryStore).by(() => stores.boundaries),
 		]);

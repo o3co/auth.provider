@@ -9,7 +9,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { type RegistrationRefusal, type Registrations, registrations } from "@mod/passkeys";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocation } from "@mod/subject-revocation";
@@ -125,9 +125,14 @@ async function serve(section: Record<string, unknown> = {}) {
 	/** A browser signed in as `subject`, or none, posting from `from`. */
 	const browser = async (subject?: string, from = origin) => {
 		const done = subject
-			? await app
-					.get(sessions)
-					.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() })
+			? openedOf(
+					await app.get(sessions).open(testRequest(), {
+						subject,
+						amr: ["pwd"],
+						authenticatedAt: runtime.clock.now(),
+						provenSince: runtime.clock.now(),
+					}),
+				)
 			: undefined;
 		const cookie = (done?.cookies ?? []).map((c) => c.split(";")[0]).join("; ");
 		return async (path: string, body?: unknown, type = "application/json", method = "POST") => {

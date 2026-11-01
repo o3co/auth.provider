@@ -19,7 +19,7 @@ import {
 	unavailableSwitch,
 } from "@mod/kernel/testing";
 import { entryJudge, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { referenceOf, type Tokens, tokens } from "@mod/tokens";
@@ -118,11 +118,14 @@ async function boot(options: Options = {}) {
 	await app.start();
 	stop = () => app.stop(1000);
 	const opened = app.get(sessions);
-	const { session } = await opened.complete(testRequest(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const { session } = openedOf(
+		await opened.open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const t = app.get(tokens);
 	const issue = async () => {
 		const token = await issuedAccess(t);

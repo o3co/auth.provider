@@ -5,6 +5,23 @@ import { type AuthContext, type EntryJudge, sessionRules } from "../../contract.
 const context: AuthContext = { subject: "alice", amr: ["pwd"], authenticatedAt: 0 };
 
 describe("session's rules", () => {
+	it("takes a proof's start of epoch milliseconds, and throws a TypeError for none or anything else", () => {
+		const facts = {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: "opening" as const,
+			provenSince: 0,
+		};
+		expect(() => sessionRules.checkProvenSince(facts)).not.toThrow();
+		expect(() => sessionRules.checkProvenSince({ ...facts, provenSince: 8.64e15 })).not.toThrow();
+		for (const provenSince of [undefined, -1, 8.64e15 + 1, Number.NaN, "1", null]) {
+			expect(
+				() => sessionRules.checkProvenSince({ ...facts, provenSince } as never),
+				String(provenSince),
+			).toThrow(TypeError);
+		}
+	});
+
 	it("closes each listed session in the listing's order, past one that fails or is left pending, and then fails", async () => {
 		const members = async () => ["x", "y", "z"].map((member) => ({ member }));
 		const closed: string[] = [];

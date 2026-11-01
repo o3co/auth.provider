@@ -12,7 +12,7 @@
 
 ## Invariants
 - Not RFC 7523 §3: an id_token's audience is the app's client ID upstream, never this server. The standard way for an app is the token exchange (`exchange-id-tokens`).
-- An id_token `exchange-id-tokens` takes is a valid assertion for the one client it is for, with its account, `iat`, `exp` and holder digest; any other is invalid.
+- An id_token `exchange-id-tokens` takes is a valid assertion for the one client it is for, with its account, `iat`, its standing time (`iat` less `exchange-id-tokens`' `clock-skew`), `exp` and holder digest; any other is invalid.
 - An id_token is taken once across both grants, in `exchange-id-tokens`' one record: one taken by either is replayed at the other.
 - Nothing is delegated until `jwt-bearer.delegated-issuers` names the issuers; one named that `exchange-id-tokens` does not take, or one it takes that is not named, refuses boot.
 

@@ -20,18 +20,11 @@ import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	type AccessCondition,
-	type AccessGrant,
-	accessConditions,
-	type IssueLimits,
-	subjectChecks,
-	type Tokens,
-	tokens,
-} from "../src/contract.ts";
+import { type AccessCondition, accessConditions, subjectChecks, tokens } from "../src/contract.ts";
 import { defaultLifetimeSeconds } from "../src/limits.ts";
 import tokensModule from "../src/module.ts";
 import { section } from "../src/section.ts";
+import { issueFor } from "./composed.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 const start = 1_800_000_000_000;
@@ -63,12 +56,6 @@ async function boot(...args: Parameters<typeof assembled>) {
 /** The grant most tests issue for; a test that is about the grant writes its own. */
 const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
 
-/** Issues through `issue`, which nothing here refuses, and answers what it issued. */
-async function issueFor(t: Tokens, grant: AccessGrant, limits?: IssueLimits) {
-	const issued = await t.issue({ grant, grantType: "test" }, limits);
-	if (issued.kind !== "issued") throw new Error(`refused by ${issued.policy}`);
-	return issued.access;
-}
 const claimsOf = (token: string) =>
 	JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
 
@@ -136,6 +123,7 @@ describe("tokens", () => {
 			id: issued.id,
 			grant,
 			expiresAt: now + 60_000,
+			standingAt: now,
 			tokenType: "Bearer",
 		});
 		now = start + 60_000;
@@ -226,7 +214,8 @@ it("refuses a valid access token that a contributed condition no longer holds fo
 	const t = await boot({ revocation: "unsupported" }, { extra: [condition] });
 	const issued = await issueFor(t, grant);
 	expect((await t.verifyAccess(issued.token)).kind).toBe("valid");
-	expect(seen).toEqual([{ id: issued.id, subject: "s", issuedAt: Math.floor(now / 1000) * 1000 }]);
+	const second = Math.floor(now / 1000) * 1000;
+	expect(seen).toEqual([{ id: issued.id, subject: "s", issuedAt: second, standingAt: second }]);
 	answer = "revoked";
 	expect(await t.verifyAccess(issued.token)).toEqual({ kind: "invalid", reason: "revoked" });
 	down.unavailable("holds");
@@ -475,7 +464,7 @@ it("reads the access token's lifetime with its unit, in whole seconds, an hour b
 it("takes all it names under either revocation, the denylist only where it keeps one", async () => {
 	for (const revocation of ["denylist", "unsupported"]) {
 		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
-		expect((await takesUnused(assembly({ revocation })))["tokens"], revocation).toBeUndefined();
+		expect((await takesUnused(assembly({ revocation }))).tokens, revocation).toBeUndefined();
 	}
 });
 

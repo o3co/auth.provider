@@ -87,7 +87,16 @@ export default defineModule(
 			};
 			const problem = lockoutProblem(policy);
 			if (problem) return c.refuse("login-password", `attempts per account: ${problem}`);
-			const login = loginWith({ known, gates, budgets, policy, windowMs, recordLogin, log: c.log });
+			const login = loginWith({
+				known,
+				gates,
+				budgets,
+				policy,
+				windowMs,
+				recordLogin,
+				log: c.log,
+				now: c.clock.now,
+			});
 			return {
 				method: "POST",
 				path: "/session/login",

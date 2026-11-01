@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { addedClaimsOf } from "../src/contract.ts";
+import { addedClaimsIn, addedClaimsOf } from "../src/contract.ts";
 
 describe("the added claims' copier", () => {
 	const refuses = (given: unknown) => expect(() => addedClaimsOf(given)).toThrow(TypeError);
+
+	it("refuses o3co_standing_at, an access token's issuer's own claim, and leaves it out of the added ones a payload holds", () => {
+		expect(() => addedClaimsOf({ o3co_standing_at: 1 })).toThrow(TypeError);
+		expect(addedClaimsIn({ o3co_standing_at: 1, iat: 2, mine: 3 })).toEqual({ mine: 3 });
+	});
 
 	it("copies a plain set into a new frozen one, and takes none for none or an empty set", () => {
 		const given = { a: { b: [true, null, 1.5, "x"] } };

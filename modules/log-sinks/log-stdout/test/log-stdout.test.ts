@@ -1,3 +1,4 @@
+import { Writable } from "node:stream";
 import { assemble, contract, defineModule, kernelConfig, type Log } from "@mod/kernel";
 import { afterEach, expect, it, vi } from "vitest";
 import logStdout from "../src/module.ts";
@@ -70,4 +71,33 @@ it("keeps a value with line breaks and control characters on one line", async ()
 it("boots where several instances run", async () => {
 	const lines = await written((log) => log.info("up"), kernelConfig({ deployment: "multi" }));
 	expect(lines).toHaveLength(1);
+});
+
+it("survives its reader going away: a line it cannot write is dropped, the next does not crash, one listener however many start", async () => {
+	// Standard output whose reader has gone: every write fails as EPIPE, and the stream emits 'error'.
+	const out = new Writable({
+		write: (_chunk, _encoding, done) =>
+			done(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+	});
+	vi.spyOn(process, "stdout", "get").mockReturnValue(out as typeof process.stdout);
+	const logs: Log[] = [];
+	const speaker = defineModule({ name: "speaker", replicaSafe: true, takes: [] }, (m) => [
+		m.provide(contract<object>("speaker")).by((c) => {
+			logs.push(c.log);
+			return {};
+		}),
+	]);
+	const apps = [await assemble({ modules: [logStdout, speaker], config: kernelConfig() })];
+	// Whatever else hears the stream, a second composition adds no listener of this sink's.
+	const heard = out.listenerCount("error");
+	apps.push(await assemble({ modules: [logStdout, speaker], config: kernelConfig() }));
+	const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+	logs[0]?.info("lost");
+	await settled();
+	expect(out.errored).toMatchObject({ code: "EPIPE" });
+	logs[1]?.info("after");
+	await settled();
+	expect(out.listenerCount("error")).toBe(heard);
+	// The stop does not wait on a stream that can take nothing, its last line lost as the rest.
+	for (const app of apps) await app.stop(1000);
 });

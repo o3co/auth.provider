@@ -138,6 +138,8 @@ beforeAll(async () => {
 		"yes",
 		"--appendfsync",
 		"always",
+		"--no-appendfsync-on-rewrite",
+		"no",
 		"--min-replicas-to-write",
 		"1",
 	);
@@ -356,9 +358,10 @@ describe("redis", () => {
 
 	it("boots a user held to the store's own keys, needing the confirmation key only where it confirms", async () => {
 		expect(await asUser(["~acl:{*", "&*", "+@all"], [], null, "acl")).toBe("booted");
-		expect(await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl")).toContain(
-			"acl:#confirm",
-		);
+		const refused = await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl");
+		// Named by the setting that sets it, never by the prefix's value.
+		expect(refused).toContain("<redis.prefix>:#confirm");
+		expect(refused).not.toContain("acl:");
 	});
 
 	it("boots while no replica takes writes: that leaves the commands undetermined, never refused", async () => {
@@ -545,7 +548,7 @@ describe("redis", () => {
 				{
 					where: "redis",
 					reason: expect.stringMatching(
-						/^set appendonly yes and appendfsync always on the server \(docs\/runbook\.md, Redis\), which the durable guarantee of these spaces needs: /,
+						/^set appendonly yes, appendfsync always and no-appendfsync-on-rewrite no on the server \(docs\/runbook\.md, Redis\), which the durable guarantee of these spaces needs: /,
 					),
 				},
 			]);
@@ -741,7 +744,12 @@ describe("settings the server will not show", () => {
 
 	it("names each setting it needs that the operator has not declared", async () => {
 		const reasons = await refusedFor({});
-		for (const name of ["maxmemory-policy", "appendonly", "appendfsync"]) {
+		for (const name of [
+			"maxmemory-policy",
+			"appendonly",
+			"appendfsync",
+			"no-appendfsync-on-rewrite",
+		]) {
 			expect(reasons, name).toContain(`declare ${name} in redis.server-settings`);
 		}
 	});
@@ -751,18 +759,24 @@ describe("settings the server will not show", () => {
 			"maxmemory-policy": "allkeys-lru",
 			appendonly: "yes",
 			appendfsync: "always",
+			"no-appendfsync-on-rewrite": "no",
 		};
 		expect(await refusedFor({ "server-settings": declared })).toContain("noeviction");
 	});
 
 	it("boots on declared settings, warning on each boot that they hold as declared, unchecked", async () => {
 		const recorded = recordingLog();
-		const declared = { "maxmemory-policy": "noeviction", appendonly: "yes", appendfsync: "always" };
+		const declared = {
+			"maxmemory-policy": "noeviction",
+			appendonly: "yes",
+			appendfsync: "always",
+			"no-appendfsync-on-rewrite": "no",
+		};
 		const app = await boot({ "server-settings": declared }, blockedUrl, recorded);
 		stops.push(() => app.stop(1000));
 		const warned = recorded.lines().filter((line) => line.event === "redis.settings_declared");
 		expect(warned.map((line) => line.fields.settings)).toEqual([
-			"maxmemory-policy, appendonly, appendfsync",
+			"maxmemory-policy, appendonly, appendfsync, no-appendfsync-on-rewrite",
 		]);
 	});
 
@@ -805,6 +819,7 @@ describe("settings the server will not show", () => {
 			"maxmemory-policy": "noeviction",
 			appendonly: "yes",
 			appendfsync: "always",
+			"no-appendfsync-on-rewrite": "no",
 		},
 	};
 

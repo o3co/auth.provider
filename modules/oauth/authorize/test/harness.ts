@@ -34,7 +34,7 @@ import { memoryRecords } from "@mod/records/testing";
 import { redirectsFor } from "@mod/redirect-uris/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
@@ -246,8 +246,8 @@ export async function serve(
 		amr = ["pwd"],
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const facts = { subject, amr, authenticatedAt };
-		const { cookies } = await opened.complete(testRequest(), facts);
+		const facts = { subject, amr, authenticatedAt, provenSince: runtime.clock.now() };
+		const { cookies } = openedOf(await opened.open(testRequest(), facts));
 		return cookies[0]?.split(";")[0] ?? "";
 	};
 	const authorize = async (params: Record<string, string> | string, cookie = "") => {

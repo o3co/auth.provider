@@ -1,7 +1,7 @@
 # login-password
 
 ## Responsibilities
-- Provides the password login endpoint: verifies with `users`, and logs in through `login-gates`, naming the session's opening as the login's authentication time (`opening`), so a gate's wait never ages it.
+- Provides the password login endpoint: verifies with `users`, and logs in through `login-gates`, naming the session's opening as the login's authentication time (`opening`), so a gate's wait never ages it, and stating the time taken before the password is verified as `provenSince`; a login `session` answers revoked fails as a wrong password does.
 
 ## Not here
 - Steps after verification, such as a second factor: `login-gates` and its gates.

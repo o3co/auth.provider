@@ -7,7 +7,7 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { type Sessions, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -53,11 +53,14 @@ async function serve() {
 	await app.start();
 	stop = () => app.stop(1000);
 	const s = app.get(sessions);
-	const completed = await s.complete(testRequest(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const completed = openedOf(
+		await s.open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const cookie = completed.cookies[0]?.split(";")[0] ?? "";
 	const sid = completed.session.id;
 	const inside = () => s.enter(testRequest({ headers: new Map([["cookie", cookie]]) }));

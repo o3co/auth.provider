@@ -72,7 +72,7 @@ export default defineModule(
 				},
 				enterFor: lifecycle.entryIn,
 				entryOf: (handle: string, level: EntryLevel = "use") => lifecycle.entryAt(handle, level),
-				complete: lifecycle.open,
+				open: lifecycle.open,
 				raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 				// The cookie's index alone: no session record is read before a close.
 				handleOf: lifecycle.handleIn,

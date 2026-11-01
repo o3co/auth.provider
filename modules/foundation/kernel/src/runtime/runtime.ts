@@ -61,3 +61,18 @@ export const systemClock: Clock = Object.freeze({ now: () => Date.now() });
 export const systemRandom: Random = Object.freeze({
 	bytes: (length: number) => new Uint8Array(randomBytes(length)),
 });
+
+/** The process's streams heard already, so however many compositions start, each gets one listener. */
+const heard = new WeakSet<NodeJS.WritableStream>();
+
+/**
+ * Hears the process's standard output and error: once its reader has gone, a write fails and the
+ * stream emits 'error', which unheard would end the process. Heard, the write alone fails.
+ */
+export function hearStandardStreams(): void {
+	for (const stream of [process.stdout, process.stderr]) {
+		if (heard.has(stream)) continue;
+		heard.add(stream);
+		stream.on("error", () => {});
+	}
+}

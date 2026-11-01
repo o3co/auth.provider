@@ -14,7 +14,7 @@ import {
 } from "@mod/webauthn/testing";
 import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { passkeyArea } from "../src/main.ts";
+import { type PasskeyPart, passkeyArea } from "../src/main.ts";
 
 const grantType = "urn:o3co:oauth:grant-type:webauthn";
 const signing = generateKeyPairSync("ed25519");
@@ -43,7 +43,11 @@ const publicClient = (id: string, grants: string[]): ClientScene => ({
 	scopes: ["read"],
 });
 
-function sceneFor(users: string[], login: { requests: number; windowSeconds: number }): AreaScene {
+function sceneFor(
+	users: string[],
+	login: { requests: number; windowSeconds: number },
+	session?: PasskeyPart["session"],
+): AreaScene {
 	return sceneOf(
 		keysArea.part({
 			signing: {
@@ -72,7 +76,12 @@ function sceneFor(users: string[], login: { requests: number; windowSeconds: num
 			dpop: true,
 		}),
 		codeArea.part({ refresh: {} }),
-		passkeyArea.part({ rpId: new URL(issuer).hostname, origins: [issuer], login }),
+		passkeyArea.part({
+			rpId: new URL(issuer).hostname,
+			origins: [issuer],
+			login,
+			...(session ? { session } : {}),
+		}),
 	);
 }
 
@@ -368,6 +377,35 @@ describe.runIf(areaTarget().can("store-fault:passkeys"))(
 			expect((await faulty.whileDown(() => c.options())).status).toBe(503);
 			expect((await faulty.whileDown(() => c.login("app", assertion))).status).toBe(503);
 			expect((await c.login("app", assertion)).status).toBe(200);
+		});
+	},
+);
+
+describe.runIf(areaTarget().can("passkey-session-login"))(
+	"H. passkey login: a challenge stays with the module that made it",
+	() => {
+		const s = running(sceneFor(["erin"], { requests: 1000, windowSeconds: 60 }, {}));
+		const c = calls(() => s.at.base);
+
+		it("refuses at the browser login an assertion a client's options asked for, with the client's id as the browser's mark [guarantee-5-k]", async () => {
+			const { authenticator } = await c.register("erin");
+			// The client asks options and the user answers them: an assertion that is the client's.
+			const forClient = await c.assertion(authenticator, "app");
+			// A browser that has asked options of its own, its mark then set to the client's id.
+			const b = browser(() => s.at.base);
+			const asked = await b.send("POST", "/session/login/passkey/options", {}, {}, "json");
+			expect(asked.status).toBe(200);
+			const mark = [...b.jar.keys()].find((name) => name.endsWith("passkey-login"));
+			expect(mark).toBeDefined();
+			b.jar.set(mark ?? "", "app");
+			const replayed = await b.send(
+				"POST",
+				"/session/login/passkey",
+				{ response: forClient },
+				{},
+				"json",
+			);
+			expect(replayed).toEqual({ status: 401, body: { error: "passkey_login_failed" } });
 		});
 	},
 );

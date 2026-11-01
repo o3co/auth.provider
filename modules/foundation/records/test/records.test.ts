@@ -128,6 +128,39 @@ it("settles a create and a change whose answers were lost, so each takes effect 
 	});
 });
 
+it("hands a create and a change the deadline each attempt is written with, a retried attempt its own", async () => {
+	const { simulated, place, records } = await open();
+	/** The deadline each create or change was sent to the store with, in order. */
+	const written: number[] = [];
+	const spied = new Proxy(place.store, {
+		get: (target, prop) => {
+			const member = Reflect.get(target, prop);
+			if (prop !== "putIfAbsent" && prop !== "replaceIf") return member.bind(target);
+			return (...args: unknown[]) => {
+				written.push((args.at(-1) as { deadline: number }).deadline);
+				return member.apply(target, args);
+			};
+		},
+	});
+	const watched = recordsIn<Counted>({ ...place, store: spied });
+	expect(await watched.create("d", ({ deadline }) => ({ n: deadline }), 60_000)).toBe("created");
+	expect((await records.change("d", (r) => ({ value: r })))?.after).toEqual({ n: written[0] });
+	// Another writer comes first, and the store clock moves on before the retry.
+	simulated.beforeNext("replaceIf", space.name, async () => {
+		await records.change("d", (r) => ({ value: { n: r.n + 1 } }));
+		simulated.shiftClock(4000);
+	});
+	const handed: number[] = [];
+	const after = await watched.change("d", (_r, { deadline }) => {
+		handed.push(deadline);
+		return { value: { n: deadline } };
+	});
+	expect(handed).toEqual(written.slice(1));
+	expect(handed).toHaveLength(2);
+	expect(handed[1]).toBeGreaterThan(handed[0] ?? Number.POSITIVE_INFINITY);
+	expect(after?.after).toEqual({ n: handed[1] });
+});
+
 it("refuses a create that reaches the store after its deadline, and leaves no record", async () => {
 	const { simulated, records } = await open();
 	simulated.beforeNext("putIfAbsent", space.name, async () => simulated.shiftClock(11_000));

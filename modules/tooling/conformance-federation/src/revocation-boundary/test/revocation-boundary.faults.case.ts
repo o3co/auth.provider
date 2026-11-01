@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
 	type Deployed,
+	type Execution,
 	type Instance,
 	instanceOf,
 	ready,
@@ -8,6 +9,7 @@ import {
 	sameMark,
 	successes,
 } from "@mod/conformance/testing";
+import { pastBoundaries } from "@mod/conformance-identity";
 import { describe, expect, it } from "vitest";
 import { faultScene, grantsOn, on } from "../../faults/test/faults.ts";
 import {
@@ -87,16 +89,22 @@ async function grantedAt(a: Instance, b: Instance, corp: FakeUpstream) {
 	return id;
 }
 
+/** Until a login is a second and more past every boundary these writes put. */
+const pastWritten = (writes: readonly Execution[]) =>
+	pastBoundaries(
+		writes.flatMap((w) =>
+			Object.values(boundariesPut(w.command)).filter((v): v is number => typeof v === "number"),
+		),
+	);
+
 /**
- * Healed: the topology has recovered, and a grant alice establishes a second and more past the
- * boundary's last write (boundaries are compared in seconds) gives a token.
+ * Healed: the topology has recovered, and a grant alice establishes a second and more past every
+ * boundary written (a boundary is its write's deadline, compared in seconds) gives a token.
  */
 async function healed(d: Deployed, i: Instance, corp: FakeUpstream) {
 	await recovered(d);
 	await ready(i);
-	const written = d.instances.flatMap((x) => successes(x, boundaryOf(subject)).map((e) => e.at));
-	const after = Math.max(...written) + 1_100 - performance.now();
-	if (after > 0) await new Promise((resolve) => setTimeout(resolve, after));
+	await pastWritten(d.instances.flatMap((x) => successes(x, boundaryOf(subject))));
 	const g = grantsOn(i, corp);
 	const { id } = await g.connected();
 	expect((await g.grantCall(id, "token")).status).toBe(200);
@@ -206,9 +214,7 @@ describe("a subject's boundary refusing, from any instance, a federation grant e
 				// A later revocation that ends delegations moves that boundary too, and the grant, read at B
 				// while that revocation's followers are held, is refused by it. She logs in again first, a
 				// second and more past the boundary, so that revocation's followers have a session to close.
-				const keptAt = Math.max(...written.map((w) => w.at));
-				const wait = keptAt + 1_100 - performance.now();
-				if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+				await pastWritten(written);
 				await grantsOn(a, corp).loggedIn();
 				const ending = performance.now();
 				const followingEnd = a.relay.hold(closingAdded);
@@ -223,9 +229,7 @@ describe("a subject's boundary refusing, from any instance, a federation grant e
 				heldEnd.release();
 				done(await askedEnd);
 				// A grant she establishes after that boundary, a second and more past it, answers.
-				const endedAt = Math.max(...moved.map((w) => w.at));
-				const later = endedAt + 1_100 - performance.now();
-				if (later > 0) await new Promise((resolve) => setTimeout(resolve, later));
+				await pastWritten(moved);
 				const fresh = await grantsOn(a, corp).connected();
 				expect((await grantsOn(b, corp).grantCall(fresh.id, "token")).status).toBe(200);
 			},

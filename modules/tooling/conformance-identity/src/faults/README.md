@@ -7,11 +7,11 @@ Internal module of `conformance-identity`: what the area's fault scenes share in
 - Sends a password login to an instance, as its proxy forwards it from a source, and reads its answer: status, error, the session cookie it set and the wait it asks.
 - Names, in `test/wire.ts` alone, what the scenes take from the store's inside, so the case files name none of it: the deployment's prefix and a store operation as the Redis adapter sends it.
 - There too: a login attempt's count under the route's name and its source in `rate-limit.attempts`; any request about an identifier's lockout in `rate-limit.lockouts`, the writes to one identifier's, and the run each writes; a session's record in `session-store.sessions` and its cookie's index in `session-store.cookies`.
-- There too: a subject's revocation boundary's writes in `subject-revocation-store.boundaries`, a follower's first write, session-lifecycle adding to its closings in `session-store.closings`, and a session's record written closed.
+- There too: a subject's revocation boundary's writes in `subject-revocation-store.boundaries` and the boundaries each puts, a follower's first write, session-lifecycle adding to its closings in `session-store.closings`, and a session's record written closed.
 
 ## Offers
 - `faultScene`, `on` (`conformance`'s, on `faultScene` by default), `nextSource`, `loginAt`, `said`, and the scene's `issuer` and user `alice`.
-- From `test/wire.ts`: `prefix`, `isStoreOperation`, `attemptFrom`, `identifierLockout`, `lockoutOf`, `lockoutRun`, `sessionRecord`, `cookieIndexed`, `boundaryOf`, `closingAdded`, `sessionClosed`.
+- From `test/wire.ts`: `prefix`, `isStoreOperation`, `attemptFrom`, `identifierLockout`, `lockoutOf`, `lockoutRun`, `sessionRecord`, `cookieIndexed`, `boundaryOf`, `boundariesPut`, `closingAdded`, `sessionClosed`.
 
 ## Invariants
 - The store's inside (spaces, partitions, operations, the adapter's commands) is named only in `test/wire.ts`; when the adapter and the wirings describe it themselves, that file alone changes.

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 import { audit } from "@mod/audit";
 import auditModule from "@mod/audit/module";
 import { assemble, kernelConfig } from "@mod/kernel";
@@ -62,6 +63,27 @@ it("fails as a receiver when the write fails", async () => {
 	a.record({ kind: "k" });
 	await settled();
 	expect(a.lost()).toEqual({ stdout: 1 });
+});
+
+it("counts each event lost once its reader goes away, never crashing on the stream's error, one listener however many start", async () => {
+	// Standard output whose reader has gone: every write fails as EPIPE, and the stream emits 'error'.
+	const out = new Writable({
+		write: (_chunk, _encoding, done) =>
+			done(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+	});
+	vi.spyOn(process, "stdout", "get").mockReturnValue(out as typeof process.stdout);
+	const a = await boot();
+	// Whatever else hears the stream, a second composition adds no listener of this receiver's.
+	const heard = out.listenerCount("error");
+	await boot();
+	a.record({ kind: "k" });
+	await settled();
+	expect(out.errored).toMatchObject({ code: "EPIPE" });
+	expect(a.lost()).toEqual({ stdout: 1 });
+	a.record({ kind: "k" });
+	await settled();
+	expect(a.lost()).toEqual({ stdout: 2 });
+	expect(out.listenerCount("error")).toBe(heard);
 });
 
 it("registers under the name its manifest declares (`registersAs`), the one `audit.receivers` names", async () => {

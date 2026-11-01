@@ -93,6 +93,7 @@ export function grantingWith(p: GrantingParts): Omit<Grant, "grantType"> {
 		checked: {
 			readonly subject: string;
 			readonly issuedAt?: number;
+			readonly standingAt?: number;
 			readonly expiresAt: number;
 		},
 		spend: () => Promise<"spent" | "replayed">,
@@ -126,7 +127,13 @@ export function grantingWith(p: GrantingParts): Omit<Grant, "grantType"> {
 		}
 		const { scope } = allowed;
 		const { audience } = asked;
-		const access = { subject: checked.subject, issuedTo: client.id, audience, scope };
+		const access = {
+			subject: checked.subject,
+			issuedTo: client.id,
+			audience,
+			scope,
+			standingAt: Math.min(madeAt - skewMs, checked.standingAt ?? Number.POSITIVE_INFINITY),
+		};
 		// Asked before the assertion is used up, so a refusal leaves it usable.
 		const admitted = await admits(access);
 		if (admitted.kind === "refused") return admitted;

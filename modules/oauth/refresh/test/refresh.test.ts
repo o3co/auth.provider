@@ -37,7 +37,7 @@ import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@m
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
@@ -238,11 +238,14 @@ async function serve(options: Options = {}) {
 	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
-	const { session } = await app.get(sessions).complete(testRequest(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const { session } = openedOf(
+		await app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const post = async (path: string, as: string, form: Record<string, string>) => {
 		const credentials: Record<string, string> =
 			as === "pub" ? { client_id: as } : { client_id: as, client_secret: clientSecret(as) };

@@ -81,7 +81,8 @@ export async function refusedCommands(
 ): Promise<string[]> {
 	const { prefix, replication } = options;
 	const problems = new Set<string>();
-	const storeKeys = `the store's keys (${prefix}:{…})`;
+	// The keys by the setting that names them, never its value: a refusal shows no setting's value.
+	const storeKeys = "the store's keys (<redis.prefix>:{…})";
 	const judge = (name: string, error: unknown, keys: string) => {
 		const message = error instanceof Error ? error.message : String(error);
 		if (keysRefused(message)) problems.add(`the server refuses this user ${keys}: allow them`);
@@ -99,7 +100,7 @@ export async function refusedCommands(
 	const replies = (await round.exec()) ?? [];
 	sent.forEach((name, at) => {
 		const error = replies[at]?.[0];
-		if (error) judge(name, error, `the confirmation key (${prefix}:#confirm)`);
+		if (error) judge(name, error, "the confirmation key (<redis.prefix>:#confirm)");
 	});
 	const check = `${prefix}:{#check}`;
 	try {

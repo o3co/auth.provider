@@ -35,7 +35,7 @@
 - The longest lifetime is `max-lifetime`; the clock allowance is `clock-skew`.
 - `jti` is a well-formed string of 1–256 characters.
 - The `jti` is spent last, after every other check.
-- A spent `jti` is kept per client, past the assertion's end by the allowance and a minute for the store's clock.
+- A spent `jti` is kept per client, past the assertion's end by five minutes, the widest `clock-skew` a section takes, whatever is set, and a minute for the store's clock: a `clock-skew` widened later on the same store never takes it again.
 - A spent `jti` is refused. One the store cannot answer for is unavailable.
 - A refusal tells the caller nothing more; its reason is logged.
 

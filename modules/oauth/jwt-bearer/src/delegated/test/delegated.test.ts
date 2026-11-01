@@ -23,12 +23,12 @@ import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
-import { revocations } from "@mod/subject-revocation";
+import { revocations, subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { issuancePolicies, tokens } from "@mod/tokens";
+import { issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -310,6 +310,47 @@ describe("delegated issuers", () => {
 		const a = sent({ ...valid, issuedAt: now - 120_000 });
 		expect(saidOf(await s.grant("app", a))).toBe("invalid_grant: assertion revoked");
 		expect(d.spent).toEqual([]);
+	});
+
+	it("stands the token on the delegate's standing time where it is earlier than the grant's own, so a boundary between them refuses it at verification [guarantee-4-a]", async () => {
+		const checked = defineModule(
+			{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+			(m) => [
+				m.contribute(subjectChecks).by(async (c) => {
+					const revocation = await c.get(subjectRevocation);
+					return {
+						holds: async (t) =>
+							(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+					};
+				}),
+			],
+		);
+		const d = delegating();
+		// The grant's skew 0s; the delegate's own skew 2s puts its check 2 s before the assertion's iat.
+		const s = await serve([d.module, checked], quietRuntime().log, {
+			"delegated-issuers": [idp],
+			"clock-skew": "0s",
+		});
+		clock.at = now - 11_000;
+		try {
+			await s.app.get(revocations).record("acct-1", { keepDelegations: false });
+		} finally {
+			clock.at = now;
+		}
+		// After the boundary by the grant's compare, before it by the delegate's.
+		const outcome = await s.grant("app", sent({ ...valid, standingAt: now - 12_000 }));
+		if (outcome.kind !== "issued") throw new Error(saidOf(outcome));
+		expect(await s.app.get(tokens).verifyAccess(String(outcome.body.access_token))).toEqual({
+			kind: "invalid",
+			reason: "revoked",
+		});
+		// One the delegate stands at its iat, as the grant does, verifies.
+		const same = await s.grant("app", sent({ ...valid, standingAt: valid.issuedAt }));
+		if (same.kind !== "issued") throw new Error(saidOf(same));
+		expect(await s.app.get(tokens).verifyAccess(String(same.body.access_token))).toMatchObject({
+			kind: "valid",
+			standingAt: valid.issuedAt,
+		});
 	});
 
 	it("asks the client's allowance, the audience and the issuance policies before the delegate spends, leaving the assertion usable", async () => {

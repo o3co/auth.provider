@@ -25,11 +25,11 @@ beforeAll(async () => {
 });
 
 /** Boots the module alone, keeping every warning with its fields. */
-async function refusalOf(redis: unknown) {
+async function refusalOf(redis: unknown, kernel: Parameters<typeof kernelConfig>[0] = {}) {
 	const recorded = recordingLog();
 	const refused = await assemble({
 		modules: [redisModule, tlsOptionsForTests],
-		config: { ...kernelConfig(), redis },
+		config: { ...kernelConfig(kernel), redis },
 		runtime: quietRuntime({
 			clock: { now: () => 0 },
 			random: { bytes: (n) => new Uint8Array(n) },
@@ -133,17 +133,23 @@ it("refuses boot at redis.url on a URL with a query, naming where each option is
 
 afterEach(() => vi.unstubAllEnvs());
 
-it("warns at every boot where DEBUG turns on the client's own debug log, with no value", async () => {
+it("refuses production where DEBUG turns on the client's own debug log, at redis.url, and warns of it in development, with no value", async () => {
 	const url = `redis://user:s3cr3t-pass@127.0.0.1:${refusedPort}`;
-	const debugWarned = async (debug: string) => {
-		vi.stubEnv("DEBUG", debug);
-		const { warned } = await refusalOf({ url, "connect-timeout": "100ms" });
-		return warned.filter((line) => line.event === "redis.client_debug_log");
-	};
-	expect(await debugWarned("ioredis:*")).toEqual([
-		{ level: "warn", event: "redis.client_debug_log", fields: {} },
+	const section = { url, "connect-timeout": "100ms" };
+	const reason =
+		"DEBUG turns on ioredis' own debug log, which writes this URL's password and every command's arguments; leave ioredis out of DEBUG";
+	vi.stubEnv("DEBUG", "ioredis:*");
+	const production = await refusalOf(section, { environment: "production" });
+	expect(production.refused).toBeInstanceOf(BootRefused);
+	expect((production.refused as BootRefused).refusals).toEqual([{ where: "redis.url", reason }]);
+	expect(JSON.stringify(production)).not.toContain("s3cr3t");
+	const development = await refusalOf(section, { environment: "development" });
+	expect(development.warned.filter((l) => l.event === "kernel.allowed_in_development")).toEqual([
+		{ level: "warn", event: "kernel.allowed_in_development", fields: { key: "redis.url", reason } },
 	]);
-	expect(await debugWarned("express:*")).toEqual([]);
+	vi.stubEnv("DEBUG", "express:*");
+	const other = await refusalOf(section, { environment: "development" });
+	expect(other.warned.filter((l) => l.event === "kernel.allowed_in_development")).toEqual([]);
 });
 
 it("warns at every boot where redis.url reaches Redis in the clear off this host, telling neither host nor URL", async () => {

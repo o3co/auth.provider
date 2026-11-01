@@ -15,7 +15,13 @@ const scopes = z.array(z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/));
 const actor: z.ZodType = z.lazy(() =>
 	z.object({ subject: z.string().min(1), actor: actor.optional() }),
 );
-const common = { subject: z.string().min(1), issuer: z.string(), expiresAt: z.number() };
+const common = {
+	subject: z.string().min(1),
+	issuer: z.string(),
+	expiresAt: z.number(),
+	// Required, yet none, or one not a finite number, stands before any boundary.
+	standingAt: z.number().catch(0),
+};
 const ownFields = {
 	issuedTo: z.string().optional(),
 	audience: strings,
@@ -49,6 +55,7 @@ const foreignOf = (read: {
 	subject: string;
 	issuer: string;
 	expiresAt: number;
+	standingAt: number;
 	clients: string[];
 	holderDigest?: string | undefined;
 }): ForeignToken => ({
@@ -56,6 +63,7 @@ const foreignOf = (read: {
 	subject: read.subject,
 	issuer: read.issuer,
 	expiresAt: read.expiresAt,
+	standingAt: read.standingAt,
 	clients: read.clients as [string, ...string[]],
 	...(read.holderDigest === undefined ? {} : { holderDigest: read.holderDigest }),
 });
@@ -79,6 +87,7 @@ export function selfIssued(tokens: Tokens, issuer: string): ExchangeVerifier {
 				audience: grant.audience,
 				scope: grant.scope,
 				expiresAt: checked.expiresAt,
+				standingAt: checked.standingAt,
 				issued: checked.id,
 				...(checked.binding ? { binding: checked.binding } : {}),
 				...(grant.actor ? { actor: grant.actor } : {}),

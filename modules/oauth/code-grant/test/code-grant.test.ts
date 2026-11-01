@@ -21,17 +21,23 @@ import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testin
 import { crowdingFor, memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
-import { revocations } from "@mod/subject-revocation";
+import { revocations, subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
-import { type IssuanceRequest, type IssuedAccess, issuancePolicies, tokens } from "@mod/tokens";
+import {
+	type IssuanceRequest,
+	type IssuedAccess,
+	issuancePolicies,
+	subjectChecks,
+	tokens,
+} from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { fromStored } from "../src/codes.ts";
@@ -206,11 +212,14 @@ async function serve(options: Options = {}) {
 	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
-	const { session, cookies } = await app.get(sessions).complete(testRequest(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const { session, cookies } = openedOf(
+		await app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const facts: CodeFacts = {
 		clientId: "app",
 		redirectUri: "https://app.example/cb",
@@ -311,11 +320,14 @@ it("issues for the code's subject, session and login as they were when it was is
 	const code = await s.issue();
 	const all = s.app.get(sessions);
 	expect(await all.raise(carrying(s.cookies), ["otp"])).toBeDefined();
-	const bob = await all.complete(testRequest(), {
-		subject: "bob",
-		amr: ["pwd", "otp"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const bob = openedOf(
+		await all.open(testRequest(), {
+			subject: "bob",
+			amr: ["pwd", "otp"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const params = {
 		grant_type: "authorization_code",
 		code,
@@ -332,6 +344,39 @@ it("issues for the code's subject, session and login as they were when it was is
 	expect(await s.app.get(sessionTokens).sessionOf(checked.id)).toEqual({
 		kind: "bound",
 		handle: s.session.id,
+	});
+});
+
+it("gives a token that verifies from a session opened after its subject's revocation, its authentication, as an upstream's auth_time, before it", async () => {
+	const checked = defineModule(
+		{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+		(m) => [
+			m.contribute(subjectChecks).by(async (c) => {
+				const revocation = await c.get(subjectRevocation);
+				return {
+					holds: async (t) =>
+						(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+				};
+			}),
+		],
+	);
+	const s = await serve({ extra: [checked] });
+	await s.app.get(subjectRevocation).revoke("alice");
+	shift += 1500;
+	// Federated: opened now, on an upstream login a minute old.
+	const authenticatedAt = Math.floor(runtime.clock.now() / 1000) * 1000 - 60_000;
+	const { session } = openedOf(
+		await s.app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["fed"],
+			authenticatedAt,
+			provenSince: runtime.clock.now(),
+		}),
+	);
+	const answer = await s.redeem(await s.app.get(codes).issue({ ...s.facts, session: session.id }));
+	expect(await s.app.get(tokens).verifyAccess(String(answer.body.access_token))).toMatchObject({
+		kind: "valid",
+		grant: { authenticatedAt },
 	});
 });
 
@@ -714,9 +759,14 @@ describe("what the ID token maker is told", () => {
 	it("that the authentication time is unknown, for a session whose login could not tell it", async () => {
 		const asked: IdTokenRequest[] = [];
 		const s = await serve({ extra: [recordingMaker(asked)] });
-		const { session } = await s.app
-			.get(sessions)
-			.complete(testRequest(), { subject: "alice", amr: ["pwd"], authenticatedAt: "unknown" });
+		const { session } = openedOf(
+			await s.app.get(sessions).open(testRequest(), {
+				subject: "alice",
+				amr: ["pwd"],
+				authenticatedAt: "unknown",
+				provenSince: runtime.clock.now(),
+			}),
+		);
 		const unknown = await s.app
 			.get(codes)
 			.issue({ ...s.facts, scope: ["openid"], session: session.id });
@@ -859,9 +909,14 @@ it("tells the access token and the additions that a session did not know its aut
 		})),
 	]);
 	const s = await serve({ extra: [adding] });
-	const { session } = await s.app
-		.get(sessions)
-		.complete(testRequest(), { subject: "alice", amr: ["pwd"], authenticatedAt: "unknown" });
+	const { session } = openedOf(
+		await s.app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: "unknown",
+			provenSince: runtime.clock.now(),
+		}),
+	);
 	const unknown = await s.redeem(await s.app.get(codes).issue({ ...s.facts, session: session.id }));
 	const known = await s.redeem(await s.issue());
 	const grantOf = async (body: Record<string, unknown>) => {

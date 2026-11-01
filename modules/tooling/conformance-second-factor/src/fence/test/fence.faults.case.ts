@@ -7,9 +7,15 @@ import {
 	recovered,
 	successes,
 } from "@mod/conformance/testing";
+import { pastBoundaries } from "@mod/conformance-identity";
 import { describe, expect, it } from "vitest";
 import { type Browser, faultScene, heldAt, on, usedAt } from "../../faults/test/faults.ts";
-import { boundaryRead, factorListWritten } from "../../faults/test/wire.ts";
+import {
+	boundariesPut,
+	boundaryOf,
+	boundaryRead,
+	factorListWritten,
+} from "../../faults/test/wire.ts";
 import { beginBinding, browser, totp } from "../../testing.ts";
 
 // Each scene races a change to the user's second factors with her revocation, from two instances. At
@@ -27,7 +33,6 @@ const scene = faultScene({ credential, sources: ["198.51.100.0/24"] });
 // longer than a command may on a busy host, and a resend would queue behind the hold and give up first,
 // answering unavailable before the fence decides anything.
 const patient = { "command-timeout": "10s" };
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The ledger's revocation of alice at the instance, from its block over https, as its proxy forwards it. */
 async function revokeAt(i: Instance) {
@@ -104,11 +109,15 @@ function refusedAt(
 	expect(successes(b, factorListWritten).filter((e) => e.at > from)).toEqual([]);
 }
 
-/** After the revocation: the topology recovered, past the boundary's second (compared in seconds), a new login. */
+/**
+ * After the revocation: the topology recovered, a new login a second and more past every boundary written
+ * (a boundary is its write's deadline, compared in seconds).
+ */
 async function afterAt(d: Deployed, i: Instance, code: string) {
 	await recovered(d);
 	await ready(i);
-	await pause(1_100);
+	const written = d.instances.flatMap((x) => successes(x, boundaryOf(subject)));
+	await pastBoundaries(written.flatMap((e) => boundariesPut(e.command)));
 	return signedInAt(i, code);
 }
 

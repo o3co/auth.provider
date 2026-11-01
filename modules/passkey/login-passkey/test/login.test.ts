@@ -232,6 +232,33 @@ describe("a passkey login", () => {
 		);
 	});
 
+	it("states the challenge's time, before the assertion, as the proof's start session compares", async () => {
+		const s = await serve();
+		const key = await s.registered("s-alice");
+		const before = Date.now();
+		let asserted = 0;
+		const answered = await s.login(key, {
+			between: async () => {
+				asserted = Date.now();
+			},
+		});
+		expect(answered.status).toBe(200);
+		const [facts] = s.seen;
+		expect(facts?.provenSince).toBeGreaterThanOrEqual(before);
+		expect(facts?.provenSince).toBeLessThanOrEqual(asserted);
+	});
+
+	it("refuses a login session answers revoked, as any refusal, with no session cookie", async () => {
+		const refusing = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
+			m.provide(sessions).by(() => stubSessions({ open: async () => ({ kind: "revoked" }) })),
+		]);
+		const s = await serve({ sessions: refusing });
+		const answered = await s.login(await s.registered("s-alice"));
+		expect({ status: answered.status, body: answered.body }).toEqual(failed);
+		expect(s.sessionCookie(answered.cookies)).toBe(false);
+		expect(s.events).toContainEqual(refusedBy("revoked"));
+	});
+
 	it("proves pop, and mfa only where the user was verified and counts-as-mfa is on", async () => {
 		const verified = await serve();
 		await verified.login(await verified.registered("s-alice"));
@@ -252,6 +279,9 @@ describe("a passkey login", () => {
 		const other = await s.options();
 		const elsewhere = await s.login(key, { cookie: other.cookie });
 		expect({ status: elsewhere.status, body: elsewhere.body }).toEqual(failed);
+		// The cookie sent with no value: no browser's mark, refused alike.
+		const blank = await s.login(key, { cookie: `${other.cookie.split("=")[0]}=` });
+		expect({ status: blank.status, body: blank.body }).toEqual(failed);
 		expect(s.seen).toEqual([]);
 	});
 
@@ -329,24 +359,8 @@ describe("a revocation of the subject since the challenge was made", () => {
 		expect(s.events.map((e) => e.kind)).not.toContain("passkey.session.held");
 	});
 
-	it("closes a session opened meanwhile before its cookie goes out (step 6)", async () => {
-		const closed: string[] = [];
-		const opening = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
-			m.provide(sessions).by(() =>
-				stubSessions({
-					complete: async () => ({
-						session: { id: "opened-1", context: {} as never },
-						cookies: ["session=opened-1; Path=/"],
-					}),
-					close: async (id) => {
-						closed.push(id);
-						return { kind: "closed", cookies: [] };
-					},
-				}),
-			),
-		]);
+	it("refuses a login revoked while the gates run, once session compares its challenge's time (step 6)", async () => {
 		const s = await serve({
-			sessions: opening,
 			gate: async (facts) => {
 				await s.revoke(facts.subject);
 				return { kind: "pass" };
@@ -357,7 +371,6 @@ describe("a revocation of the subject since the challenge was made", () => {
 		expect(s.sessionCookie(answered.cookies)).toBe(false);
 		expect(s.events).toContainEqual(refusedBy("revoked"));
 		expect(s.events.map((e) => e.kind)).not.toContain("passkey.session.opened");
-		expect(closed).toEqual(["opened-1"]);
 	});
 });
 
@@ -462,6 +475,7 @@ describe("the gate credential-policy", () => {
 			subject,
 			amr: ["pwd"],
 			authenticatedAt: Date.now(),
+			provenSince: Date.now(),
 			attributes: { source: loginSource.users, values: { groups } },
 		});
 

@@ -16,6 +16,8 @@
 - A field named `level`, `at` or `event` is dropped; the line's own values stand.
 - Line breaks and control characters in values are escaped by JSON, so one log line never spans two output lines.
 - A line always carries `level`, which tells it apart from an audit line.
+- Once standard output's reader has gone, a line it cannot write is dropped and never ends the process: `kernel` hears the stream's `error`.
+- At stop, the lines it has queued are written out before the stop ends, within `kernel.stop-deadline`, its hook running after the modules that log stopped; past the deadline its hook is called with the aborted signal and does not wait, so the lines then queued, `kernel.stop_failed` among them, are lost, and not counted.
 
 ## Data
 - None: it holds no state, so it is safe on multiple instances.

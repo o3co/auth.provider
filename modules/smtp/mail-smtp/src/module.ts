@@ -1,11 +1,16 @@
-import { defineModule, type LogFields, Unavailable } from "@mod/kernel";
+import { defineModule, Unavailable } from "@mod/kernel";
 import { canonicalAddress, type Message, mail, preparer, preparerTakes } from "@mod/mail";
 import { isFloor, tlsOptions } from "@mod/tls-options";
-import { RelayFailure, relayOver } from "./relay/relay.ts";
+import { RelayFailure, relayOver, type Stage } from "./relay/relay.ts";
 import { section } from "./section.ts";
 
-/** What a failure log line may hold: the stage and the codes, never the relay's words. */
-function logged(failure: unknown): LogFields {
+/** What a failure log line may hold: the stage and the codes, never the relay's words. Its keys are
+ * spelled out, so the log's type checks them as it checks a line's own names. */
+type Logged = { readonly stage: Stage | "unknown" } & {
+	readonly [K in keyof RelayFailure["codes"]]: RelayFailure["codes"][K];
+};
+
+function logged(failure: unknown): Logged {
 	if (!(failure instanceof RelayFailure)) return { stage: "unknown" };
 	return { stage: failure.stage, ...failure.codes };
 }

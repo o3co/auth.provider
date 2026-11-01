@@ -24,6 +24,12 @@ export interface AccessGrant {
 	readonly authenticatedAtUnknown?: true;
 	readonly acr?: string;
 	/**
+	 * Epoch ms: when the grant's own check compared its subject's boundary, for a token tied to no
+	 * session. Written as `o3co_standing_at` in whole seconds, floored and never after the token's
+	 * issue; it never moves the token's lifetime. Without it, the token stands from its issue.
+	 */
+	readonly standingAt?: number;
+	/**
 	 * Claims the grant adds to its access token: JSON within `added-claims`' limits, no name
 	 * reserved; an empty set is none. What the grant states, never what the provider vouches for.
 	 */
@@ -49,6 +55,8 @@ export type AccessCheck =
 			readonly id: string;
 			readonly grant: AccessGrant;
 			readonly expiresAt: number;
+			/** Epoch ms: the token's standing time, its standing claim where it carries one, else its issue time. */
+			readonly standingAt: number;
 			readonly tokenType: string;
 			readonly binding?: Binding;
 	  }
@@ -126,9 +134,11 @@ export interface Tokens extends TokenValidity<AccessCheck> {
 	admits(request: IssuanceRequest): Promise<Admitted>;
 	/**
 	 * Issues once every policy, its own first, allows it; throws Unavailable when one cannot tell.
-	 * Refuses, as its own rule, a token with less than a second left once signed, its cap passed or
-	 * its signing slow: policy `tokens`, reason `no_lifetime_left`, the client's word `expired`. Such
-	 * a token is handed to no one, and nothing of it is kept.
+	 * The token's `iat` is when `issue` was asked, before the policies are, and its lifetime runs
+	 * from there, their wait included; what it answers is left runs from signing. Refuses, as its
+	 * own rule, a token with less than a second left once signed, its cap passed, its lifetime spent
+	 * in the policies' wait or its signing slow: policy `tokens`, reason `no_lifetime_left`, the
+	 * client's word `expired`. Such a token is handed to no one, and nothing of it is kept.
 	 */
 	issue(request: IssuanceRequest, limits?: IssueLimits): Promise<Issued>;
 	verifyAccess(token: string): Promise<AccessCheck>;
@@ -146,6 +156,8 @@ export interface IssuedFor {
 	readonly subject: string;
 	/** Epoch ms. */
 	readonly issuedAt: number;
+	/** Epoch ms: the time its subject's authentication stands from, its standing claim else its issue. */
+	readonly standingAt: number;
 }
 
 /** A condition every access token must still meet, contributed by the module that owns it. */

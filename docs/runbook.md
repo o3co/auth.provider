@@ -44,7 +44,7 @@ The `redis` module checks the server once, at boot, and refuses to start when an
 
 - Redis 7.0 or later, answering as a primary. Cluster mode is refused, and so is a proxy that splits keys across nodes: a write across partitions runs as one script on the one server, over the slots of every partition it touches.
 - `maxmemory-policy noeviction`, where any composed module keeps data that must never be evicted (sessions, the token denylist, lockouts, DPoP proof ids).
-- `appendonly yes` and `appendfsync always`, where any composed module keeps data that must survive a crash. RDB snapshots are not enough.
+- `appendonly yes`, `appendfsync always` and `no-appendfsync-on-rewrite no` (Redis's default), where any composed module keeps data that must survive a crash: a rewrite that skips its fsyncs loses acknowledged writes in a crash. RDB snapshots are not enough.
 - Where any composed module keeps data that must be replicated, or read only once confirmed, with `redis.replication = replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of at least 1.
 - Where any composed module keeps such data, with `redis.replication = none`: no replica connected.
 
@@ -52,7 +52,7 @@ The check reads the server's settings with `CONFIG GET`, and `ROLE` and `INFO` a
 
 ### A managed Redis that refuses `CONFIG`
 
-Where the server refuses `CONFIG GET` for good (`NOPERM`, or the command renamed or missing), declare its settings in `redis.server-settings` (`maxmemory-policy`, `appendonly`, `appendfsync`, `min-replicas-to-write`, `min-replicas-max-lag`). The check then takes them as declared and judges them as it judges the ones it reads; a setting it needs and you left out refuses boot, naming it. Every boot logs `redis.settings_declared` with the names taken from the declaration, since nothing confirmed them. Any other error, such as `BUSY` while a long script runs, refuses boot rather than taking the declaration; start again once the server answers.
+Where the server refuses `CONFIG GET` for good (`NOPERM`, or the command renamed or missing), declare its settings in `redis.server-settings` (`maxmemory-policy`, `appendonly`, `appendfsync`, `no-appendfsync-on-rewrite`, `min-replicas-to-write`, `min-replicas-max-lag`). The check then takes them as declared and judges them as it judges the ones it reads; a setting it needs and you left out refuses boot, naming it. Every boot logs `redis.settings_declared` with the names taken from the declaration, since nothing confirmed them. Any other error, such as `BUSY` while a long script runs, refuses boot rather than taking the declaration; start again once the server answers.
 
 Declare only what the server really has: a declaration is your statement, and the check cannot see past it. Where `CONFIG GET` does answer, a declared value that differs refuses boot.
 
@@ -71,7 +71,7 @@ A managed, non-cluster Redis or Valkey with replicas and automatic failover serv
 
 - `min-replicas-to-write` of 1 or more, and `min-replicas-max-lag` of 1 or more, so a primary cut off from its replicas stops taking writes;
 - `maxmemory-policy noeviction`;
-- for the durable spaces, `appendonly yes` and `appendfsync always`, or `redis.durability = none` where the service offers neither (see [A managed Redis that refuses `CONFIG`](#a-managed-redis-that-refuses-config)).
+- for the durable spaces, `appendonly yes`, `appendfsync always` and `no-appendfsync-on-rewrite no`, or `redis.durability = none` where the service offers neither (see [A managed Redis that refuses `CONFIG`](#a-managed-redis-that-refuses-config)).
 
 Where the service keeps these in a parameter group whose defaults are 0 or another policy, make a group of your own with these values: declaring them while the server holds the defaults is a statement the check cannot see past.
 
@@ -363,6 +363,7 @@ While the ledger cannot answer, every password login outside the exempt group an
 - **`auth_dependency_up` is 0** for a probe: that dependency is down, and `/readyz` answers `503`. The probe's name says which.
 - **`auth_rate_limit_uncounted_total` rises**, by `limit` (`requests` or `attempts`): a rate limit could not count, usually because the store is down. Attempt limits then refuse with `503`; request limits refuse too, or let requests through uncounted where `rate-limit.fail-mode = open`.
 - **`auth_audit_events_lost_total` rises**, by `receiver`: a receiver is not taking events, so the audit trail has a gap. The warning `audit.receiver_losing` says why.
+- **The log goes silent** while the process serves, or `auth_audit_events_lost_total` rises for `stdout`: standard output's reader has gone. Its lines are dropped, uncounted, and the process keeps serving; it no longer exits for a supervisor to restart it. Restart the instance, or mend what reads its output.
 - **`http_request_duration_seconds`**: the rate of `5xx` answers and the latency, by method and route. A `499` is a client that closed before the answer.
 - **The process**: the Node defaults, prefixed `auth_provider_` (event loop lag, memory, handles).
 - **Warnings in the log**: a failed periodic run, probe or stop hook is one warn line naming it. `outbound.resolver_restarts` and `outbound.resolver_stuck` mean names do not resolve; see [Name resolution](#name-resolution).

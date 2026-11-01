@@ -63,13 +63,13 @@
 
 - **guarantee-4-a** MUST NOT: once a subject's boundary is written, a read from any instance lets through a session, a code, a refresh token, an access token or a session grant made before it; a revocation that cannot finish never answers done. One exception alone: where `tokens.subject-check = none` is chosen, an access token lives until it expires. A split confirmation is held by guarantee-5-a, the store's one path.
   faults: Lr, Lx, F, C, K, H2
-- **guarantee-4-b** MUST NOT: once a subject's boundary is written, a read from any instance lets a device code made before it issue a token. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
+- **guarantee-4-b** MUST NOT: once a subject's boundary is written, a read from any instance lets through a token from a device code approved before it. One exception alone: where `tokens.subject-check = none` is chosen, an access token lives until it expires. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
   faults: H2
 - **guarantee-4-c** MUST NOT: once a subject's boundary is written, a read from any instance lets an established federation grant made before it answer. One exception alone: where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations, the grant answers only to the `delegations` boundary, which such a revocation leaves where it was. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
   faults: H2
 - **guarantee-4-d** MUST NOT: once a subject's revocation is complete, a second factor's enrollment begun before it binds, or a session opened before it removes a factor or reissues recovery codes, read from any instance. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
   faults: H2
-- **guarantee-4-e** MUST NOT: once a subject's boundary is written, a read from any instance lets a token exchange made before it issue a token. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
+- **guarantee-4-e** MUST NOT: once a subject's boundary is written, a read from any instance lets through a token exchanged from a subject token made before it. The boundary's write is the artifact of guarantee-4-a (subject-revocation's boundary) on the same path, so its faults are held there.
   faults: H2
 
 ## 5 What is used once is used once, on any number of instances.
@@ -94,6 +94,7 @@
   faults: Lr, F, C, K, H2
 - **guarantee-5-j** MUST: an id_token is exchanged once, whether by the token exchange or as a JWT bearer assertion.
   faults: Lr, Lx, F, C, K, H2
+- **guarantee-5-k** MUST: a passkey assertion's challenge is redeemed only by the requester it was made for: the module that asked, by its own name, and the id it asked for; another module's assertion with the same id is refused.
 
 ## 6 A token bound to a key or a certificate is never used as a bearer token.
 

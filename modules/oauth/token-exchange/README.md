@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Contributes the Token Exchange grant (RFC 8693), `urn:ietf:params:oauth:grant-type:token-exchange`. It issues access tokens only.
-- Owns the extension point for the verifiers of the tokens a client may exchange. Verifies this provider's own access tokens itself.
+- Owns the extension point for the verifiers of the tokens a client may exchange.
 - Builds the actor chain (`act`), and checks its depth and `may_act`.
 
 ## Not here
@@ -11,7 +11,7 @@
 ## Offers
 - Composition definition, refusing boot where `tokens` checks no subject (`subjectsChecked`). The grant, and the verifier of the type `urn:ietf:params:oauth:token-type:access_token` (through `tokens`).
 - Extension point `token-exchange.verifiers`, one verifier per token type; a second for a type refuses boot.
-  - A verifier answers invalid, or a token by its `kind`, with its subject, issuer and expiry: `own`, naming the client by issued-to or audience, with its scope, audience, binding, actor chain and `may_act`; or `foreign`, another issuer's for an app, with `clients` (at least one) and `holderDigest`, `BASE64URL(SHA-256(jkt))` of the key a public client must hold. It throws unavailable when it cannot tell.
+  - A verifier answers invalid, or a token by its `kind`, with its subject, issuer, expiry and standing time: `own`, naming the client by issued-to or audience, with its scope, audience, binding, actor chain and `may_act`; or `foreign`, another issuer's for an app, with `clients` (at least one) and `holderDigest`, `BASE64URL(SHA-256(jkt))` of the key a public client must hold. It throws unavailable when it cannot tell.
   - `issued` names a token this provider issued, so its ties are asked. Only the built-in verifier's `issued`, amr, authentication time and acr are read.
   - `consume(token)`, optional: records a once-only token, answering `consumed` or `replayed`.
 - Client metadata section `token-exchange`: `others-tokens` and `public-exchange`, each default false; see Invariants.
@@ -29,7 +29,7 @@
 - `act` is the actor's subject over the subject token's chain. Without an actor there is no `act`. A chain past `max-actor-depth` is refused. A `may_act` must name the actor, or the client when there is none; a client never matches an entry with an issuer.
 - A revoked or expired token, or one a tie answers ended (its family, or its session closed or short of a requirement, each told apart in the description), is refused, as subject or actor: the subject's ties first, each token's in their names' order.
 - The issued token joins the subject token's ties in their names' order (family, then session), issued from the session one names, so `token-endpoint` records it there; at the first that ended meanwhile, it is revoked and the exchange refused. Ties naming two sessions are Unavailable. The actor token's ties only refuse.
-- It never outlives the subject token or the earliest end its ties give. Revoking the subject token alone does not end it.
+- It never outlives the subject token or the earliest end its ties give. Revoking the subject token alone does not end it. It stands from the subject token's standing time; one not a finite number is 0, before any boundary.
 - Its lifetime is the `o3co_expires_in` asked, or `tokens`' lifetime when none is asked, cut to `max-lifetime`; without that cap, `tokens`' lifetime cuts an asked one too. `expires_in` in the answer is that lifetime.
 - `o3co_expires_in` (RFC 6749 §8.2: `expires_in` is registered for answers only) left out or empty asks for nothing. Otherwise it is 1–10 ASCII digits, from 2 (as `max-lifetime`), or `invalid_request` before any token is checked. A request's `expires_in` is ignored.
 - The subject's amr, authentication time and acr are carried only from this provider's own tokens.

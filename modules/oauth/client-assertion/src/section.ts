@@ -2,6 +2,9 @@ import { setting } from "@mod/kernel";
 import { type VerifyAlgorithm, verifyAlgorithms } from "@mod/keys";
 import { z } from "zod";
 
+/** The widest `clock-skew` a section takes, in seconds: a spent assertion is kept past it, whatever is set. */
+export const widestClockSkew = 300;
+
 export const section = z.strictObject({
 	"max-lifetime": setting
 		.duration("s")
@@ -12,7 +15,7 @@ export const section = z.strictObject({
 		),
 	"clock-skew": setting
 		.duration("s")
-		.pipe(z.number().int().min(0).max(300))
+		.pipe(z.number().int().min(0).max(widestClockSkew))
 		.prefault("30s")
 		.describe(
 			"How far a client's clock may be off when an assertion's times are checked, from `0s` to `5m` in whole seconds.",

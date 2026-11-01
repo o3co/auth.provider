@@ -140,7 +140,7 @@ From `@mod/exchange-id-tokens`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `exchange-id-tokens.max-age` | string | `10m` |  |  |  | The oldest an id_token may be, from its `iat`, from 1m to 1h. |
-| `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. |
+| `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. Set it no lower than your issuers' real clock drift: narrowing it can admit an id_token a wider skew refused at a revocation. |
 | `exchange-id-tokens.apple.upstream` | string | `apple` when `exchange-id-tokens.apple` is set |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
 | `exchange-id-tokens.apple.clients` | map |  | when `exchange-id-tokens.apple` is set |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
 | `exchange-id-tokens.apple.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256"]` when `exchange-id-tokens.apple` is set |  |  |  | The algorithms Apple's id_tokens may be signed with: asymmetric ones only, RS256 by default. |
@@ -289,7 +289,7 @@ From `@mod/jwt-bearer`.
 | `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks","subject":"as-is","conditions":{"subject-prefix":"REPLACE-SUBJECT-PREFIX"}}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. An entry's keys are `issuer`; `keys`, or `jwks-uri` with `accept-key-set-elsewhere`, or neither; `subject`, `upstream`, `subject-is-key-thumbprint`, `self-issued-prefix`, `conditions`, `accept-any-subject`, `ceiling`, `max-assertion-lifetime`, `clock-skew`, `profile` and `client`; and `algorithms`, which only an entry without `keys` takes; `jwt-bearer`'s internal module `issuers` says what each takes. |
 | `jwt-bearer.delegated-issuers` | list of string | `[]` |  |  |  | Issuers whose assertions another module checks by its own rules, each exactly as sent: their audience is an app, not this server, so RFC 7523 §3 does not hold. Each needs the one module that checks it. |
 | `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | How far ahead its `exp` an assertion may be when it is taken, and how far its `exp` may be from its `iat`, from `1s` to `1d` in whole seconds. |
-| `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
+| `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. Set it no lower than your issuers' real clock drift: narrowing it can admit an assertion a wider skew refused at a revocation. |
 
 ## kernel
 
@@ -565,10 +565,11 @@ From `@mod/redis`.
 | `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |
 | `redis.command-timeout` | string | `1s` |  |  |  | How long one Redis command may take, from 10ms to 1m. |
 | `redis.replication` | none \| replicas |  |  | `REDIS_REPLICATION` | `replicas` | Required when a space asks for replication or confirmed reads. "replicas": every write must reach the replicas, and Redis itself must refuse writes without them. "none": the operator states there is no failover at all, accepting that a failover would lose writes. |
-| `redis.durability` | none |  |  |  |  | "none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes and appendfsync always. |
+| `redis.durability` | none |  |  |  |  | "none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes, appendfsync always and no-appendfsync-on-rewrite no. |
 | `redis.server-settings.maxmemory-policy` | string |  |  |  |  | The server's maxmemory-policy, as it is set there. |
 | `redis.server-settings.appendonly` | yes \| no |  |  |  |  | Whether the server keeps an append-only file. |
 | `redis.server-settings.appendfsync` | always \| everysec \| no |  |  |  |  | How often the server fsyncs its append-only file. |
+| `redis.server-settings.no-appendfsync-on-rewrite` | yes \| no |  |  |  |  | Whether the server skips its fsyncs while it rewrites its append-only file. |
 | `redis.server-settings.min-replicas-to-write` | integer (0–9007199254740991) |  |  |  |  | The replicas the server needs before it takes a write. |
 | `redis.server-settings.min-replicas-max-lag` | integer (0–9007199254740991) |  |  |  |  | How many seconds behind a replica may be and still count for writes. |
 
@@ -762,7 +763,7 @@ From `@mod/tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `2s` to `1d` in whole seconds. |
+| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from when it is asked for (the issuance policies' wait included), from `2s` to `1d` in whole seconds. |
 | `tokens.revocation` | denylist \| unsupported |  | yes | `TOKENS_REVOCATION` | `denylist` | Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported. |
 | `tokens.issuance-timeout` | string | `10s` |  |  |  | How long the issuance policies may take together, from `1s` to `1m`; past it, the issuance is unavailable. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |

@@ -3,7 +3,7 @@ import { type AreaScene, areaTarget, type Fake, fakeHttp, type Started } from "@
 import { codeScene } from "@mod/conformance-code";
 import { browserAt } from "@mod/conformance-code/testing";
 import { deviceArea } from "@mod/conformance-device";
-import { ledgerRevocation } from "@mod/conformance-identity";
+import { ledgerRevocation, revocationWindowMs } from "@mod/conformance-identity";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { exchangeArea } from "../src/main.ts";
@@ -138,6 +138,19 @@ async function approvedDevice() {
 	expect(res.status).toBe(200);
 	return given.body.device_code ?? "";
 }
+/** A login of the user's from the browser, answered as it is: its status and error. */
+async function loginAnswer() {
+	const res = await fetch(`${base}/session/login`, {
+		method: "POST",
+		headers: browser.headers({
+			"content-type": "application/x-www-form-urlencoded",
+			origin: issuer,
+		}),
+		body: new URLSearchParams(user),
+	});
+	const text = await res.text();
+	return [res.status, text ? (JSON.parse(text) as { error?: string }).error : undefined];
+}
 /** The ledger's revocation of a subject, from its block over https, as its proxy forwards it. */
 async function revoke(revoked: string) {
 	const res = await fetch(`${base}/ledger/subject-revocations`, {
@@ -179,7 +192,9 @@ describe.runIf(areaTarget().can(ledgerRevocation))(
 			for (const token of issued) expect(await active(token)).toBe(true);
 
 			const before = told.received.length;
+			const sentAt = performance.now();
 			expect(await revoke(subject)).toEqual({ status: 200, json: { complete: true } });
+			const answeredAt = performance.now();
 
 			// The session closed, so its client is told by a logout token naming it.
 			for (let i = 0; i < 100 && told.received.length === before; i++) await wait(50);
@@ -213,8 +228,13 @@ describe.runIf(areaTarget().can(ledgerRevocation))(
 			for (const token of issued) expect(await active(token)).toBe(false);
 			expect(refusal(await exchange(tokens.access_token))).toEqual([400, "invalid_request"]);
 
-			// A login after the boundary's second is past it, and lets the user in again.
-			await wait(1100);
+			// The boundary is the deadline of the write that recorded it, its patience (10 s) past a send
+			// after the revocation was sent: a login 9 s past that is still before it, refused as a wrong
+			// password is.
+			await wait(sentAt + 9_000 - performance.now());
+			expect(await loginAnswer()).toEqual([401, "invalid_credentials"]);
+			// Past the window U-0.19-126 states, a login lets the user in again.
+			await wait(answeredAt + revocationWindowMs - performance.now());
 			browser.forget();
 			const again = await browser.authorize(codeRequest({ prompt: "none" }));
 			expect(again.at?.searchParams.get("code")).toBeTruthy();

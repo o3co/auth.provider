@@ -38,13 +38,7 @@ export const gating = (m: Parts<Settings>) =>
 	}));
 
 /** What `partsIn` takes from the build context. */
-export const partsTakes = [
-	sessions,
-	logins,
-	subjectRevocation,
-	audit,
-	...transactionsTakes,
-] as const;
+export const partsTakes = [sessions, logins, audit, ...transactionsTakes] as const;
 
 /** The parts the module binding factors takes, from the contracts this package pulls. */
 export async function partsIn(c: BuildContext<Settings>) {
@@ -52,7 +46,6 @@ export async function partsIn(c: BuildContext<Settings>) {
 	const resume = resumeOver({
 		sessions: await c.get(sessions),
 		logins: await c.get(logins),
-		revocation: await c.get(subjectRevocation),
 		transactions,
 		log: c.log,
 	});

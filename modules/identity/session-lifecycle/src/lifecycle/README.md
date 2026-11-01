@@ -22,7 +22,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - Entry at a level.
 - Entry by a request's cookie (`entryIn`, behind `enter` and `enterFor`) reads which session the cookie opens again once the entry is decided, and is absent unless it still opens it. A raise retires the old cookie before it writes the session, so a cookie a raise retired meanwhile never enters the raised session.
 - A read that finds an open record ended by the lifetime in force closes it there, calling no participants; a close that finds one calls them, as any close does.
-- `open` (as `complete`), `close` (as `close`) and `closeIn` (as `closeRequest`).
+- `open` (as `open`), `close` (as `close`) and `closeIn` (as `closeRequest`).
 - One sweep of pending closings, which goes on past a failing one.
 - A sweep ends at the stop signal, and the host waits for it.
 - A new secret indexed to a handle as a cookie for a given time, unavailable unless the index answers created.
