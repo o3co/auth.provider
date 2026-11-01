@@ -61,7 +61,7 @@ const proof = async () =>
 		.sign(holder.privateKey);
 
 describe.runIf(areaTarget().can("dpop"))("session grant: binding", () => {
-	it("binds the token to the key the request proves", async () => {
+	it("binds the token to the key the request proves [rfc9449-5-b]", async () => {
 		const res = await fetch(`${base}/oauth/token`, {
 			method: "POST",
 			headers: browser.headers({

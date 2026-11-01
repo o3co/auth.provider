@@ -34,7 +34,8 @@ const scene = codeScene({
 	clients: [
 		client("app", defaults),
 		client("third", { ...defaults, firstParty: false }),
-		client("nocode", { ...defaults, grants: ["client_credentials"] }),
+		// Allowed no grant, so not the code, and the scene needs no other grant composed.
+		client("nocode", { ...defaults, grants: [] }),
 		client("nodefault"),
 	],
 	users: [{ identifier: "alice", password: "correct horse battery" }],
@@ -69,7 +70,7 @@ const authorizing = (events: readonly SentEvent[]) =>
 	events.filter((event) => event.kind.startsWith("authorize."));
 
 describe.runIf(areaTarget().can(auditEvents.need))("authorization endpoint: audit events", () => {
-	it("records a code given with the subject and the client, never the code", async () => {
+	it("records a code given with the subject and the client, never the code [guarantee-8-c]", async () => {
 		await browser.login();
 		const given = await auditEvents.of(running).during(() => browser.authorize(request()));
 		const code = given.result.at?.searchParams.get("code") ?? "";

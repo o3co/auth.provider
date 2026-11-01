@@ -6,6 +6,10 @@ import { type CodeScene, codeScene } from "../src/main.ts";
 import { backChannel, browserAt } from "../src/testing.ts";
 
 const issuer = "https://issuer.example";
+/** How a session grant with no session to use is refused, by the target. */
+const noSession = areaTarget().differs("session-grant-invalid-grant")
+	? [401, "unauthorized"]
+	: [400, "invalid_grant"];
 const api = "https://api.example";
 const pair = generateKeyPairSync("ed25519");
 // Each client names its audience and an empty default scope, so both targets issue alike.
@@ -33,7 +37,8 @@ const svc: ClientScene = {
 	kind: "confidential",
 	method: "client_secret_basic",
 	secret: "svc-secret-0123456789abcdef",
-	grants: ["client_credentials"],
+	// Allowed no grant, so not this one, and the scene needs no other grant composed.
+	grants: [],
 	scopes: ["read"],
 	audiences: [api],
 };
@@ -124,7 +129,7 @@ async function introspect(token: string) {
 }
 
 describe("session grant", () => {
-	it("gives a confidential client an access token for the session's user, and nothing more", async () => {
+	it("gives a confidential client an access token for the session's user, and nothing more [rfc6749-5.1-a]", async () => {
 		const res = await sessionGrant(asBff);
 		expect(res.status).toBe(200);
 		expect(res.body).toMatchObject({ token_type: "Bearer", scope: "read" });
@@ -167,34 +172,34 @@ describe("session grant", () => {
 		expect(await browser.logout()).toBe(200);
 		expect((await introspect(issued.body.access_token ?? "")).active).toBe(false);
 		const again = await sessionGrant({ ...asBff, cookie });
-		expect([again.status, again.body.error]).toEqual([401, "unauthorized"]);
+		expect([again.status, again.body.error]).toEqual(noSession);
 	});
 });
 
 describe("session grant: refusals", () => {
-	it("refuses a request without a session as unauthorized", async () => {
+	it("refuses a request without a session as invalid_grant [rfc6749-8.5-a]", async () => {
 		const res = await sessionGrant({ ...asBff, cookie: "" });
-		expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);
+		expect([res.status, res.body.error]).toEqual(noSession);
 	});
 
-	it("refuses a client not allowed the grant", async () => {
+	it("refuses a client not allowed the grant [rfc6749-5.2-a]", async () => {
 		const res = await sessionGrant({ client: svc });
 		expect([res.status, res.body.error]).toEqual([400, "unauthorized_client"]);
 	});
 
 	it.skipIf(areaTarget().differs("session-grant-same-origin-only"))(
-		"refuses a request from another origin as unauthorized",
+		"refuses a request from another origin as unauthorized [guarantee-9-a]",
 		async () => {
 			const res = await sessionGrant({ ...asBff, origin: "https://elsewhere.example" });
-			expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);
+			expect([res.status, res.body.error]).toEqual(noSession);
 		},
 	);
 
 	it.skipIf(areaTarget().differs("session-grant-needs-origin-evidence"))(
-		"refuses a request without same-origin evidence as unauthorized",
+		"refuses a request without same-origin evidence as unauthorized [guarantee-9-a]",
 		async () => {
 			const res = await sessionGrant({ ...asBff, origin: null });
-			expect([res.status, res.body.error]).toEqual([401, "unauthorized"]);
+			expect([res.status, res.body.error]).toEqual(noSession);
 		},
 	);
 
@@ -214,7 +219,7 @@ describe("session grant: whose allowance", () => {
 		expect(res.body).not.toHaveProperty("access_token");
 	});
 
-	it("refuses a confidential client named in the body without its credentials", async () => {
+	it("refuses a confidential client named in the body without its credentials [rfc6749-2.2-a] [rfc6749-2.3.1-d] [rfc6749-3.2.1-a]", async () => {
 		const res = await sessionGrant({ form: { client_id: "bff", scope: "read" } });
 		expect([res.status, res.body.error]).toEqual([401, "invalid_client"]);
 	});

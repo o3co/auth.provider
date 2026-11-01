@@ -1,8 +1,8 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Fake, fakeHttp, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { codeScene } from "../src/main.ts";
-import { browserAt } from "../src/testing.ts";
+import { codeScene } from "../../main.ts";
+import { browserAt } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
 const registeredId = "https://app.example/client.json";
@@ -34,7 +34,7 @@ const scene = codeScene({
 	],
 	users: [user],
 	discovery: true,
-	documents: { deny: ["denied.example"], scopes: ["openid"] },
+	documents: { anyHost: true, deny: ["denied.example"], scopes: ["openid"] },
 });
 
 let running: Started;
@@ -95,7 +95,7 @@ describe("metadata document clients: ids refused before any fetch", () => {
 		] as const;
 	};
 
-	it("answers each with 400 and no redirect, and fetches nothing", async () => {
+	it("answers each with 400 and no redirect, and fetches nothing [rfc6749-4.1.2.1-a] [rfc6749-4.1.2.1-b] [oidc-core-3.1.2.6-b]", async () => {
 		const answers = [];
 		for (const [what, id] of ids()) {
 			const res = await authorizing(id, "https://other.example/cb");

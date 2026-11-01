@@ -4,7 +4,7 @@ import { type Issued, issue, pemOf, thumbprintOf } from "@mod/conformance-mtls";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { codeScene } from "../../main.ts";
-import { backChannel } from "../../testing.ts";
+import { backChannel, succeeded } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
 const header = "x-client-cert";
@@ -64,7 +64,10 @@ async function boundTo(issued: Issued) {
 			client_secret: svc.secret ?? "",
 		}),
 	});
-	const { access_token: token = "" } = (await res.json()) as Record<string, string>;
+	const { access_token: token = "" } = (await succeeded(res, "the token endpoint")) as Record<
+		string,
+		string
+	>;
 	const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
 	expect(claims.cnf).toEqual({ "x5t#S256": thumbprintOf(issued.der) });
 	return token;
@@ -86,13 +89,13 @@ async function userinfo(token: string, certificate?: Issued) {
 }
 
 describe("OpenID Connect userinfo: a token bound to the client's certificate (mTLS)", () => {
-	it("answers the client that presents the certificate the token is bound to", async () => {
+	it("answers the client that presents the certificate the token is bound to [rfc8705-3-b] [rfc8705-3.1-a] [rfc8705-3.1-b] [rfc8705-3.1-c]", async () => {
 		const own = await issue({ cn: "client" });
 		const answer = await userinfo(await boundTo(own), own);
 		expect([answer.status, Object.keys(answer.body)]).toEqual([200, ["sub"]]);
 	});
 
-	it("refuses the token with another certificate, or with none", async () => {
+	it("refuses the token with another certificate, or with none, as invalid_token [rfc8705-3-b] [rfc8705-3-c] [guarantee-6-a]", async () => {
 		const own = await issue({ cn: "client" });
 		const token = await boundTo(own);
 		for (const [name, certificate] of [
@@ -102,6 +105,7 @@ describe("OpenID Connect userinfo: a token bound to the client's certificate (mT
 			const answer = await userinfo(token, certificate);
 			expect([name, answer.status], name).toEqual([name, 401]);
 			expect(answer.challenge, name).toMatch(/^Bearer/);
+			expect(answer.challenge, name).toMatch(/error="invalid_token"/);
 		}
 	});
 });

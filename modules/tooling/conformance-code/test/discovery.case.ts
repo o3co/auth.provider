@@ -48,7 +48,7 @@ function started(scene: CodeScene) {
 
 describe("the metadata document with the code flow", () => {
 	const at = started(fields);
-	it("tells where to authorize, that the answer is a code, and that PKCE is by S256", async () => {
+	it("tells where to authorize, that the answer is a code, and that PKCE is by S256 [oidc-discovery-3-d] [oidc-discovery-3-v] [oidc-discovery-4-a] [oidc-discovery-4.1-a] [rfc8414-2-b] [rfc8414-2-g] [rfc9700-2.1.1-c] [rfc9700-2.1.1-d] [rfc9700-2.6-a]", async () => {
 		const res = await fetch(`${at.base}/.well-known/openid-configuration`);
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as Record<string, unknown>;
@@ -57,7 +57,7 @@ describe("the metadata document with the code flow", () => {
 		expect(body.code_challenge_methods_supported).toEqual(["S256"]);
 	});
 
-	it("names the algorithm ID tokens are signed with, and where the keys to check them are", async () => {
+	it("names the algorithm ID tokens are signed with, and where the keys to check them are [oidc-discovery-3-j] [oidc-discovery-3-z]", async () => {
 		const body = (await (
 			await fetch(`${at.base}/.well-known/openid-configuration`)
 		).json()) as Record<string, unknown>;
@@ -66,7 +66,7 @@ describe("the metadata document with the code flow", () => {
 		expect(body.jwks_uri).toBe(new URL("/.well-known/jwks.json", issuer).href);
 	});
 
-	it("names openid, profile, email and groups as the scopes it supports", async () => {
+	it("names openid, profile, email and groups as the scopes it supports [oidc-discovery-3-s] [rfc8414-2-f]", async () => {
 		const body = (await (
 			await fetch(`${at.base}/.well-known/openid-configuration`)
 		).json()) as Record<string, unknown>;

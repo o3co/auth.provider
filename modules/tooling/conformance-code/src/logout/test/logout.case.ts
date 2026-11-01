@@ -3,7 +3,7 @@ import { areaTarget, type Fake, fakeHttp, type Started } from "@mod/conformance"
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type CodeScene, codeScene } from "../../main.ts";
-import { backChannel, browserAt } from "../../testing.ts";
+import { backChannel, browserAt, succeeded } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
 const back = "https://app.example/after";
@@ -36,6 +36,8 @@ const sceneWith = (clients: readonly ClientScene[], allowed: readonly string[]):
 	users: [{ identifier: user.username, password: user.password }],
 	discovery: true,
 	logout: { allowed },
+	// Each scene signs a browser in afresh, all from one sender.
+	login: { attempts: 100 },
 });
 
 /** The back channel of an allowed client, and of one the operator did not allow. */
@@ -51,7 +53,6 @@ beforeAll(async () => {
 		frontchannelLogoutUri: "https://app.example/fc",
 		backchannelLogoutUri: `${told.base}/bc`,
 	});
-	const far = client("far", { backchannelLogoutUri: `${unlisted.base}/bc` });
 	// A second front channel, at another origin, that does not ask for the session.
 	const side = client("side", {
 		frontchannelLogoutUri: "https://side.example/fc",
@@ -66,9 +67,7 @@ beforeAll(async () => {
 		backchannelLogoutUri: `${told.base}/lean`,
 		backchannelLogoutSessionRequired: false,
 	});
-	running = await areaTarget().start(
-		codeScene(sceneWith([app, far, keen, lean, side], [told.base])),
-	);
+	running = await areaTarget().start(codeScene(sceneWith([app, keen, lean, side], [told.base])));
 	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
 	base = running.baseUrl;
 });
@@ -105,8 +104,8 @@ const codeRequest = (clientId: string) => ({
 });
 
 /** A browser signed in afresh, and the ID token and access token a client's code gives in its session. */
-async function signedIn(id = "app") {
-	const browser = browserAt(() => base, issuer, user);
+async function signedIn(id = "app", source?: string) {
+	const browser = browserAt(() => base, issuer, user, source);
 	const tokensFor = async (clientId: string) => {
 		const answer = await browser.authorize(codeRequest(clientId));
 		const res = await fetch(`${base}/oauth/token`, {
@@ -121,7 +120,10 @@ async function signedIn(id = "app") {
 				code_verifier: verifier,
 			}),
 		});
-		const body = (await res.json()) as { id_token?: string; access_token?: string };
+		const body = (await succeeded(res, "the token endpoint")) as {
+			id_token?: string;
+			access_token?: string;
+		};
 		return { idToken: String(body.id_token), accessToken: String(body.access_token) };
 	};
 	return { browser, ...(await tokensFor(id)), tokensFor };
@@ -132,10 +134,13 @@ type SignedIn = Awaited<ReturnType<typeof signedIn>>;
 async function logout(
 	at: SignedIn,
 	method: "GET" | "POST",
-	params: Record<string, string>,
+	/** The parameters, or their pairs in order where a name is sent more than once. */
+	params: Record<string, string> | readonly (readonly [string, string])[],
 	extra: Record<string, string> = {},
 ) {
-	const query = new URLSearchParams(params).toString();
+	const query = new URLSearchParams(
+		Array.isArray(params) ? params.map(([k, v]) => [k, v]) : (params as Record<string, string>),
+	).toString();
 	const res = await fetch(`${base}/oauth/logout${method === "GET" ? `?${query}` : ""}`, {
 		method,
 		redirect: "manual",
@@ -147,12 +152,28 @@ async function logout(
 		...(method === "POST" ? { body: query } : {}),
 	});
 	const text = await res.text();
+	// A hinted POST is carried on to the logout's own GET: followed, as a browser follows it.
+	const location = res.headers.get("location") ?? "";
+	if (res.status === 303 && location.startsWith("/oauth/logout?")) {
+		const carried = Object.fromEntries(new URL(location, base).searchParams);
+		return logout(at, "GET", carried, extra);
+	}
 	const json = res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : undefined;
 	return { status: res.status, headers: res.headers, text, json };
 }
-/** Whether the browser's session still gives a code. */
-const stillSignedIn = async (at: SignedIn) =>
-	(await at.browser.authorize(codeRequest("app"))).at?.searchParams.get("code") != null;
+/**
+ * Whether the browser's session still gives a code: a code is yes, a `302` to the login page, the
+ * answer both builds give a browser without a session, is no, and any other answer (a limit, an
+ * outage, an error at the client) fails the scene rather than read as signed out.
+ */
+const stillSignedIn = async (at: SignedIn) => {
+	const res = await at.browser.authorize(codeRequest("app"));
+	if (res.at?.searchParams.get("code") != null) return true;
+	const toLogIn =
+		res.at !== undefined && `${res.at.origin}${res.at.pathname}` === `${issuer}/login`;
+	if (res.status === 302 && toLogIn) return false;
+	throw new Error(`authorize answered ${res.status}, ${res.at?.href ?? "no redirect"}`);
+};
 
 const unescaped = (text: string) =>
 	text.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code))).replace(/&amp;/g, "&");
@@ -178,7 +199,7 @@ const hashOf = (script: string) =>
 	`'sha256-${createHash("sha256").update(script).digest("base64")}'`;
 
 describe("a logout the client starts", () => {
-	it("ends the session the hint names and sends the browser back with its state, by GET or POST", async () => {
+	it("ends the session the hint names and sends the browser back with its state, by GET or POST [oidc-rpinit-2-d]", async () => {
 		for (const method of ["GET", "POST"] as const) {
 			const at = await signedIn();
 			expect(await stillSignedIn(at)).toBe(true);
@@ -197,30 +218,290 @@ describe("a logout the client starts", () => {
 		expect([again.status, again.json]).toEqual([200, { logged_out: true }]);
 	});
 
-	// Open redirect: only a return the hint's client registered, compared exactly, is followed.
-	it("never sends the browser to a return the client did not register, and still ends the session", async () => {
-		for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
-			const at = await signedIn();
-			const answer = await logout(at, "GET", {
-				id_token_hint: at.idToken,
-				post_logout_redirect_uri: asked,
-			});
-			expect([answer.status, answer.json]).toEqual([200, { logged_out: true }]);
-			expect(await stillSignedIn(at)).toBe(false);
-		}
-	});
+	// Open redirect: only a return the hint's client registered, compared exactly, is taken; any other
+	// refuses the request, the session left as it was.
+	it.runIf(!areaTarget().differs("logout-unregistered-return-refused"))(
+		"refuses a return the client did not register, never sending the browser to it, and leaves the session [oidc-rpinit-2-b] [oidc-rpinit-3-b] [oidc-rpinit-4-c]",
+		async () => {
+			for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
+				const at = await signedIn();
+				for (const accept of ["application/json", "text/html"]) {
+					const answer = await logout(
+						at,
+						"GET",
+						{ id_token_hint: at.idToken, post_logout_redirect_uri: asked },
+						{ accept },
+					);
+					expect([asked, accept, answer.status, answer.json]).toEqual([
+						asked,
+						accept,
+						400,
+						{
+							error: "invalid_request",
+							error_description: "post_logout_redirect_uri is not registered for the client",
+						},
+					]);
+					expect(answer.headers.get("location")).toBeNull();
+				}
+				expect(await stillSignedIn(at)).toBe(true);
+			}
+		},
+	);
 
-	it("refuses a request without a hint", async () => {
-		const at = await signedIn();
-		for (const method of ["GET", "POST"] as const) {
-			const answer = await logout(at, method, { post_logout_redirect_uri: back });
-			expect([answer.status, answer.json?.error]).toEqual([400, "invalid_request"]);
-		}
-		expect(await stillSignedIn(at)).toBe(true);
-	});
+	// A client_id beside the hint must be the client the ID token was issued to (RP-Initiated Logout 1.0 §2).
+	it.runIf(!areaTarget().differs("logout-client-id-checked"))(
+		"refuses a client_id that is not the client the hint was issued to, leaving the session [oidc-rpinit-2-a] [oidc-rpinit-4-c]",
+		async () => {
+			const at = await signedIn();
+			for (const method of ["GET", "POST"] as const) {
+				const answer = await logout(at, method, { id_token_hint: at.idToken, client_id: "other" });
+				expect([answer.status, answer.json]).toEqual([
+					400,
+					{
+						error: "invalid_request",
+						error_description: "client_id is not the client the id_token_hint was issued to",
+					},
+				]);
+			}
+			expect(await stillSignedIn(at)).toBe(true);
+		},
+	);
+
+	// A parameter sent twice reads as none: refused first, so neither the client_id check nor the
+	// return's can be passed by sending it twice.
+	it.runIf(!areaTarget().differs("logout-repeated-parameter-refused"))(
+		"refuses a client_id or a return sent twice, leaving the session [oidc-rpinit-4-c]",
+		async () => {
+			for (const [name, value] of [
+				["client_id", "other"],
+				["post_logout_redirect_uri", `${back}/x`],
+			] as const) {
+				const at = await signedIn();
+				for (const method of ["GET", "POST"] as const) {
+					const answer = await logout(at, method, [
+						["id_token_hint", at.idToken],
+						[name, value],
+						[name, value],
+					]);
+					expect([name, method, answer.status, answer.json]).toEqual([
+						name,
+						method,
+						400,
+						{ error: "invalid_request", error_description: "repeated parameter" },
+					]);
+				}
+				expect([name, await stillSignedIn(at)]).toEqual([name, true]);
+			}
+		},
+	);
+
+	// RP-Initiated Logout 1.0 §2: with no hint, the OP asks the End-User whether to log out; §3: with no
+	// hint, a return cannot be confirmed as the client's, so the confirmation never sends the browser to it.
+	describe.runIf(!areaTarget().differs("logout-confirmed-without-hint"))(
+		"a logout a client starts without a hint",
+		() => {
+			/** The confirmation page as the browser holding the session gets it, with the form's cookie. */
+			const confirmationFor = async (at: SignedIn, request?: string) => {
+				const session = await at.browser.login();
+				const carried = request === undefined ? "" : `?${new URLSearchParams({ request })}`;
+				const res = await fetch(`${base}/oauth/logout/confirm${carried}`, {
+					headers: at.browser.headers({ cookie: session }),
+				});
+				const text = await res.text();
+				const field = (name: string) =>
+					unescaped(new RegExp(`name="${name}" value="([^"]*)"`).exec(text)?.[1] ?? "");
+				const csrf = res.headers.getSetCookie().map((c) => c.split(";")[0] ?? "")[0] ?? "";
+				return {
+					res,
+					text,
+					cookie: `${session}; ${csrf}`,
+					token: field("csrf_token"),
+					confirmation: field("confirmation"),
+				};
+			};
+			/** The form posted as a browser does from a page under no-referrer: Origin null, no Referer. */
+			const posted = (
+				at: SignedIn,
+				cookie: string,
+				fields: Record<string, string>,
+				origin = "null",
+			) =>
+				fetch(`${base}/oauth/logout/confirm`, {
+					method: "POST",
+					redirect: "manual",
+					headers: at.browser.headers({
+						cookie,
+						origin,
+						"content-type": "application/x-www-form-urlencoded",
+					}),
+					body: new URLSearchParams(fields).toString(),
+				});
+
+			it("asks the person on its own site whether to log out, and logs them out once they agree [oidc-rpinit-2-i] [oidc-rpinit-2-j]", async () => {
+				const at = await signedIn();
+				// The RP's cross-site POST carries no session cookie: it is sent on to this site first.
+				const started = await fetch(`${base}/oauth/logout`, {
+					method: "POST",
+					redirect: "manual",
+					headers: at.browser.headers({ "content-type": "application/x-www-form-urlencoded" }),
+					body: new URLSearchParams({ state: "s" }).toString(),
+				});
+				expect([started.status, started.headers.get("location")]).toEqual([
+					303,
+					"/oauth/logout/confirm",
+				]);
+				expect(await stillSignedIn(at)).toBe(true);
+				const page = await confirmationFor(at);
+				expect(page.res.status).toBe(200);
+				expect(page.text).toContain("Do you want to log out of");
+				const policy = page.res.headers.get("content-security-policy") ?? "";
+				expect(policy).toContain("form-action 'self'");
+				expect(policy).toContain("frame-ancestors 'none'");
+				expect(policy).not.toContain("script-src");
+				const done = await posted(at, page.cookie, {
+					csrf_token: page.token,
+					confirmation: page.confirmation,
+				});
+				expect(done.status).toBe(200);
+				expect(await done.text()).toContain("You are logged out.");
+				expect(await stillSignedIn(at)).toBe(false);
+			});
+
+			it("asks the person where a request without a hint names a return, and once they agree never sends the browser to it [oidc-rpinit-2-i] [oidc-rpinit-3-a]", async () => {
+				for (const method of ["GET", "POST"] as const) {
+					const at = await signedIn();
+					const started = await logout(at, method, {
+						post_logout_redirect_uri: back,
+						client_id: "app",
+						state: "s",
+					});
+					expect([method, started.status, started.headers.get("location")]).toEqual([
+						method,
+						303,
+						"/oauth/logout/confirm",
+					]);
+					expect(await stillSignedIn(at)).toBe(true);
+					const page = await confirmationFor(at);
+					expect(page.text).toContain("Do you want to log out of");
+					expect(page.text).not.toContain(back);
+					const done = await posted(at, page.cookie, {
+						csrf_token: page.token,
+						confirmation: page.confirmation,
+					});
+					const text = await done.text();
+					expect([method, done.status, done.headers.get("location")]).toEqual([method, 200, null]);
+					expect(text).toContain("You are logged out.");
+					expect(text).not.toContain(back);
+					expect(await stillSignedIn(at)).toBe(false);
+				}
+			});
+
+			it("refuses the form without its CSRF token, or from another site, closing nothing", async () => {
+				const at = await signedIn();
+				const page = await confirmationFor(at);
+				const without = await posted(at, page.cookie, { confirmation: page.confirmation });
+				const foreign = await posted(
+					at,
+					page.cookie,
+					{ csrf_token: page.token, confirmation: page.confirmation },
+					"https://evil.example",
+				);
+				expect([without.status, foreign.status]).toEqual([403, 403]);
+				expect(await stillSignedIn(at)).toBe(true);
+			});
+
+			// RP-Initiated Logout 1.0 §2: a hint for a session the browser does not hold is asked too; the
+			// legacy build closes the session the hint names.
+			describe.runIf(!areaTarget().differs("logout-asked-for-another-session"))(
+				"a logout whose hint names a session the browser does not hold",
+				() => {
+					const carriedIn = (location: string | null) =>
+						new URL(location ?? "", base).searchParams.get("request") ?? "";
+					/** Browsers of their own address, counted per source apart from the other scenes'. */
+					const elsewhere = () => signedIn("app", "198.51.100.30");
+
+					it("asks the person, by GET or POST, closing once they agree only the session the browser holds, never the hint's, and moving on to the return with its state [oidc-rpinit-2-n]", async () => {
+						// The hint's browser stays signed in throughout, so one serves both methods.
+						const at = await elsewhere();
+						for (const method of ["GET", "POST"] as const) {
+							const other = await elsewhere();
+							const params = {
+								id_token_hint: at.idToken,
+								post_logout_redirect_uri: back,
+								state: "s 1",
+							};
+							const started = await logout(other, method, params);
+							const to = new URL(started.headers.get("location") ?? "", base);
+							expect([method, started.status, to.pathname]).toEqual([
+								method,
+								303,
+								"/oauth/logout/confirm",
+							]);
+							const page = await confirmationFor(other, carriedIn(started.headers.get("location")));
+							expect(page.text).toContain("Do you want to log out of");
+							const done = await posted(other, page.cookie, {
+								csrf_token: page.token,
+								confirmation: page.confirmation,
+							});
+							const text = await done.text();
+							expect([method, done.status, done.headers.get("location")]).toEqual([
+								method,
+								200,
+								null,
+							]);
+							expect(text).toContain(`data-target="${back}?state=s+1"`);
+							expect([await stillSignedIn(at), await stillSignedIn(other)]).toEqual([true, false]);
+						}
+					});
+
+					it("asks a browser that sends no session cookie, and moves on to the return from the page saying it is not signed in, closing nothing", async () => {
+						const at = await elsewhere();
+						const query = new URLSearchParams({
+							id_token_hint: at.idToken,
+							post_logout_redirect_uri: back,
+							state: "s",
+						});
+						const started = await fetch(`${base}/oauth/logout?${query}`, {
+							redirect: "manual",
+							headers: at.browser.headers(),
+						});
+						expect([
+							started.status,
+							new URL(started.headers.get("location") ?? "", base).pathname,
+						]).toEqual([303, "/oauth/logout/confirm"]);
+						const carried = new URLSearchParams({
+							request: carriedIn(started.headers.get("location")),
+						});
+						const page = await fetch(`${base}/oauth/logout/confirm?${carried}`, {
+							headers: at.browser.headers(),
+						});
+						const text = await page.text();
+						expect(text).toContain("You are not signed in.");
+						expect(text).toContain(`data-target="${back}?state=s"`);
+						expect(await stillSignedIn(at)).toBe(true);
+					});
+				},
+			);
+
+			it("asks again, closing nothing, where the browser holds another session than the page was shown for", async () => {
+				const first = await signedIn();
+				const second = await signedIn();
+				const shownToFirst = await confirmationFor(first);
+				const ownPage = await confirmationFor(second);
+				const answer = await posted(second, ownPage.cookie, {
+					csrf_token: ownPage.token,
+					confirmation: shownToFirst.confirmation,
+				});
+				expect(answer.status).toBe(200);
+				expect(await answer.text()).toContain("Do you want to log out of");
+				expect(await stillSignedIn(first)).toBe(true);
+				expect(await stillSignedIn(second)).toBe(true);
+			});
+		},
+	);
 
 	// A hint naming no session cannot say which session to end.
-	it("refuses a hint that names no session, leaving the session", async () => {
+	it("refuses a hint that names no session, leaving the session [oidc-rpinit-4-c]", async () => {
 		const at = await signedIn();
 		const { sid: _, ...claims } = claimsOf(at.idToken);
 		const answer = await logout(at, "GET", { id_token_hint: signed({ typ: "JWT" }, claims) });
@@ -229,7 +510,7 @@ describe("a logout the client starts", () => {
 	});
 
 	// Token confusion: only an ID token is taken as the hint, never another kind the provider signs.
-	it("refuses as the hint a token of another kind, or one the provider did not sign", async () => {
+	it("refuses as the hint a token of another kind, or one the provider did not sign [oidc-rpinit-2-e] [oidc-rpinit-4-a] [oidc-rpinit-4-b] [oidc-rpinit-4-c]", async () => {
 		const at = await signedIn();
 		const other = generateKeyPairSync("ed25519").privateKey;
 		const foreign = signed({ typ: "JWT" }, claimsOf(at.idToken), other);
@@ -247,20 +528,21 @@ describe("hints past their time", () => {
 		const now = Math.floor(Date.now() / 1000);
 		return signed({ typ: "JWT" }, { ...claimsOf(idToken), iat: now - ago, exp: now - 3600 });
 	};
-	const unless = (difference: string) => it.runIf(!areaTarget().differs(difference));
+	it.runIf(!areaTarget().differs("expired-logout-hint"))(
+		"ends the session for a hint past its end",
+		async () => {
+			const at = await signedIn();
+			const answer = await logout(at, "GET", { id_token_hint: aged(at.idToken, 7200) });
+			expect([answer.status, answer.json, await stillSignedIn(at)]).toEqual([
+				200,
+				{ logged_out: true },
+				false,
+			]);
+		},
+	);
 
-	unless("expired-logout-hint")("ends the session for a hint past its end", async () => {
-		const at = await signedIn();
-		const answer = await logout(at, "GET", { id_token_hint: aged(at.idToken, 7200) });
-		expect([answer.status, answer.json, await stillSignedIn(at)]).toEqual([
-			200,
-			{ logged_out: true },
-			false,
-		]);
-	});
-
-	unless("old-logout-hint")(
-		"refuses a hint issued over a day ago, by GET or POST, leaving the session open",
+	it.runIf(!areaTarget().differs("old-logout-hint"))(
+		"refuses a hint issued over a day ago, by GET or POST, leaving the session open [oidc-rpinit-4-c]",
 		async () => {
 			const at = await signedIn();
 			const hint = aged(at.idToken, 90_000);
@@ -325,31 +607,22 @@ describe("telling the session's clients", () => {
 	});
 
 	// Open redirect and XSS through a return: a page with no return to follow has no script and moves nowhere.
-	it("gives a page with no script when there is no registered return to move on to", async () => {
-		for (const asked of [undefined, "https://other.example/after"]) {
-			const at = await signedIn();
-			const params = {
-				id_token_hint: at.idToken,
-				...(asked ? { post_logout_redirect_uri: asked } : {}),
-			};
-			const answer = await logout(at, "GET", params, { accept: "text/html" });
-			expect(answer.status, asked).toBe(200);
-			const page = pageOf(answer);
-			expect(page.frames.map((url) => url.origin + url.pathname)).toEqual([
-				"https://app.example/fc",
-			]);
-			expect([page.scripts, page.target, page.policy.has("script-src")], asked).toEqual([
-				[],
-				undefined,
-				false,
-			]);
-			expect(page.policy.get("default-src")).toEqual(["'none'"]);
-			if (asked) expect(answer.text).not.toContain("other.example");
-			expect(await stillSignedIn(at)).toBe(false);
-		}
+	it("gives a page with no script when there is no return to move on to", async () => {
+		const at = await signedIn();
+		const answer = await logout(at, "GET", { id_token_hint: at.idToken }, { accept: "text/html" });
+		expect(answer.status).toBe(200);
+		const page = pageOf(answer);
+		expect(page.frames.map((url) => url.origin + url.pathname)).toEqual(["https://app.example/fc"]);
+		expect([page.scripts, page.target, page.policy.has("script-src")]).toEqual([
+			[],
+			undefined,
+			false,
+		]);
+		expect(page.policy.get("default-src")).toEqual(["'none'"]);
+		expect(await stillSignedIn(at)).toBe(false);
 	});
 
-	it("posts each client of the session a logout token signed by the provider", async () => {
+	it("posts each client of the session a logout token signed by the provider [oidc-bcl-2.4-a] [oidc-bcl-2.4-b] [oidc-bcl-2.4-f] [oidc-bcl-2.4-i] [oidc-bcl-2.4-j] [oidc-bcl-2.4-k] [oidc-bcl-2.4-m] [oidc-bcl-2.6-a]", async () => {
 		const at = await signedIn();
 		const before = told.received.length;
 		await logout(at, "POST", { id_token_hint: at.idToken });
@@ -380,7 +653,7 @@ describe("telling the session's clients", () => {
 	});
 
 	// OpenID Connect Back-Channel Logout 1.0 §2.4: a token without sid still names the subject.
-	it("puts the session in the logout token of a client that requires it, and leaves it out, naming the subject, for one that does not", async () => {
+	it("puts the session in the logout token of a client that requires it, and leaves it out, naming the subject, for one that does not [oidc-bcl-2.4-i]", async () => {
 		const at = await signedIn();
 		await at.tokensFor("keen");
 		await at.tokensFor("lean");
@@ -408,21 +681,25 @@ describe("telling the session's clients", () => {
 	describe.runIf(!areaTarget().differs("back-channel-by-host-and-port"))(
 		"the back channel's destinations",
 		() => {
-			it("sends nothing to a client's back channel the operator did not allow", async () => {
-				const at = await signedIn();
-				await at.tokensFor("far");
-				const before = told.received.length;
-				await logout(at, "POST", { id_token_hint: at.idToken });
-				await toldSince(before);
-				await new Promise((resolve) => setTimeout(resolve, 500));
-				expect(told.received.length).toBe(before + 1);
+			it("refuses to start with a client whose back channel the operator did not allow", async () => {
+				const far = client("far", { backchannelLogoutUri: `${unlisted.base}/bc` });
+				const started = await areaTarget().start(codeScene(sceneWith([far], [told.base])));
+				try {
+					expect(started.kind).toBe("refused");
+					if (started.kind === "refused") {
+						expect(started.output).toContain("backchannel-logout-uri");
+						expect(started.output).not.toContain(unlisted.base);
+					}
+				} finally {
+					if (started.kind === "running") await started.stop();
+				}
 				expect(unlisted.received).toEqual([]);
 			});
 		},
 	);
 });
 
-it("names its endpoint and the channels it tells in the metadata document", async () => {
+it("names its endpoint and the channels it tells in the metadata document [oidc-rpinit-2.1-a] [oidc-bcl-2.1-a]", async () => {
 	const res = await fetch(`${base}/.well-known/openid-configuration`, {
 		headers: { "x-forwarded-proto": "https", "x-forwarded-host": new URL(issuer).host },
 	});
