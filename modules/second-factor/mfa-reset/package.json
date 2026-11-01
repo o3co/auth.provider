@@ -17,6 +17,8 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-flows": "workspace:*",
+		"@mod/mfa-managing": "workspace:*",
+		"@mod/mfa-reading": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/subject-revocation": "workspace:*"
 	},
