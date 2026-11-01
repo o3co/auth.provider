@@ -15,7 +15,7 @@ import secretHashModule from "@mod/secret-hash/module";
 import { senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
 import { type Session, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
@@ -159,7 +159,7 @@ export async function harness(
 	/** A session opened for `subject`. */
 	const login = async (subject = "alice") => {
 		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
-		return (await app.get(sessions).complete(testRequest(), facts)).session;
+		return openedOf(await app.get(sessions).open(testRequest(), facts)).session;
 	};
 	/** An access token issued to `client` in the session, whose audience names the client and whose subject is the session's. */
 	const issue = async (
