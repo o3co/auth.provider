@@ -18,7 +18,7 @@
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-exchange": "workspace:*",
 		"@mod/users": "workspace:*",
-		"jose": "6.2.12",
+		"jose": "6.2.13",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
@@ -30,6 +30,7 @@
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
+		"@mod/tls-options": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"vitest": "5.0.5"
@@ -41,5 +42,11 @@
 		"vitest": {
 			"optional": true
 		}
+	},
+	"takenBy": {
+		"idTokenChecks": [
+			"@mod/exchange-id-tokens",
+			"@mod/jwt-bearer-id-tokens"
+		]
 	}
 }
