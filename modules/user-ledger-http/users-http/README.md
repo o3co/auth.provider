@@ -23,8 +23,9 @@
   |---|---|
   | `200`, a JSON object with an `id` of a subject's shape (`users`) and a non-empty string `username` | the user |
   | `401` with a Bearer challenge, when a credential was sent | unavailable (the credential is refused) |
-  | `401` otherwise | none; to be read as a lookup's is in a later release |
-  | anything else, `403` (a proxy before the ledger may send it while it fails), a `200` of another shape, `404` and other `2xx` included | unavailable |
+  | `401` otherwise | none; deprecated, kept for 0.17's ledgers: answer `404` with `{"error":"not_found"}` for no user with that identifier and password |
+  | `404` with `{"error":"not_found"}`, or `410` with `{"error":"gone"}`, as for a lookup | none |
+  | anything else, `403` (a proxy before the ledger may send it while it fails), a `200` of another shape, a `404` or `410` saying neither and other `2xx` included | unavailable |
 
 - A lookup, with the body `{"subject"}` by subject or `{"idp", "subject"}` by upstream identity:
 
@@ -36,16 +37,16 @@
 
 - A user: `id` is the subject; `email`, `name`, `picture`, `groups` and a boolean `emailVerified` (only beside `email`) are the attributes `users` names for them; other fields are dropped.
 
-- `./testing`: `usersLedger` (users, each with any upstream identity linked to it), a fake ledger speaking these calls for the users given, behind a credential of its own: its answer to a call (none for a call not its own; a bare `404` without its credential, and `not_found` for a user it does not hold) and the section pointing users-http at it, for a scene or an operator's trial.
 ## Invariants
-- The ledger is reached only through `outbound`, at each URL's host alone; a redirect is not followed. Each URL is an internal destination, named to `outbound` as itself: a private address is reached only when its host is in `outbound.internal-hosts` or, over plain http, when `outbound.plain-internal` names its `host:port`, and only at that URL's origin (scheme, host and port).
-- Boot is refused with no URL, on a URL outbound's destination policy refuses (at that URL's key, with which of `outbound`'s keys to set), and with a `credential` where `outbound.credentials` refuses its URLs (more than one origin, or one neither https nor a `plain-loopback` or `plain-internal` pair, in `credentialRefusalText`'s words; at `credential`): the credential goes to one party alone, sent by `outbound` as its `credential`.
+- The ledger is reached only through `outbound`, at each URL's host alone; a redirect is not followed. Each URL is an internal destination (`narrower`: `internal`), named to `outbound` as itself: a private address is reached only when its host is in `outbound.internal-hosts` or, over plain http, when `outbound.plain-internal` names its `host:port`, and only at that URL's origin (scheme, host and port).
+- Boot is refused with no URL (at `verify-url`), on a URL outbound's destination policy refuses (at that URL's key, with which of `outbound`'s keys to set), and with a `credential` where `outbound.credentials` refuses its URLs (more than one origin, or one neither https nor a `plain-loopback` or `plain-internal` pair, in `credentialRefusalText`'s words; at `credential`): the credential goes to one party alone, sent by `outbound` as its `credential`.
 - The password goes in the request body alone, never in a URL, a log line or an error.
 - A destination refused when sending, or no answer in time or size, is unavailable. A wrong `verify-url` makes verification unavailable, never "no such user", unless what answers there is a `401` without a Bearer challenge, which reads as none.
 - Boot reports never show the credential.
+- The credential is the ledger's service credential, an operator's trust assumption between the provider and its ledger, never an OAuth access token: no checklist item on access tokens applies to it.
 - A lookup's `404` or `410` is none only where its body says so: one without the word (a wrong URL, a gateway's unknown route, a ledger hiding itself) is unavailable, logged as `users-http.ledger_failed` with its status and `reason: "unmarked"`, never no such user.
 - The operator's ledger must do the same work for an unknown identifier as for a known one; this module sends the same one request either way.
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `users`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)
+- `kernel`, `users`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule), `ledger-wire` (the wire's words); its takes name `credentialPolicy` (`outbound.credentials`) with or without a `credential`, as `outbound` provides it beside `outbound`, so a module of your own providing `outbound` provides it too

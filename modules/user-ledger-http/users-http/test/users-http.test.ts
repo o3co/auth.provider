@@ -10,6 +10,7 @@ import {
 	kernelConfig,
 	type Runtime,
 } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import {
@@ -20,6 +21,7 @@ import {
 	policySettings,
 } from "@mod/outbound-policy";
 import secretHashModule from "@mod/secret-hash/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { ledgerContract, memoryUsersStores, testUser, usersContract } from "@mod/users/testing";
@@ -135,9 +137,10 @@ const settings = (extra: Record<string, unknown> = {}) => ({
 	...extra,
 });
 const collected = contract<readonly Ledger[]>("test.ledgers");
-const collector = defineModule({ name: "test-collector" }, (m) => [
-	m.provide(collected).by((c) => c.collect(ledgers)),
-]);
+const collector = defineModule(
+	{ name: "test-collector", replicaSafe: false, takes: [ledgers] },
+	(m) => [m.provide(collected).by((c) => c.collect(ledgers))],
+);
 const boot = (
 	section: unknown,
 	registered: unknown[] = [],
@@ -147,6 +150,7 @@ const boot = (
 	assemble({
 		modules: [
 			outboundModule,
+			tlsOptionsForTests,
 			usersModule,
 			secretHashModule,
 			memoryUsersStores().module,
@@ -166,6 +170,8 @@ async function open(extra?: Record<string, unknown>, allow?: string[]) {
 	const app = await boot(settings(extra), [], allow);
 	const [ledger] = app.get(collected);
 	if (!ledger) throw new Error("no ledger contributed");
+	// What the ledger logs once booted: outbound's start warnings (its plain-loopback pair) come before.
+	logged.length = 0;
 	return { ledger, users: app.get(users) };
 }
 /** Each request the ledger received, by the shape users-http sends. */
@@ -272,7 +278,7 @@ describe("users-http", () => {
 		expect(received[1]?.path).toBe("/ledger/authenticate?realm=a");
 	});
 
-	it("sends no credential when none is set, and then reads a challenged 401 as none, and a 403 as unavailable", async () => {
+	it("sends no credential when none is set, and then reads a challenged 401 as none, and a 403 as unavailable [guarantee-3-m]", async () => {
 		const app = await boot({ "verify-url": `http://${pair}/ledger/authenticate` });
 		const [ledger] = app.get(collected);
 		script = () => ({ status: 401, headers: { "www-authenticate": "Bearer" } });
@@ -291,7 +297,7 @@ describe("users-http", () => {
 		expect(received).toEqual([]);
 	});
 
-	it("answers none to a 401 alone: a 403, which a proxy before the ledger may send while it fails, is unavailable", async () => {
+	it("answers none to a 401 alone: a 403, which a proxy before the ledger may send while it fails, is unavailable [guarantee-3-m]", async () => {
 		const { ledger } = await open();
 		expect(await ledger.verify("nobody", "x")).toEqual({ kind: "none" });
 		expect(await ledger.verify("alice", "x")).toEqual({ kind: "none" });
@@ -310,13 +316,40 @@ describe("users-http", () => {
 		}
 	});
 
-	it("answers unavailable to a 404", async () => {
+	it("answers none to a 404 or a 410 saying it knows no such user, as a lookup does, unlogged [guarantee-3-m]", async () => {
 		const { ledger } = await open();
-		script = () => ({ status: 404 });
-		await expect(ledger.verify("alice", "correct horse")).rejects.toSatisfy(isUnavailable);
+		for (const answer of [notFound, gone]) {
+			script = () => answer;
+			expect(await ledger.verify("alice", "correct horse"), JSON.stringify(answer)).toEqual({
+				kind: "none",
+			});
+		}
+		expect(logged).toEqual([]);
 	});
 
-	it("answers unavailable to a 401 or 403 that challenges its credential as Bearer", async () => {
+	it("answers unavailable to a 404 or a 410 that does not say it knows no such user, logging its status [guarantee-3-f] [guarantee-3-m]", async () => {
+		const { ledger } = await open();
+		const answers: Answer[] = [
+			{ status: 404 },
+			{ status: 410 },
+			{ status: 404, text: "not_found" },
+			{ status: 404, json: { error: "gone" } },
+			{ status: 410, json: { error: "not_found" } },
+			{ status: 404, json: ["not_found"] },
+		];
+		for (const answer of answers) {
+			script = () => answer;
+			await expect(
+				ledger.verify("alice", "correct horse"),
+				JSON.stringify(answer),
+			).rejects.toSatisfy(isUnavailable);
+		}
+		expect(logged).toEqual(
+			answers.map(({ status }) => ["users-http.ledger_failed", { status, reason: "unmarked" }]),
+		);
+	});
+
+	it("answers unavailable to a 401 or 403 that challenges its credential as Bearer [guarantee-3-m]", async () => {
 		const { ledger } = await open();
 		const challenges = [
 			"Bearer",
@@ -368,10 +401,10 @@ describe("users-http", () => {
 	});
 
 	it("logs the status of a ledger's failure, and nothing it sent", async () => {
-		script = () => ({ status: 404, text: "ledger detail" });
+		script = () => ({ status: 500, text: "ledger detail" });
 		const { ledger } = await open();
 		await expect(ledger.verify("alice", "pw-1")).rejects.toSatisfy(isUnavailable);
-		expect(logged).toEqual([["users-http.ledger_failed", { status: 404 }]]);
+		expect(logged).toEqual([["users-http.ledger_failed", { status: 500 }]]);
 	});
 
 	it("logs the kind of each other failure, and nothing it sent", async () => {
@@ -467,7 +500,7 @@ describe("users-http", () => {
 		expect((await roomy.ledger.verify("alice", "correct horse")).kind).toBe("user");
 	});
 
-	it("refuses a malformed user as unavailable", async () => {
+	it("refuses a malformed user as unavailable [oidc-core-2-c]", async () => {
 		const malformed: Record<string, unknown> = {
 			"empty id": { ...alice, id: "" },
 			"no id": { username: "alice" },
@@ -600,7 +633,7 @@ describe("users-http", () => {
 	it("names verify-url as the operator's own, at boot and on each request, so a ledger at a private address is reached", async () => {
 		const checked: (Narrower | undefined)[] = [];
 		const sent: (Narrower | undefined)[] = [];
-		const recording = defineModule({ name: "outbound" }, (m) => [
+		const recording = defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(outbound).by(() => ({
 				fetch: async (_url, _request, narrower) => {
 					sent.push(narrower);
@@ -643,7 +676,7 @@ describe("users-http", () => {
 			[
 				["ledger.example"],
 				`http://${pair}/ledger/authenticate`,
-				"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+				"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public; plain http also needs its host:port in outbound.plain-loopback, or, for a URL of your own configuration on a private network, in outbound.plain-internal",
 			],
 			[
 				["127.0.0.1"],
@@ -712,7 +745,7 @@ describe("users-http looking a user up by subject", () => {
 		expect(JSON.parse(asked?.body ?? "")).toEqual({ subject: "s-alice" });
 	});
 
-	it("hands over the user it finds, needing no username, and none for a 404 or a 410, unlogged", async () => {
+	it("hands over the user it finds, needing no username, and none for a 404 or a 410, unlogged [guarantee-3-m]", async () => {
 		const { ledger } = await looking();
 		expect(await ledger.bySubject("s-alice")).toEqual({
 			kind: "user",
@@ -729,7 +762,7 @@ describe("users-http looking a user up by subject", () => {
 		expect(logged).toEqual([]);
 	});
 
-	it("answers unavailable to a 401 or 403, challenged or not, and to every other answer it cannot read", async () => {
+	it("answers unavailable to a 401 or 403, challenged or not, and to every other answer it cannot read [guarantee-3-m]", async () => {
 		const { ledger } = await looking();
 		const answers: Answer[] = [
 			{ status: 401 },
@@ -762,7 +795,7 @@ describe("users-http looking a user up by subject", () => {
 		expect(logged).toContainEqual(["users-http.ledger_failed", { status: 201 }]);
 	});
 
-	it("logs a lookup's 404 or 410 that does not say it knows no such user, with its status alone", async () => {
+	it("logs a lookup's 404 or 410 that does not say it knows no such user, with its status alone [guarantee-3-m]", async () => {
 		const { ledger } = await looking();
 		script = () => ({ status: 404, text: "ledger detail" });
 		await expect(ledger.bySubject("s-alice")).rejects.toSatisfy(isUnavailable);
@@ -788,13 +821,13 @@ describe("users-http looking a user up by subject", () => {
 		]);
 	});
 
-	it("refuses to start with no URL, or with a credential and URLs at two origins", async () => {
+	it("refuses to start with no URL, at verify-url, or with a credential and URLs at two origins", async () => {
 		// A second origin outbound takes: the next port at loopback, where nothing need answer.
 		const otherPair = `127.0.0.1:${Number(pair.split(":")[1]) + 1}`;
 		const other = `http://${otherPair}/ledger/subject`;
 		const bootBoth = (section: unknown) => boot(section, [], undefined, [pair, otherPair]);
 		for (const [section, where] of [
-			[{ credential }, "users-http"],
+			[{ credential }, "users-http.verify-url"],
 			[settings({ "subject-url": other }), "users-http.credential"],
 			[settings({ "subject-url": `https://${pair}/ledger/subject` }), "users-http.credential"],
 		] as const) {
@@ -807,6 +840,14 @@ describe("users-http looking a user up by subject", () => {
 			expect(refusals.map((r) => r.where)).toEqual([where]);
 			expect(refusals.map((r) => r.reason).join()).not.toContain(credential);
 		}
+		await expect(bootBoth({ credential })).rejects.toMatchObject({
+			refusals: [
+				{
+					where: "users-http.verify-url",
+					reason: "needs one of verify-url, subject-url, upstream-url",
+				},
+			],
+		});
 		await expect(boot(settings({ "subject-url": subjectUrl() }))).resolves.toBeDefined();
 		await expect(
 			bootBoth({ "verify-url": `http://${pair}/ledger/authenticate`, "subject-url": other }),
@@ -819,6 +860,7 @@ describe("users-http looking a user up by subject", () => {
 			assemble({
 				modules: [
 					outboundModule,
+					tlsOptionsForTests,
 					usersModule,
 					secretHashModule,
 					memoryUsersStores().module,
@@ -844,7 +886,7 @@ describe("users-http looking a user up by subject", () => {
 
 	it("says why its credential may not go in outbound-policy's words", async () => {
 		for (const refusal of ["origins", "scheme"] as const) {
-			const standIn = defineModule({ name: "outbound" }, (m) => [
+			const standIn = defineModule({ name: "outbound", replicaSafe: true, takes: [] }, (m) => [
 				m.provide(outbound).by(() => ({
 					fetch: async () => {
 						throw new Error("never sent");
@@ -864,6 +906,35 @@ describe("users-http looking a user up by subject", () => {
 				refusals: [{ where: "users-http.credential", reason: credentialRefusalText(refusal) }],
 			});
 		}
+	});
+
+	it("takes outbound's credential policy only with a credential, its takes naming it either way", async () => {
+		const unused = async (section: unknown) =>
+			(
+				await takesUnused({
+					modules: [
+						outboundModule,
+						tlsOptionsForTests,
+						usersModule,
+						secretHashModule,
+						memoryUsersStores().module,
+						usersHttp,
+						collector,
+					],
+					config: {
+						...kernelConfig(),
+						outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
+						"users-http": section,
+					},
+					runtime,
+				})
+			)["users-http"];
+		expect(await unused(settings())).toBeUndefined();
+		// The take is conditional, the takes static: outbound provides the policy beside the refusals
+		// the module always takes, so wherever it boots the policy is there; without a credential it
+		// is left untaken.
+		const { credential: _, ...bare } = settings();
+		expect(await unused(bare)).toEqual(["outbound.credentials"]);
 	});
 
 	it("refuses to start on a subject-url outbound's policy refuses, saying why", async () => {
@@ -886,7 +957,7 @@ describe("users-http looking a user up by upstream identity", () => {
 		expect(JSON.parse(asked?.body ?? "")).toEqual({ idp: "apple", subject: "apple-alice" });
 	});
 
-	it("answers none to a 404 or a 410, and unavailable to a 401, a 403 or anything else it cannot read", async () => {
+	it("answers none to a 404 or a 410 saying it knows no such user, and unavailable to a bare 404 or 410, a 401, a 403 or anything else it cannot read [guarantee-3-m]", async () => {
 		const { ledger } = await open({ "upstream-url": upstreamUrl() });
 		expect(await ledger.byUpstream?.("apple", "apple-nobody")).toEqual({ kind: "none" });
 		expect(await ledger.byUpstream?.("apple", "apple-gone")).toEqual({ kind: "none" });
