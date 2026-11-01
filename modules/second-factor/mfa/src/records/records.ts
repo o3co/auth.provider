@@ -44,6 +44,7 @@ export const fencesOf = (record: StoredFactors | undefined): number => {
 export const storedList = (subject: string, factors: readonly Factor[], fences = 0) =>
 	({ subject, factors, ...(fences > 0 ? { fences } : {}) }) as unknown as StoredFactors;
 export const listKeyOf = (subject: string) => `s-${hashOf(subject)}`;
+export const claimKeyOf = (kind: string, value: string) => `u-${hashOf(`${kind}\n${value}`)}`;
 const claimOf = (record: StoredFactors | undefined) => record as unknown as Claim | undefined;
 const asClaim = (claim: Claim) => claim as unknown as StoredFactors;
 const sameClaim = (a: Claim | undefined, b: Claim) =>
@@ -75,8 +76,8 @@ export function factorRecords(store: FactorStore) {
 		// Another request saved one first, yet it cannot be found.
 		if (!(await store.update(key, changing))) throw new Unavailable("mfa");
 	};
-	const claimKey = (kind: string, value: string) => `u-${hashOf(`${kind}\n${value}`)}`;
-	/** A factor is written before its claim, so a claim whose list lacks its factor is stale. */
+	const claimKey = claimKeyOf;
+	/** A claim whose list lacks its factor is stale: the factor was removed since. */
 	const holding = async (claim: Claim) =>
 		factorsOf(await store.read(claim.listKey)).some((f) => f.id === claim.factor);
 	return {
@@ -115,18 +116,42 @@ export function factorRecords(store: FactorStore) {
 			if (held === undefined || sameClaim(held, { listKey: keyOf(subject), factor })) return false;
 			return holding(held);
 		},
-		/** Claims a kind's unique value for a factor already written; answers whether the factor holds it. */
-		claim: async (subject: string, kind: string, value: string, factor: string) => {
-			const key = claimKey(kind, value);
-			const mine: Claim = { listKey: keyOf(subject), factor };
-			if ((await store.save(key, asClaim(mine), "endless")) === "created") return true;
-			const held = claimOf(await store.read(key));
-			if (!held) throw new Unavailable("mfa");
-			if (await holding(held)) return false;
-			const taken = await store.update(key, (record) =>
-				sameClaim(claimOf(record), held) ? { value: asClaim(mine) } : undefined,
-			);
-			return sameClaim(claimOf(taken?.after), mine);
+		/**
+		 * Decides on the factors as `decide` does, and writes the list with the claim on the kind's unique
+		 * value for `factor` in the same write, where the place writes them together: `duplicate` where
+		 * another factor holds the value (its claim's list lists it), and a claim whose factor is gone is
+		 * taken. The judge answers first, so a write it refuses answers as it does.
+		 */
+		decideClaiming: async <T>(
+			subject: string,
+			claimed: { readonly kind: string; readonly value: string; readonly factor: string },
+			judge: (factors: readonly Factor[], fences: number) => Decision<T>,
+		): Promise<T | "duplicate"> => {
+			const mine: Claim = { listKey: keyOf(subject), factor: claimed.factor };
+			let last: Decision<T> | "duplicate" | undefined;
+			await store.updateTogether(keyOf(subject), claimKey(claimed.kind, claimed.value), {
+				// The claim's own list tells whether it still holds the value.
+				watch: (_list, claim) => {
+					const held = claimOf(claim);
+					return held ? [held.listKey] : [];
+				},
+				change: (list, claim, [holder]) => {
+					const decision = judge(factorsOf(list), fencesOf(list));
+					last = decision;
+					if (!decision.next) return {};
+					const held = claimOf(claim);
+					if (held && factorsOf(holder).some((f) => f.id === held.factor)) {
+						last = "duplicate";
+						return {};
+					}
+					const fences = fencesOf(list) + (decision.fence ? 1 : 0);
+					return {
+						list: { value: storedList(subject, decision.next, fences) },
+						claim: { value: asClaim(mine) },
+					};
+				},
+			});
+			return last === "duplicate" ? "duplicate" : (last as Decision<T>).verdict;
 		},
 	};
 }
