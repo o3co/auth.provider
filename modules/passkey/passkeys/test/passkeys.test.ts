@@ -111,7 +111,7 @@ it("redeems a challenge made for a requester only for that requester, taking it 
 	expect((await passkeys.assert(await ask(app), app)).kind).toBe("asserted");
 });
 
-it("redeems a challenge made for a module's requester by that module's alone, whatever another module's id", async () => {
+it("redeems a challenge made for a module's requester by that module's alone, whatever another module's id [guarantee-5-k]", async () => {
 	const { passkeys, authenticator } = await kept();
 	const client = { by: "webauthn-login", id: "C" };
 	const browser = { by: "login-passkey", id: "C" };
@@ -160,7 +160,7 @@ it("throws, before the store is read, a requester whose part is no non-empty str
 	expect((await passkeys.assert(response, app)).kind).toBe("asserted");
 });
 
-it("takes and refuses an assertion challenge kept as format 1, though its digest is the id's, as it names no asker", async () => {
+it("takes and refuses an assertion challenge kept as format 1, though its digest is the id's, as it names no asker [guarantee-5-k]", async () => {
 	const { passkeys, ceremonies, stores, authenticator } = await kept();
 	const browser = { by: "login-passkey", id: "chosen" };
 	const digestOf = (text: string) => createHash("sha256").update(text).digest("base64url");
@@ -192,7 +192,7 @@ it("takes and refuses an assertion challenge kept as format 1, though its digest
 	});
 });
 
-it("redeems a format 2 assertion challenge for its own requester alone, another module's or another id refused", async () => {
+it("redeems a format 2 assertion challenge for its own requester alone, another module's or another id refused [guarantee-5-k]", async () => {
 	const { passkeys, authenticator } = await kept();
 	const mine = { by: "webauthn-login", id: "C" };
 	const ask = async () =>
