@@ -100,8 +100,8 @@ export function resumeOver(p: ResumeParts) {
 		const resumed = await p.logins.resume(request, resuming, "mfa", t.done, t.from);
 		if (resumed.kind === "held")
 			return jsonAnswer(403, resumed.answer, { cookies: resumed.cookies });
-		// A gate refused it: the transaction was taken already, so its cookie goes; nothing is amiss to warn of.
-		if (resumed.kind === "refused") {
+		// A gate refused it, or session did by the held facts' `provenSince`: the transaction is taken, its cookie goes.
+		if (resumed.kind === "refused" || resumed.kind === "revoked") {
 			return jsonAnswer(403, { error: "login_required" }, { cookies: [p.transactions.cleared()] });
 		}
 		// Any other outcome opened nothing (a resume past its caller's deadline): refused as a gate would.
