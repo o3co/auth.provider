@@ -8,6 +8,12 @@ export interface Issuer {
 
 export const issuer = contract<Issuer>("issuer");
 
+/**
+ * The origin this provider names its endpoints on: the issuer's, which is `http`'s public origin
+ * wherever one is written (boot refuses another), so every deployment has one.
+ */
+export const endpointOrigin = (named: Issuer): string => new URL(named.url).origin;
+
 /** One item this authorization server names itself by; its contributor alone decides its value. */
 export interface MetadataItem {
 	readonly name: string;
