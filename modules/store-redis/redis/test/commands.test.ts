@@ -6,9 +6,11 @@ import {
 	contract,
 	defineModule,
 	kernelConfig,
+	type Module,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces } from "@mod/store";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 import * as scripts from "../src/scripts.ts";
@@ -21,8 +23,13 @@ afterEach(async () => {
 });
 
 /** A space whose writes are confirmed on every replica, so a write takes a confirmation round. */
-const replicated = defineModule({ name: "replicated-owner" }, (m) => [
+const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
+]);
+
+/** A space whose writes must survive a crash, so the server's fsyncs are checked. */
+const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
+	m.contribute(spaces).by(() => ({ name: "durable", guarantees: ["durable"] })),
 ]);
 
 /** A primary that refuses writes without a replica, as `replicas` needs. */
@@ -33,10 +40,15 @@ function primary() {
 	return redis;
 }
 
-async function boot(port: number, replication?: "replicas" | "none") {
+async function boot(
+	port: number,
+	replication?: "replicas" | "none",
+	prefix?: string,
+	extra: Module[] = [],
+) {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
-	const asker = defineModule({ name: "asker" }, (m) => [
+	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(contract<object>("asker")).by((c) => {
 			context = c;
 			return {};
@@ -44,10 +56,16 @@ async function boot(port: number, replication?: "replicas" | "none") {
 	]);
 	const url = `redis://:s3cret@127.0.0.1:${port}`;
 	app = await assemble({
-		modules: [redisModule, asker, ...(replication ? [replicated] : [])],
+		modules: [
+			redisModule,
+			tlsOptionsForTests,
+			asker,
+			...(replication ? [replicated] : []),
+			...extra,
+		],
 		config: {
 			...kernelConfig(),
-			redis: { url, ...(replication ? { replication } : {}) },
+			redis: { url, ...(replication ? { replication } : {}), ...(prefix ? { prefix } : {}) },
 		},
 		runtime: quietRuntime({
 			clock: { now: () => 0 },
@@ -64,8 +82,12 @@ async function boot(port: number, replication?: "replicas" | "none") {
 }
 
 /** Why boot was refused, at `redis`; the refusal never names the URL or its password. */
-async function refusal(port: number, replication?: "replicas" | "none"): Promise<string> {
-	const error = await boot(port, replication).catch((e: unknown) => e);
+async function refusal(
+	port: number,
+	replication?: "replicas" | "none",
+	prefix?: string,
+): Promise<string> {
+	const error = await boot(port, replication, prefix).catch((e: unknown) => e);
 	expect(error).toBeInstanceOf(BootRefused);
 	const reasons = (error as BootRefused).refusals.map((r) => `${r.where}: ${r.reason}`).join("\n");
 	expect(reasons).not.toContain("s3cret");
@@ -116,6 +138,33 @@ describe("the commands the store needs", () => {
 			expect(said, wording).not.toMatch(/refuses HSET/);
 			inScript.down();
 		}
+	});
+
+	it("name the keys a user is refused by the key that sets their prefix, never by its value", async () => {
+		const redis = primary();
+		redis.writes.keysRefused = true;
+		redis.scripts.keysRefused = true;
+		const reasons = await refusal(await redis.listen(), "replicas", "private-tenant");
+		expect(reasons).toContain("the confirmation key (<redis.prefix>:#confirm)");
+		expect(reasons).toContain("the store's keys (<redis.prefix>:{…})");
+		expect(reasons).not.toContain("private-tenant");
+		redis.down();
+	});
+
+	it("refuse boot for a durable space where the server skips its fsyncs while it rewrites, and boot where it does not", async () => {
+		const redis = primary();
+		Object.assign(redis.settings, { appendonly: "yes", appendfsync: "always" });
+		redis.settings["no-appendfsync-on-rewrite"] = "yes";
+		const port = await redis.listen();
+		const error = await boot(port, undefined, undefined, [durable]).catch((e) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect(String((error as BootRefused).refusals.map((r) => r.reason))).toContain(
+			"no-appendfsync-on-rewrite no",
+		);
+		await app?.stop(1000);
+		redis.settings["no-appendfsync-on-rewrite"] = "no";
+		await boot(port, undefined, undefined, [durable]);
+		redis.down();
 	});
 
 	it("take a write refused for want of replicas as no answer, never as a refused command", async () => {

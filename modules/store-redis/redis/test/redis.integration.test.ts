@@ -11,6 +11,7 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces, store } from "@mod/store";
 import { contractSpaces, overwrite, storeContract } from "@mod/store/testing";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 
@@ -41,7 +42,12 @@ let replica = "";
 let secondReplica = "";
 let network = "";
 
-const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+/**
+ * A docker call killed past a minute, as long as its hook may take, so a stalled daemon fails the test.
+ * Its own, not `docker-client`'s: an adapter's tests take no assembly package (G10).
+ */
+const docker = (...args: string[]) =>
+	execFileSync("docker", args, { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" }).trim();
 const cli = (target: string, ...args: string[]) => docker("exec", target, "redis-cli", ...args);
 /** Whether the target answers PING; a container still starting answers nothing yet. */
 const pings = (target: string) => {
@@ -132,6 +138,8 @@ beforeAll(async () => {
 		"yes",
 		"--appendfsync",
 		"always",
+		"--no-appendfsync-on-rewrite",
+		"no",
 		"--min-replicas-to-write",
 		"1",
 	);
@@ -171,11 +179,11 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(() => {
-	for (const id of [replica, secondReplica, container]) if (id) docker("rm", "-f", id);
+	for (const id of [replica, secondReplica, container]) if (id) docker("rm", "-f", "-v", id);
 	if (network) docker("network", "rm", network);
 });
 
-const durable = defineModule({ name: "durable-owner" }, (m) => [
+const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
 	...contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 ]);
@@ -190,7 +198,7 @@ async function open(
 	replication: string | null = "replicas",
 ) {
 	const app = await assemble({
-		modules: [redisModule, ...extra],
+		modules: [redisModule, tlsOptionsForTests, ...extra],
 		config: {
 			...kernelConfig({ deployment: "multi" }),
 			redis: { url: through, prefix, ...(replication ? { replication } : {}) },
@@ -203,6 +211,24 @@ async function open(
 const stops: (() => Promise<void>)[] = [];
 afterAll(async () => {
 	for (const stop of stops) await stop();
+});
+
+it("answers an empty batch in time as committed with no versions, as the contract's answer is shaped", async () => {
+	const app = await open([durable], undefined, proxyUrl);
+	stops.push(() => app.stop(1000));
+	const s = app.get(store);
+	const now = await s.now();
+	expect(await s.batch([], [], { deadline: now + 60_000 })).toEqual({
+		kind: "committed",
+		versions: [],
+	});
+	expect(await s.batch([], [])).toEqual({ kind: "committed", versions: [] });
+});
+
+it("offers a batch across partitions and spaces of one guarantee, so the contract's batches across run on it", async () => {
+	const app = await open([durable], undefined, proxyUrl);
+	stops.push(() => app.stop(1000));
+	expect(typeof app.get(store).batchAcross).toBe("function");
 });
 
 storeContract("redis", {
@@ -308,7 +334,8 @@ describe("redis", () => {
 		cli(container, "acl", "setuser", user, "on", ">pw", ...every, "-evalsha", "-script");
 		try {
 			let context: BuildContext<unknown> | undefined;
-			const asker = defineModule({ name: "asker" }, (m) => [
+			// Safe: it keeps the build context for the test once, at build; no request writes it.
+			const asker = defineModule({ name: "asker", replicaSafe: true, takes: [] }, (m) => [
 				m.provide(contract<object>("asker")).by((c) => {
 					context = c;
 					return {};
@@ -331,9 +358,10 @@ describe("redis", () => {
 
 	it("boots a user held to the store's own keys, needing the confirmation key only where it confirms", async () => {
 		expect(await asUser(["~acl:{*", "&*", "+@all"], [], null, "acl")).toBe("booted");
-		expect(await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl")).toContain(
-			"acl:#confirm",
-		);
+		const refused = await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl");
+		// Named by the setting that sets it, never by the prefix's value.
+		expect(refused).toContain("<redis.prefix>:#confirm");
+		expect(refused).not.toContain("acl:");
 	});
 
 	it("boots while no replica takes writes: that leaves the commands undetermined, never refused", async () => {
@@ -379,7 +407,7 @@ describe("redis", () => {
 				open([durable], undefined, `redis://127.0.0.1:${port}`, "none"),
 			).rejects.toBeInstanceOf(BootRefused);
 		} finally {
-			docker("rm", "-f", node);
+			docker("rm", "-f", "-v", node);
 		}
 	}, 60_000);
 
@@ -402,8 +430,9 @@ describe("redis", () => {
 		let follower = "";
 		try {
 			await waitFor(() => pings(lone));
-			const replicatedOnly = defineModule({ name: "replicated-owner" }, (m) =>
-				contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
+			const replicatedOnly = defineModule(
+				{ name: "replicated-owner", replicaSafe: true, takes: [] },
+				(m) => contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 			);
 			const app = await open(
 				[replicatedOnly],
@@ -436,7 +465,7 @@ describe("redis", () => {
 				name: "Unavailable",
 			});
 		} finally {
-			for (const id of [follower, lone]) if (id) docker("rm", "-f", id);
+			for (const id of [follower, lone]) if (id) docker("rm", "-f", "-v", id);
 			docker("network", "rm", net);
 		}
 	}, 90_000);
@@ -498,7 +527,7 @@ describe("redis", () => {
 				same.disconnect();
 			}
 		} finally {
-			docker("rm", "-f", lone);
+			docker("rm", "-f", "-v", lone);
 		}
 	}, 60_000);
 
@@ -511,10 +540,18 @@ describe("redis", () => {
 		}
 	});
 
-	it("refuses durable spaces when the server does not persist", async () => {
+	it("refuses durable spaces when the server does not persist, saying first what to set", async () => {
 		cli(container, "config", "set", "appendonly", "no");
 		try {
-			await expect(open()).rejects.toBeInstanceOf(BootRefused);
+			const refused = await open().catch((error: BootRefused) => error.refusals);
+			expect(refused).toEqual([
+				{
+					where: "redis",
+					reason: expect.stringMatching(
+						/^set appendonly yes, appendfsync always and no-appendfsync-on-rewrite no on the server \(docs\/runbook\.md, Redis\), which the durable guarantee of these spaces needs: /,
+					),
+				},
+			]);
 		} finally {
 			cli(container, "config", "set", "appendonly", "yes");
 		}
@@ -560,12 +597,12 @@ describe("redis", () => {
 		try {
 			await waitFor(() => pings(old));
 			const app = assemble({
-				modules: [redisModule],
+				modules: [redisModule, tlsOptionsForTests],
 				config: { ...kernelConfig(), redis: { url: `redis://127.0.0.1:${port}` } },
 			});
 			await expect(app).rejects.toBeInstanceOf(BootRefused);
 		} finally {
-			docker("rm", "-f", old);
+			docker("rm", "-f", "-v", old);
 		}
 	}, 60_000);
 
@@ -606,7 +643,7 @@ describe("redis", () => {
 
 	it("refuses to start when the server cannot be reached", async () => {
 		const app = assemble({
-			modules: [redisModule],
+			modules: [redisModule, tlsOptionsForTests],
 			config: {
 				...kernelConfig(),
 				redis: { url: `redis://127.0.0.1:${await freePort()}` },
@@ -619,26 +656,34 @@ describe("redis", () => {
 describe("one server alone, as configured with replication none", () => {
 	const lone: string[] = [];
 	afterAll(() => {
-		for (const id of lone) docker("rm", "-f", id);
+		for (const id of lone) docker("rm", "-f", "-v", id);
 	});
-	const replicatedOnly = defineModule({ name: "replicated-owner" }, (m) => [
-		m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
-	]);
+	const replicatedOnly = defineModule(
+		{ name: "replicated-owner", replicaSafe: true, takes: [] },
+		(m) => [m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] }))],
+	);
 
-	it("boots on Redis 7.4 and 7.0 alike: one server, its run id the same to both connections, and the store's scripts run", async () => {
+	it("boots on Redis 7.4 and 7.0 alike: one server, its run id the same to both connections, and the store's scripts run, warning at each boot of the spaces it leaves unreplicated", async () => {
 		for (const version of ["redis:7.4-alpine", "redis:7.0-alpine"]) {
 			const port = await freePort();
 			const id = docker("run", "-d", "--rm", "-p", `127.0.0.1:${port}:6379`, version);
 			lone.push(id);
 			await waitFor(() => pings(id));
+			const recorded = recordingLog();
 			const app = await assemble({
-				modules: [redisModule, replicatedOnly],
+				modules: [redisModule, tlsOptionsForTests, replicatedOnly],
 				config: {
 					...kernelConfig(),
 					redis: { url: `redis://127.0.0.1:${port}`, prefix: "alone", replication: "none" },
 				},
+				runtime: quietRuntime({ log: recorded.log }),
 			});
 			await app.stop(1000);
+			const warned = recorded.lines().filter((line) => line.event === "redis.replication_none");
+			expect(
+				warned.map((line) => line.fields.spaces),
+				version,
+			).toEqual(["replicated"]);
 		}
 	}, 90_000);
 });
@@ -653,14 +698,14 @@ describe("a Redis 7.0 server", () => {
 		await waitFor(() => pings(old));
 	}, 60_000);
 	afterAll(() => {
-		if (old) docker("rm", "-f", old);
+		if (old) docker("rm", "-f", "-v", old);
 	});
 
 	it("names the store's keys where a script is refused one, in 7.0's words", async () => {
 		docker("exec", old, "redis-cli", "acl", "setuser", "u", "on", ">pw", "~*", "&*", "+@all");
 		docker("exec", old, "redis-cli", "acl", "setuser", "u", "-hset", "(+hset ~other:*)");
 		const refused = await assemble({
-			modules: [redisModule],
+			modules: [redisModule, tlsOptionsForTests],
 			config: { ...kernelConfig(), redis: { url: oldUrl, prefix: "old" } },
 		}).catch((error) => error);
 		expect(refused).toBeInstanceOf(BootRefused);
@@ -680,14 +725,14 @@ describe("settings the server will not show", () => {
 		await waitFor(() => pings(blocked));
 	}, 60_000);
 	afterAll(() => {
-		if (blocked) docker("rm", "-f", blocked);
+		if (blocked) docker("rm", "-f", "-v", blocked);
 	});
-	const kept = defineModule({ name: "kept-owner" }, (m) => [
+	const kept = defineModule({ name: "kept-owner", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
 	]);
 	const boot = (redis: object, through = blockedUrl, recorded = recordingLog()) =>
 		assemble({
-			modules: [redisModule, kept],
+			modules: [redisModule, tlsOptionsForTests, kept],
 			config: { ...kernelConfig(), redis: { url: through, prefix: `d${++opened}`, ...redis } },
 			runtime: quietRuntime({ log: recorded.log }),
 		});
@@ -699,7 +744,12 @@ describe("settings the server will not show", () => {
 
 	it("names each setting it needs that the operator has not declared", async () => {
 		const reasons = await refusedFor({});
-		for (const name of ["maxmemory-policy", "appendonly", "appendfsync"]) {
+		for (const name of [
+			"maxmemory-policy",
+			"appendonly",
+			"appendfsync",
+			"no-appendfsync-on-rewrite",
+		]) {
 			expect(reasons, name).toContain(`declare ${name} in redis.server-settings`);
 		}
 	});
@@ -709,18 +759,24 @@ describe("settings the server will not show", () => {
 			"maxmemory-policy": "allkeys-lru",
 			appendonly: "yes",
 			appendfsync: "always",
+			"no-appendfsync-on-rewrite": "no",
 		};
 		expect(await refusedFor({ "server-settings": declared })).toContain("noeviction");
 	});
 
 	it("boots on declared settings, warning on each boot that they hold as declared, unchecked", async () => {
 		const recorded = recordingLog();
-		const declared = { "maxmemory-policy": "noeviction", appendonly: "yes", appendfsync: "always" };
+		const declared = {
+			"maxmemory-policy": "noeviction",
+			appendonly: "yes",
+			appendfsync: "always",
+			"no-appendfsync-on-rewrite": "no",
+		};
 		const app = await boot({ "server-settings": declared }, blockedUrl, recorded);
 		stops.push(() => app.stop(1000));
 		const warned = recorded.lines().filter((line) => line.event === "redis.settings_declared");
 		expect(warned.map((line) => line.fields.settings)).toEqual([
-			"maxmemory-policy, appendonly, appendfsync",
+			"maxmemory-policy, appendonly, appendfsync, no-appendfsync-on-rewrite",
 		]);
 	});
 
@@ -763,6 +819,7 @@ describe("settings the server will not show", () => {
 			"maxmemory-policy": "noeviction",
 			appendonly: "yes",
 			appendfsync: "always",
+			"no-appendfsync-on-rewrite": "no",
 		},
 	};
 

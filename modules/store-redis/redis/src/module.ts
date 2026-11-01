@@ -1,12 +1,24 @@
 import { contract, defineModule, probes, setting } from "@mod/kernel";
 import { type Space, spaces, store } from "@mod/store";
+import { isFloor, tlsOptions } from "@mod/tls-options";
 import { Redis } from "ioredis";
 import { z } from "zod";
+import { clientDebugs, clientOptions, inTheClear, queryRefusal } from "./client/client.ts";
 import { redisProbe } from "./probe.ts";
 import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
 
 const section = z.strictObject({
-	url: z.url({ protocol: /^rediss?$/ }).describe("The Redis server to connect to."),
+	url: z
+		.url({ protocol: /^rediss?$/ })
+		.superRefine((url, ctx) => {
+			const refused = queryRefusal(url);
+			if (refused !== undefined) ctx.addIssue({ code: "custom", message: refused });
+		})
+		.describe("The Redis server to connect to, with no query: each option is its own setting."),
+	"address-family": z
+		.enum(["ipv4", "ipv6"])
+		.optional()
+		.describe("The address family the host's name resolves to: ipv4 or ipv6; either when unset."),
 	prefix: z
 		.string()
 		.regex(/^[a-z0-9-]+$/)
@@ -37,7 +49,7 @@ const section = z.strictObject({
 		.literal("none")
 		.optional()
 		.describe(
-			'"none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes and appendfsync always.',
+			'"none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes, appendfsync always and no-appendfsync-on-rewrite no.',
 		),
 	"server-settings": z
 		.strictObject({
@@ -54,6 +66,10 @@ const section = z.strictObject({
 				.enum(["always", "everysec", "no"])
 				.optional()
 				.describe("How often the server fsyncs its append-only file."),
+			"no-appendfsync-on-rewrite": z
+				.enum(["yes", "no"])
+				.optional()
+				.describe("Whether the server skips its fsyncs while it rewrites its append-only file."),
 			"min-replicas-to-write": z
 				.number()
 				.int()
@@ -182,12 +198,19 @@ async function durabilityProblems(
 ): Promise<string[]> {
 	const durable = declared.filter((s) => s.guarantees.includes("durable"));
 	if (durable.length === 0 || durability === "none") return [];
-	// Both are read, so a refusal names every setting left undeclared at once.
-	const [appendonly, appendfsync] = [await settings("appendonly"), await settings("appendfsync")];
-	const persisted = appendonly === "yes" && appendfsync === "always";
+	// Each is read, so a refusal names every setting left undeclared at once. A rewrite that skips
+	// its fsyncs loses an acknowledged write in a crash, as appendfsync other than always does.
+	const [appendonly, appendfsync, onRewrite] = [
+		await settings("appendonly"),
+		await settings("appendfsync"),
+		await settings("no-appendfsync-on-rewrite"),
+	];
+	const persisted = appendonly === "yes" && appendfsync === "always" && onRewrite === "no";
 	if (persisted) return [];
 	const names = durable.map((s) => s.name).join(", ");
-	return [`the durable guarantee needs appendonly yes and appendfsync always: ${names}`];
+	return [
+		`set appendonly yes, appendfsync always and no-appendfsync-on-rewrite no on the server (docs/runbook.md, Redis), which the durable guarantee of these spaces needs: ${names}`,
+	];
 }
 
 /** What the server's settings fail to give the declared spaces, empty when everything holds; and the settings taken as declared. */
@@ -200,18 +223,22 @@ async function unmet(
 	readonly problems: string[];
 	readonly declaredOnly: readonly SettingName[];
 	readonly undurable: readonly string[];
+	readonly unreplicated: readonly string[];
 }> {
 	// First, as the checks below send some of the same commands: a refused one is named, not lost.
 	const refused = await refusedCommands(client, confirmer, {
 		prefix: s.prefix,
 		replication: s.replication,
 	});
-	if (refused.length > 0) return { problems: refused, declaredOnly: [], undurable: [] };
+	if (refused.length > 0) {
+		return { problems: refused, declaredOnly: [], undurable: [], unreplicated: [] };
+	}
 	const round = await roundProblems(client, confirmer, {
 		prefix: s.prefix,
 		replication: s.replication,
 	});
-	if (round.length > 0) return { problems: round, declaredOnly: [], undurable: [] };
+	if (round.length > 0)
+		return { problems: round, declaredOnly: [], undurable: [], unreplicated: [] };
 	const role = await roleOf(client);
 	const settings = serverSettings(client, s["server-settings"] ?? {});
 	const problems = [
@@ -225,11 +252,40 @@ async function unmet(
 		s.durability === "none"
 			? declared.filter((d) => d.guarantees.includes("durable")).map((d) => d.name)
 			: [];
+	const unreplicated =
+		s.replication === "none"
+			? declared
+					.filter(
+						(d) => d.guarantees.includes("replicated") || d.guarantees.includes("confirmed-reads"),
+					)
+					.map((d) => d.name)
+			: [];
 	return {
 		problems: [...problems, ...settings.problems],
 		declaredOnly: [...settings.used],
 		undurable,
+		unreplicated,
 	};
+}
+
+/**
+ * What a failure is, by its code alone (`ECONNREFUSED`, `ENOTFOUND`, `NOAUTH`): a system error's
+ * code, the first word of a server's reply where it is one, or the error's class (`ParserError`);
+ * never the message, which may name a host or a key.
+ */
+function codeOf(error: unknown): string {
+	const word = /^[A-Z][A-Z0-9_]{1,31}$/;
+	const { code, message, name } = (error ?? {}) as {
+		code?: unknown;
+		message?: unknown;
+		name?: unknown;
+	};
+	if (typeof code === "string" && word.test(code)) return code;
+	const first = typeof message === "string" ? message.split(" ")[0] : undefined;
+	if (first !== undefined && word.test(first)) return first;
+	return typeof name === "string" && /^[A-Z][A-Za-z]{1,31}Error$/.test(name) && name !== "Error"
+		? name
+		: "unknown";
 }
 
 /** The two connections, open and checked, for the store and its probe alike. */
@@ -239,80 +295,117 @@ const connections = contract<{
 	readonly declared: readonly Space[];
 }>("redis.connections");
 
-export default defineModule({ name: "redis", section }, (m) => [
-	m.provide(connections).by(async (c) => {
-		const client = new Redis(c.section.url, {
-			lazyConnect: true,
-			connectTimeout: c.section["connect-timeout"],
-			maxRetriesPerRequest: 0,
-			enableOfflineQueue: false,
-			// A command whose reply was lost must not be sent again on a new connection: a resent
-			// WAIT would confirm nothing, and a resent script would run twice.
-			autoResendUnfulfilledCommands: false,
-			commandTimeout: c.section["command-timeout"],
-		});
-		client.on("error", () => c.log.warn("redis.error"));
-		const confirmer = client.duplicate({
-			commandTimeout: c.section["replication-timeout"] + c.section["command-timeout"],
-		});
-		confirmer.on("error", () => c.log.warn("redis.error"));
-		let checked: Awaited<ReturnType<typeof unmet>>;
-		const declared = await c.collect(spaces);
-		try {
-			await client.connect();
-			await confirmer.connect();
-			checked = await unmet(client, confirmer, declared, c.section);
-		} catch {
-			client.disconnect();
-			confirmer.disconnect();
-			return c.refuse("redis.url", "cannot connect to Redis, or cannot check its configuration");
-		}
-		if (checked.problems.length > 0) {
-			client.disconnect();
-			confirmer.disconnect();
-			return c.refuse("redis", checked.problems.join("; "));
-		}
-		if (checked.declaredOnly.length > 0) {
-			// On every boot: these the server would not show, so they hold as declared, unchecked.
-			c.log.warn("redis.settings_declared", { settings: checked.declaredOnly.join(", ") });
-		}
-		if (checked.undurable.length > 0) {
-			// On every boot: a crash loses these spaces' latest writes, as the operator stated.
-			c.log.warn("redis.durability_none", { spaces: checked.undurable.join(", ") });
-		}
-		c.onStop(async (signal) => {
-			// Past the stop's deadline the connections are cut, not left waiting on QUIT.
-			const cut = () => {
+const takes = [spaces, tlsOptions] as const;
+
+// Safe on many instances: it is the shared store, given the same `url` and `prefix` on each
+// (deployment-guarantees, Several instances).
+export default defineModule(
+	{
+		name: "redis",
+		replicaSafe: true,
+		section,
+		// The client's own debug log writes AUTH's password and every command's arguments, what the
+		// store keeps among them; production refuses it by the key whose secret it leaks, never a value.
+		refusedInProduction: () =>
+			clientDebugs(process.env.DEBUG)
+				? [
+						{
+							key: "url",
+							reason:
+								"DEBUG turns on ioredis' own debug log, which writes this URL's password and every command's arguments; leave ioredis out of DEBUG",
+						},
+					]
+				: [],
+		takes,
+	},
+	(m) => [
+		m.provide(connections).by(async (c) => {
+			// On every boot: what the store keeps, and the URL's password, go in the clear; no host is told.
+			if (inTheClear(c.section.url)) {
+				c.log.warn("redis.plaintext", { reason: "the connection to Redis is not encrypted" });
+			}
+			const floor = await c.get(tlsOptions);
+			if (!isFloor(floor)) {
+				return c.refuse(
+					"redis",
+					"the TLS floor is not one tls-options made: provide it from @mod/tls-options",
+				);
+			}
+			const client = new Redis(c.section.url, clientOptions(c.section, floor));
+			// The last failure's code, which a refused connect tells only through its error events.
+			let lastCode = "unknown";
+			const failed = (error: unknown) => {
+				lastCode = codeOf(error);
+				c.log.warn("redis.error", { code: lastCode });
+			};
+			client.on("error", failed);
+			const confirmer = client.duplicate({
+				commandTimeout: c.section["replication-timeout"] + c.section["command-timeout"],
+			});
+			confirmer.on("error", failed);
+			const disconnectBoth = () => {
 				client.disconnect();
 				confirmer.disconnect();
 			};
-			if (signal.aborted) return cut();
-			signal.addEventListener("abort", cut, { once: true });
+			let checked: Awaited<ReturnType<typeof unmet>>;
+			const declared = await c.collect(spaces);
 			try {
-				await client.quit().catch(() => client.disconnect());
-				await confirmer.quit().catch(() => confirmer.disconnect());
-			} finally {
-				signal.removeEventListener("abort", cut);
+				await client.connect();
+				await confirmer.connect();
+				checked = await unmet(client, confirmer, declared, c.section);
+			} catch (error) {
+				disconnectBoth();
+				return c.refuse(
+					"redis.url",
+					`cannot connect to Redis, or cannot check its configuration (${codeOf(error) === "unknown" ? lastCode : codeOf(error)})`,
+				);
 			}
-		});
-		return { client, confirmer, declared };
-	}),
-	m.provide(store).by(async (c) => {
-		const { client, confirmer, declared } = await c.get(connections);
-		return redisStore(
-			client,
-			confirmer,
-			{
-				prefix: c.section.prefix,
-				replicationTimeoutMs: c.section["replication-timeout"],
-				replication: c.section.replication,
-			},
-			declared,
-		);
-	}),
-	m.contribute(probes).by(async (c) => {
-		const { client, confirmer, declared } = await c.get(connections);
-		const recheck = async () => (await unmet(client, confirmer, declared, c.section)).problems;
-		return redisProbe([client, confirmer], recheck, c.log);
-	}),
-]);
+			if (checked.problems.length > 0) {
+				disconnectBoth();
+				return c.refuse("redis", checked.problems.join("; "));
+			}
+			if (checked.declaredOnly.length > 0) {
+				// On every boot: these the server would not show, so they hold as declared, unchecked.
+				c.log.warn("redis.settings_declared", { settings: checked.declaredOnly.join(", ") });
+			}
+			if (checked.undurable.length > 0) {
+				// On every boot: a crash loses these spaces' latest writes, as the operator stated.
+				c.log.warn("redis.durability_none", { spaces: checked.undurable.join(", ") });
+			}
+			if (checked.unreplicated.length > 0) {
+				// On every boot: a failover loses these spaces' writes, confirmed ones too, as the operator stated.
+				c.log.warn("redis.replication_none", { spaces: checked.unreplicated.join(", ") });
+			}
+			c.onStop(async (signal) => {
+				// Past the stop's deadline the connections are cut, not left waiting on QUIT.
+				if (signal.aborted) return disconnectBoth();
+				signal.addEventListener("abort", disconnectBoth, { once: true });
+				try {
+					await client.quit().catch(() => client.disconnect());
+					await confirmer.quit().catch(() => confirmer.disconnect());
+				} finally {
+					signal.removeEventListener("abort", disconnectBoth);
+				}
+			});
+			return { client, confirmer, declared };
+		}),
+		m.provide(store).by(async (c) => {
+			const { client, confirmer, declared } = await c.get(connections);
+			return redisStore(
+				client,
+				confirmer,
+				{
+					prefix: c.section.prefix,
+					replicationTimeoutMs: c.section["replication-timeout"],
+					replication: c.section.replication,
+				},
+				declared,
+			);
+		}),
+		m.contribute(probes).by(async (c) => {
+			const { client, confirmer, declared } = await c.get(connections);
+			const recheck = async () => (await unmet(client, confirmer, declared, c.section)).problems;
+			return redisProbe([client, confirmer], recheck, c.log);
+		}),
+	],
+);
