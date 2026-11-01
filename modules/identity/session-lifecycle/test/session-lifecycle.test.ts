@@ -17,8 +17,11 @@ import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
-import { subjectRevocation } from "@mod/subject-revocation";
+import { simulatedStore } from "@mod/store/testing";
+import { revocations, subjectRevocation } from "@mod/subject-revocation";
+import revocationModule from "@mod/subject-revocation/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import revocationStore from "@mod/subject-revocation-store/module";
 import { beforeEach, describe, expect, it } from "vitest";
 import sessionLifecycle from "../src/module.ts";
 import type { StoredSession } from "../src/store.ts";
@@ -410,6 +413,48 @@ describe("session entry", () => {
 		expect(await s.enter(withCookie(a))).toBeUndefined();
 		expect(await s.enter(withCookie(b))).toBeDefined();
 		expect(await s.enter(withCookie(await login("alice")))).toBeDefined();
+	});
+
+	it("closes before any cookie a session whose proof began before a boundary whose write landed near its deadline, opened after it", async () => {
+		const simulated = simulatedStore();
+		const app = await assemble({
+			modules: [
+				http,
+				cookiesModule,
+				sessionLifecycle,
+				sessionRequirements,
+				sessionParticipants,
+				memoryStores().module,
+				revocationModule,
+				revocationStore,
+				simulated.module,
+			],
+			config: configWith(),
+			runtime: quietRuntime({ clock: { now: () => now } }),
+		});
+		const s = app.get(sessions);
+		const opening = s.open;
+		if (!opening) expect.unreachable("session-lifecycle opens through open");
+		const provenSince = now;
+		// The revocation's write lands just short of its deadline: the boundary, 10 s on.
+		simulated.beforeNext("putIfAbsent", "subject-revocation-store.boundaries", async () =>
+			simulated.shiftClock(9900),
+		);
+		await app.get(revocations).record("alice");
+		// The session opens after the boundary, so its own opening is no longer before it.
+		now += 15_000;
+		expect(await opening(testRequest(), { ...facts(), provenSince })).toEqual({ kind: "revoked" });
+		// Opened without the proof's start, the same login would be entered.
+		const unchecked = await s.complete(testRequest(), facts());
+		const cookie = pair(unchecked.cookies[0]);
+		expect(
+			await s.enter(
+				testRequest({ headers: new Map([["cookie", cookie]]), source: { scheme: "https" } }),
+			),
+		).toBeDefined();
+		// A proof begun after the boundary opens.
+		const later = await opening(testRequest(), { ...facts(), provenSince: now });
+		expect(later.kind).toBe("opened");
 	});
 
 	it("closes a session a read finds ended by the lifetime in force, so restoring the lifetime never brings it back", async () => {

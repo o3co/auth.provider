@@ -72,7 +72,13 @@ export default defineModule(
 				},
 				enterFor: lifecycle.entryIn,
 				entryOf: (handle: string, level: EntryLevel = "use") => lifecycle.entryAt(handle, level),
-				complete: lifecycle.open,
+				complete: async (request, facts) => {
+					const opened = await lifecycle.open(request, facts, false);
+					if (opened.kind !== "opened")
+						throw new TypeError("session-lifecycle: complete never answers revoked");
+					return { session: opened.session, cookies: opened.cookies };
+				},
+				open: (request, facts) => lifecycle.open(request, facts, true),
 				raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 				// The cookie's index alone: no session record is read before a close.
 				handleOf: lifecycle.handleIn,

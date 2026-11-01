@@ -7,6 +7,8 @@ import {
 	type Entry,
 	type EntryJudge,
 	type EntryLevel,
+	type LoginFacts,
+	type Opened,
 	type Session,
 	type Sessions,
 	sessionRules,
@@ -56,8 +58,8 @@ export interface Lifecycle {
 	liveAt(handle: string): Promise<OpenRecord | undefined>;
 	entryAt(handle: string, level: EntryLevel): Promise<Entry>;
 	entryIn(request: HttpRequest, level: EntryLevel): Promise<Entry>;
-	/** As `complete`: a new session over the request's earlier one. */
-	open: Sessions["complete"];
+	/** As `open` over the request's earlier session; `rechecked`, the proof's start compared once saved. */
+	open(request: HttpRequest, facts: LoginFacts, rechecked: boolean): Promise<Opened>;
 	close: Sessions["close"];
 	/** Closes the session the request's cookie opens, if any, and destroys the cookie it carries. */
 	closeIn: Sessions["closeRequest"];
@@ -230,8 +232,9 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		if (entry.kind === "absent") return entry;
 		return (await index.read(secret)) === handle ? entry : { kind: "absent" };
 	};
-	const open: Sessions["complete"] = async (request, facts) => {
+	const open: Lifecycle["open"] = async (request, facts, rechecked) => {
 		sessionRules.checkAuthenticatedAt(facts);
+		sessionRules.checkProvenSince(facts);
 		// The earlier session is closed first; the login fails if that close cannot even be added to the closings.
 		const earlier = await handleIn(request);
 		if (earlier) await close(earlier);
@@ -249,11 +252,19 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		};
 		const record: SessionRecord = { format: 2, state: "open", ...context, openedAt };
 		await created(kept.save(handle, toStored(record), lifetimeMs));
+		// Once saved: a boundary landing after this read is later than the opening, which entry compares.
+		const { provenSince } = facts;
+		if (rechecked && provenSince !== undefined) {
+			if ((await revocation.check(facts.subject, provenSince)) === "revoked") {
+				await close(handle);
+				return { kind: "revoked" };
+			}
+		}
 		// Listed before its cookie is made, so a revocation finds every session anyone can enter.
 		const { pushedOut } = await listed.add(facts.subject, handle, lifetimeMs);
 		if (pushedOut.length > 0) await listing.closePushedOut(facts.subject, handle, pushedOut);
 		const { cookie } = await issueSecret(handle, lifetimeMs);
-		return { session: sessionOf(handle, context), cookies: [cookie] };
+		return { kind: "opened", session: sessionOf(handle, context), cookies: [cookie] };
 	};
 	return {
 		handleIn,
