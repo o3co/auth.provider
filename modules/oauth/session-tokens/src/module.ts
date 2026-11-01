@@ -138,7 +138,11 @@ const sessionTie = (index: TokenIndex, open: Pick<Sessions, "entryOf">): TokenTi
 /** The parts built once, so the margin is checked once. */
 const built = contract<Parts>("session-tokens.parts");
 
-export default defineModule({ name: "session-tokens", section }, (m) => [
+const takes = [issuedTokens, tokenIndex, pendingSessions, tokens, sessions];
+
+// Safe on many instances: every instance runs the sweep over the shared store, and revoking a pushed-out
+// token twice does no harm.
+export default defineModule({ name: "session-tokens", replicaSafe: true, section, takes }, (m) => [
 	m.provide(built).by(partsOf),
 	m.provide(sessionTokens).by(async (c) => {
 		const parts = await c.get(built);
