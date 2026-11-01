@@ -14,6 +14,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
+		"@mod/mfa-managing": "workspace:*",
 		"@mod/subject-revocation": "workspace:*"
 	},
 	"devDependencies": {

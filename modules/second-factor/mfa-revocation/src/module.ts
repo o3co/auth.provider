@@ -1,10 +1,14 @@
 import { defineModule } from "@mod/kernel";
-import { factors, fenceFollower } from "@mod/mfa";
+import { fenceFollower } from "@mod/mfa";
+import { factorManaging } from "@mod/mfa-managing";
 import { revocationFollowers } from "@mod/subject-revocation";
 
-export default defineModule({ name: "mfa-revocation" }, (m) => [
-	m.contribute(revocationFollowers).by(async (c) => {
-		const decided = await c.get(factors);
-		return { name: fenceFollower, follow: (subject) => decided.fence(subject) };
-	}),
-]);
+export default defineModule(
+	{ name: "mfa-revocation", replicaSafe: true, takes: [factorManaging] },
+	(m) => [
+		m.contribute(revocationFollowers).by(async (c) => {
+			const decided = await c.get(factorManaging);
+			return { name: fenceFollower, follow: (subject) => decided.fence(subject) };
+		}),
+	],
+);
