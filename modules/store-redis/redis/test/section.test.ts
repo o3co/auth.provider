@@ -150,6 +150,20 @@ it("refuses production where DEBUG turns on the client's own debug log, at redis
 	vi.stubEnv("DEBUG", "express:*");
 	const other = await refusalOf(section, { environment: "development" });
 	expect(other.warned.filter((l) => l.event === "kernel.allowed_in_development")).toEqual([]);
+	// Any of the client's logs, not its command log alone: each writes to stderr, whose reader gone ends the process.
+	for (const [debug, refused] of [
+		["ioredis:connection", true],
+		["*,-ioredis:redis", true],
+		["*,-ioredis:*", false],
+	] as const) {
+		vi.stubEnv("DEBUG", debug);
+		const { refused: answer } = await refusalOf(section, { environment: "production" });
+		const ours = answer instanceof BootRefused ? answer.refusals : [];
+		expect(
+			ours.some((r) => r.where === "redis.url" && r.reason === reason),
+			debug,
+		).toBe(refused);
+	}
 });
 
 it("warns at every boot where redis.url reaches Redis in the clear off this host, telling neither host nor URL", async () => {

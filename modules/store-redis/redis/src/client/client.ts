@@ -37,15 +37,54 @@ export const inTheClear = (url: string): boolean => {
 	return protocol === "redis:" && !isLoopbackName(hostname);
 };
 
-/** Whether `DEBUG` turns on the client's `ioredis:redis` log, which writes AUTH's password, read as the `debug` library reads it. */
+/** Where the client's logs are named: `ioredis:redis` writes AUTH's password, and each writes to stderr. */
+const clientLogs = "ioredis:";
+
+/** A `debug` template's places (`*` any run of characters, all else itself), with each `*` passed too, as it may take none. */
+function past(template: string, places: readonly number[]): number[] {
+	const all = new Set<number>();
+	for (let at of places) {
+		all.add(at);
+		while (template[at] === "*") all.add(++at);
+	}
+	return [...all].sort((a, b) => a - b);
+}
+
+/** A template's places after one more character. */
+const step = (template: string, places: readonly number[], char: string): number[] =>
+	past(
+		template,
+		places.flatMap((at) => (template[at] === "*" ? [at] : template[at] === char ? [at + 1] : [])),
+	);
+
+/**
+ * Whether `DEBUG` turns on any of the client's `ioredis:` logs, read as the `debug` library reads it:
+ * a namespace a negation names is off, one another template names on. Every name under `ioredis:` is
+ * tried, a character at a time, each template's places held, until one is on or no other is left.
+ */
 export function clientDebugs(debug: string | undefined): boolean {
-	const names = (debug ?? "").split(/[\s,]+/).filter((name) => name !== "");
-	const matches = (pattern: string) =>
-		new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*?")}$`).test(
-			"ioredis:redis",
-		);
-	if (names.some((name) => name.startsWith("-") && matches(name.slice(1)))) return false;
-	return names.some((name) => !name.startsWith("-") && matches(name));
+	const templates = (debug ?? "").split(/[\s,]+/).filter((t) => t !== "");
+	const names = templates.filter((t) => !t.startsWith("-"));
+	const all = [...names, ...templates.filter((t) => t.startsWith("-")).map((t) => t.slice(1))];
+	// A character no template names stands for every one such.
+	const chars = [...new Set([...all.join("").replaceAll("*", ""), "\0"])];
+	const start = all.map((t) =>
+		[...clientLogs].reduce((at, char) => step(t, at, char), past(t, [0])),
+	);
+	const seen = new Set<string>();
+	// No log is named `ioredis:` alone.
+	const queue = chars.map((char) => start.map((at, i) => step(all[i] ?? "", at, char)));
+	for (const places of queue) {
+		const key = JSON.stringify(places);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const ends = places.map((at, i) => at.includes(all[i]?.length ?? -1));
+		const on = ends.slice(0, names.length).some(Boolean);
+		if (on && !ends.slice(names.length).some(Boolean)) return true;
+		if (places.slice(0, names.length).every((at) => at.length === 0)) continue;
+		for (const char of chars) queue.push(places.map((at, i) => step(all[i] ?? "", at, char)));
+	}
+	return false;
 }
 
 /**

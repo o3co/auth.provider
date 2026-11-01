@@ -305,7 +305,8 @@ export default defineModule(
 		replicaSafe: true,
 		section,
 		// The client's own debug log writes AUTH's password and every command's arguments, what the
-		// store keeps among them; production refuses it by the key whose secret it leaks, never a value.
+		// store keeps among them, and any of its logs writes to stderr, whose reader gone ends the
+		// process; production refuses each by the key whose secret it leaks, never a value.
 		refusedInProduction: () =>
 			clientDebugs(process.env.DEBUG)
 				? [
