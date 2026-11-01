@@ -11,15 +11,16 @@
 - Opening the session (`session`, through `login-gates`).
 
 ## Offers
+- A `login-gates` return path: each IdP's start.
 - Composition definition: `GET /session/oauth/federation/<idp>` (start: `redirect_to`, `prompt` (only `login` is passed on), `max_age`, `link` (`1` or `true` chooses the continuation named `link`; any other value is a login)) and `…/<idp>/callback` (`code`, `state`, `iss`, `error`; by POST for an IdP that answers in a posted form, else GET; the other method is 405); starts and callbacks are limited per source
 - Provides `upstreams`, as its default adapter.
 - Declares to `users` (`upstreamNames`) each IdP's name with the issuer its upstream says.
 - The operator section (its keys in the settings list).
 - Test configuration builders and an IdP type for tests (`./testing`)
-- Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`)
+- Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`, or `refused` for a login a gate refused, or `revoked` for one `session` refused, its subject revoked since the round trip began, each answered as `unknown_user`)
 - No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
 - Answer codes: `not_found` (404), `repeated_parameter`, `invalid_redirect`, `invalid_request`, `invalid_state`, `upstream_refused`, `continuation_unavailable` (400), `unknown_user`, `login_required` (401), a gate's answer (403), a continuation's own answers, `method_not_allowed` (405, with `allow`), `exchange_failed` (502), `temporarily_unavailable` (503)
-- Success is a 302 to the return target or the landing.
+- Success is a 303 to the return target or the landing.
 - A held login carries that same return to its gates.
 - A held login is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
 
@@ -36,9 +37,10 @@
 - A failed exchange is logged with the IdP and its kind only.
 - An unavailable upstream is 503.
 - The start is declared as the user's own navigation, and the callback as the IdP's redirect or posted form, each in place of a policy keeping other sites out; both change state.
-- A login reports the upstream's login time as when the user authenticated, on our clock (a time before the start but within the type's clock allowance before the start's second counts as the start, to the millisecond), or that it is unknown.
+- A login reports when the user logged in upstream, on our clock (one within the allowance before the start's second is the start, to the millisecond), or unknown; the allowance is applied here alone: the session carries the time, never the allowance.
 - After `prompt=login` or a max age, a login counts only when the upstream says when the user logged in.
-- Fresh enough: after `prompt=login`, the upstream's login time plus the type's clock allowance is not before the start's second (so an upstream that does not authenticate again passes a login up to that allowance before the start); with a max age, it is within the max age of now.
+- Fresh enough, after `prompt=login` or with a max age: by the IdP's `fresh-login-allowance` (its type's clock allowance by default), as `round-trip`'s card says.
+- The fresh login allowance narrows only how far back a login time reaches: a time ahead of ours that the type's clock allowance passes, or any time the upstream says, is taken as the upstream says it.
 - The local user is found only by the IdP's name and the upstream subject.
 - An unknown identity is refused, and nothing is created.
 - The login proves `fed` plus only the upstream amr values the operator maps (declared as provable).
@@ -48,7 +50,7 @@
 - Groups and other claims never reach the session.
 - A login's upstream tokens go to their receivers through `upstream-handoff`, which keeps a held login's for `transaction-lifetime`, its resume's deadline; if they cannot be kept, the callback is unavailable.
 - An IdP's redirect URI is the public origin plus its callback path.
-- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them) or cannot be reached, told apart, no public origin, or a `held-page` off it (the page reads the held login with this deployment's cookies), one reason per issue, all at once.
+- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them) or cannot be reached, told apart, no public origin, or a `held-page` off it (the page reads the held login with this deployment's cookies), one reason per issue, all at once; in production, also a `held-page` on a loopback host.
 - An IdP that answers in a posted form refuses boot where cookies cannot be secure, as its round trip's cookie is cross-site.
 
 ## Depends on

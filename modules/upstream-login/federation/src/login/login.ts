@@ -5,15 +5,17 @@ import { loginSource } from "@mod/login-attributes";
 import { type Logins, logins } from "@mod/login-gates";
 import { type Handoff, handoff } from "@mod/upstream-handoff";
 import type { UpstreamLogin } from "@mod/upstreams";
+import { loopbackPagesRefused } from "@mod/url-setting";
 import { type Users, userAttribute, users } from "@mod/users";
 import {
 	type Continuation,
 	type Idp,
+	landed,
 	landingIn,
+	landingTakes,
 	proves,
 	recorderOf,
 	secondOf,
-	sent,
 } from "../round-trip/round-trip.ts";
 import type { Settings } from "../section.ts";
 
@@ -29,6 +31,13 @@ export interface LoginParts {
 
 /** The name login-gates tells when a login federation asked for opens after a hold. */
 export const loginCaller = "federation";
+
+/** What `loginIn` takes from the build context, and the landing's, whose `site` its held page is checked against. */
+export const loginTakes = [logins, users, audit, handoff, ...landingTakes] as const;
+
+/** A production check's refusal of a held page on a loopback host, which is the operator's own machine. */
+export const heldPageRefused = (settings: Pick<Settings, "held-page">) =>
+	loopbackPagesRefused({ "held-page": settings["held-page"] });
 
 export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> {
 	const heldPage = c.section["held-page"];
@@ -70,13 +79,25 @@ export function loginWith(p: LoginParts): Continuation {
 				deadline: handing.deadline,
 			};
 			const authenticatedAt = onOurClock(upstreamLogin.authenticatedAt, trip.startedAt, idp);
-			const facts = { subject, amr, authenticatedAt, ...attributesOf(name, upstreamLogin.profile) };
+			// The proof began with the round trip: session compares its start with the boundary.
+			const facts = {
+				subject,
+				amr,
+				authenticatedAt,
+				...attributesOf(name, upstreamLogin.profile),
+				provenSince: trip.startedAt,
+			};
 			const outcome = await p.logins.login(request, facts, done, from);
+			await handing?.after(outcome);
+			// A login a gate refused, or session revoked, fails as one with no local user does, telling nothing of why.
+			if (outcome.kind === "refused" || outcome.kind === "revoked") {
+				record("failed", name, { reason: outcome.kind, source });
+				return jsonAnswer(401, { error: "unknown_user" }, { cookies: cleared });
+			}
 			const held = outcome.kind === "held";
 			record(held ? "held" : "succeeded", name, { subject, source });
-			await handing?.after(outcome);
 			const cookies = [...cleared, ...outcome.cookies];
-			if (!held) return sent(lands, cookies);
+			if (!held) return landed(lands, cookies);
 			return p.heldPage === undefined
 				? jsonAnswer(403, outcome.answer, { cookies })
 				: { status: 303, headers: { ...noStore, location: p.heldPage }, cookies };
@@ -86,13 +107,11 @@ export function loginWith(p: LoginParts): Continuation {
 
 /**
  * When the upstream says the user logged in, on our clock: a time before the start but within the
- * upstream's clock allowance before the start's second was the round trip's own login: the start.
+ * IdP's fresh login allowance before the start's second was the round trip's own login: the start.
  */
 function onOurClock(at: number | undefined, startedAt: number, idp: Idp) {
 	if (at === undefined) return "unknown" as const;
-	return at < startedAt && at + (idp.upstream.clockSkewMs ?? 0) >= secondOf(startedAt)
-		? startedAt
-		: at;
+	return at < startedAt && at + idp.freshLoginAllowanceMs >= secondOf(startedAt) ? startedAt : at;
 }
 
 /**
