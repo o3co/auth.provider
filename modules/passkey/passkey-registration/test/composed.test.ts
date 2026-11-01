@@ -97,7 +97,12 @@ async function serve(
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
 		const done = openedOf(
-			await app.get(sessions).open(testRequest(), { subject, amr: ["pwd"], authenticatedAt }),
+			await app.get(sessions).open(testRequest(), {
+				subject,
+				amr: ["pwd"],
+				authenticatedAt,
+				provenSince: runtime.clock.now(),
+			}),
 		);
 		const cookie = done.cookies.map((c) => c.split(";")[0]).join("; ");
 		return async (path: string, body?: unknown, method = "POST") => {
@@ -211,7 +216,12 @@ it("refuses a session whose sign-in time is unknown where mfa judges entry, befo
 
 it("leaves the credentials entry to mfa's requirement where mfa is composed, not to session's floor", async () => {
 	const { sessions: open } = await serve({}, { withMfa: true });
-	const facts = { subject: "dee", amr: ["pwd"], authenticatedAt: "unknown" as const };
+	const facts = {
+		subject: "dee",
+		amr: ["pwd"],
+		authenticatedAt: "unknown" as const,
+		provenSince: runtime.clock.now(),
+	};
 	const { cookies } = openedOf(await open.open(testRequest(), facts));
 	const cookie = cookies.map((c) => c.split(";")[0]).join("; ");
 	const request = testRequest({

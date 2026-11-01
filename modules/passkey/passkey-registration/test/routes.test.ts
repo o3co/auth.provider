@@ -126,9 +126,12 @@ async function serve(section: Record<string, unknown> = {}) {
 	const browser = async (subject?: string, from = origin) => {
 		const done = subject
 			? openedOf(
-					await app
-						.get(sessions)
-						.open(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() }),
+					await app.get(sessions).open(testRequest(), {
+						subject,
+						amr: ["pwd"],
+						authenticatedAt: runtime.clock.now(),
+						provenSince: runtime.clock.now(),
+					}),
 				)
 			: undefined;
 		const cookie = (done?.cookies ?? []).map((c) => c.split(";")[0]).join("; ");
