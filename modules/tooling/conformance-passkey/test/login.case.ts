@@ -387,7 +387,7 @@ describe.runIf(areaTarget().can("passkey-session-login"))(
 		const s = running(sceneFor(["erin"], { requests: 1000, windowSeconds: 60 }, {}));
 		const c = calls(() => s.at.base);
 
-		it("refuses at the browser login an assertion a client's options asked for, with the client's id as the browser's mark", async () => {
+		it("refuses at the browser login an assertion a client's options asked for, with the client's id as the browser's mark [guarantee-5-k]", async () => {
 			const { authenticator } = await c.register("erin");
 			// The client asks options and the user answers them: an assertion that is the client's.
 			const forClient = await c.assertion(authenticator, "app");

@@ -94,6 +94,7 @@
   faults: Lr, F, C, K, H2
 - **guarantee-5-j** MUST: an id_token is exchanged once, whether by the token exchange or as a JWT bearer assertion.
   faults: Lr, Lx, F, C, K, H2
+- **guarantee-5-k** MUST: a passkey assertion's challenge is redeemed only by the requester it was made for: the module that asked, by its own name, and the id it asked for; another module's assertion with the same id is refused.
 
 ## 6 A token bound to a key or a certificate is never used as a bearer token.
 
