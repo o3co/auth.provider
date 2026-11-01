@@ -21,6 +21,7 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import senderBindingModule from "@mod/sender-binding/module";
 import { sessions } from "@mod/session";
+import { openedOf } from "@mod/session/testing";
 import sessionLifecycle from "@mod/session-lifecycle/module";
 import { sessionLifecycleConfig } from "@mod/session-lifecycle/testing";
 import sessionParticipants from "@mod/session-participants/module";
@@ -94,11 +95,13 @@ it("redeems a code once through code-grant wired to records, and revokes what it
 	});
 	await app.start();
 	try {
-		const { session } = await app.get(sessions).complete(testRequest(), {
-			subject: "alice",
-			amr: ["pwd"],
-			authenticatedAt: runtime.clock.now(),
-		});
+		const { session } = openedOf(
+			await app.get(sessions).open(testRequest(), {
+				subject: "alice",
+				amr: ["pwd"],
+				authenticatedAt: runtime.clock.now(),
+			}),
+		);
 		const code = await app.get(codes).issue({
 			clientId: "app",
 			redirectUri: "https://app.example/cb",
