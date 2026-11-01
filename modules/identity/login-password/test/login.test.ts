@@ -225,7 +225,7 @@ describe("login-password answers", () => {
 
 	it("gives no cookie when the session cannot be opened after a match", async () => {
 		const down = unavailableSwitch<Sessions>("session");
-		down.unavailable("complete", "open");
+		down.unavailable("open");
 		const failing = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(sessions).by(() => down.wrap(stubSessions())),
 		]);
