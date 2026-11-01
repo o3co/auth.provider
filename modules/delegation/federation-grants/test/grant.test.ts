@@ -18,13 +18,13 @@ describe("the operator's section and the boot", () => {
 		});
 	}
 
-	it("boots with its pages at http on a loopback host", async () => {
-		const local = {
-			page: "http://localhost:3000/page",
-			"login-page": "http://127.0.0.1:3000/login",
-			"step-up-page": "http://[::1]:3000/raise",
-		};
-		await expect(harness({ settings: local })).resolves.toBeDefined();
+	it("refuses to boot on a browser setting still written here, naming the key and never its value", async () => {
+		const error = await harness({
+			settings: { "login-page": "https://issuer.example/secret-login" } as never,
+		}).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect(JSON.stringify((error as BootRefused).refusals)).toContain("login-page");
+		expect(JSON.stringify((error as BootRefused).refusals)).not.toContain("secret-login");
 	});
 
 	it("counts every route's requests per source in the operator's window", async () => {
@@ -53,6 +53,29 @@ describe("a client's returns", () => {
 				"return-uris": [`https://worker.example/back?${name}=x`],
 			});
 			expect("issues" in checked && checked.issues, name).toBeTruthy();
+		}
+	});
+
+	it("takes only a return URI a client may register to be sent back to, as redirect-uris says", () => {
+		const takes = (uri: string) =>
+			!("issues" in clientSection.schema["~standard"].validate({ "return-uris": [uri] }));
+		for (const uri of [
+			"https://worker.example/back",
+			"http://127.0.0.1:8080/back",
+			"http://localhost/back",
+			"com.example.worker:/back",
+		]) {
+			expect(takes(uri), uri).toBe(true);
+		}
+		for (const uri of [
+			"javascript:alert(1)",
+			"data:text/html,x",
+			"http://worker.example/back",
+			"ftp://worker.example/back",
+			"https://worker.example/back#here",
+			"https://user:pass@worker.example/back",
+		]) {
+			expect(takes(uri), uri).toBe(false);
 		}
 	});
 });

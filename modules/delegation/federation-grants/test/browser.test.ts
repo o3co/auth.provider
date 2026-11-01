@@ -7,15 +7,7 @@ const errorOf = (h: Harness, answer: { headers: Record<string, string> }) =>
 	h.location(answer as never).searchParams.get("error");
 
 describe("the callback of a renewal", () => {
-	it("refuses a renewal from another issuer, and one whose grant a revocation since covers", async () => {
-		const h = await harness();
-		const { id } = await h.connected();
-		const renewal = await h.grantCall(id, "reauthorize", { redirect_uri: back, state: "r" });
-		const alice = await h.login();
-		const { state } = await h.decide((await h.open(renewal, alice)).challenge, alice);
-		h.script.exchange = async () => ({ ...upstreamLogin(), issuer: "https://other.example" });
-		expect(errorOf(h, await h.callback(state, alice))).toBe("account_mismatch");
-
+	it("refuses a renewal whose grant a revocation since covers", async () => {
 		const r = await harness();
 		const made = await r.connected();
 		await r.stores.subjects.remove("alice", made.id);

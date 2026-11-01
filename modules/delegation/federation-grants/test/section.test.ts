@@ -9,7 +9,6 @@ const times = [
 	["refresh-before", 0, 3600, "30s"],
 	["rotation-window", 1, 86_400, "1h"],
 	["lodge-window", 1, 86_400, "1m"],
-	["revocation-skew", 0, 300, "1s"],
 	["window", 1, 3600, "1m"],
 ] as const;
 
@@ -23,7 +22,6 @@ describe("federation-grants' section: its times", () => {
 				"refresh-before": "1m",
 				"rotation-window": "2h",
 				"lodge-window": "30s",
-				"revocation-skew": "2s",
 				window: "10s",
 			}),
 		).toMatchObject({
@@ -33,7 +31,6 @@ describe("federation-grants' section: its times", () => {
 			"refresh-before": 60,
 			"rotation-window": 7200,
 			"lodge-window": 30,
-			"revocation-skew": 2,
 			window: 10,
 		});
 	});
@@ -67,10 +64,8 @@ describe("federation-grants' section: its times", () => {
 			"rotation-window": 3600,
 			lodges: 60,
 			"lodge-window": 60,
-			"revocation-skew": 1,
 			"sweep-interval": 3600,
 			"keep-on-subject-revocation": false,
-			"identity-check": "required",
 			requests: 60,
 			window: 60,
 		});
@@ -137,9 +132,47 @@ describe("federation-grants' section: a connection's longest access token life",
 		]);
 	});
 
+	it("refuses revocation-skew, an allowance for hosts' clocks it no longer takes", () => {
+		expect(section.safeParse({ "revocation-skew": "1s" }).error?.issues).toMatchObject([
+			{ code: "unrecognized_keys", keys: ["revocation-skew"] },
+		]);
+	});
+
 	it("refuses max-access-token-seconds, a name in seconds it no longer reads", () => {
 		expect(
 			section.safeParse(withConnection({ [key]: "1h", [old]: 3600 })).error?.issues,
 		).toMatchObject([{ code: "unrecognized_keys", path: where, keys: [old] }]);
+	});
+});
+
+describe("federation-grants' section: a connection's resource", () => {
+	/** The section with one connection, `cal`, whose resource is the one given. */
+	const withResource = (resource: unknown) => ({
+		connections: {
+			cal: { idp: "corp", scopes: ["openid"], "max-access-token-lifetime": "1h", resource },
+		},
+	});
+
+	it("takes only an absolute URI as the resource sent upstream, refusing the section otherwise [rfc8707-2-d]", () => {
+		const resource = "https://api.example/v1";
+		expect(section.parse(withResource(resource)).connections.cal?.resource).toBe(resource);
+		for (const relative of ["/v1", "api.example/v1", "//api.example/v1", "", 7]) {
+			expect(
+				section.safeParse(withResource(relative)).error?.issues,
+				String(relative),
+			).toMatchObject([{ path: ["connections", "cal", "resource"] }]);
+		}
+	});
+
+	it("refuses the section where the resource sent upstream carries a fragment or a query [rfc8707-2-e]", () => {
+		for (const [resource, message] of [
+			["https://api.example/v1#part", "resource must carry no fragment"],
+			["https://api.example/v1#", "resource must carry no fragment"],
+			["https://api.example/v1?tenant=a", "resource must carry no query"],
+		] as const) {
+			expect(section.safeParse(withResource(resource)).error?.issues, resource).toMatchObject([
+				{ path: ["connections", "cal", "resource"], message },
+			]);
+		}
 	});
 });

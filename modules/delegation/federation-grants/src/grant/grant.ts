@@ -1,5 +1,6 @@
 import type { Client, Section } from "@mod/clients";
 import type { Log, Random } from "@mod/kernel";
+import { registrable } from "@mod/redirect-uris";
 import type { Seal } from "@mod/seal";
 import type { BoundaryKind, Revocations } from "@mod/subject-revocation";
 import { refreshedExpiry, type Upstreams } from "@mod/upstreams";
@@ -132,12 +133,15 @@ export const clientSection: Section<{
 		"return-uris": z
 			.array(
 				z
-					.url()
+					.string()
+					// The rule for URIs a client may register to be sent back to is redirect-uris': https,
+					// http to localhost or a loopback address, or a private-use scheme; never `javascript:`.
+					.refine(registrable, "a return URI a client may register to be sent back to")
 					.refine((uri) => !reserved(uri), "a return URI may not hold grant_id, state or error"),
 			)
 			.prefault([])
 			.describe(
-				"Where the browser may be sent back after the user connects or declines, each matched exactly; none may hold `grant_id`, `state` or `error`.",
+				"Where the browser may be sent back after the user connects or declines, each matched exactly: https, http to localhost or a loopback address, or a private-use scheme, as redirect-uris takes one; none may hold `grant_id`, `state` or `error`.",
 			),
 	}),
 };
@@ -228,12 +232,12 @@ export function listingWith(subjects: SubjectGrants, log: Log) {
 export type Listing = ReturnType<typeof listingWith>;
 
 /**
- * Judges a grant against its subject's revocation boundaries, each widened by the allowance for
- * hosts' clocks, and against its end.
+ * Judges a grant against its subject's revocation boundaries, on hosts' clocks as the deployment
+ * keeps them, and against its end.
  */
 export function judgeWith(
 	revocations: Revocations,
-	{ keep, maxMs, allowanceMs }: { keep: boolean; maxMs: number; allowanceMs: number },
+	{ keep, maxMs }: { keep: boolean; maxMs: number },
 ) {
 	// Kept grants answer only to `delegations`; otherwise either boundary ends one.
 	const kinds: readonly BoundaryKind[] = keep ? ["delegations"] : ["sessions", "delegations"];
@@ -242,15 +246,14 @@ export function judgeWith(
 		revoked: async (grant: Grant): Promise<boolean> => {
 			if (grant.authorizedAt === undefined) return false;
 			for (const kind of kinds) {
-				const at = await revocations.compare(grant.subject, grant.authorizedAt, kind, allowanceMs);
+				const at = await revocations.compare(grant.subject, grant.authorizedAt, kind);
 				if (at === "revoked") return true;
 			}
 			return false;
 		},
 		/** Whether an intent started before the subject's `sessions` boundary, which ends any intent. */
 		intentRevoked: async (grant: Grant, intent: Intent) =>
-			(await revocations.compare(grant.subject, intent.startedAt, "sessions", allowanceMs)) ===
-			"revoked",
+			(await revocations.compare(grant.subject, intent.startedAt, "sessions")) === "revoked",
 		/** When the grant ends, held to the longest a grant may live now. */
 		endOf: (grant: Grant) =>
 			grant.authorizedAt === undefined || grant.expiresAt === undefined

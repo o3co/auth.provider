@@ -106,6 +106,8 @@ export function sweepWith(p: SweepParts) {
 	};
 }
 
+export const sweepTakes = [grantStore] as const;
+
 /** Starts the sweep on this host every `sweep-interval`, over the contracts the assembly gives. */
 export async function sweepIn(
 	c: BuildContext<Settings>,
