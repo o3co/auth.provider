@@ -1,13 +1,14 @@
 import { clients } from "@mod/clients";
 import { composedGrants, grants, targets } from "@mod/grants";
-import { routes, site, use } from "@mod/http";
-import { metadata } from "@mod/issuer";
+import { routes, use } from "@mod/http";
+import { endpointOrigin, issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
-import { clientCredentialsIn } from "./built-in/client-credentials.ts";
-import { composedRule } from "./built-in/targets.ts";
+import { unservedGrants } from "./allowed/allowed.ts";
+import { composedRule, targetTakes } from "./built-in/targets.ts";
 import { tokenEndpointLocation } from "./contract.ts";
-import { endpointIn, tokenPath } from "./route/endpoint.ts";
+import { endpointIn, endpointTakes } from "./endpoint-in/endpoint-in.ts";
+import { tokenPath } from "./route/endpoint.ts";
 import { section } from "./section.ts";
 
 /** A browser's public client may send a body's type and its DPoP proof, and read the nonce, the challenge and the wait. */
@@ -16,15 +17,16 @@ const cors = {
 	exposes: ["dpop-nonce", "www-authenticate", "retry-after"],
 };
 
-export default defineModule({ name: "token-endpoint", section }, (m) => [
-	m.contribute(grants).by(clientCredentialsIn),
+/** What the endpoint takes: its helpers' (`composedRule`, `endpointIn`), and the grants, the issuer and clients. */
+const takes = [...targetTakes, ...endpointTakes, grants, issuer, clients];
+
+export default defineModule({ name: "token-endpoint", replicaSafe: true, section, takes }, (m) => [
 	m.provide(targets).by(composedRule),
 	m
 		.provide(composedGrants)
 		.by(async (c) => new Set((await c.collect(grants)).map((g) => g.grantType))),
 	m.provide(tokenEndpointLocation).by(async (c) => {
-		const { origin } = await c.get(site);
-		return { url: origin === undefined ? undefined : new URL(tokenPath, origin).href };
+		return { url: new URL(tokenPath, endpointOrigin(await c.get(issuer))).href };
 	}),
 	m.contribute(metadata).by(async (c) => ({
 		name: "token_endpoint",
@@ -48,6 +50,20 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 	}),
 	m.contribute(routes).by(async (c) => {
 		const composed = await c.collect(grants);
+		// A grant a registered client is allowed and nothing serves would go missing in silence.
+		const unserved = unservedGrants(
+			(await c.get(clients)).registered(),
+			new Set(composed.map((g) => g.grantType)),
+		);
+		if (unserved.length > 0) return c.refuseAll(unserved);
+		// An endpoint with nothing to issue would publish an empty grant_types_supported, which
+		// discovery leaves out and a client reads as authorization_code and implicit (RFC 8414 §2).
+		if (composed.length === 0) {
+			return c.refuse(
+				"token-endpoint",
+				"no grant is composed: compose one, or leave the token endpoint out",
+			);
+		}
 		// The route has no own-site policy: it relies on each grant saying whether it reads a cookie.
 		const silent = composed.filter((g) => g.readsAmbient !== "none" && g.readsAmbient !== "cookie");
 		if (silent.length > 0) {
