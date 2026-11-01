@@ -19,6 +19,8 @@ export interface FailureCodes {
 	readonly enhanced?: string;
 	/** A connection failure from `TRANSPORT_CODES`. */
 	readonly code?: string;
+	/** The TLS alert that refused the handshake (RFC 8446 §6), its number as OpenSSL reports it. */
+	readonly alert?: number;
 }
 
 /** A send the relay did not accept. It holds the stage and codes only, never the relay's words. */
@@ -26,7 +28,9 @@ export class RelayFailure extends Error {
 	readonly stage: Stage;
 	readonly codes: FailureCodes;
 	constructor(stage: Stage, codes: FailureCodes = {}) {
-		const shown = [codes.reply, codes.enhanced, codes.code].filter((v) => v !== undefined);
+		const shown = [codes.reply, codes.enhanced, codes.code, codes.alert].filter(
+			(v) => v !== undefined,
+		);
 		super(`relay failed at ${stage}${shown.length > 0 ? ` (${shown.join(" ")})` : ""}`);
 		this.name = "RelayFailure";
 		this.stage = stage;
@@ -54,6 +58,15 @@ const MAIL_STAGES: ReadonlyMap<string, Stage> = new Map([
 /** A limit: one of these replies to the mail itself, with one of these enhanced codes. */
 const LIMIT_REPLIES = new Set([421, 450, 451, 452]);
 const LIMIT_ENHANCED = new Set(["4.7.1", "4.7.28", "4.5.3"]);
+
+/** A refused handshake's TLS alert, ending OpenSSL's error; never of a reply, whose words the library adds. */
+function alertOf(failure: unknown): number | undefined {
+	const code = stringField(failure, "code") ?? "";
+	if (stringField(failure, "response") !== undefined) return undefined;
+	if (code !== "ETLS" && code !== "ESOCKET" && !code.startsWith("ERR_SSL_")) return undefined;
+	const alert = /SSL alert number (\d{1,3})\s*$/.exec(stringField(failure, "message") ?? "")?.[1];
+	return alert !== undefined && Number(alert) <= 255 ? Number(alert) : undefined;
+}
 
 /** A reply's code, and an enhanced code of the same class right after it. */
 const REPLY =
@@ -136,5 +149,10 @@ export function answerOf(failure: unknown, phase: Phase): "limited" | RelayFailu
 	const reply = replyCodes(stringField(failure, "response"));
 	if (isLimit(stage, libraryCode, reply)) return "limited";
 	const transport = transportCode(failure);
-	return new RelayFailure(stage, { ...reply, ...(transport !== undefined && { code: transport }) });
+	const alert = alertOf(failure);
+	return new RelayFailure(stage, {
+		...reply,
+		...(transport !== undefined && { code: transport }),
+		...(alert !== undefined && { alert }),
+	});
 }

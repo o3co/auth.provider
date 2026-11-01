@@ -1,10 +1,24 @@
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { inspect } from "node:util";
-import { assemble, BootRefused, kernelConfig, type Module, Unavailable } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { mail } from "@mod/mail";
 import mailModule from "@mod/mail/module";
 import { contractTemplates, mailConfig, mailContract, remoteWords } from "@mod/mail/testing";
+import { tlsOptions } from "@mod/tls-options";
+import {
+	type Offer,
+	peerOptions,
+	testTlsOptions,
+	tlsOptionsForTests,
+} from "@mod/tls-options/testing";
 import { afterAll, describe, expect, it } from "vitest";
 import smtp from "../src/module.ts";
 import { type FakeRelay, fakeRelay, type Script } from "./fake-relay.ts";
@@ -38,7 +52,7 @@ const section = (port: number, more: object = {}) => ({
 });
 const assembled = (settings: object, modules: readonly Module[] = [contractTemplates]) =>
 	assemble({
-		modules: [smtp, ...modules],
+		modules: [smtp, tlsOptionsForTests, ...modules],
 		config: { ...kernelConfig(), "mail-smtp": settings },
 		runtime,
 	});
@@ -177,6 +191,62 @@ describe("securing the connection", () => {
 		const byAddress = await starttls(named, { host: "127.0.0.1" });
 		await expect(byAddress.send(notice())).rejects.toBeInstanceOf(Unavailable);
 		expect(verbs(named)).toEqual(["EHLO", "STARTTLS", "(tls)"]);
+	});
+
+	it("holds the connection to tls-options' floor, over TLS and STARTTLS alike [oidc-core-16.17-b]", async () => {
+		const offers: readonly Offer[] = ["tls1.1", "static-rsa", "cbc", "ecdhe-aead", "tls1.3"];
+		for (const security of ["tls", "starttls"] as const) {
+			const sides = [];
+			for (const offer of offers) {
+				const { server, ca } = await peerOptions(offer);
+				setDefaultCACertificates([...getCACertificates("default"), ca]);
+				const r = await started(
+					security === "tls"
+						? { implicit: true, certificate: server }
+						: { extensions: ["STARTTLS"], certificate: server },
+				);
+				const from = recorded.lines().length;
+				const sent = await (await starttls(r, { security }))
+					.send(notice())
+					.catch((e: unknown) => e);
+				const logged = recorded.lines().slice(from)[0]?.fields;
+				// The relay's side, by the handshake it refused, and the sender's, by the alert it got.
+				sides.push([offer, r.refused, sent === "sent" ? "sent" : logged]);
+			}
+			// RFC 8446 §6: 70 protocol_version, 40 handshake_failure.
+			const refusedAt = (alert: number) => ({
+				purpose: "contract.notice",
+				stage: "security",
+				alert,
+			});
+			expect(sides, security).toEqual([
+				["tls1.1", ["ERR_SSL_UNSUPPORTED_PROTOCOL"], refusedAt(70)],
+				["static-rsa", ["ERR_SSL_NO_SHARED_CIPHER"], refusedAt(40)],
+				["cbc", ["ERR_SSL_NO_SHARED_CIPHER"], refusedAt(40)],
+				["ecdhe-aead", [], "sent"],
+				["tls1.3", [], "sent"],
+			]);
+		}
+	});
+
+	it("refuses boot on a floor that is not tls-options' own, however alike", async () => {
+		const copied = { ...testTlsOptions };
+		const another = defineModule({ name: "tls-options", replicaSafe: true, takes: [] }, (m) => [
+			m.provide(tlsOptions).by(() => copied),
+		]);
+		const refused = await assemble({
+			modules: [smtp, another, contractTemplates],
+			config: { ...kernelConfig(), "mail-smtp": section(25) },
+			runtime,
+		})
+			.then((app) => app.get(mail))
+			.catch((e: unknown) => e);
+		expect((refused as BootRefused).refusals).toEqual([
+			{
+				where: "mail-smtp",
+				reason: "the TLS floor is not one tls-options made: provide it from @mod/tls-options",
+			},
+		]);
 	});
 
 	it("checks the certificate whatever the environment says", async () => {
@@ -483,7 +553,7 @@ describe("settings", () => {
 
 	it("cannot be composed beside the logging-only sender", async () => {
 		const both = assemble({
-			modules: [smtp, mailModule, contractTemplates],
+			modules: [smtp, tlsOptionsForTests, mailModule, contractTemplates],
 			config: { ...kernelConfig(), ...mailConfig(), "mail-smtp": section(25) },
 			runtime,
 		});
