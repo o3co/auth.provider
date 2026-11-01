@@ -76,6 +76,30 @@ export function isLoopbackName(host: string): boolean {
 	return labels.at(-1) === "localhost" && labels.every((label) => label !== "");
 }
 
+/**
+ * Whether a URL is plain `http` on a loopback host (`isLoopbackName`), as a module's own production
+ * check asks of a URL `loopbackHttp` took: such a page is the operator's machine, never a user's.
+ */
+export function isLoopbackHttp(url: string): boolean {
+	const parsed = URL.parse(url);
+	return parsed?.protocol === "http:" && isLoopbackName(parsed.hostname);
+}
+
+/**
+ * A module's production refusals of its pages that `loopbackHttp` took: each key whose URL, or one
+ * of whose URLs, is plain http on a loopback host, with one reason and never the value. A browser
+ * sent there would reach the user's own machine, never the deployment's page.
+ */
+export function loopbackPagesRefused(
+	pages: Readonly<Record<string, string | readonly string[] | undefined>>,
+): { key: string; reason: string }[] {
+	const reason =
+		"is plain http on a loopback host, the operator's own machine, which a production deployment does not send a browser to; set kernel.environment = development to try one";
+	return Object.entries(pages)
+		.filter(([, value]) => [value ?? []].flat().some((url) => isLoopbackHttp(url)))
+		.map(([key]) => ({ key, reason }));
+}
+
 function form(kind: string): string {
 	return `a URL as the URL parser writes it; refused for ${kind}`;
 }
@@ -133,6 +157,29 @@ function percentEncoded(value: string, written: string): boolean {
 const configured = z.string().brand<"ConfiguredUrl">();
 /** A URL url-setting read from an operator's configuration; nothing else makes one, so a caller holding one holds the operator's URL. */
 export type ConfiguredUrl = z.output<typeof configured>;
+
+/**
+ * A path or query with what RFC 3986 holds equivalent spelled one way: an unreserved character
+ * encoded is the character, and the hex of any other encoding upper case (§6.2.2.1, §6.2.2.2).
+ */
+const equivalent = (part: string) =>
+	part.replace(/%([0-9A-Fa-f]{2})/g, (_, hex: string) => {
+		const char = String.fromCharCode(Number.parseInt(hex, 16));
+		return /[A-Za-z0-9\-._~]/.test(char) ? char : `%${hex.toUpperCase()}`;
+	});
+
+/**
+ * Whether two URLs of an operator's configuration name one target: one origin, and a path and a
+ * query RFC 3986 holds equivalent (§6.2.2), whatever their spelling.
+ */
+export function sameTarget(a: ConfiguredUrl, b: ConfiguredUrl): boolean {
+	const [x, y] = [new URL(a), new URL(b)];
+	return (
+		x.origin === y.origin &&
+		equivalent(x.pathname) === equivalent(y.pathname) &&
+		equivalent(x.search) === equivalent(y.search)
+	);
+}
 
 export function urlSetting(rules: UrlRules) {
 	return configured.superRefine((value, context) => {
