@@ -2,7 +2,8 @@ import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { openedOf } from "@mod/session/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { describe, expect, it } from "vitest";
@@ -34,7 +35,7 @@ async function placeOver(
 				? { kind: "short", requirement: "test", answer: { error: "short" } }
 				: { kind: "admit", judged: credentialsJudged && level === "credentials" },
 	};
-	const around = defineModule({ name: "around" }, (m) => [
+	const around = defineModule({ name: "around", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(entryJudge).by(() => judge),
 		m.contribute(closingParticipants).by(() => ({
 			closing: async (session) => {
@@ -87,11 +88,12 @@ describe("the stand-in's seams", () => {
 		subject: "alice",
 		amr,
 		authenticatedAt: place.now(),
+		provenSince: place.now(),
 	});
 
 	it("takes no seam contributed as no requirement and no participant, the credentials floor still kept", async () => {
 		const place = await placeOver([], {}, { none: true });
-		const done = await place.sessions.complete(place.request(), facts(place));
+		const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 		const entering = (level: "use" | "credentials") =>
 			place.sessions.enterFor(place.request(done.cookies), level);
 		expect((await entering("use")).kind).toBe("entered");
@@ -117,7 +119,7 @@ describe("the stand-in's seams", () => {
 			},
 		};
 		const place = await placeOver([], {}, { judge: waiting });
-		const done = await place.sessions.complete(place.request(), facts(place));
+		const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 		place.advance(60_000);
 		const entering = place.sessions.enterFor(place.request(done.cookies), "use");
 		await reached;
@@ -125,4 +127,10 @@ describe("the stand-in's seams", () => {
 		gate.open?.();
 		expect(await entering).toEqual({ kind: "absent" });
 	});
+});
+
+it("takes every handle its stand-in's takes name, the seams collected though none is contributed", async () => {
+	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
+	const modules = [http, cookiesModule, sessionStandIn, subjectRevocationStandIn];
+	expect((await takesUnused({ modules, config })).session).toBeUndefined();
 });
