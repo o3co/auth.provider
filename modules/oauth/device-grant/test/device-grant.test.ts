@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
+import { authMethods } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import {
 	clientSecret,
@@ -26,18 +27,18 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
-import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { laggingRevocation, subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { issuancePolicies, tokens } from "@mod/tokens";
+import { issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -57,6 +58,8 @@ const origin = "https://as.example";
 let now = 1_800_000_000_000;
 /** Bytes the next draws of a user code take (16 at a time; the device code takes 32), so a test can make two codes meet. */
 const draws: Uint8Array[] = [];
+/** Every draw of 32 bytes the composition made, as base64url, so a test can tell what a device code was made from. */
+const drawn: string[] = [];
 const logged = recordingLog();
 /** The warnings logged after `from`, a count of lines taken before. */
 const warnedSince = (from: number) =>
@@ -68,31 +71,54 @@ const warnedSince = (from: number) =>
 const runtime = quietRuntime({
 	log: logged.log,
 	clock: { now: () => now },
-	random: { bytes: (n) => (n === 16 && draws.shift()) || new Uint8Array(randomBytes(n)) },
+	random: {
+		bytes: (n) => {
+			const bytes = (n === 16 && draws.shift()) || new Uint8Array(randomBytes(n));
+			if (n === 32) drawn.push(Buffer.from(bytes).toString("base64url"));
+			return bytes;
+		},
+	},
 });
 let stop = async () => {};
 afterEach(() => {
 	draws.length = 0;
+	drawn.length = 0;
 	return stop();
 });
 const allowed = (grants: string[]) =>
 	allowancesFor({ grants, scopes: ["read", "write"], "default-scopes": ["read"] });
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", replicaSafe: true, takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
 /** What records a token issued in a session to it, as session-tokens does where composed. */
-const recording = defineModule({ name: "recording" }, (m) => [
+const recording = defineModule({ name: "recording", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(sessionIssuances).by(() => ({ issued: async () => {} })),
 ]);
 
-async function serve(
+/** A subject check comparing a token's standing time with its subject's boundary, as subject-tokens does. */
+const standingChecked = defineModule(
+	{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+	(m) => [
+		m.contribute(subjectChecks).by(async (c) => {
+			const revocation = await c.get(subjectRevocation);
+			return {
+				holds: async (t) =>
+					(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+			};
+		}),
+	],
+);
+
+/** What `serve` assembles, with the stores and stand-ins it reaches into. */
+function assembly(
 	settings: Partial<DeviceGrantSettings> = {},
 	extra: Module[] = [],
 	site: { readonly "public-origin"?: string } = { "public-origin": origin },
 	recorded = true,
+	revocation: Module = subjectRevocationStandIn,
 ) {
 	const kept = recordsStandIn(() => now);
 	const down = {
@@ -101,7 +127,7 @@ async function serve(
 	};
 	/** Time that passes before the next rewrite of a device reads it, as when the store is slow. */
 	let stall = 0;
-	const stores = defineModule({ name: "device-stores" }, (m) => [
+	const stores = defineModule({ name: "device-stores", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(deviceStore).by(() =>
 			down.devices.wrap({
 				...kept.devices,
@@ -115,7 +141,7 @@ async function serve(
 		m.provide(userCodes).by(() => down.codes.wrap(kept.userCodes)),
 	]);
 	const audit = auditStandIn();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			clientsModule,
@@ -126,7 +152,7 @@ async function serve(
 			clientAllowanceModule,
 			sessionStandIn,
 			sessionRequirements,
-			subjectRevocationStandIn,
+			revocation,
 			csrfStandIn,
 			cookiesModule,
 			rateLimitModule,
@@ -150,7 +176,16 @@ async function serve(
 			...deviceGrantConfig(settings),
 		},
 		runtime,
-	});
+	};
+	const slowNextUpdate = (ms: number) => {
+		stall = ms;
+	};
+	return { input, kept, down, audit, slowNextUpdate };
+}
+
+async function serve(...given: Parameters<typeof assembly>) {
+	const { input, kept, down, audit, slowNextUpdate } = assembly(...given);
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -165,10 +200,18 @@ async function serve(
 			},
 			body,
 		});
+		const text = await res.text();
 		return {
 			status: res.status,
 			headers: res.headers,
-			body: (await res.json().catch(() => ({}))) as Record<string, string>,
+			text,
+			body: (() => {
+				try {
+					return JSON.parse(text) as Record<string, string>;
+				} catch {
+					return {} as Record<string, string>;
+				}
+			})(),
 		};
 	};
 	const post = (path: string, form: Record<string, string> | string[][], headers = {}) =>
@@ -190,8 +233,8 @@ async function serve(
 		subject = "alice",
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const facts = { subject, amr: ["pwd"], authenticatedAt };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
+		const facts = { subject, amr: ["pwd"], authenticatedAt, provenSince: runtime.clock.now() };
+		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		return cookies[0]?.split(";")[0] ?? "";
 	};
 	const verify = (cookie: string, json: Record<string, unknown>, headers = {}) =>
@@ -210,9 +253,6 @@ async function serve(
 	/** What the store keeps for a device. */
 	const stored = async (code: string) =>
 		(await kept.devices.read(kept.devices.nameOf(code))) as unknown as Record<string, unknown>;
-	const slowNextUpdate = (ms: number) => {
-		stall = ms;
-	};
 	return {
 		app,
 		down,
@@ -230,7 +270,7 @@ async function serve(
 }
 
 describe("device authorization", () => {
-	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant", async () => {
+	it("gives an allowed client a device code and a user code, and refuses a client not allowed the grant [rfc8628-3.2-a] [rfc8628-3.2-b] [rfc8628-3.2-c] [rfc8628-3.2-d] [rfc8628-3.3-b] [rfc8628-6.1-a] [rfc8628-3.1-d] [rfc8628-5.1-a]", async () => {
 		const s = await serve();
 		const given = await s.authorize();
 		expect(given.status).toBe(200);
@@ -263,8 +303,88 @@ describe("device authorization", () => {
 		]);
 	});
 
+	it("refuses a request that names no client and authenticates none [rfc8628-3.1-a]", async () => {
+		const s = await serve();
+		for (const form of [{}, { scope: "read" }]) {
+			const asked = await s.post("/oauth/device_authorization", form);
+			expect([asked.status, asked.body.error], JSON.stringify(form)).toEqual([
+				401,
+				"invalid_client",
+			]);
+		}
+	});
+
+	it("reads a parameter sent empty as one not sent, and passes over one it does not know [rfc8628-3.1-b] [rfc8628-3.1-c]", async () => {
+		const s = await serve();
+		for (const form of [
+			{ scope: "" },
+			{ resource: "" },
+			{ scope: "", resource: "" },
+			{ ui_locales: "fr" },
+			{ x_vendor: "1" },
+		]) {
+			const asked = await s.authorize("tv", form);
+			expect(asked.status, JSON.stringify(form)).toBe(200);
+		}
+		// Each empty one is read as not sent, through to the token: the client's default scope, the issuer's audience.
+		const cookie = await s.login();
+		const issuedFor = async (form: Record<string, string>) => {
+			const { code, user } = await s.started("tv", form);
+			await s.verify(cookie, { action: "approve", user_code: user });
+			now += 5_000;
+			const issued = (await s.poll(code)) as Record<string, string>;
+			const checked = await s.app.get(tokens).verifyAccess(String(issued.access_token));
+			if (checked.kind !== "valid") throw new Error(checked.reason);
+			return checked.grant;
+		};
+		const unsent = await issuedFor({});
+		expect(unsent).toMatchObject({ scope: ["read"], audience: [origin] });
+		for (const form of [{ scope: "" }, { resource: "" }, { scope: "", resource: "" }]) {
+			const grant = await issuedFor(form);
+			expect([grant.scope, grant.audience], JSON.stringify(form)).toEqual([
+				unsent.scope,
+				unsent.audience,
+			]);
+		}
+	});
+
+	it("writes each parameter of its answer once, the page's address with the code in too [rfc8628-3.1-e]", async () => {
+		for (const settings of [{}, { "complete-uri": true }]) {
+			const given = await (await serve(settings)).authorize();
+			expect(given.status).toBe(200);
+			// Read from the raw body, since parsing would keep one of two.
+			const names = [...given.text.matchAll(/"([^"\\]+)":/g)].map((match) => match[1]);
+			expect(names, JSON.stringify(settings)).toEqual([...new Set(names)]);
+			expect(names.length, JSON.stringify(settings)).toBe(Object.keys(given.body).length);
+			if ("complete-uri" in settings) expect(names).toContain("verification_uri_complete");
+		}
+	});
+
+	it("answers an assertion beside another method invalid_client, as the token endpoint does, and two other methods invalid_request", async () => {
+		// A method saying it authenticates by an assertion: what makes the refusal the assertion's.
+		const assertionMethod = defineModule(
+			{ name: "test-assertion", replicaSafe: true, takes: [] },
+			(m) => [
+				m.contribute(authMethods).by(() => ({
+					name: "test_assertion",
+					assertion: true,
+					signingAlgorithms: ["ES256"],
+					claimed: (request) => request.fields.single("test_assertion"),
+					verify: async () => false,
+				})),
+			],
+		);
+		const s = await serve({}, [assertionMethod]);
+		const secret = { client_id: "tv", client_secret: clientSecret("tv") };
+		const beside = await s.post("/oauth/device_authorization", { ...secret, test_assertion: "tv" });
+		expect([beside.status, beside.body.error]).toEqual([401, "invalid_client"]);
+		const basic = `Basic ${Buffer.from(`tv:${clientSecret("tv")}`).toString("base64")}`;
+		const two = await s.post("/oauth/device_authorization", secret, { authorization: basic });
+		expect([two.status, two.body.error]).toEqual([400, "invalid_request"]);
+	});
+
 	it("refuses a resource where the composed rule refuses one to what takes no audience", async () => {
-		const strict = defineModule({ name: "strict" }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				untargeted: ({ param }) =>
@@ -297,9 +417,12 @@ describe("device authorization", () => {
 		});
 	});
 
-	it("leaves where device authorization is asked for out of the metadata without a public origin", async () => {
+	it("names where device authorization is asked for on the issuer's origin where no public origin is written", async () => {
 		const { app } = await serve({}, [reader], {});
-		expect(app.get(published)).toContainEqual({ name: "device_authorization_endpoint" });
+		expect(app.get(published)).toContainEqual({
+			name: "device_authorization_endpoint",
+			value: `${origin}/oauth/device_authorization`,
+		});
 	});
 
 	it("draws a user code again when it meets one in use", async () => {
@@ -319,6 +442,15 @@ describe("device authorization", () => {
 		expect([crowded.status, crowded.body.error]).toEqual([503, "temporarily_unavailable"]);
 	});
 
+	// Of the credentials the guessing items list, the provider makes the codes and tokens alone: users choose passwords, operators register client secrets.
+	// Session, consent and CSRF handles are no OAuth credentials, so they lie outside these items.
+	it("makes each device code of 32 fresh random bytes [rfc6749-10.10-a] [rfc6749-10.10-b] [rfc6749-10.10-c] [rfc8628-5.2-a]", async () => {
+		const s = await serve();
+		const codes = [(await s.authorize()).body.device_code, (await s.authorize()).body.device_code];
+		for (const code of codes) expect(drawn).toContain(code);
+		expect(codes[0]).not.toBe(codes[1]);
+	});
+
 	it("answers the page's address with the code filled in only when asked to", async () => {
 		const s = await serve({ "complete-uri": true });
 		const given = (await s.authorize()).body;
@@ -327,7 +459,7 @@ describe("device authorization", () => {
 		);
 	});
 
-	it("limits device authorization requests per source", async () => {
+	it("limits device authorization requests per source [guarantee-10-a]", async () => {
 		const s = await serve({ requests: 2 });
 		expect([(await s.authorize()).status, (await s.authorize()).status]).toEqual([200, 200]);
 		const limited = await s.authorize();
@@ -351,7 +483,7 @@ describe("device authorization", () => {
 });
 
 describe("polling", () => {
-	it("waits, slows a device that polls too often, then issues once to an approved device, with the approval's authentication", async () => {
+	it("waits, slows a device that polls too often, then issues once to an approved device, with the approval's authentication [rfc6749-3.3-b] [rfc6749-5.1-a]", async () => {
 		const s = await serve();
 		const { code, user } = await s.started();
 		expect(await s.poll(code)).toBe("authorization_pending");
@@ -425,7 +557,7 @@ describe("polling", () => {
 		expect(await s.poll(code)).toBe("invalid_grant");
 	});
 
-	it("spends nothing on a poll by another client, and still issues to the device's own", async () => {
+	it("spends nothing on a poll by another client, and still issues to the device's own [rfc8628-3.4-b]", async () => {
 		const s = await serve();
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });
@@ -495,7 +627,7 @@ describe("polling", () => {
 
 	it("issues nothing a contributed policy refuses, and leaves the approved code to a later poll", async () => {
 		const denying = { on: false };
-		const policy = defineModule({ name: "deny-alice" }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -520,7 +652,7 @@ describe("polling", () => {
 
 	it("refuses and records an approval a contributed policy refuses, before keeping it, as 0.17 refused an unverified email", async () => {
 		const denying = { on: true, description: "not now" };
-		const policy = defineModule({ name: "deny-alice" }, (m) => [
+		const policy = defineModule({ name: "deny-alice", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -562,7 +694,7 @@ describe("polling", () => {
 
 	it("asks the issuance policies with the approving session, at approval and at the poll", async () => {
 		const asked: (string | undefined)[] = [];
-		const policy = defineModule({ name: "watching" }, (m) => [
+		const policy = defineModule({ name: "watching", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "watching",
 				judge: async (request) => {
@@ -609,14 +741,17 @@ describe("polling", () => {
 
 	it("issues nothing while the approving session falls short of a requirement to be used, as a closed one", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ name: "short-to-use" }, (m) => [
-			m.contribute(entryRequirements).by(() => ({
-				name: "mfa",
-				judges: ["use"],
-				admits: async () =>
-					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
-			})),
-		]);
+		const requirement = defineModule(
+			{ name: "short-to-use", replicaSafe: false, takes: [] },
+			(m) => [
+				m.contribute(entryRequirements).by(() => ({
+					name: "mfa",
+					judges: ["use"],
+					admits: async () =>
+						short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+				})),
+			],
+		);
 		const s = await serve({}, [requirement]);
 		const { code, user } = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: user });
@@ -627,7 +762,7 @@ describe("polling", () => {
 	it("answers no token issued while the approving session closed", async () => {
 		let asked = 0;
 		let close = async () => {};
-		const closing = defineModule({ name: "closing" }, (m) => [
+		const closing = defineModule({ name: "closing", replicaSafe: false, takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "closing",
 				judge: async () => {
@@ -660,6 +795,28 @@ describe("polling", () => {
 		const later = await s.started();
 		await s.verify(await s.login(), { action: "approve", user_code: later.user });
 		expect(await s.poll(later.code)).toMatchObject({ token_type: "Bearer" });
+	});
+
+	it("issues on a stale read of its subject's boundary, for an approval kept with no session, a token the next verification refuses, as it stands from the approval's authentication [guarantee-4-b]", async () => {
+		const lagging = laggingRevocation();
+		const s = await serve({}, [standingChecked], undefined, true, lagging.module);
+		const { code, user } = await s.started();
+		await s.verify(await s.login(), { action: "approve", user_code: user });
+		await s.tamper(code, (kept) => {
+			const { session: _, ...approval } = kept.approval as Record<string, unknown>;
+			return { ...kept, approval };
+		});
+		now += 1000;
+		lagging.lag();
+		await s.app.get(subjectRevocation).revoke("alice");
+		now += 1000;
+		const issued = await s.poll(code);
+		if (typeof issued === "string") expect.unreachable("the stale read lets it through");
+		lagging.catchUp();
+		expect(await s.app.get(tokens).verifyAccess(String(issued.access_token))).toEqual({
+			kind: "invalid",
+			reason: "revoked",
+		});
 	});
 
 	it("takes no approval from a session whose subject was revoked after it logged in", async () => {
@@ -829,7 +986,7 @@ describe("verification", () => {
 		expect(await s.poll(code)).toMatchObject({ token_type: "Bearer" });
 	});
 
-	it("counts every decision a subject tries, so codes cannot be guessed", async () => {
+	it("counts every decision a subject tries, so codes cannot be guessed: by default 8 letters of 20, living 10 minutes, 5 tries a subject each window [rfc8628-5.1-a]", async () => {
 		const s = await serve({ attempts: 2 });
 		const cookie = await s.login();
 		for (let i = 0; i < 2; i++) {
@@ -859,7 +1016,7 @@ describe("verification", () => {
 	});
 
 	it("asks the session's entry requirements at use for an approval, and at none for the rest", async () => {
-		const strict = defineModule({ name: "strict" }, (m) => [
+		const strict = defineModule({ name: "strict", replicaSafe: true, takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "fresh",
 				judges: ["use"],
@@ -984,4 +1141,14 @@ it("refuses to start where nothing records a token to its session, so a logout c
 		where: "device-grant",
 		reason: expect.stringMatching(/recorded to the session/),
 	});
+});
+
+it("takes all its module names, with a public origin and without", async () => {
+	for (const site of [{ "public-origin": origin }, {}]) {
+		// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+		expect(
+			(await takesUnused(assembly({}, [], site).input))["device-grant"],
+			JSON.stringify(site),
+		).toBeUndefined();
+	}
 });

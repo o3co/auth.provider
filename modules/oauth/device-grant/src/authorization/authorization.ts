@@ -91,6 +91,9 @@ export function authorizationWith(a: Authorizing): Pick<Route, "handle" | "unava
 	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
 
+/** What `authorizationOver` takes. */
+export const authorizationTakes = [clients, audit, targets, deviceStore, userCodes, issuer];
+
 /** The handler over the contracts the assembly gives. */
 export const authorizationOver = async (c: BuildContext<Settings>) =>
 	authorizationWith({
