@@ -138,6 +138,23 @@ export interface Store {
 		| Reused
 		| { readonly kind: "conflict"; readonly index: number }
 	>;
+	/**
+	 * As `batch`, over keys of any partition, and of any spaces declaring the same guarantees. Its
+	 * mark binds the request (its keys in their order) and is kept, with one answer and one end, in
+	 * every partition it touches, the partitions it only reads included: a resend meets it in any, and
+	 * another request meeting it in any is reused. A late answer is not kept. Reads made before it are
+	 * no snapshot: a value relied on goes in as a condition. A store without it leaves it out.
+	 */
+	batchAcross?(
+		conditions: readonly Condition[],
+		writes: readonly BatchWrite[],
+		options?: Omit<WriteOptions, "expiry">,
+	): Promise<
+		| { readonly kind: "committed"; readonly versions: readonly (Version | null)[] }
+		| Late
+		| Reused
+		| { readonly kind: "conflict"; readonly index: number }
+	>;
 	/** A fixed window counted on the store clock; at the limit nothing is written. */
 	count(
 		key: Key,
@@ -171,6 +188,9 @@ export type Decision =
 	| { readonly kind: "remove" }
 	| { readonly kind: "keep" };
 
+/** How many times `mutate` reads and decides again after losing a race, unless its caller says. */
+const defaultAttempts = 8;
+
 /**
  * Read, decide with a pure function, write on the version read; on a lost race the function
  * runs again on the new entry, so writes made in between are never overwritten blindly.
@@ -187,7 +207,7 @@ export async function mutate(
 > {
 	const limits = options.deadline === undefined ? {} : { deadline: options.deadline };
 	const gone = { kind: "done", value: null, version: null } as const;
-	for (let attempt = 0; attempt < (options.attempts ?? 8); attempt++) {
+	for (let attempt = 0; attempt < (options.attempts ?? defaultAttempts); attempt++) {
 		const { entry, now } = await target.get(key);
 		const decision = decide(entry, now);
 		if (decision.kind === "keep") {
@@ -352,11 +372,14 @@ function readWriteOptions(value: unknown): WriteOptions {
 	};
 }
 
+/** The largest count a window may allow. */
+const largestLimit = 1_000_000_000;
+
 function readWindow(value: unknown): { ms: number; limit: number } {
 	const read = fields("window", value, ["ms", "limit"]);
 	return {
 		ms: whole("window ms", read.ms, 1),
-		limit: whole("limit", read.limit, 0, 1_000_000_000),
+		limit: whole("limit", read.limit, 0, largestLimit),
 	};
 }
 
@@ -404,7 +427,23 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 		if (new Set(names).size !== names.length) fail("a batch may write each key once");
 		return checked;
 	};
+	/** Spaces a batch across joins declare the same guarantees, so a fault keeps or drops it whole. */
+	const oneGuarantee = (keys: readonly Key[]) => {
+		const sets = new Set(keys.map((k) => JSON.stringify([...new Set(k.space.guarantees)].sort())));
+		if (sets.size > 1) fail("a batch across spaces joins spaces of the same guarantees only");
+	};
+	const batchAcross = inner.batchAcross?.bind(inner);
 	return {
+		...(batchAcross
+			? {
+					batchAcross: async (conditions, writes, o) => {
+						const checkedConditions = [...conditions].map((c) => readCondition(c, key));
+						const checkedWrites = batchWrites(writes);
+						oneGuarantee([...checkedConditions, ...checkedWrites].map((x) => x.key));
+						return batchAcross(checkedConditions, checkedWrites, readLimits(o));
+					},
+				}
+			: {}),
 		get: async (k) => inner.get(key(k)),
 		putIfAbsent: async (k, v, o) => inner.putIfAbsent(key(k), json(v), readWriteOptions(o)),
 		replaceIf: async (k, version, v, o) =>

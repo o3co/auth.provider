@@ -4,7 +4,9 @@ import {
 	defineModule,
 	type KernelSettings,
 	kernelConfig,
+	type Module,
 } from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
 import { memoryStore } from "../src/memory.ts";
@@ -14,6 +16,25 @@ import { contractSpaces, overwrite, storeContract } from "../src/testing.ts";
 storeContract("memory", {
 	open: async () => memoryStore({ now: () => Date.now() }, contractSpaces),
 	peer: async (s) => s,
+});
+
+it("offers a batch across partitions and spaces of one guarantee, so the contract's batches across run on it", () => {
+	expect(typeof memoryStore({ now: () => Date.now() }, contractSpaces).batchAcross).toBe(
+		"function",
+	);
+});
+
+it("judges the guarantees a batch across joins as sets, so a guarantee named twice changes nothing", async () => {
+	const once: Space = { name: "once", guarantees: ["durable"] };
+	const twice: Space = { name: "twice", guarantees: ["durable", "durable"] };
+	const s = memoryStore({ now: () => Date.now() }, [once, twice]);
+	const put = (space: Space) =>
+		({
+			key: { space, partition: space.name, name: "k" },
+			put: 1,
+			expiry: { kind: "never" },
+		}) as const;
+	expect((await s.batchAcross?.([], [put(once), put(twice)]))?.kind).toBe("committed");
 });
 
 // A store clock far from the caller's catches implementations that judge time by the caller's clock.
@@ -128,10 +149,10 @@ it("starts a new window at its reset time, and refuses every hit under a limit o
 	expect(await s.count(key("zero"), { ms: 1000, limit: 1 })).toMatchObject({ count: 1 });
 });
 
-const durable = defineModule({ name: "durable-owner" }, (m) => [
+const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable"] })),
 ]);
-const replicated = defineModule({ name: "replicated-owner" }, (m) => [
+const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(spaces).by(() => ({ name: "copied", guarantees: ["replicated"] })),
 ]);
 
@@ -151,4 +172,20 @@ it("refuses durable or replicated spaces unless volatility is accepted, and is u
 	await expect(
 		assemble({ modules: [storeModule], config: config(true, "multi") }),
 	).rejects.toBeInstanceOf(BootRefused);
+});
+
+it("warns at every start that boots durable or replicated spaces on memory, naming them", async () => {
+	const warned = async (...owners: Module[]) => {
+		const recorded = recordingLog();
+		await assemble({
+			modules: [storeModule, ...owners],
+			config: { ...kernelConfig(), store: { "accept-volatile": true } },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+		return recorded.lines().filter((line) => line.level === "warn");
+	};
+	expect(await warned(durable, replicated)).toEqual([
+		{ level: "warn", event: "store.volatile_accepted", fields: { spaces: "kept, copied" } },
+	]);
+	expect(await warned()).toEqual([]);
 });

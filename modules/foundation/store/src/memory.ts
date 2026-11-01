@@ -1,5 +1,7 @@
 import { deepFreeze, type Runtime } from "@mod/kernel";
 import {
+	type BatchWrite,
+	type Condition,
 	canonicalJson,
 	checkedStore,
 	type Entry,
@@ -87,6 +89,29 @@ export function memoryStore(
 		values.delete(id(key));
 		return undefined;
 	};
+	/**
+	 * A batch at `now`, as one: every condition checked first, the first not met answered by its
+	 * index with nothing written; else every write made, each version (none for a removal) answered.
+	 */
+	const applyBatch = (
+		conditions: readonly Condition[],
+		writes: readonly BatchWrite[],
+		now: number,
+	) => {
+		for (const [index, condition] of conditions.entries()) {
+			const held = current(condition.key, now);
+			const holds = "absent" in condition ? !held : held?.version === condition.version;
+			if (!holds) return { kind: "conflict" as const, index };
+		}
+		const versions = writes.map((w) => {
+			if ("remove" in w) {
+				values.delete(id(w.key));
+				return null;
+			}
+			return write(w.key, w.put, w.expiry, now);
+		});
+		return { kind: "committed" as const, versions };
+	};
 	/** Runs a write once per idempotency mark and request, refusing it after its deadline. */
 	const guarded = async <A extends Answer>(
 		partition: string | undefined,
@@ -111,6 +136,33 @@ export function memoryStore(
 			const until = (options?.deadline ?? now + idempotencyDefaultMs) + idempotencySkewMs;
 			answers.set(mark, { digest: request, answer, until });
 		}
+		return answer;
+	};
+	/**
+	 * Runs a batch across partitions once per mark and request: the mark is looked for in every
+	 * partition first, kept in each with one answer and one end, never rewritten when reused, and a
+	 * late answer is not kept.
+	 */
+	const guardedAcross = async <A extends Answer>(
+		partitions: readonly string[],
+		request: string,
+		options: Limits,
+		apply: (now: number) => A,
+	): Promise<A | Late | Reused> => {
+		const now = clock.now();
+		sweep(now);
+		const marks = options?.idempotency
+			? partitions.map((partition) => JSON.stringify([partition, options.idempotency]))
+			: [];
+		for (const mark of marks) {
+			const seen = answers.get(mark);
+			if (seen && seen.until > now)
+				return seen.digest === request ? (seen.answer as A) : { kind: "reused" };
+		}
+		if (options?.deadline !== undefined && now > options.deadline) return { kind: "late" };
+		const answer = deepFreeze(structuredClone(apply(now)));
+		const until = (options?.deadline ?? now + idempotencyDefaultMs) + idempotencySkewMs;
+		for (const mark of marks) answers.set(mark, { digest: request, answer, until });
 		return answer;
 	};
 	const write = (key: Key, value: Json, expiry: Expiry, now: number) => {
@@ -185,6 +237,17 @@ export function memoryStore(
 					values.delete(id(key));
 					return { kind: "taken" as const, entry: entryOf(held) };
 				}),
+			batchAcross: async (conditions, writes, options) => {
+				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
+				const request = idempotencyRequest("batchAcross", keys, [
+					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
+					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
+				]);
+				const partitions = [...new Set(keys.map(partitionOf))];
+				return guardedAcross(partitions, request, options, (now) =>
+					applyBatch(conditions, writes, now),
+				);
+			},
 			batch: async (conditions, writes, options) => {
 				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
 				samePartition(keys);
@@ -192,21 +255,9 @@ export function memoryStore(
 					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
 					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
 				]);
-				return guarded(keys[0] && partitionOf(keys[0]), request, options, (now) => {
-					for (const [index, condition] of conditions.entries()) {
-						const held = current(condition.key, now);
-						const holds = "absent" in condition ? !held : held?.version === condition.version;
-						if (!holds) return { kind: "conflict" as const, index };
-					}
-					const versions = writes.map((w) => {
-						if ("remove" in w) {
-							values.delete(id(w.key));
-							return null;
-						}
-						return write(w.key, w.put, w.expiry, now);
-					});
-					return { kind: "committed" as const, versions };
-				});
+				return guarded(keys[0] && partitionOf(keys[0]), request, options, (now) =>
+					applyBatch(conditions, writes, now),
+				);
 			},
 			count: (key, window, options) =>
 				guarded(

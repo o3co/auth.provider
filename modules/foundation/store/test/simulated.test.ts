@@ -1,7 +1,8 @@
 import { assemble, defineModule, kernelConfig, type Runtime } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
+import storeModule from "../src/module.ts";
 import { overwrite, simulatedStore } from "../src/testing.ts";
 
 const space: Space = { name: "simulated", guarantees: ["no-eviction", "durable", "replicated"] };
@@ -22,7 +23,7 @@ const fullyConfirmed: Space = {
 /** A simulated store over the spaces given, on the test's clock unless another is given. */
 async function open(declared: readonly Space[] = [space], clock: Runtime["clock"] = runtime.clock) {
 	const simulated = simulatedStore();
-	const caller = defineModule({ name: "caller" }, (m) =>
+	const caller = defineModule({ name: "caller", replicaSafe: true, takes: [] }, (m) =>
 		declared.map((d) => m.contribute(spaces).by(() => d)),
 	);
 	const app = await assemble({
@@ -409,4 +410,98 @@ it("adds up shifts of its clock", async () => {
 	simulated.shiftClock(1000);
 	simulated.shiftClock(1000);
 	expect(await s.now()).toBe(now + 2000);
+});
+
+/** Keys of two partitions, the second in a space of the first's guarantees, under one name. */
+const pairOf = (first: Space, second: Space, tag: string) => [
+	{ space: first, partition: `${tag}1`, name: "a" },
+	{ space: second, partition: `${tag}2`, name: "b" },
+];
+
+it("keeps or loses a batch across whole, its values and its mark, by the guarantees its spaces share", async () => {
+	const durableTwin: Space = { name: "simulated-twin", guarantees: space.guarantees };
+	const volatile: Space = { name: "volatile", guarantees: [] };
+	const volatileTwin: Space = { name: "volatile-twin", guarantees: [] };
+	for (const fault of ["restart", "pressMemory", "failover"] as const) {
+		const { simulated, s } = await open([space, durableTwin, volatile, volatileTwin]);
+		const across = s.batchAcross?.bind(s);
+		if (!across) throw new Error("no batch across");
+		/** Writes both keys where the first is absent, under the mark: the request a resend repeats. */
+		const request = (
+			keys: readonly { space: Space; partition: string; name: string }[],
+			mark: string,
+		) =>
+			across(
+				[{ key: keys[0] as never, absent: true }],
+				keys.map((key) => ({ key, put: 1, expiry: { kind: "never" } }) as const),
+				{ idempotency: mark },
+			);
+		const kept = pairOf(space, durableTwin, `${fault}-kept`);
+		const lost = pairOf(volatile, volatileTwin, `${fault}-lost`);
+		const keptAnswer = await request(kept, "kept");
+		const lostAnswer = await request(lost, "lost");
+		expect([keptAnswer.kind, lostAnswer.kind]).toEqual(["committed", "committed"]);
+		await simulated[fault]();
+		const values = async (keys: readonly { space: Space; partition: string; name: string }[]) =>
+			Promise.all(keys.map(async (k) => (await s.get(k)).entry?.value ?? null));
+		expect(await values(kept), fault).toEqual([1, 1]);
+		// Its condition fails now: only the mark answers with the first answer.
+		expect(await request(kept, "kept"), fault).toEqual(keptAnswer);
+		// Spaces without the guarantee lose it whole, its mark with it: a restart or memory pressure
+		// drops them, and a failover drops what no replicated write after it confirmed. The resend
+		// then runs anew.
+		expect(await values(lost), fault).toEqual([null, null]);
+		const anew = await request(lost, "lost");
+		expect(anew.kind, fault).toBe("committed");
+		expect(anew, fault).not.toEqual(lostAnswer);
+	}
+});
+
+it("loses on failover a batch across whose answer was lost, mark and all, and keeps one a later write confirmed", async () => {
+	const twin: Space = { name: "simulated-twin", guarantees: space.guarantees };
+	const { simulated, s } = await open([space, twin]);
+	const across = s.batchAcross?.bind(s);
+	if (!across) throw new Error("no batch across");
+	const request = (
+		keys: readonly { space: Space; partition: string; name: string }[],
+		mark: string,
+	) =>
+		across(
+			[{ key: keys[0] as never, absent: true }],
+			keys.map((key) => ({ key, put: 1, expiry: { kind: "never" } }) as const),
+			{ idempotency: mark },
+		);
+	const lost = pairOf(space, twin, "lost");
+	simulated.loseNextReply();
+	await expect(request(lost, "lost")).rejects.toThrow();
+	await simulated.failover();
+	expect(await Promise.all(lost.map(async (k) => (await s.get(k)).entry))).toEqual([null, null]);
+	// The mark went with it: the resend runs anew.
+	expect((await request(lost, "lost")).kind).toBe("committed");
+	const kept = pairOf(space, twin, "kept");
+	simulated.loseNextReply();
+	await expect(request(kept, "kept")).rejects.toThrow();
+	expect((await overwrite(s, key("later"), 1, never)).kind).toBe("written");
+	await simulated.failover();
+	const entries = await Promise.all(kept.map(async (k) => (await s.get(k)).entry));
+	expect(entries.map((e) => e?.value)).toEqual([1, 1]);
+	// The mark was kept with it: the resend learns the first answer, though its condition fails now.
+	expect(await request(kept, "kept")).toEqual({
+		kind: "committed",
+		versions: entries.map((e) => e?.version),
+	});
+});
+
+it("takes every handle its takes name, the store and its simulated stand-in alike", async () => {
+	const caller = defineModule({ name: "caller", replicaSafe: false, takes: [] }, (m) => [
+		m.contribute(spaces).by(() => space),
+	]);
+	const accepting = { ...kernelConfig(), store: { "accept-volatile": true } };
+	expect(
+		(await takesUnused({ modules: [storeModule, caller], config: accepting })).store,
+	).toBeUndefined();
+	const simulated = simulatedStore().module;
+	expect(
+		(await takesUnused({ modules: [simulated, caller], config: kernelConfig() })).store,
+	).toBeUndefined();
 });
