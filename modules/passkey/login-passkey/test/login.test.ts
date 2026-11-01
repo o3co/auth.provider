@@ -232,6 +232,33 @@ describe("a passkey login", () => {
 		);
 	});
 
+	it("states the challenge's time, before the assertion, as the proof's start session compares", async () => {
+		const s = await serve();
+		const key = await s.registered("s-alice");
+		const before = Date.now();
+		let asserted = 0;
+		const answered = await s.login(key, {
+			between: async () => {
+				asserted = Date.now();
+			},
+		});
+		expect(answered.status).toBe(200);
+		const [facts] = s.seen;
+		expect(facts?.provenSince).toBeGreaterThanOrEqual(before);
+		expect(facts?.provenSince).toBeLessThanOrEqual(asserted);
+	});
+
+	it("refuses a login session answers revoked, as any refusal, with no session cookie", async () => {
+		const refusing = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
+			m.provide(sessions).by(() => stubSessions({ open: async () => ({ kind: "revoked" }) })),
+		]);
+		const s = await serve({ sessions: refusing });
+		const answered = await s.login(await s.registered("s-alice"));
+		expect({ status: answered.status, body: answered.body }).toEqual(failed);
+		expect(s.sessionCookie(answered.cookies)).toBe(false);
+		expect(s.events).toContainEqual(refusedBy("revoked"));
+	});
+
 	it("proves pop, and mfa only where the user was verified and counts-as-mfa is on", async () => {
 		const verified = await serve();
 		await verified.login(await verified.registered("s-alice"));

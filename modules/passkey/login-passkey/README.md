@@ -21,7 +21,7 @@
 - An assertion is redeemed only with the cookie its options set: another browser's, or none, is refused as the assertion's `challenge`. Every answer the login's handler gives ends that cookie; one refused before it (csrf, the request limit, the body) takes no challenge.
 - A refusal tells nothing of why: whether the credential is registered, the user known or a revocation landed is the same `401`; the reason is recorded only.
 - The login's facts: the assertion's subject, the amr, the session's opening as the authentication time (`opening`), and the user's attributes from `users`. The amr is `pop`, with `mfa` (`mfa-extensions`' `secondFactorAmr`) added only where `counts-as-mfa` is on and the assertion says the authenticator verified the user; with `mfa`, the gate `mfa` passes the login unasked (`mfa-flows`' card).
-- A revocation of the subject since the challenge was made refuses the login before the gates, before a gate's hold is handed on, and once a session opened, closing it before its cookie goes out.
+- A revocation of the subject since the challenge was made refuses the login before the gates, before a gate's hold is handed on, and once a session opened, closing it before its cookie goes out. The login states the challenge's time as `provenSince`, and refuses one `session` answers revoked.
 - A subject `users` does not know is refused; one it cannot look up by subject is `503`, so the ledger must answer by subject.
 - Before the gates, whether the subject holds a passkey is settled with the witness composed, which fills its mark there.
 - `credential-policy` runs before `mfa` (gates run by name), and again when a login a later gate held resumes, before the gates after it.

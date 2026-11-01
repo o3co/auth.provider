@@ -41,7 +41,12 @@ export function openingOver(p: OpeningParts) {
 		if (found.kind !== "facts") return refuse("unknown_user");
 		// Settled with the witness before any gate: the mark of one who uses a passkey fills here.
 		if (!(await p.holders.held(subject))) return refuse("unknown-credential");
-		const outcome = await p.logins.login(request, found.facts, done);
+		// The proof began when the challenge was made: session compares that with the boundary once it opens.
+		const outcome = await p.logins.login(
+			request,
+			{ ...found.facts, provenSince: challengedAt },
+			done,
+		);
 		if (outcome.kind === "refused") return refuse("gate_refused");
 		if (outcome.kind === "held") {
 			// The transaction began before this: a revocation since the challenge hands nothing on.
@@ -49,8 +54,8 @@ export function openingOver(p: OpeningParts) {
 			p.recorded.session(request, "held", subject);
 			return jsonAnswer(403, outcome.answer, { cookies: outcome.cookies });
 		}
-		// Any other outcome opened no session: session refused it, its subject revoked since the proof.
-		if (outcome.kind !== "opened") return refuse("revoked");
+		// session refused it: the subject was revoked since the challenge.
+		if (outcome.kind === "revoked") return refuse("revoked");
 		// session-lifecycle compares with the opening, so a revocation since the challenge ends it here.
 		if (await revoked()) {
 			await p.sessions.close(outcome.session.id);
