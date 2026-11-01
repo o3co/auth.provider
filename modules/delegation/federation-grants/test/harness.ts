@@ -20,7 +20,7 @@ import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import {
@@ -273,9 +273,8 @@ export async function harness(
 
 	/** A browser's cookie for a new session of `subject`. */
 	const login = async (subject = "alice") => {
-		const done = await app
-			.get(sessions)
-			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() });
+		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const done = openedOf(await app.get(sessions).open(testRequest(), facts));
 		return (done.cookies[0] ?? "").split(";")[0] ?? "";
 	};
 	const intents = app.get(grantIntents);
