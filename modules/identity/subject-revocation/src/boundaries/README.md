@@ -11,8 +11,8 @@ Internal module of `subject-revocation`: a subject's boundaries, how they are wr
 - The store interface and its needs (`subject-revocation`'s contract).
 
 ## Offers
-- `recorded`: the boundaries after a revocation at a time; `compared`: valid or revoked, in seconds, with the boundary widened by an allowance.
-- `writtenTo`: the store and the clock → the write `record` makes before its followers.
+- `recorded`: the boundaries after a revocation at a time, the deadline of the write that records them; `compared`: valid or revoked, in seconds, with the boundary widened by an allowance.
+- `writtenTo`: the store and the clock → the write `record` makes before its followers, at each attempt's deadline; the clock's time stands in only where a store hands no write.
 - `opened`: the boundaries a stored record holds, or none when it holds no time.
 - `subjectRevocationOf`: the single-boundary interface over `revocations`.
 

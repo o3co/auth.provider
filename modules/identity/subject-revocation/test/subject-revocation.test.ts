@@ -12,6 +12,8 @@ import {
 import { memoryBoundaries } from "./stores.ts";
 
 const now = 1_800_000_000_000;
+/** How far past its store-clock time a boundary's write may land: records' patience, its deadline. */
+const patience = 10_000;
 const stored = (at: number) => at as unknown as StoredBoundary;
 
 /** A runtime whose clock the test moves, and the adapter the contract test reads it by. */
@@ -33,8 +35,8 @@ function movable() {
 
 /** subject-revocation over the records stand-in, on a clock the test moves; `front` may stand in front of the store. */
 async function boot(front: (boundaries: BoundaryStore) => BoundaryStore = (b) => b) {
-	const stores = memoryBoundaries();
 	const { clock, runtime, adapter } = movable();
+	const stores = memoryBoundaries(() => clock.at);
 	const app = await assemble({
 		modules: [
 			revocationModule,
@@ -55,30 +57,34 @@ it("refuses authentications up to the boundary's second, and only for that subje
 	expect(await revocation.check("alice", before)).toBe("valid");
 	await revocation.revoke("alice");
 	expect(await revocation.check("alice", before)).toBe("revoked");
-	expect(await revocation.check("alice", now + 999)).toBe("revoked");
-	expect(await revocation.check("alice", now + 1000)).toBe("valid");
+	expect(await revocation.check("alice", now + patience + 999)).toBe("revoked");
+	expect(await revocation.check("alice", now + patience + 1000)).toBe("valid");
 	expect(await revocation.check("bob", before)).toBe("valid");
 });
 
 it("revokes what started within the allowance after the boundary's second, and refuses an allowance that is no number", async () => {
 	const { revocation, revocations } = await boot();
 	await revocation.revoke("alice");
-	expect(await revocations.compare("alice", now + 2999, "sessions", 2000)).toBe("revoked");
-	expect(await revocations.compare("alice", now + 3000, "sessions", 2000)).toBe("valid");
-	expect(await revocations.compare("alice", now + 1000, "sessions", 1)).toBe("valid");
-	expect(await revocations.compare("alice", now, "sessions", -5000)).toBe("revoked");
-	expect(await revocations.compare("alice", now + 1000, "sessions", Number.NaN)).toBe("revoked");
+	const at = now + patience;
+	expect(await revocations.compare("alice", at + 2999, "sessions", 2000)).toBe("revoked");
+	expect(await revocations.compare("alice", at + 3000, "sessions", 2000)).toBe("valid");
+	expect(await revocations.compare("alice", at + 1000, "sessions", 1)).toBe("valid");
+	expect(await revocations.compare("alice", at, "sessions", -5000)).toBe("revoked");
+	expect(await revocations.compare("alice", at + 1000, "sessions", Number.NaN)).toBe("revoked");
 	expect(
-		await revocations.compare("alice", now + 60_000, "sessions", Number.POSITIVE_INFINITY),
+		await revocations.compare("alice", at + 60_000, "sessions", Number.POSITIVE_INFINITY),
 	).toBe("revoked");
 });
 
-it("takes the boundary from the kernel's clock, whatever the store's clock says", async () => {
+it("records the boundary as the deadline of the write that records it, on the store's clock, never the host's time", async () => {
 	const { advanceStore, revocation } = await boot();
-	advanceStore(60_000);
+	// The store's clock runs 3 s ahead of the host's: its write's deadline is 13 s past the host's time.
+	advanceStore(3000);
 	await revocation.revoke("alice");
-	expect(await revocation.check("alice", now)).toBe("revoked");
-	expect(await revocation.check("alice", now + 1000)).toBe("valid");
+	expect(await revocation.check("alice", now + 3000 + patience)).toBe("revoked");
+	expect(await revocation.check("alice", now + 3000 + patience + 999)).toBe("revoked");
+	// A login after the window enters.
+	expect(await revocation.check("alice", now + 3000 + patience + 1000)).toBe("valid");
 });
 
 it("never moves the boundary back, from a later revocation or another writer's", async () => {
@@ -133,7 +139,7 @@ it("is unavailable when a boundary holds no time, and a revocation moves both ki
 	await revocations.record("alice", { keepDelegations: true });
 	expect(await revocations.compare("alice", now - 1000, "sessions")).toBe("revoked");
 	expect(await revocations.compare("alice", now - 1000, "delegations")).toBe("revoked");
-	expect(await revocations.compare("alice", now + 1000, "delegations")).toBe("valid");
+	expect(await revocations.compare("alice", now + patience + 1000, "delegations")).toBe("valid");
 });
 
 it("reads a boundary of one time as both kinds", async () => {
@@ -185,7 +191,8 @@ it("is unavailable when another request's first boundary is gone before it moves
 
 subjectRevocationContract("subject-revocation over the records stand-in", async () => {
 	const { adapter, revocation, revocations } = await boot();
-	return { revocation, revocations, ...adapter };
+	// A boundary is its write's deadline: an authentication counts as after it a patience later.
+	return { revocation, revocations, ...adapter, settlesAfterMs: patience + 1000 };
 });
 
 subjectRevocationContract("the stand-in", async () => {
