@@ -17,7 +17,7 @@ export type LoginOutcome =
 			readonly gate: string;
 			readonly cookies: readonly [];
 	  }
-	/** `session` refused it, its subject revoked since the proof began: no session, and no cookies; the caller answers it as a refusal. */
+	/** `session` refused it, its subject revoked since the proof began: no session, and no cookies; the caller answers it. */
 	| { readonly kind: "revoked"; readonly cookies: readonly [] };
 
 /** A held login resumed at or past the deadline its caller set; no gate ran. */

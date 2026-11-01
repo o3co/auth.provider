@@ -38,6 +38,6 @@
 ## Vocabulary
 - held: a gate stopped the login, kept `done` and `from`, and answers the client itself.
 - refused: a gate ended the login: no session opens, and the caller answers with its own failure (as for wrong credentials where it took them; a held login's resume answers as its route does).
-- revoked: `session` refused the login, its subject revoked since the proof began: no session opens, and the caller answers it as it answers refused.
+- revoked: `session` refused the login, its subject revoked since the proof began: no session opens, and the caller answers it.
 - done: what the caller answers once the session opens, carried across gates.
 - from: the caller to tell once a held login opens, a carry that only that caller reads, and an optional deadline on `kernel`'s clock.
