@@ -87,16 +87,17 @@ it("survives its reader going away: a line it cannot write is dropped, the next 
 			return {};
 		}),
 	]);
-	const apps = [];
-	for (const _ of [1, 2])
-		apps.push(await assemble({ modules: [logStdout, speaker], config: kernelConfig() }));
+	const apps = [await assemble({ modules: [logStdout, speaker], config: kernelConfig() })];
+	// Whatever else hears the stream, a second composition adds no listener of this sink's.
+	const heard = out.listenerCount("error");
+	apps.push(await assemble({ modules: [logStdout, speaker], config: kernelConfig() }));
 	const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 	logs[0]?.info("lost");
 	await settled();
 	expect(out.errored).toMatchObject({ code: "EPIPE" });
 	logs[1]?.info("after");
 	await settled();
-	expect(out.listenerCount("error")).toBe(1);
+	expect(out.listenerCount("error")).toBe(heard);
 	// The stop does not wait on a stream that can take nothing, its last line lost as the rest.
 	for (const app of apps) await app.stop(1000);
 });

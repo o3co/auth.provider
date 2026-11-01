@@ -16,7 +16,7 @@
 - A line break inside a value is escaped, so no value can start another line.
 - A line carries no `level`, so it is told apart from a log line.
 - A write that fails is this receiver failing; the event is not written again.
-- Once standard output's reader has gone, each write fails so, counted by `audit`, and never ends the process: the stream's `error` is heard, by one listener however many compositions start.
+- Once standard output's reader has gone, each write fails so, counted by `audit`, and never ends the process: `kernel` hears the stream's `error`.
 
 ## Data
 - None, so it is safe on many instances.

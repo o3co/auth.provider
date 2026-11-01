@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Assembles modules: checks what they take, builds every provision and contribution (internal module `building`), resolving contracts at once. Owns the generic rules of extension points, collecting contributions in module order.
-- Loads configuration and gives each module only its own section, checked and frozen. With even one boot refusal, nothing is served.
+- Loads configuration and gives each module only its own section. With even one boot refusal, nothing is served.
 - Runs the lifecycle (start, periodic tasks, stop within a drain deadline) and answers readiness (internal module `lifecycle`, whose card holds their invariants).
 - Additions to this module go through a human gate.
 
@@ -18,7 +18,7 @@
 - `every(intervalMs, task)`: runs `task(signal)` from start at a whole interval of ms from 1 to 2^31−1, never two at once; a failed run is logged and the next follows; stop aborts a running one and waits for it.
 - Refusals and outages (internal module `refusal`): `BootRefused`, `BuildRefused` (a library's refusal from inside a factory) and `Unavailable`, each told by a mark every copy of the kernel shares: `BootRefused.is`, `BuildRefused.is` and `isUnavailable`, none throwing.
 - `deepFreeze` freezes a value from outside once, to the leaves. `sameSecret` compares two secrets (strings as UTF-8, or bytes) in constant time when their byte lengths match, and answers false otherwise.
-- Runtime contracts (internal module `runtime`, whose card holds the log's invariants): clock, randomness, and a log with one method per level (trace to fatal). Sinks come from `logSinks` (any number), built first, so a sink's stop hooks run after those of every module its build does not take.
+- Runtime contracts (internal module `runtime`, whose card holds the log's and the process's standard streams' invariants): clock, randomness, and a log with one method per level (trace to fatal). Sinks come from `logSinks` (any number), built first, so a sink's stop hooks run after those of every module its build does not take.
 - Section `kernel` (`deployment`, `environment`, `logging.level`, `stop-deadline`), its schema `kernelSection` and `kernelConfig`: internal module `config`.
 - A production check, `refusedInProduction` on `defineModule`: asked with a section that passed, it answers key paths below the section and reasons, never values, refusing boot in production and each warned in development (`kernel.allowed_in_development`).
 - A section, and a value it passes through read by `readConfigured` (the value, or each `ConfigurationIssue`), is read as the HOCON library's typed getters read it: a string converts to the number or boolean its schema asks for, and one that does not, or a value configuration cannot hold, refuses boot.

@@ -13,7 +13,13 @@ import { stopWithin } from "./lifecycle/stop.ts";
 import type { Module } from "./module.ts";
 import { BootRefused, type Refusal } from "./refusal/refusal.ts";
 import { guardedLog, logSinks, routedLog } from "./runtime/log.ts";
-import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime/runtime.ts";
+import {
+	hearStandardStreams,
+	type LogSink,
+	type Runtime,
+	systemClock,
+	systemRandom,
+} from "./runtime/runtime.ts";
 import { checkTakes } from "./takes/takes.ts";
 
 export interface Assembly {
@@ -81,6 +87,7 @@ export async function assembleWatching(
 	const modules = input.modules;
 	const refusals: Refusal[] = [];
 	const { kernel, unsure, sections } = readSections(modules, input.config, refusals);
+	hearStandardStreams();
 	let sinkList: readonly LogSink[] | undefined;
 	// A runtime a test passes keeps its log, without threshold or sinks; its calls still never throw.
 	const runtime: Runtime = input.runtime
