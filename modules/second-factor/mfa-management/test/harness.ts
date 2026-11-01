@@ -207,7 +207,12 @@ export async function serve(settings: Settings = {}) {
 	const signIn = async (subject = "alice", { proved = false } = {}) => {
 		jar = new Map();
 		const amr = proved ? ["pwd", "otp", "mfa"] : ["pwd"];
-		const facts = { subject, amr, authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject,
+			amr,
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		for (const c of cookies) {
 			const [name = "", value = ""] = (c.split(";")[0] ?? "").split("=");
