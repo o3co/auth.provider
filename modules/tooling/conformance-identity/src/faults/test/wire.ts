@@ -69,6 +69,18 @@ export const boundaryOf = (subject: string): Match =>
 		operations: ["putIfAbsent", "replaceIf"],
 	});
 
+/** The boundaries a write of a subject's boundary puts, each a time: its sessions' and its delegations'. */
+export const boundariesPut = (command: Command): number[] => {
+	const put = writtenValues(command).find(
+		(w) => w.key.space === "subject-revocation-store.boundaries" && w.key.name === "record",
+	)?.value;
+	const value = put && typeof put === "object" && "value" in put ? put.value : put;
+	if (typeof value === "number") return [value];
+	return value && typeof value === "object"
+		? Object.values(value).filter((v): v is number => typeof v === "number")
+		: [];
+};
+
 /**
  * A follower's first write after a revocation's boundary: session-lifecycle adding the subject's
  * sessions to its closings, before it closes any.

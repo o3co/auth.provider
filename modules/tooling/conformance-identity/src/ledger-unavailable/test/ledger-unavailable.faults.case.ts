@@ -14,7 +14,8 @@ import {
 } from "@mod/conformance/testing";
 import { describe, expect, it } from "vitest";
 import { faultScene, loginAt, nextSource, on, said } from "../../faults/test/faults.ts";
-import { boundaryOf, closingAdded, sessionClosed } from "../../faults/test/wire.ts";
+import { boundariesPut, boundaryOf, closingAdded, sessionClosed } from "../../faults/test/wire.ts";
+import { pastBoundaries, revocationWindowMs } from "../../revocation.ts";
 
 // The ledger's route uses the store in three steps: its request window's count, the subject's
 // boundary, and the followers (session-lifecycle adding the subject's sessions to its closings first).
@@ -47,8 +48,12 @@ async function sessionOf(i: Instance, user: User) {
 	]);
 }
 
+/** Each subject's latest revocation: when it was sent and when it was answered. */
+const revocations = new Map<string, { from: number; at: number }>();
+
 /** The ledger's revocation of a subject at the instance, from its block over https, as its proxy forwards it. */
 async function revokeAt(i: Instance, subject: string) {
+	const from = performance.now();
 	const res = await fetch(`${i.baseUrl}/ledger/subject-revocations`, {
 		method: "POST",
 		headers: {
@@ -64,13 +69,9 @@ async function revokeAt(i: Instance, subject: string) {
 	try {
 		body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
 	} catch {}
-	return {
-		status: res.status,
-		error: body.error,
-		state: body.state,
-		complete: body.complete,
-		at: performance.now(),
-	};
+	const at = performance.now();
+	revocations.set(subject, { from, at });
+	return { status: res.status, error: body.error, state: body.state, complete: body.complete, at };
 }
 type Revoked = Awaited<ReturnType<typeof revokeAt>>;
 const said3 = (r: Revoked) => [r.status, r.error, r.state];
@@ -114,10 +115,27 @@ async function control(i: Instance) {
 	expect(heldToWrites(i, users.carol.subject, from, r)).toBe("complete");
 }
 
+/**
+ * Until a login of alice's is past the boundary her latest revocation recorded: the boundaries its answered
+ * writes put, or where none was answered, the window the contract states from its answer.
+ */
+async function pastAlice(d: Deployed) {
+	const last = revocations.get(users.alice.subject);
+	if (!last) return;
+	const put = d.instances
+		.flatMap((x) => successes(x, boundaryOf(users.alice.subject)))
+		.filter((e) => e.at > last.from && e.at <= last.at)
+		.flatMap((e) => boundariesPut(e.command));
+	if (put.length > 0) return pastBoundaries(put);
+	const wait = last.at + revocationWindowMs - performance.now();
+	if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+}
+
 /** Healed: the topology has recovered and the instance is ready, and the revocation sent again, alice holding a new session for its followers, is done. */
 async function healed(d: Deployed, i: Instance) {
 	await recovered(d);
 	await ready(i);
+	await pastAlice(d);
 	// A revocation answered done during the fault closed her sessions; one with none to close writes no follower's.
 	await sessionOf(i, users.alice);
 	const from = performance.now();
