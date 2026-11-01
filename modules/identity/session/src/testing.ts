@@ -37,9 +37,6 @@ export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 		enter: async () => undefined,
 		enterFor: async () => ({ kind: "absent" }),
 		raise: async () => undefined,
-		complete: async () => {
-			throw new Error("not in this test");
-		},
 		open: async () => {
 			throw new Error("not in this test");
 		},
@@ -108,14 +105,16 @@ export function sessionsContract(
 			expect(await entering(place.now())).toBe("entered");
 		});
 
-		it("opens through open as through complete, telling it opened, and refuses a proof's start of no epoch milliseconds before anything", async () => {
+		it("opens through open, telling it opened, and refuses a login stating no proof's start, or one of no epoch milliseconds, before anything", async () => {
 			const place = await open();
 			const opening = (...args: Parameters<Sessions["open"]>) => place.sessions.open(...args);
 			const done = await opening(place.request(), facts(place));
 			if (done.kind !== "opened") expect.unreachable("nothing is revoked");
 			expect((await place.sessions.enter(place.request(done.cookies)))?.id).toBe(done.session.id);
-			const over = { ...facts(place), provenSince: "then" } as never;
-			await expect(opening(place.request(done.cookies), over)).rejects.toThrow(TypeError);
+			const { provenSince: _, ...stating } = facts(place);
+			for (const over of [stating, { ...facts(place), provenSince: "then" }] as never[]) {
+				await expect(opening(place.request(done.cookies), over)).rejects.toThrow(TypeError);
+			}
 			expect((await place.sessions.enter(place.request(done.cookies)))?.id).toBe(done.session.id);
 		});
 
@@ -829,14 +828,10 @@ export const sessionStandIn = defineModule(
 				return { kind: "closed" as const, cookies: removed, session, from };
 			};
 			/**
-			 * A login's session, saved and listed behind a new cookie; `rechecked`, a proof begun at or before
-			 * its subject's revocation closes it, saved, before any cookie, as an implementation does.
+			 * A login's session, saved and listed behind a new cookie; a proof begun at or before its
+			 * subject's revocation closes it, saved, before any cookie, as an implementation does.
 			 */
-			const opening = async (
-				request: HttpRequest,
-				facts: LoginFacts,
-				rechecked: boolean,
-			): Promise<Opened> => {
+			const opening = async (request: HttpRequest, facts: LoginFacts): Promise<Opened> => {
 				checkAuthenticatedAt(facts);
 				checkProvenSince(facts);
 				const carried = handleIn(request);
@@ -857,12 +852,9 @@ export const sessionStandIn = defineModule(
 				kept.set(handle, { context, state: "open", openedAt, until });
 				// Compared once saved: a boundary whose write landed before this is seen, and one after it
 				// is later than the opening, which every entry compares.
-				const { provenSince } = facts;
-				if (rechecked && provenSince !== undefined) {
-					if ((await revocation.check(facts.subject, provenSince)) === "revoked") {
-						await close(handle);
-						return { kind: "revoked" };
-					}
+				if ((await revocation.check(facts.subject, facts.provenSince)) === "revoked") {
+					await close(handle);
+					return { kind: "revoked" };
 				}
 				// Listed before its cookie is made; a session pushed out is closed through `close`.
 				for (const pushed of list(facts.subject, handle, until)) await close(pushed);
@@ -878,13 +870,7 @@ export const sessionStandIn = defineModule(
 				enter: async (request) => (await enteredAt(handleIn(request)))?.session,
 				enterFor: (request, level) => enterAt(handleIn(request), level),
 				entryOf: (handle, level = "use") => enterAt(handle, level),
-				complete: async (request, facts) => {
-					const opened = await opening(request, facts, false);
-					if (opened.kind !== "opened")
-						throw new TypeError("session: complete never answers revoked");
-					return { session: opened.session, cookies: opened.cookies };
-				},
-				open: (request, facts) => opening(request, facts, true),
+				open: (request, facts) => opening(request, facts),
 				raise: async (request, amr) => {
 					const secret = secretIn(request);
 					const handle = handleOf(secret);

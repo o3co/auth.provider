@@ -5,11 +5,16 @@ import { type AuthContext, type EntryJudge, sessionRules } from "../../contract.
 const context: AuthContext = { subject: "alice", amr: ["pwd"], authenticatedAt: 0 };
 
 describe("session's rules", () => {
-	it("takes a proof's start of epoch milliseconds, or none while it may be left out, and throws a TypeError for anything else", () => {
-		const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: "opening" as const };
+	it("takes a proof's start of epoch milliseconds, and throws a TypeError for none or anything else", () => {
+		const facts = {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: "opening" as const,
+			provenSince: 0,
+		};
 		expect(() => sessionRules.checkProvenSince(facts)).not.toThrow();
-		expect(() => sessionRules.checkProvenSince({ ...facts, provenSince: 0 })).not.toThrow();
-		for (const provenSince of [-1, 8.64e15 + 1, Number.NaN, "1", null]) {
+		expect(() => sessionRules.checkProvenSince({ ...facts, provenSince: 8.64e15 })).not.toThrow();
+		for (const provenSince of [undefined, -1, 8.64e15 + 1, Number.NaN, "1", null]) {
 			expect(
 				() => sessionRules.checkProvenSince({ ...facts, provenSince } as never),
 				String(provenSince),

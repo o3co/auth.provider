@@ -15,10 +15,9 @@ export function checkAuthenticatedAt(facts: LoginFacts): void {
 		throw new TypeError('authenticatedAt must be epoch milliseconds, "opening" or "unknown"');
 }
 
-/** A `TypeError`, naming no value, for a proof's start given that is not epoch milliseconds. */
+/** A `TypeError`, naming no value, for a proof's start that is missing or not epoch milliseconds. */
 export function checkProvenSince(facts: LoginFacts): void {
 	const since: unknown = facts.provenSince;
-	if (since === undefined) return;
 	const held =
 		typeof since === "number" && Number.isFinite(since) && since >= 0 && since <= latestEpochMs;
 	if (!held) throw new TypeError("provenSince must be epoch milliseconds");
