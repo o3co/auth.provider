@@ -53,7 +53,12 @@ async function boot() {
 	});
 	const s = app.get(sessions);
 	const login = async () => {
-		const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		return pair(openedOf(await s.open(testRequest(), facts)).cookies[0]);
 	};
 	const handleOf = async (cookie: string) => ((await s.enter(withCookie(cookie))) as Session).id;
