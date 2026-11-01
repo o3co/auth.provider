@@ -31,7 +31,7 @@
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable; every boot warns `redis.replication_none` naming the replicated spaces.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
 - Internal module `round` (the confirmation round).
-- Internal module `client` (the client's options; what the URL and environment tell of the connection): boot warns `redis.plaintext` where the URL is in the clear, `redis.client_debug_log` where the client's own log is on. Another floor refuses boot.
+- Internal module `client` (the client's options; what the URL and environment tell of the connection): boot warns `redis.plaintext` where the URL is in the clear. Production refuses `url` while `DEBUG` covers ioredis. Another floor refuses boot.
 - Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - Nothing a connection does ends the process.

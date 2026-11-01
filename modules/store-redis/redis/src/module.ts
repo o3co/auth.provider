@@ -299,95 +299,113 @@ const takes = [spaces, tlsOptions] as const;
 
 // Safe on many instances: it is the shared store, given the same `url` and `prefix` on each
 // (deployment-guarantees, Several instances).
-export default defineModule({ name: "redis", replicaSafe: true, section, takes }, (m) => [
-	m.provide(connections).by(async (c) => {
-		// On every boot: the client's own debug log writes AUTH's password; no value is told here.
-		if (clientDebugs(process.env.DEBUG)) c.log.warn("redis.client_debug_log", {});
-		// On every boot: what the store keeps, and the URL's password, go in the clear; no host is told.
-		if (inTheClear(c.section.url)) {
-			c.log.warn("redis.plaintext", { reason: "the connection to Redis is not encrypted" });
-		}
-		const floor = await c.get(tlsOptions);
-		if (!isFloor(floor)) {
-			return c.refuse(
-				"redis",
-				"the TLS floor is not one tls-options made: provide it from @mod/tls-options",
-			);
-		}
-		const client = new Redis(c.section.url, clientOptions(c.section, floor));
-		// The last failure's code, which a refused connect tells only through its error events.
-		let lastCode = "unknown";
-		const failed = (error: unknown) => {
-			lastCode = codeOf(error);
-			c.log.warn("redis.error", { code: lastCode });
-		};
-		client.on("error", failed);
-		const confirmer = client.duplicate({
-			commandTimeout: c.section["replication-timeout"] + c.section["command-timeout"],
-		});
-		confirmer.on("error", failed);
-		const disconnectBoth = () => {
-			client.disconnect();
-			confirmer.disconnect();
-		};
-		let checked: Awaited<ReturnType<typeof unmet>>;
-		const declared = await c.collect(spaces);
-		try {
-			await client.connect();
-			await confirmer.connect();
-			checked = await unmet(client, confirmer, declared, c.section);
-		} catch (error) {
-			disconnectBoth();
-			return c.refuse(
-				"redis.url",
-				`cannot connect to Redis, or cannot check its configuration (${codeOf(error) === "unknown" ? lastCode : codeOf(error)})`,
-			);
-		}
-		if (checked.problems.length > 0) {
-			disconnectBoth();
-			return c.refuse("redis", checked.problems.join("; "));
-		}
-		if (checked.declaredOnly.length > 0) {
-			// On every boot: these the server would not show, so they hold as declared, unchecked.
-			c.log.warn("redis.settings_declared", { settings: checked.declaredOnly.join(", ") });
-		}
-		if (checked.undurable.length > 0) {
-			// On every boot: a crash loses these spaces' latest writes, as the operator stated.
-			c.log.warn("redis.durability_none", { spaces: checked.undurable.join(", ") });
-		}
-		if (checked.unreplicated.length > 0) {
-			// On every boot: a failover loses these spaces' writes, confirmed ones too, as the operator stated.
-			c.log.warn("redis.replication_none", { spaces: checked.unreplicated.join(", ") });
-		}
-		c.onStop(async (signal) => {
-			// Past the stop's deadline the connections are cut, not left waiting on QUIT.
-			if (signal.aborted) return disconnectBoth();
-			signal.addEventListener("abort", disconnectBoth, { once: true });
-			try {
-				await client.quit().catch(() => client.disconnect());
-				await confirmer.quit().catch(() => confirmer.disconnect());
-			} finally {
-				signal.removeEventListener("abort", disconnectBoth);
+export default defineModule(
+	{
+		name: "redis",
+		replicaSafe: true,
+		section,
+		// The client's own debug log writes AUTH's password and every command's arguments, what the
+		// store keeps among them; production refuses it by the key whose secret it leaks, never a value.
+		refusedInProduction: () =>
+			clientDebugs(process.env.DEBUG)
+				? [
+						{
+							key: "url",
+							reason:
+								"DEBUG turns on ioredis' own debug log, which writes this URL's password and every command's arguments; leave ioredis out of DEBUG",
+						},
+					]
+				: [],
+		takes,
+	},
+	(m) => [
+		m.provide(connections).by(async (c) => {
+			// On every boot: what the store keeps, and the URL's password, go in the clear; no host is told.
+			if (inTheClear(c.section.url)) {
+				c.log.warn("redis.plaintext", { reason: "the connection to Redis is not encrypted" });
 			}
-		});
-		return { client, confirmer, declared };
-	}),
-	m.provide(store).by(async (c) => {
-		const { client, confirmer, declared } = await c.get(connections);
-		return redisStore(
-			client,
-			confirmer,
-			{
-				prefix: c.section.prefix,
-				replicationTimeoutMs: c.section["replication-timeout"],
-				replication: c.section.replication,
-			},
-			declared,
-		);
-	}),
-	m.contribute(probes).by(async (c) => {
-		const { client, confirmer, declared } = await c.get(connections);
-		const recheck = async () => (await unmet(client, confirmer, declared, c.section)).problems;
-		return redisProbe([client, confirmer], recheck, c.log);
-	}),
-]);
+			const floor = await c.get(tlsOptions);
+			if (!isFloor(floor)) {
+				return c.refuse(
+					"redis",
+					"the TLS floor is not one tls-options made: provide it from @mod/tls-options",
+				);
+			}
+			const client = new Redis(c.section.url, clientOptions(c.section, floor));
+			// The last failure's code, which a refused connect tells only through its error events.
+			let lastCode = "unknown";
+			const failed = (error: unknown) => {
+				lastCode = codeOf(error);
+				c.log.warn("redis.error", { code: lastCode });
+			};
+			client.on("error", failed);
+			const confirmer = client.duplicate({
+				commandTimeout: c.section["replication-timeout"] + c.section["command-timeout"],
+			});
+			confirmer.on("error", failed);
+			const disconnectBoth = () => {
+				client.disconnect();
+				confirmer.disconnect();
+			};
+			let checked: Awaited<ReturnType<typeof unmet>>;
+			const declared = await c.collect(spaces);
+			try {
+				await client.connect();
+				await confirmer.connect();
+				checked = await unmet(client, confirmer, declared, c.section);
+			} catch (error) {
+				disconnectBoth();
+				return c.refuse(
+					"redis.url",
+					`cannot connect to Redis, or cannot check its configuration (${codeOf(error) === "unknown" ? lastCode : codeOf(error)})`,
+				);
+			}
+			if (checked.problems.length > 0) {
+				disconnectBoth();
+				return c.refuse("redis", checked.problems.join("; "));
+			}
+			if (checked.declaredOnly.length > 0) {
+				// On every boot: these the server would not show, so they hold as declared, unchecked.
+				c.log.warn("redis.settings_declared", { settings: checked.declaredOnly.join(", ") });
+			}
+			if (checked.undurable.length > 0) {
+				// On every boot: a crash loses these spaces' latest writes, as the operator stated.
+				c.log.warn("redis.durability_none", { spaces: checked.undurable.join(", ") });
+			}
+			if (checked.unreplicated.length > 0) {
+				// On every boot: a failover loses these spaces' writes, confirmed ones too, as the operator stated.
+				c.log.warn("redis.replication_none", { spaces: checked.unreplicated.join(", ") });
+			}
+			c.onStop(async (signal) => {
+				// Past the stop's deadline the connections are cut, not left waiting on QUIT.
+				if (signal.aborted) return disconnectBoth();
+				signal.addEventListener("abort", disconnectBoth, { once: true });
+				try {
+					await client.quit().catch(() => client.disconnect());
+					await confirmer.quit().catch(() => confirmer.disconnect());
+				} finally {
+					signal.removeEventListener("abort", disconnectBoth);
+				}
+			});
+			return { client, confirmer, declared };
+		}),
+		m.provide(store).by(async (c) => {
+			const { client, confirmer, declared } = await c.get(connections);
+			return redisStore(
+				client,
+				confirmer,
+				{
+					prefix: c.section.prefix,
+					replicationTimeoutMs: c.section["replication-timeout"],
+					replication: c.section.replication,
+				},
+				declared,
+			);
+		}),
+		m.contribute(probes).by(async (c) => {
+			const { client, confirmer, declared } = await c.get(connections);
+			const recheck = async () => (await unmet(client, confirmer, declared, c.section)).problems;
+			return redisProbe([client, confirmer], recheck, c.log);
+		}),
+	],
+);
