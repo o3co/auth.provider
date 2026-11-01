@@ -4,7 +4,12 @@ import { area } from "@mod/conformance";
 export interface SecondFactorPart {
 	readonly mode: "optional" | "required";
 	/** A code by mail as a second factor, sent to the fake SMTP relay at `host` and `port`; no proof of the address before a first binding. */
-	readonly mail?: { readonly host: string; readonly port: number };
+	readonly mail?: {
+		readonly host: string;
+		readonly port: number;
+		/** Whether its proof adds `mfa`, so it counts; true unless a scene states otherwise (`mfa-email`'s default is false). */
+		readonly addsSecondFactor?: boolean;
+	};
 	/** The lockout's numbers, where a scene needs a hold it can reach; each target's defaults otherwise. */
 	readonly lockout?: {
 		readonly threshold: number;
