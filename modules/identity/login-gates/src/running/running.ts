@@ -42,7 +42,8 @@ export function runningWith(parts: {
 				return { kind: "held", gate: gate.name, answer: decision.answer, cookies };
 			}
 		}
-		return { kind: "opened", ...(await opening.complete(request, facts)) };
+		const opened = await opening.open(request, facts);
+		return opened.kind === "opened" ? opened : { kind: "revoked", cookies: [] };
 	};
 	/** The gates before `heldAt` that are asked again on resume; one holding there is the gate's error. */
 	const rechecked = async (

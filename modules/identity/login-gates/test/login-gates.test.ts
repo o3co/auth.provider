@@ -430,7 +430,7 @@ function unopened() {
 	const module = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
-				complete: async () => {
+				open: async () => {
 					asked.opens += 1;
 					throw new Error("no session opens in this test");
 				},
@@ -439,6 +439,22 @@ function unopened() {
 	]);
 	return { asked, module };
 }
+
+it("answers revoked, with no cookies and no caller told, where session refuses a login its subject was revoked since", async () => {
+	const refusing = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(sessions).by(() => stubSessions({ open: async () => ({ kind: "revoked" }) })),
+	]);
+	const { gates, caller, told } = gated({ holding: ["a"] });
+	const l = await boot([...gates, caller], {}, runtime.log, refusing);
+	expect((await l.login(testRequest(), facts, null, from)).kind).toBe("held");
+	expect(await l.resume(testRequest(), facts, "a", null, from)).toEqual({
+		kind: "revoked",
+		cookies: [],
+	});
+	expect(told).toEqual([]);
+	const ungated = await boot([], {}, runtime.log, refusing);
+	expect(await ungated.login(testRequest(), facts)).toEqual({ kind: "revoked", cookies: [] });
+});
 
 it("ends a login at the first gate that refuses, with no session, no cookies and no gate after it", async () => {
 	const { gates, ran } = gated({ refusing: ["a"] });
