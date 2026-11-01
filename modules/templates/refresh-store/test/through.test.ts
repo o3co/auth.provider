@@ -84,6 +84,7 @@ async function boot() {
 			subject: "alice",
 			amr: ["pwd"],
 			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
 		}),
 	);
 	const grant = { subject: "alice", issuedTo: "app", audience: ["https://api"], scope: ["read"] };
