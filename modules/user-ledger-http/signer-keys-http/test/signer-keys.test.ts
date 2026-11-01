@@ -20,7 +20,7 @@ import {
 	isUnavailable,
 	kernelConfig,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import { credentialPolicy, credentialRefusalText, outboundRefusals } from "@mod/outbound-policy";
@@ -28,6 +28,7 @@ import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { tokensStandIn } from "@mod/tokens/testing";
@@ -96,13 +97,14 @@ const settings = (more: Record<string, unknown> = {}) => ({
 	...more,
 });
 const collected = contract<readonly SignerKeys[]>("test.signer-keys");
-const collector = defineModule({ name: "test-collector" }, (m) => [
-	m.provide(collected).by((c) => c.collect(signerKeys)),
-]);
+const collector = defineModule(
+	{ name: "test-collector", replicaSafe: true, takes: [signerKeys] },
+	(m) => [m.provide(collected).by((c) => c.collect(signerKeys))],
+);
 async function open(section: unknown = settings(), allow = ["127.0.0.1"]) {
 	const logged = recordingLog();
 	const app = await assemble({
-		modules: [outboundModule, signerKeysHttp, collector],
+		modules: [outboundModule, tlsOptionsForTests, signerKeysHttp, collector],
 		config: {
 			...kernelConfig(),
 			outbound: { allow, "plain-loopback": [pair] },
@@ -112,11 +114,13 @@ async function open(section: unknown = settings(), allow = ["127.0.0.1"]) {
 	});
 	const [keys] = app.get(collected);
 	if (!keys) throw new Error("no signer keys contributed");
-	return { keys, logged };
+	// What the keys log once booted: outbound's start warnings (its plain-loopback pair) come before.
+	const from = logged.lines().length;
+	return { keys, logged: { lines: () => logged.lines().slice(from) } };
 }
 
 /** jwt-bearer's spent assertions on records' stand-in, as a wiring would keep them. */
-const spent = defineModule({ name: "spent-assertions" }, (m) => [
+const spent = defineModule({ name: "spent-assertions", replicaSafe: false, takes: [] }, (m) => [
 	m.provide(spentAssertions).by((c) => {
 		const stand = memoryRecords<true>(c.clock.now, { shards: 1, perShard: 1 });
 		return {
@@ -169,6 +173,13 @@ describe("signer-keys-http", () => {
 			algorithms: ["EdDSA"],
 		});
 		expect(received).toHaveLength(2);
+		// Any algorithm there is to take is handed on as named; the grant takes those its issuer does.
+		script = () => ({ status: 200, json: { keys: [deviceJwk], algorithms: ["PS256", "RS384"] } });
+		expect(await keys.keysOf({ subject: "dev-1" })).toMatchObject({
+			algorithms: ["PS256", "RS384"],
+		});
+		// The ledger answers each signer's own keys alone, as its card says it does.
+		expect(keys.perSigner).toBe(true);
 		// The keys left out are counted in one warning, telling nothing they held.
 		const lines = logged.lines().map((line) => [line.event, line.fields]);
 		expect(lines).toEqual([["signer-keys-http.keys_dropped", { count: 3 }]]);
@@ -244,7 +255,7 @@ it("says which of outbound's keys lets a keys-url it refuses through, naming no 
 });
 
 it("says why its credential may not go to keys-url in outbound-policy's words", async () => {
-	const standIn = defineModule({ name: "outbound" }, (m) => [
+	const standIn = defineModule({ name: "outbound", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async () => {
 				throw new Error("never sent");
@@ -263,13 +274,34 @@ it("says why its credential may not go to keys-url in outbound-policy's words", 
 	]);
 });
 
+it("takes outbound's credential policy only with a credential, its takes naming it either way", async () => {
+	const unused = async (section: unknown) =>
+		(
+			await takesUnused({
+				modules: [outboundModule, tlsOptionsForTests, signerKeysHttp, collector],
+				config: {
+					...kernelConfig(),
+					outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
+					"signer-keys-http": section,
+				},
+				runtime: quietRuntime(),
+			})
+		)["signer-keys-http"];
+	expect(await unused(settings())).toBeUndefined();
+	// The takes are static: outbound provides the policy beside the refusals the module always
+	// takes, so wherever it boots the policy is there, and without a credential it is left untaken.
+	const { credential: _, ...bare } = settings();
+	expect(await unused(bare)).toEqual(["outbound.credentials"]);
+});
+
 describe("signer-keys-http under jwt-bearer", () => {
 	const issuer = "https://as.example";
 	const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 	async function serve() {
-		const location = defineModule({ name: "token-endpoint-location" }, (m) => [
-			m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` })),
-		]);
+		const location = defineModule(
+			{ name: "token-endpoint-location", replicaSafe: true, takes: [] },
+			(m) => [m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` }))],
+		);
 		const app = await assemble({
 			modules: [
 				location,
@@ -281,6 +313,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 				grantCaller,
 				clientAllowanceModule,
 				outboundModule,
+				tlsOptionsForTests,
 				externalJwtModule,
 				simulatedStore().module,
 				subjectRevocationStandIn,
@@ -290,7 +323,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 			],
 			config: {
 				...kernelConfig(),
-				...httpConfig(),
+				...httpConfig({ "public-origin": new URL(issuer).origin }),
 				...issuerConfig({ url: issuer }),
 				outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
 				...clientsConfig([
