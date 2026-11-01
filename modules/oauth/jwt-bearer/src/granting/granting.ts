@@ -93,6 +93,7 @@ export function grantingWith(p: GrantingParts): Omit<Grant, "grantType"> {
 		checked: {
 			readonly subject: string;
 			readonly issuedAt?: number;
+			readonly standingAt?: number;
 			readonly expiresAt: number;
 		},
 		spend: () => Promise<"spent" | "replayed">,
@@ -131,7 +132,7 @@ export function grantingWith(p: GrantingParts): Omit<Grant, "grantType"> {
 			issuedTo: client.id,
 			audience,
 			scope,
-			standingAt: madeAt - skewMs,
+			standingAt: Math.min(madeAt - skewMs, checked.standingAt ?? Number.POSITIVE_INFINITY),
 		};
 		// Asked before the assertion is used up, so a refusal leaves it usable.
 		const admitted = await admits(access);

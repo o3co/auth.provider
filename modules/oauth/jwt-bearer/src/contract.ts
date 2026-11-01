@@ -109,6 +109,8 @@ export type DelegatedCheck =
 			readonly kind: "valid";
 			readonly subject: string;
 			readonly issuedAt: number;
+			/** Epoch ms, where the delegate compared its subject's boundary; the token stands no later than it. */
+			readonly standingAt?: number;
 			readonly expiresAt: number;
 			readonly clients: readonly [string, ...string[]];
 			readonly holderDigest?: string;
