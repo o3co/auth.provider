@@ -1,4 +1,5 @@
 import { BootRefused, defineModule, isUnavailable } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { factorKinds } from "@mod/mfa-extensions";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { expect, it } from "vitest";
@@ -6,7 +7,7 @@ import { witnessBackfill } from "../src/contract.ts";
 import { witnessed } from "./harness.ts";
 
 /** A counting kind whose first proof names a credential no two factors may hold. */
-const card = defineModule({ name: "kind-card" }, (m) => [
+const card = defineModule({ name: "kind-card", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "card",
 		amr: ["hwk"],
@@ -18,6 +19,19 @@ const card = defineModule({ name: "kind-card" }, (m) => [
 		verify: async (_secret, state, proof) => ({ kind: "valid" as const, state: state ?? proof }),
 	})),
 ]);
+
+/** A witnessed mfa with the card kind, and a binding of a card under a proof. */
+async function withCards() {
+	const served = await witnessed({}, [card]);
+	const bindCard = async (subject: string, proof: string) => {
+		const begun = await served.decided.begin(subject, "card");
+		if (begun.kind !== "begun") throw new Error(begun.kind);
+		const proved = await served.decided.provePending(subject, begun.pending, proof);
+		if (proved.kind !== "valid") throw new Error(proved.kind);
+		return served.decided.bind(subject, begun.pending, proved.state);
+	};
+	return { ...served, bindCard };
+}
 
 it("refuses to start with two witnesses", async () => {
 	await expect(witnessed({}, [witnessStandIn("witness-two").module])).rejects.toBeInstanceOf(
@@ -41,47 +55,23 @@ it("marks no subject whose first binding another subject's factor already holds 
 	expect(await bindCard("bob", "c2")).toMatchObject({ kind: "bound" });
 });
 
-it("fills no mark for a factor whose binding ends as a duplicate, read before its claim", async () => {
-	const { app, decided, place, witness } = await witnessed({}, [card]);
-	const bindCard = async (subject: string, proof: string) => {
-		const begun = await decided.begin(subject, "card");
-		if (begun.kind !== "begun") throw new Error(begun.kind);
-		const proved = await decided.provePending(subject, begun.pending, proof);
-		if (proved.kind !== "valid") throw new Error(proved.kind);
-		return decided.bind(subject, begun.pending, proved.state);
-	};
-	expect(await bindCard("ann", "c1")).toMatchObject({ kind: "bound" });
-	// A backfill reads bob's factor once it is written, before its claim on ann's value fails.
-	let filled: string | undefined;
-	place.hooks.beforeSave = async (key) => {
-		if (key.startsWith("u-")) filled ??= await app.get(witnessBackfill).settle("bob");
-	};
-	expect(await bindCard("bob", "c1")).toEqual({ kind: "duplicate" });
-	expect(filled).toBe("none");
+it("fills no mark for a factor whose claim is missing, as 0.18 left one", async () => {
+	const { app, bindCard, place, witness } = await withCards();
+	expect(await bindCard("bob", "c1")).toMatchObject({ kind: "bound" });
+	await place.loseClaims();
+	witness.marks.clear();
+	// Written, none claimed: it may yet be another's.
+	expect(await app.get(witnessBackfill).settle("bob")).toBe("unclaimed");
 	expect(witness.marks.has("bob")).toBe(false);
 });
 
-it("fills no mark for a factor not yet claimed, whose value another then binds first", async () => {
-	const { app, decided, place, witness } = await witnessed({}, [card]);
-	const proved = async (subject: string, proof: string) => {
-		const begun = await decided.begin(subject, "card");
-		if (begun.kind !== "begun") throw new Error(begun.kind);
-		const valid = await decided.provePending(subject, begun.pending, proof);
-		if (valid.kind !== "valid") throw new Error(valid.kind);
-		return () => decided.bind(subject, begun.pending, valid.state);
-	};
-	const [bob, ann] = [await proved("bob", "c1"), await proved("ann", "c1")];
-	// Bob's factor is written and stops before its claim: a backfill runs, then Ann binds the value.
-	let filled: string | undefined;
-	let paused = false;
-	place.hooks.beforeSave = async (key) => {
-		if (!key.startsWith("u-") || paused) return;
-		paused = true;
-		filled = await app.get(witnessBackfill).settle("bob");
-		expect(await ann()).toMatchObject({ kind: "bound" });
-	};
-	expect(await bob()).toEqual({ kind: "duplicate" });
-	expect(filled).toBe("none");
+it("fills no mark for a factor whose claim is missing, whose value another then binds", async () => {
+	const { app, bindCard, place, witness } = await withCards();
+	expect(await bindCard("bob", "c1")).toMatchObject({ kind: "bound" });
+	await place.loseClaims();
+	witness.marks.clear();
+	expect(await bindCard("ann", "c1")).toMatchObject({ kind: "bound" });
+	expect(await app.get(witnessBackfill).settle("bob")).toBe("unclaimed");
 	expect(witness.marks.has("bob")).toBe(false);
 	expect(witness.marks.has("ann")).toBe(true);
 });
@@ -189,7 +179,7 @@ it("clears the mark after a reset's removal, and answers unavailable while it ca
 	expect((await decided.clear("jo")).count).toBe(2);
 	expect(witness.marks.has("jo")).toBe(false);
 	await bindCode("jo");
-	witness.failing.clear = 1;
+	witness.failing.markedWith = 1;
 	await expect(decided.clear("jo")).rejects.toSatisfy(isUnavailable);
 	expect([await counted("jo"), witness.marks.has("jo")]).toEqual([0, true]);
 	await expect(decided.asks("jo")).rejects.toSatisfy(isUnavailable);
@@ -219,4 +209,10 @@ it("judges whether a counting factor is held against the witness, recording wher
 		["mfa.enrollment_inconsistent", { at: "credentials" }],
 		["mfa.enrollment_inconsistent", { at: "binding" }],
 	]);
+});
+
+it("takes all it names, with mfa and a witness in memory", async () => {
+	const h = await witnessed();
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(h.input))["mfa-witnessing"]).toBeUndefined();
 });

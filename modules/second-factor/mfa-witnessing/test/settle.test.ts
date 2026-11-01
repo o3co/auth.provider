@@ -3,9 +3,13 @@ import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { expect, it } from "vitest";
 import { settlingOf } from "../src/witnessing.ts";
 
+// These hold settle over a witness with no withdraw, whose own clear may take any mark; the
+// withdraw it uses where offered is in withdraw.test.ts.
+const witnessStandInWithout = () => witnessStandIn("enrollment-witness", { withdraw: false });
+
 /** Settling over a witness in memory, the subject's counting factors read in turn from `reads`. */
 const settled = (reads: boolean[]) => {
-	const stand = witnessStandIn();
+	const stand = witnessStandInWithout();
 	let n = 0;
 	const settle = settlingOf({
 		witness: stand.witness,
@@ -31,7 +35,7 @@ it("clears a mark it set itself when the factor went meanwhile, as a reset's rem
 });
 
 it("marks anew when its clear takes the mark a new binding set after a reset", async () => {
-	const stand = witnessStandIn();
+	const stand = witnessStandInWithout();
 	const reads = [true, false, true, true];
 	let n = 0;
 	const settle = settlingOf({
@@ -51,7 +55,7 @@ it("marks anew when its clear takes the mark a new binding set after a reset", a
 });
 
 it("checks the last mark it may make, and clears it where a reset took the factor meanwhile", async () => {
-	const stand = witnessStandIn();
+	const stand = witnessStandInWithout();
 	const reads = [true, false, true, false, false];
 	let n = 0;
 	const settle = settlingOf({
@@ -72,7 +76,7 @@ it("checks the last mark it may make, and clears it where a reset took the facto
 });
 
 it("never clears a mark another set after its own clear, though it marked before", async () => {
-	const stand = witnessStandIn();
+	const stand = witnessStandInWithout();
 	const reads = [true, false, true, false, false];
 	let n = 0;
 	const settle = settlingOf({
