@@ -7,11 +7,12 @@ import { issuer as named } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { answerTo, matches, redirects } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
-import { oauthError } from "@mod/token-endpoint";
+import { errorDescription, oauthError } from "@mod/token-endpoint";
 import events from "../audit-events.ts";
 import { type Decision, refusal } from "../decision.ts";
-import { type Flow, flowOver, type Place } from "../flow/flow.ts";
+import { type Flow, flowOver, flowTakes, type Place } from "../flow/flow.ts";
 import type { Settings } from "../section.ts";
+import { urlFrom } from "../url.ts";
 
 export const path = "/oauth/authorize";
 
@@ -32,6 +33,9 @@ export interface RouteParts extends Place {
 	readonly rule: Pick<TargetRule, "repeated">;
 }
 
+/** The routes' declared answer to Unavailable, and the one before a session is found. */
+const unavailableAnswer = oauthError(503, "temporarily_unavailable");
+
 /** Answers both methods of the endpoint; Unavailable before the redirect URI is trusted is `http`'s to warn of. */
 export function routeWith({
 	issuer,
@@ -43,8 +47,7 @@ export function routeWith({
 	rule,
 }: RouteParts): Pick<Route, "handle" | "unavailable"> {
 	const audited = declaredAudit(recorder, events);
-	const urlWith = (params: Iterable<readonly [string, string]>) =>
-		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
+	const urlWith = urlFrom(self);
 
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
 		if (request.method === "POST") {
@@ -77,37 +80,40 @@ export function routeWith({
 		const state = stateText !== undefined && stateText.length <= maxState ? stateText : undefined;
 		const back = (params: Record<string, string>) =>
 			answerTo(redirectUri, { ...params, state, iss: issuer });
-		const reply = (d: Decision) =>
-			found(
+		/** The answer a decision makes: here, on to another page, or back to the client. */
+		const responseOf = (d: Decision) => {
+			if (d.kind === "unavailable") return unavailableAnswer;
+			if (d.kind === "answer") return oauthError(400, d.error, d.description);
+			if (d.kind === "send") return found(302, d.to);
+			if (d.kind === "code") return found(302, back({ code: d.code }));
+			return found(
 				302,
-				d.kind === "send"
-					? d.to
-					: back(
-							d.kind === "code"
-								? { code: d.code }
-								: {
-										error: d.error,
-										...(d.description ? { error_description: d.description } : {}),
-									},
-						),
+				back({
+					error: d.error,
+					// Held to RFC 6749's characters, as the token endpoint's: a rule or policy may say anything.
+					...(d.description ? { error_description: errorDescription(d.description) } : {}),
+				}),
 			);
-		if (repeated.length > 0) {
-			// A parameter the rule reads, sent twice, is the rule's to answer (RFC 8707 §2's invalid_target).
-			const ruled = repeated.map((name) => rule.repeated?.(name)).find((r) => r !== undefined);
-			return reply(
-				ruled
+		};
+		// The form's refusals are read here and answered by the flow, which logs the browser in first.
+		// A parameter the rule reads, sent twice, is the rule's to answer (RFC 8707 §2's invalid_target).
+		const ruled = repeated.map((name) => rule.repeated?.(name)).find((r) => r !== undefined);
+		const refused =
+			repeated.length > 0
+				? ruled
 					? refusal(ruled.error, ruled.description)
-					: refusal("invalid_request", "repeated parameter"),
-			);
-		}
-		if (tooLong.length > 0 || (stateText !== undefined && state === undefined)) {
-			return reply(refusal("invalid_request", "parameter too long"));
-		}
+					: refusal("invalid_request", "repeated parameter")
+				: tooLong.length > 0 || (stateText !== undefined && state === undefined)
+					? refusal("invalid_request", "parameter too long")
+					: undefined;
 		const params = new Map([...source].map(([name, values]) => [name, values[0] ?? ""]));
 		const from = determinedSource(request);
 		const by = { client: client.id, ...(from === undefined ? {} : { source: from }) };
 		try {
-			const decided = await flow({ client, redirectUri, one, params, request });
+			const decided = await flow({
+				...{ client, redirectUri, one, params, request },
+				...(refused ? { refused } : {}),
+			});
 			if (decided.kind === "code") {
 				const attributes = { ...by, response_type: "code" };
 				audited.record("authorize.granted", { subject: decided.subject, attributes });
@@ -117,15 +123,22 @@ export function routeWith({
 				const attributes = { ...by, reason, ...(policy === undefined ? {} : { policy }) };
 				audited.record("authorize.rejected", { attributes });
 			}
-			return reply(decided);
+			// Before the session is found an outage is answered here, as before the redirect URI is trusted.
+			if (decided.kind === "unavailable") {
+				log.warn("authorize.unavailable", { what: decided.what, route: path });
+			}
+			return responseOf(decided);
 		} catch (error) {
 			if (!isUnavailable(error)) throw error;
 			log.warn("authorize.unavailable", { what: error.what, route: path });
-			return reply(refusal("temporarily_unavailable"));
+			return responseOf(refusal("temporarily_unavailable"));
 		}
 	};
-	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
+	return { handle: answer, unavailable: { response: unavailableAnswer } };
 }
+
+/** What `endpointOver` and `routeOver` take, the flow's included: what the module takes. */
+export const routeTakes = [site, named, clients, audit, targets, ...flowTakes];
 
 /** This endpoint's URL on `http`'s public origin; none without one. */
 export const endpointOver = async (c: BuildContext<Settings>) => {

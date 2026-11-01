@@ -1,47 +1,78 @@
+import { selectionConsents } from "@mod/claims-selection";
+import { documentCopies } from "@mod/client-documents";
 import { metadataSections } from "@mod/clients";
 import { routes, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { returnPaths } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
-import { redirects } from "@mod/redirect-uris";
-import { endpointOver, path, routeOver } from "./route/route.ts";
+import { loopbackPagesRefused } from "@mod/url-setting";
+import { clientMetadata } from "./client-metadata/client-metadata.ts";
+import { consentDecisionOver } from "./consent-decision/consent-decision.ts";
+import { endpointOver, path, routeOver, routeTakes } from "./route/route.ts";
 import { section } from "./section.ts";
 
 /** Why the endpoint takes other sites' requests. */
 const navigation =
 	"An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete.";
 
-export default defineModule({ name: "authorize", section }, (m) => [
-	m.contribute(metadataSections).by(() => redirects),
-	m.contribute(returnPaths).by(() => ({ path })),
-	m.contribute(metadata).by(async (c) => ({
-		name: "authorization_endpoint",
-		value: await endpointOver(c),
-	})),
-	// Only the code flow, and PKCE only by S256 (the endpoint refuses anything else).
-	m.contribute(metadata).by(() => ({ name: "response_types_supported", value: ["code"] })),
-	m.contribute(metadata).by(() => ({ name: "code_challenge_methods_supported", value: ["S256"] })),
-	// Answers only in the query, and takes no request object by reference (discovery's default is true).
-	m.contribute(metadata).by(() => ({ name: "response_modes_supported", value: ["query"] })),
-	m.contribute(metadata).by(() => ({ name: "request_uri_parameter_supported", value: false })),
-	// Every redirect answer, errors included, carries `iss` (RFC 9207 §3).
-	m.contribute(metadata).by(() => ({
-		name: "authorization_response_iss_parameter_supported",
-		value: true,
-	})),
-	// The POST is a 303 to the GET with the same parameters, so both take other sites' requests alike.
-	...(["GET", "POST"] as const).map((method) =>
-		m.contribute(routes).by(async (c) => {
-			const window = { limit: c.section.requests, ms: c.section.window * 1000 };
+export default defineModule(
+	{
+		name: "authorize",
+		replicaSafe: true,
+		section,
+		refusedInProduction: (s) =>
+			loopbackPagesRefused({ "login-page": s["login-page"], "step-up-page": s["step-up-page"] }),
+		takes: routeTakes,
+	},
+	(m) => [
+		m.contribute(metadataSections).by(() => clientMetadata.section),
+		m.contribute(documentCopies).by(() => clientMetadata.copy),
+		m.contribute(returnPaths).by(() => ({ path })),
+		m.contribute(metadata).by(async (c) => ({
+			name: "authorization_endpoint",
+			value: await endpointOver(c),
+		})),
+		// Only the code flow, and PKCE only by S256 (the endpoint refuses anything else).
+		m.contribute(metadata).by(() => ({ name: "response_types_supported", value: ["code"] })),
+		m
+			.contribute(metadata)
+			.by(() => ({ name: "code_challenge_methods_supported", value: ["S256"] })),
+		// Answers only in the query, and takes no request object by reference (discovery's default is true).
+		m.contribute(metadata).by(() => ({ name: "response_modes_supported", value: ["query"] })),
+		m.contribute(metadata).by(() => ({ name: "request_uri_parameter_supported", value: false })),
+		// Claims requests are taken only where claims-parameter says; otherwise discovery's default, false,
+		// stands, and boot says so once, as this item is built once.
+		m.contribute(metadata).by((c) => {
+			if (!c.section["claims-parameter"]) c.log.warn("authorize.claims_parameter_off");
 			return {
-				method,
-				path,
-				uses: [use(requestsPerSource, { name: "authorize", window })],
-				...(method === "GET" ? { changesState: true } : {}),
-				crossSite: navigation,
-				...(await routeOver(c)),
+				name: "claims_parameter_supported",
+				value: c.section["claims-parameter"] ? true : undefined,
 			};
 		}),
-	),
-]);
+		// Consent for a claims request's names is judged as it is for the scope: first-party, or agreed to.
+		m.contribute(selectionConsents).by(async (c) => {
+			const { consented } = await consentDecisionOver(c);
+			return { consented };
+		}),
+		// Every redirect answer, errors included, carries `iss` (RFC 9207 §3).
+		m.contribute(metadata).by(() => ({
+			name: "authorization_response_iss_parameter_supported",
+			value: true,
+		})),
+		// The POST is a 303 to the GET with the same parameters, so both take other sites' requests alike.
+		...(["GET", "POST"] as const).map((method) =>
+			m.contribute(routes).by(async (c) => {
+				const window = { limit: c.section.requests, ms: c.section.window * 1000 };
+				return {
+					method,
+					path,
+					uses: [use(requestsPerSource, { name: "authorize", window })],
+					...(method === "GET" ? { changesState: true } : {}),
+					crossSite: navigation,
+					...(await routeOver(c)),
+				};
+			}),
+		),
+	],
+);

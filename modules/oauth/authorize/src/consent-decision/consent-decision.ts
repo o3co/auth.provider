@@ -10,6 +10,8 @@ export interface ConsentDecision {
 	denied(one: (name: string) => string | undefined): Decision | undefined;
 	/** A client that is not first-party is refused while consent cannot ask. */
 	served(client: Client): Decision | undefined;
+	/** Whether the subject agreed to the client for one scope: always, for a first-party client. */
+	consented(client: Client, subject: string, scope: string): Promise<boolean>;
 	/** Nothing when the code may be issued; otherwise a refusal, or the consent page. Asked after `served`. */
 	decide(
 		client: Client,
@@ -34,6 +36,8 @@ export function consentDecisionWith({ consents: kept }: ConsentDecisionParts): C
 			isFirstParty(client) || kept.asking
 				? undefined
 				: recorded("unauthorized_client", "client_not_first_party", notServed),
+		consented: async (client, subject, scope) =>
+			isFirstParty(client) || (await kept.covers(client.id, subject, [scope])),
 		async decide(client, session, scope, prompt, again) {
 			if (isFirstParty(client)) return undefined;
 			const asked =
@@ -43,13 +47,16 @@ export function consentDecisionWith({ consents: kept }: ConsentDecisionParts): C
 			const page = await kept.ask(session, {
 				clientId: client.id,
 				range: scope,
-				onAccept: again(["reauth", "max_age", "prompt:login", "prompt:consent"]),
+				onAccept: again(["reauth", "prompt:login", "prompt:consent"]),
 				onDeny: again(["reauth"], [["consent_denied", "1"]]),
 			});
 			return { kind: "send", to: page };
 		},
 	};
 }
+
+/** What `consentDecisionOver` takes. */
+export const consentDecisionTakes = [consents];
 
 /** The decision over `consent`'s records the assembly gives. */
 export const consentDecisionOver = async (c: BuildContext<Settings>) =>

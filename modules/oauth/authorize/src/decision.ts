@@ -1,5 +1,3 @@
-import type { IssuanceRefused } from "@mod/tokens";
-
 /** What a step decides for a request whose redirect URI is trusted; only `route` turns it into an answer. */
 export type Decision =
 	| {
@@ -11,6 +9,10 @@ export type Decision =
 			/** The issuance policy that refused, recorded with its reason. */
 			readonly policy?: string;
 	  }
+	/** Refused at the endpoint, never sent back: a refusal whose login the request is too long to reach. */
+	| { readonly kind: "answer"; readonly error: string; readonly description?: string }
+	/** An outage before the session was found: answered at the endpoint, never sent back. */
+	| { readonly kind: "unavailable"; readonly what: string }
 	/** The browser goes to another page first: to log in, to raise its authentication, or to consent. */
 	| { readonly kind: "send"; readonly to: string }
 	| { readonly kind: "code"; readonly code: string; readonly subject: string };
@@ -27,15 +29,6 @@ export const recorded = (error: string, reason: string, description?: string): D
 	error,
 	...(description ? { description } : {}),
 	reason,
-});
-
-/** A refusal by an issuance policy: `access_denied` with its description, recorded with its name and reason. */
-export const policyRefusal = (refused: IssuanceRefused): Decision => ({
-	kind: "refuse",
-	error: "access_denied",
-	...(refused.description ? { description: refused.description } : {}),
-	reason: refused.reason,
-	policy: refused.policy,
 });
 
 /**
