@@ -14,6 +14,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { SignJWT } from "jose";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -50,10 +51,10 @@ const jwksUri = () => `http://127.0.0.1:${port}/jwks`;
 /** Clients over outbound reaching the key set server alone; `section` is the client's own. */
 async function boot(section: Record<string, unknown>, reach = true) {
 	const stand = memoryRecords<true>(() => Date.now(), { shards: 1, perShard: 1 });
-	const location = defineModule({ name: "token-endpoint" }, (m) => [
+	const location = defineModule({ name: "token-endpoint", replicaSafe: true, takes: [] }, (m) => [
 		m.provide(tokenEndpointLocation).by(() => ({ url: tokenUrl })),
 	]);
-	const spent = defineModule({ name: "spent" }, (m) => [
+	const spent = defineModule({ name: "spent", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.provide(spentAssertions)
 			.by(() => ({ save: (name, lifetimeMs) => stand.records.create(name, true, lifetimeMs) })),
@@ -62,6 +63,7 @@ async function boot(section: Record<string, unknown>, reach = true) {
 		modules: [
 			http,
 			outboundModule,
+			tlsOptionsForTests,
 			externalJwtModule,
 			clientsModule,
 			secretHashModule,
@@ -120,7 +122,7 @@ it("authenticates a client by keys it publishes at its jwks-uri, fetching the se
 	expect(fetched - before).toBe(1);
 });
 
-it("refuses a key its jwks-uri does not publish", async () => {
+it("refuses a key its jwks-uri does not publish [rfc7523-3-u] [rfc7521-5.2-n]", async () => {
 	served = {
 		keys: [publicJwk(generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey, "ec")],
 	};
@@ -143,7 +145,7 @@ it("refuses boot for a client whose jwks-uri outbound's policy refuses", async (
 			{
 				where: "clients.registered.0.sections.client-assertion",
 				reason: expect.stringMatching(
-					/refuses the jwks-uri: not-allowed: name the host in outbound\.allow, or set outbound\.allow-any-public$/,
+					/refuses the jwks-uri: not-allowed: name the host in outbound\.allow, or set outbound\.allow-any-public; plain http also needs its host:port in outbound\.plain-loopback, or, for a URL of your own configuration on a private network, in outbound\.plain-internal$/,
 				),
 			},
 		],
