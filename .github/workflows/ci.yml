@@ -12,6 +12,8 @@ on:
   # other job that builds or tests is gated on the event.
   schedule:
     - cron: '17 3 * * *'
+  # A manual run: every job a pull request runs, and the interop jobs (see `interop-due`).
+  workflow_dispatch:
 
 # Least privilege for GITHUB_TOKEN: every job only checks out and reads this
 # repository. release.yml declares its own permissions.
@@ -39,6 +41,18 @@ jobs:
         # The lowest version engines admits, and the newest.
         node: ['24', '26']
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        if: matrix.node == '24'
+        env:
+          KIND: unit
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
         with:
           # The commit-message scan and the per-commit install check walk the
@@ -53,13 +67,38 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
+      # The lowest version's run keeps the evidence of the unit tests (spec-checklist's reporter);
+      # build-and-test holds both versions to passing.
       - run: pnpm check
+        env:
+          SPEC_EVIDENCE_DIR: ${{ matrix.node == '24' && format('{0}/evidence', runner.temp) || '' }}
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-checks-${{ matrix.node }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      # The API site builds from the bundles as they stand, before a release
+      # does it from what it published; nothing is written to the pages.
+      - name: The API site builds from the bundles
+        if: matrix.node == '26'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm bundles
+          version="$(node -p "require('./package.json').version.split('-')[0]")"
+          pnpm api-docs link "$PWD/dist/bundles" "$RUNNER_TEMP/api-project"
+          pnpm api-docs build "$RUNNER_TEMP/api-project" "$RUNNER_TEMP/api-site" "$version"
       - name: No cross-project references or agent-workspace paths
         run: |
           set -euo pipefail
@@ -153,6 +192,18 @@ jobs:
         # The lowest version engines admits, and the newest.
         node: ['24', '26']
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        if: matrix.node == '24'
+        env:
+          KIND: integration
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -163,6 +214,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -170,6 +223,16 @@ jobs:
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:integration
+        env:
+          SPEC_EVIDENCE_DIR: ${{ matrix.node == '24' && format('{0}/evidence', runner.temp) || '' }}
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-integration-${{ matrix.node }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The required check on every branch it guards: both jobs above passed, on
   # every Node version of their matrix.
@@ -188,10 +251,15 @@ jobs:
           echo "checks: ${CHECKS}, integration: ${INTEGRATION}"
           [ "$CHECKS" = success ] && [ "$INTEGRATION" = success ]
 
-  # On a push to develop: whether five merges have landed since the last
-  # conformance run on develop (pull requests to develop skip conformance).
-  # When they have, the conformance jobs below run on this push; the daily run
-  # covers develop on quieter days.
+  # On a push to develop: whether five merges have landed since the commit the
+  # latest conformance run on develop covers. When they have, the conformance
+  # jobs below run on this push; the daily run covers develop on quieter days.
+  # A run covers its commit once it ended, not cancelled, its plan having passed
+  # and its gate having run; or while it is still running, its plan started (it
+  # found itself due), so pushes landing during a run do not each start another.
+  # A cancelled run, whose gate still runs and fails, covers nothing, nor one
+  # whose plan failed; the count goes back to the run before it. Where GitHub's
+  # API cannot answer after a few tries, conformance is due.
   conformance-due:
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
@@ -210,16 +278,50 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVERY: 5
+          # The commit a run (its status, conclusion, head_sha and jobs' names, statuses and conclusions)
+          # covers; none where it covers none.
+          COVERS: >-
+            if .status == "completed"
+            then (if .conclusion != "cancelled"
+              and any(.jobs[]; .name == "conformance-plan" and .conclusion == "success")
+              and any(.jobs[]; .name == "conformance" and (.conclusion == "success" or .conclusion == "failure"))
+              then .head_sha else "" end)
+            else (if any(.jobs[]; .name == "conformance-plan"
+              and (.status == "in_progress" or (.status == "completed" and .conclusion == "success")))
+              then .head_sha else "" end)
+            end
         run: |
           set -euo pipefail
+          # GitHub's API, tried again where it does not answer (a 502).
+          api() {
+            local try
+            for try in 1 2 3 4; do
+              gh api "$@" </dev/null && return 0
+              sleep $((try * 10))
+            done
+            return 1
+          }
           last=""
-          for run in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=develop&event=push&status=completed&per_page=50" --jq '.workflow_runs[].id'); do
-            ran=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --jq '[.jobs[] | select(.name == "conformance" and (.conclusion == "success" or .conclusion == "failure"))] | length')
-            if [ "$ran" != 0 ]; then
-              last=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .head_sha)
+          # The runs before this one, the newest first, each as one line of JSON.
+          if ! runs=$(api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=develop&event=push&per_page=50" --jq ".workflow_runs[] | select(.id < $GITHUB_RUN_ID) | {id, status, conclusion, head_sha} | tojson"); then
+            echo "GitHub's API did not answer: conformance is due"
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          while read -r described; do
+            [ -n "$described" ] || continue
+            run=$(jq -r .id <<<"$described")
+            if ! jobs=$(api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --jq '[.jobs[] | {name, status, conclusion}]'); then
+              echo "GitHub's API did not answer: conformance is due"
+              echo "due=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            last=$(jq -r --argjson jobs "$jobs" ". + {jobs: \$jobs} | $COVERS" <<<"$described")
+            if [ -n "$last" ]; then
+              echo "run $run covers $last"
               break
             fi
-          done
+          done <<<"$runs"
           if [ -n "$last" ] && git cat-file -e "$last^{commit}" 2>/dev/null; then
             merges=$(git rev-list --first-parent --count "$last..$GITHUB_SHA")
           else
@@ -231,26 +333,41 @@ jobs:
 
   # On a pull request to main (a release), on the release branches, once a day
   # on develop, and on a push to develop every five merges: the new system's
-  # conformance and the legacy system's (0.17.0, built from this repository's
-  # own v0.17.0 tag), then the scenes on each pattern's app. A release is tested
+  # conformance and the legacy system's (0.17.0, built once for the run from the
+  # commit conformance-legacy names), then the scenes on each pattern's app. A release is tested
   # before it reaches main, so the push to main does not run it again. Each area
   # and each pattern runs in a job of its own; `conformance` passes only once
   # all of them have.
   #
-  # What the jobs run, read from the repository: an area is a package with a
-  # `conformance` script, and a pattern is a run `patterns --list` names.
+  # What the jobs run is read from the runs spec-checklist lists (`run plan`), the
+  # same runs whose evidence compliance expects: an area is a package with a
+  # `conformance` script, a pattern a pattern run `conformance` prints, and an
+  # area's fault scenes a run of kind `faults` its `evidence-runs` names. The plan
+  # also fixes the one commit every conformance job and compliance check out, so a
+  # daily run's jobs test the same develop commit.
+  #
+  # A pull request to develop runs every area and its fault scenes, but no pattern, where it changes
+  # a file the scenes may stand on: any but the docs and spec-checklist's checklist and tests. An
+  # area does not name the modules it composes, which create-app builds as it runs, so the change is
+  # judged by its paths alone. spec-checklist's sources hold every area's evidence reporter, so a
+  # change to them runs every area. A pull request that changes none of those files runs none.
   conformance-plan:
     needs: conformance-due
-    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
     runs-on: ubuntu-latest
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
       patterns: ${{ steps.plan.outputs.patterns }}
+      faults: ${{ steps.plan.outputs.faults }}
+      sha: ${{ steps.plan.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           # The daily run tests develop, where merged work waits for the next release.
           ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          # A pull request's change is read against its base, from where they part; a moved file by both
+          # its paths.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -258,38 +375,56 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - id: plan
         shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          # Whether a change's files (a JSON list of paths) may reach a scene.
+          REACHES: >-
+            any(.[]; (startswith("docs/") or (startswith("modules/tooling/spec-checklist/")
+            and (startswith("modules/tooling/spec-checklist/src/") | not))) | not)
         run: |
           set -euo pipefail
-          areas=$(jq -c -s 'map(select(.scripts.conformance) | .name)' modules/*/*/package.json)
-          patterns=$(pnpm --silent --filter @mod/conformance run patterns --list)
-          echo "areas=$areas" >> "$GITHUB_OUTPUT"
-          echo "patterns=$patterns" >> "$GITHUB_OUTPUT"
+          areas=$(pnpm --silent --filter @mod/spec-checklist run plan area)
+          patterns=$(pnpm --silent --filter @mod/spec-checklist run plan pattern)
+          faults=$(pnpm --silent --filter @mod/spec-checklist run plan faults)
+          if [ "$EVENT" = pull_request ] && [ "$BASE" = develop ]; then
+            changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD" | jq -Rsc 'split("\n") | map(select(. != ""))')
+            reaches=$(jq -c "$REACHES" <<<"$changed")
+            echo "files the change touches: $changed; they reach the scenes: $reaches"
+            if [ "$reaches" != true ]; then
+              areas='[]'
+              faults='[]'
+            fi
+            patterns='[]'
+          fi
+          {
+            echo "areas=$areas"
+            echo "patterns=$patterns"
+            echo "faults=$faults"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
-  # One area: its scenes on the new system, then on the legacy one. A scene the
-  # legacy system cannot be set up for, or answers by a decided difference, is
-  # skipped; any other fails.
-  conformance-area:
+  # The legacy system, built once for the run from the commit conformance-legacy
+  # names, and handed to each area as this run's own artifact. A run whose
+  # evidence a release may take builds it afresh: it restores no cache, as
+  # whoever saved one is not known.
+  legacy-build:
     needs: conformance-plan
-    # A skipped conformance-due above would otherwise skip this job too.
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.areas != '[]' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        area: ${{ fromJSON(needs.conformance-plan.outputs.areas) }}
+    outputs:
+      legacy: ${{ steps.kept.outputs.artifact-id }}
     env:
       LEGACY_SOURCE: ${{ github.workspace }}
-      LEGACY_BRANCH: v0.17.0
     steps:
       # The runner context is not available in a job's env, so the legacy
       # build's directory is set here.
       - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
-          # The daily run tests develop, where merged work waits for the next release.
-          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
-          # The legacy build clones the v0.17.0 tag from this checkout.
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
+          # The legacy build checks out its commit from this clone's history.
           fetch-depth: 0
           fetch-tags: true
       - uses: pnpm/action-setup@v4
@@ -301,34 +436,125 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
       - name: Cache the legacy build
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/legacy-0.17.0
-          key: legacy-0.17.0-${{ hashFiles('modules/tooling/conformance-legacy/scripts/**') }}
+          key: legacy-0.17.0-${{ hashFiles('modules/tooling/conformance-legacy/scripts/**', 'modules/tooling/conformance-legacy/src/dir.ts') }}
       - run: pnpm install --frozen-lockfile
       - name: Build the legacy system
         run: |
           if [ ! -d "$LEGACY_DIR" ]; then
             pnpm --filter @mod/conformance-legacy run prepare-legacy
           fi
+      # Packed, so its links and modes reach each area as they are; without its clone's history,
+      # which the build checked and no area reads.
+      - name: Pack the legacy build
+        run: tar -C "$RUNNER_TEMP" --exclude=legacy-0.17.0/.git -czf "$RUNNER_TEMP/legacy.tgz" legacy-0.17.0
+      # A re-run of all jobs builds and writes it again; a re-run of the failed areas takes this one,
+      # so it is kept as long as their evidence, which GitHub re-runs within.
+      - name: Keep it for the areas
+        id: kept
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-build
+          path: ${{ runner.temp }}/legacy.tgz
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+
+  # One area: its scenes on the new system, then on the legacy one. A scene the
+  # legacy system cannot be set up for, or answers by a decided difference, is
+  # skipped; any other fails.
+  conformance-area:
+    needs: [conformance-plan, legacy-build]
+    # A skipped conformance-due above would otherwise skip this job too; none planned, none runs.
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.legacy-build.result == 'success' && needs.conformance-plan.outputs.areas != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        area: ${{ fromJSON(needs.conformance-plan.outputs.areas) }}
+    steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: area
+          MATRIX: ${{ matrix.area }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
+      # The runner context is not available in a job's env, so the legacy
+      # build's directory is set here.
+      - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - run: pnpm install --frozen-lockfile
+      # Only this run's own artifact, by the id legacy-build gave: no other run's can stand in.
+      - name: Take the legacy build this run made
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.legacy-build.outputs.legacy }}
+          path: ${{ runner.temp }}/legacy-archive
+          merge-multiple: true
+      - run: tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/legacy-archive/legacy.tgz"
       - name: Conformance on the new system
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter "${{ matrix.area }}" run conformance
+      # Runs where the new system failed too, so each target reports; the legacy one's evidence is
+      # kept but not counted.
       - name: Conformance on the legacy system
+        if: ${{ !cancelled() }}
         env:
           CONFORMANCE_TARGET: legacy
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter "${{ matrix.area }}" run conformance
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-area-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
   # One pattern's app, on each area it composes.
   conformance-pattern:
     needs: conformance-plan
-    # A skipped conformance-due above would otherwise skip this job too.
-    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
+    # A skipped conformance-due above would otherwise skip this job too; none planned, none runs.
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.patterns != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -336,10 +562,21 @@ jobs:
       matrix:
         pattern: ${{ fromJSON(needs.conformance-plan.outputs.patterns) }}
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: pattern
+          MATRIX: ${{ matrix.pattern }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
         with:
-          # The daily run tests develop, where merged work waits for the next release.
-          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -349,6 +586,8 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -356,27 +595,431 @@ jobs:
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
       - run: pnpm conformance:patterns "${{ matrix.pattern }}"
+        env:
+          # Where the runner keeps a failed area's whole output (output.log), so the step below finds it.
+          TMPDIR: ${{ runner.temp }}
+          # Each area's run on the pattern's app inherits it and reports as `<area>@<pattern>`.
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
+      - name: Keep the output of each area that failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-output-${{ matrix.pattern }}
+          path: ${{ runner.temp }}/conformance-*/output.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-pattern-${{ matrix.pattern }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
 
-  # The check required of a release: every area and every pattern passed.
+  # One area's fault scenes (`*.faults.case.ts`), on the new system alone: each scene on a Redis
+  # topology and app instances of its own (conformance's relay, topology and deployment). They run
+  # when conformance does (conformance-plan decides): on a pull request to main, on the release
+  # branches, every five merges to develop, and on the daily run, which checks out develop, not the
+  # default branch the schedule runs on, as the plan fixes. An area is in the matrix where its
+  # `evidence-runs` names a run of kind `faults`; its `conformance:faults` reports as
+  # `<area>#faults`. With CONFORMANCE_FAULTS=1 a scene that cannot run (no Docker, no libfaketime
+  # that moves Node's clock) fails rather than skips. Two at a time: each holds several Redis
+  # containers and app instances. One leg also runs conformance's deployment tests, which move an
+  # instance's clock: only this job holds the library they need.
+  conformance-faults:
+    needs: conformance-plan
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' && needs.conformance-plan.outputs.faults != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        area: ${{ fromJSON(needs.conformance-plan.outputs.faults) }}
+    steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: faults
+          MATRIX: ${{ matrix.area }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
+      - uses: actions/checkout@v4
+        with:
+          # The commit the plan fixed: on the daily run, develop as the plan found it.
+          ref: ${{ needs.conformance-plan.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - run: pnpm install --frozen-lockfile
+      # The thread-safe libfaketime at the version conformance pins (its app clock image, Debian's
+      # package by version), taken out of that image, so an instance's clock moves on this runner.
+      - name: Take the pinned libfaketime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd modules/tooling/conformance
+          image=$(node --input-type=module -e 'import { appClockImage } from "./src/clock/clock.ts"; process.stdout.write(await appClockImage());')
+          lib=$(node --input-type=module -e 'import { appLibfaketimeIn } from "./src/clock/clock.ts"; process.stdout.write(await appLibfaketimeIn(process.argv[1]));' "$image")
+          mkdir -p "$RUNNER_TEMP/faketime"
+          container=$(docker create "$image")
+          docker cp "$container:$lib" "$RUNNER_TEMP/faketime/libfaketimeMT.so.1"
+          docker rm "$container" > /dev/null
+          echo "CONFORMANCE_FAKETIME_LIB=$RUNNER_TEMP/faketime/libfaketimeMT.so.1" >> "$GITHUB_ENV"
+      # Fails here, not in a scene, where the library does not move this runner's Node.
+      - name: The library moves Node's clock here
+        run: |
+          node --input-type=module -e 'import { hostLibfaketime } from "./modules/tooling/conformance/src/clock/clock.ts"; if (!hostLibfaketime()) { console.error(`no libfaketime moves Node here: ${process.env.CONFORMANCE_FAKETIME_LIB}`); process.exit(1); }'
+      - name: Fault scenes
+        env:
+          CONFORMANCE_FAULTS: '1'
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
+          # What each scene ran on, beside the evidence and apart from it: compliance reads every file there.
+          CONFORMANCE_FAULTS_DIR: ${{ runner.temp }}/fault-setups
+        run: pnpm --filter "${{ matrix.area }}" run conformance:faults
+      # The deployment's tests that move an instance's clock, in one leg alone (the integration job runs
+      # the rest); with CONFORMANCE_FAULTS=1 a missing library fails them rather than skips. They report
+      # no evidence. A name filter that matches nothing passes with every test skipped, so the step
+      # fails unless at least the two it holds ran and passed.
+      - name: Deployment tests with a moved clock
+        if: ${{ !cancelled() && strategy.job-index == 0 }}
+        env:
+          CONFORMANCE_FAULTS: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run --config vitest.integration.config.ts modules/tooling/conformance/src/deployment/test/deployment.integration.test.ts -t clock --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/clock-tests.json"
+          jq -e '.numPassedTests >= 2' "$RUNNER_TEMP/clock-tests.json" > /dev/null || {
+            echo "the clock step did not pass the 2 deployment clock tests it holds" >&2
+            exit 1
+          }
+      - name: Keep what each scene ran on
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fault-setups-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fault-setups
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-faults-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Whether the interop jobs run, what they run and on which commit. They run on a pull request to
+  # main, on the release branches, on the daily run (develop) and by hand, and before a merge to
+  # develop where the pull request touches what they test with: the harnesses, the shared front and
+  # tunnel, the conformance driver, the checklist, and the pins they hold (the suite's in
+  # interop-oidf, the libraries' in interop-clients). A pull request to develop that touches a
+  # provider module (anything under modules/ but tooling) runs every suite plan, the OP's and the
+  # relying party's, as a module can serve either side; one touching the federation scenes alone
+  # runs the relying party plan alone. Not on a push to develop.
+  interop-due:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-latest
+    outputs:
+      oidf: ${{ steps.due.outputs.oidf }}
+      clients: ${{ steps.due.outputs.clients }}
+      oidf-plans: ${{ steps.plan.outputs.oidf-plans }}
+      libraries: ${{ steps.plan.outputs.libraries }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The daily run tests develop; a pull request's diff needs its base.
+          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
+          fetch-depth: 0
+      - id: due
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != pull_request ] || [ "$BASE" = main ]; then
+            echo "oidf=true" >> "$GITHUB_OUTPUT"
+            echo "oidf-scope=all" >> "$GITHUB_OUTPUT"
+            echo "clients=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A moved file by both its paths: git names a rename by its new one alone.
+          changed=$(git diff --no-renames --name-only "origin/$BASE...HEAD")
+          touches() { grep -qE "$1" <<<"$changed" && echo true || echo false; }
+          shared='^modules/tooling/(conformance-front|conformance-tunnel|spec-checklist)/'
+          all=$(touches "^modules/tooling/(interop-oidf|conformance)/|$shared")
+          # Read whole, not by grep -q: one stopping at its first line would cut the pipe before it ends.
+          provider=$([ -n "$(grep -E '^modules/' <<<"$changed" | grep -vE '^modules/tooling/' || true)" ] && echo true || echo false)
+          # The federation scenes build the relying party's side alone; the provider's modules reach both.
+          scenes=$(touches '^modules/tooling/conformance-federation/')
+          if [ "$all" = true ] || [ "$provider" = true ]; then scope=all; elif [ "$scenes" = true ]; then scope=rp; else scope=none; fi
+          echo "oidf=$([ "$scope" != none ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "oidf-scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "clients=$(touches "^modules/tooling/interop-clients/|$shared")" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - id: plan
+        shell: bash
+        env:
+          SCOPE: ${{ steps.due.outputs.oidf-scope }}
+        run: |
+          set -euo pipefail
+          plans=$(pnpm --silent --filter @mod/spec-checklist run plan oidf-plan)
+          if [ "$SCOPE" = rp ]; then plans=$(jq -c '[.[] | select(. == "rp")]' <<<"$plans"); fi
+          {
+            echo "oidf-plans=$plans"
+            echo "libraries=$(pnpm --silent --filter @mod/spec-checklist run plan library)"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+  # One client library: its adapter, built from the library's registry, runs each flow it runs
+  # first-class against the provider (interop-clients). On a pull request to main, the release
+  # branches and the daily run on develop; not on develop's every-five-merges run.
+  interop-clients:
+    needs: interop-due
+    if: ${{ !cancelled() && needs.interop-due.outputs.clients == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        library: ${{ fromJSON(needs.interop-due.outputs.libraries) }}
+    steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: library
+          MATRIX: ${{ matrix.library }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
+      - uses: actions/checkout@v4
+        with:
+          # The commit interop-due fixed: on the daily run, develop as it found it.
+          ref: ${{ needs.interop-due.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # The JDK and Maven's cache, for the adapters Maven builds; the jars are checked against their pins.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) && 'maven' || '' }}
+          cache-dependency-path: modules/tooling/interop-clients/adapters/*/pom.xml
+      # Python for the Authlib adapter's environment, at the version it names.
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: modules/tooling/interop-clients/adapters/authlib/.python-version
+      # Go for the adapter `go build` makes, at the toolchain its go.mod pins.
+      - uses: actions/setup-go@v5
+        with:
+          # Its cache is on unless turned off, and a run whose evidence a release may take restores none.
+          cache: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
+          go-version-file: modules/tooling/interop-clients/adapters/go/go.mod
+          cache-dependency-path: modules/tooling/interop-clients/adapters/go/go.sum
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @mod/interop-clients run library "${{ matrix.library }}"
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-library-${{ matrix.library }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # One plan of the OpenID Foundation's conformance suite against the provider (interop-oidf): the
+  # suite at its pinned version in Docker, the simple-web pattern's app behind the harness's https
+  # front. Its result is "OIDF (PKCE adaptation)", never a certification.
+  interop-oidf:
+    needs: interop-due
+    if: ${{ !cancelled() && needs.interop-due.outputs.oidf == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plan: ${{ fromJSON(needs.interop-due.outputs.oidf-plans) }}
+    steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: oidf-plan
+          MATRIX: ${{ matrix.plan }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.interop-due.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # The suite's scripts run on a Python of their own, made from this one.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @mod/interop-oidf run plan "${{ matrix.plan }}"
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
+          OIDF_ARTIFACTS_DIR: ${{ runner.temp }}/oidf
+      # The harness stops the suite however a run ends; this stops one a killed run left.
+      - name: Stop any suite left running
+        if: always()
+        run: |
+          for project in $(docker compose ls --all --quiet --filter name=o3co-oidf); do
+            docker compose -p "$project" down --volumes --remove-orphans || true
+          done
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-oidf-plan-${{ matrix.plan }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      # The runner's output, the suite's export and logs, each test's log, the front's log, what the shim
+      # added, and the pages the suite left for a person's review: kept on every run, a passing one too,
+      # for the review a release needs.
+      - name: Keep the run's records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oidf-records-${{ matrix.plan }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oidf
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # The check required of a release: every area and every pattern passed. On a pull request to
+  # develop, every job planned passed; a job with nothing planned is skipped, and passes.
   conformance:
-    needs: [conformance-due, conformance-plan, conformance-area, conformance-pattern]
-    if: always() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true'))
+    needs: [conformance-due, conformance-plan, legacy-build, conformance-area, conformance-pattern, conformance-faults]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true'))
     runs-on: ubuntu-latest
     steps:
-      - name: Every area and every pattern passed
+      - name: Every area, every pattern and every area's fault scenes planned passed
+        env:
+          PLAN: ${{ needs.conformance-plan.result }}
+          LEGACY: ${{ needs.legacy-build.result }}
+          AREAS: ${{ needs.conformance-area.result }}
+          PATTERNS: ${{ needs.conformance-pattern.result }}
+          FAULTS: ${{ needs.conformance-faults.result }}
+          PLANNED_AREAS: ${{ needs.conformance-plan.outputs.areas }}
+          PLANNED_PATTERNS: ${{ needs.conformance-plan.outputs.patterns }}
+          PLANNED_FAULTS: ${{ needs.conformance-plan.outputs.faults }}
         run: |
-          for result in "${{ needs.conformance-plan.result }}" "${{ needs.conformance-area.result }}" "${{ needs.conformance-pattern.result }}"; do
-            [ "$result" = success ] || { echo "a conformance job ended $result"; exit 1; }
+          [ "$PLAN" = success ] || { echo "conformance-plan ended $PLAN"; exit 1; }
+          # Each job beside what was planned for it: the legacy build serves the areas.
+          for job in "legacy-build $PLANNED_AREAS $LEGACY" "conformance-area $PLANNED_AREAS $AREAS" "conformance-pattern $PLANNED_PATTERNS $PATTERNS" "conformance-faults $PLANNED_FAULTS $FAULTS"; do
+            read -r name planned result <<<"$job"
+            if [ "$planned" = "[]" ] && [ "$result" = skipped ]; then continue; fi
+            [ "$result" = success ] || { echo "$name ended $result"; exit 1; }
+          done
+
+  # The check required of a release: every interop job that was due passed (the OIDF suite's plans,
+  # the client libraries). A job that was due and was skipped or cancelled fails it.
+  interop:
+    needs: [interop-due, interop-oidf, interop-clients]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every interop job that was due passed
+        env:
+          DUE: ${{ needs.interop-due.result }}
+          OIDF_DUE: ${{ needs.interop-due.outputs.oidf }}
+          OIDF: ${{ needs.interop-oidf.result }}
+          CLIENTS_DUE: ${{ needs.interop-due.outputs.clients }}
+          CLIENTS: ${{ needs.interop-clients.result }}
+        run: |
+          [ "$DUE" = success ] || { echo "interop-due ended $DUE"; exit 1; }
+          # Each interop job beside whether it was due: a job a later change adds goes here too.
+          for job in "oidf $OIDF_DUE $OIDF" "clients $CLIENTS_DUE $CLIENTS"; do
+            read -r name due result <<<"$job"
+            if [ "$due" = true ] && [ "$result" != success ]; then echo "interop-$name was due and ended $result"; exit 1; fi
           done
 
   # On a pull request to main and on the release branches: what a release would publish.
-  # `pnpm release:check` packs every bundle and the entrance, makes an app of
-  # each pattern from them, installs it from the tarballs alone, type-checks
-  # and boots it. The tarballs are then checked to ship the root LICENSE.
+  # `pnpm release:check` packs every bundle and the entrance as the release
+  # does, the index sealed, makes an app of each pattern from them, installs it
+  # from the tarballs alone, type-checks and boots it; then composes a package
+  # outside the release from a registry of its own and checks the app is held
+  # to what the release sealed. The tarballs are then checked to ship the root
+  # LICENSE.
   release-check:
     if: (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     steps:
+      # First, before anything can fail: this attempt's mark, which a re-run that does not report leaves.
+      - name: Mark this attempt
+        env:
+          KIND: release
+          MATRIX: ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg job "$GITHUB_JOB" \
+            --arg kind "$KIND" --arg matrix "$MATRIX" \
+            '{attempted: ({run: $run, attempt: $attempt, job: $job, kind: $kind} + (if $matrix == "" then {} else {matrix: $matrix} end))}' \
+            > "$RUNNER_TEMP/evidence/attempted-$GITHUB_JOB.json"
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -387,12 +1030,17 @@ jobs:
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Cache pnpm store
+        # A run whose evidence a release may take restores no cache: whoever saved it is not known.
+        if: ${{ !((github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'pull_request' && github.base_ref == 'main')) }}
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
+      # As the release writes them: a version without its changelog section stops here, before the tag.
+      - name: The version's notes
+        run: pnpm release:notes "$(jq -r .version package.json)" "$RUNNER_TEMP/release-notes.md"
       - run: pnpm release:check
       - name: Each tarball ships the root LICENSE
         run: |
@@ -404,7 +1052,79 @@ jobs:
       - name: The recipes against the packed release
         env:
           RECIPES_TARBALLS: ${{ runner.temp }}/tarballs
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/evidence
         run: pnpm --filter @mod/conformance-recipes run external
+      - name: Keep the evidence of the tests that ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-release-check-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # What this run's tests proved of the checklist's items (spec-checklist's `compliance`): it reads
+  # every job's evidence, keeps this commit and run's, and tells each item's status and the expected
+  # runs that did not report. It runs after every job, whatever they ended; on a pull request to main
+  # and on the release branches it fails where an expected run did not report or an item is
+  # failed, incomplete or unverified, and elsewhere it only tells.
+  compliance:
+    needs: [checks, integration, conformance-plan, conformance-area, conformance-pattern, conformance-faults, interop-due, interop-oidf, interop-clients, release-check]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit the conformance and interop jobs tested, where they ran; else the event's.
+          ref: ${{ needs.conformance-plan.outputs.sha || needs.interop-due.outputs.sha || '' }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      # Each job's evidence in a directory of its own, so no two reports share a path.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: evidence-*
+          path: ${{ runner.temp }}/evidence
+      - name: Each item's status from this run's evidence
+        env:
+          # A release's run fails where a job it needs did not succeed, even one that ended before it marked its attempt.
+          NEEDS: ${{ toJSON(needs) }}
+          RELEASE: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          release=""
+          if [ "$RELEASE" = true ]; then release=--release; fi
+          status=0
+          if [ "$RELEASE" = true ]; then
+            unsucceeded=$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<<"$NEEDS")
+            if [ -n "$unsucceeded" ]; then
+              echo "jobs this release needs did not succeed:"
+              echo "$unsucceeded"
+              status=1
+            fi
+          fi
+          pnpm --silent --filter @mod/spec-checklist run compliance "$RUNNER_TEMP/evidence" $release > "$RUNNER_TEMP/compliance.out" || status=$?
+          cat "$RUNNER_TEMP/compliance.out" >> "$GITHUB_STEP_SUMMARY"
+          # The summary over every specification, from the checklist alone, which the repository does not keep.
+          pnpm --silent --filter @mod/spec-checklist run summary > "$RUNNER_TEMP/evidence/summary.md"
+          { echo; echo "## The checklist by specification and by role"; echo; cat "$RUNNER_TEMP/evidence/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Keep the table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance
+          # A re-run writes over the table an earlier attempt kept: an artifact's name is the run's.
+          overwrite: true
+          path: |
+            ${{ runner.temp }}/evidence/compliance.json
+            ${{ runner.temp }}/evidence/compliance.md
+            ${{ runner.temp }}/evidence/summary.md
+          if-no-files-found: ignore
+          retention-days: 90
 
   # Daily on the default branch, and on every push: known vulnerabilities in
   # what an app installs.

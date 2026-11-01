@@ -26,8 +26,10 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/federation-grants/*` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes | A confidential client's own call, authenticated as that client; it reads no cookie. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation/*` | `@mod/federation-tokens` | form | `rate-limit.requests-per-source` | yes | A client's own call, authenticated as that client; it reads no cookie. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/introspect` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes | A resource server's call, authenticated as a client; it reads no cookie. | `rate-limit.requests-per-source` |  |
-| GET | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes | RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names. | `rate-limit.requests-per-source` |  |
-| POST | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes | RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names. | `rate-limit.requests-per-source` |  |
+| GET | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes | RP-initiated logout is a navigation from the RP's site by design; without asking, it closes only the session the browser holds, where a hint the provider signed names it. | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes | RP-initiated logout is a navigation from the RP's site by design; without asking, it closes only the session the browser holds, where a hint the provider signed names it. | `rate-limit.requests-per-source` |  |
+| GET | `/oauth/logout/confirm` | `@mod/rp-logout` | form | `rate-limit.requests-per-source` | no |  | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/logout/confirm` | `@mod/rp-logout` | form | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/revoke` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes | It reads no cookie: revoking needs the token itself, which a public client may revoke for itself (RFC 7009). | `rate-limit.requests-per-source` | yes |
 | POST | `/oauth/token` | `@mod/token-endpoint` | form, json, none | `rate-limit.requests-per-source` | yes | Authorization is per grant; a grant that reads a cookie declares it and checks the origin itself. | `rate-limit.requests-per-source` | yes |
 | GET | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  | no |  |  | yes |
@@ -35,6 +37,9 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/webauthn/authentication/options` | `@mod/webauthn-login` | json, form, none | `rate-limit.requests-per-source` | yes | It reads no cookie and answers options the same for everyone, the challenge made for the client that asks. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/options` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/verify` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
+| GET | `/oauth/webauthn/registrations` | `@mod/passkey-registration` | form |  | no |  |  |  |
+| POST | `/oauth/webauthn/registrations/remove` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/webauthn/registrations/rename` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | GET | `/readyz` | `@mod/http-ops` | none |  | no |  |  |  |
 | GET | `/session/csrf` | `@mod/csrf` | form |  | no |  |  |  |
 | GET | `/session/federation-grants/callback/*` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | yes | The upstream's redirect back, matched to the state of a connection this browser started. | `rate-limit.requests-per-source` |  |
@@ -42,6 +47,8 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | GET | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | no |  | `rate-limit.requests-per-source` |  |
 | POST | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/login` | `@mod/login-password` | form, json | `csrf`, `rate-limit.attempts-per-source` | yes | `csrf` | `rate-limit.attempts-per-source` |  |
+| POST | `/session/login/passkey` | `@mod/login-passkey` | json | `csrf`, `rate-limit.attempts-per-source` | yes | `csrf` | `rate-limit.attempts-per-source` |  |
+| POST | `/session/login/passkey/options` | `@mod/login-passkey` | json, form, none | `csrf`, `rate-limit.attempts-per-source` | yes | `csrf` | `rate-limit.attempts-per-source` |  |
 | POST | `/session/logout` | `@mod/logout` | form, json, none | `csrf` | yes | `csrf` | It closes only the requester's own session; there is nothing to guess or spend. |  |
 | POST | `/session/mfa/challenge` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/mfa/enrollment` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |

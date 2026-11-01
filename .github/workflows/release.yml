@@ -4,17 +4,309 @@ on:
   push:
     tags: ['v*']
 
+# Each job names what it takes beyond reading: the publish job alone holds what publishing takes.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
-  publish:
-    name: Publish to npm
+  # Before anything is published: the evidence of the CI run that tested what this tag publishes,
+  # the push of the release branch's head the tag's commit merged, of the tag's tree (distribution's
+  # `release-evidence`), or the release stopped with what is missing and what to do. Reading another
+  # run's artifacts takes `actions: read`, given to this job alone. Fetching holds the token and runs
+  # before anything is installed; judging, which installs the workspace to read the evidence again
+  # through the release's compliance (spec-checklist's), holds none.
+  evidence:
+    name: Evidence of the tested tree
     runs-on: ubuntu-latest
+    # `actions: read`: the release branch's runs and their artifacts.
+    permissions:
+      contents: read
+      actions: read
+    # Later jobs take the artifact by this id, never by a name another job could make again; `route`
+    # says whether this repository's run was taken (public) or the tag declares a security release (security).
+    outputs:
+      evidence: ${{ steps.kept.outputs.artifact-id }}
+      route: ${{ steps.judge.outputs.route }}
+    steps:
+      # No credential left in the checkout's git configuration; main's history, which the tag's first
+      # parent must be on.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # The tag as pushed, its message where a security release is declared: the checkout writes it
+      # again as a lightweight tag. Read without a credential, as this repository is public.
+      - name: The tag as pushed
+        run: git fetch --no-tags --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # The token is this step's alone, and nothing installed runs beside it.
+      - name: Fetch the release branch's runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node modules/tooling/distribution/src/release-evidence/fetch.ts "$RUNNER_TEMP/fetched"
+      # No lifecycle script runs; and no step after this one holds the token.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # Where the tag declares a security release (Release-Evidence: security in its message), it
+      # hands the release to the security repository's run; no run here, or its absence, decides that.
+      - name: Judge them, holding no credential
+        id: judge
+        run: node modules/tooling/distribution/src/release-evidence/judge.ts "$RUNNER_TEMP/fetched" "$RUNNER_TEMP/evidence"
+      - name: Keep it for the publish job
+        id: kept
+        if: steps.judge.outputs.route == 'public'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 90
+          # A re-run of all jobs writes over the one an earlier attempt kept: an artifact's name is the run's.
+          overwrite: true
+
+  # A security fix is tested in the security repository before it is made public, so its CI run is
+  # there (docs/releasing.md, "A security release"). Only where the tag declares a security release: the
+  # environment's reviewer approves the run, and the App, installed on that repository alone, gives
+  # a token that reads its runs, used by fetching alone and revoked before anything is installed.
+  evidence-security:
+    name: Evidence of the tested tree, from the security repository
+    needs: evidence
+    if: ${{ needs.evidence.result == 'success' && needs.evidence.outputs.route == 'security' }}
+    runs-on: ubuntu-latest
+    environment: security-evidence
+    permissions:
+      contents: read
+    outputs:
+      evidence: ${{ steps.kept.outputs.artifact-id }}
+    env:
+      # Fixed here, never taken from the tag or an input.
+      EVIDENCE_REPOSITORY: o3co/auth.provider-security
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # The tag as pushed, its message where a security release is declared: the checkout writes it
+      # again as a lightweight tag. Read without a credential, as this repository is public.
+      - name: The tag as pushed
+        run: git fetch --no-tags --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: A token reading the security repository's runs
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.SECURITY_EVIDENCE_APP_ID }}
+          private-key: ${{ secrets.SECURITY_EVIDENCE_APP_KEY }}
+          owner: o3co
+          repositories: auth.provider-security
+          permission-actions: read
+      # Revoked as fetching ends, whether it passed or not.
+      - name: Fetch the release branch's runs there
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'gh api --method DELETE /installation/token >/dev/null 2>&1 || true' EXIT
+          node modules/tooling/distribution/src/release-evidence/fetch.ts "$RUNNER_TEMP/fetched"
+      - name: The token is revoked
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        shell: bash
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/installation/repositories)
+          if [ "$code" != 401 ]; then echo "::error::the token still answers ($code)"; exit 1; fi
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Judge them, holding no credential
+        run: node modules/tooling/distribution/src/release-evidence/judge.ts "$RUNNER_TEMP/fetched" "$RUNNER_TEMP/evidence"
+      - name: Keep it for the publish job
+        id: kept
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
+  # The checks and the pack, where nothing can publish: they run the workspace's code and what the
+  # release packed (each pattern's app booted from the tarballs), so this job holds no token past
+  # reading. It keeps the tarballs for the jobs after it, and its own checks' evidence.
+  pack:
+    name: Check and pack the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tarballs: ${{ steps.tarballs.outputs.artifact-id }}
+      run: ${{ steps.run.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Every published package takes its version from the root package.json
+      # alone, so the tag must name that version: a tag that does not stops
+      # the release before anything is built.
+      - name: The tag names the workspace's version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          stated="$(node -p "require('./package.json').version")"
+          if [ "$stated" != "$VERSION" ]; then
+            echo "::error::the tag is v${VERSION}, but the workspace's package.json states ${stated}"
+            exit 1
+          fi
+
+      - run: pnpm install --frozen-lockfile
+      # Each test's result of this run's own checks, kept with the evidence.
+      - run: pnpm check
+        env:
+          SPEC_EVIDENCE_DIR: ${{ runner.temp }}/release-run/reports
+      # The tarballs of this tag, checked before a draft release is created or
+      # anything is published. Each attempt asks npm for each package at this
+      # version: one already there, published by an earlier attempt, is taken
+      # from the registry, of the integrity npm gave it; the rest are packed,
+      # the index sealed again over the bundles before it. No earlier attempt's
+      # artifact is restored. The release publishes the index's bundle after
+      # every bundle it seals over, so it can always be sealed again; where it
+      # cannot, the pack stops for a person to look.
+      - name: Pack the bundles
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/tarballs"
+          pnpm bundles
+          .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs" --from-registry
+
+      # Built, not packed: the license check lists the packages the release
+      # publishes from what pnpm bundles builds. Checked before they are saved.
+      - name: Refuse a tarball without the root LICENSE
+        run: .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
+
+      # Each pattern made from these very tarballs, the ones the release publishes, type-checked and booted.
+      - run: pnpm release:check "$RUNNER_TEMP/tarballs"
+
+      # Saved before anything is published, with the order the release
+      # publishes them in, by each attempt, so its jobs take them by this
+      # attempt's id.
+      - name: Save the tarballs
+        id: tarballs
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tarballs
+          path: |
+            ${{ runner.temp }}/tarballs/*.tgz
+            ${{ runner.temp }}/tarballs/publish-order.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
+      # This run's part of the evidence: its checks' reports, the dependency audit, and the commands
+      # and environment they ran in.
+      - name: The release run's own evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          at="$RUNNER_TEMP/release-run"
+          mkdir -p "$at"
+          # Which tarballs this attempt took from the registry, as npm holds them.
+          cp "$RUNNER_TEMP/tarballs/fetched.json" "$at/fetched.json"
+          # Kept as it is: a finding is reported, not a stop here; CI's audit job holds the gate.
+          pnpm audit --json > "$at/audit.json" || true
+          jq -n \
+            --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg node "$(node --version)" --arg pnpm "$(pnpm --version)" --arg npm "$(npm --version)" \
+            --arg os "$(. /etc/os-release && echo "$PRETTY_NAME")" --arg kernel "$(uname -sr)" \
+            --arg image "${ImageOS:-} ${ImageVersion:-}" \
+            --arg docker "$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo none)" \
+            '{commit: $commit, run: $run, attempt: $attempt,
+              commands: ["pnpm install --frozen-lockfile", "pnpm check", "pnpm release:check", "pnpm audit --json"],
+              environment: {node: $node, pnpm: $pnpm, npm: $npm, os: $os, kernel: $kernel, runnerImage: $image, docker: $docker}}' \
+            > "$at/environment.json"
+      - name: Keep it for the publish job
+        id: run
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-run
+          path: ${{ runner.temp }}/release-run
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
+  # The release's lists of what it ships (CycloneDX), made from the tarballs the pack job kept,
+  # where nothing can publish (distribution's `release:sbom`): the operator's app and the entrance,
+  # what bundles hold inside, the tools that build it, and the reference image. Making them runs
+  # what the release packed. A tarball no list holds, or a bundled file undeclared, stops it here.
+  sbom:
+    name: The lists of what the release ships
+    needs: pack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      lists: ${{ steps.lists.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Take the tarballs the pack job kept
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.pack.outputs.tarballs }}
+          path: ${{ runner.temp }}/tarballs
+          merge-multiple: true
+      - name: Make the lists
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm release:sbom "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/sbom"
+      - name: Keep them for the publish job
+        id: lists
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-sbom
+          path: ${{ runner.temp }}/sbom
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
+  # Publishing alone, with what it takes: the tarballs the pack job kept, held to those the lists
+  # were made of and to what npm holds, then the draft release with its assets, then npm. Nothing
+  # the release packed runs here.
+  publish:
+    name: Publish to npm
+    needs: [evidence, evidence-security, pack, sbom]
+    # Written out, as a skipped evidence-security would otherwise skip every release: the pack and the
+    # lists made, and exactly one route's evidence taken.
+    if: >-
+      ${{ !cancelled()
+          && needs.pack.result == 'success' && needs.sbom.result == 'success'
+          && needs.evidence.result == 'success'
+          && ((needs.evidence.outputs.route == 'public' && needs.evidence-security.result == 'skipped')
+           || (needs.evidence.outputs.route == 'security' && needs.evidence-security.result == 'success')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -38,31 +330,6 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      # Every published package takes its version from the root package.json
-      # alone, so the tag must name that version: a tag that does not stops
-      # the release before anything is built.
-      - name: The tag names the workspace's version
-        env:
-          VERSION: ${{ steps.release.outputs.version }}
-        shell: bash
-        run: |
-          stated="$(node -p "require('./package.json').version")"
-          if [ "$stated" != "$VERSION" ]; then
-            echo "::error::the tag is v${VERSION}, but the workspace's package.json states ${stated}"
-            exit 1
-          fi
-
-      - name: Get pnpm store path
-        id: pnpm-store
-        shell: bash
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-
-
       # npm publishes through trusted publishing (this run's OIDC token, no
       # stored token) from 11.5.1 on.
       - name: npm publishes through trusted publishing
@@ -77,31 +344,78 @@ jobs:
           fi
           echo "npm ${stated}"
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      # Each pattern made from the packed tarballs alone, type-checked and booted.
-      - run: pnpm release:check
+      # The workspace's own scripts that check the tarballs; no install script runs where the token is.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Take the tarballs the pack job kept
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.pack.outputs.tarballs }}
+          path: ${{ runner.temp }}/tarballs
+          merge-multiple: true
+      - name: Take the lists
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.sbom.outputs.lists }}
+          path: ${{ runner.temp }}/sbom
+          merge-multiple: true
 
-      # The tarballs of this tag, checked before a draft release is created or
-      # anything is published: every bundle and the entrance is packed, and
-      # each ships the root LICENSE word for word.
-      - name: Pack the bundles and refuse a tarball without the root LICENSE
+      # What is published is what the lists cover: each tarball, by name, version and integrity.
+      - name: Refuse a tarball the lists were not made of
+        run: pnpm release:listed "$RUNNER_TEMP/tarballs" "$RUNNER_TEMP/sbom/tarballs.json"
+
+      # Before anything is published: every package of this version already on
+      # npm, the index's bundle and the entrance among them, must be the very
+      # tarball about to be published, and an answer npm gives that cannot be
+      # read stops it as well. A first attempt finds none; a rerun finds those
+      # it published, which must be these.
+      - name: Refuse what is published already as another tarball
+        run: pnpm release:published "$RUNNER_TEMP/tarballs"
+
+      # The assets the release keeps past any artifact's days: the lists, and the evidence (the CI
+      # run's that tested the tag's tree, with its manifest, and this run's own).
+      - name: Take the evidence of the tested tree
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.evidence.outputs.route == 'public' && needs.evidence.outputs.evidence || needs.evidence-security.outputs.evidence }}
+          path: ${{ runner.temp }}/release-evidence
+          merge-multiple: true
+      - name: Take the release run's own evidence
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.pack.outputs.run }}
+          path: ${{ runner.temp }}/release-evidence/release-run
+          merge-multiple: true
+      - name: Pack the assets
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
         run: |
           set -euo pipefail
-          pnpm bundles
-          .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
-          .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
+          tar -czf "$RUNNER_TEMP/auth-provider-${VERSION}-evidence.tar.gz" -C "$RUNNER_TEMP" release-evidence
+          tar -czf "$RUNNER_TEMP/auth-provider-${VERSION}-sbom.tar.gz" -C "$RUNNER_TEMP" sbom
+
+      # The notes are the version's section of CHANGELOG.md: the commits on
+      # main are one per package, so no pull request's title would tell them.
+      - name: Write the release's notes
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: pnpm release:notes "$VERSION" "$RUNNER_TEMP/release-notes.md"
 
       - name: Create GitHub Release (draft)
         id: draft
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           draft: true
           prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: |
+            ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-evidence.tar.gz
+            ${{ runner.temp }}/auth-provider-${{ steps.release.outputs.version }}-sbom.tar.gz
+          fail_on_unmatched_files: true
 
-      # The checked tarballs, one by one, the bundles first and the entrance
-      # (`@o3co/create-auth-provider`, which depends on them) last. A name at
+      # The checked tarballs, one by one, in the order the pack wrote: the
+      # bundles the index seals over, then the index's bundle, then the entrance
+      # (`@o3co/create-auth-provider`, which depends on them). A name at
       # this version already on npm is passed over, so a rerun after a partial
       # publish publishes only what is missing. npm authenticates through this
       # run's OIDC token (`id-token: write`), each name bound to this workflow
@@ -114,12 +428,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          entrance="$RUNNER_TEMP/tarballs/o3co-create-auth-provider-${VERSION}.tgz"
-          for tgz in "$RUNNER_TEMP"/tarballs/*.tgz; do
-            [ "$tgz" = "$entrance" ] || set -- "$@" "$tgz"
-          done
-          set -- "$@" "$entrance"
-          for tgz in "$@"; do
+          # In the order the pack wrote, which release:listed held to these tarballs.
+          mapfile -t order < <(node -e 'for (const f of JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))) console.log(f)' "$RUNNER_TEMP/tarballs/publish-order.json")
+          for file in "${order[@]}"; do
+            tgz="$RUNNER_TEMP/tarballs/${file}"
             name="$(tar -xzOf "$tgz" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).name')"
             if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
               echo "${name}@${VERSION} is on npm already; passed over"
@@ -149,3 +461,17 @@ jobs:
           fi
           gh api --method PATCH "$endpoint" -F draft=false -F "prerelease=${PRERELEASE}" \
             --jq '"\(.tag_name): draft=\(.draft) prerelease=\(.prerelease) \(.html_url)"'
+
+  # After the packages are on npm, a release (never a prerelease) builds its
+  # API into the repository's pages. A failure leaves what was published as
+  # it is; the API site workflow runs again by hand with the tag.
+  api-docs:
+    name: API site
+    needs: publish
+    # Written out, as publish's own needs hold a job a release skips.
+    if: ${{ !cancelled() && needs.publish.result == 'success' && !contains(github.ref_name, '-') }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/api-docs.yml
+    with:
+      tag: ${{ github.ref_name }}

@@ -128,7 +128,7 @@ A module can gain internal modules with their own cards to keep reading scope ma
 A public split should follow a real responsibility boundary.
 
 The kernel checks the application being assembled.
-Missing providers, conflicting contributions, invalid configuration and, in a multi-instance deployment, unsafe modules refuse boot.
+Missing providers, conflicting contributions and invalid configuration refuse boot; which modules a multi-instance deployment refuses is [promise 5 of the security model](docs/security-model.md#promises-across-modules).
 Refusals are collected by assembly stage and reported by key path, without values.
 The application serves nothing while boot is refused.
 
@@ -193,7 +193,8 @@ The module structure has a cost: more packages and contracts to navigate than in
 Extension authors must meet the invariants of the card they build on.
 Operators must understand their selected composition and its storage requirements.
 
-0.18 is still a prerelease, and a new release candidate may break compatibility.
+0.18 is a final release; before 1.0, a new minor version may break compatibility, as [what a version promises](docs/releasing.md#what-a-version-promises) states.
+A new minor first comes out as release candidates, which may change again before the minor is final.
 Moving from 0.17 requires new package names and rewritten configuration.
 Stored state is not migrated.
 Read the [migration guide](docs/migration.md) before planning that move.

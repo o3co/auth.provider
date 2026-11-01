@@ -10,5 +10,14 @@ minimumReleaseAgeExclude:
 # vitest takes vite as a peer; 8.3.0–8.3.2 carry launch-editor advisories
 # (GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw), so the
 # workspace resolves the patched release until vitest's own range moves past.
+# typedoc, which api-docs runs, wants minimatch ^10.2.5, and every minimatch
+# before 11.0.1 carries a denial of service through globparts amplification
+# (GHSA-g3hv-75wg-m249), with no patched 10.x: typedoc's minimatch resolves the
+# patched release. typedoc's glob path calls minimatch's matchOne, which 11
+# removed, so it throws on a glob entry point, or on entry points whose common
+# root has a dir under it: api-docs hands typedoc plain files in one dir with
+# none under it (its card). Remove this once typedoc's own range reaches
+# minimatch 11.0.1 or later.
 overrides:
   "vite@>=8.3.0 <8.3.3": "8.3.3"
+  "typedoc>minimatch": "11.0.3"

@@ -8,8 +8,8 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `authorize.granted` | `client`, `source`, `response_type` | a code is given, with the subject and `response_type` `code` |
-| `authorize.rejected` | `client`, `source`, `reason`, `policy` | a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name) |
+| `authorize.granted` | `client`, `source`, `response_type` | a code is given, with the subject and `response_type` `code`, and `source` only where `request-source` determined it |
+| `authorize.rejected` | `client`, `source`, `reason`, `policy` | a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name), and `source` only where `request-source` determined it |
 
 ## @mod/clients
 
@@ -71,6 +71,15 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `federation.token.failed` | `idp`, `client`, `reason`, `source` | the calling client is refused the upstream token (`reason`); not when unlinked, limited or a 503 |
 | `federation.token.succeeded` | `idp`, `client`, `refreshed`, `source` | the calling client is handed the upstream token, refreshed first or not (`refreshed`) |
 
+## @mod/login-passkey
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.password_refused` | `source` | a password login of a subject holding a passkey is refused (`password = refused-when-held`) |
+| `passkey.session.held` | `source` | a passkey login is held by a gate before its session opens |
+| `passkey.session.opened` | `source` | a passkey login opens a session |
+| `passkey.session.refused` | `reason`, `source` | a passkey login is refused: `reason` is the assertion's refusal, `unknown_user`, `revoked` or `gate_refused` |
+
 ## @mod/login-password
 
 | Kind | Attributes | Recorded when |
@@ -112,19 +121,33 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `mfa.reset` | `by`, `kinds`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
+| `mfa.reset` | `by`, `kinds`, `count`, `parts`, `partsStopped`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
 
 ## @mod/mfa-witnessing
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `mfa.enrollment_inconsistent` | `at` | the witness marks a subject holding no counting factor, so its store may have lost them; `at` is the decision answered unavailable: `login`, `binding` or `credentials` |
+| `mfa.enrollment_inconsistent` | `at` | the witness marks a subject holding no counting factor, so its store may have lost them; `at` is the decision answered unavailable: `login`, `binding`, `credentials`, or `reset` (after a reset, the mark not sure to be its to remove) |
 
 ## @mod/passkey-registration
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `passkey.registered` | `source` | a passkey is kept for the session's subject, the event's subject |
+| `passkey.removed` | `source` | the session's subject ends one of its passkeys |
+| `passkey.renamed` | `source` | the session's subject names one of its passkeys anew |
+
+## @mod/passkey-reset
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.reset` | `by`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's passkey reset gets past its input, finished or not (`complete`) |
+
+## @mod/passkey-witnessing
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.enrollment_inconsistent` | `at` | the witness marks a subject holding no passkey, so the passkey store may have lost them; `at` is where it was found: `held`, `registration`, `removal`, `reset` or `settle` |
 
 ## @mod/rate-limit
 
@@ -164,8 +187,8 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `token.issued` | `client`, `source`, `grant_type`, `claims`, `claims_left` | a grant issues; `claims` names the claims the grant added to the tokens it issued, in their order, one space apart, never their values: all of them within 2048 characters, else as many as fit, with `claims_left` how many were left out |
-| `token.issued.failure` | `client`, `source`, `grant_type`, `reason`, `error`, `policy`, `refusal` | a request is refused, with `reason` (`repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with the refusing `policy` and its `refusal`) and the answer's `error`; `grant_type` once it is known |
+| `token.issued` | `client`, `source`, `grant_type`, `identified`, `claims`, `claims_left` | a grant issues; `identified` is `grant` where the grant identified the client of a request naming none; `claims` names the claims the grant added to the tokens it issued, in their order, one space apart, never their values: all of them within 2048 characters, else as many as fit, with `claims_left` how many were left out |
+| `token.issued.failure` | `client`, `source`, `grant_type`, `identified`, `reason`, `error`, `policy`, `refusal` | a request is refused, with `reason` (`client_not_identified`, `repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with the refusing `policy` and its `refusal`) and the answer's `error`; `grant_type` once it is known; `client` once it is known, which for a request naming none is once the grant identifies it, `identified` then being `grant` |
 
 ## @mod/webauthn-login
 

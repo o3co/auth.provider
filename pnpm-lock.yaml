@@ -6,6 +6,7 @@ settings:
 
 overrides:
   vite@>=8.3.0 <8.3.3: 8.3.3
+  typedoc>minimatch: 11.0.3
 
 importers:
 
@@ -22,7 +23,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/audit-receivers/audit-http:
     dependencies:
@@ -47,7 +48,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/audit-receivers/audit-stdout:
     dependencies:
@@ -60,13 +61,16 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/cert-binding/mtls:
     dependencies:
       '@mod/client-certificate':
         specifier: workspace:*
         version: link:../../foundation/client-certificate
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../../foundation/host-entries
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
@@ -76,18 +80,15 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
-      '@mod/outbound-policy':
-        specifier: workspace:*
-        version: link:../../foundation/outbound-policy
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
       asn1js:
-        specifier: 3.1.0
-        version: 3.1.0
+        specifier: 4.0.0
+        version: 4.0.0
       pkijs:
-        specifier: 3.4.1
-        version: 3.4.1
+        specifier: 4.0.1
+        version: 4.0.1(asn1js@4.0.0)
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -97,7 +98,7 @@ importers:
         version: link:../../foundation/http
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/delegation/federation-grants:
     dependencies:
@@ -122,18 +123,61 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../../oauth/redirect-uris
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/upstreams':
+        specifier: workspace:*
+        version: link:../../upstream-login/upstreams
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/delegation/federation-grants-connect:
+    dependencies:
+      '@mod/federation-grants':
+        specifier: workspace:*
+        version: link:../federation-grants
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
       '@mod/upstream-round-trip':
         specifier: workspace:*
         version: link:../../upstream-login/upstream-round-trip
@@ -150,30 +194,45 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
       '@mod/session-requirements':
         specifier: workspace:*
         version: link:../../identity/session-requirements
-      '@mod/store':
+      '@mod/subject-revocation':
         specifier: workspace:*
-        version: link:../../foundation/store
+        version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/added-claims:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/address-reach:
     dependencies:
@@ -209,11 +268,11 @@ importers:
         version: link:../kernel
       '@o3co/ts.hocon':
         specifier: 1.14.3
-        version: 1.14.3(zod@4.6.7)
+        version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -242,15 +301,27 @@ importers:
         specifier: workspace:*
         version: link:../outbound
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../tls-options
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../url-setting
+
+  modules/foundation/host-entries:
+    dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../address-reach
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   modules/foundation/http:
     dependencies:
@@ -289,7 +360,7 @@ importers:
     dependencies:
       '@o3co/ts.hocon':
         specifier: 1.14.3
-        version: 1.14.3(zod@4.6.7)
+        version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
     devDependencies:
       zod:
         specifier: 4.6.7
@@ -304,8 +375,8 @@ importers:
         specifier: workspace:*
         version: link:../kernel
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -314,7 +385,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/mail:
     dependencies:
@@ -327,7 +398,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/metrics:
     dependencies:
@@ -337,19 +408,25 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/outbound:
     dependencies:
       '@mod/address-reach':
         specifier: workspace:*
         version: link:../address-reach
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../host-entries
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
       '@mod/outbound-policy':
         specifier: workspace:*
         version: link:../outbound-policy
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../tls-options
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../url-setting
@@ -359,13 +436,16 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/outbound-policy:
     dependencies:
       '@mod/address-reach':
         specifier: workspace:*
         version: link:../address-reach
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../host-entries
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -378,7 +458,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/foundation/rate-limit:
     dependencies:
@@ -415,6 +495,9 @@ importers:
 
   modules/foundation/request-source:
     dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../address-reach
       '@mod/client-certificate':
         specifier: workspace:*
         version: link:../client-certificate
@@ -460,7 +543,16 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/foundation/tls-options:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   modules/foundation/url-setting:
     dependencies:
@@ -471,6 +563,19 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
+
+  modules/identity/client-documents:
+    dependencies:
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../clients
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/clients:
     dependencies:
@@ -519,7 +624,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/login-gates:
     dependencies:
@@ -612,7 +717,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/session-lifecycle:
     dependencies:
@@ -647,9 +752,15 @@ importers:
       '@mod/session-requirements':
         specifier: workspace:*
         version: link:../session-requirements
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-revocation-store':
+        specifier: workspace:*
+        version: link:../../templates/subject-revocation-store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/session-participants:
     dependencies:
@@ -662,7 +773,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/session-requirements:
     dependencies:
@@ -675,7 +786,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/subject-attributes:
     dependencies:
@@ -697,7 +808,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/subject-revocation:
     dependencies:
@@ -710,7 +821,7 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/identity/users:
     dependencies:
@@ -729,7 +840,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/log-sinks/log-stdout:
     dependencies:
@@ -739,7 +850,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/metrics-publishers/metrics-prometheus:
     dependencies:
@@ -761,7 +872,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/acr:
     dependencies:
@@ -796,9 +907,15 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../claims-selection
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
+      '@mod/client-documents':
+        specifier: workspace:*
+        version: link:../../identity/client-documents
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
@@ -880,7 +997,35 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/oauth/claims-selection:
+    dependencies:
+      '@mod/client-allowance':
+        specifier: workspace:*
+        version: link:../client-allowance
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      '@mod/code-grant':
+        specifier: workspace:*
+        version: link:../code-grant
+      '@mod/grants':
+        specifier: workspace:*
+        version: link:../grants
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/client-allowance:
     dependencies:
@@ -899,7 +1044,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/client-assertion:
     dependencies:
@@ -934,8 +1079,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/url-setting
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -946,15 +1091,43 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/oauth/client-credentials:
+    dependencies:
+      '@mod/client-allowance':
+        specifier: workspace:*
+        version: link:../client-allowance
+      '@mod/grants':
+        specifier: workspace:*
+        version: link:../grants
+      '@mod/issuer':
+        specifier: workspace:*
+        version: link:../issuer
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/clients-cimd:
     dependencies:
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
+      '@mod/client-documents':
+        specifier: workspace:*
+        version: link:../../identity/client-documents
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
@@ -964,6 +1137,9 @@ importers:
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../../foundation/host-entries
       '@mod/issuer':
         specifier: workspace:*
         version: link:../issuer
@@ -997,7 +1173,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/code-grant:
     dependencies:
@@ -1058,13 +1234,16 @@ importers:
         version: link:../token-endpoint
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/consent:
     dependencies:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
+      '@mod/client-documents':
+        specifier: workspace:*
+        version: link:../../identity/client-documents
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
@@ -1104,7 +1283,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/device-grant:
     dependencies:
@@ -1174,7 +1353,7 @@ importers:
         version: link:../../foundation/store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/discovery:
     dependencies:
@@ -1210,8 +1389,8 @@ importers:
         specifier: workspace:*
         version: link:../sender-binding
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1221,7 +1400,7 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/exchange-id-tokens:
     dependencies:
@@ -1244,8 +1423,8 @@ importers:
         specifier: workspace:*
         version: link:../../identity/users
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1274,6 +1453,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
@@ -1282,7 +1464,7 @@ importers:
         version: link:../tokens
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/grants:
     dependencies:
@@ -1304,7 +1486,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/issuer:
     dependencies:
@@ -1326,12 +1508,21 @@ importers:
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
       '@mod/external-jwt':
         specifier: workspace:*
         version: link:../../foundation/external-jwt
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../../foundation/host-entries
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
       '@mod/issuer':
         specifier: workspace:*
         version: link:../issuer
@@ -1344,9 +1535,12 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
-      '@mod/outbound-policy':
+      '@mod/resource-indicators':
         specifier: workspace:*
-        version: link:../../foundation/outbound-policy
+        version: link:../resource-indicators
+      '@mod/sender-binding':
+        specifier: workspace:*
+        version: link:../sender-binding
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1357,18 +1551,12 @@ importers:
         specifier: workspace:*
         version: link:../../identity/users
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/clients':
-        specifier: workspace:*
-        version: link:../../identity/clients
-      '@mod/http':
-        specifier: workspace:*
-        version: link:../../foundation/http
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1378,12 +1566,118 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/oauth/jwt-bearer-id-tokens:
+    dependencies:
+      '@mod/exchange-id-tokens':
+        specifier: workspace:*
+        version: link:../exchange-id-tokens
+      '@mod/jwt-bearer':
+        specifier: workspace:*
+        version: link:../jwt-bearer
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/client-allowance':
+        specifier: workspace:*
+        version: link:../client-allowance
+      '@mod/client-assertion':
+        specifier: workspace:*
+        version: link:../client-assertion
+      '@mod/client-assertion-store':
+        specifier: workspace:*
+        version: link:../../templates/client-assertion-store
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      '@mod/dpop':
+        specifier: workspace:*
+        version: link:../dpop
+      '@mod/dpop-store':
+        specifier: workspace:*
+        version: link:../../templates/dpop-store
+      '@mod/exchange-id-tokens-store':
+        specifier: workspace:*
+        version: link:../../templates/exchange-id-tokens-store
+      '@mod/external-jwt':
+        specifier: workspace:*
+        version: link:../../foundation/external-jwt
+      '@mod/grants':
+        specifier: workspace:*
+        version: link:../grants
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/issuer':
+        specifier: workspace:*
+        version: link:../issuer
+      '@mod/jwt-bearer-store':
+        specifier: workspace:*
+        version: link:../../templates/jwt-bearer-store
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
+      '@mod/sender-binding':
+        specifier: workspace:*
+        version: link:../sender-binding
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      '@mod/subject-revocation-store':
+        specifier: workspace:*
+        version: link:../../templates/subject-revocation-store
+      '@mod/subject-tokens':
+        specifier: workspace:*
+        version: link:../subject-tokens
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
+      '@mod/token-endpoint':
+        specifier: workspace:*
+        version: link:../token-endpoint
+      '@mod/token-exchange':
+        specifier: workspace:*
+        version: link:../token-exchange
+      '@mod/tokens':
+        specifier: workspace:*
+        version: link:../tokens
+      '@mod/tokens-store':
+        specifier: workspace:*
+        version: link:../../templates/tokens-store
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      jose:
+        specifier: 6.2.13
+        version: 6.2.13
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/jwt-bearer-users:
     dependencies:
@@ -1402,7 +1696,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/logout:
     dependencies:
@@ -1449,9 +1743,24 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../../second-factor/mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-reading
 
   modules/oauth/oidc:
     dependencies:
+      '@mod/authorize':
+        specifier: workspace:*
+        version: link:../authorize
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../claims-selection
+      '@mod/client-documents':
+        specifier: workspace:*
+        version: link:../../identity/client-documents
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant
@@ -1501,10 +1810,13 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/redirect-uris:
     dependencies:
+      '@mod/client-documents':
+        specifier: workspace:*
+        version: link:../../identity/client-documents
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
@@ -1514,13 +1826,16 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/refresh:
     dependencies:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../claims-selection
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
@@ -1593,7 +1908,7 @@ importers:
         version: link:../token-exchange
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/resource-indicators:
     dependencies:
@@ -1606,7 +1921,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/rp-logout:
     dependencies:
@@ -1619,6 +1934,9 @@ importers:
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -1637,6 +1955,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -1652,10 +1973,19 @@ importers:
       '@mod/session-participants':
         specifier: workspace:*
         version: link:../../identity/session-participants
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../claims-selection
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -1676,7 +2006,7 @@ importers:
         version: link:../../identity/users
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/sender-binding:
     dependencies:
@@ -1741,7 +2071,7 @@ importers:
         version: link:../token-endpoint
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/session-tokens:
     dependencies:
@@ -1775,7 +2105,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/subject-tokens:
     dependencies:
@@ -1853,7 +2183,7 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/token-endpoint:
     dependencies:
@@ -1894,6 +2224,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/client-credentials':
+        specifier: workspace:*
+        version: link:../client-credentials
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
@@ -1921,6 +2254,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/resource-indicators':
+        specifier: workspace:*
+        version: link:../resource-indicators
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
@@ -1934,6 +2270,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -1948,16 +2287,13 @@ importers:
         version: link:../token-endpoint
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/tokens:
     dependencies:
       '@mod/added-claims':
         specifier: workspace:*
         version: link:../../foundation/added-claims
-      '@mod/http':
-        specifier: workspace:*
-        version: link:../../foundation/http
       '@mod/issuer':
         specifier: workspace:*
         version: link:../issuer
@@ -1977,15 +2313,21 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/userinfo:
     dependencies:
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../claims-selection
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -2013,7 +2355,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/oauth/verified-email:
     dependencies:
@@ -2023,9 +2365,6 @@ importers:
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
-      '@mod/token-endpoint':
-        specifier: workspace:*
-        version: link:../token-endpoint
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
@@ -2041,7 +2380,123 @@ importers:
         version: link:../../identity/session
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/passkey/login-passkey:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/login-attributes':
+        specifier: workspace:*
+        version: link:../../identity/login-attributes
+      '@mod/login-gates':
+        specifier: workspace:*
+        version: link:../../identity/login-gates
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-extensions
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/passkey-witness':
+        specifier: workspace:*
+        version: link:../passkey-witness
+      '@mod/passkey-witnessing':
+        specifier: workspace:*
+        version: link:../passkey-witnessing
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/webauthn-store':
+        specifier: workspace:*
+        version: link:../../templates/webauthn-store
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/passkey/mfa-reset-passkeys:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-reset':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-reset
+      '@mod/passkey-reset':
+        specifier: workspace:*
+        version: link:../passkey-reset
+    devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/mfa-flows':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-flows
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-managing
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-reading
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
+      '@mod/webauthn-store':
+        specifier: workspace:*
+        version: link:../../templates/webauthn-store
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/passkey/mfa-webauthn:
     dependencies:
@@ -2069,7 +2524,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/passkey/passkey-registration:
     dependencies:
@@ -2088,6 +2543,9 @@ importers:
       '@mod/labels':
         specifier: workspace:*
         version: link:../../foundation/labels
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2097,9 +2555,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
-      '@mod/webauthn':
+      '@mod/subject-revocation':
         specifier: workspace:*
-        version: link:../webauthn
+        version: link:../../identity/subject-revocation
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2128,15 +2586,109 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
-      '@mod/subject-revocation':
+      '@mod/webauthn':
         specifier: workspace:*
-        version: link:../../identity/subject-revocation
+        version: link:../webauthn
       '@mod/webauthn-store':
         specifier: workspace:*
         version: link:../../templates/webauthn-store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/passkey/passkey-reset:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+    devDependencies:
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
+      '@mod/webauthn-store':
+        specifier: workspace:*
+        version: link:../../templates/webauthn-store
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/passkey/passkey-witness:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/passkey/passkey-witnessing:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/passkey-witness':
+        specifier: workspace:*
+        version: link:../passkey-witness
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
+    devDependencies:
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
+      '@mod/webauthn-store':
+        specifier: workspace:*
+        version: link:../../templates/webauthn-store
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/passkey/passkeys:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/passkey-witness':
+        specifier: workspace:*
+        version: link:../passkey-witness
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/passkey/webauthn:
     dependencies:
@@ -2150,18 +2702,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/http':
-        specifier: workspace:*
-        version: link:../../foundation/http
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
-      '@mod/store':
-        specifier: workspace:*
-        version: link:../../foundation/store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/passkey/webauthn-login:
     dependencies:
@@ -2183,6 +2726,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2192,9 +2738,6 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
-      '@mod/webauthn':
-        specifier: workspace:*
-        version: link:../webauthn
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2216,23 +2759,45 @@ importers:
         version: link:../../oauth/tokens
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/scaffold/app-entries:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/scaffold/app-output:
     dependencies:
+      '@mod/app-entries':
+        specifier: workspace:*
+        version: link:../app-entries
       '@o3co/ts.hocon':
         specifier: 1.14.3
-        version: 1.14.3(zod@4.6.7)
+        version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
     devDependencies:
+      rolldown:
+        specifier: 1.2.14
+        version: 1.2.14
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/scaffold/combinations:
+    dependencies:
+      '@mod/kinds':
+        specifier: workspace:*
+        version: link:../kinds
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/scaffold/create-app:
     dependencies:
@@ -2242,7 +2807,16 @@ importers:
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
     devDependencies:
+      '@mod/app-entries':
+        specifier: workspace:*
+        version: link:../app-entries
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../../tooling/docker-client
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -2251,20 +2825,32 @@ importers:
         version: link:../trial
       '@o3co/ts.hocon':
         specifier: 1.14.3
-        version: 1.14.3(zod@4.6.7)
+        version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
+      '@types/semver':
+        specifier: 7.8.0
+        version: 7.8.0
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+
+  modules/scaffold/kinds:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/scaffold/trial:
     dependencies:
       '@o3co/ts.hocon':
         specifier: 1.14.3
-        version: 1.14.3(zod@4.6.7)
+        version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa:
     dependencies:
@@ -2280,9 +2866,18 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../mfa-witness
@@ -2307,7 +2902,23 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/mfa-binding:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-binding-proof:
     dependencies:
@@ -2320,6 +2931,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
@@ -2336,6 +2950,9 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
@@ -2353,7 +2970,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-email:
     dependencies:
@@ -2384,7 +3001,35 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/mfa-email-proof:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-binding-proof':
+        specifier: workspace:*
+        version: link:../mfa-binding-proof
+      '@mod/mfa-email':
+        specifier: workspace:*
+        version: link:../mfa-email
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
+      '@mod/subject-attributes':
+        specifier: workspace:*
+        version: link:../../identity/subject-attributes
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-email-wording:
     dependencies:
@@ -2400,7 +3045,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-enrollment:
     dependencies:
@@ -2416,6 +3061,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
@@ -2425,6 +3073,9 @@ importers:
       '@mod/mfa-flows':
         specifier: workspace:*
         version: link:../mfa-flows
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
@@ -2450,6 +3101,9 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-revocation':
         specifier: workspace:*
         version: link:../mfa-revocation
@@ -2476,7 +3130,7 @@ importers:
         version: link:../../identity/subject-attributes
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2492,6 +3146,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
@@ -2507,7 +3164,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-extensions:
     dependencies:
@@ -2517,7 +3174,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-flows:
     dependencies:
@@ -2545,6 +3202,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2567,12 +3227,18 @@ importers:
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/mfa-revocation':
         specifier: workspace:*
         version: link:../mfa-revocation
@@ -2590,7 +3256,7 @@ importers:
         version: link:../../foundation/store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-management:
     dependencies:
@@ -2609,6 +3275,12 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2628,6 +3300,9 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
@@ -2648,7 +3323,33 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/mfa-managing:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/mfa-reading:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-recovery:
     dependencies:
@@ -2676,6 +3377,12 @@ importers:
       '@mod/mfa-flows':
         specifier: workspace:*
         version: link:../mfa-flows
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2736,7 +3443,7 @@ importers:
         version: link:../../identity/subject-attributes
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2749,13 +3456,16 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-totp:
     dependencies:
@@ -2780,7 +3490,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/second-factor/mfa-witnessing:
     dependencies:
@@ -2793,13 +3503,22 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../mfa-witness
     devDependencies:
-      '@mod/mfa-extensions':
+      '@mod/mfa-binding':
         specifier: workspace:*
-        version: link:../mfa-extensions
+        version: link:../mfa-binding
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2808,7 +3527,7 @@ importers:
         version: link:../../foundation/seal
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/smtp/mail-smtp:
     dependencies:
@@ -2821,19 +3540,22 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
       nodemailer:
-        specifier: 10.1.7
-        version: 10.1.7
+        specifier: 10.2.1
+        version: 10.2.1
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/store-redis/redis:
     dependencies:
@@ -2843,6 +3565,12 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       ioredis:
         specifier: 5.11.1
         version: 5.11.1
@@ -2852,7 +3580,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/templates/authorize-store:
     dependencies:
@@ -2862,6 +3590,21 @@ importers:
       '@mod/reauth':
         specifier: workspace:*
         version: link:../../oauth/reauth
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+
+  modules/templates/claims-selection-store:
+    dependencies:
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../../oauth/claims-selection
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -3049,7 +3792,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/templates/federation-tokens-store:
     dependencies:
@@ -3068,7 +3811,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/templates/jwt-bearer-store:
     dependencies:
@@ -3136,6 +3879,9 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
+      '@mod/claims-selection':
+        specifier: workspace:*
+        version: link:../../oauth/claims-selection
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../../oauth/client-allowance
@@ -3196,7 +3942,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/templates/session-store:
     dependencies:
@@ -3316,7 +4062,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/templates/upstream-round-trip-store:
     dependencies:
@@ -3335,7 +4081,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/templates/users-store:
     dependencies:
@@ -3357,15 +4103,28 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../../passkey/passkeys
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
-      '@mod/webauthn':
-        specifier: workspace:*
-        version: link:../../passkey/webauthn
+
+  modules/tooling/api-docs:
+    dependencies:
+      typedoc:
+        specifier: 0.28.20
+        version: 0.28.20(typescript@6.0.3)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance:
     dependencies:
@@ -3375,12 +4134,15 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../docker-client
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-code:
     dependencies:
@@ -3406,12 +4168,15 @@ importers:
         specifier: workspace:*
         version: link:../conformance-second-factor
     devDependencies:
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-device:
     dependencies:
@@ -3431,9 +4196,12 @@ importers:
         specifier: workspace:*
         version: link:../conformance-oauth
     devDependencies:
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-exchange:
     dependencies:
@@ -3459,12 +4227,21 @@ importers:
         specifier: workspace:*
         version: link:../conformance-oauth
     devDependencies:
+      '@mod/conformance-front':
+        specifier: workspace:*
+        version: link:../conformance-front
+      '@mod/conformance-tunnel':
+        specifier: workspace:*
+        version: link:../conformance-tunnel
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-federation:
     dependencies:
@@ -3487,15 +4264,30 @@ importers:
         specifier: workspace:*
         version: link:../conformance-oauth
     devDependencies:
+      '@mod/conformance-front':
+        specifier: workspace:*
+        version: link:../conformance-front
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/conformance-tunnel':
+        specifier: workspace:*
+        version: link:../conformance-tunnel
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/conformance-front:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-identity:
     dependencies:
@@ -3505,6 +4297,9 @@ importers:
       '@mod/conformance-legacy':
         specifier: workspace:*
         version: link:../conformance-legacy
+      '@mod/ledger-fakes':
+        specifier: workspace:*
+        version: link:../ledger-fakes
       bcryptjs:
         specifier: 3.0.3
         version: 3.0.3
@@ -3512,9 +4307,12 @@ importers:
       '@mod/conformance-keys':
         specifier: workspace:*
         version: link:../conformance-keys
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-keys:
     dependencies:
@@ -3525,9 +4323,12 @@ importers:
         specifier: workspace:*
         version: link:../conformance-legacy
     devDependencies:
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-legacy:
     dependencies:
@@ -3550,18 +4351,21 @@ importers:
         specifier: workspace:*
         version: link:../conformance-oauth
       asn1js:
-        specifier: 3.1.0
-        version: 3.1.0
+        specifier: 4.0.0
+        version: 4.0.0
       pkijs:
-        specifier: 3.4.1
-        version: 3.4.1
+        specifier: 4.0.1
+        version: 4.0.1(asn1js@4.0.0)
     devDependencies:
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-oauth:
     dependencies:
@@ -3578,12 +4382,15 @@ importers:
       '@mod/conformance-identity':
         specifier: workspace:*
         version: link:../conformance-identity
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-ops:
     dependencies:
@@ -3600,9 +4407,12 @@ importers:
         specifier: workspace:*
         version: link:../conformance-oauth
     devDependencies:
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/conformance-passkey:
     dependencies:
@@ -3615,9 +4425,12 @@ importers:
       '@mod/conformance-oauth':
         specifier: workspace:*
         version: link:../conformance-oauth
+      '@mod/ledger-fakes':
+        specifier: workspace:*
+        version: link:../ledger-fakes
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
     devDependencies:
       '@mod/conformance-code':
         specifier: workspace:*
@@ -3631,12 +4444,15 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       '@mod/webauthn':
         specifier: workspace:*
         version: link:../../passkey/webauthn
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
 
   modules/tooling/conformance-recipes:
     dependencies:
@@ -3648,7 +4464,7 @@ importers:
         version: link:../../scaffold/create-app
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
     devDependencies:
       '@mod/conformance-code':
         specifier: workspace:*
@@ -3665,6 +4481,12 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/ledger-fakes':
+        specifier: workspace:*
+        version: link:../ledger-fakes
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
@@ -3682,7 +4504,7 @@ importers:
         version: link:../conformance-legacy
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
     devDependencies:
       '@mod/conformance-identity':
         specifier: workspace:*
@@ -3690,30 +4512,157 @@ importers:
       '@mod/conformance-keys':
         specifier: workspace:*
         version: link:../conformance-keys
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
+
+  modules/tooling/conformance-tunnel:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/distribution:
     dependencies:
+      '@mod/combinations':
+        specifier: workspace:*
+        version: link:../../scaffold/combinations
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/docker-client':
+        specifier: workspace:*
+        version: link:../docker-client
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
       typescript:
         specifier: 6.0.3
         version: 6.0.3
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+    devDependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
+
+  modules/tooling/docker-client:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/tooling/guard:
     dependencies:
-      '@mod/combinations':
+      '@mod/guard-imports':
         specifier: workspace:*
-        version: link:../../scaffold/combinations
+        version: link:../guard-imports
+      '@mod/kinds':
+        specifier: workspace:*
+        version: link:../../scaffold/kinds
       typescript:
         specifier: 6.0.3
         version: 6.0.3
 
+  modules/tooling/guard-imports:
+    dependencies:
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/interop-clients:
+    dependencies:
+      '@mod/conformance':
+        specifier: workspace:*
+        version: link:../conformance
+      '@mod/conformance-code':
+        specifier: workspace:*
+        version: link:../conformance-code
+      '@mod/conformance-device':
+        specifier: workspace:*
+        version: link:../conformance-device
+      '@mod/conformance-exchange':
+        specifier: workspace:*
+        version: link:../conformance-exchange
+      '@mod/conformance-front':
+        specifier: workspace:*
+        version: link:../conformance-front
+      '@mod/conformance-oauth':
+        specifier: workspace:*
+        version: link:../conformance-oauth
+      '@mod/conformance-tunnel':
+        specifier: workspace:*
+        version: link:../conformance-tunnel
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
+      openid-client:
+        specifier: 6.8.8
+        version: 6.8.8
+      undici:
+        specifier: 8.12.3
+        version: 8.12.3
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/interop-oidf:
+    dependencies:
+      '@mod/conformance':
+        specifier: workspace:*
+        version: link:../conformance
+      '@mod/conformance-code':
+        specifier: workspace:*
+        version: link:../conformance-code
+      '@mod/conformance-federation':
+        specifier: workspace:*
+        version: link:../conformance-federation
+      '@mod/conformance-front':
+        specifier: workspace:*
+        version: link:../conformance-front
+      '@mod/conformance-oauth':
+        specifier: workspace:*
+        version: link:../conformance-oauth
+      '@mod/conformance-tunnel':
+        specifier: workspace:*
+        version: link:../conformance-tunnel
+      '@mod/spec-checklist':
+        specifier: workspace:*
+        version: link:../spec-checklist
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/ledger-fakes:
+    dependencies:
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../../user-ledger-http/ledger-wire
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/tooling/references:
     dependencies:
+      '@mod/app-entries':
+        specifier: workspace:*
+        version: link:../../scaffold/app-entries
       '@mod/app-output':
         specifier: workspace:*
         version: link:../../scaffold/app-output
@@ -3726,6 +4675,9 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/guard-imports':
+        specifier: workspace:*
+        version: link:../guard-imports
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -3735,10 +4687,26 @@ importers:
     devDependencies:
       '@o3co/ts.hocon':
         specifier: 1.14.3
-        version: 1.14.3(zod@4.6.7)
+        version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/spec-checklist:
+    dependencies:
+      '@mod/guard-imports':
+        specifier: workspace:*
+        version: link:../guard-imports
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
 
   modules/upstream-login/federation:
     dependencies:
@@ -3809,9 +4777,12 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/upstream-handoff-seal':
+        specifier: workspace:*
+        version: link:../upstream-handoff-seal
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/federation-link:
     dependencies:
@@ -3836,12 +4807,15 @@ importers:
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users
       vitest:
         specifier: 5.0.4
-        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3914,7 +4888,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/idp-apple:
     dependencies:
@@ -3940,15 +4914,18 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/url-setting
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/idp-github:
     dependencies:
@@ -3974,9 +4951,12 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/idp-google:
     dependencies:
@@ -4005,15 +4985,21 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/idp-oidc:
     dependencies:
       '@mod/external-jwt':
         specifier: workspace:*
         version: link:../../foundation/external-jwt
+      '@mod/host-entries':
+        specifier: workspace:*
+        version: link:../../foundation/host-entries
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -4036,12 +5022,15 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/rp-logout-federation:
     dependencies:
@@ -4057,7 +5046,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/upstream-client:
     dependencies:
@@ -4082,7 +5071,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/upstream-handoff:
     dependencies:
@@ -4107,7 +5096,23 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/upstream-login/upstream-handoff-seal:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/upstream-handoff':
+        specifier: workspace:*
+        version: link:../upstream-handoff
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/upstream-round-trip:
     dependencies:
@@ -4129,7 +5134,7 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/upstream-login/upstreams:
     dependencies:
@@ -4148,7 +5153,44 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/user-ledger-http/jti-ledger-http:
+    dependencies:
+      '@mod/jwt-bearer':
+        specifier: workspace:*
+        version: link:../../oauth/jwt-bearer
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
+
+  modules/user-ledger-http/ledger-wire:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   modules/user-ledger-http/mfa-witness-http:
     dependencies:
@@ -4158,6 +5200,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../ledger-wire
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../../second-factor/mfa-witness
@@ -4174,9 +5219,46 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/user-ledger-http/passkey-witness-http:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../ledger-wire
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
+      '@mod/passkey-witness':
+        specifier: workspace:*
+        version: link:../../passkey/passkey-witness
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/user-ledger-http/signer-keys-http:
     dependencies:
@@ -4229,6 +5311,9 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../../oauth/token-endpoint
@@ -4236,8 +5321,8 @@ importers:
         specifier: workspace:*
         version: link:../../oauth/tokens
       jose:
-        specifier: 6.2.12
-        version: 6.2.12
+        specifier: 6.2.13
+        version: 6.2.13
 
   modules/user-ledger-http/subject-revocation-http:
     dependencies:
@@ -4271,7 +5356,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
   modules/user-ledger-http/users-http:
     dependencies:
@@ -4281,6 +5366,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../ledger-wire
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
@@ -4300,9 +5388,12 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/tls-options':
+        specifier: workspace:*
+        version: link:../../foundation/tls-options
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
 packages:
 
@@ -4363,11 +5454,17 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@gerrit0/mini-shiki@3.23.0':
+    resolution: {integrity: sha512-bEMORlG0cqdjVyCEuU0cDQbORWX+kYCeo0kV1lbxF5bt4r7SID2l9bqsxJEM0zndaxpOUT7riCyIVEuqq/Ynxg==}
+
   '@hexagon/base64@1.1.28':
     resolution: {integrity: sha512-lhqDEAvWixy3bZ+UOYbPwUbBkwBq5C1LAJ/xPC8Oi+lL54oyakv/npbA0aU2hgCsx/1NUd4IBvV03+aUBWxerw==}
 
   '@ioredis/commands@1.10.0':
     resolution: {integrity: sha512-UmeW7z4LfctwoQ5wkhVzgq8tXkreED2xZGpX+Bg+zA+WJFZCT6c062AfCK/Dfk81xZnnwdhJCUMkitihRaoC2Q==}
+
+  '@isaacs/nonrecursive-glob-match@1.0.3':
+    resolution: {integrity: sha512-SI7kyKHq4XXDRozw+r9GlRZkia1ZkFrpLW98r2IC2Bpr8YkFGE3fvjzmxCG0x78A++69HmDNrDvSMYBZmHGpKA==}
 
   '@jridgewell/resolve-uri@3.1.2':
     resolution: {integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==}
@@ -4382,9 +5479,9 @@ packages:
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
 
-  '@noble/hashes@1.8.0':
-    resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
-    engines: {node: ^14.21.3 || >=16}
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
 
   '@o3co/ts.hocon@1.14.3':
     resolution: {integrity: sha512-eiqxkHVvfV0ZQsk0oT3V7HYP8/UGKqpL66kG2zxndHDqoNLCPMtAiKMr+5IJ+wM9y1KfZxJBX7598i28Tqc/zg==}
@@ -4462,6 +5559,10 @@ packages:
 
   '@peculiar/utils@2.0.3':
     resolution: {integrity: sha512-+oL3HPFRIZ1St2K50lWCXiioIgSoxzz7R1J3uF6neO2yl1sgmpgY6XXJH4BdpoDkMWznQTeYF6oWNDZLCdQ4eQ==}
+
+  '@peculiar/utils@4.1.0':
+    resolution: {integrity: sha512-y2oDqAwp+VPZMUYFGFFMYlXM8xinwb7ehb69+2EhbEL+n7KsykCQX5F0u3/B+BFHxCkwTyft3T1id0ugyzNHVQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
 
   '@peculiar/x509@2.1.0':
     resolution: {integrity: sha512-IYbg1R03CSQGWwl24kGyqrdVtixNSbRaDvBg1r5wyYjTP+VwPQkka1BzTgU5+vxiuwqg04OxdvdJ1xYYFIdUSA==}
@@ -4566,6 +5667,21 @@ packages:
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
 
+  '@shikijs/engine-oniguruma@3.23.0':
+    resolution: {integrity: sha512-1nWINwKXxKKLqPibT5f4pAFLej9oZzQTsby8942OTlsJzOBZ0MWKiwzMsd+jhzu8YPCHAswGnnN1YtQfirL35g==}
+
+  '@shikijs/langs@3.23.0':
+    resolution: {integrity: sha512-2Ep4W3Re5aB1/62RSYQInK9mM3HsLeB91cHqznAJMuylqjzNVAVCMnNWRHFtcNHXsoNRayP9z1qj4Sq3nMqYXg==}
+
+  '@shikijs/themes@3.23.0':
+    resolution: {integrity: sha512-5qySYa1ZgAT18HR/ypENL9cUSGOeI2x+4IvYJu4JgVJdizn6kG4ia5Q1jDEOi7gTbN4RbuYtmHh0W3eccOrjMA==}
+
+  '@shikijs/types@3.23.0':
+    resolution: {integrity: sha512-3JZ5HXOZfYjsYSk0yPwBrkupyYSLpAE26Qc0HLghhZNGTZg/SKxXIIgoxOpmmeQP0RRSDJTk1/vPfw9tbw+jSQ==}
+
+  '@shikijs/vscode-textmate@10.1.0':
+    resolution: {integrity: sha512-cVBuhDQjBZaNMTwBquYfPydrUP+E3hE6oYGasx8h6ZrODIM7/r+gxLDXdd66oszbrggZHEntdE6j+5gYIVyMWQ==}
+
   '@simplewebauthn/server@14.0.1':
     resolution: {integrity: sha512-kjWgcm9NdSv+Tobo4Swxd1WnEawsBogpYFMjg9pKsVLPN3FdCmR6BipkL+DcPDgmQ7UKbbBZqRqn3E3YaA7NBw==}
     engines: {node: '>=20.0.0'}
@@ -4582,8 +5698,17 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
+  '@types/hast@3.0.5':
+    resolution: {integrity: sha512-rp/ezSWaD1m44dPKICGhiskI13nVr7qTloFwDa/IYkhhf5nzwP+zIQcIJh3WIFSBOy/H1PzB40jPjMDksN4F+g==}
+
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
+
+  '@types/unist@3.0.3':
+    resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
 
   '@vitest/mocker@5.0.4':
     resolution: {integrity: sha512-tqAlrYWce4iUxhr3ncNohejtCTOcHeE8XWrSNZY3OhPoDn01yeGv+gnaBy64ATp7o6pb03eIbBAjzmibpc9vIQ==}
@@ -4613,13 +5738,24 @@ packages:
   '@vitest/spy@5.0.5':
     resolution: {integrity: sha512-lwJRExuH417257Q5wv9QYugN9IMJkoxcrKrYxGPQkBzl7wlNpTUxD/5yNX4ESKVUIShKPgkGchYPFMWOOk0wzw==}
 
+  argparse@2.0.1:
+    resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
+
   asn1js@3.1.0:
     resolution: {integrity: sha512-HWYi1THkOqguCiO+vwj09ZkQFD2kKEsejYHAYCtX0D80WVdoDnvRc9IukXX/jeb0T9NRWJnRtqwdbHltnFjwXA==}
     engines: {node: '>=12.0.0'}
 
+  asn1js@4.0.0:
+    resolution: {integrity: sha512-81NlooYbXCbBWL2+p1/ivGyT4AR2+bnfKYlPq/3rCoIPJSuLbdS8G70XYt561wOJnbaYfBS2HQDMENaX5hM2vA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
+
+  balanced-match@4.0.4:
+    resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
+    engines: {node: 18 || 20 || >=22}
 
   bcryptjs@3.0.3:
     resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
@@ -4628,9 +5764,13 @@ packages:
   bintrees@1.0.2:
     resolution: {integrity: sha512-VOMgTMwjAaUG580SXn3LacVgjurrbMme7ZZNYGSSV7mmtY6QQRh0Eg3pwIcntQ77DErK1L0NxkbetjcoXzVwKw==}
 
-  bytestreamjs@2.0.1:
-    resolution: {integrity: sha512-U1Z/ob71V/bXfVABvNr/Kumf5VyeQRBEm6Txb0PQ6S7V5GpBM3w4Cbqz/xPDicR5tN0uvDifng8C+5qECeGwyQ==}
-    engines: {node: '>=6.0.0'}
+  brace-expansion@5.0.12:
+    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
+    engines: {node: 20 || >=22}
+
+  bytestreamjs@3.0.0:
+    resolution: {integrity: sha512-QJYdJHpGNj4dAfRrgQAu8V5OEFVgiALJ8YFR4c1BuNYzvoDU86yEg+9SXu/AbGyMaLAn17qdMmwsCc2Ry2nHPg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
 
   chai@6.3.0:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
@@ -4656,6 +5796,10 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  entities@4.5.0:
+    resolution: {integrity: sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==}
+    engines: {node: '>=0.12'}
 
   es-module-lexer@2.3.2:
     resolution: {integrity: sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw==}
@@ -4685,8 +5829,8 @@ packages:
     resolution: {integrity: sha512-ehuGcf94bQXhfagULNXrJdfnWO38v070jxSx/qE87Kjzmu2fU7ro5EFAb+OPituLqgfyuQaym5DlrNydW2sJ9A==}
     engines: {node: '>=12.22.0'}
 
-  jose@6.2.12:
-    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
+  jose@6.2.13:
+    resolution: {integrity: sha512-7TIg10ZE1x82YediN+lcrPNvGMKge9yFHQD+Qho/b8y2adfugU3AsvvHfxV0fzyFllT6l9xCjf4RWY9g/Z9PJQ==}
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -4762,8 +5906,25 @@ packages:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
 
+  linkify-it@5.0.2:
+    resolution: {integrity: sha512-ONTm2jCMAVZjgQa/Fy1kScXsuOoF5NPTsoFBdE1KVIZ2vAh/r9+Bqo+0jINCBYnavTPQZz38QzFTme79ENoN3Q==}
+
+  lunr@2.3.9:
+    resolution: {integrity: sha512-zTU3DaZaF3Rt9rhN3uBMGQD3dD2/vFQqnvZCDv4dl5iOzq2IZQqTxu90r4E5J+nP70J3ilqVCrbho2eWaeW8Ow==}
+
   magic-string@1.4.3:
     resolution: {integrity: sha512-z12OxmaPGE0F4xlpGdjuAUckipLpQlTAuAmyGhNoD7ODpYUzvDfvtxUbjM/jwznyP178oju/KDdyi220wNJ0RQ==}
+
+  markdown-it@14.3.3:
+    resolution: {integrity: sha512-L//tDAkjTjJCU6pBUSBTgs3Kg4InVaZuUZog/b6V12UKhcDQ7S78877ibbCanRExwPuYP1CZD7Gd2dxSy1GXRg==}
+    hasBin: true
+
+  mdurl@2.1.0:
+    resolution: {integrity: sha512-1+HBaOx0zi/dQWht8rNv9MYf9qqpqL/kxI0hXImU6Y547zM6Sni8BQibt7ifgMcYtQg41ao3Ivd6cnSM86inpg==}
+
+  minimatch@11.0.3:
+    resolution: {integrity: sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw==}
+    engines: {node: 18 || 20 || >=22}
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
@@ -4773,13 +5934,19 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nodemailer@10.1.7:
-    resolution: {integrity: sha512-OQa6FDln5fLttmqSbjDiRYvFDOFNrBqfiOwHPlEbURil3b+vPB1v8xpi+Sp46drzNDlsTnNsS502vthmz56r4w==}
+  nodemailer@10.2.1:
+    resolution: {integrity: sha512-ZrDNsPFoDMwefNs7sJwrYiEJ/CG4ClJWDZv05iNJsEBWa8GRDry1QJHTJxsuTAY9eDDKjX4k+q3SxslXJOao7w==}
     engines: {node: '>=20.0.0'}
+
+  oauth4webapi@3.8.8:
+    resolution: {integrity: sha512-8N28E+a/oxfXWBgOMt+ZP/JUf/XR+IFbvkAEPP3gznXOMv9BpAAwiIj0TFNz3tGTPc0ZQ8zmWBNgN1nAys0gng==}
 
   obug@3.0.0:
     resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
+
+  openid-client@6.8.8:
+    resolution: {integrity: sha512-ZsucJA5Ad04Uv7YN4ql+s4GXNmb9uAYQwyJTsJx7CH/MX3JZioLE2pVKi1SC+YrbSLA4Px3Gi30dMjgOZtb6pA==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -4788,9 +5955,11 @@ packages:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
 
-  pkijs@3.4.1:
-    resolution: {integrity: sha512-Oo/NZcSWccq8KyoG7gLE9fnltgHns+pNCjCAp/WmjsUySi+sX7y4z4Xqu4fVb42CDHzRPl33fjzT15V1wvcyhA==}
-    engines: {node: '>=16.0.0'}
+  pkijs@4.0.1:
+    resolution: {integrity: sha512-hs6jHBg+Y9ZZ9r5w2CHnKXkGPOr3qWfkLfnZGlbNkP2hceGZ6EgjnTS7tqwbugHXx5mCqoSf4TUH2nu1diirnA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    peerDependencies:
+      asn1js: ^4.0.0
 
   postcss@8.5.30:
     resolution: {integrity: sha512-zkd+e9S1AQHhmaBKye9zlFHWjOwVgqXl1q3ECYy8561K7qxR2cREf/STLskulBFd78k6AOFeA+ff1TtEzk9bAA==}
@@ -4800,6 +5969,10 @@ packages:
     resolution: {integrity: sha512-6ZiOBfCywsD4k1BN9IX0uZhF+tJkV8q8llP64G5Hajs4JOeVLPCwpPVcpXy3BwYiUGgyJzsJJQeOIv7+hDSq8g==}
     engines: {node: ^16 || ^18 || >=20}
     deprecated: prom-client has been replaced by @prometheus-io/client
+
+  punycode.js@2.3.1:
+    resolution: {integrity: sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==}
+    engines: {node: '>=6'}
 
   pvtsutils@1.3.6:
     resolution: {integrity: sha512-PLgQXQ6H2FWCaeRak8vvk1GW462lMxB5s3Jm673N82zI4vqtVUPuZdffdZbPDFRoU8kAhItWFtPCWiPpp4/EDg==}
@@ -4822,6 +5995,11 @@ packages:
   rolldown@1.2.14:
     resolution: {integrity: sha512-eTBTTqMR6uHKLgcUqpJP8ntzDI6V4LYA8negAMBEI7gkgVvOdrx6VsvS2Ym+83KhOPdLCHWJu0w7UQFJZhHKNw==}
     engines: {node: ^20.19.0 || >=22.12.0}
+    hasBin: true
+
+  semver@7.8.5:
+    resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
+    engines: {node: '>=10'}
     hasBin: true
 
   source-map-js@1.2.2:
@@ -4859,13 +6037,27 @@ packages:
     resolution: {integrity: sha512-axr3IdNuVIxnaK5XGEUFTu3YmAQ6lllgrvqfEoR16g/HGnYY/6We4oWENtAnzK6/LpJ2ur9PAb80RBt7/U4ugw==}
     engines: {node: '>= 6.0.0'}
 
+  typedoc@0.28.20:
+    resolution: {integrity: sha512-uSKqkh8Cr48vllnEy+jdaAgOeR6Y+QCBW7usgUsKj7gJEfR7stw9U/fE49LBnj2tPRKPY0c0EBJSWe9Appmplg==}
+    engines: {node: '>= 18', pnpm: '>= 10'}
+    hasBin: true
+    peerDependencies:
+      typescript: 5.0.x || 5.1.x || 5.2.x || 5.3.x || 5.4.x || 5.5.x || 5.6.x || 5.7.x || 5.8.x || 5.9.x || 6.0.x
+
   typescript@6.0.3:
     resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
     engines: {node: '>=14.17'}
     hasBin: true
 
+  uc.micro@2.1.0:
+    resolution: {integrity: sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A==}
+
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
+
+  undici@8.12.3:
+    resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
+    engines: {node: '>=22.19.0'}
 
   vite@8.3.3:
     resolution: {integrity: sha512-cTAldKPImjg6c+gk48U19POPn3GCBzZwpdsN8ZMEEcbpes+6/wvfqUd0C2y3qYY4wsj8PwgFwrZ/1jBPVttMSg==}
@@ -4997,6 +6189,11 @@ packages:
     engines: {node: '>=20.11'}
     hasBin: true
 
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -5037,9 +6234,19 @@ snapshots:
   '@biomejs/cli-win32-x64@2.5.15':
     optional: true
 
+  '@gerrit0/mini-shiki@3.23.0':
+    dependencies:
+      '@shikijs/engine-oniguruma': 3.23.0
+      '@shikijs/langs': 3.23.0
+      '@shikijs/themes': 3.23.0
+      '@shikijs/types': 3.23.0
+      '@shikijs/vscode-textmate': 10.1.0
+
   '@hexagon/base64@1.1.28': {}
 
   '@ioredis/commands@1.10.0': {}
+
+  '@isaacs/nonrecursive-glob-match@1.0.3': {}
 
   '@jridgewell/resolve-uri@3.1.2': {}
 
@@ -5052,10 +6259,11 @@ snapshots:
 
   '@levischuck/tiny-cbor@0.2.11': {}
 
-  '@noble/hashes@1.8.0': {}
+  '@noble/hashes@2.4.0': {}
 
-  '@o3co/ts.hocon@1.14.3(zod@4.6.7)':
+  '@o3co/ts.hocon@1.14.3(yaml@2.9.1)(zod@4.6.7)':
     optionalDependencies:
+      yaml: 2.9.1
       zod: 4.6.7
 
   '@opentelemetry/api@1.9.1': {}
@@ -5164,6 +6372,8 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
+  '@peculiar/utils@4.1.0': {}
+
   '@peculiar/x509@2.1.0':
     dependencies:
       '@peculiar/asn1-cms': 2.11.0
@@ -5225,6 +6435,26 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
+  '@shikijs/engine-oniguruma@3.23.0':
+    dependencies:
+      '@shikijs/types': 3.23.0
+      '@shikijs/vscode-textmate': 10.1.0
+
+  '@shikijs/langs@3.23.0':
+    dependencies:
+      '@shikijs/types': 3.23.0
+
+  '@shikijs/themes@3.23.0':
+    dependencies:
+      '@shikijs/types': 3.23.0
+
+  '@shikijs/types@3.23.0':
+    dependencies:
+      '@shikijs/vscode-textmate': 10.1.0
+      '@types/hast': 3.0.5
+
+  '@shikijs/vscode-textmate@10.1.0': {}
+
   '@simplewebauthn/server@14.0.1':
     dependencies:
       '@hexagon/base64': 1.1.28
@@ -5249,31 +6479,41 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
+  '@types/hast@3.0.5':
+    dependencies:
+      '@types/unist': 3.0.3
+
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
 
-  '@vitest/mocker@5.0.4(vite@8.3.3(@types/node@26.6.5))':
+  '@types/semver@7.8.0': {}
+
+  '@types/unist@3.0.3': {}
+
+  '@vitest/mocker@5.0.4(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.4
       estree-walker: 3.0.3
       magic-string: 1.4.3
     optionalDependencies:
-      vite: 8.3.3(@types/node@26.6.5)
+      vite: 8.3.3(@types/node@26.6.5)(yaml@2.9.1)
 
-  '@vitest/mocker@5.0.5(vite@8.3.3(@types/node@26.6.5))':
+  '@vitest/mocker@5.0.5(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.5
       estree-walker: 3.0.3
       magic-string: 1.4.3
     optionalDependencies:
-      vite: 8.3.3(@types/node@26.6.5)
+      vite: 8.3.3(@types/node@26.6.5)(yaml@2.9.1)
 
   '@vitest/spy@5.0.4': {}
 
   '@vitest/spy@5.0.5': {}
+
+  argparse@2.0.1: {}
 
   asn1js@3.1.0:
     dependencies:
@@ -5281,13 +6521,23 @@ snapshots:
       pvutils: 1.2.0
       tslib: 2.8.1
 
+  asn1js@4.0.0:
+    dependencies:
+      '@peculiar/utils': 4.1.0
+
   assertion-error@2.0.1: {}
+
+  balanced-match@4.0.4: {}
 
   bcryptjs@3.0.3: {}
 
   bintrees@1.0.2: {}
 
-  bytestreamjs@2.0.1: {}
+  brace-expansion@5.0.12:
+    dependencies:
+      balanced-match: 4.0.4
+
+  bytestreamjs@3.0.0: {}
 
   chai@6.3.0: {}
 
@@ -5300,6 +6550,8 @@ snapshots:
   denque@2.1.0: {}
 
   detect-libc@2.1.2: {}
+
+  entities@4.5.0: {}
 
   es-module-lexer@2.3.2: {}
 
@@ -5328,7 +6580,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  jose@6.2.12: {}
+  jose@6.2.13: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true
@@ -5379,30 +6631,57 @@ snapshots:
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
 
+  linkify-it@5.0.2:
+    dependencies:
+      uc.micro: 2.1.0
+
+  lunr@2.3.9: {}
+
   magic-string@1.4.3:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  markdown-it@14.3.3:
+    dependencies:
+      argparse: 2.0.1
+      entities: 4.5.0
+      linkify-it: 5.0.2
+      mdurl: 2.1.0
+      punycode.js: 2.3.1
+      uc.micro: 2.1.0
+
+  mdurl@2.1.0: {}
+
+  minimatch@11.0.3:
+    dependencies:
+      '@isaacs/nonrecursive-glob-match': 1.0.3
+      brace-expansion: 5.0.12
 
   ms@2.1.3: {}
 
   nanoid@3.3.20: {}
 
-  nodemailer@10.1.7: {}
+  nodemailer@10.2.1: {}
+
+  oauth4webapi@3.8.8: {}
 
   obug@3.0.0: {}
+
+  openid-client@6.8.8:
+    dependencies:
+      jose: 6.2.13
+      oauth4webapi: 3.8.8
 
   picocolors@1.1.1: {}
 
   picomatch@4.0.7: {}
 
-  pkijs@3.4.1:
+  pkijs@4.0.1(asn1js@4.0.0):
     dependencies:
-      '@noble/hashes': 1.8.0
-      asn1js: 3.1.0
-      bytestreamjs: 2.0.1
-      pvtsutils: 1.3.6
-      pvutils: 1.2.0
-      tslib: 2.8.1
+      '@noble/hashes': 2.4.0
+      '@peculiar/utils': 4.1.0
+      asn1js: 4.0.0
+      bytestreamjs: 3.0.0
 
   postcss@8.5.30:
     dependencies:
@@ -5414,6 +6693,8 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.9.1
       tdigest: 0.1.3
+
+  punycode.js@2.3.1: {}
 
   pvtsutils@1.3.6:
     dependencies:
@@ -5450,6 +6731,8 @@ snapshots:
       '@rolldown/binding-win32-arm64-msvc': 1.2.14
       '@rolldown/binding-win32-x64-msvc': 1.2.14
 
+  semver@7.8.5: {}
+
   source-map-js@1.2.2: {}
 
   standard-as-callback@2.1.0: {}
@@ -5477,11 +6760,24 @@ snapshots:
     dependencies:
       tslib: 1.14.1
 
+  typedoc@0.28.20(typescript@6.0.3):
+    dependencies:
+      '@gerrit0/mini-shiki': 3.23.0
+      lunr: 2.3.9
+      markdown-it: 14.3.3
+      minimatch: 11.0.3
+      typescript: 6.0.3
+      yaml: 2.9.1
+
   typescript@6.0.3: {}
+
+  uc.micro@2.1.0: {}
 
   undici-types@8.9.0: {}
 
-  vite@8.3.3(@types/node@26.6.5):
+  undici@8.12.3: {}
+
+  vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -5491,11 +6787,12 @@ snapshots:
     optionalDependencies:
       '@types/node': 26.6.5
       fsevents: 2.3.3
+      yaml: 2.9.1
 
-  vitest@5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)):
+  vitest@5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.4(vite@8.3.3(@types/node@26.6.5))
+      '@vitest/mocker': 5.0.4(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -5506,7 +6803,7 @@ snapshots:
       tinybench: 6.2.2
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.3.3(@types/node@26.6.5)
+      vite: 8.3.3(@types/node@26.6.5)(yaml@2.9.1)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
@@ -5514,10 +6811,10 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)):
+  vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.5(vite@8.3.3(@types/node@26.6.5))
+      '@vitest/mocker': 5.0.5(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -5528,7 +6825,7 @@ snapshots:
       tinybench: 6.2.2
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.3.3(@types/node@26.6.5)
+      vite: 8.3.3(@types/node@26.6.5)(yaml@2.9.1)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
@@ -5537,5 +6834,7 @@ snapshots:
       - msw
 
   why-is-node-running@3.2.1: {}
+
+  yaml@2.9.1: {}
 
   zod@4.6.7: {}
