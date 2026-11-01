@@ -3,11 +3,12 @@ import { clientAllowance } from "@mod/client-allowance";
 import type { Grant, GrantOutcome } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import type { BuildContext } from "@mod/kernel";
+import { type Passkeys, passkeys } from "@mod/passkeys";
 import { type Lineage, lineage } from "@mod/refresh";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
-import { type Passkeys, passkeys } from "@mod/webauthn";
 import events from "../audit-events.ts";
 import { passkeyAmr, webauthnGrantType } from "../contract.ts";
+import { requesterFor } from "../requester.ts";
 
 type Refusal = Extract<Awaited<ReturnType<Passkeys["assert"]>>, { kind: "refused" }>["reason"];
 
@@ -43,7 +44,9 @@ export interface LoginParts {
 	readonly issuer: string;
 }
 
-/** The passkey login grant: an assertion of a kept passkey for the client's tokens. */
+/** What `passkeyGrantIn` takes from the build context. */
+export const grantTakes = [passkeys, lineage, subjectRevocation, audit, issuer] as const;
+
 /** The grant over the contracts the assembly gives. */
 export const passkeyGrantIn = async (c: BuildContext<unknown>) =>
 	passkeyGrant({
@@ -54,6 +57,7 @@ export const passkeyGrantIn = async (c: BuildContext<unknown>) =>
 		issuer: (await c.get(issuer)).url,
 	});
 
+/** The passkey login grant: an assertion of a kept passkey for the client's tokens. */
 export function passkeyGrant(p: LoginParts): Grant {
 	return {
 		grantType: webauthnGrantType,
@@ -74,7 +78,7 @@ export function passkeyGrant(p: LoginParts): Grant {
 			if (typeof assertion !== "object" || assertion === null || Array.isArray(assertion)) {
 				return invalidGrant("assertion must be an object");
 			}
-			const asserted = await p.passkeys.assert(assertion, client.id);
+			const asserted = await p.passkeys.assert(assertion, requesterFor(client.id));
 			if (asserted.kind === "refused") return notAccepted(reasons[asserted.reason]);
 			// The authentication time is when the challenge was made.
 			const { subject, challengedAt: authenticatedAt } = asserted;
@@ -94,6 +98,8 @@ export function passkeyGrant(p: LoginParts): Grant {
 				scope,
 				amr,
 				authenticatedAt,
+				// Tied to no session, the token stands from the time its boundary was compared with.
+				standingAt: authenticatedAt,
 			});
 			if (issued.kind === "refused") return issued;
 			const { access } = issued;
