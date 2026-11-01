@@ -11,12 +11,18 @@ const startSecond = 1_800_000_000_000;
 const skewMs = 30_000;
 
 /** The login continuation over stand-ins, keeping the facts it hands login-gates; the IdP's fresh login allowance its clock allowance unless given. */
-function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map(), freshMs = skewMs) {
+function loginOf(
+	upstreamAmr: ReadonlyMap<string, string> = new Map(),
+	freshMs = skewMs,
+	revoked = false,
+) {
 	const handed: LoginFacts[] = [];
+	const recorded: unknown[] = [];
 	const login = loginWith({
 		logins: {
 			login: async (_request, facts) => {
 				handed.push(facts);
+				if (revoked) return { kind: "revoked", cookies: [] };
 				return {
 					kind: "opened",
 					session: { id: "s1", context: { ...facts, authenticatedAt: 0 } },
@@ -27,7 +33,7 @@ function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map(), freshMs =
 		users: {
 			byUpstream: async () => ({ kind: "user", user: { subject: "alice", attributes: {} } }),
 		},
-		audit: { record: () => {} },
+		audit: { record: (event) => void recorded.push(event) },
 		handoff: { of: () => undefined },
 		landing: "https://app.example/",
 		heldLoginLifetimeMs: 600_000,
@@ -44,7 +50,7 @@ function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map(), freshMs =
 		trip: { nonce: "n", verifier: "v", startedAt },
 		cleared: [],
 	});
-	return { handed, complete: (at: UpstreamLogin) => login.complete(completing(at)) };
+	return { handed, recorded, complete: (at: UpstreamLogin) => login.complete(completing(at)) };
 }
 
 it("reports when the upstream says the user logged in, or that it is unknown where it says nothing", async () => {
@@ -86,6 +92,17 @@ it("reports a login the upstream says came after the start as said", async () =>
 	const l = loginOf();
 	await l.complete({ subject: "u-1", amr: [], authenticatedAt: startSecond + 5000 });
 	expect(l.handed.map((facts) => facts.authenticatedAt)).toEqual([startSecond + 5000]);
+});
+
+it("states the round trip's start as the proof's start session compares, and answers a login session revoked as one with no local user", async () => {
+	const l = loginOf();
+	await l.complete({ subject: "u-1", amr: [] });
+	expect(l.handed.map((facts) => facts.provenSince)).toEqual([startedAt]);
+	const revoked = loginOf(new Map(), skewMs, true);
+	const answered = await revoked.complete({ subject: "u-1", amr: [] });
+	expect(answered.status).toBe(401);
+	expect(answered.body).toEqual({ json: { error: "unknown_user" } });
+	expect(JSON.stringify(revoked.recorded)).toContain("revoked");
 });
 
 it("names each amr once, however many upstream values map to it", async () => {

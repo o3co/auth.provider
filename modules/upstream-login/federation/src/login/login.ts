@@ -79,12 +79,19 @@ export function loginWith(p: LoginParts): Continuation {
 				deadline: handing.deadline,
 			};
 			const authenticatedAt = onOurClock(upstreamLogin.authenticatedAt, trip.startedAt, idp);
-			const facts = { subject, amr, authenticatedAt, ...attributesOf(name, upstreamLogin.profile) };
+			// The proof began with the round trip: session compares its start with the boundary.
+			const facts = {
+				subject,
+				amr,
+				authenticatedAt,
+				...attributesOf(name, upstreamLogin.profile),
+				provenSince: trip.startedAt,
+			};
 			const outcome = await p.logins.login(request, facts, done, from);
 			await handing?.after(outcome);
-			// A login a gate refused fails as one with no local user does, telling nothing of why.
-			if (outcome.kind === "refused") {
-				record("failed", name, { reason: "refused", source });
+			// A login a gate refused, or session revoked, fails as one with no local user does, telling nothing of why.
+			if (outcome.kind === "refused" || outcome.kind === "revoked") {
+				record("failed", name, { reason: outcome.kind, source });
 				return jsonAnswer(401, { error: "unknown_user" }, { cookies: cleared });
 			}
 			const held = outcome.kind === "held";

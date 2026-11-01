@@ -26,6 +26,7 @@ import secretHashModule from "@mod/secret-hash/module";
 import { type LoginFacts, type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
+import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { heldLoginStore, type StoredHeldLogin } from "@mod/upstream-handoff";
 import handoffModule from "@mod/upstream-handoff/module";
@@ -824,6 +825,26 @@ describe("federation", () => {
 		// Any other prompt asks nothing of the upstream login.
 		expect((await s.roundTrip("code=before", "?prompt=consent")).status).toBe(303);
 		expect(s.asked.starts.at(-1)?.prompt).toBeUndefined();
+	});
+
+	it("refuses a login whose round trip began before its subject's revocation, however late its callback comes back", async () => {
+		const s = await serve({ answers: answering(["old", aliceAt(now)]) });
+		const started = await s.begin();
+		now += 1000;
+		await s.declared(subjectRevocation).revoke("alice");
+		now += 20_000;
+		const back = await s.callback(`code=old&state=${started.state}`, started.cookie);
+		expect(back.status).toBe(401);
+		expect(await s.contextOf(back.cookies)).toBeUndefined();
+	});
+
+	it("logs in a round trip begun after the subject's revocation, though the upstream's own login came before it", async () => {
+		const s = await serve({ answers: answering(["early", aliceAt(now - 60_000)]) });
+		await s.declared(subjectRevocation).revoke("alice");
+		now += 2000;
+		const back = await s.roundTrip("code=early");
+		expect(back.status).toBe(303);
+		expect(await s.contextOf(back.cookies)).toBeDefined();
 	});
 
 	it("compares an upstream login time in whole seconds with the start, as upstreams give it", async () => {
