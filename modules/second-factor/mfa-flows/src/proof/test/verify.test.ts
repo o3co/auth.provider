@@ -52,8 +52,6 @@ function standIn() {
 			| undefined,
 		resumed: opened,
 		revoked: false,
-		/** The revocation lands while the login opens. */
-		revokeOnOpen: false,
 		entered: session as Session | undefined,
 		held: [{ id: "f", kind: "code" }],
 	};
@@ -83,7 +81,6 @@ function standIn() {
 		logins: {
 			resume: async (_request, facts) => {
 				calls.push(`resume ${facts.amr.join(" ")}`);
-				set.revoked ||= set.revokeOnOpen;
 				return set.resumed;
 			},
 		},
@@ -184,7 +181,7 @@ it("hands back the answer of a later gate that holds the login, with its cookies
 	expect([...statusOf(held), held.cookies]).toEqual([403, { step: "next" }, ["later=1"]]);
 });
 
-it("refuses a login whose resume came past its caller's deadline as a gate would, logging it", async () => {
+it("refuses a login whose resume came past its caller's deadline as a gate would, clearing the transaction's cookie and logging it", async () => {
 	const s = standIn();
 	const { request } = await s.login();
 	s.set.resumed = { kind: "expired" } as unknown as LoginOutcome;
@@ -192,24 +189,24 @@ it("refuses a login whose resume came past its caller's deadline as a gate would
 	expect([...statusOf(expired), expired.cookies]).toEqual([
 		403,
 		{ error: "login_required" },
-		undefined,
+		["mfa="],
 	]);
 	expect(s.logged.lines().map((l) => [l.level, l.event])).toEqual([
 		["warn", "mfa-flows.login_expired"],
 	]);
 });
 
-it("closes a session that opened after a revocation since the transaction started", async () => {
+it("answers a login session refused, its subject revoked since the proof began, as a revocation, opening nothing", async () => {
 	const s = standIn();
 	const { request } = await s.login();
-	s.set.revokeOnOpen = true;
-	const closed = await s.proof.verify(request(right));
-	expect([...statusOf(closed), closed.cookies]).toEqual([
+	s.set.resumed = { kind: "revoked", cookies: [] };
+	const refused = await s.proof.verify(request(right));
+	expect([...statusOf(refused), refused.cookies]).toEqual([
 		401,
 		{ error: "login_required" },
 		["mfa="],
 	]);
-	expect(s.calls.at(-1)).toBe("close h1");
+	expect(s.calls).not.toContain("close h1");
 });
 
 it("answers a step-up whose session went before the raise 401, one whose raise was not written 503, and clears the binding only once raised", async () => {
@@ -259,6 +256,18 @@ it("gives back the attempt of a proof that cannot be judged, and never one a fau
 	expect(await left()).toBe(5);
 	await expect(proving("broken")).rejects.toThrow(TypeError);
 	expect(await left()).toBe(4);
+});
+
+it("gives back the last attempt too, the transaction still found to prove again", async () => {
+	const s = standIn();
+	const { request } = await s.login();
+	const proving = (proof: string) => s.proof.verify(request({ factor_id: "f", proof }));
+	for (let wrong = 0; wrong < 4; wrong++) expect((await proving("wrong")).status).toBe(401);
+	// The last attempt's proof cannot be judged: the attempt comes back, and so does the transaction.
+	await expect(proving("unreadable")).rejects.toSatisfy(isUnavailable);
+	const read = statusOf(await s.proof.transaction(request({}, "GET")));
+	expect(read).toEqual([200, expect.objectContaining({ attempts_remaining: 1 })]);
+	expect((await proving("right")).status).toBe(200);
 });
 
 it("answers a transaction's time left in whole seconds, rounded down", async () => {

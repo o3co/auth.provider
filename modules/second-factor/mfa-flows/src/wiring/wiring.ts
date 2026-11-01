@@ -1,18 +1,18 @@
 import { audit } from "@mod/audit";
-import type { BuildContext } from "@mod/kernel";
-import { logins } from "@mod/login-gates";
-import { factors } from "@mod/mfa";
+import type { BuildContext, Parts } from "@mod/kernel";
+import { loginGates, logins } from "@mod/login-gates";
+import { factorReading } from "@mod/mfa-reading";
 import { type LockoutPolicy, lockouts } from "@mod/rate-limit";
 import { longestRecentMs, sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { type EnrollmentFlow, enrollmentFlow } from "../contract.ts";
 import { permitsOver } from "../permits/permits.ts";
-import { proofOver, resumeOver } from "../proof/proof.ts";
+import { gateOver, proofOver, resumeOver } from "../proof/proof.ts";
 import { releaseOver } from "../release/release.ts";
 import { flowPartsOf } from "../seams/seams.ts";
 import type { Settings } from "../section.ts";
 import { transactionStore } from "../store.ts";
-import { transactionsIn } from "../transactions/transactions.ts";
+import { transactionsIn, transactionsTakes } from "../transactions/transactions.ts";
 
 export const policyOf = (s: Settings): LockoutPolicy => ({
 	threshold: s.lockout.threshold,
@@ -24,13 +24,28 @@ export const policyOf = (s: Settings): LockoutPolicy => ({
 	memoryMs: s.lockout.memory * 1000,
 });
 
+/** What `gating`'s gate takes from the build context. */
+export const gatingTakes = [factorReading, ...transactionsTakes] as const;
+
+/** The gate `mfa` the package contributes to `login-gates`, over its factors and transactions. */
+export const gating = (m: Parts<Settings>) =>
+	m.contribute(loginGates).by(async (c) => ({
+		name: "mfa",
+		hold: gateOver({
+			factors: await c.get(factorReading),
+			transactions: await transactionsIn(c),
+		}),
+	}));
+
+/** What `partsIn` takes from the build context. */
+export const partsTakes = [sessions, logins, audit, ...transactionsTakes] as const;
+
 /** The parts the module binding factors takes, from the contracts this package pulls. */
 export async function partsIn(c: BuildContext<Settings>) {
 	const transactions = await transactionsIn(c);
 	const resume = resumeOver({
 		sessions: await c.get(sessions),
 		logins: await c.get(logins),
-		revocation: await c.get(subjectRevocation),
 		transactions,
 		log: c.log,
 	});
@@ -42,10 +57,23 @@ export async function partsIn(c: BuildContext<Settings>) {
 	});
 }
 
+/** What `handlersOver` takes from the build context. */
+export const handlersTakes = [
+	factorReading,
+	sessions,
+	subjectRevocation,
+	logins,
+	transactionStore,
+	enrollmentFlow,
+	lockouts,
+	audit,
+	...transactionsTakes,
+] as const;
+
 /** Pulls the contracts and gives each internal module only the interfaces it uses. */
 export async function handlersOver(c: BuildContext<Settings>, policy: LockoutPolicy) {
 	const shared = {
-		factors: await c.get(factors),
+		factors: await c.get(factorReading),
 		sessions: await c.get(sessions),
 		revocation: await c.get(subjectRevocation),
 		transactions: await transactionsIn(c),

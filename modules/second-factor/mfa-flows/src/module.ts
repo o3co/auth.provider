@@ -1,16 +1,21 @@
 import { csrfChecked } from "@mod/csrf";
 import { type Route, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
-import { loginGates } from "@mod/login-gates";
-import { factors, fenceFollower, proofSteps } from "@mod/mfa";
+import { fenceFollower, proofSteps } from "@mod/mfa";
 import { lockoutProblem, requestsPerSource } from "@mod/rate-limit";
 import { revocationFollowers } from "@mod/subject-revocation";
 import { flowParts } from "./contract.ts";
-import { gateOver } from "./proof/proof.ts";
-import { type Handler, unavailable } from "./routing.ts";
+import { type Handler, unavailable } from "./requests/requests.ts";
 import { section } from "./section.ts";
-import { transactionsIn } from "./transactions/transactions.ts";
-import { handlersOver, partsIn, policyOf } from "./wiring/wiring.ts";
+import {
+	gating,
+	gatingTakes,
+	handlersOver,
+	handlersTakes,
+	partsIn,
+	partsTakes,
+	policyOf,
+} from "./wiring/wiring.ts";
 
 type HandlerName = keyof Awaited<ReturnType<typeof handlersOver>>;
 
@@ -36,7 +41,10 @@ const withUnavailable =
 		}
 	};
 
-export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (m) => [
+/** What the module takes: the revocation followers, and its helpers' (`gating`, `partsIn`, `handlersOver`). */
+const takes = [revocationFollowers, ...gatingTakes, ...partsTakes, ...handlersTakes];
+
+export default defineModule({ name: "mfa-flows", section, replicaSafe: true, takes }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "mfa-flows" })),
 	m.provide(flowParts).by(async (c) => {
 		// A completed revocation stops a binding begun before it only where something moves mfa's fence.
@@ -48,13 +56,7 @@ export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (
 		}
 		return partsIn(c);
 	}),
-	m.contribute(loginGates).by(async (c) => ({
-		name: "mfa",
-		hold: gateOver({
-			factors: await c.get(factors),
-			transactions: await transactionsIn(c),
-		}),
-	})),
+	gating(m),
 	...table.map(([method, path, name]) =>
 		m.contribute(routes).by(async (c): Promise<Route> => {
 			const policy = policyOf(c.section);

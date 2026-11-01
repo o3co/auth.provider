@@ -61,7 +61,6 @@ function opening(closes: () => Promise<void> = async () => {}) {
 			},
 		},
 		logins: { resume: async () => ({ kind: "opened", session, cookies: ["session=s1"] }) },
-		revocation: { check: async () => "valid" },
 		transactions: { cleared: () => "mfa=" } as never,
 		log: recordingLog().log,
 	});

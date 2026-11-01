@@ -6,15 +6,15 @@ import type { Session, Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { resumeOver } from "../proof/proof.ts";
 import { auditedBy } from "../recording/recording.ts";
-import * as routing from "../routing.ts";
+import * as requests from "../requests/requests.ts";
 import { lockoutName } from "../section.ts";
 import type { ByPurpose, Started, Transaction } from "../transactions/records.ts";
 import { askedFrom, type Transactions } from "../transactions/transactions.ts";
 
 /** The enrollment routes' handlers, and the answer to a challenge in an enrollment's transaction. */
 export interface EnrollmentFlow {
-	readonly enroll: routing.Handler;
-	readonly complete: routing.Handler;
+	readonly enroll: requests.Handler;
+	readonly complete: requests.Handler;
 	challenge(request: HttpRequest, id: string, t: Transaction): Promise<HttpResponse>;
 }
 
@@ -100,16 +100,16 @@ export const flowPartsOf = (parts: {
 	resumeWith: (request, t, proved, made) => parts.resume(request, t, proved, made),
 	record: auditedBy(parts.audit),
 	answers: {
-		unknownTransaction: routing.unknownTransaction,
-		loginRequired: routing.loginRequired,
-		unavailable: routing.unavailable,
+		unknownTransaction: requests.unknownTransaction,
+		loginRequired: requests.loginRequired,
+		unavailable: requests.unavailable,
 	},
 	requests: {
-		field: routing.field,
-		proofOf: routing.proofOf,
-		postedTransaction: routing.postedTransaction,
-		revokedSince: routing.revokedSince,
-		managing: routing.managing,
+		field: requests.field,
+		proofOf: requests.proofOf,
+		postedTransaction: requests.postedTransaction,
+		revokedSince: requests.revokedSince,
+		managing: requests.managing,
 	},
 	lockout: { name: lockoutName, policy: parts.policy },
 });

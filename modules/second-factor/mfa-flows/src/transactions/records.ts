@@ -9,8 +9,8 @@ export interface Challenge {
 }
 
 /** A login's facts as held: one held before the authentication time was reported has none. */
-export type HeldFacts = Omit<LoginFacts, "authenticatedAt"> &
-	Partial<Pick<LoginFacts, "authenticatedAt">>;
+export type HeldFacts = Omit<LoginFacts, "authenticatedAt" | "provenSince"> &
+	Partial<Pick<LoginFacts, "authenticatedAt" | "provenSince">>;
 
 /** What a transaction holds by its purpose. */
 export type ByPurpose =
