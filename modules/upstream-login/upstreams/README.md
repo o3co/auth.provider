@@ -4,7 +4,7 @@
 - Says what an upstream IdP is to this provider: the IdP types that open one, what an opened upstream does, and who receives a login's upstream tokens.
 
 ## Not here
-- Logging a browser in through an upstream, the IdPs' settings and opening them at boot (the implementation).
+- Logging a browser in through an upstream, the IdPs' settings and opening them at boot (the implementation; see the owner map).
 - What differs per IdP: discovery, keys, the token request, the id_token checks (the type).
 - What IdP types share as OAuth clients of an upstream (`upstream-client`).
 - Keeping upstream tokens (the receivers).
@@ -16,7 +16,7 @@
   - `open` throws `UpstreamMismatch(reason, at)` to say why it refuses the settings and at which of their keys; the reason names no configuration value.
 - An upstream: its issuer, how it answers (in the query or a posted form), its clock allowance, authorization URL, and code exchange → upstream login, with its tokens and profile if the type gives them
   - The code exchange gets the verifier, nonce, redirect URI and the callback's `iss`.
-- An upstream's exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold, and `Unavailable` when it cannot be reached or fails (5xx); a delegation's start is refused as a value, never thrown.
+- Exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold (an exchange's 5xx too), `Unavailable` when unreachable (a refresh's 5xx too); a delegation's start refuses as a value, never throws.
 - `UpstreamRefused.is` and `UpstreamMismatch.is` tell each by a mark, which every copy of upstreams in a bundle shares; a caller tells them so, never by its class.
 - An upstream may also offer a refresh, an end-session URL and an offline delegation
 - A refresh answers new tokens, `invalid_grant` (the grant is gone), `interaction_required` (the grant stands, but the user must act at the upstream first) or `limited` (with when to ask again, where said).
@@ -33,7 +33,7 @@
 - A login's tokens are taken once and go only to a session of the subject that logged in; their lifetime counts from the hand-over.
 
 ## Depends on
-- `kernel`, `session` (the session a receiver is told), `http` (what a continuation is asked and answers); implemented by `federation`.
+- `kernel`, `session` (the session a receiver is told), `http` (what a continuation is asked and answers)
 
 ## Vocabulary
 - IdP type: what one kind of upstream IdP does differently.
