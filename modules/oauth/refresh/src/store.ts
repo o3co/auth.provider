@@ -44,7 +44,10 @@ export interface TokenFamilies {
 	read(tokenId: string): Promise<StoredLink | undefined>;
 }
 
-/** Members by key, each for its own lifetime, which only lengthens; past a cap, the first to end is pushed out. */
+/**
+ * Members by key, each for its own lifetime, which only lengthens; past a cap, the first to end is
+ * pushed out, and awaits under its key until it is said settled.
+ */
 export interface MemberLists {
 	add(
 		key: string,
@@ -54,6 +57,9 @@ export interface MemberLists {
 	members(
 		key: string,
 	): Promise<readonly { readonly member: string; readonly remainingMs: number }[]>;
+	/** The members pushed out under the key and not yet settled, within their lifetimes. */
+	awaiting(key: string): Promise<readonly string[]>;
+	settled(key: string, member: string): Promise<void>;
 }
 
 /** The families whose revocation must still be finished, kept until done. */

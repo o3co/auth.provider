@@ -1,4 +1,5 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
+import { type ClaimsSelections, claimsSelections } from "@mod/claims-selection";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Grant, GrantOutcome } from "@mod/grants";
 import { issuer } from "@mod/issuer";
@@ -46,15 +47,27 @@ async function stillValid(family: Family, checks: Checks): Promise<number | unde
 	return valid ? endsAt : undefined;
 }
 
-export function refreshGrant(
-	stores: Stores,
-	revoker: Revoker,
-	checks: Checks,
-	random: Random,
-	issuer: string,
-	now: () => number,
-	recorder: Pick<Audit, "record">,
-): Grant {
+export interface GrantParts {
+	readonly stores: Stores;
+	readonly revoker: Revoker;
+	readonly checks: Checks;
+	readonly random: Random;
+	readonly issuer: string;
+	readonly now: () => number;
+	readonly recorder: Pick<Audit, "record">;
+	readonly selections: Pick<ClaimsSelections, "forRefreshed">;
+}
+
+export function refreshGrant({
+	stores,
+	revoker,
+	checks,
+	random,
+	issuer,
+	now,
+	recorder,
+	selections,
+}: GrantParts): Grant {
 	const recorded = declaredAudit(recorder, events);
 	/** Ends the family a reuse showed, and records it. */
 	const reused = async (id: string, family: Family) => {
@@ -116,6 +129,8 @@ export function refreshGrant(
 					authenticatedAt: family.authenticatedAt,
 					...(family.authenticatedAtUnknown ? { authenticatedAtUnknown: true as const } : {}),
 					...(family.acr ? { acr: family.acr } : {}),
+					// Bound to no session, the token stands from the authentication its boundary was compared with.
+					...(family.session ? {} : { standingAt: family.authenticatedAt }),
 				},
 				// A refresh continues a grant the policies already let through: they may judge it so.
 				{
@@ -127,6 +142,23 @@ export function refreshGrant(
 			if (judged.kind === "refused") return judged;
 			const issued = judged.access;
 			await revoker.recordAccess(parsed.id, issued);
+			// The family's selection, its names cut to what is allowed and agreed to now, kept for this token;
+			// failing, the token is revoked and the round fails before the rotation, so it can be tried again.
+			try {
+				await selections.forRefreshed(parsed.id, client, family.subject, issued);
+			} catch (error) {
+				await revoker.revokeIssued(issued);
+				throw error;
+			}
+			// A boundary or a logout that came while the token was made: its session no longer enters, and
+			// the token, standing from its issue, is withdrawn rather than handed out.
+			if (family.session !== undefined) {
+				const entry = await checks.sessions.entryOf(family.session);
+				if (entry.kind !== "entered") {
+					await revoker.revokeIssued(issued);
+					return refused;
+				}
+			}
 			// Rotates only from the secret checked here, however often the change runs again.
 			const written = await stores.families.update(parsed.id, (stored) =>
 				liveFamily(stored)?.current === family.current ? { value: toStored(rotated) } : undefined,
@@ -152,19 +184,22 @@ export function refreshGrant(
 	};
 }
 
+/** What `grantOver` takes beside `settlingIn`'s. */
+export const grantTakes = [sessions, subjectRevocation, issuer, audit, claimsSelections];
+
 /** The refresh_token grant over the contracts the assembly gives; it sweeps the families to settle. */
 export async function grantOver(c: BuildContext<Settings>) {
 	const { stores, revoker } = await settlingIn(c);
 	c.every(c.section["sweep-interval"] * 1000, () => revoker.sweep());
 	const checks = { sessions: await c.get(sessions), revocation: await c.get(subjectRevocation) };
-	const issuerUrl = (await c.get(issuer)).url;
-	return refreshGrant(
+	return refreshGrant({
 		stores,
 		revoker,
 		checks,
-		c.random.bytes,
-		issuerUrl,
-		c.clock.now,
-		await c.get(audit),
-	);
+		random: c.random.bytes,
+		issuer: (await c.get(issuer)).url,
+		now: c.clock.now,
+		recorder: await c.get(audit),
+		selections: await c.get(claimsSelections),
+	});
 }
