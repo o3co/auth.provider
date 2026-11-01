@@ -1,0 +1,35 @@
+# interop-clients
+
+## Responsibilities
+- Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
+- Starts the provider the libraries meet, behind an https front whose origin is the issuer: the full template with every feature that opts in, and the services' (`a2a`) for the grants that need no user, such as jwt-bearer, which the full template's ledger of users cannot hold; there an issuer's entry names a client too, for a jwt-bearer request naming none (RFC 7523 §3.1), and an enterprise IdP the harness plays issues ID-JAGs, which an issuer taking the profile is written for.
+- Plays the browser in each flow: the driver logs in and follows the authorization URL a library built, only where it is the provider's authorization endpoint at the issuer, and hands the library the redirect, accepting the consent page on the way for a client that is not first-party.
+- Holds the back-channel receiver the `backchannel` client is registered with, its port bound from the world's build to its stop, and relays each post to the receiver an adapter names with its logout ask: plain http at `127.0.0.1`, on the path it was told.
+- Serves a client's metadata document over https by its host's name, on a certificate the app is told to trust, and reaches it for the app through a tunnel set as its outbound proxy.
+- Holds the differences accepted between a library and the provider, each written narrowly and held to the checklist's exception rules.
+
+## Not here
+- What a library does on its own: its adapter calls the library's first-class interface and reports what the library said.
+- Starting the app (`conformance`'s drivers), the https front (`conformance-front`), and the tunnel (`conformance-tunnel`).
+- Whether an item is met: the flow tests name the items they check, and `spec-checklist` reads their results.
+
+## Offers
+- The script `library <name>`: builds the library's adapter, then runs the flow tests with it (`INTEROP_LIBRARY`, `SPEC_EVIDENCE_RUN`).
+- The script `evidence-runs`: each library's run as the JSON runs `spec-checklist` reads (`@mod/interop-clients#<library>`, kind `library`, the library its matrix value).
+- `known-differences.json`: each accepted difference, by library, flow and the check's title, with its class and reason.
+
+## Invariants
+- An adapter is one program per library, its library pinned in its own manifest (`package.json` for Node, `pom.xml` for Maven, `go.mod` for Go, its toolchain too, `requirements.txt` for Python) and installed from the library's registry; a jar is pinned by its SHA-256 too (`jars.sha256`), as npm's are by the lockfile's integrity, Go's modules by `go.sum`, and Python's packages by `requirements.txt`'s hashes.
+- An adapter trusts the front's certificate, as its instruction gives it, and nothing else, no public root either; no library is told to take plain http, nor follows a redirect to it, which would send a request's body and credentials again in clear.
+- An adapter reports what the provider's answers name, never a value a check expects; takes a discovery only for the issuer asked, as written, before any credential is sent; fetches a key set without the access token; takes an ID token only where its `aud` names the client, and userinfo only where its `sub` is the ID token's; and leaves no file behind, its answer written once its own are gone; a provider the harness plays checks each, as the real one never errs so.
+- The front tells the app the libraries send from `198.51.100.30`: on loopback the sender would be the app's trusted proxy, and its source undetermined.
+- A check that fails is skipped as excused only where a known difference names its library, flow and title; a difference no check met fails the run.
+- A flow test runs only for a library that runs the flow first-class; the others skip it. Spring runs no ID-JAG flow: it has no step to get one, as it reads no `token_type` but Bearer and DPoP, and an ID-JAG's is `N_A`.
+- The world keeps no file but its front's and the metadata document's, under `under` where given: the client certificate's are removed once read back. Where the app does not start, the front, the back-channel relay, the document's server and the tunnel are closed and the run's files removed before the failure is told.
+
+## Depends on
+- `conformance`, `conformance-code`, `conformance-device`, `conformance-exchange`, `conformance-oauth`, `conformance-front`, `conformance-tunnel`, `spec-checklist`, `openid-client`, `undici`; a JDK and Maven for the Nimbus adapter, Go for the Go adapter, Python for the Authlib adapter.
+
+## Vocabulary
+- adapter: a library's small program that runs one flow per start, told by its first input line.
+- flow: a protocol exchange the provider offers and a library runs first-class, such as `login` or `refresh`.
