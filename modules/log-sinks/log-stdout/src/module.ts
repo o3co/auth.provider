@@ -1,4 +1,5 @@
 import { defineModule, type LogLine, logSinks } from "@mod/kernel";
+import { drained } from "./drain.ts";
 
 const envelope = new Set(["level", "at", "event"]);
 
@@ -15,9 +16,13 @@ function text(line: LogLine): string {
 }
 
 export default defineModule({ name: "log-stdout", replicaSafe: true, takes: [] }, (m) => [
-	m.contribute(logSinks).by(() => ({
-		write: (line) => {
-			process.stdout.write(text(line));
-		},
-	})),
+	m.contribute(logSinks).by((c) => {
+		// A sink's hook runs after every other module's: the lines they logged as they stopped are out.
+		c.onStop((signal) => drained(process.stdout, signal));
+		return {
+			write: (line) => {
+				process.stdout.write(text(line));
+			},
+		};
+	}),
 ]);
