@@ -1,5 +1,11 @@
 import { isUnavailable, Unavailable } from "@mod/kernel";
-import { type JsonAnswer, jsonObjectOf, type OutboundResponse } from "@mod/outbound";
+import {
+	type JsonAnswer,
+	jsonObjectOf,
+	type Narrower,
+	type Outbound,
+	type OutboundResponse,
+} from "@mod/outbound";
 import {
 	type AuthorizationStart,
 	type UpstreamRefresh,
@@ -8,6 +14,7 @@ import {
 } from "@mod/upstreams";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
+import { basicAuthorization } from "./basic.ts";
 
 export { type IdTokenLogin, type IdTokenRules, idTokenReaderOf } from "./id-token/reader.ts";
 
@@ -149,13 +156,41 @@ export function refreshAnswerOf(
 	return { kind: "refreshed", tokens: tokenAnswerOf(jsonObjectOf(answer), asked).tokens };
 }
 
-/** A value form-urlencoded, as URLSearchParams writes it: a space is `+`. */
-const formEncoded = (value: string) => new URLSearchParams({ "": value }).toString().slice(1);
+/** How a client authenticates at the token endpoint (RFC 6749 §2.3.1): HTTP Basic, or its ID and secret in the form. */
+export type TokenAuth = "basic" | "form";
 
-/** The HTTP Basic client authentication, each part form-urlencoded first (RFC 6749 §2.3.1). */
-export function basicAuthorization(clientId: string, secret: string): string {
-	const pair = `${formEncoded(clientId)}:${formEncoded(secret)}`;
-	return `Basic ${Buffer.from(pair).toString("base64")}`;
+/**
+ * Posts a grant to the token endpoint, form-urlencoded, the client's secret as `auth` says: the only
+ * request it goes in. The secret is asked for at each post, so one signed per call is fresh.
+ */
+export function tokenPostOf(
+	outbound: Outbound,
+	endpoint: string,
+	client: {
+		readonly id: string;
+		readonly auth: TokenAuth;
+		readonly secret: () => Promise<string>;
+	},
+	narrower: Narrower,
+): (grant: Readonly<Record<string, string>>) => Promise<OutboundResponse> {
+	return async (grant) => {
+		const secret = await client.secret();
+		const form =
+			client.auth === "form" ? { ...grant, client_id: client.id, client_secret: secret } : grant;
+		return outbound.fetch(
+			endpoint,
+			{
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					accept: "application/json",
+				},
+				body: new URLSearchParams(form).toString(),
+				...(client.auth === "basic" ? { credential: basicAuthorization(client.id, secret) } : {}),
+			},
+			narrower,
+		);
+	};
 }
 
 /**
