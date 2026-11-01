@@ -348,14 +348,16 @@ public final class Main {
   /**
    * Signs in, then ends the session by the end-session endpoint, and takes the logout token the
    * provider posts to the receiver the client registered, validated by Nimbus's LogoutTokenValidator.
+   * The harness holds that receiver and relays the post to this one, on a port of its own named with
+   * the logout.
    */
   private Map<String, Object> backchannelLogout() throws Exception {
     Map<String, Object> at = JSONObjectUtils.getJSONObject(instruction, "backchannel");
     CompletableFuture<String> told = new CompletableFuture<>();
-    HttpServer receiver =
-        HttpServer.create(new InetSocketAddress("127.0.0.1", JSONObjectUtils.getInt(at, "port")), 0);
+    String path = JSONObjectUtils.getString(at, "path");
+    HttpServer receiver = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     receiver.createContext(
-        JSONObjectUtils.getString(at, "path"),
+        path,
         exchange -> {
           String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
           for (String pair : body.split("&"))
@@ -367,7 +369,8 @@ public final class Main {
     receiver.start();
     try {
       SignedIn in = signIn();
-      Map<String, Object> ended = logout(in);
+      Map<String, Object> ended =
+          logout(in, "http://127.0.0.1:" + receiver.getAddress().getPort() + path);
       String token = told.get(20, TimeUnit.SECONDS);
       var keys = new DefaultResourceRetriever(5000, 5000, 512 * 1024, true, tls);
       LogoutTokenClaimsSet claims =
@@ -689,10 +692,11 @@ public final class Main {
 
   /** Signs in, then ends the session by the provider's end-session endpoint, as the relying party starts it. */
   private Map<String, Object> logout() throws Exception {
-    return logout(signIn());
+    return logout(signIn(), null);
   }
 
-  private Map<String, Object> logout(SignedIn in) throws Exception {
+  /** Ends the session as the browser would; `receiver`, where given, is named for the back-channel's relay. */
+  private Map<String, Object> logout(SignedIn in, String receiver) throws Exception {
     State state = new State();
     URI url =
         new LogoutRequest(
@@ -704,6 +708,7 @@ public final class Main {
     Map<String, Object> question = new LinkedHashMap<>();
     question.put("ask", "logout");
     question.put("url", url.toString());
+    if (receiver != null) question.put("receiver", receiver);
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("location", JSONObjectUtils.getString(ask(question), "location"));
     result.put("state", state.getValue());
