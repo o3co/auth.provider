@@ -107,10 +107,9 @@ export function sessionsContract(
 			expect(await entering(place.now())).toBe("entered");
 		});
 
-		it("opens through open as through complete, telling it opened, and refuses a proof's start of no epoch milliseconds before anything", async (context) => {
+		it("opens through open as through complete, telling it opened, and refuses a proof's start of no epoch milliseconds before anything", async () => {
 			const place = await open();
-			const opening = place.sessions.open;
-			if (!opening) return context.skip();
+			const opening = (...args: Parameters<Sessions["open"]>) => place.sessions.open(...args);
 			const done = await opening(place.request(), facts(place));
 			if (done.kind !== "opened") expect.unreachable("nothing is revoked");
 			expect((await place.sessions.enter(place.request(done.cookies)))?.id).toBe(done.session.id);
@@ -119,10 +118,9 @@ export function sessionsContract(
 			expect((await place.sessions.enter(place.request(done.cookies)))?.id).toBe(done.session.id);
 		});
 
-		it("refuses a login whose proof began at or before its subject's revocation, closing its session before any cookie, and opens one whose proof began after it", async (context) => {
+		it("refuses a login whose proof began at or before its subject's revocation, closing its session before any cookie, and opens one whose proof began after it", async () => {
 			const place = await open();
-			const opening = place.sessions.open;
-			if (!opening) return context.skip();
+			const opening = (...args: Parameters<Sessions["open"]>) => place.sessions.open(...args);
 			const provenSince = place.now();
 			await place.revokeSubject("carol");
 			const refused = await opening(place.request(), { ...facts(place, "carol"), provenSince });

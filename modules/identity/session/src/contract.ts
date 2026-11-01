@@ -80,9 +80,8 @@ export interface Sessions {
 	/**
 	 * As `complete`, telling it opened; where the facts give `provenSince`, the session is compared with
 	 * the subject's revocation boundary once saved and, revoked, closed before any cookie is made.
-	 * Optional until every implementation has it.
 	 */
-	open?(request: HttpRequest, facts: LoginFacts): Promise<Opened>;
+	open(request: HttpRequest, facts: LoginFacts): Promise<Opened>;
 	/** Adds to the request's session what a further authentication proved, under a new cookie. */
 	raise(
 		request: HttpRequest,
