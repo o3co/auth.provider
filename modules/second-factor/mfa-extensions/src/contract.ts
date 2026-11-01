@@ -2,7 +2,8 @@ import { extensionPoint } from "@mod/kernel";
 
 export type Verified =
 	/**
-	 * `state` is kept with the factor and given to the next verification; `amr` is this proof's,
+	 * `state` is kept with the factor and given to the next verification, as JSON: a value JSON writes
+	 * and reads back as it is (no BigInt, cycle or function), which mfa compares by its text; `amr` is this proof's,
 	 * among its kind's; `remaining` is how many proofs a way back has left, recorded with its use.
 	 */
 	| {
@@ -55,7 +56,7 @@ export interface FactorKind {
 	readonly addsSecondFactor: boolean;
 	/** Whether guessing can beat it, so failures count toward a lockout. */
 	readonly guessable: boolean;
-	/** Whether it meets a required second factor; one that does not is a way back only. */
+	/** Whether it meets a required second factor; one that does not is a way back only, which a subject still binds unless mfa issues it (`issuedWayBack`). */
 	readonly counts: boolean;
 	/** The value no two factors of this kind may hold, whatever their subjects; none while it cannot be told. */
 	uniqueSecret?(factor: Opened): string | undefined;
@@ -66,6 +67,10 @@ export interface FactorKind {
 	/** `kept` is what the factor's last challenge kept, when one was sent. */
 	verify(secret: string, state: unknown, proof: string, kept?: string): Promise<Verified>;
 }
+
+/** A way back mfa issues itself (the recovery codes): it does not count and says guessing cannot beat it. No subject begins one. */
+export const issuedWayBack = (kind: Pick<FactorKind, "counts" | "guessable">): boolean =>
+	!kind.counts && kind.guessable === false;
 
 export const factorKinds = extensionPoint<FactorKind>("mfa.factor-kinds", {
 	multiplicity: "keyed",
@@ -89,3 +94,27 @@ export interface FirstBindingGate {
 export const firstBindingGates = extensionPoint<FirstBindingGate>("mfa.first-binding-gates", {
 	multiplicity: "many",
 });
+
+/** Where a subject's standing is asked, as an inconsistency with the witness is recorded. */
+export type Asked = "login" | "binding" | "credentials";
+
+/**
+ * What stands for the subject after a reset, read anew each time: `counting` where a counting
+ * factor stands (written after it); `none` where none of a counting kind is written and the store
+ * still holds the reset's write; `unsure` otherwise (one written that does not stand, or the
+ * subject's record lost or put back since), so the mark is not the reset's to remove.
+ */
+export type AfterReset = "counting" | "none" | "unsure";
+
+/** Who tells, apart from the store, that a subject enrolled: contributed by `mfa-witnessing` where a witness is composed. */
+export interface Witnessing {
+	/** `held` for a subject holding a counting factor, `none` where nothing marks it either; unavailable, recorded, where a mark stands beside nothing counting. */
+	standing(subject: string, counts: boolean, at: Asked): Promise<"held" | "none">;
+	/** After a binding's write: brings the mark in line with the counting factors, as `counting` reads them now. */
+	settle(subject: string, counting: () => Promise<boolean>): Promise<void>;
+	/** After a reset removed every factor: the mark goes where `after` says it may. */
+	cleared(subject: string, after: () => Promise<AfterReset>): Promise<void>;
+}
+
+/** At most one; with none, the store alone tells. */
+export const witnessing = extensionPoint<Witnessing>("mfa.witnessing", { multiplicity: "many" });
