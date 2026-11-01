@@ -1,0 +1,88 @@
+# OpenID Connect Discovery 1.0 ledger
+
+- source: https://openid.net/specs/openid-connect-discovery-1_0.txt
+- version: OpenID Connect Discovery 1.0 incorporating errata set 2, Final
+- sha256: f498120b428e2f1bed14e3aedcc582edf62f10348c3332411257f5bbf479e4c5
+
+- 1.1 #1 MUST: excluded definition
+- 1.1 #2 MUST NOT: excluded definition
+- 1.1 #3 REQUIRED: excluded definition
+- 1.1 #4 SHALL: excluded definition
+- 1.1 #5 SHALL NOT: excluded definition
+- 1.1 #6 SHOULD: excluded definition
+- 1.1 #7 SHOULD NOT: excluded definition
+- 1.1 #8 RECOMMENDED: excluded definition
+- 1.1 #9 NOT RECOMMENDED: excluded definition
+- 1.1 #10 MUST NOT: excluded definition
+- 2 #1 MUST: oidc-discovery-2-f
+- 2 #2 RECOMMENDED: oidc-discovery-2-g
+- 2 #3 MUST: oidc-discovery-2-a
+- 2 #4 SHOULD: oidc-discovery-2-b
+- 2 #5 MUST: oidc-discovery-2-c
+- 2 #6 MUST: oidc-discovery-2-d
+- 2 #7 MUST: oidc-discovery-2-e
+- 2.1 #1 SHOULD: oidc-discovery-2.1-a
+- 2.1 #2 MUST: oidc-discovery-2.1-b
+- 2.1.1 #1 MUST: oidc-discovery-2.1.1-a
+- 2.1.2 #1 MUST: oidc-discovery-2.1.2-a
+- 3 #1 REQUIRED: oidc-discovery-3-a
+- 3 #2 MUST: oidc-discovery-3-b
+- 3 #3 MUST: oidc-discovery-3-c
+- 3 #4 REQUIRED: oidc-discovery-3-d
+- 3 #5 MUST: oidc-discovery-3-e
+- 3 #6 REQUIRED: oidc-discovery-3-f
+- 3 #7 MUST: oidc-discovery-3-g
+- 3 #8 RECOMMENDED: oidc-discovery-3-h
+- 3 #9 MUST: oidc-discovery-3-i
+- 3 #10 REQUIRED: oidc-discovery-3-j
+- 3 #11 MUST: oidc-discovery-3-k
+- 3 #12 REQUIRED: oidc-discovery-3-l
+- 3 #13 NOT RECOMMENDED: oidc-discovery-3-m
+- 3 #14 MUST: oidc-discovery-3-n
+- 3 #15 MUST: oidc-discovery-3-o
+- 3 #16 MUST NOT: oidc-discovery-3-p
+- 3 #17 RECOMMENDED: oidc-discovery-3-q
+- 3 #18 MUST: oidc-discovery-3-r
+- 3 #19 RECOMMENDED: oidc-discovery-3-s
+- 3 #20 MUST: oidc-discovery-3-t
+- 3 #21 SHOULD: oidc-discovery-3-u
+- 3 #22 REQUIRED: oidc-discovery-3-v
+- 3 #23 MUST: oidc-discovery-3-w
+- 3 #24 MUST: oidc-discovery-3-x
+- 3 #25 REQUIRED: oidc-discovery-3-y
+- 3 #26 REQUIRED: oidc-discovery-3-z
+- 3 #27 MUST: oidc-discovery-3-aa
+- 3 #28 MUST NOT: oidc-discovery-3-ab
+- 3 #29 SHOULD: oidc-discovery-3-ac
+- 3 #30 SHOULD: oidc-discovery-3-ad
+- 3 #31 MUST NOT: oidc-discovery-3-ae
+- 3 #32 RECOMMENDED: oidc-discovery-3-af
+- 3 #33 REQUIRED: oidc-discovery-3-ag
+- 3 #34 SHOULD: oidc-discovery-3-ah
+- 3 #35 SHOULD: oidc-discovery-3-ai
+- 3 #36 SHOULD: oidc-discovery-3-aj
+- 3 #37 NOT RECOMMENDED: oidc-discovery-3-ak
+- 4 #1 MUST: oidc-discovery-4-a
+- 4 #2 MUST: oidc-discovery-4-b
+- 4 #3 MUST: oidc-discovery-4-c
+- 4 #4 SHOULD: oidc-discovery-4-d
+- 4.1 #1 MUST: oidc-discovery-4.1-a, oidc-discovery-4.1-b
+- 4.1 #2 MUST: oidc-discovery-4.1-c
+- 4.2 #1 MUST: oidc-discovery-4.2-a
+- 4.2 #2 MUST: oidc-discovery-4.2-b
+- 4.3 #1 MUST: oidc-discovery-4.3-b
+- 4.3 #2 MUST NOT: oidc-discovery-4.3-c
+- 4.3 #3 MUST: oidc-discovery-4.3-a
+- 4.3 #4 MUST: oidc-discovery-3-c
+- 5 #1 MUST: oidc-discovery-5-a
+- 5 #2 MUST NOT: oidc-discovery-5-b
+- 5 #3 MUST: oidc-discovery-5-c
+- 6 #1 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 6 #2 REQUIRED: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 6 #3 MUST: excluded other: the conformance statement that implementations implement every MUST and REQUIRED above; each is its own item
+- 7.1 #1 MUST: oidc-discovery-7.1-b
+- 7.1 #2 SHOULD: oidc-discovery-7.1-c
+- 7.1 #3 MUST: oidc-discovery-7.1-b
+- 7.1 #4 MUST: oidc-discovery-7.1-a, oidc-discovery-7.1-d
+- 7.2 #1 MUST: oidc-discovery-7.1-d
+- 7.2 #2 MUST: oidc-discovery-7.2-a
