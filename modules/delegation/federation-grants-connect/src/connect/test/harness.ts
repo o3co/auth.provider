@@ -22,7 +22,7 @@ import { memoryRecords } from "@mod/records/testing";
 import { type Seal, seal } from "@mod/seal";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
@@ -294,9 +294,11 @@ export async function connector(
 
 	/** A browser's cookie for a new session of `subject`. */
 	const login = async (subject = "alice") => {
-		const done = await app
-			.get(sessions)
-			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() });
+		const done = openedOf(
+			await app
+				.get(sessions)
+				.open(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() }),
+		);
 		return (done.cookies[0] ?? "").split(";")[0] ?? "";
 	};
 	/** A browser's request to a route, with its cookie and its query or form. */
