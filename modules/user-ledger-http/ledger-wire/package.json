@@ -1,0 +1,17 @@
+{
+	"name": "@mod/ledger-wire",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "protocol",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"peerDependencies": {
+		"zod": "^4.6.0"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5",
+		"zod": "4.6.7"
+	}
+}
