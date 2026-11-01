@@ -7,6 +7,9 @@
 	"exports": {
 		".": "./src/contract.ts"
 	},
+	"dependencies": {
+		"@mod/kinds": "workspace:*"
+	},
 	"devDependencies": {
 		"vitest": "5.0.5"
 	}
