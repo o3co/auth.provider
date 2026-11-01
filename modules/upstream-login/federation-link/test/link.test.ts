@@ -20,7 +20,9 @@ const upstreamLogin: UpstreamLogin = {
 
 /** The link over stand-ins a test sets: by default the browser is still in the session it started from. */
 type Settings = ReturnType<typeof standIn>["set"];
-function standIn() {
+function standIn(
+	more: { readonly stepUp?: { readonly page: string; readonly origin: string } } = {},
+) {
 	const set = {
 		sameOrigin: true,
 		entry: { kind: "entered", session: s1, endsAt: 0 } as Entry,
@@ -92,6 +94,7 @@ function standIn() {
 			},
 		},
 		log: logged.log,
+		...(more.stepUp ? { stepUp: more.stepUp } : {}),
 	});
 	/** What this link's start kept. */
 	const kept = { session: "s1", subject: "alice" };
@@ -147,25 +150,64 @@ it("answers a start a session requirement holds with its answer and the requirem
 	expect(await refusedAt(s)).toEqual([403, { error: "step_up_required", requirement: "mfa" }]);
 });
 
-it("refuses a start not shown to come from this origin, logging the IdP and what the browser said", async () => {
-	const s = standIn();
-	s.set.sameOrigin = false;
-	const request = testRequest({ headers: new Map([["sec-fetch-site", "cross-site\u0007"]]) });
-	expect(await refusedAt(s, request)).toEqual([403, { error: "link_requires_trusted_origin" }]);
-	expect(s.logged.lines()).toEqual([
-		{
-			level: "warn",
-			event: "federation.link_start_rejected",
-			fields: { idp: "corp", secFetchSite: "cross-site" },
-		},
+it("names the step-up page a short start is sent to, with the requirement and only this start to come back to", async () => {
+	const s = standIn({
+		stepUp: { page: "https://as.example/raise?from=link", origin: "https://as.example" },
+	});
+	s.set.entry = { kind: "short", requirement: "mfa", answer: { error: "step_up_required" } };
+	// The browser's own query goes nowhere: the start is spelled from the origin and its path alone.
+	const request = testRequest({
+		path: "/session/oauth/federation/corp",
+		query: new Map([
+			["link", ["1"]],
+			["redirect_to", ["https://evil.example/"]],
+		]),
+	});
+	const [status, body] = (await refusedAt(s, request)) as [number, unknown];
+	expect(status).toBe(403);
+	const { page, ...rest } = body as { page: string };
+	expect(rest).toEqual({ error: "step_up_required", requirement: "mfa" });
+	const sent = new URL(page);
+	expect(`${sent.origin}${sent.pathname}`).toBe("https://as.example/raise");
+	expect([...sent.searchParams]).toEqual([
+		["from", "link"],
+		["requirement", "mfa"],
+		["redirect_to", "https://as.example/session/oauth/federation/corp?link=1"],
 	]);
 });
 
-it("links the identity to the session's subject, hands the tokens to that session, and records it", async () => {
+it("refuses a start not shown to come from this origin, logging the IdP and what the browser said, as one of Sec-Fetch-Site's values or other", async () => {
+	for (const [sent, logged] of [
+		["cross-site", "cross-site"],
+		["same-site", "same-site"],
+		["none", "none"],
+		["cross-site\u0007", "other"],
+		["Cross-Site", "other"],
+		["a value the browser never sends", "other"],
+		[undefined, "other"],
+	] as const) {
+		const s = standIn();
+		s.set.sameOrigin = false;
+		const headers = new Map(sent === undefined ? [] : [["sec-fetch-site", sent]]);
+		expect(await refusedAt(s, testRequest({ headers }))).toEqual([
+			403,
+			{ error: "link_requires_trusted_origin" },
+		]);
+		expect(s.logged.lines(), String(sent)).toEqual([
+			{
+				level: "warn",
+				event: "federation.link_start_rejected",
+				fields: { idp: "corp", secFetchSite: logged },
+			},
+		]);
+	}
+});
+
+it("links the identity to the session's subject, hands the tokens to that session, records it, and lands by 303 [rfc9700-4.12-a]", async () => {
 	const s = standIn();
 	const done = await s.link.complete(s.completing());
 	expect([done.status, done.headers?.location, done.cookies]).toEqual([
-		302,
+		303,
 		landing,
 		["federation.corp=; Max-Age=0"],
 	]);
@@ -190,7 +232,7 @@ it("links the identity to the session's subject, hands the tokens to that sessio
 it("lets the recorded session decide for a browser in none, as a posted answer carries no cookie", async () => {
 	const s = standIn();
 	s.set.entered = undefined;
-	expect((await s.link.complete(s.completing())).status).toBe(302);
+	expect((await s.link.complete(s.completing())).status).toBe(303);
 	expect(s.links).toHaveLength(1);
 });
 
@@ -210,7 +252,7 @@ it("lands where the round trip says, and hands nothing on when the upstream gave
 it("takes an identity the account holds already without a record, and refuses another account's, handing nothing on", async () => {
 	const s = standIn();
 	s.set.linked = "already";
-	expect((await s.link.complete(s.completing())).status).toBe(302);
+	expect((await s.link.complete(s.completing())).status).toBe(303);
 	expect(s.events).toEqual([]);
 	expect(s.joined).toEqual([["s1", "corp", "up-1"]]);
 	s.joined.length = 0;
