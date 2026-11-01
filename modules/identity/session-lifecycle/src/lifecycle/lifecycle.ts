@@ -253,12 +253,9 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		const record: SessionRecord = { format: 2, state: "open", ...context, openedAt };
 		await created(kept.save(handle, toStored(record), lifetimeMs));
 		// Once saved: a boundary landing after this read is later than the opening, which entry compares.
-		const { provenSince } = facts;
-		if (provenSince !== undefined) {
-			if ((await revocation.check(facts.subject, provenSince)) === "revoked") {
-				await close(handle);
-				return { kind: "revoked" };
-			}
+		if ((await revocation.check(facts.subject, facts.provenSince)) === "revoked") {
+			await close(handle);
+			return { kind: "revoked" };
 		}
 		// Listed before its cookie is made, so a revocation finds every session anyone can enter.
 		const { pushedOut } = await listed.add(facts.subject, handle, lifetimeMs);
