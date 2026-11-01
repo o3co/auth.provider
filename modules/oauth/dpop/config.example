@@ -1,6 +1,6 @@
 dpop {
 	nonce {
-		required = never
+		required = as
 		ttl = 5m
 		secret = "REPLACE-NONCE-SECRET-BASE64-32-BYTES"
 	}

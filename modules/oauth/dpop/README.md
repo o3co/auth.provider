@@ -13,11 +13,11 @@
 - Store interface for spent proofs: save a name for a lifetime, answering `created` or `exists`.
   - Requirements: no eviction, survives a crash, never rolled back by failover.
   - Its contract test, and the section for tests, `dpopConfig` (`./testing`).
-- Operator section `dpop`: `algorithms`, `proof-window`, and `nonce` (`required`: `never` by default, `as` or `as+rs`; `ttl`; `secret`), times written with their unit; its keys are in the configuration reference.
+- Operator section `dpop`: `algorithms`, `proof-window`, and `nonce` (`required`: `as` by default, asked at the token endpoint, where a token is bound; `as+rs`, at resources too, is no default, as a resource server outside this provider would have to ask it as well; `never` is warned of at every start, `dpop.nonce_not_asked`; `ttl`; `secret`, then required), times written with their unit; its keys are in the configuration reference.
 
 ## Invariants
 - Where a server-provided nonce is asked (RFC 9449 §8), a proof without one taken is refused `use_dpop_nonce` with the current nonce in `DPoP-Nonce`, before the token's hash is checked and before its jti is spent.
-- A nonce is its time bucket and an HMAC under the shared secret, taken in that bucket and the next; nothing is kept, so any instance takes another's.
+- A nonce is its time bucket and an HMAC under the shared secret, taken in that bucket and the next, and only in the very form it was handed out; nothing is kept, so any instance takes another's.
 - The nonce secret is one, as in 0.17: once it is changed, a nonce handed out just before is refused once, and the client sends the proof again with the new nonce.
 - One DPoP header only; repeated headers arrive joined by commas and are refused.
 - A proof not written in its one form (`keys`' rule for a JWS) is no JWT.
@@ -36,7 +36,7 @@
 
 ## Data
 - Spent proofs, named by the key's thumbprint and the `jti`. A thumbprint holds no dot, so a name is one key's and one `jti`'s alone.
-- Each is kept for twice the window, plus a minute for the store's clock.
+- Each is kept for twice five minutes, the widest `proof-window` the section takes, whatever is set, plus a minute for the store's clock: a `proof-window` widened later on the same store never takes it again.
 
 ## Depends on
 - `kernel`, `http`, `issuer`, `keys`, `sender-binding`
