@@ -73,7 +73,8 @@ export interface Sessions {
 	enterFor(request: HttpRequest, level: EntryLevel): Promise<Entry>;
 	/** The entry a request carrying this session's cookie would get at `level` (`use` unless said): entered with its end, short of a requirement, or absent once closed, ended or revoked. */
 	entryOf(handle: string, level?: EntryLevel): Promise<Entry>;
-	complete(
+	/** As `open`, never answering `revoked`: optional while implementations drop it, and to go. */
+	complete?(
 		request: HttpRequest,
 		facts: LoginFacts,
 	): Promise<{ readonly session: Session; readonly cookies: readonly string[] }>;

@@ -93,13 +93,14 @@ export function sessionsContract(
 		subject,
 		amr: ["pwd"],
 		authenticatedAt: place.now(),
+		provenSince: place.now(),
 	});
 	describe(`sessions' contract: ${name}`, () => {
 		it("lets a session change credentials, where nothing judges that, only after a recent sign-in at a known time", async () => {
 			const place = await open({ credentialsJudged: false });
 			const entering = async (authenticatedAt: number | "unknown") => {
-				const at = { subject: "alice", amr: ["pwd"], authenticatedAt };
-				const done = await place.sessions.complete(place.request(), at);
+				const at = { subject: "alice", amr: ["pwd"], authenticatedAt, provenSince: place.now() };
+				const done = openedOf(await place.sessions.open(place.request(), at));
 				return (await place.sessions.enterFor(place.request(done.cookies), "credentials")).kind;
 			};
 			expect(await entering("unknown")).toBe("short");
@@ -148,7 +149,7 @@ export function sessionsContract(
 
 		it("opens a session on login behind a new cookie, which enters it", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const entered = await place.sessions.enter(place.request(done.cookies));
 			expect(entered?.id).toBe(done.session.id);
 			expect(entered?.context).toMatchObject({
@@ -162,10 +163,9 @@ export function sessionsContract(
 
 		it("closes the session a request carried when a login completes over it", async () => {
 			const place = await open();
-			const first = await place.sessions.complete(place.request(), facts(place));
-			const second = await place.sessions.complete(
-				place.request(first.cookies),
-				facts(place, "bob"),
+			const first = openedOf(await place.sessions.open(place.request(), facts(place)));
+			const second = openedOf(
+				await place.sessions.open(place.request(first.cookies), facts(place, "bob")),
 			);
 			expect(second.session.id).not.toBe(first.session.id);
 			expect(await place.sessions.enter(place.request(first.cookies))).toBeUndefined();
@@ -174,16 +174,15 @@ export function sessionsContract(
 
 		it("keeps a session's subject for as long as it lives, a raise included, and never names another session by its handle", async () => {
 			const place = await open();
-			const first = await place.sessions.complete(place.request(), facts(place));
+			const first = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const raised = await place.sessions.raise(place.request(first.cookies), ["strong"]);
 			expect(raised?.session.context.subject).toBe("alice");
 			expect(await place.sessions.entryOf(first.session.id)).toMatchObject({
 				kind: "entered",
 				session: { context: { subject: "alice" } },
 			});
-			const second = await place.sessions.complete(
-				place.request(raised?.cookies),
-				facts(place, "bob"),
+			const second = openedOf(
+				await place.sessions.open(place.request(raised?.cookies), facts(place, "bob")),
 			);
 			expect((await place.sessions.entryOf(first.session.id)).kind).toBe("absent");
 			expect(await place.sessions.entryOf(second.session.id)).toMatchObject({
@@ -194,8 +193,8 @@ export function sessionsContract(
 
 		it("ends a session at its lifetime, and when its subject is revoked", async () => {
 			const place = await open();
-			const lived = await place.sessions.complete(place.request(), facts(place));
-			const revoked = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const lived = openedOf(await place.sessions.open(place.request(), facts(place)));
+			const revoked = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			await place.revokeSubject("bob");
 			expect(await place.sessions.enter(place.request(revoked.cookies))).toBeUndefined();
 			expect((await place.sessions.entryOf(revoked.session.id)).kind).toBe("absent");
@@ -209,7 +208,7 @@ export function sessionsContract(
 
 		it("answers by handle the entry its cookie would get: entered with its end, short at a level it falls short of, absent once closed or revoked", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const endsAt = done.session.context.authenticatedAt + place.lifetimeMs;
 			expect(await place.sessions.entryOf(done.session.id)).toMatchObject({
 				kind: "entered",
@@ -220,7 +219,7 @@ export function sessionsContract(
 				kind: "short",
 			});
 			expect((await place.sessions.entryOf(done.session.id, "none")).kind).toBe("entered");
-			const revoked = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const revoked = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			await place.revokeSubject("bob");
 			expect(await place.sessions.entryOf(revoked.session.id)).toEqual({ kind: "absent" });
 			await place.sessions.close(done.session.id);
@@ -230,7 +229,7 @@ export function sessionsContract(
 
 		it("tells an entered session when it ends: its opening and the lifetime in force", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.advance(1000);
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			const asked = place.request(raised?.cookies);
@@ -256,7 +255,7 @@ export function sessionsContract(
 
 		it("asks the entry requirements at the level asked, and admits once a raise meets them", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const asked = place.request(done.cookies);
 			expect((await place.sessions.enterFor(asked, "use")).kind).toBe("entered");
 			expect(await place.sessions.enterFor(asked, "credentials")).toMatchObject({
@@ -279,7 +278,7 @@ export function sessionsContract(
 				async (asked: HttpRequest) =>
 					(await place.sessions.enterFor(asked, "credentials")).kind !== "absent",
 			]) {
-				const done = await place.sessions.complete(place.request(), facts(place));
+				const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 				const asked = place.request(done.cookies);
 				let raised: Awaited<ReturnType<Sessions["raise"]>>;
 				between(async () => {
@@ -293,7 +292,7 @@ export function sessionsContract(
 
 		it("raises under a new cookie, keeping the session and its authentication time", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.advance(1000);
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			expect(raised?.session.id).toBe(done.session.id);
@@ -312,17 +311,21 @@ export function sessionsContract(
 
 		it("keeps the authentication time a login reports, or that it is unknown, across a raise", async () => {
 			const place = await open();
-			const known = await place.sessions.complete(place.request(), {
-				...facts(place),
-				authenticatedAt: place.now() - 500,
-			});
+			const known = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					authenticatedAt: place.now() - 500,
+				}),
+			);
 			expect(known.session.context.authenticatedAt).toBe(place.now() - 500);
 			expect(known.session.context.authenticatedAtUnknown).toBeUndefined();
 			const opened = place.now();
-			const unknown = await place.sessions.complete(place.request(), {
-				...facts(place, "bob"),
-				authenticatedAt: "unknown",
-			});
+			const unknown = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place, "bob"),
+					authenticatedAt: "unknown",
+				}),
+			);
 			place.advance(1000);
 			const raised = await place.sessions.raise(place.request(unknown.cookies), ["strong"]);
 			const entered = await place.sessions.enter(place.request(raised?.cookies));
@@ -336,10 +339,12 @@ export function sessionsContract(
 			await place.revokeSubject("alice");
 			place.advance(60_000);
 			const opened = place.now();
-			const done = await place.sessions.complete(place.request(), {
-				...facts(place),
-				authenticatedAt: opened - 120_000,
-			});
+			const done = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					authenticatedAt: opened - 120_000,
+				}),
+			);
 			expect(done.session.context.authenticatedAt).toBe(opened - 120_000);
 			const endsAt = opened + place.lifetimeMs;
 			const asked = place.request(done.cookies);
@@ -357,29 +362,33 @@ export function sessionsContract(
 		it("takes an authentication time later than the opening as the opening", async () => {
 			const place = await open();
 			const opened = place.now();
-			const done = await place.sessions.complete(place.request(), {
-				...facts(place),
-				authenticatedAt: opened + 60_000,
-			});
+			const done = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					authenticatedAt: opened + 60_000,
+				}),
+			);
 			expect(done.session.context.authenticatedAt).toBe(opened);
 		});
 
 		it("takes a login naming its authentication time the opening as authenticated when the session opens, known", async () => {
 			const place = await open();
 			const opened = place.now();
-			const done = await place.sessions.complete(place.request(), {
-				...facts(place),
-				authenticatedAt: "opening",
-			});
+			const done = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					authenticatedAt: "opening",
+				}),
+			);
 			expect(done.session.context.authenticatedAt).toBe(opened);
 			expect(done.session.context.authenticatedAtUnknown).toBeUndefined();
 		});
 
 		it("throws a TypeError, naming no value, for an authentication time that is no time, closing nothing", async () => {
 			const place = await open();
-			const carried = await place.sessions.complete(place.request(), facts(place));
+			const carried = openedOf(await place.sessions.open(place.request(), facts(place)));
 			for (const at of [-1, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
-				const opened = place.sessions.complete(place.request(carried.cookies), {
+				const opened = place.sessions.open(place.request(carried.cookies), {
 					...facts(place),
 					authenticatedAt: at,
 				});
@@ -393,7 +402,7 @@ export function sessionsContract(
 
 		it("says what a raise added once each, however often it was given", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const raised = await place.sessions.raise(place.request(done.cookies), [
 				"strong",
 				"pwd",
@@ -407,7 +416,7 @@ export function sessionsContract(
 
 		it("closes a session past its lifetime without calling the participants, its cookie gone with it", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			place.advance(place.lifetimeMs);
 			for (const cookies of [done.cookies, raised?.cookies]) {
@@ -421,7 +430,7 @@ export function sessionsContract(
 
 		it("hands out every session frozen", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const entered = await place.sessions.enter(place.request(done.cookies));
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			const entry = await place.sessions.enterFor(place.request(raised?.cookies), "use");
@@ -436,7 +445,7 @@ export function sessionsContract(
 
 		it("closes once every participant is done, and lets nobody in meanwhile", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			expect(await place.sessions.entryOf(done.session.id)).toMatchObject({
 				kind: "entered",
 				session: { context: { subject: "alice" } },
@@ -454,8 +463,8 @@ export function sessionsContract(
 
 		it("destroys the cookie on close by handle only when it opens that session", async () => {
 			const place = await open();
-			const mine = await place.sessions.complete(place.request(), facts(place));
-			const other = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const mine = openedOf(await place.sessions.open(place.request(), facts(place)));
+			const other = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			const asked = place.request(other.cookies);
 			expect((await place.sessions.close(mine.session.id, asked)).cookies).toEqual([]);
 			expect((await place.sessions.close(other.session.id, asked)).cookies).toEqual([
@@ -473,10 +482,12 @@ export function sessionsContract(
 				groups: ["staff", "ops"],
 			};
 			const given = { source: "users", values };
-			const done = await place.sessions.complete(place.request(), {
-				...facts(place),
-				attributes: given,
-			});
+			const done = openedOf(
+				await place.sessions.open(place.request(), {
+					...facts(place),
+					attributes: given,
+				}),
+			);
 			values.groups.push("admin");
 			values.name = "Mallory";
 			const kept = {
@@ -491,7 +502,7 @@ export function sessionsContract(
 			expect(raised?.session.context.attributes).toEqual(kept);
 			const entry = await place.sessions.entryOf(done.session.id);
 			expect(entry.kind === "entered" && entry.session.context.attributes).toEqual(kept);
-			const bare = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const bare = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			expect(bare.session.context).not.toHaveProperty("attributes");
 		});
 
@@ -499,10 +510,12 @@ export function sessionsContract(
 			const place = await open();
 			const keptOf = async (given: unknown) => {
 				const attributes = given as SourcedAttributes;
-				const done = await place.sessions.complete(place.request(), {
-					...facts(place),
-					attributes,
-				});
+				const done = openedOf(
+					await place.sessions.open(place.request(), {
+						...facts(place),
+						attributes,
+					}),
+				);
 				const entered = await place.sessions.enter(place.request(done.cookies));
 				expect(entered?.context.attributes).toEqual(done.session.context.attributes);
 				return done.session.context.attributes;
@@ -522,7 +535,7 @@ export function sessionsContract(
 		it("answers the handle a request's cookie opens, and none for a cookie that opens nothing", async () => {
 			const place = await open();
 			const handleOf = (request: HttpRequest) => place.sessions.handleOf(request);
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			expect(await handleOf(place.request(done.cookies))).toBe(done.session.id);
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			expect(await handleOf(place.request(raised?.cookies))).toBe(done.session.id);
@@ -540,7 +553,7 @@ export function sessionsContract(
 
 		it("closes the session a request's cookie points to, and destroys the cookie", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const closed = await place.sessions.closeRequest(place.request(done.cookies));
 			expect(closed.kind).toBe("closed");
 			expect(closed.cookies.some((cookie) => /Max-Age=0/i.test(cookie))).toBe(true);
@@ -549,7 +562,7 @@ export function sessionsContract(
 
 		it("destroys a session cookie sent twice, reading neither and closing no session for it", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const once = done.cookies[0] as string;
 			const twice = place.request([once, once]);
 			expect(await place.sessions.enter(twice)).toBeUndefined();
@@ -564,7 +577,7 @@ export function sessionsContract(
 
 		it("destroys a cookie that opens nothing, and closes no session for it", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			const forged = (done.cookies[0] as string).replace(/=[^;]*/, `=${"A".repeat(43)}`);
 			for (const stale of [done.cookies, [forged]]) {
@@ -584,9 +597,9 @@ export function sessionsContract(
 
 		it("closes every live session of a revoked subject, calling the participants, and no one else's", async () => {
 			const place = await open();
-			await place.sessions.complete(place.request(), facts(place));
-			await place.sessions.complete(place.request(), facts(place));
-			const other = await place.sessions.complete(place.request(), facts(place, "bob"));
+			openedOf(await place.sessions.open(place.request(), facts(place)));
+			openedOf(await place.sessions.open(place.request(), facts(place)));
+			const other = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			await place.revokeSubject("alice");
 			expect(place.closed).toEqual(["alice", "alice"]);
 			expect((await place.sessions.entryOf(other.session.id)).kind).toBe("entered");
@@ -594,7 +607,7 @@ export function sessionsContract(
 
 		it("answers a revocation incomplete while a close it made is left pending, and complete once finished", async () => {
 			const place = await open();
-			await place.sessions.complete(place.request(), facts(place));
+			openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.failClosing(true);
 			expect(await place.revokeSubject("alice")).toEqual({ complete: false });
 			place.failClosing(false);
@@ -604,11 +617,11 @@ export function sessionsContract(
 
 		it("closes a session its subject's full listing pushes out, calling the participants", async () => {
 			const place = await open();
-			const first = await place.sessions.complete(place.request(), facts(place));
-			const others = await place.sessions.complete(place.request(), facts(place, "bob"));
+			const first = openedOf(await place.sessions.open(place.request(), facts(place)));
+			const others = openedOf(await place.sessions.open(place.request(), facts(place, "bob")));
 			for (let n = 0; n < place.listingCap; n++) {
 				place.advance(1000);
-				await place.sessions.complete(place.request(), facts(place));
+				openedOf(await place.sessions.open(place.request(), facts(place)));
 			}
 			expect(place.closed).toEqual(["alice"]);
 			expect((await place.sessions.entryOf(first.session.id)).kind).toBe("absent");
@@ -618,16 +631,16 @@ export function sessionsContract(
 		it("fails a login whose session cannot be listed under its subject", async () => {
 			const place = await open();
 			place.failNextListing();
-			await expect(place.sessions.complete(place.request(), facts(place))).rejects.toSatisfy(
+			await expect(place.sessions.open(place.request(), facts(place))).rejects.toSatisfy(
 				isUnavailable,
 			);
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			expect((await place.sessions.entryOf(done.session.id)).kind).toBe("entered");
 		});
 
 		it("names a closed session for the lifetime from its last close", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			const named = { id: done.session.id, subject: "alice" };
 			for (let n = 0; n < 3; n++) {
 				expect((await place.sessions.close(done.session.id)).session).toEqual(named);
@@ -637,7 +650,7 @@ export function sessionsContract(
 
 		it("says the state each close found the record in: open, closing while left pending, then closed", async () => {
 			const place = await open();
-			const done = await place.sessions.complete(place.request(), facts(place));
+			const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.failClosing(true);
 			expect((await place.sessions.close(done.session.id)).from).toBe("open");
 			expect((await place.sessions.close(done.session.id)).from).toBe("closing");
@@ -650,11 +663,11 @@ export function sessionsContract(
 		it("names the session a close ended or left pending, by its handle and subject", async () => {
 			const place = await open();
 			const named = (done: { session: Session }) => ({ id: done.session.id, subject: "alice" });
-			const asked = await place.sessions.complete(place.request(), facts(place));
+			const asked = openedOf(await place.sessions.open(place.request(), facts(place)));
 			expect((await place.sessions.closeRequest(place.request(asked.cookies))).session).toEqual(
 				named(asked),
 			);
-			const pending = await place.sessions.complete(place.request(), facts(place));
+			const pending = openedOf(await place.sessions.open(place.request(), facts(place)));
 			place.failClosing(true);
 			expect(await place.sessions.close(pending.session.id)).toMatchObject({
 				kind: "pending",
