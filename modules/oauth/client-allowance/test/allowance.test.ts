@@ -53,6 +53,7 @@ describe("allowances within a ceiling", () => {
 			}),
 		);
 		expect(allowsGrant(client, "authorization_code")).toBe(true);
+		expect(clientAllowance.grantsOf(client)).toEqual(client.section(allowances).grants);
 		expect(allowsGrant(client, "client_credentials")).toBe(false);
 		expect(allowsGrant(client, "refresh_token")).toBe(false);
 		expect(allowedIssuance(client, "admin", "https://as").kind).toBe("error");
@@ -121,7 +122,7 @@ describe("scope parameter", () => {
 		}
 	});
 
-	it("issues the defaults for an empty scope, as for none", () => {
+	it("issues the defaults for an empty scope, as for none [rfc6749-3.3-b]", () => {
 		const client = holding({ scopes: ["read", "write"], "default-scopes": ["read"] });
 		for (const requested of ["", undefined]) {
 			expect(allowedIssuance(client, requested, "https://as")).toEqual({
@@ -145,13 +146,22 @@ describe("grants, scopes, issuances and audiences seen", () => {
 		expect(allowsGrant(client([]), "client_credentials")).toBe(false);
 	});
 
-	it("issues each scope asked once, the first allowed audience, and no scope to a client allowed none", () => {
+	it("issues each scope asked once, the first allowed audience, no scope to a client allowed none, and the client's default, the operator's choice, where it asks none; never past its allowance [rfc6750-5.2-c] [rfc9700-2.3-a]", () => {
 		const { allowedIssuance } = clientAllowance;
 		const client = holding({ scopes: ["read"], audiences: ["https://api", "https://other"] });
+		const defaulted = holding({ scopes: ["read", "write"], "default-scopes": ["read"] });
+		expect(allowedIssuance(defaulted, undefined, "https://as")).toEqual({
+			kind: "allowed",
+			scope: ["read"],
+			audience: ["https://as"],
+		});
 		expect(allowedIssuance(client, "read read", "https://as")).toEqual({
 			kind: "allowed",
 			scope: ["read"],
 			audience: ["https://api"],
+		});
+		expect(allowedIssuance(client, "read write", "https://as")).toMatchObject({
+			error: "invalid_scope",
 		});
 		expect(allowedIssuance(holding({}), undefined, "https://as")).toEqual({
 			kind: "allowed",
@@ -181,5 +191,145 @@ describe("grants, scopes, issuances and audiences seen", () => {
 		expect(maySee(api, ["https://other"])).toBe(true);
 		expect(maySee(api, ["c"])).toBe(true);
 		expect(maySee(api, ["https://elsewhere"])).toBe(false);
+	});
+});
+
+describe("an issuance within ceilings", () => {
+	const { allowedIssuance, allowedIssuanceWithin, allowsAudienceWithin } = clientAllowance;
+	const as = "https://as";
+	const client = holding({
+		scopes: ["read", "write"],
+		audiences: ["https://api", "https://other"],
+		"default-scopes": ["read", "write"],
+	});
+
+	it("decides as allowedIssuance with no ceiling", () => {
+		for (const asked of [undefined, "", "read", "write read", "admin"]) {
+			expect(allowedIssuanceWithin(client, [], asked, as), String(asked)).toEqual(
+				allowedIssuance(client, asked, as),
+			);
+		}
+	});
+
+	it("keeps what every ceiling and the client hold, a list not written being no ceiling", () => {
+		const ceilings = [
+			{ scopes: ["read", "write", "admin"] },
+			{ scopes: ["read"], audiences: ["https://other"] },
+		];
+		expect(allowedIssuanceWithin(client, ceilings, "read", as)).toEqual({
+			kind: "allowed",
+			scope: ["read"],
+			audience: ["https://other"],
+		});
+		expect(allowedIssuanceWithin(client, ceilings, "write", as)).toMatchObject({
+			kind: "error",
+			error: "invalid_scope",
+		});
+		expect(allowedIssuanceWithin(client, ceilings, "admin", as).kind).toBe("error");
+		// The defaults are narrowed too; one the ceilings leave none of is refused, never issued empty.
+		expect(allowedIssuanceWithin(client, ceilings, undefined, as)).toMatchObject({
+			scope: ["read"],
+		});
+		expect(allowedIssuanceWithin(client, [{ scopes: ["admin"] }], undefined, as)).toMatchObject({
+			kind: "error",
+			error: "invalid_scope",
+		});
+	});
+
+	it("allows nothing under an empty list, and never widens what the client is allowed", () => {
+		expect(allowedIssuanceWithin(client, [{ scopes: [] }], "read", as).kind).toBe("error");
+		expect(allowedIssuanceWithin(client, [{ scopes: [] }], undefined, as).kind).toBe("error");
+		expect(allowedIssuanceWithin(client, [{ audiences: [] }], "read", as)).toMatchObject({
+			kind: "error",
+			error: "invalid_target",
+		});
+		expect(
+			allowedIssuanceWithin(client, [{ audiences: ["https://elsewhere"] }], "read", as),
+		).toMatchObject({
+			kind: "error",
+			error: "invalid_target",
+		});
+		const wide = [
+			{ scopes: ["read", "write", "admin"], audiences: ["https://api", "https://elsewhere"] },
+		];
+		expect(allowedIssuanceWithin(client, wide, "admin", as).kind).toBe("error");
+		expect(allowsAudienceWithin(client, wide, "https://elsewhere", as)).toBe(false);
+	});
+
+	it("holds the issuer, a client's audience when it is allowed none, to the ceilings like any other", () => {
+		const bare = holding({ scopes: ["read"] });
+		expect(allowedIssuanceWithin(bare, [{ audiences: [as] }], "read", as)).toMatchObject({
+			audience: [as],
+		});
+		expect(allowedIssuanceWithin(bare, [{ audiences: ["https://api"] }], "read", as)).toMatchObject(
+			{
+				kind: "error",
+				error: "invalid_target",
+			},
+		);
+		expect(allowsAudienceWithin(bare, [{ audiences: ["https://api"] }], as, as)).toBe(false);
+		expect(allowsAudienceWithin(bare, [{ scopes: ["read"] }], as, as)).toBe(true);
+	});
+
+	it("keeps an explicitly empty default within any ceiling", () => {
+		const none = holding({ scopes: ["read"], "default-scopes": [] });
+		expect(allowedIssuanceWithin(none, [{ scopes: [] }], undefined, as)).toMatchObject({
+			kind: "allowed",
+			scope: [],
+		});
+	});
+});
+
+describe("ceilings never widen an issuance", () => {
+	const { allowedIssuance, allowedIssuanceWithin } = clientAllowance;
+	const as = "https://as";
+	const clients = [
+		holding({ scopes: ["read"] }),
+		holding({ scopes: ["read", "write"], "default-scopes": ["read"] }),
+		holding({ scopes: ["read"], "default-scopes": [] }),
+		holding({ scopes: [], audiences: ["https://api"] }),
+		holding({ scopes: ["read"], audiences: ["https://api", "https://other"] }),
+	];
+	const ceilings = [
+		[{ scopes: [] }],
+		[{ scopes: ["admin"] }],
+		[{ scopes: ["read"] }],
+		[{ audiences: [] }],
+		[{ audiences: [as] }],
+		[{ scopes: ["read", "write"], audiences: ["https://other"] }],
+		[{ scopes: ["read"] }, { scopes: [] }],
+	];
+
+	it("refuses a client that must name a scope and names none, under any ceiling", () => {
+		const must = holding({ scopes: ["read"] });
+		expect(allowedIssuance(must, undefined, as).kind).toBe("error");
+		for (const within of ceilings) {
+			for (const asked of [undefined, ""]) {
+				expect(
+					allowedIssuanceWithin(must, within, asked, as),
+					JSON.stringify(within),
+				).toMatchObject({ kind: "error", error: "invalid_scope" });
+			}
+		}
+	});
+
+	it("refuses under every ceiling what it refuses under none, and allows only what it would", () => {
+		for (const client of clients) {
+			for (const asked of [undefined, "", "read", "write", "read write", "admin"]) {
+				const alone = allowedIssuance(client, asked, as);
+				for (const within of ceilings) {
+					const narrowed = allowedIssuanceWithin(client, within, asked, as);
+					const label = JSON.stringify({ section: client.section(allowances), asked, within });
+					if (alone.kind === "error") expect(narrowed.kind, label).toBe("error");
+					if (narrowed.kind === "allowed") {
+						expect(alone.kind, label).toBe("allowed");
+						const allowed = client.section(allowances);
+						for (const s of narrowed.scope) expect(allowed.scopes, label).toContain(s);
+						const reach = allowed.audiences.length > 0 ? allowed.audiences : [as];
+						for (const a of narrowed.audience) expect(reach, label).toContain(a);
+					}
+				}
+			}
+		}
 	});
 });
