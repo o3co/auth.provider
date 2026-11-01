@@ -172,6 +172,7 @@ async function serve(
 				subject,
 				amr: ["pwd"],
 				authenticatedAt: runtime.clock.now(),
+				provenSince: runtime.clock.now(),
 			}),
 		);
 		const cookie = cookies[0]?.split(";")[0] ?? "";
