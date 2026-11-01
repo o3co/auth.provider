@@ -17,7 +17,7 @@ import refreshModule from "@mod/refresh/module";
 import { refreshConfig } from "@mod/refresh/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -79,11 +79,13 @@ async function boot() {
 		},
 		runtime,
 	});
-	const { session } = await app.get(sessions).complete(testRequest(), {
-		subject: "alice",
-		amr: ["pwd"],
-		authenticatedAt: runtime.clock.now(),
-	});
+	const { session } = openedOf(
+		await app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+		}),
+	);
 	const grant = { subject: "alice", issuedTo: "app", audience: ["https://api"], scope: ["read"] };
 	const start = async () => {
 		const issued = await app.get(tokens).issue({ grant, grantType: "authorization_code" });
