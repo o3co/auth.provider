@@ -13,7 +13,7 @@ import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Asked, clientCopy, clientSection, consents, isFirstParty } from "../src/contract.ts";
@@ -167,11 +167,13 @@ async function serve(
 	const opened = app.get(sessions);
 	const given = app.get(consents);
 	const sessionFor = async (subject: string) => {
-		const { cookies } = await opened.complete(testRequest(), {
-			subject,
-			amr: ["pwd"],
-			authenticatedAt: runtime.clock.now(),
-		});
+		const { cookies } = openedOf(
+			await opened.open(testRequest(), {
+				subject,
+				amr: ["pwd"],
+				authenticatedAt: runtime.clock.now(),
+			}),
+		);
 		const cookie = cookies[0]?.split(";")[0] ?? "";
 		const session = (await opened.enter(
 			testRequest({ headers: new Map([["cookie", cookie]]) }),
