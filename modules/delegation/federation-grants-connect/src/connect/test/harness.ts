@@ -295,9 +295,12 @@ export async function connector(
 	/** A browser's cookie for a new session of `subject`. */
 	const login = async (subject = "alice") => {
 		const done = openedOf(
-			await app
-				.get(sessions)
-				.open(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() }),
+			await app.get(sessions).open(testRequest(), {
+				subject,
+				amr: ["pwd"],
+				authenticatedAt: runtime.clock.now(),
+				provenSince: runtime.clock.now(),
+			}),
 		);
 		return (done.cookies[0] ?? "").split(";")[0] ?? "";
 	};
