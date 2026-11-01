@@ -273,7 +273,8 @@ export async function harness(
 
 	/** A browser's cookie for a new session of `subject`. */
 	const login = async (subject = "alice") => {
-		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const at = runtime.clock.now();
+		const facts = { subject, amr: ["pwd"], authenticatedAt: at, provenSince: at };
 		const done = openedOf(await app.get(sessions).open(testRequest(), facts));
 		return (done.cookies[0] ?? "").split(";")[0] ?? "";
 	};
