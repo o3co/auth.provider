@@ -2,7 +2,7 @@ import { Unavailable } from "@mod/kernel";
 import { type Entry, sessions } from "@mod/session";
 import type { UpstreamRefresh } from "@mod/upstreams";
 import { describe, expect, it, vi } from "vitest";
-import { back, harness, named, type Offered, unreadable } from "./harness.ts";
+import { back, harness, named, type Offered, receiver, unreadable } from "./harness.ts";
 
 const refreshed = (more: Record<string, unknown> = {}): UpstreamRefresh =>
 	({
@@ -95,7 +95,7 @@ describe("the token route", () => {
 		["short of a requirement", "short"],
 		["open for another subject", "bob"],
 	] as const)(
-		"refuses the refreshed token when the session is %s once the upstream's tokens are written",
+		"refuses the refreshed token when the session is %s once the upstream's tokens are written [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f]",
 		async (_, now) => {
 			const at: { h?: Awaited<ReturnType<typeof linked>> } = {};
 			const offered: Offered = {
@@ -141,7 +141,7 @@ describe("the token route", () => {
 		});
 	});
 
-	it("refuses a token of an ended family, for another audience, or whose session is open for another subject", async () => {
+	it("refuses a token of an ended family, for another audience, or whose session is open for another subject [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f] [rfc6750-3.1-b] [rfc9700-2.3-c]", async () => {
 		const h = await linked();
 		const ended = await h.issue(h.session, "app", { family: "ended" });
 		const aside = await h.issue(h.session, "app", { audience: ["api"] });
@@ -159,7 +159,7 @@ describe("the token route", () => {
 		}
 	});
 
-	it("challenges a refused DPoP-bound token in its own scheme", async () => {
+	it("challenges a refused DPoP-bound token in its own scheme [rfc9449-7.1-c] [rfc9449-7.2-c]", async () => {
 		const h = await linked();
 		const ended = await h.issue(h.session, "app", { family: "ended", dpop: true });
 		const got = await h.call("token", ended.token, { scheme: "DPoP" });
@@ -176,7 +176,7 @@ describe("the token route", () => {
 		expect(await h.stores.records.read(h.session.id)).toBeUndefined();
 	});
 
-	it("refuses a token whose session is short of a requirement as one closed, keeping the session's upstream tokens", async () => {
+	it("refuses a token whose session is short of a requirement as one closed, keeping the session's upstream tokens [rfc6750-3-a] [rfc6750-3-b] [rfc6750-3-c] [rfc6750-3-f]", async () => {
 		const h = await linked();
 		h.shorten("alice");
 		for (const idp of ["corp", "other"]) {
@@ -191,15 +191,27 @@ describe("the token route", () => {
 		expect(await h.stores.records.read(h.session.id)).toBeDefined();
 	});
 
-	it("refuses a client the operator did not make a receiver, even one whose own metadata says it receives", async () => {
+	it("refuses a client the operator did not make a receiver, even one whose own metadata says it receives, challenging it insufficient_scope in its token's scheme [rfc6750-3-a] [rfc6750-3.1-c]", async () => {
 		const h = await linked();
 		for (const client of ["plain", named]) {
 			const { token } = await h.issue(h.session, client);
-			expect(await h.ask(token)).toMatchObject({ status: 403, json: { error: "forbidden" } });
+			const got = await h.ask(token);
+			expect([got.status, got.json, got.headers["www-authenticate"]]).toEqual([
+				403,
+				{ error: "forbidden" },
+				'Bearer error="insufficient_scope"',
+			]);
 		}
 		expect(h.events.map((e) => [e.kind, e.attributes?.reason])).toEqual([
 			["federation.token.failed", "forbidden"],
 			["federation.token.failed", "forbidden"],
+		]);
+		// A DPoP-bound token is challenged in its own scheme.
+		const bound = await h.issue(h.session, "plain", { dpop: true });
+		const got = await h.call("token", bound.token, { scheme: "DPoP" });
+		expect([got.status, got.headers["www-authenticate"]]).toEqual([
+			403,
+			'DPoP error="insufficient_scope"',
 		]);
 	});
 
@@ -428,4 +440,12 @@ describe("the upstream logout route", () => {
 		});
 		expect((await h.ask(h.token)).status).toBe(200);
 	});
+});
+
+it("warns at every start for each registered client that receives upstream tokens, by its id", async () => {
+	const h = await harness();
+	const warned = h.logged().filter((line) => line.event === "federation-tokens.receives");
+	expect(warned).toEqual([
+		{ level: "warn", event: "federation-tokens.receives", fields: { client: receiver } },
+	]);
 });
