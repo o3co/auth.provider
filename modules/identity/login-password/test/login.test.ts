@@ -4,8 +4,21 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
+import {
+	quietRuntime,
+	recordingLog,
+	switchedModule,
+	takesUnused,
+	unavailableSwitch,
+} from "@mod/kernel/testing";
 import { loginGates, logins, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
@@ -13,6 +26,7 @@ import secretHashModule from "@mod/secret-hash/module";
 import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn, stubSessions } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
+import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { type Users, users } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -30,11 +44,17 @@ afterEach(async () => {
 interface Setup {
 	readonly login?: Record<string, unknown>;
 	readonly gates?: Record<string, unknown>;
+	/** In place of login-gates, a `logins` answering as a test needs. */
+	readonly logins?: Module;
 	readonly trusted?: string[];
 	readonly origin?: string;
 	readonly sessions?: Module;
 	readonly users?: Module;
 	readonly extra?: Module[];
+	/** A log in place of the quiet one. */
+	readonly log?: ReturnType<typeof recordingLog>;
+	/** A clock the test moves, in place of the host's. */
+	readonly clock?: { at: number };
 }
 
 async function serve(setup: Setup = {}) {
@@ -44,7 +64,7 @@ async function serve(setup: Setup = {}) {
 	const app = await assemble({
 		modules: [
 			http,
-			gatesModule,
+			setup.logins ?? gatesModule,
 			csrfStandIn,
 			cookiesModule,
 			setup.users ?? usersModule,
@@ -59,7 +79,8 @@ async function serve(setup: Setup = {}) {
 			...(setup.extra ?? []),
 		],
 		config: {
-			...kernelConfig(),
+			// A plain-http origin is one only a development deployment takes.
+			...kernelConfig({ environment: origin.startsWith("http:") ? "development" : "production" }),
 			...httpConfig({
 				"trusted-proxies": setup.trusted ?? ["127.0.0.1"],
 				"public-origin": origin,
@@ -72,9 +93,13 @@ async function serve(setup: Setup = {}) {
 				testUser("carol", "pw", { attributes: carol }),
 			]),
 			"login-password": setup.login ?? {},
-			"login-gates": setup.gates ?? {},
+			...(setup.logins ? {} : { "login-gates": setup.gates ?? {} }),
 		},
-		runtime,
+		runtime: setup.log
+			? quietRuntime({ log: setup.log.log })
+			: setup.clock
+				? quietRuntime({ clock: { now: () => setup.clock?.at ?? 0 } })
+				: runtime,
 	});
 	await app.start();
 	stop = () => app.stop(1000);
@@ -178,7 +203,7 @@ describe("login-password answers", () => {
 		expect((await login("username=alice", { "content-type": "text/plain" })).status).toBe(415);
 	});
 
-	it("refuses without CSRF evidence, and with a repeated field", async () => {
+	it("refuses without CSRF evidence, and with a repeated field [oidc-core-3.1.2.3-e]", async () => {
 		const { login } = await serve();
 		expect((await login(right, { origin: "" })).status).toBe(403);
 		expect((await login(right, { origin: "https://evil.example" })).status).toBe(403);
@@ -200,8 +225,8 @@ describe("login-password answers", () => {
 
 	it("gives no cookie when the session cannot be opened after a match", async () => {
 		const down = unavailableSwitch<Sessions>("session");
-		down.unavailable("complete");
-		const failing = defineModule({ name: "session" }, (m) => [
+		down.unavailable("open");
+		const failing = defineModule({ name: "session", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(sessions).by(() => down.wrap(stubSessions())),
 		]);
 		const { login, events } = await serve({ sessions: failing });
@@ -282,7 +307,7 @@ describe("login-password return targets", () => {
 });
 
 describe("login-password attempts", () => {
-	it("counts every attempt before checking it, successful or not, known user or not", async () => {
+	it("counts every attempt before checking it, successful or not, known user or not [rfc6749-10.10-d]", async () => {
 		const { login } = await serve({ login: { attempts: 2, window: "1m" } });
 		await login(right, from("198.51.100.1"));
 		await login({ username: "nobody", password: "x" }, from("198.51.100.1"));
@@ -355,12 +380,13 @@ describe("login-password attempts", () => {
 });
 
 it("sends the user back to a contributed path on the public origin, with any query, and nowhere near it", async () => {
-	const authorize = defineModule({ name: "return-path" }, (m) => [
+	const authorize = defineModule({ name: "return-path", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(returnPaths).by(() => ({ path: "/oauth/authorize" })),
 	]);
-	const device = defineModule({ name: "another-return-path" }, (m) => [
-		m.contribute(returnPaths).by(() => ({ path: "/device" })),
-	]);
+	const device = defineModule(
+		{ name: "another-return-path", replicaSafe: true, takes: [] },
+		(m) => [m.contribute(returnPaths).by(() => ({ path: "/device" }))],
+	);
 	const { login } = await serve({ extra: [authorize, device] });
 	const back = "https://as.example/oauth/authorize?client_id=app&state=x";
 	expect((await login({ ...right, redirect_to: back })).body).toEqual({ redirect_to: back });
@@ -383,7 +409,7 @@ it("sends the user back to a contributed path on the public origin, with any que
 
 it("answers a login a gate holds with 403, the gate's answer and its cookies, and opens no session", async () => {
 	const carried: unknown[] = [];
-	const gate = defineModule({ name: "gate" }, (m) => [
+	const gate = defineModule({ name: "gate", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "second",
 			hold: async (_request, _facts, done) => {
@@ -468,25 +494,83 @@ it("passes the user's attributes from users' answer to the session, under the so
 	expect((await app.get(sessions).enter(request))?.context).not.toHaveProperty("attributes");
 });
 
-it("reports the time it verified the password as the login's authentication time", async () => {
+it("names the session's opening as the login's authentication time, so a gate's wait never ages it", async () => {
 	const seen: unknown[] = [];
-	const gate = defineModule({ name: "gate" }, (m) => [
+	let passedAt = 0;
+	const gate = defineModule({ name: "gate", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "watching",
 			hold: async (_request, facts) => {
 				seen.push(facts.authenticatedAt);
+				await new Promise((resolve) => setTimeout(resolve, 20));
+				passedAt = Date.now();
 				return { kind: "pass" as const };
 			},
 		})),
 	]);
-	const { login } = await serve({ extra: [gate] });
-	const before = Date.now();
+	const { app, login } = await serve({ extra: [gate] });
+	const res = await login(right);
+	expect(res.status).toBe(200);
+	expect(seen).toEqual(["opening"]);
+	const cookie = res.headers.getSetCookie()[0] ?? "";
+	const request = testRequest({ headers: new Map([["cookie", cookie.split(";")[0] ?? ""]]) });
+	const context = (await app.get(sessions).enter(request))?.context;
+	expect(context?.authenticatedAt).toBeGreaterThanOrEqual(passedAt);
+	expect(context).not.toHaveProperty("authenticatedAtUnknown");
+});
+
+/** users, its `verify` running `during` first, as a ledger slow to answer. */
+const slowUsers = (during: () => Promise<void>) =>
+	switchedModule(usersModule, users, {
+		wrap: (inner: Users): Users =>
+			new Proxy({} as Users, {
+				get: (_target, prop) => {
+					if (prop === "verify") {
+						return async (...args: Parameters<Users["verify"]>) => {
+							await during();
+							return inner.verify(...args);
+						};
+					}
+					const member = Reflect.get(inner, prop);
+					return typeof member === "function" ? member.bind(inner) : member;
+				},
+			}),
+	} as never);
+
+it("states the time taken before the password is verified as the proof's start session compares", async () => {
+	const clock = { at: 1_800_000_000_000 };
+	const seen: unknown[] = [];
+	const gate = defineModule({ name: "gate", replicaSafe: false, takes: [] }, (m) => [
+		m.contribute(loginGates).by(() => ({
+			name: "watching",
+			hold: async (_request, facts) => {
+				seen.push(facts.provenSince);
+				return { kind: "pass" as const };
+			},
+		})),
+	]);
+	const users = slowUsers(async () => {
+		clock.at += 5000;
+	});
+	const { login } = await serve({ clock, users, extra: [gate] });
 	expect((await login(right)).status).toBe(200);
-	const after = Date.now();
-	const [at] = seen;
-	expect(typeof at).toBe("number");
-	expect(at as number).toBeGreaterThanOrEqual(before);
-	expect(at as number).toBeLessThanOrEqual(after);
+	expect(seen).toEqual([1_800_000_000_000]);
+});
+
+it("refuses, as a wrong password and with no cookie, a login whose verification answered after a revocation it began before", async () => {
+	const clock = { at: 1_800_000_000_000 };
+	let revoke = async () => {};
+	const users = slowUsers(async () => {
+		// The revocation lands while the ledger checks the password; the answer comes two seconds on.
+		await revoke();
+		clock.at += 2000;
+	});
+	const { app, login } = await serve({ clock, users });
+	revoke = async () => void (await app.get(subjectRevocation).revoke("alice"));
+	const res = await login(right);
+	expect(res.status).toBe(401);
+	expect(res.body).toEqual({ error: "invalid_credentials" });
+	expect(res.headers.getSetCookie().some((c) => c.startsWith("session"))).toBe(false);
 });
 
 describe("login-password attempts per account", () => {
@@ -500,7 +584,7 @@ describe("login-password attempts per account", () => {
 	const elsewhere = () => from(`198.51.100.${sender++}`);
 	const wrong = (username: string) => ({ username, password: "wrong" });
 
-	it("makes an identifier wait after its attempts, from any source, and answers alike whether its account exists", async () => {
+	it("makes an identifier wait after its attempts, from any source, and answers alike whether its account exists [rfc6749-10.10-d]", async () => {
 		for (const username of ["alice", "nobody"]) {
 			const { login } = await serve({ login: budget });
 			expect((await login(wrong(username), elsewhere())).status, username).toBe(401);
@@ -583,4 +667,129 @@ describe("login-password attempts per account", () => {
 			await expect(serve({ login }), JSON.stringify(login)).rejects.toBeInstanceOf(BootRefused);
 		}
 	});
+});
+
+describe("login-password under a gate that refuses", () => {
+	/** A `logins` whose login answers `outcome`, or throws it. */
+	const answering = (outcome: () => Promise<unknown>) =>
+		defineModule({ name: "logins-stand-in", replicaSafe: true, takes: [] }, (m) => [
+			m.provide(logins).by(() => ({
+				login: outcome as never,
+				resume: outcome as never,
+				achievable: () => true,
+				returnAllowed: () => true,
+			})),
+		]);
+	const budget = { "account-attempts": 2, "account-window": "1h", "account-max-wait": "1m" };
+	let sender = 60;
+	const elsewhere = () => from(`198.51.100.${sender++}`);
+
+	it("answers a refused login as a wrong password, in its answer, its record and its count", async () => {
+		const refused = async () => ({ kind: "refused", gate: "credential-policy", cookies: [] });
+		const { login, events } = await serve({ login: budget, logins: answering(refused) });
+		const wrong = await login({ username: "bob", password: "wrong" }, elsewhere());
+		const refusedOne = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([refusedOne.status, refusedOne.body]).toEqual([wrong.status, wrong.body]);
+		expect(refusedOne.headers.getSetCookie()).toEqual([]);
+		expect(events.map((e) => [e.kind, e.subject])).toEqual([
+			["login.failed", undefined],
+			["login.failed", undefined],
+		]);
+		// Counted as a failed guess: the identifier waits after its attempts.
+		await login({ username: "alice", password: "correct horse" }, elsewhere());
+		const held = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([held.status, held.body]).toEqual([429, { error: "too_many_attempts" }]);
+	});
+
+	it("hands back the guess where a gate cannot tell, answering unavailable", async () => {
+		const down = async () => {
+			throw new Unavailable("login-gates");
+		};
+		const { login } = await serve({
+			login: { ...budget, "account-attempts": 1 },
+			logins: answering(down),
+		});
+		for (let i = 0; i < 3; i++) {
+			const res = await login({ username: "alice", password: "correct horse" }, elsewhere());
+			expect([res.status, res.body], String(i)).toEqual([
+				503,
+				{ error: "temporarily_unavailable" },
+			]);
+		}
+	});
+
+	it("answers a login the gates opened or held though its run cannot be ended then, the attempt staying counted", async () => {
+		let down = () => {};
+		const outcomes = {
+			opened: { kind: "opened", session: { id: "h1" }, cookies: ["__Host-session=s1; Path=/"] },
+			held: {
+				kind: "held",
+				gate: "mfa",
+				answer: { error: "mfa_required" },
+				cookies: ["mfa=t1; Path=/"],
+			},
+		};
+		let next: keyof typeof outcomes = "opened";
+		const logged = recordingLog();
+		const { login, simulated, events } = await serve({
+			log: logged,
+			login: budget,
+			logins: answering(async () => {
+				// The store goes down once the login is made, before its run is ended.
+				down();
+				return outcomes[next];
+			}),
+		});
+		down = () => simulated.unreachable(true);
+		const answers = [];
+		for (const kind of ["opened", "held"] as const) {
+			next = kind;
+			simulated.unreachable(false);
+			const res = await login({ username: "alice", password: "correct horse" }, elsewhere());
+			answers.push([res.status, res.body, res.headers.getSetCookie()]);
+		}
+		expect(answers).toEqual([
+			[200, {}, [expect.stringMatching(/^__Host-session=s1/)]],
+			[403, { error: "mfa_required" }, [expect.stringMatching(/^mfa=t1/)]],
+		]);
+		expect(events.map((e) => [e.kind, e.subject])).toEqual([
+			["login.succeeded", "alice"],
+			["login.held", "alice"],
+		]);
+		expect(logged.lines().filter((l) => l.level === "warn")).toEqual([
+			{ level: "warn", event: "login-password.run_unended", fields: {} },
+			{ level: "warn", event: "login-password.run_unended", fields: {} },
+		]);
+		// Both left counted: the identifier, past its two attempts, waits.
+		simulated.unreachable(false);
+		down = () => {};
+		const held = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([held.status, held.body]).toEqual([429, { error: "too_many_attempts" }]);
+	});
+});
+
+it("takes every handle its takes name, every module beside it as it boots", async () => {
+	const modules = [
+		http,
+		gatesModule,
+		csrfStandIn,
+		cookiesModule,
+		usersModule,
+		secretHashModule,
+		memoryUsersStores().module,
+		sessionStandIn,
+		subjectRevocationStandIn,
+		rateLimitModule,
+		simulatedStore().module,
+		loginModule,
+		auditStandIn().module,
+	];
+	const config = {
+		...kernelConfig(),
+		...httpConfig({ "public-origin": "https://as.example" }),
+		...usersConfig([testUser("alice", "correct horse")]),
+		"login-password": {},
+		"login-gates": {},
+	};
+	expect((await takesUnused({ modules, config }))["login-password"]).toBeUndefined();
 });
