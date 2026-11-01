@@ -6,7 +6,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import {
 	canonicalAddress,
@@ -16,6 +16,7 @@ import {
 	mailTemplates,
 	plainText,
 	preparer,
+	preparerTakes,
 } from "../src/contract.ts";
 import mailModule from "../src/module.ts";
 import { section } from "../src/section.ts";
@@ -47,7 +48,7 @@ async function relay(how?: "limit" | "down"): Promise<"accepted" | "limit"> {
 
 /** A sender through the stand-in relay that allows one mail per address and then answers limited. */
 const onePerAddress = (how?: "limit" | "down") =>
-	defineModule({ name: "one-per-address" }, (m) => [
+	defineModule({ name: "one-per-address", replicaSafe: false, takes: preparerTakes }, (m) => [
 		m.provide(mail).by(async (c) => {
 			const prepare = await preparer(c);
 			const reached = new Set<string>();
@@ -70,7 +71,7 @@ mailContract("one mail per address", {
 	refusing: (how, modules) => bootWith(onePerAddress(how), modules, {}),
 });
 
-const reset = defineModule({ name: "reset-owner" }, (m) => [
+const reset = defineModule({ name: "reset-owner", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(mailPurposes).by(() => ({ purpose: "reset" })),
 	m
 		.contribute(mailTemplates)
@@ -142,8 +143,28 @@ it("refuses to boot unless the operator accepts that nothing is sent, and on man
 	await expect(boot([contractTemplates])).resolves.toBeDefined();
 });
 
+it("warns at every start that the logging-only sender sends nothing", async () => {
+	const warned = async () => {
+		const from = recorded.lines().length;
+		await boot([reset]);
+		return recorded
+			.lines()
+			.slice(from)
+			.filter((line) => line.level === "warn");
+	};
+	const once = [
+		{
+			level: "warn",
+			event: "mail.unsent_accepted",
+			fields: { reason: "the logging-only sender sends nothing" },
+		},
+	];
+	expect(await warned()).toEqual(once);
+	expect(await warned()).toEqual(once);
+});
+
 it("names the purpose that has no template when it refuses to boot", async () => {
-	const bare = defineModule({ name: "bare-owner" }, (m) => [
+	const bare = defineModule({ name: "bare-owner", replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(mailPurposes).by(() => ({ purpose: "bare" })),
 	]);
 	const booting = boot([bare]);
@@ -189,4 +210,11 @@ it("puts an address in one form: its domain in IDNA's ASCII form, lowercase, its
 
 it("refuses the logging-only sender unless the operator accepts that it sends nothing", () => {
 	expect(section.parse({})).toEqual({ "accept-unsent": false });
+});
+
+it("takes every handle its takes name", async () => {
+	const config = { ...kernelConfig(), ...mailConfig() };
+	expect(
+		(await takesUnused({ modules: [mailModule, contractTemplates], config })).mail,
+	).toBeUndefined();
 });
