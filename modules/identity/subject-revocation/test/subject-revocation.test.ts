@@ -121,10 +121,10 @@ it("saves a first boundary, and moves one the subject holds, with one write each
 
 it("is unavailable when a boundary holds no time, and a revocation moves both kinds over it", async () => {
 	const { boundaries, revocation, revocations } = await boot();
-	await boundaries.save("alice", { at: now } as unknown as StoredBoundary, "endless");
+	await boundaries.save("alice", () => ({ at: now }) as unknown as StoredBoundary, "endless");
 	await boundaries.save(
 		"bob",
-		{ sessions: now, delegations: "soon" } as unknown as StoredBoundary,
+		() => ({ sessions: now, delegations: "soon" }) as unknown as StoredBoundary,
 		"endless",
 	);
 	await expect(revocation.check("alice", now - 1000)).rejects.toSatisfy(isUnavailable);
@@ -132,7 +132,7 @@ it("is unavailable when a boundary holds no time, and a revocation moves both ki
 		isUnavailable,
 	);
 	await expect(revocations.compare("bob", now - 1000, "sessions")).rejects.toSatisfy(isUnavailable);
-	await boundaries.save("carol", null as unknown as StoredBoundary, "endless");
+	await boundaries.save("carol", () => null as unknown as StoredBoundary, "endless");
 	await expect(revocations.compare("carol", now - 1000, "sessions")).rejects.toSatisfy(
 		isUnavailable,
 	);
@@ -144,7 +144,7 @@ it("is unavailable when a boundary holds no time, and a revocation moves both ki
 
 it("reads a boundary of one time as both kinds", async () => {
 	const { boundaries, revocations } = await boot();
-	await boundaries.save("alice", stored(now), "endless");
+	await boundaries.save("alice", () => stored(now), "endless");
 	expect(await revocations.compare("alice", now - 1000, "sessions")).toBe("revoked");
 	expect(await revocations.compare("alice", now - 1000, "delegations")).toBe("revoked");
 	expect(await revocations.compare("alice", now + 1000, "delegations")).toBe("valid");
@@ -156,7 +156,7 @@ it("moves a first boundary another writer saved first", async () => {
 	const { revocation } = await boot((b) => ({
 		...b,
 		save: async (subject, record, lifetimeMs) => {
-			await b.save(subject, stored(now - 60_000), lifetimeMs);
+			await b.save(subject, () => stored(now - 60_000), lifetimeMs);
 			return b.save(subject, record, lifetimeMs);
 		},
 	}));
@@ -170,6 +170,28 @@ it("writes even when the boundary is already far enough, so an unconfirmed bound
 	clock.at = now - 60_000;
 	down.failNext("update");
 	await expect(revocation.revoke("alice")).rejects.toSatisfy(isUnavailable);
+});
+
+it("is unavailable, recording nothing, where a store hands a write no deadline", async () => {
+	/** A write the store hands as no deadline, or as one of no number. */
+	const handing =
+		(write: unknown) =>
+		(b: BoundaryStore): BoundaryStore => ({
+			...b,
+			save: (subject, record, lifetimeMs) =>
+				b.save(subject, () => (record as (w: unknown) => StoredBoundary)(write), lifetimeMs),
+			update: (subject, change) =>
+				b.update(subject, (record) =>
+					(change as (r: StoredBoundary, w: unknown) => StoredBoundary)(record, write),
+				),
+		});
+	for (const write of [undefined, {}, { deadline: "soon" }, { deadline: Number.NaN }]) {
+		const { revocation } = await boot(handing(write));
+		await expect(revocation.revoke("alice"), JSON.stringify(write)).rejects.toSatisfy(
+			isUnavailable,
+		);
+		expect(await revocation.check("alice", now - 1000)).toBe("valid");
+	}
 });
 
 it("is unavailable rather than valid or recorded when the store cannot tell", async () => {

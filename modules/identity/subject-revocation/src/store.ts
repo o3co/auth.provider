@@ -11,10 +11,10 @@ export interface BoundaryWrite {
 
 /** Boundaries by subject, each changed only from what it holds, kept without end. Every call throws Unavailable when the place cannot tell. */
 export interface BoundaryStore {
-	/** Keeps a subject's first boundary, unless the subject holds one; one made from a write is made from each attempt's. */
+	/** Keeps a subject's first boundary, unless the subject holds one, made from each attempt's write. */
 	save(
 		subject: string,
-		record: StoredBoundary | ((write?: BoundaryWrite) => StoredBoundary),
+		record: (write: BoundaryWrite) => StoredBoundary,
 		lifetimeMs: "endless",
 	): Promise<"created" | "exists">;
 	read(subject: string): Promise<StoredBoundary | undefined>;
@@ -24,7 +24,7 @@ export interface BoundaryStore {
 	 */
 	update(
 		subject: string,
-		change: (record: StoredBoundary, write?: BoundaryWrite) => StoredBoundary,
+		change: (record: StoredBoundary, write: BoundaryWrite) => StoredBoundary,
 	): Promise<{ readonly before: StoredBoundary; readonly after: StoredBoundary } | undefined>;
 }
 

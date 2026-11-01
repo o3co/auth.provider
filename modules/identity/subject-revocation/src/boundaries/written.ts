@@ -16,24 +16,30 @@ export const opened = (record: StoredBoundary): Boundaries | undefined => {
 	return typeof delegations === "number" ? { sessions, delegations } : undefined;
 };
 
+/** The deadline a store hands a write; one that hands none, or one of no number, has written nothing it can confirm. */
+const timeOf = (write: BoundaryWrite | undefined) => {
+	const deadline: unknown = write?.deadline;
+	if (typeof deadline !== "number" || !Number.isFinite(deadline)) {
+		throw new Unavailable("subject-revocation");
+	}
+	return deadline;
+};
+
 /**
  * Writes a subject's boundaries through the store at the deadline of the write that records them,
- * on the store's clock, so a boundary is never earlier than the time its write became visible;
- * the time `now` gives stands in only where a store hands no write.
+ * on the store's clock, so a boundary is never earlier than the time its write became visible.
  */
-export function writtenTo(boundaries: BoundaryStore, now: () => number): Write {
+export function writtenTo(boundaries: BoundaryStore): Write {
 	return async (subject, keep) => {
-		const at = now();
-		const timeOf = (write?: BoundaryWrite) => write?.deadline ?? at;
 		// Written even when far enough, so a boundary not yet confirmed is confirmed by this write.
 		// A record that holds no time keeps nothing: both kinds move.
-		const moved = (record: StoredBoundary, write?: BoundaryWrite) => {
+		const moved = (record: StoredBoundary, write: BoundaryWrite) => {
 			const held = opened(record);
 			return stored(recorded(held, timeOf(write), keep && held !== undefined));
 		};
 		// Update first: a subject revoked before then costs one call.
 		if (await boundaries.update(subject, moved)) return;
-		const first = (write?: BoundaryWrite) => stored(recorded(undefined, timeOf(write), keep));
+		const first = (write: BoundaryWrite) => stored(recorded(undefined, timeOf(write), keep));
 		if ((await boundaries.save(subject, first, "endless")) === "created") return;
 		// Another request saved the first boundary meanwhile: move it from what it holds.
 		if (!(await boundaries.update(subject, moved))) throw new Unavailable("subject-revocation");
