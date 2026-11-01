@@ -166,6 +166,7 @@ async function serve(
 				subject: "alice",
 				amr: ["pwd"],
 				authenticatedAt: runtime.clock.now(),
+				provenSince: runtime.clock.now(),
 			}),
 		);
 		const code = await app.get(codes).issue({

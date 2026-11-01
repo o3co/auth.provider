@@ -243,6 +243,7 @@ async function serve(options: Options = {}) {
 			subject: "alice",
 			amr: ["pwd"],
 			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
 		}),
 	);
 	const post = async (path: string, as: string, form: Record<string, string>) => {
