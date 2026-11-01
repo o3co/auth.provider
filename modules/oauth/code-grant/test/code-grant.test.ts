@@ -217,6 +217,7 @@ async function serve(options: Options = {}) {
 			subject: "alice",
 			amr: ["pwd"],
 			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
 		}),
 	);
 	const facts: CodeFacts = {
@@ -324,6 +325,7 @@ it("issues for the code's subject, session and login as they were when it was is
 			subject: "bob",
 			amr: ["pwd", "otp"],
 			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
 		}),
 	);
 	const params = {
@@ -364,9 +366,12 @@ it("gives a token that verifies from a session opened after its subject's revoca
 	// Federated: opened now, on an upstream login a minute old.
 	const authenticatedAt = Math.floor(runtime.clock.now() / 1000) * 1000 - 60_000;
 	const { session } = openedOf(
-		await s.app
-			.get(sessions)
-			.open(testRequest(), { subject: "alice", amr: ["fed"], authenticatedAt }),
+		await s.app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["fed"],
+			authenticatedAt,
+			provenSince: runtime.clock.now(),
+		}),
 	);
 	const answer = await s.redeem(await s.app.get(codes).issue({ ...s.facts, session: session.id }));
 	expect(await s.app.get(tokens).verifyAccess(String(answer.body.access_token))).toMatchObject({
@@ -755,9 +760,12 @@ describe("what the ID token maker is told", () => {
 		const asked: IdTokenRequest[] = [];
 		const s = await serve({ extra: [recordingMaker(asked)] });
 		const { session } = openedOf(
-			await s.app
-				.get(sessions)
-				.open(testRequest(), { subject: "alice", amr: ["pwd"], authenticatedAt: "unknown" }),
+			await s.app.get(sessions).open(testRequest(), {
+				subject: "alice",
+				amr: ["pwd"],
+				authenticatedAt: "unknown",
+				provenSince: runtime.clock.now(),
+			}),
 		);
 		const unknown = await s.app
 			.get(codes)
@@ -902,9 +910,12 @@ it("tells the access token and the additions that a session did not know its aut
 	]);
 	const s = await serve({ extra: [adding] });
 	const { session } = openedOf(
-		await s.app
-			.get(sessions)
-			.open(testRequest(), { subject: "alice", amr: ["pwd"], authenticatedAt: "unknown" }),
+		await s.app.get(sessions).open(testRequest(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: "unknown",
+			provenSince: runtime.clock.now(),
+		}),
 	);
 	const unknown = await s.redeem(await s.app.get(codes).issue({ ...s.facts, session: session.id }));
 	const known = await s.redeem(await s.issue());
