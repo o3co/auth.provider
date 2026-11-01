@@ -72,7 +72,10 @@ it("counts each event lost once its reader goes away, never crashing on the stre
 			done(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
 	});
 	vi.spyOn(process, "stdout", "get").mockReturnValue(out as typeof process.stdout);
-	const [a] = [await boot(), await boot()];
+	const a = await boot();
+	// Whatever else hears the stream, a second composition adds no listener of this receiver's.
+	const heard = out.listenerCount("error");
+	await boot();
 	a.record({ kind: "k" });
 	await settled();
 	expect(out.errored).toMatchObject({ code: "EPIPE" });
@@ -80,7 +83,7 @@ it("counts each event lost once its reader goes away, never crashing on the stre
 	a.record({ kind: "k" });
 	await settled();
 	expect(a.lost()).toEqual({ stdout: 2 });
-	expect(out.listenerCount("error")).toBe(1);
+	expect(out.listenerCount("error")).toBe(heard);
 });
 
 it("registers under the name its manifest declares (`registersAs`), the one `audit.receivers` names", async () => {
