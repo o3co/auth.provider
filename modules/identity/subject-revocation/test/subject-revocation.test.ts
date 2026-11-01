@@ -4,7 +4,11 @@ import { expect, it } from "vitest";
 import { revocations, subjectRevocation } from "../src/contract.ts";
 import revocationModule from "../src/module.ts";
 import { type BoundaryStore, boundaryStore, type StoredBoundary } from "../src/store.ts";
-import { subjectRevocationContract, subjectRevocationStandIn } from "../src/testing.ts";
+import {
+	laggingRevocation,
+	subjectRevocationContract,
+	subjectRevocationStandIn,
+} from "../src/testing.ts";
 import { memoryBoundaries } from "./stores.ts";
 
 const now = 1_800_000_000_000;
@@ -192,6 +196,28 @@ subjectRevocationContract("the stand-in", async () => {
 		runtime,
 	});
 	return { revocation: app.get(subjectRevocation), revocations: app.get(revocations), ...adapter };
+});
+
+subjectRevocationContract("the lagging stand-in, caught up", async () => {
+	const { runtime, adapter } = movable();
+	const app = await assemble({
+		modules: [laggingRevocation().module],
+		config: kernelConfig(),
+		runtime,
+	});
+	return { revocation: app.get(subjectRevocation), revocations: app.get(revocations), ...adapter };
+});
+
+it("answers, while it lags, by the boundaries as they stood when it began, and by the latest once caught up", async () => {
+	const { runtime } = movable();
+	const lagging = laggingRevocation();
+	const app = await assemble({ modules: [lagging.module], config: kernelConfig(), runtime });
+	const before = runtime.clock.now() - 1000;
+	lagging.lag();
+	await app.get(subjectRevocation).revoke("alice");
+	expect(await app.get(subjectRevocation).check("alice", before)).toBe("valid");
+	lagging.catchUp();
+	expect(await app.get(subjectRevocation).check("alice", before)).toBe("revoked");
 });
 
 it("takes every handle its takes name, the module and its stand-in alike", async () => {

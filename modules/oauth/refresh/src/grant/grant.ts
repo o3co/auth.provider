@@ -129,6 +129,8 @@ export function refreshGrant({
 					authenticatedAt: family.authenticatedAt,
 					...(family.authenticatedAtUnknown ? { authenticatedAtUnknown: true as const } : {}),
 					...(family.acr ? { acr: family.acr } : {}),
+					// Bound to no session, the token stands from the authentication its boundary was compared with.
+					...(family.session ? {} : { standingAt: family.authenticatedAt }),
 				},
 				// A refresh continues a grant the policies already let through: they may judge it so.
 				{
@@ -147,6 +149,15 @@ export function refreshGrant({
 			} catch (error) {
 				await revoker.revokeIssued(issued);
 				throw error;
+			}
+			// A boundary or a logout that came while the token was made: its session no longer enters, and
+			// the token, standing from its issue, is withdrawn rather than handed out.
+			if (family.session !== undefined) {
+				const entry = await checks.sessions.entryOf(family.session);
+				if (entry.kind !== "entered") {
+					await revoker.revokeIssued(issued);
+					return refused;
+				}
 			}
 			// Rotates only from the secret checked here, however often the change runs again.
 			const written = await stores.families.update(parsed.id, (stored) =>

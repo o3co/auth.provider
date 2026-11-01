@@ -23,9 +23,9 @@ import { type Beginning, lineage } from "@mod/refresh";
 import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
-import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { laggingRevocation, subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { type IssuanceRequest, issuancePolicies, tokens } from "@mod/tokens";
+import { type IssuanceRequest, issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { passkeyAmr, webauthnGrantType } from "../src/contract.ts";
@@ -72,7 +72,11 @@ const recordedAs = {
 	raced: "sign_count_raced",
 } satisfies Record<Refusal, string>;
 
-async function serve(section: Record<string, unknown> = {}, extra: Module[] = []) {
+async function serve(
+	section: Record<string, unknown> = {},
+	extra: Module[] = [],
+	revocation: Module = subjectRevocationStandIn,
+) {
 	const seen: unknown[] = [];
 	const requesters: { asked: unknown[]; redeemed: unknown[] } = {
 		asked: [],
@@ -119,7 +123,7 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
-			subjectRevocationStandIn,
+			revocation,
 			rateLimitModule,
 			recorded.module,
 			simulatedStore().module,
@@ -164,6 +168,22 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 		fetch(`${base}/oauth/webauthn/authentication/options`, { method: "POST", ...init });
 	return { app, input, state, seen, requesters, begun, events: recorded.events, call, ask };
 }
+
+/** A subject check comparing a token's standing time with its subject's boundary, as subject-tokens does. */
+const standingChecked = defineModule(
+	{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+	(m) => [
+		m.contribute(subjectChecks).by(async (c) => {
+			const revocation = await c.get(subjectRevocation);
+			return {
+				holds: async (token) =>
+					(await revocation.check(token.subject, token.standingAt)) === "valid"
+						? "holds"
+						: "revoked",
+			};
+		}),
+	],
+);
 
 const assertion = { id: "cred", response: { userHandle: "h" } };
 const asApp = { headers: { "content-type": "application/json" }, body: '{"client_id":"app"}' };
@@ -333,6 +353,22 @@ describe("the passkey grant", () => {
 		const s = await serve();
 		await s.app.get(subjectRevocation).revoke("alice");
 		expect(await s.call({ assertion })).toMatchObject({ kind: "error", error: "invalid_grant" });
+	});
+
+	it("issues on a stale read of its subject's boundary a token the next verification refuses, as it stands from its challenge [guarantee-4-a]", async () => {
+		const lagging = laggingRevocation();
+		const s = await serve({}, [standingChecked], lagging.module);
+		lagging.lag();
+		await s.app.get(subjectRevocation).revoke("alice");
+		// Issued in a later second than the boundary, its challenge made before it.
+		now += 1500;
+		const outcome = await s.call({ assertion });
+		if (outcome.kind !== "issued") expect.unreachable("the stale read lets it through");
+		lagging.catchUp();
+		expect(await s.app.get(tokens).verifyAccess(String(outcome.body.access_token))).toEqual({
+			kind: "invalid",
+			reason: "revoked",
+		});
 	});
 
 	it("answers a scope beyond the allowance before the revocation boundary", async () => {

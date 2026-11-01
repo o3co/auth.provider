@@ -16,7 +16,7 @@ import { revokedInMemory } from "./revoked.ts";
 
 /**
  * What both runs share: a clock the contract moves, a binding kind the composition knows, and a
- * subject check answering revoked for a token issued up to its subject's boundary, as subject-tokens does.
+ * subject check answering revoked for a token standing up to its subject's boundary, as subject-tokens does.
  */
 function around(random?: Random) {
 	let now = 1_800_000_000_000;
@@ -28,7 +28,7 @@ function around(random?: Random) {
 		m.contribute(senderBindings).by(() => ({ ...known, read: async () => ({ kind: "absent" }) })),
 		m.contribute(subjectChecks).by(() => ({
 			holds: async (token) =>
-				token.issuedAt <= (revoked.get(token.subject) ?? Number.NEGATIVE_INFINITY)
+				token.standingAt <= (revoked.get(token.subject) ?? Number.NEGATIVE_INFINITY)
 					? "revoked"
 					: "holds",
 		})),

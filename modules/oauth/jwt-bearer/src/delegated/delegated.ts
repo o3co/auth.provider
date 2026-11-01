@@ -45,6 +45,7 @@ const checkShape = z.discriminatedUnion("kind", [
 		kind: z.literal("valid"),
 		subject: z.string().refine(isWellFormedSubject),
 		issuedAt: z.number().finite(),
+		standingAt: z.number().finite().optional(),
 		expiresAt: z.number().finite(),
 		clients: z.array(z.string().min(1)).min(1),
 		holderDigest: z.string().regex(digestShape).optional(),

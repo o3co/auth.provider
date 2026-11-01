@@ -98,6 +98,8 @@ export function passkeyGrant(p: LoginParts): Grant {
 				scope,
 				amr,
 				authenticatedAt,
+				// Tied to no session, the token stands from the time its boundary was compared with.
+				standingAt: authenticatedAt,
 			});
 			if (issued.kind === "refused") return issued;
 			const { access } = issued;

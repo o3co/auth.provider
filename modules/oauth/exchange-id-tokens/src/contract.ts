@@ -10,6 +10,8 @@ export interface IdTokenTaken {
 	readonly issuer: string;
 	/** In ms. */
 	readonly issuedAt: number;
+	/** In ms: when it stands from, as its subject's revocation boundary is compared: its `iat` less the clock skew. */
+	readonly standingAt: number;
 	/** In ms. */
 	readonly expiresAt: number;
 	readonly client: string;

@@ -13,16 +13,17 @@ import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { spentAssertions } from "@mod/jwt-bearer";
 import jwtBearer from "@mod/jwt-bearer/module";
-import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import secretHashModule from "@mod/secret-hash/module";
-import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { revocations, subjectRevocation } from "@mod/subject-revocation";
+import { laggingRevocation, subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import tokenExchange from "@mod/token-exchange/module";
-import { tokens } from "@mod/tokens";
+import { subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import usersModule from "@mod/users/module";
 import { memoryUsersStores, testUser } from "@mod/users/testing";
@@ -30,8 +31,10 @@ import { describe, expect, it } from "vitest";
 import bridge from "../src/module.ts";
 
 const now = 1_800_000_000_000;
+/** The kernel's clock, which a test may move: put back after it. */
+const clock = { at: now };
 const runtime = quietRuntime({
-	clock: { now: () => now },
+	clock: { now: () => clock.at },
 	random: { bytes: (n) => new Uint8Array(n).map(() => Math.floor(Math.random() * 256)) },
 });
 const issuer = "https://as.example";
@@ -82,7 +85,10 @@ const records = defineModule({ name: "records-in-memory", replicaSafe: false, ta
 function assembly(
 	section: Partial<typeof settings> = settings,
 	delegated: readonly string[] = [appleIss, ...googleIss],
+	/** Each grant's own `clock-skew`, subject-revocation where not its stand-in, and more modules. */
+	more: { skews?: [string, string]; subjects?: Module; extra?: readonly Module[] } = {},
 ) {
+	const [exchangeSkew, bearerSkew] = more.skews ?? [];
 	return {
 		modules: [
 			http,
@@ -95,7 +101,7 @@ function assembly(
 			outboundModule,
 			tlsOptionsForTests,
 			externalJwtModule,
-			subjectRevocationStandIn,
+			more.subjects ?? subjectRevocationStandIn,
 			usersModule,
 			memoryUsersStores().module,
 			records,
@@ -103,6 +109,7 @@ function assembly(
 			exchangeIdTokensOver(issuers),
 			jwtBearer,
 			bridge,
+			...(more.extra ?? []),
 		],
 		config: {
 			...kernelConfig(),
@@ -122,15 +129,19 @@ function assembly(
 					}),
 				],
 			},
-			"exchange-id-tokens": section,
-			"jwt-bearer": { issuers: [], "delegated-issuers": delegated },
+			"exchange-id-tokens": { ...section, ...(exchangeSkew ? { "clock-skew": exchangeSkew } : {}) },
+			"jwt-bearer": {
+				issuers: [],
+				"delegated-issuers": delegated,
+				...(bearerSkew ? { "clock-skew": bearerSkew } : {}),
+			},
 		},
 		runtime,
 	};
 }
 
-async function serve() {
-	const app = await assemble(assembly());
+async function serve(more: Parameters<typeof assembly>[2] = {}) {
+	const app = await assemble(assembly(settings, undefined, more));
 	const calls = app.get(grantCalls);
 	return {
 		app,
@@ -184,6 +195,39 @@ describe("jwt-bearer-id-tokens", () => {
 				{ kind: "valid", grant: { subject: "acct-1", issuedTo: client } },
 			);
 			expect(said(await s.bearer(client, token))).toBe("invalid_grant: assertion replayed");
+		}
+	});
+
+	it("stands the token on exchange-id-tokens' standing where its skew is wider than jwt-bearer's, so the next verification refuses one a stale read let through [guarantee-4-a]", async () => {
+		const lagging = laggingRevocation();
+		const checked = defineModule(
+			{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+			(m) => [
+				m.contribute(subjectChecks).by(async (c) => {
+					const revocation = await c.get(subjectRevocation);
+					return {
+						holds: async (t) =>
+							(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+					};
+				}),
+			],
+		);
+		const s = await serve({ skews: ["2s", "0s"], subjects: lagging.module, extra: [checked] });
+		lagging.lag();
+		await s.app.get(revocations).record("acct-1", { keepDelegations: false });
+		// Issued a second after the boundary: within exchange-id-tokens' 2 s skew of it, past jwt-bearer's 0 s.
+		const idToken = await appleToken({ iat: now / 1000 + 1 });
+		clock.at = now + 1500;
+		try {
+			const outcome = await s.bearer("ios-app", idToken);
+			if (outcome.kind !== "issued") throw new Error(said(outcome));
+			lagging.catchUp();
+			expect(await s.app.get(tokens).verifyAccess(String(outcome.body.access_token))).toEqual({
+				kind: "invalid",
+				reason: "revoked",
+			});
+		} finally {
+			clock.at = now;
 		}
 	});
 

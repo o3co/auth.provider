@@ -54,6 +54,7 @@ describe("idTokenChecks", () => {
 			subject: "acct-1",
 			issuer: "https://appleid.apple.com",
 			issuedAt: claims.iat * 1000,
+			standingAt: claims.iat * 1000 - 30_000,
 			expiresAt: claims.exp * 1000,
 			client: "ios-app",
 		});

@@ -306,6 +306,8 @@ export function exchangeGrant(parts: Parts): Grant {
 			const access = {
 				subject: subject.subject,
 				issuedTo: client.id,
+				// It stands where the subject token does, never from its own issue.
+				standingAt: subject.standingAt,
 				...target,
 				...(chain ? { actor: chain } : {}),
 				...(own?.amr ? { amr: own.amr } : {}),

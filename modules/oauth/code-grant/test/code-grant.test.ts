@@ -28,10 +28,16 @@ import sessionRequirements from "@mod/session-requirements/module";
 import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
-import { revocations } from "@mod/subject-revocation";
+import { revocations, subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
-import { type IssuanceRequest, type IssuedAccess, issuancePolicies, tokens } from "@mod/tokens";
+import {
+	type IssuanceRequest,
+	type IssuedAccess,
+	issuancePolicies,
+	subjectChecks,
+	tokens,
+} from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { fromStored } from "../src/codes.ts";
@@ -332,6 +338,34 @@ it("issues for the code's subject, session and login as they were when it was is
 	expect(await s.app.get(sessionTokens).sessionOf(checked.id)).toEqual({
 		kind: "bound",
 		handle: s.session.id,
+	});
+});
+
+it("gives a token that verifies from a session opened after its subject's revocation, its authentication, as an upstream's auth_time, before it", async () => {
+	const checked = defineModule(
+		{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+		(m) => [
+			m.contribute(subjectChecks).by(async (c) => {
+				const revocation = await c.get(subjectRevocation);
+				return {
+					holds: async (t) =>
+						(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+				};
+			}),
+		],
+	);
+	const s = await serve({ extra: [checked] });
+	await s.app.get(subjectRevocation).revoke("alice");
+	shift += 1500;
+	// Federated: opened now, on an upstream login a minute old.
+	const authenticatedAt = Math.floor(runtime.clock.now() / 1000) * 1000 - 60_000;
+	const { session } = await s.app
+		.get(sessions)
+		.complete(testRequest(), { subject: "alice", amr: ["fed"], authenticatedAt });
+	const answer = await s.redeem(await s.app.get(codes).issue({ ...s.facts, session: session.id }));
+	expect(await s.app.get(tokens).verifyAccess(String(answer.body.access_token))).toMatchObject({
+		kind: "valid",
+		grant: { authenticatedAt },
 	});
 });
 

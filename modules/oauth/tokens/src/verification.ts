@@ -4,6 +4,7 @@ import type { SenderBindings } from "@mod/sender-binding";
 import { z } from "zod";
 import type { AccessCheck, AccessGrant, Actor } from "./contract.ts";
 import { chainWithin, issuedWithin } from "./limits.ts";
+import { standingRead } from "./standing/standing.ts";
 
 /** An actor chain as an access token's `act` writes it. */
 export interface Act {
@@ -31,6 +32,8 @@ const claimsShape = z.object({
 	amr: z.array(z.string()).optional(),
 	auth_time: z.number().optional(),
 	acr: z.string().min(1).optional(),
+	// Whole seconds; a value present in another shape is no token of tokens', never an absent one.
+	o3co_standing_at: z.number().int().optional(),
 });
 
 type Claims = z.infer<typeof claimsShape>;
@@ -96,6 +99,8 @@ export function checkingWith({ signing, bindings, iss, now }: CheckingParts) {
 		if (!issuedWithin(claims.iat, claims.exp, now())) {
 			return { kind: "invalid", reason: "shape" };
 		}
+		const standing = standingRead(claims.o3co_standing_at, claims.iat);
+		if (standing === undefined) return { kind: "invalid", reason: "shape" };
 		const bound = Object.entries(claims.cnf ?? {}).map(([member, confirmation]) => ({
 			member,
 			confirmation,
@@ -111,6 +116,7 @@ export function checkingWith({ signing, bindings, iss, now }: CheckingParts) {
 				kind: "valid",
 				id: claims.jti,
 				expiresAt: claims.exp * 1000,
+				standingAt: standing * 1000,
 				tokenType,
 				...(binding ? { binding: { ...binding, tokenType } } : {}),
 				grant: grantOf(claims, extra.added),

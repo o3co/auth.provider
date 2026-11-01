@@ -30,12 +30,12 @@ import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
-import { revocations } from "@mod/subject-revocation";
-import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { revocations, subjectRevocation } from "@mod/subject-revocation";
+import { laggingRevocation, subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
-import { type IssuanceRequest, issuancePolicies, tokens } from "@mod/tokens";
+import { type IssuanceRequest, issuancePolicies, subjectChecks, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
@@ -101,6 +101,7 @@ function assembly(
 	out: Module = outboundModule,
 	extra: readonly Module[] = [],
 	publicOrigin = true,
+	subjects: Module = subjectRevocationStandIn,
 ) {
 	const location = defineModule(
 		{ name: "token-endpoint-location", replicaSafe: true, takes: [] },
@@ -120,7 +121,7 @@ function assembly(
 			tlsOptionsForTests,
 			externalJwtModule,
 			simulatedStore().module,
-			subjectRevocationStandIn,
+			subjects,
 			jwtBearer,
 			spentOn(storeAheadMs),
 			...extra,
@@ -173,6 +174,20 @@ const base = { iss: "https://idp.example", sub: "alice", aud: issuer, exp: now /
 const errorOf = (outcome: GrantOutcome) => (outcome.kind === "error" ? outcome.error : "issued");
 const saidOf = (outcome: GrantOutcome) =>
 	outcome.kind === "error" ? `${outcome.error}: ${outcome.description}` : "issued";
+
+/** A subject check comparing a token's standing time with its subject's boundary, as subject-tokens does. */
+const standingChecked = defineModule(
+	{ name: "standing-check", replicaSafe: false, takes: [subjectRevocation] },
+	(m) => [
+		m.contribute(subjectChecks).by(async (c) => {
+			const revocation = await c.get(subjectRevocation);
+			return {
+				holds: async (t) =>
+					(await revocation.check(t.subject, t.standingAt)) === "valid" ? "holds" : "revoked",
+			};
+		}),
+	],
+);
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
 const narrowing = defineModule({ name: "narrowing", replicaSafe: true, takes: [] }, (m) => [
@@ -442,7 +457,7 @@ describe("jwt-bearer", () => {
 		expect(saidOf(await s.grant(late))).toBe("invalid_grant: assertion replayed");
 	});
 
-	it("gives no token where its subject's boundary is recorded while the policies judge, after the first check [guarantee-4-a]", async () => {
+	it("issues where its subject's boundary is recorded while the policies judge a token the next verification refuses, as it stands from before it [guarantee-4-a]", async () => {
 		const revoking = defineModule(
 			{ name: "revoking", replicaSafe: true, takes: [revocations] },
 			(m) => [
@@ -460,9 +475,44 @@ describe("jwt-bearer", () => {
 		);
 		const s = await serve(undefined, issuer, undefined, trustedUpstream, outboundModule, [
 			revoking,
+			standingChecked,
 		]);
-		const made = await assertion({ ...base, iat: now / 1000 });
-		expect(saidOf(await s.grant(made))).toBe("invalid_grant: assertion revoked");
+		const outcome = await s.grant(await assertion({ ...base, iat: now / 1000 }));
+		if (outcome.kind !== "issued") expect.unreachable("the boundary comes after the grant's check");
+		expect(await s.verify(String(outcome.body.access_token))).toEqual({
+			kind: "invalid",
+			reason: "revoked",
+		});
+	});
+
+	it("issues on a stale read of its subject's boundary a token the next verification refuses, as it stands from the assertion's making less the skew [guarantee-4-a]", async () => {
+		const lagging = laggingRevocation();
+		const s = await serve(
+			undefined,
+			issuer,
+			undefined,
+			trustedUpstream,
+			outboundModule,
+			[standingChecked],
+			true,
+			lagging.module,
+		);
+		// Made 20 s after the boundary, yet within the 30 s skew of it.
+		const made = await assertion({ ...base, iat: now / 1000 + 20 });
+		lagging.lag();
+		await s.revoke("alice");
+		clock.at = now + 21_000;
+		try {
+			const outcome = await s.grant(made);
+			if (outcome.kind !== "issued") expect.unreachable("the stale read lets it through");
+			lagging.catchUp();
+			expect(await s.verify(String(outcome.body.access_token))).toEqual({
+				kind: "invalid",
+				reason: "revoked",
+			});
+		} finally {
+			clock.at = now;
+		}
 	});
 
 	it("gives no token for an assertion made before its subject's revocation, nor one that says not when once there is one", async () => {

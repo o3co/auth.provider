@@ -10,7 +10,7 @@
 
 ## Offers
 - Composition definition (a verifier for `token-exchange.verifiers`, the Space `exchange-id-tokens.used`, and to `users.upstream-names` each kind's upstream name with its issuer).
-- Contract `idTokenChecks` (`.`): each written kind's `iss` values; `check`, the id_token `taken` (the account, the kind's issuer, `iat` and `exp`, the one client, a `holderDigest`) or invalid; `consume`, `consumed` once, then `replayed`. The exchange's verifier is these checks.
+- Contract `idTokenChecks` (`.`): each written kind's `iss` values; `check`, the id_token `taken` (the account, the kind's issuer, `iat` and `exp`, the standing time, `iat` less `clock-skew`, the one client, a `holderDigest`) or invalid; `consume`, `consumed` once, then `replayed`. The exchange's verifier is these checks.
 - Store interface `usedIdTokens` (`.`), wired by the assembly with `usedIdTokensNeeds` (no eviction, a crash and a failover survived): `save` a name under its kind for a lifetime, answering `created` or `exists`.
 - Operator section, times written with their unit:
   - `max-age` (`1m` to `1h`, default `10m`): the oldest an id_token may be, from its `iat`. `clock-skew` (`0s` to `5m`, default `30s`): set it no lower than the issuers' real clock drift, as narrowing it can admit an id_token a wider skew refused at a revocation.
@@ -25,7 +25,7 @@
 - A client takes an id_token whose `aud` is one of its `audiences` and, without `authorized-parties`, whose `azp` is absent or its `aud`; with them, whose `azp` is one of them. An id_token exactly one client takes is that client's; one no client or two clients take is invalid.
 - An id_token needs `iat`, no older than `max-age` with `clock-skew`, and is refused past `exp` or from the future, as `external-jwt` reads them.
 - Its `sub` must have a subject's shape. The account is `users.byUpstream(upstream, sub)`; none is invalid. One issued before the account's `sessions` revocation boundary, widened by `clock-skew`, is invalid: an issuer's clock running ahead never lets one issued before it through.
-- The checks hold for every grant that takes them. The exchange's answer is a `foreign` token: the account as subject, the issuer, the id_token's `exp` as its end, the one client as `clients`, and a `nonce` of a SHA-256 digest's shape as `holderDigest`; no scope or audience of its own.
+- The checks hold for every grant that takes them. The exchange's answer is a `foreign` token: the account as subject, the issuer, the id_token's `exp` as its end, its standing time, the one client as `clients`, and a `nonce` of a SHA-256 digest's shape as `holderDigest`; no scope or audience of its own.
 - Boot is refused with neither `apple` nor `google`, with two clients of one kind taking one (`aud`, `azp`) pair (the second refused, naming the first by its key path), and with a client no registered client is. Users refuses it too where another module names the same upstream for another issuer; the same name for the same issuer (federation's `google`) boots.
 - Users, the store and the key sets failing are Unavailable, never a refusal.
 - The expected flow: the app signs in with Apple or Google, exchanges the id_token once for a short token, and proves a device key to the operator's API with it. A public app makes a DPoP key first and passes `BASE64URL(SHA-256(jkt))` as the sign-in `nonce`.

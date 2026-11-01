@@ -16,11 +16,13 @@ export default defineModule(
 				check: async (assertion): Promise<DelegatedCheck> => {
 					const taken = await checks.check(assertion);
 					if (taken.kind !== "taken") return { kind: "invalid" };
-					const { subject, issuedAt, expiresAt, client, holderDigest } = taken;
+					const { subject, issuedAt, standingAt, expiresAt, client, holderDigest } = taken;
 					return {
 						kind: "valid",
 						subject,
 						issuedAt,
+						// Where its own check compared the boundary, its skew its own: jwt-bearer's never moves it later.
+						standingAt,
 						expiresAt,
 						clients: [client],
 						...(holderDigest === undefined ? {} : { holderDigest }),
