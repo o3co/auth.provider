@@ -123,6 +123,7 @@ async function boot(options: Options = {}) {
 			subject: "alice",
 			amr: ["pwd"],
 			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
 		}),
 	);
 	const t = app.get(tokens);
