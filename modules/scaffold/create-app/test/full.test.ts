@@ -23,6 +23,7 @@ import {
 	generated,
 	importedModules as imports,
 	installed,
+	linked,
 	read,
 	root,
 } from "./full-app.ts";
@@ -50,13 +51,16 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	expect(pkg.scripts).toEqual({
 		start: "node --env-file-if-exists=.env src/main.ts",
 		reseal: "node --env-file-if-exists=.env src/reseal.ts",
+		"unclaimed-factors": "node --env-file-if-exists=.env src/unclaimed-factors.ts",
 	});
 	const composed = modules.map(manifest);
 	const owners = composed.flatMap((m) => m.replaces ?? m.adapts ?? []);
 	expect(owners.length).toBeGreaterThan(0);
 	expect(new Set(owners).size).toBe(owners.length);
 	for (const m of composed) {
-		expect(m.optIn, m.name).not.toBe(true);
+		// Only a bridge opts in and still comes, where all it joins is composed.
+		const joined = (m.joins ?? []).length > 0 && (m.joins ?? []).every((j) => modules.includes(j));
+		if (!joined) expect(m.optIn, m.name).not.toBe(true);
 		if (m.replaces) expect(modules, m.name).not.toContain(m.replaces);
 	}
 	// The guide lists what the template leaves out, to add.
@@ -64,10 +68,11 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	for (const name of optIns()) expect(readme).toContain(`- \`${name}\``);
 });
 
-it("names by hand only the keys no module's example holds", async () => {
+it("names in its guide each key no module's example holds, in the lines the modules declare", async () => {
 	const readme = await read(await generated(), "README.md");
-	const section = readme.split("## Keys no example holds")[1]?.split("\n## ")[0] ?? "";
-	expect([...section.matchAll(/^- `([a-z0-9.-]+)`/gm)].map((m) => m[1])).toEqual([
+	const line = (key: string) =>
+		readme.split("\n").find((l) => l.startsWith("- ") && l.includes(`\`${key}\``));
+	for (const key of [
 		"authorize.step-up-page",
 		"federation.held-page",
 		"http.trusted-proxies",
@@ -77,11 +82,17 @@ it("names by hand only the keys no module's example holds", async () => {
 		"mail-smtp.user",
 		"mail-smtp.password",
 		"clients.registered",
-	]);
-	// Every other key the guide names comes from the fragments.
-	for (const heading of ["Values the operator decides", "Pages the operator serves", "Secrets"]) {
+	]) {
+		expect(line(key), key).toBeDefined();
+	}
+	expect(line("federation.held-page")).toContain("public origin");
+	// No key named by hand: the guide's two lists are the modules' own, kernel's line first and once.
+	for (const heading of ["Keys no example holds", "Pages the operator serves", "Secrets"]) {
 		expect(readme).not.toContain(`## ${heading}`);
 	}
+	expect(readme).toContain("## Settings the composed modules ask for\n\n- ");
+	expect(readme.split("## Values the operator decides\n\n- `kernel.deployment`: ")).toHaveLength(2);
+	expect(readme.split("- `kernel.deployment`: ")).toHaveLength(2);
 });
 
 it("writes a witness-backfill script where the enrollment witness is kept, and none where it is not", async () => {
@@ -93,6 +104,15 @@ it("writes a witness-backfill script where the enrollment witness is kept, and n
 	expect(await read(kept, "src/witness-backfill.ts")).toMatch(/witnessBackfill/);
 	const plain = JSON.parse(await read(await generated(), "package.json"));
 	expect(plain.scripts["witness-backfill"]).toBeUndefined();
+});
+
+it("writes a passkey-backfill script where passkey logins keep the passkey witness", async () => {
+	const kept = await generated(["@mod/webauthn-login", "@mod/passkey-witness-http"]);
+	const pkg = JSON.parse(await read(kept, "package.json"));
+	expect(pkg.scripts["passkey-backfill"]).toBe(
+		"node --env-file-if-exists=.env src/passkey-backfill.ts",
+	);
+	expect(await read(kept, "src/passkey-backfill.ts")).toMatch(/passkeyBackfill/);
 });
 
 it("assembles the features added, with their wirings, bridges and default adapters", async () => {
@@ -117,6 +137,24 @@ it("assembles the features added, with their wirings, bridges and default adapte
 	);
 });
 
+it("adds federation grants with the browser half that runs them, which the full app holds neither of, and boots", async () => {
+	const grants = ["@mod/federation-grants", "@mod/federation-grants-connect"];
+	for (const name of grants) expect(full(), name).not.toContain(name);
+	const target = await linked(await generated(["@mod/federation-grants"]));
+	expect(await imports(target)).toEqual(expect.arrayContaining(grants));
+	const pkg = JSON.parse(await read(target, "package.json"));
+	for (const name of grants) expect(pkg.dependencies, name).toHaveProperty(name);
+	// The browser half's page is its own section's, read from env as the rest.
+	expect(await read(target, "config/application.conf")).toMatch(
+		/^\tpage = \$\{\?FEDERATION_GRANTS_CONNECT_PAGE\}$/m,
+	);
+	// federation-grants takes exactly one browser half: booting shows the bridge is composed.
+	await configured(target, { deployment: "single", redisUrl: "redis://127.0.0.1:1" });
+	const run = boot(target, "config/local.conf,config/application.conf");
+	expect(run.status, run.stderr).toBe(78);
+	expect(run.refused, run.stderr).toEqual(["redis.url"]);
+});
+
 it("reads each scalar of the composed modules' fragments from env, one variable each, holding no value", async () => {
 	await readsScalarsFromEnv(await generated(), full());
 });
@@ -139,18 +177,8 @@ it("writes the image, and what git and the image leave out", async () => {
 	const docker = await read(target, "Dockerfile");
 	// A Node 24 or later image; which tag it follows is app-output's, held by its own test.
 	expect(docker).toMatch(/^FROM node:2[4-9]\S* AS base$/m);
-	// Dependencies are installed in their own stage; the image takes only what they left.
-	expect(docker.match(/^FROM .*$/gm)).toEqual([
-		"FROM " + docker.match(/^FROM (\S+) AS base$/m)?.[1] + " AS base",
-		"FROM base AS deps",
-		"FROM base AS runtime",
-	]);
-	expect(docker).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
+	// The image's stages and what each installs are app-output's, held by its own test.
 	expect(docker).toMatch(/^USER node$/m);
-	// An init as process 1 passes signals on and reaps what node leaves behind; pnpm comes through a pinned corepack.
-	expect(docker).toMatch(
-		/^RUN apk add --no-cache tini && npm install --global corepack@\d+\.\d+\.\d+ && corepack enable$/m,
-	);
 	expect(docker).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
 	expect(docker).toContain("pnpm install --frozen-lockfile --prod");
 	// The workspace file, where the operator writes one, installs as pnpm reads it; none is needed.
@@ -269,12 +297,6 @@ it("gives a generated app a trial layer by its own modules, with hosts under .in
 	);
 });
 
-it("tells the operator to set the page a federation login a second factor holds goes on at", async () => {
-	expect(await read(await generated(), "README.md")).toContain(
-		"- `federation.held-page`: the page a federation login a second factor holds goes on at, on the public origin; without it, the browser stops at the factor's answer.",
-	);
-});
-
 it("stops within the kernel's own deadline, and tells the operator to give the orchestrator longer", async () => {
 	const target = await generated();
 	const main = await read(target, "src/main.ts");
@@ -312,7 +334,7 @@ it("tells in the full template's README the command's name, how to try it over p
 	expect(readme).toContain("Generated by `create-auth-provider` from the full template");
 	expect(readme).not.toContain("`create-app`");
 	expect(readme).toMatch(
-		/`http\.public-origin` to `http:\/\/localhost:8080` and `http\.insecure-origin` to `true`/,
+		/`http\.public-origin` and `issuer\.url` to `http:\/\/localhost:8080`, `http\.insecure-origin` to `true`, and `kernel\.environment` to `development`/,
 	);
 	expect(readme).toContain("`create-auth-provider --list`");
 	expect(readme).toMatch(

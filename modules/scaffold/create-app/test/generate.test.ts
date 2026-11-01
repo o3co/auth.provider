@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mainSource } from "@mod/app-output";
+import { mainSource } from "@mod/app-entries";
 import { addable, needed } from "@mod/combinations";
 import { trialLayer } from "@mod/trial";
 import { expect, it, vi } from "vitest";
@@ -15,6 +15,28 @@ import {
 	writesListsLocally,
 } from "./checks.ts";
 import { configured, importedModules, linked, root } from "./full-app.ts";
+
+/** Runs a script of a generated app in its directory, the environment given over this process's. */
+const runIn = (target: string, script: string, env: Record<string, string>, input?: string) =>
+	spawnSync(process.execPath, [script], {
+		cwd: target,
+		env: { ...process.env, ...env },
+		encoding: "utf8",
+		...(input === undefined ? {} : { input }),
+	});
+
+/** What seal needs to run (its keys, http) from trial's layer, and a seal key of this test's. */
+async function sealed(target: string) {
+	const key = Buffer.from(Array.from({ length: 32 }, (_, i) => i * 7 + 1)).toString("base64");
+	await writeFile(
+		join(target, "config", "seal.conf"),
+		JSON.stringify({ seal: { current: { id: "now", key } } }),
+	);
+	await writeFile(
+		join(target, "config", "local.conf"),
+		await trialLayer(target, { redisUrl: "redis://127.0.0.1:1", leave: ["seal"] }),
+	);
+}
 
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
@@ -131,12 +153,13 @@ it("reads its fragments' scalars from env and writes their lists locally, with a
 	await expect(readFile(join(target, "src", "witness-backfill.ts"), "utf8")).rejects.toThrow();
 	const guide = await readFile(join(target, "README.md"), "utf8");
 	expect(guide).toContain("from the modules listed: `@mod/tokens`.");
-	expect(guide).toContain("- `tokens.revocation`:");
-	// Its store is kept in memory: accepted, one instance, and Redis named for more.
-	expect(guide).toContain("the memory store accepted (`store.accept-volatile = true`)");
 	expect(guide).toContain(
-		"- `kernel.deployment`: `single`: the store is kept in this process, so the deployment runs as one instance; list `@mod/redis` to keep it in Redis and run several.",
+		"- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported. With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
 	);
+	// Its store is kept in memory: accepted, one instance, said in store's line; the deployment's is kernel's.
+	expect(guide).toContain("the memory store accepted (`store.accept-volatile = true`)");
+	expect(guide.split("- `kernel.deployment`: ")).toHaveLength(2);
+	expect(guide).toContain("- `kernel.deployment`: `single` for one instance, `multi` for several.");
 });
 
 it("promises no http, port or health check to a listed app that composes no http", async () => {
@@ -178,12 +201,12 @@ it("writes a witness-backfill script for an app that keeps the enrollment witnes
 	}
 	expect(source).not.toMatch(/app\.start\(/);
 	await linked(target);
-	const run = spawnSync(process.execPath, ["src/witness-backfill.ts"], {
-		cwd: target,
-		env: { ...process.env, APP_CONFIG: "config/application.conf" },
-		input: "alice\n",
-		encoding: "utf8",
-	});
+	const run = runIn(
+		target,
+		"src/witness-backfill.ts",
+		{ APP_CONFIG: "config/application.conf" },
+		"alice\n",
+	);
 	// Its sections unset, boot is refused as the app's is, telling no subject.
 	expect([run.status, run.stdout]).toEqual([78, ""]);
 });
@@ -199,22 +222,9 @@ it("writes a reseal script for an app that seals, which seals again through each
 	// Stopped before it exits, so the stop hooks run (connections closed, buffered log lines out).
 	expect(await readFile(join(target, "src", "reseal.ts"), "utf8")).toMatch(/await app\.stop\(\)/);
 	await linked(target);
-	const key = Buffer.from(Array.from({ length: 32 }, (_, i) => i * 7 + 1)).toString("base64");
-	await writeFile(
-		join(target, "config", "seal.conf"),
-		JSON.stringify({ seal: { current: { id: "now", key } } }),
-	);
-	// What seal needs to run (its keys, http) is set by trial's layer; the seal key is this test's.
-	await writeFile(
-		join(target, "config", "local.conf"),
-		await trialLayer(target, { redisUrl: "redis://127.0.0.1:1", leave: ["seal"] }),
-	);
+	await sealed(target);
 	const reseal = (files: string) =>
-		spawnSync(process.execPath, ["src/reseal.ts"], {
-			cwd: target,
-			env: { ...process.env, KERNEL_DEPLOYMENT: "single", APP_CONFIG: files },
-			encoding: "utf8",
-		});
+		runIn(target, "src/reseal.ts", { KERNEL_DEPLOYMENT: "single", APP_CONFIG: files });
 	const done = reseal("config/seal.conf,config/local.conf,config/application.conf");
 	expect([done.status, done.stdout]).toEqual([0, "previous keys may be retired\n"]);
 	expect(reseal("config/application.conf").status).toBe(78);
@@ -224,25 +234,12 @@ it("warns once as it boots of the 0.17 variables set and never read, by name and
 	const target = await mkdtemp(join(tmpdir(), "create-app-"));
 	await generate({ target, modules: ["@mod/seal", "@mod/log-stdout"], workspace: root });
 	await linked(target);
-	const key = Buffer.from(Array.from({ length: 32 }, (_, i) => i * 7 + 1)).toString("base64");
-	await writeFile(
-		join(target, "config", "seal.conf"),
-		JSON.stringify({ seal: { current: { id: "now", key } } }),
-	);
-	await writeFile(
-		join(target, "config", "local.conf"),
-		await trialLayer(target, { redisUrl: "redis://127.0.0.1:1", leave: ["seal"] }),
-	);
+	await sealed(target);
 	const run = (legacy: Record<string, string>) =>
-		spawnSync(process.execPath, ["src/reseal.ts"], {
-			cwd: target,
-			env: {
-				...process.env,
-				KERNEL_DEPLOYMENT: "single",
-				APP_CONFIG: "config/seal.conf,config/local.conf,config/application.conf",
-				...legacy,
-			},
-			encoding: "utf8",
+		runIn(target, "src/reseal.ts", {
+			KERNEL_DEPLOYMENT: "single",
+			APP_CONFIG: "config/seal.conf,config/local.conf,config/application.conf",
+			...legacy,
 		});
 	const left = run({ OAUTH_ACCESS_TOKEN_EXPIRES_IN: "61937", CORE_DEPLOYMENT_MODE: "multi-q7" });
 	expect(left.status).toBe(0);
@@ -274,12 +271,7 @@ it("starts on the configuration files APP_CONFIG lists, and exits 78 telling eac
 	const target = await mkdtemp(join(tmpdir(), "create-app-"));
 	await generate({ target, modules: ["@mod/log-stdout"], workspace: root });
 	await linked(target);
-	const run = (env: Record<string, string>) =>
-		spawnSync(process.execPath, ["src/main.ts"], {
-			cwd: target,
-			env: { ...process.env, ...env },
-			encoding: "utf8",
-		});
+	const run = (env: Record<string, string>) => runIn(target, "src/main.ts", env);
 	// The generated file holds no value: the kernel's deployment is read from the environment.
 	expect(run({}).status).toBe(78);
 	expect(run({ KERNEL_DEPLOYMENT: "single" }).status).toBe(0);
@@ -294,7 +286,7 @@ it("starts on the configuration files APP_CONFIG lists, and exits 78 telling eac
 /** A module whose start takes a second, saying when it begins, ends and stops. */
 const slowModule = `import { contract, defineModule } from "@mod/kernel";
 const slow = contract("test.slow");
-export default defineModule({ name: "slow" }, (m) => [
+export default defineModule({ name: "slow", takes: [] }, (m) => [
 	m.provide(slow).by((c) => {
 		c.onStart(async () => {
 			process.stdout.write("starting\\n");

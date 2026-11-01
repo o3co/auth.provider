@@ -1,3 +1,4 @@
+export type { OutsidePlan } from "./assembly.ts";
 export { run } from "./command.ts";
 export { type FullPlan, generate, type ModulesPlan, type Plan } from "./generate.ts";
 export type { PatternPlan } from "./pattern.ts";

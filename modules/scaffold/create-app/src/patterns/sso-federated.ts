@@ -5,8 +5,9 @@ export const ssoFederated: Pattern = {
 	name: "sso-federated",
 	use:
 		"Single sign-on through upstream identity providers (OpenID Connect, Google, GitHub, Apple), " +
-		"with no password of its own: clients use the authorization code flow with refresh, and " +
-		"services client credentials. Users come from an outside ledger.",
+		"with no password of its own: clients use the authorization code flow with refresh; services " +
+		"that use client credentials add it (--add @mod/client-credentials). Users come from an " +
+		"outside ledger.",
 	axes: { ...simpleWeb.axes, "@mod/users": "@mod/users-http" },
 	features: {
 		login: [
@@ -22,5 +23,6 @@ export const ssoFederated: Pattern = {
 		grants: simpleWeb.features.grants ?? [],
 	},
 	areas: ["keys", "identity", "code", "oauth", "federation", "ops"],
-	conformanceAdd: ["@mod/login-password"],
+	// The token endpoint's own checks (client authentication, introspection, CORS, DPoP) take its tokens.
+	conformanceAdd: ["@mod/login-password", "@mod/client-credentials"],
 };

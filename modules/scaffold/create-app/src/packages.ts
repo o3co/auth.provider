@@ -1,6 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { type Card, fragmentsIn, fragmentsOf, type Packages } from "@mod/app-output";
+import {
+	type Ask,
+	type Asked,
+	type Card,
+	fragmentsIn,
+	fragmentsOf,
+	type Packages,
+	type Sampled,
+	sampleFile,
+} from "@mod/app-output";
+import type { Outside, Read } from "./outside/contract.ts";
 import { dependenciesOf, workspacePackages } from "./project.ts";
 
 /** Where an entry's files lie in the app: under `node_modules`, the entry's own path. */
@@ -17,13 +27,35 @@ const installed = (
 const asksOfDeployment = (card: string) =>
 	existsSync(card) && /^## Deployment$/m.test(readFileSync(card, "utf8"));
 
+/** What a manifest declares for the guide: its lines, the owner it adapts, and the name it registers under it. */
+const askedIn = (name: string, manifest: Readonly<Record<string, unknown>> | undefined): Asked => ({
+	name,
+	...(Array.isArray(manifest?.asks) ? { asks: manifest.asks as Ask[] } : {}),
+	...(typeof manifest?.adapts === "string" ? { adapts: manifest.adapts } : {}),
+	...(typeof manifest?.registersAs === "string" ? { registersAs: manifest.registersAs } : {}),
+});
+
+/** What a manifest declares of entry samples: the maps it takes them for (`takesSamples`), or the contract its own sample is of (`sampleOf`), with the sample's text. */
+const sampledIn = (
+	name: string,
+	manifest: Readonly<Record<string, unknown>> | undefined,
+	sample: { readonly from: string; readonly text: string } | undefined,
+): Sampled => ({
+	name,
+	...(Array.isArray(manifest?.takesSamples)
+		? { takes: manifest.takesSamples as { map: string; of: string }[] }
+		: {}),
+	...(typeof manifest?.sampleOf === "string" ? { sampleOf: manifest.sampleOf } : {}),
+	...(sample ? { sample } : {}),
+});
+
 /** A repository URL as a manifest states it, a string or `{ url }`, plain https and no `.git`. */
 const repositoryOf = (stated: unknown): string | undefined => {
 	const url = typeof stated === "string" ? stated : (stated as { url?: unknown } | undefined)?.url;
 	return typeof url === "string" ? url.replace(/^git\+/, "").replace(/\.git$/, "") : undefined;
 };
 
-interface Indexed {
+export interface Indexed {
 	readonly version: string;
 	readonly repository?: string;
 	readonly packages: readonly {
@@ -31,13 +63,26 @@ interface Indexed {
 		readonly package: string;
 		readonly entry: string;
 		readonly fragment?: string;
+		/** The member's entry sample, as the release wrote it. */
+		readonly sample?: string;
 		readonly references?: boolean;
 		readonly deployment?: boolean;
+		/** The member's manifest, as the release wrote it. */
+		readonly manifest?: Readonly<Record<string, unknown>>;
 	}[];
+	/** Sealed by the release: each bundle's integrity, by its public name, and zod's. */
+	readonly integrity?: Readonly<Record<string, string>>;
+	readonly zod?: { readonly version: string; readonly integrity: string };
 }
 
 /** The index distribution writes at the root of the bundle create-app is built into. */
-const bundleIndex = join(import.meta.dirname, "..", "..", "index.json");
+export const bundleIndex = join(import.meta.dirname, "..", "..", "index.json");
+
+/** The packages outside the release read for a plan, and the names let through though fresh. */
+export interface Beside {
+	readonly read: Read;
+	readonly fresh?: readonly string[];
+}
 /** The workspace this package lies in, where `combinations` reads the modules it composes. */
 const ownWorkspace = join(import.meta.dirname, "..", "..", "..", "..");
 
@@ -71,6 +116,25 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 					}),
 				};
 			}),
+		asks: (names) =>
+			names.flatMap((name) => {
+				const dir = dirs().get(name);
+				return dir === undefined
+					? []
+					: [askedIn(name, JSON.parse(readFileSync(join(dir, "package.json"), "utf8")))];
+			}),
+		samples: (names) =>
+			names.flatMap((name) => {
+				const dir = dirs().get(name);
+				if (dir === undefined) return [];
+				const file = join(dir, sampleFile);
+				const sample = existsSync(file)
+					? { from: file, text: readFileSync(file, "utf8") }
+					: undefined;
+				return [
+					sampledIn(name, JSON.parse(readFileSync(join(dir, "package.json"), "utf8")), sample),
+				];
+			}),
 		release: () => {
 			const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 			const repository = repositoryOf(manifest.repository);
@@ -79,35 +143,84 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 	};
 }
 
-function publishedIn(index: Indexed): Packages {
+/**
+ * The packages as published, from the index, and beside them the packages outside the release read
+ * for the plan: each of those depended on at its recorded version, imported by its own name.
+ */
+export function publishedIn(index: Indexed, beside?: Beside): Packages {
 	const byName = new Map(index.packages.map((entry) => [entry.name, entry]));
+	const outside = new Map<string, Outside>(
+		(beside?.read.outside ?? []).map((o) => [o.declaration.name, o]),
+	);
 	const found = (name: string) => {
 		const entry = byName.get(name);
 		if (!entry) throw new Error(`${name} is no published package`);
 		return entry;
 	};
 	return {
+		// The release's and those outside it in one reading, so no section is read twice.
 		fragments: async (names) =>
 			fragmentsOf(
 				names.flatMap((name) => {
-					const { fragment } = found(name);
+					const fragment = outside.has(name) ? outside.get(name)?.fragment : found(name).fragment;
 					return fragment === undefined ? [] : [{ from: name, text: fragment }];
 				}),
 			),
 		dependencies: (names) =>
-			Object.fromEntries(names.map((name) => [found(name).package, index.version])),
-		importOf: (name) => found(name).entry,
+			Object.fromEntries(
+				names.map((name) => {
+					const beside = outside.get(name);
+					return beside ? [name, beside.record.version] : [found(name).package, index.version];
+				}),
+			),
+		importOf: (name) => (outside.has(name) ? name : found(name).entry),
 		cards: (names) =>
 			names.map((name) => {
+				const read = outside.get(name);
+				if (read) {
+					return {
+						name,
+						...installed(name, {
+							references: read.references !== undefined,
+							deployment: /^## Deployment$/m.test(read.card ?? ""),
+						}),
+					};
+				}
 				const { entry, references, deployment } = found(name);
 				return {
 					name,
 					...installed(entry, { references: references === true, deployment: deployment === true }),
 				};
 			}),
+		// A package outside the release declares nothing for the guide.
+		asks: (names) =>
+			names.flatMap((name) =>
+				outside.has(name) || !byName.has(name) ? [] : [askedIn(name, byName.get(name)?.manifest)],
+			),
+		// Nor of entry samples.
+		samples: (names) =>
+			names.flatMap((name) => {
+				const entry = outside.has(name) ? undefined : byName.get(name);
+				if (entry === undefined) return [];
+				const sample = entry.sample === undefined ? undefined : { from: name, text: entry.sample };
+				return [sampledIn(name, entry.manifest, sample)];
+			}),
 		release: () => ({
 			version: index.version,
 			...(index.repository ? { repository: index.repository } : {}),
+			...(index.integrity && index.zod
+				? { integrity: { ...index.integrity, zod: index.zod.integrity } }
+				: {}),
 		}),
+		outside: (names) => {
+			const modules = names.flatMap((name) => outside.get(name)?.record ?? []);
+			if (modules.length === 0 || beside === undefined) return undefined;
+			const fresh = (beside.fresh ?? []).filter((name) => names.includes(name));
+			return {
+				modules,
+				registries: beside.read.registries,
+				...(fresh.length > 0 ? { fresh } : {}),
+			};
+		},
 	};
 }

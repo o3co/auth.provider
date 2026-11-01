@@ -26,5 +26,6 @@ export const mfaWeb: Pattern = {
 		],
 	},
 	areas: ["keys", "identity", "code", "oauth", "second-factor", "ops"],
-	conformanceAdd: [],
+	// The token endpoint's own checks (client authentication, introspection, CORS, DPoP) take its tokens.
+	conformanceAdd: ["@mod/client-credentials"],
 };
