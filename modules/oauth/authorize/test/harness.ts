@@ -246,7 +246,7 @@ export async function serve(
 		amr = ["pwd"],
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const facts = { subject, amr, authenticatedAt };
+		const facts = { subject, amr, authenticatedAt, provenSince: runtime.clock.now() };
 		const { cookies } = openedOf(await opened.open(testRequest(), facts));
 		return cookies[0]?.split(";")[0] ?? "";
 	};
