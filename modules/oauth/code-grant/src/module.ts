@@ -13,13 +13,30 @@ import {
 	codeStore,
 	codes,
 	idTokens,
+	redemptionHooks,
 	sessionRedemptions,
 	voidList,
 } from "./contract.ts";
 import { answerFields, codeGrant, voiding } from "./grant.ts";
 import { section } from "./section.ts";
 
-export default defineModule({ name: "code-grant", section }, (m) => [
+const takes = [
+	codeStore,
+	voidList,
+	sessions,
+	clients,
+	issuer,
+	tokens,
+	idTokens,
+	additions,
+	sessionIssuances,
+	sessionRedemptions,
+	redemptionHooks,
+];
+
+// Safe on many instances: every instance runs the sweep over the shared void list, and settling a void twice
+// does no harm (test/voids.test.ts).
+export default defineModule({ name: "code-grant", replicaSafe: true, section, takes }, (m) => [
 	m.provide(codes).by(async (c) => {
 		const store = await c.get(codeStore);
 		const opened = await c.get(sessions);
@@ -30,8 +47,8 @@ export default defineModule({ name: "code-grant", section }, (m) => [
 			issue: async (facts) => {
 				if (!challengeShape.test(facts.challenge)) throw new TypeError("code-grant: bad challenge");
 				const entry = await opened.entryOf(facts.session);
-				if (entry.kind !== "entered")
-					throw new TypeError(`code-grant: the session is ${entry.kind} at use`);
+				// One closed or short since the caller read it is no fault of the caller's: it answers as it can.
+				if (entry.kind !== "entered") throw new Unavailable("code-grant");
 				const context = entry.session.context;
 				if (context.subject !== facts.subject)
 					throw new TypeError("code-grant: not this session's subject");
@@ -60,6 +77,8 @@ export default defineModule({ name: "code-grant", section }, (m) => [
 				if (saved !== "created") throw new Unavailable("code-grant");
 				return code;
 			},
+			redemptionOf: (code) => store.nameOf(code),
+			lifetimeMs: () => c.section["code-lifetime"] * 1000,
 			idTokenScope: () => (makers.length === 1 ? makers[0]?.scope : undefined),
 		};
 	}),
@@ -102,6 +121,7 @@ export default defineModule({ name: "code-grant", section }, (m) => [
 			idToken: makers[0],
 			additions: contributed,
 			redemptions: await c.collect(sessionRedemptions),
+			hooks: await c.collect(redemptionHooks),
 		});
 	}),
 ]);
