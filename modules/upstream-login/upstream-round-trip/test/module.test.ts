@@ -2,7 +2,7 @@ import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { expect, it } from "vitest";
 import { roundTripStore, roundTrips, type StoredRoundTrip } from "../src/contract.ts";
@@ -10,7 +10,7 @@ import roundTripModule from "../src/module.ts";
 
 it("provides round trips over the composed store and cookies", async () => {
 	const kept = memoryRecords<StoredRoundTrip>(() => 0, { shards: 1, perShard: 1 });
-	const store = defineModule({ name: "round-trip-store" }, (m) => [
+	const store = defineModule({ name: "round-trip-store", replicaSafe: false, takes: [] }, (m) => [
 		m
 			.provide(roundTripStore)
 			.by(() => ({ save: kept.records.create, update: kept.records.change })),
@@ -30,4 +30,20 @@ it("provides round trips over the composed store and cookies", async () => {
 		kind: "taken",
 		carried: "kept",
 	});
+});
+
+it("takes all it names", async () => {
+	const kept = memoryRecords<StoredRoundTrip>(() => 0, { shards: 1, perShard: 1 });
+	const store = defineModule({ name: "round-trip-store", replicaSafe: false, takes: [] }, (m) => [
+		m
+			.provide(roundTripStore)
+			.by(() => ({ save: kept.records.create, update: kept.records.change })),
+	]);
+	const input = {
+		modules: [http, cookiesModule, store, roundTripModule],
+		config: { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) },
+		runtime: quietRuntime(),
+	};
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(input))["upstream-round-trip"]).toBeUndefined();
 });
