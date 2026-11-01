@@ -11,10 +11,10 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { carried, checking } from "../src/check.ts";
-import { csrfChecked, originEvidence } from "../src/contract.ts";
+import { csrfChecked, formTokens, originEvidence } from "../src/contract.ts";
 import csrfModule from "../src/module.ts";
 import { csrfStandIn } from "../src/testing.ts";
 
@@ -26,7 +26,8 @@ const boot = (origin = "https://as.example", modules: readonly Module[] = [csrfM
 	assemble({
 		modules: [http, cookiesModule, ...modules],
 		config: {
-			...kernelConfig(),
+			// A plain-http origin is one only a development deployment takes.
+			...kernelConfig({ environment: origin.startsWith("http:") ? "development" : "production" }),
 			...httpConfig({
 				"trusted-proxies": ["127.0.0.1"],
 				...(origin ? { "public-origin": origin } : {}),
@@ -44,7 +45,7 @@ const checkOf = (app: Assembly) => {
 const token = "t".repeat(43);
 
 describe("the check", () => {
-	it("passes on same-origin evidence or a matching token, and refuses any foreign evidence", async () => {
+	it("passes on same-origin evidence or a matching token, and refuses any foreign evidence [guarantee-9-a]", async () => {
 		const app = await boot();
 		const check = checkOf(app);
 		const named = (value: string) => cookieOf(app.get(cookies), value);
@@ -103,7 +104,7 @@ describe("the check", () => {
 		expect(at([{ origin: "https://as.example" }], "http"), "plain http").toBe("refused");
 	});
 
-	it("reads the field token from a JSON body only as a string", async () => {
+	it("reads the field token from a JSON body only as a string [guarantee-9-a]", async () => {
 		const app = await boot();
 		const check = checkOf(app);
 		const cookie = cookieOf(app.get(cookies), token);
@@ -171,7 +172,7 @@ describe("the route", () => {
 	});
 });
 
-const guarded = defineModule({ name: "guarded" }, (m) =>
+const guarded = defineModule({ name: "guarded", replicaSafe: false, takes: [] }, (m) =>
 	(["GET", "POST", "DELETE"] as const).map((method) =>
 		m.contribute(routes).by(() => ({
 			method,
@@ -194,7 +195,7 @@ describe("without a public origin", () => {
 		).rejects.toMatchObject({ name: "BootRefused", refusals: [{ where: "csrf" }] });
 	});
 
-	it("starts the stand-in, which then refuses every unsafe request", async () => {
+	it("starts the stand-in, which then refuses every unsafe request [guarantee-9-a]", async () => {
 		const app = await boot("", [csrfStandIn, guarded]);
 		await app.start();
 		try {
@@ -223,7 +224,7 @@ describe.each([
 	["the module", csrfModule],
 	["the stand-in", csrfStandIn],
 ])("the contract, as %s keeps it", (_, module) => {
-	it("offers the policy to routes: a GET passes, any other method only on evidence or the token", async () => {
+	it("offers the policy to routes: a GET passes, any other method only on evidence or the token [guarantee-9-a] [oidc-core-3.1.2.3-e]", async () => {
 		const app = await boot("https://as.example", [module, guarded]);
 		await app.start();
 		try {
@@ -264,7 +265,7 @@ describe.each([
 
 	it("marks the policy own-site for every method but GET", async () => {
 		const declared = (method: "GET" | "POST" | "PUT" | "DELETE") =>
-			defineModule({ name: "declared" }, (m) => [
+			defineModule({ name: "declared", replicaSafe: false, takes: [] }, (m) => [
 				m.contribute(routes).by(() => ({
 					method,
 					path: "/declared",
@@ -330,4 +331,64 @@ describe.each([
 		});
 		expect(plain.sameOrigin(overHttp)).toBe(true);
 	});
+});
+
+it("takes every handle its takes name, the module and its stand-in alike, at a public origin", async () => {
+	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
+	for (const module of [csrfModule, csrfStandIn]) {
+		expect(
+			(await takesUnused({ modules: [http, cookiesModule, module], config })).csrf,
+		).toBeUndefined();
+	}
+});
+
+it("takes cookies in its stand-in without a public origin too, for the form tokens it hands out", async () => {
+	// The policy refuses every unsafe request without an origin; the form tokens still need the cookie.
+	const config = { ...kernelConfig(), ...httpConfig() };
+	const unused = await takesUnused({ modules: [http, cookiesModule, csrfStandIn], config });
+	expect(unused.csrf).toBeUndefined();
+});
+
+describe("a token for a form the server draws", () => {
+	for (const [name, module] of [
+		["the module", csrfModule],
+		["the stand-in", csrfStandIn],
+	] as const) {
+		it(`is handed out by ${name} with its cookie, a valid one the request holds kept, and passes the policy from a form`, async () => {
+			const app = await boot("https://as.example", [module, guarded]);
+			await app.start();
+			try {
+				const jar = app.get(cookies);
+				const issued = app.get(formTokens).issue(testRequest({ method: "GET", path: "/page" }));
+				expect(issued.field).toBe("csrf_token");
+				expect(issued.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+				expect(issued.cookies).toEqual([jar.write("csrf", issued.token, 7200)]);
+				const cookie = cookieOf(jar, issued.token);
+				const again = app
+					.get(formTokens)
+					.issue(
+						testRequest({ method: "GET", path: "/page", headers: new Map([["cookie", cookie]]) }),
+					);
+				expect(again.token).toBe(issued.token);
+				// A form posted from a page under no-referrer: Origin null, no Referer; the token carries it.
+				const base = `http://127.0.0.1:${app.get(listening).port()}/guarded`;
+				const form = (body: string) =>
+					fetch(base, {
+						method: "POST",
+						headers: {
+							"x-forwarded-proto": "https",
+							origin: "null",
+							cookie,
+							"content-type": "application/x-www-form-urlencoded",
+						},
+						body,
+					});
+				expect((await form(`csrf_token=${issued.token}`)).status).toBe(204);
+				expect((await form("")).status).toBe(403);
+				expect((await form(`csrf_token=${"x".repeat(43)}`)).status).toBe(403);
+			} finally {
+				await app.stop(1000);
+			}
+		});
+	}
 });
