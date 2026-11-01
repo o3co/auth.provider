@@ -4,6 +4,7 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Session, sessions } from "@mod/session";
+import { openedOf } from "@mod/session/testing";
 import sessionLifecycle from "@mod/session-lifecycle/module";
 import { sessionLifecycleConfig } from "@mod/session-lifecycle/testing";
 import { participants } from "@mod/session-participants";
@@ -22,7 +23,7 @@ const withCookie = (cookie: string) =>
 async function boot() {
 	const simulated = simulatedStore();
 	const closer = { failing: false, calls: 0 };
-	const participant = defineModule({ name: "closer" }, (m) => [
+	const participant = defineModule({ name: "closer", replicaSafe: false, takes: [] }, (m) => [
 		m.contribute(participants).by(() => ({
 			name: "closer",
 			closing: async () => {
@@ -52,8 +53,13 @@ async function boot() {
 	});
 	const s = app.get(sessions);
 	const login = async () => {
-		const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: runtime.clock.now() };
-		return pair((await s.complete(testRequest(), facts)).cookies[0]);
+		const facts = {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
+		return pair(openedOf(await s.open(testRequest(), facts)).cookies[0]);
 	};
 	const handleOf = async (cookie: string) => ((await s.enter(withCookie(cookie))) as Session).id;
 	return { s, simulated, closer, login, handleOf };
