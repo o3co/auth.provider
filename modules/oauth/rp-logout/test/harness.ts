@@ -30,7 +30,7 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn, stubSessions } from "@mod/session/testing";
+import { openedOf, sessionStandIn, stubSessions } from "@mod/session/testing";
 import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
 import sessionRequirements from "@mod/session-requirements/module";
@@ -202,9 +202,11 @@ export async function harness(
 	const seen = app.get(probed);
 	/** A session for the subject, with the cookie that opens it. */
 	const login = async (subject = "alice") => {
-		const done = await app
-			.get(sessions)
-			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() });
+		const done = openedOf(
+			await app
+				.get(sessions)
+				.open(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() }),
+		);
 		return { session: done.session, cookie: (done.cookies[0] ?? "").split(";")[0] ?? "" };
 	};
 	/** An ID token for the session, as oidc makes it, the claims written over by `over`. */
@@ -380,11 +382,11 @@ export function readEndingSessions(lifetimeMs: number) {
 					const id = /session=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
 					return id !== undefined && kept.has(id) ? id : undefined;
 				},
-				complete: async (_request, facts) => {
+				open: async (_request, facts) => {
 					const id = `s${kept.size + 1}`;
 					const r: Kept = { subject: facts.subject, openedAt: c.clock.now(), state: "open" };
 					kept.set(id, r);
-					return { session: sessionOf(id, r), cookies: [`session=${id}`] };
+					return { kind: "opened", session: sessionOf(id, r), cookies: [`session=${id}`] };
 				},
 				entryOf: async (id) => {
 					const r = kept.get(id);
