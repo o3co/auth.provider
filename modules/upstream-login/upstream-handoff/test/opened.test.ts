@@ -147,3 +147,12 @@ it("keeps nothing of a login a gate refused, so no opening hands its tokens on",
 	await h.handoff.opened(session, kept.carry);
 	expect(h.received).toEqual([]);
 });
+
+it("keeps nothing of a login session refused as revoked, so no opening hands its tokens on", async () => {
+	const h = holding();
+	const kept = h.handoff.of("corp", "alice", tokens, 60_000);
+	if (!kept) throw new Error("tokens someone receives are held");
+	await kept.after({ kind: "revoked", cookies: [] });
+	await h.handoff.opened(session, kept.carry);
+	expect(h.received).toEqual([]);
+});

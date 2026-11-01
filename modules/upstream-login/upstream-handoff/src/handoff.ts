@@ -141,8 +141,8 @@ export function handoffWith(parts: Parts): Handoff {
 				deadline,
 				after: async (outcome) => {
 					if (outcome.kind === "opened") return tell(outcome.session, idp, tokens);
-					// A refused login opens no session, now or later: nothing is kept to hand on.
-					if (outcome.kind === "refused") return;
+					// Only a held login opens later: one refused or revoked keeps nothing to hand on.
+					if (outcome.kind !== "held") return;
 					await held.keep(carry, { idp, subject, heldAt: parts.clock.now(), tokens }, lifetimeMs);
 				},
 			};
