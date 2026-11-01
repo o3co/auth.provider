@@ -8,6 +8,7 @@ import {
 	sameMark,
 	successes,
 } from "@mod/conformance/testing";
+import { pastBoundaries } from "@mod/conformance-identity";
 import { describe, expect, it } from "vitest";
 import {
 	type Answer,
@@ -18,7 +19,12 @@ import {
 	said,
 	users,
 } from "../../faults/test/faults.ts";
-import { boundaryCreated, boundaryOf, closingAdded } from "../../faults/test/wire.ts";
+import {
+	boundariesPut,
+	boundaryCreated,
+	boundaryOf,
+	closingAdded,
+} from "../../faults/test/wire.ts";
 
 // Each scene exchanges, at another instance, an access token alice was given before her boundary while
 // the revocation's followers are held at their first write, so her session is not closed nor its
@@ -76,17 +82,14 @@ async function control(d: Deployed) {
 }
 
 /**
- * Healed: the topology has recovered, and a token alice is given from a login a second and more past the
- * boundary's last write (boundaries are compared in seconds) is exchanged.
+ * Healed: the topology has recovered, and a token alice is given from a login a second and more past
+ * every boundary written (a boundary is its write's deadline, compared in seconds) is exchanged.
  */
 async function healed(d: Deployed, i: Instance) {
 	await recovered(d);
 	await ready(i);
-	const written = d.instances.flatMap((x) =>
-		successes(x, boundaryOf(users.alice.subject)).map((e) => e.at),
-	);
-	const after = Math.max(...written) + 1_100 - performance.now();
-	if (after > 0) await new Promise((resolve) => setTimeout(resolve, after));
+	const written = d.instances.flatMap((x) => successes(x, boundaryOf(users.alice.subject)));
+	await pastBoundaries(written.flatMap((e) => boundariesPut(e.command)));
 	expect(said(await exchangeAt(i, await accessAt(i, users.alice)))).toEqual([200, "Bearer"]);
 }
 
