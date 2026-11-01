@@ -8,6 +8,8 @@ const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TR
 const STATUSES = Array.from({ length: 500 }, (_, i) => String(100 + i));
 // No route's handler ran: 400, 404, 405 and preflight answers.
 const UNMATCHED = "unmatched";
+// In seconds: prom-client's default buckets, 5 ms to 10 s.
+const LATENCY_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 
 export type Duration = Histogram<Label>;
 
@@ -21,7 +23,7 @@ export function requestDuration(paths: readonly string[]): Duration {
 			route: [...new Set([...paths, UNMATCHED])],
 			status: STATUSES,
 		},
-		buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+		buckets: LATENCY_BUCKETS,
 	});
 }
 
