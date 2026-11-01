@@ -15,7 +15,7 @@ import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
@@ -269,7 +269,7 @@ it("holds the sessions it composes to mfa's entry requirement: a subject holding
 	const { passOf, bindCode, sessions: open } = await serve();
 	expect((await bindCode("ann", await passOf("ann"))).kind).toBe("bound");
 	const facts = { subject: "ann", amr: ["pwd"], authenticatedAt: runtime.clock.now() };
-	const { cookies } = await open.complete(testRequest(), facts);
+	const { cookies } = openedOf(await open.open(testRequest(), facts));
 	const cookie = cookies.map((c) => c.split(";")[0]).join("; ");
 	const request = testRequest({
 		headers: new Map([["cookie", cookie]]),
