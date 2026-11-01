@@ -4,6 +4,19 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "foundation",
+	"registersAs": "log",
+	"asks": [
+		"Audit events named in `audit.receivers = [{adapters}]`.",
+		{
+			"line": "`audit.receivers`: the names of the audit receivers composed: `[{adapters}]`.",
+			"decides": true
+		},
+		{
+			"line": "`log`: audit's own receiver, writing events to the log.",
+			"decides": true,
+			"unadapted": true
+		}
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",

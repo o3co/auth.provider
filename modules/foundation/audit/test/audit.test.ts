@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
 import metricsModule from "@mod/metrics/module";
 import { beforeEach, expect, it } from "vitest";
@@ -11,7 +13,7 @@ import { section } from "../src/section.ts";
 let recorded = recordingLog();
 const lines = () => recorded.lines();
 const receiving = (name: string, receive: AuditReceiver["receive"]): Module =>
-	defineModule({ name: `receiver-${name}` }, (m) => [
+	defineModule({ name: `receiver-${name}`, replicaSafe: true, takes: [] }, (m) => [
 		m.contribute(auditReceivers).by(() => ({ name, receive })),
 	]);
 /** A composition naming `receivers`, with the receiving modules and settings a test adds. */
@@ -129,11 +131,8 @@ it("counts a failing receiver's lost events and warns once when it starts losing
 	expect(got).toEqual(["k", "k"]);
 	expect(a.lost()).toEqual({ rejecting: 2, throwing: 2, fine: 0 });
 	expect(warned()).toEqual([
-		["audit receiver losing events", { receiver: "rejecting", lost: 1, failure: "Error" }],
-		[
-			"audit receiver losing events",
-			{ receiver: "throwing", lost: 1, failure: "DestinationRefused" },
-		],
+		["audit.receiver_losing", { receiver: "rejecting", lost: 1, failure: "Error" }],
+		["audit.receiver_losing", { receiver: "throwing", lost: 1, failure: "DestinationRefused" }],
 	]);
 	failing = false;
 	a.record({ kind: "k" });
@@ -141,12 +140,9 @@ it("counts a failing receiver's lost events and warns once when it starts losing
 	await settled();
 	expect(a.lost()).toEqual({ rejecting: 2, throwing: 4, fine: 0 });
 	expect(warned()).toEqual([
-		["audit receiver losing events", { receiver: "rejecting", lost: 1, failure: "Error" }],
-		[
-			"audit receiver losing events",
-			{ receiver: "throwing", lost: 1, failure: "DestinationRefused" },
-		],
-		["audit receiver recovered", { receiver: "rejecting", lost: 2 }],
+		["audit.receiver_losing", { receiver: "rejecting", lost: 1, failure: "Error" }],
+		["audit.receiver_losing", { receiver: "throwing", lost: 1, failure: "DestinationRefused" }],
+		["audit.receiver_recovered", { receiver: "rejecting", lost: 2 }],
 	]);
 	expect(JSON.stringify(warned())).not.toContain("s3cr3t");
 });
@@ -172,8 +168,8 @@ it("does not queue an event past a receiver's pending limit, and counts it as lo
 	await settled();
 	expect(got).toEqual(["1", "2"]);
 	expect(warned()).toEqual([
-		["audit receiver losing events", { receiver: "slow", lost: 1, failure: "backlog" }],
-		["audit receiver recovered", { receiver: "slow", lost: 1 }],
+		["audit.receiver_losing", { receiver: "slow", lost: 1, failure: "backlog" }],
+		["audit.receiver_recovered", { receiver: "slow", lost: 1 }],
 	]);
 	a.record({ kind: "4" });
 	await settled();
@@ -188,7 +184,7 @@ it("reads the losses as a frozen count per named receiver", async () => {
 	expect((await boot("none")).lost()).toEqual({});
 });
 
-it("writes one log line per event, with the attributes' names and never their values", async () => {
+it("writes one log line per event, with the attributes' names and never their values [guarantee-8-b]", async () => {
 	const a = await boot(["log"]);
 	a.record({ kind: "k", subject: "s", attributes: { method: "secret-ish", result: "x" } });
 	await settled();
@@ -196,16 +192,25 @@ it("writes one log line per event, with the attributes' names and never their va
 		{
 			level: "info",
 			event: "audit",
-			fields: { kind: "k", at: 1234, subject: "s", attributes: "method,result" },
+			fields: { kind: "k", occurred: 1234, subject: "s", attributes: "method,result" },
 		},
 	]);
 });
 
-it("delivers nowhere when the section states none", async () => {
+it("delivers nowhere when the section states none, warning so at every boot", async () => {
+	const nowhere = {
+		level: "warn",
+		event: "audit.receivers_none",
+		fields: {},
+	};
 	const a = await boot("none");
 	a.record({ kind: "k" });
 	await settled();
-	expect(lines()).toEqual([]);
+	expect(lines()).toEqual([nowhere]);
+	await boot("none");
+	expect(lines()).toEqual([nowhere, nowhere]);
+	await boot(["log"]);
+	expect(warnings()).toEqual([nowhere, nowhere]);
 });
 
 it("refuses to start without the statement, with an unknown name, or with a receiver left unnamed", async () => {
@@ -228,10 +233,10 @@ it("refuses to start without the statement, with an unknown name, or with a rece
 	await expect(boot(["log", "other"], { extra: [other] })).resolves.toBeDefined();
 });
 
-it("refuses a name no receiver has at its place in the list, never by the name", async () => {
+it("refuses a name no receiver has at its place in the list, never by the name, telling the names composed", async () => {
 	const refused = await boot(["log", "missing"]).catch((error: unknown) => error);
 	expect((refused as BootRefused).refusals).toEqual([
-		{ where: "audit.receivers.1", reason: "names no receiver" },
+		{ where: "audit.receivers.1", reason: "names no composed receiver (composed: log)" },
 	]);
 });
 
@@ -281,8 +286,26 @@ it("counts as lost the events still under way at the stop deadline, and stops on
 	expect(Date.now() - started).toBeLessThan(1000);
 	expect(assembly.get(audit).lost()).toEqual({ hung: 2 });
 	expect(warned()).toContainEqual([
-		"audit receiver losing events",
+		"audit.receiver_losing",
 		{ receiver: "hung", lost: 1, failure: "stopped" },
+	]);
+});
+
+it("counts an event recorded after stop that its receiver fails, as any other loss", async () => {
+	const failing = receiving("failing", async () => {
+		throw new Error("down");
+	});
+	const assembly = await app(["failing"], [failing]);
+	await assembly.stop(1000);
+	// A handler still running past stop records; its receiver fails.
+	assembly.get(audit).record({ kind: "login.failed" });
+	await settled();
+	await settled();
+	expect(assembly.get(audit).lost()).toEqual({ failing: 1 });
+	expect(lostSeries(assembly)).toEqual([{ labels: { receiver: "failing" }, value: 1 }]);
+	expect(warned()).toContainEqual([
+		"audit.receiver_losing",
+		{ receiver: "failing", lost: 1, failure: "Error" },
 	]);
 });
 
@@ -300,4 +323,17 @@ it("counts each receiver's lost events as a metric", async () => {
 
 it("lets each receiver hold 1000 deliveries at once when the operator sets no limit", () => {
 	expect(section.parse({ receivers: "none" })).toEqual({ receivers: "none", "max-pending": 1000 });
+});
+
+it("takes every handle its takes name", async () => {
+	const config = { ...kernelConfig(), audit: { receivers: ["log"] } };
+	expect((await takesUnused({ modules: [auditModule], config })).audit).toBeUndefined();
+});
+
+it("names its own receiver, for when no adapter is composed, as its manifest declares (`registersAs`)", async () => {
+	const { registersAs } = JSON.parse(
+		readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"),
+	) as { registersAs: string };
+	const config = { ...kernelConfig(), audit: { receivers: [registersAs] } };
+	await expect(assemble({ modules: [auditModule], config })).resolves.toBeDefined();
 });
