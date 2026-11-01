@@ -22,7 +22,7 @@ import { quietRuntime, switchedModule } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import sessionRequirements from "@mod/session-requirements/module";
 import sessionTokensModule from "@mod/session-tokens/module";
@@ -161,11 +161,14 @@ async function serve(
 	};
 	/** A code redeemed in a session opened now: its family is bound to that session. */
 	const redeem = async () => {
-		const { session } = await app.get(sessions).complete(testRequest(), {
-			subject: "alice",
-			amr: ["pwd"],
-			authenticatedAt: runtime.clock.now(),
-		});
+		const { session } = openedOf(
+			await app.get(sessions).open(testRequest(), {
+				subject: "alice",
+				amr: ["pwd"],
+				authenticatedAt: runtime.clock.now(),
+				provenSince: runtime.clock.now(),
+			}),
+		);
 		const code = await app.get(codes).issue({
 			clientId: "app",
 			redirectUri: "https://app.example/cb",

@@ -3,6 +3,7 @@ import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { openedOf } from "@mod/session/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { describe, expect, it } from "vitest";
@@ -87,11 +88,12 @@ describe("the stand-in's seams", () => {
 		subject: "alice",
 		amr,
 		authenticatedAt: place.now(),
+		provenSince: place.now(),
 	});
 
 	it("takes no seam contributed as no requirement and no participant, the credentials floor still kept", async () => {
 		const place = await placeOver([], {}, { none: true });
-		const done = await place.sessions.complete(place.request(), facts(place));
+		const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 		const entering = (level: "use" | "credentials") =>
 			place.sessions.enterFor(place.request(done.cookies), level);
 		expect((await entering("use")).kind).toBe("entered");
@@ -117,7 +119,7 @@ describe("the stand-in's seams", () => {
 			},
 		};
 		const place = await placeOver([], {}, { judge: waiting });
-		const done = await place.sessions.complete(place.request(), facts(place));
+		const done = openedOf(await place.sessions.open(place.request(), facts(place)));
 		place.advance(60_000);
 		const entering = place.sessions.enterFor(place.request(done.cookies), "use");
 		await reached;

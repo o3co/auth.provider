@@ -31,7 +31,7 @@ import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod
 import rateLimitModule from "@mod/rate-limit/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
@@ -233,8 +233,8 @@ async function serve(...given: Parameters<typeof assembly>) {
 		subject = "alice",
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const facts = { subject, amr: ["pwd"], authenticatedAt };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
+		const facts = { subject, amr: ["pwd"], authenticatedAt, provenSince: runtime.clock.now() };
+		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		return cookies[0]?.split(";")[0] ?? "";
 	};
 	const verify = (cookie: string, json: Record<string, unknown>, headers = {}) =>

@@ -18,7 +18,7 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
@@ -96,9 +96,14 @@ async function serve(
 		subject: string,
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const done = await app
-			.get(sessions)
-			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt });
+		const done = openedOf(
+			await app.get(sessions).open(testRequest(), {
+				subject,
+				amr: ["pwd"],
+				authenticatedAt,
+				provenSince: runtime.clock.now(),
+			}),
+		);
 		const cookie = done.cookies.map((c) => c.split(";")[0]).join("; ");
 		return async (path: string, body?: unknown, method = "POST") => {
 			const url = path.startsWith("/") ? path : `/oauth/webauthn/registration/${path}`;
@@ -211,8 +216,13 @@ it("refuses a session whose sign-in time is unknown where mfa judges entry, befo
 
 it("leaves the credentials entry to mfa's requirement where mfa is composed, not to session's floor", async () => {
 	const { sessions: open } = await serve({}, { withMfa: true });
-	const facts = { subject: "dee", amr: ["pwd"], authenticatedAt: "unknown" as const };
-	const { cookies } = await open.complete(testRequest(), facts);
+	const facts = {
+		subject: "dee",
+		amr: ["pwd"],
+		authenticatedAt: "unknown" as const,
+		provenSince: runtime.clock.now(),
+	};
+	const { cookies } = openedOf(await open.open(testRequest(), facts));
 	const cookie = cookies.map((c) => c.split(";")[0]).join("; ");
 	const request = testRequest({
 		headers: new Map([["cookie", cookie]]),

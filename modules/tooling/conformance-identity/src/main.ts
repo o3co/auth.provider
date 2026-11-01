@@ -13,3 +13,4 @@ export {
 	type UpstreamScene,
 	type UserScene,
 } from "./area.ts";
+export { pastBoundaries, revocationWindowMs } from "./revocation.ts";

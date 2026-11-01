@@ -22,11 +22,11 @@ const t = {
 /** resumeOver over stand-ins; `calls` lists what reached them, the carried answer's making included. */
 function standIn() {
 	const calls: string[] = [];
+	/** The facts each resume handed login-gates. */
+	const asked: unknown[] = [];
 	const logged = recordingLog();
 	const set = {
 		resumed: { kind: "opened", session, cookies: ["session=s1"] } as LoginOutcome,
-		revokeOnOpen: false,
-		revoked: false,
 		closing: async () => {},
 	};
 	const resume = resumeOver({
@@ -38,20 +38,21 @@ function standIn() {
 			},
 		},
 		logins: {
-			resume: async () => {
-				set.revoked ||= set.revokeOnOpen;
+			resume: async (_request, facts) => {
+				asked.push(facts);
 				return set.resumed;
 			},
 		},
-		revocation: { check: async () => (set.revoked ? "revoked" : "valid") },
 		transactions: { cleared: () => "mfa=" } as never,
 		log: logged.log,
 	});
 	return {
 		calls,
+		asked,
 		lines: logged.lines,
 		set,
-		resume: (carried: Parameters<typeof resume>[3]) => resume(testRequest(), t, ["otp"], carried),
+		resume: (carried: Parameters<typeof resume>[3], held: typeof t = t) =>
+			resume(testRequest(), held, ["otp"], carried),
 	};
 }
 
@@ -69,10 +70,25 @@ it("makes what it carries only once the login opened and no revocation came, add
 	]);
 	s.set.resumed = { kind: "held", gate: "next", answer: { error: "next" }, cookies: [] };
 	expect((await s.resume(carried)).status).toBe(403);
-	s.set.resumed = { kind: "opened", session, cookies: ["session=s1"] };
-	s.set.revokeOnOpen = true;
+	// session refused it, its subject revoked since the proof began: nothing made, no session to close.
+	s.set.resumed = { kind: "revoked", cookies: [] };
 	expect((await s.resume(carried)).status).toBe(401);
-	expect(s.calls).toEqual(["made", "close h1"]);
+	expect(s.calls).toEqual(["made"]);
+});
+
+it("hands login-gates the held facts' own proof's start, and answers a login session revoked as login_required, warning no expiry", async () => {
+	const s = standIn();
+	const held = { ...t, facts: { subject: "sue", amr: ["pwd"], provenSince: 1234 } };
+	await s.resume(undefined, held);
+	expect(s.asked).toMatchObject([{ subject: "sue", amr: ["pwd", "otp"], provenSince: 1234 }]);
+	s.set.resumed = { kind: "revoked", cookies: [] };
+	const refused = await s.resume(undefined, held);
+	expect([refused.status, refused.body, refused.cookies]).toEqual([
+		401,
+		{ json: { error: "login_required" } },
+		["mfa="],
+	]);
+	expect(s.lines().map((line) => line.event)).not.toContain("mfa-flows.login_expired");
 });
 
 it("closes the opened session and answers what carried answered when it is a response; the session's cookie never goes out", async () => {

@@ -22,7 +22,7 @@ import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { type Sessions, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { type Revocations, revocations } from "@mod/subject-revocation";
@@ -72,7 +72,7 @@ const entering = {
 		return sessionsDown.wrap({
 			...kept,
 			raise: (...args: Parameters<Sessions["raise"]>) => held(kept.raise(...args)),
-			complete: (...args: Parameters<Sessions["complete"]>) => held(kept.complete(...args)),
+			open: (...args: Parameters<Sessions["open"]>) => held(kept.open(...args)),
 		});
 	},
 };
@@ -313,8 +313,13 @@ export async function serve(
 	/** A fresh browser, signed in by password. */
 	const signIn = async (subject = "alice") => {
 		jar = new Map();
-		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
+		const facts = {
+			subject,
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
+		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		keep(cookies);
 	};
 	/** Enrolls a code factor from a signed-in browser and answers its secret and the recovery codes. */
@@ -334,7 +339,12 @@ export async function serve(
 		from?: LoginFrom,
 	) => {
 		jar = new Map();
-		const facts = { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject,
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		const outcome = await app.get(logins).login(testRequest(), facts, done, from);
 		keep(outcome.cookies);
 		return outcome;

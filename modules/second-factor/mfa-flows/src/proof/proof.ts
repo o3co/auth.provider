@@ -9,8 +9,8 @@ import type { Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { Permits } from "../permits/permits.ts";
 import { auditedBy } from "../recording/recording.ts";
-import { loginRequired, revokedSince, unavailable } from "../requests/requests.ts";
-import type { Transaction } from "../transactions/records.ts";
+import { loginRequired, unavailable } from "../requests/requests.ts";
+import type { HeldFacts, Transaction } from "../transactions/records.ts";
 import type { Transactions } from "../transactions/transactions.ts";
 import { challengeWith } from "./challenge.ts";
 import { provingWith } from "./proving.ts";
@@ -49,7 +49,6 @@ export function gateOver(p: GateParts): LoginGate["hold"] {
 export interface ResumeParts {
 	readonly sessions: Pick<Sessions, "close">;
 	readonly logins: Pick<Logins, "resume">;
-	readonly revocation: Pick<SubjectRevocation, "check">;
 	readonly transactions: Transactions;
 	readonly log: Pick<Log, "warn">;
 }
@@ -92,15 +91,22 @@ export function resumeOver(p: ResumeParts) {
 		carried?: Carried,
 		opened?: (handle: string) => Promise<void>,
 	) => {
-		const facts = t.facts ?? { subject: t.subject, amr: [] };
+		const facts: HeldFacts = t.facts ?? { subject: t.subject, amr: [] };
 		const amr = [...new Set([...facts.amr, ...proved])];
-		// Held with no time, it is unknown: never the opening's.
+		// Held with no time, it is unknown, never the opening's; with no proof's start, the transaction's.
 		const authenticatedAt = facts.authenticatedAt ?? "unknown";
-		const resuming = { ...facts, amr, authenticatedAt };
+		const resuming = {
+			...facts,
+			amr,
+			authenticatedAt,
+			provenSince: facts.provenSince ?? t.startedAt,
+		};
 		const resumed = await p.logins.resume(request, resuming, "mfa", t.done, t.from);
 		if (resumed.kind === "held")
 			return jsonAnswer(403, resumed.answer, { cookies: resumed.cookies });
-		// A gate refused it: the transaction was taken already, so its cookie goes; nothing is amiss to warn of.
+		// A gate refused it, or session did as a revocation since the held facts' `provenSince`: the cookie goes.
+		if (resumed.kind === "revoked")
+			return { ...loginRequired, cookies: [p.transactions.cleared()] };
 		if (resumed.kind === "refused") {
 			return jsonAnswer(403, { error: "login_required" }, { cookies: [p.transactions.cleared()] });
 		}
@@ -109,11 +115,6 @@ export function resumeOver(p: ResumeParts) {
 			p.log.warn("mfa-flows.login_expired", {});
 			// Answered as a refusal is, cookie and all: only the log tells them apart.
 			return jsonAnswer(403, { error: "login_required" }, { cookies: [p.transactions.cleared()] });
-		}
-		// A revocation landing between the proof and the opening ends the session before its cookie goes out.
-		if (await revokedSince(p.revocation, t)) {
-			await p.sessions.close(resumed.session.id);
-			return { ...loginRequired, cookies: [p.transactions.cleared()] };
 		}
 		await opened?.(resumed.session.id);
 		const made = carried === undefined ? undefined : await madeIn(resumed.session.id, carried);
@@ -129,6 +130,7 @@ export function resumeOver(p: ResumeParts) {
 }
 
 export interface ProofParts extends ResumeParts {
+	readonly revocation: Pick<SubjectRevocation, "check">;
 	readonly factors: Pick<FactorReading, "guessable" | "held" | "challenge" | "prove">;
 	readonly sessions: Pick<Sessions, "enter" | "raise" | "close">;
 	readonly lockouts: Pick<Lockouts, "reserve" | "succeeded" | "abandoned">;

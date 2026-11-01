@@ -30,7 +30,7 @@ export default defineModule(
 				save: records.create,
 				read: records.read,
 				update: (subject, change) =>
-					records.change(subject, (record) => ({ value: change(record) })),
+					records.change(subject, (record, write) => ({ value: change(record, write) })),
 			};
 		}),
 	],

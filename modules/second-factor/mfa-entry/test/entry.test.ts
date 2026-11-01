@@ -15,7 +15,7 @@ import { type Enforcer, enforcers } from "@mod/mfa";
 import { type FactorKind, factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
 import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { sessionRules, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -86,7 +86,14 @@ async function serve(
 		amr: string[],
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const { cookies } = await opened.complete(testRequest(), { subject, amr, authenticatedAt });
+		const { cookies } = openedOf(
+			await opened.open(testRequest(), {
+				subject,
+				amr,
+				authenticatedAt,
+				provenSince: runtime.clock.now(),
+			}),
+		);
 		return withCookie(cookies[0] ?? "");
 	};
 	return { app, input, opened, signedIn, asked: stand.asked };
@@ -184,9 +191,13 @@ it("takes only a second factor proven recently as proven, never a recent sign-in
 	const { app } = await serve();
 	const now = runtime.clock.now();
 	const at = (amr: string[], extra = {}) =>
-		app
-			.get(secondFactors)
-			.provenRecently({ subject: "s", amr, authenticatedAt: now, ...extra } as never);
+		app.get(secondFactors).provenRecently({
+			subject: "s",
+			amr,
+			authenticatedAt: now,
+			provenSince: now,
+			...extra,
+		} as never);
 	expect(at(["pwd"])).toBe(false);
 	expect(at(["pwd", secondFactorAmr])).toBe(true);
 	expect(at(["pwd"], { raisedAmr: ["otp", secondFactorAmr], raisedAt: now })).toBe(true);

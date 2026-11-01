@@ -15,7 +15,7 @@ export default defineModule(
 	(m) => [
 		m.provide(revocations).by(async (c): Promise<Revocations> => {
 			const boundaries = await c.get(boundaryStore);
-			const write = writtenTo(boundaries, () => c.clock.now());
+			const write = writtenTo(boundaries);
 			return {
 				record: followedBy(write, await c.collect(revocationFollowers), c.log),
 				compare: async (subject, time, kind, allowanceMs) => {

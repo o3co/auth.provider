@@ -22,6 +22,7 @@
 - The need for a user ledger over HTTP
 - The need for a user ledger over HTTP beside users in the settings
 - The need for a ledger that revokes subjects over HTTP (`ledgerRevocation`), which the legacy build cannot meet
+  - The window after the ledger's revocation answered in which a login of its subject may still be refused (`revocationWindowMs`, as U-0.19-126 states it), and a wait until a login is past the boundaries a scene read as recorded (`pastBoundaries`)
 - The need for a recent-authentication window (`recentAuthenticationWindow`), which the legacy build cannot meet
 - The fault run (`conformance:faults`): the `*.faults.case.ts` scenes alone, failing where one did not run only with `CONFORMANCE_FAULTS=1`, as CI sets and the script does not; named to the evidence as `@mod/conformance-identity#faults` by the run itself; the area's own run and its pattern runs leave them out
 

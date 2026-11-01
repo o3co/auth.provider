@@ -626,7 +626,8 @@ describe("the logout a client starts", () => {
 		const broken = defineModule({ takes: [], name: "session", replicaSafe: false }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
-					complete: async (_request, facts) => ({
+					open: async (_request, facts) => ({
+						kind: "opened",
 						session: {
 							id: "s1",
 							context: { subject: facts.subject, amr: ["pwd"], authenticatedAt: 0 },

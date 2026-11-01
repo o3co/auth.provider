@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type Match, storeWrite } from "@mod/conformance/testing";
+import { type Command, type Match, storeWrite, writtenValues } from "@mod/conformance/testing";
 
 // The store's own names a scene matches its writes by: the spaces and partitions subject-revocation,
 // session-lifecycle and exchange-id-tokens write. Nothing else in the area names them.
@@ -18,6 +18,18 @@ export const boundaryOf = (subject: string): Match =>
 		partition: subject,
 		operations: ["putIfAbsent", "replaceIf"],
 	});
+
+/** The boundaries a write of a subject's boundary puts, each a time: its sessions' and its delegations'. */
+export const boundariesPut = (command: Command): number[] => {
+	const put = writtenValues(command).find(
+		(w) => w.key.space === "subject-revocation-store.boundaries" && w.key.name === "record",
+	)?.value;
+	const value = put && typeof put === "object" && "value" in put ? put.value : put;
+	if (typeof value === "number") return [value];
+	return value && typeof value === "object"
+		? Object.values(value).filter((v): v is number => typeof v === "number")
+		: [];
+};
 
 /** The write that creates a subject's first boundary; a revocation that finds one held writes it from that instead. */
 export const boundaryCreated = (subject: string): Match =>

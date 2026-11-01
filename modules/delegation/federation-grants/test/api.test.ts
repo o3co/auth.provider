@@ -177,6 +177,7 @@ describe("the client routes", () => {
 		});
 		expect(h.stores.peek(id)).toHaveProperty("sealed");
 		expect((await h.grantCall(id, "token")).status).toBe(200);
+		h.advance(1000); // A login proved after the revocation opens; the renewal begun before it still ends.
 		expect((await h.open(renewal, await h.login())).opened.status).toBe(400);
 	});
 

@@ -17,7 +17,7 @@
 - Declares to `users` (`upstreamNames`) each IdP's name with the issuer its upstream says.
 - The operator section (its keys in the settings list).
 - Test configuration builders and an IdP type for tests (`./testing`)
-- Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`, or `refused` for a login a gate refused, answered as `unknown_user`)
+- Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`, or `refused` for a login a gate refused, or `revoked` for one `session` refused, its subject revoked since the round trip began, each answered as `unknown_user`)
 - No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
 - Answer codes: `not_found` (404), `repeated_parameter`, `invalid_redirect`, `invalid_request`, `invalid_state`, `upstream_refused`, `continuation_unavailable` (400), `unknown_user`, `login_required` (401), a gate's answer (403), a continuation's own answers, `method_not_allowed` (405, with `allow`), `exchange_failed` (502), `temporarily_unavailable` (503)
 - Success is a 303 to the return target or the landing.

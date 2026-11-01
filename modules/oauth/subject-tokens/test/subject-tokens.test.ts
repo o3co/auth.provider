@@ -56,10 +56,11 @@ it("fails a token issued up to its subject's revocation, and no other subject's"
 	expect((await s.t.verifyAccess(other)).kind).toBe("valid");
 });
 
-it("keeps a token issued in a later second than the revocation", async () => {
+it("keeps a token issued in a later second than the revocation's boundary, its write's deadline", async () => {
 	const s = await boot();
 	await s.revoke("alice");
-	now += 1000;
+	// The boundary is the deadline its write was sent with, records' 10 s past the store's time.
+	now += 11_000;
 	expect((await s.t.verifyAccess(await s.issue("alice"))).kind).toBe("valid");
 });
 
