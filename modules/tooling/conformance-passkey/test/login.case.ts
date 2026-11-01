@@ -14,7 +14,7 @@ import {
 } from "@mod/webauthn/testing";
 import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { passkeyArea } from "../src/main.ts";
+import { type PasskeyPart, passkeyArea } from "../src/main.ts";
 
 const grantType = "urn:o3co:oauth:grant-type:webauthn";
 const signing = generateKeyPairSync("ed25519");
@@ -43,7 +43,11 @@ const publicClient = (id: string, grants: string[]): ClientScene => ({
 	scopes: ["read"],
 });
 
-function sceneFor(users: string[], login: { requests: number; windowSeconds: number }): AreaScene {
+function sceneFor(
+	users: string[],
+	login: { requests: number; windowSeconds: number },
+	session?: PasskeyPart["session"],
+): AreaScene {
 	return sceneOf(
 		keysArea.part({
 			signing: {
@@ -62,7 +66,8 @@ function sceneFor(users: string[], login: { requests: number; windowSeconds: num
 			issuer,
 			clients: [
 				confidential("app", [grantType, "refresh_token"]),
-				confidential("other", ["client_credentials"]),
+				// Allowed no grant, so not this one, and the scene needs no other grant composed.
+				confidential("other", []),
 				publicClient("web", [grantType]),
 				publicClient("spa", [grantType, "refresh_token"]),
 			],
@@ -71,7 +76,12 @@ function sceneFor(users: string[], login: { requests: number; windowSeconds: num
 			dpop: true,
 		}),
 		codeArea.part({ refresh: {} }),
-		passkeyArea.part({ rpId: new URL(issuer).hostname, origins: [issuer], login }),
+		passkeyArea.part({
+			rpId: new URL(issuer).hostname,
+			origins: [issuer],
+			login,
+			...(session ? { session } : {}),
+		}),
 	);
 }
 
@@ -175,13 +185,15 @@ describe("H. passkey login at the token endpoint", () => {
 	);
 	const c = calls(() => s.at.base);
 
-	it("gives the client its tokens for a registered passkey, with amr hwk; the refresh token rotates and the client can revoke", async () => {
+	it("gives the client its tokens for a registered passkey, with a passkey's amr and login time that a refresh keeps, and lets the client revoke [rfc6749-5.1-a] [rfc7009-2-b] [rfc7662-2.2-a] [rfc7662-2.2-b] [rfc7662-2.2-c] [rfc7662-4-d]", async () => {
 		const { authenticator } = await c.register("alice");
 		const first = await c.login("app", await c.assertion(authenticator), { scope: "read write" });
 		expect(first.status).toBe(200);
 		expect(first.body).toMatchObject({ token_type: "Bearer", scope: "read write" });
 		const claims = claimsOf(first.body.access_token);
-		expect(claims).toMatchObject({ client_id: "app", amr: ["hwk"] });
+		expect(claims).toMatchObject({ client_id: "app" });
+		// Ours proves possession alone, `pop`; the legacy build proves `hwk`.
+		expect(claims.amr).toEqual(areaTarget().differs("passkey-amr-pop") ? ["hwk"] : ["pop"]);
 		expect(typeof claims.auth_time).toBe("number");
 		const next = await c.post("/oauth/token", "app", {
 			grant_type: "refresh_token",
@@ -189,7 +201,7 @@ describe("H. passkey login at the token endpoint", () => {
 		});
 		expect(next.status).toBe(200);
 		expect(claimsOf(next.body.access_token)).toMatchObject({
-			amr: ["hwk"],
+			amr: claims.amr,
 			auth_time: claims.auth_time,
 		});
 		const token = String(next.body.access_token);
@@ -205,7 +217,7 @@ describe("H. passkey login at the token endpoint", () => {
 		expect(answer.body.refresh_token).toBeUndefined();
 	});
 
-	it("refuses a client not allowed the grant, and a form body", async () => {
+	it("refuses a client not allowed the grant, and a form body [rfc6749-5.2-a]", async () => {
 		const { authenticator } = await c.register("carol");
 		const other = await c.login("other", await c.assertion(authenticator, "other"));
 		expect([other.status, other.body.error]).toEqual([400, "unauthorized_client"]);
@@ -218,7 +230,7 @@ describe("H. passkey login at the token endpoint", () => {
 		expect((await c.login("app", assertion)).status).toBe(200);
 	});
 
-	it("refuses the same assertion twice, and a count that goes back", async () => {
+	it("refuses the same assertion twice, and a count that goes back [rfc6749-5.2-a]", async () => {
 		const { authenticator } = await c.register("dave");
 		const assertion = await c.assertion(authenticator);
 		expect((await c.login("app", assertion)).status).toBe(200);
@@ -233,7 +245,7 @@ describe("H. passkey login: who the assertion names", () => {
 	const s = running(sceneFor(["erin", "fay", "gus", "hal"], { requests: 1000, windowSeconds: 60 }));
 	const c = calls(() => s.at.base);
 
-	it("refuses an assertion naming another account's user handle, issuing for neither; its own handle passes", async () => {
+	it("refuses an assertion naming another account's user handle, issuing for neither; its own handle passes [rfc6749-5.2-a]", async () => {
 		const owner = await c.register("erin");
 		const other = await c.register("fay");
 		const crossed = await c.login(
@@ -246,7 +258,7 @@ describe("H. passkey login: who the assertion names", () => {
 		expect(own.status).toBe(200);
 	});
 
-	it("refuses an assertion without a user handle, and leaves its challenge for the right one", async () => {
+	it("refuses an assertion without a user handle, and leaves its challenge for the right one [rfc6749-5.2-a]", async () => {
 		const { authenticator } = await c.register("gus");
 		const offered = (await c.options()).body;
 		const bare = await c.login("app", authenticator.get(offered, at, { userHandle: null }));
@@ -280,7 +292,7 @@ describe("H. passkey login: who the assertion names", () => {
 		}
 	});
 
-	it("binds the token to the key a DPoP proof shows", async () => {
+	it("binds the token to the key a DPoP proof shows [rfc9449-5-b] [rfc9449-6.1-a]", async () => {
 		const { authenticator } = await c.register("gus");
 		const holder = generateKeyPairSync("ed25519");
 		const proof = await new SignJWT({
@@ -312,7 +324,7 @@ describe("H. passkey login: the options' limit", () => {
 	const s = running(sceneFor([], { requests: 3, windowSeconds: 600 }));
 	const c = calls(() => s.at.base);
 
-	it("answers 429 once a source has asked for options past the limit", async () => {
+	it("answers 429 once a source has asked for options past the limit [guarantee-10-a]", async () => {
 		for (let i = 0; i < 3; i++) expect((await c.options()).status).toBe(200);
 		expect((await c.options()).status).toBe(429);
 	});
@@ -336,7 +348,7 @@ describe("H. passkey login: a small options limit", () => {
 		};
 	};
 
-	it("answers rate_limited with a wait within the window past the limit, to that source's options alone", async () => {
+	it("answers rate_limited with a wait within the window past the limit, to that source's options alone [guarantee-10-a]", async () => {
 		const { authenticator } = await c.register("ines");
 		for (let i = 0; i < 2; i++)
 			expect((await optionsFrom(backChannel["x-forwarded-for"])).status).toBe(200);
@@ -365,6 +377,35 @@ describe.runIf(areaTarget().can("store-fault:passkeys"))(
 			expect((await faulty.whileDown(() => c.options())).status).toBe(503);
 			expect((await faulty.whileDown(() => c.login("app", assertion))).status).toBe(503);
 			expect((await c.login("app", assertion)).status).toBe(200);
+		});
+	},
+);
+
+describe.runIf(areaTarget().can("passkey-session-login"))(
+	"H. passkey login: a challenge stays with the module that made it",
+	() => {
+		const s = running(sceneFor(["erin"], { requests: 1000, windowSeconds: 60 }, {}));
+		const c = calls(() => s.at.base);
+
+		it("refuses at the browser login an assertion a client's options asked for, with the client's id as the browser's mark [guarantee-5-k]", async () => {
+			const { authenticator } = await c.register("erin");
+			// The client asks options and the user answers them: an assertion that is the client's.
+			const forClient = await c.assertion(authenticator, "app");
+			// A browser that has asked options of its own, its mark then set to the client's id.
+			const b = browser(() => s.at.base);
+			const asked = await b.send("POST", "/session/login/passkey/options", {}, {}, "json");
+			expect(asked.status).toBe(200);
+			const mark = [...b.jar.keys()].find((name) => name.endsWith("passkey-login"));
+			expect(mark).toBeDefined();
+			b.jar.set(mark ?? "", "app");
+			const replayed = await b.send(
+				"POST",
+				"/session/login/passkey",
+				{ response: forClient },
+				{},
+				"json",
+			);
+			expect(replayed).toEqual({ status: 401, body: { error: "passkey_login_failed" } });
 		});
 	},
 );
