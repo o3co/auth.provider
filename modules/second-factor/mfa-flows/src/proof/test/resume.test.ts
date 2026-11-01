@@ -27,8 +27,6 @@ function standIn() {
 	const logged = recordingLog();
 	const set = {
 		resumed: { kind: "opened", session, cookies: ["session=s1"] } as LoginOutcome,
-		revokeOnOpen: false,
-		revoked: false,
 		closing: async () => {},
 	};
 	const resume = resumeOver({
@@ -42,11 +40,9 @@ function standIn() {
 		logins: {
 			resume: async (_request, facts) => {
 				asked.push(facts);
-				set.revoked ||= set.revokeOnOpen;
 				return set.resumed;
 			},
 		},
-		revocation: { check: async () => (set.revoked ? "revoked" : "valid") },
 		transactions: { cleared: () => "mfa=" } as never,
 		log: logged.log,
 	});
@@ -74,10 +70,10 @@ it("makes what it carries only once the login opened and no revocation came, add
 	]);
 	s.set.resumed = { kind: "held", gate: "next", answer: { error: "next" }, cookies: [] };
 	expect((await s.resume(carried)).status).toBe(403);
-	s.set.resumed = { kind: "opened", session, cookies: ["session=s1"] };
-	s.set.revokeOnOpen = true;
+	// session refused it, its subject revoked since the proof began: nothing made, no session to close.
+	s.set.resumed = { kind: "revoked", cookies: [] };
 	expect((await s.resume(carried)).status).toBe(401);
-	expect(s.calls).toEqual(["made", "close h1"]);
+	expect(s.calls).toEqual(["made"]);
 });
 
 it("hands login-gates the held facts' own proof's start, and answers a login session revoked as login_required, warning no expiry", async () => {

@@ -9,7 +9,7 @@ import type { Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { Permits } from "../permits/permits.ts";
 import { auditedBy } from "../recording/recording.ts";
-import { loginRequired, revokedSince, unavailable } from "../requests/requests.ts";
+import { loginRequired, unavailable } from "../requests/requests.ts";
 import type { HeldFacts, Transaction } from "../transactions/records.ts";
 import type { Transactions } from "../transactions/transactions.ts";
 import { challengeWith } from "./challenge.ts";
@@ -49,7 +49,6 @@ export function gateOver(p: GateParts): LoginGate["hold"] {
 export interface ResumeParts {
 	readonly sessions: Pick<Sessions, "close">;
 	readonly logins: Pick<Logins, "resume">;
-	readonly revocation: Pick<SubjectRevocation, "check">;
 	readonly transactions: Transactions;
 	readonly log: Pick<Log, "warn">;
 }
@@ -117,11 +116,6 @@ export function resumeOver(p: ResumeParts) {
 			// Answered as a refusal is, cookie and all: only the log tells them apart.
 			return jsonAnswer(403, { error: "login_required" }, { cookies: [p.transactions.cleared()] });
 		}
-		// A revocation landing between the proof and the opening ends the session before its cookie goes out.
-		if (await revokedSince(p.revocation, t)) {
-			await p.sessions.close(resumed.session.id);
-			return { ...loginRequired, cookies: [p.transactions.cleared()] };
-		}
 		await opened?.(resumed.session.id);
 		const made = carried === undefined ? undefined : await madeIn(resumed.session.id, carried);
 		// Its cookie never goes out: the session closed, or failing to, is no one's.
@@ -136,6 +130,7 @@ export function resumeOver(p: ResumeParts) {
 }
 
 export interface ProofParts extends ResumeParts {
+	readonly revocation: Pick<SubjectRevocation, "check">;
 	readonly factors: Pick<FactorReading, "guessable" | "held" | "challenge" | "prove">;
 	readonly sessions: Pick<Sessions, "enter" | "raise" | "close">;
 	readonly lockouts: Pick<Lockouts, "reserve" | "succeeded" | "abandoned">;

@@ -52,8 +52,6 @@ function standIn() {
 			| undefined,
 		resumed: opened,
 		revoked: false,
-		/** The revocation lands while the login opens. */
-		revokeOnOpen: false,
 		entered: session as Session | undefined,
 		held: [{ id: "f", kind: "code" }],
 	};
@@ -83,7 +81,6 @@ function standIn() {
 		logins: {
 			resume: async (_request, facts) => {
 				calls.push(`resume ${facts.amr.join(" ")}`);
-				set.revoked ||= set.revokeOnOpen;
 				return set.resumed;
 			},
 		},
@@ -199,17 +196,17 @@ it("refuses a login whose resume came past its caller's deadline as a gate would
 	]);
 });
 
-it("closes a session that opened after a revocation since the transaction started", async () => {
+it("answers a login session refused, its subject revoked since the proof began, as a revocation, opening nothing", async () => {
 	const s = standIn();
 	const { request } = await s.login();
-	s.set.revokeOnOpen = true;
-	const closed = await s.proof.verify(request(right));
-	expect([...statusOf(closed), closed.cookies]).toEqual([
+	s.set.resumed = { kind: "revoked", cookies: [] };
+	const refused = await s.proof.verify(request(right));
+	expect([...statusOf(refused), refused.cookies]).toEqual([
 		401,
 		{ error: "login_required" },
 		["mfa="],
 	]);
-	expect(s.calls.at(-1)).toBe("close h1");
+	expect(s.calls).not.toContain("close h1");
 });
 
 it("answers a step-up whose session went before the raise 401, one whose raise was not written 503, and clears the binding only once raised", async () => {
