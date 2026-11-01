@@ -10,7 +10,7 @@ import {
 	referenceConfOf,
 	sectionsIn,
 } from "../src/configuration.ts";
-import { root } from "./root.ts";
+import { packages, root } from "./root.ts";
 import {
 	accepts,
 	type Node,
@@ -23,19 +23,29 @@ import {
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
 
-const sections = sectionsIn(root);
+const sections = sectionsIn(packages);
 /** Each section held to the rules: the operator's, those modules add to client records, and the IdP types' settings. */
-const checked = Promise.all([sections, clientSectionsOf(root), idpTypesOf(root)]).then(
-	([own, clients, types]) => [...own, ...clients, ...types],
-);
+const checked = Promise.all([
+	sections,
+	clientSectionsOf(root, packages),
+	idpTypesOf(root, packages),
+]).then(([own, clients, types]) => [...own, ...clients, ...types]);
 const nodes = (s: ClientSection) => nodesOf(s.schema as unknown as Node, [s.section]);
 
-it("writes a section's defaults as HOCON: each described, a unit value bare, a key without a default as a comment", () => {
+it("writes a section's defaults as HOCON: each described, a unit value bare, a key without a default or within an optional object as a comment", () => {
 	const rows = [
 		{ key: "s.ttl", type: "integer", default: "5m", required: false, description: "How long." },
 		{ key: "s.retry.hosts", type: "list of string", default: ["a"], required: false },
 		{ key: "s.url", type: "string", required: true },
 		{ key: "s.proxy", type: "string", required: false },
+		{ key: "s.next.alg", type: "string", default: "a", required: false, within: "s.next" },
+		{ key: "s.next.id", type: "string", required: true, within: "s.next" },
+		{
+			key: "s.anchors",
+			type: "list of string",
+			required: true,
+			when: [{ key: "s.mode", values: ["pki", "chain"] }],
+		},
 	];
 	const conf = referenceConfOf({ section: "s", owner: "@mod/s", rows });
 	expect(conf.split("\n").slice(2)).toEqual([
@@ -45,6 +55,9 @@ it("writes a section's defaults as HOCON: each described, a unit value bare, a k
 		'\tretry.hosts = ["a"]',
 		"\t# url: required",
 		"\t# proxy: optional",
+		'\t# next.alg = "a" (when next is set)',
+		"\t# next.id: required when next is set",
+		"\t# anchors: required when mode is pki or chain",
 		"}",
 		"",
 	]);
@@ -56,8 +69,15 @@ it("holds, committed beside each package, the defaults generated from its sectio
 		const conf = readFileSync(referenceConfFile(s.dir), "utf8");
 		const stale = `${s.owner}'s reference.conf is generated from its schema: run \`pnpm --filter @mod/references run configuration\``;
 		expect(conf, stale).toBe(referenceConfOf(s));
-		for (const r of s.rows.filter((r) => r.default !== undefined)) {
+		const unconditional = (r: (typeof s.rows)[number]) => r.within === undefined && !r.when;
+		for (const r of s.rows.filter((r) => r.default !== undefined && unconditional(r))) {
 			expect(parseString(conf).get(r.key), r.key).toEqual(r.default);
+		}
+		for (const r of s.rows.filter((r) => r.within !== undefined)) {
+			expect(parseString(conf).has(r.within as string), r.key).toBe(false);
+		}
+		for (const r of s.rows.filter((r) => r.when)) {
+			expect(parseString(conf).has(r.key), r.key).toBe(false);
 		}
 	}
 });

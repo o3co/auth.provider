@@ -3,13 +3,15 @@ import { expect, it, vi } from "vitest";
 import {
 	clientSectionsOf,
 	idpTypesOf,
+	itemRowsOf,
+	type JsonSchema,
 	referenceFile,
 	referenceOf,
 	rowsOf,
 	sectionsIn,
 	unfixedKeys,
 } from "../src/configuration.ts";
-import { root } from "./root.ts";
+import { packages, root } from "./root.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
@@ -40,7 +42,7 @@ it("describes each key by its schema: type and bounds, default, whether required
 		{ key: "s.mode", type: "a | b", default: "a", required: false },
 		{ key: "s.size", type: "integer (1–10)", default: 5, required: false },
 		{ key: "s.hosts", type: "list of string", required: false },
-		{ key: "s.retry.max-ms", type: "number", required: false },
+		{ key: "s.retry.max-ms", type: "number", required: false, within: "s.retry" },
 	]);
 	expect(
 		referenceOf([{ section: "s", owner: "@mod/s", rows: rowsOf(schema, ["s"], at) }]),
@@ -56,29 +58,160 @@ it("writes an example of several lines on one line of its table, as JSON writes 
 	expect(line).toContain('`"-----BEGIN KEY-----\\nREPLACE-KEY\\n-----END KEY-----"`');
 });
 
-it("requires a key inside an object only when the object is required too", () => {
-	const key = { type: "object", required: ["id"], properties: { id: { type: "string" } } };
-	const schema = { type: "object", required: ["current"], properties: { current: key, next: key } };
-	expect(rowsOf(schema, ["k"], () => ({}))).toEqual([
+it("requires a key inside an optional object only once the object is set, and holds its default only then", () => {
+	const key = {
+		type: "object",
+		required: ["id"],
+		properties: { id: { type: "string" }, alg: { type: "string", default: "a" } },
+	};
+	const schema = {
+		type: "object",
+		required: ["current"],
+		properties: { current: key, next: key, kept: { ...key, default: {} } },
+	};
+	const rows = rowsOf(schema, ["k"], () => ({}));
+	expect(rows).toEqual([
 		{ key: "k.current.id", type: "string", required: true },
-		{ key: "k.next.id", type: "string", required: false },
+		{ key: "k.current.alg", type: "string", default: "a", required: false },
+		{ key: "k.next.id", type: "string", required: true, within: "k.next" },
+		{ key: "k.next.alg", type: "string", default: "a", required: false, within: "k.next" },
+		{ key: "k.kept.id", type: "string", required: false },
+		{ key: "k.kept.alg", type: "string", default: "a", required: false },
+	]);
+	const table = referenceOf([{ section: "k", owner: "@mod/k", rows }]);
+	expect(table).toContain("| `k.current.id` | string |  | yes |");
+	expect(table).toContain("| `k.next.id` | string |  | when `k.next` is set |");
+	expect(table).toContain("| `k.next.alg` | string | `a` when `k.next` is set |  |");
+});
+
+it("holds a key nested in an optional object to the nearest optional object, a list of objects kept as one row", () => {
+	const object = (properties: Record<string, JsonSchema>, required: string[] = []): JsonSchema => ({
+		type: "object",
+		required,
+		properties,
+	});
+	const next = object(
+		{
+			pair: object({ x: { type: "string" } }, ["x"]),
+			extra: object({ y: { type: "string" } }, ["y"]),
+			tuned: { ...object({ z: { type: "string" } }, ["z"]), default: {} },
+			hosts: { type: "array", items: object({ name: { type: "string" } }, ["name"]) },
+		},
+		["pair"],
+	);
+	expect(rowsOf(object({ next }), ["k"], () => ({}))).toEqual([
+		{ key: "k.next.pair.x", type: "string", required: true, within: "k.next" },
+		{ key: "k.next.extra.y", type: "string", required: true, within: "k.next.extra" },
+		{ key: "k.next.tuned.z", type: "string", required: false, within: "k.next" },
+		{ key: "k.next.hosts", type: "list of map", required: false, within: "k.next" },
 	]);
 });
 
-it("merges the keys of a union of objects, required only where every variant requires them", () => {
-	const schema = {
+it("writes a union told apart by one key by its variants: a key's default and requiredness when that key takes theirs", () => {
+	const schema: JsonSchema = {
+		oneOf: [
+			{
+				type: "object",
+				required: ["mode"],
+				properties: { mode: { const: "off", description: "Whether it runs." } },
+			},
+			{
+				type: "object",
+				required: ["mode", "hosts"],
+				properties: {
+					mode: { enum: ["on", "loud"] },
+					hosts: { type: "array", items: { type: "string" } },
+					header: { type: "string", default: "a" },
+				},
+			},
+			{
+				type: "object",
+				required: ["mode", "header"],
+				properties: { mode: { const: "quiet" }, header: { type: "string" } },
+			},
+		],
+	};
+	const rows = rowsOf(schema, ["u"], () => ({}));
+	const by = (values: string[]) => [{ key: "u.mode", values }];
+	expect(rows).toEqual([
+		{
+			key: "u.mode",
+			type: "off | on | loud | quiet",
+			required: true,
+			description: "Whether it runs.",
+		},
+		{ key: "u.hosts", type: "list of string", required: true, when: by(["on", "loud"]) },
+		{ key: "u.header", type: "string", default: "a", required: false, when: by(["on", "loud"]) },
+		{ key: "u.header", type: "string", required: true, when: by(["quiet"]) },
+	]);
+	const table = referenceOf([{ section: "u", owner: "@mod/u", rows }]);
+	expect(table).toContain("| `u.hosts` | list of string |  | when `u.mode` is `on` or `loud` |");
+	expect(table).toContain("| `u.header` | string | `a` when `u.mode` is `on` or `loud` |  |");
+	expect(table).toContain("| `u.header` | string |  | when `u.mode` is `quiet` |");
+});
+
+it("holds a variant's object's keys to both variants, outermost first, beside an optional object's", () => {
+	const inner: JsonSchema = {
 		oneOf: [
 			{ type: "object", required: ["mode"], properties: { mode: { const: "off" } } },
 			{
 				type: "object",
 				required: ["mode", "hosts"],
-				properties: { mode: { const: "on" }, hosts: { type: "array", items: { type: "string" } } },
+				properties: { mode: { enum: ["a", "b", "c"] }, hosts: { type: "string" } },
+			},
+		],
+	};
+	const schema: JsonSchema = {
+		oneOf: [
+			{ type: "object", required: ["kind"], properties: { kind: { const: "plain" } } },
+			{
+				type: "object",
+				required: ["kind", "check"],
+				properties: { kind: { const: "checked" }, check: inner, extra: inner },
+			},
+		],
+	};
+	const rows = rowsOf(schema, ["s"], () => ({})).filter((r) => r.key.endsWith(".hosts"));
+	expect(rows.map((r) => [r.key, r.required, r.within, r.when])).toEqual([
+		[
+			"s.check.hosts",
+			true,
+			undefined,
+			[
+				{ key: "s.kind", values: ["checked"] },
+				{ key: "s.check.mode", values: ["a", "b", "c"] },
+			],
+		],
+		[
+			"s.extra.hosts",
+			true,
+			"s.extra",
+			[
+				{ key: "s.kind", values: ["checked"] },
+				{ key: "s.extra.mode", values: ["a", "b", "c"] },
+			],
+		],
+	]);
+	const table = referenceOf([{ section: "s", owner: "@mod/s", rows }]);
+	expect(table).toContain(
+		"| `s.extra.hosts` | string |  | when `s.kind` is `checked` and `s.extra` is set and `s.extra.mode` is `a`, `b` or `c` |",
+	);
+});
+
+it("merges the keys of a union no one key tells apart, required only where every variant requires them", () => {
+	const schema: JsonSchema = {
+		oneOf: [
+			{ type: "object", required: ["a"], properties: { a: { type: "string" } } },
+			{
+				type: "object",
+				required: ["a", "b"],
+				properties: { a: { type: "string" }, b: { type: "string" } },
 			},
 		],
 	};
 	expect(rowsOf(schema, ["u"], () => ({}))).toEqual([
-		{ key: "u.mode", type: "off | on", required: true },
-		{ key: "u.hosts", type: "list of string", required: false },
+		{ key: "u.a", type: "string", required: true },
+		{ key: "u.b", type: "string", required: false },
 	]);
 });
 
@@ -98,7 +231,7 @@ it("tells a key read from env that no fixed key of the schema holds, as one unde
 });
 
 it("reads from env only fixed keys of each section, never one under a map whose names are the operator's, naming the fragment", async () => {
-	const unfixed = (await sectionsIn(root)).flatMap((s) =>
+	const unfixed = (await sectionsIn(packages)).flatMap((s) =>
 		s.unfixed.map(
 			(key) =>
 				`${s.owner}'s config.example: ${key} is under a map the operator names; give its entries in the local layer`,
@@ -108,7 +241,9 @@ it("reads from env only fixed keys of each section, never one under a map whose 
 });
 
 it("finds keys in every section, so none is left out by a shape the reference cannot read", async () => {
-	const empty = (await sectionsIn(root)).filter((s) => s.rows.length === 0).map((s) => s.section);
+	const empty = (await sectionsIn(packages))
+		.filter((s) => s.rows.length === 0)
+		.map((s) => s.section);
 	expect(empty).toEqual([]);
 });
 
@@ -122,13 +257,13 @@ it("writes a client metadata section under `sections`, by the module that adds i
 });
 
 it("finds the client metadata sections that full with every opt-in composes, each by its contributor", async () => {
-	const found = await clientSectionsOf(root);
+	const found = await clientSectionsOf(root, packages);
 	expect(found.find((s) => s.section === "client-secret")?.owner).toBe("@mod/clients");
 	expect(found.filter((s) => s.rows.length === 0).map((s) => s.section)).toEqual([]);
 });
 
 it("finds each IdP type's settings that full with every opt-in composes, by the module that adds the type", async () => {
-	const types = await idpTypesOf(root);
+	const types = await idpTypesOf(root, packages);
 	expect(types.map((t) => [t.section, t.owner])).toEqual([
 		["apple", "@mod/idp-apple"],
 		["github", "@mod/idp-github"],
@@ -142,30 +277,59 @@ it("finds each IdP type's settings that full with every opt-in composes, by the 
 
 it("holds, committed, the reference generated from the workspace as it is now", async () => {
 	const reference = referenceOf(
-		await sectionsIn(root),
-		await clientSectionsOf(root),
-		await idpTypesOf(root),
+		await sectionsIn(packages),
+		await clientSectionsOf(root, packages),
+		await idpTypesOf(root, packages),
 	);
 	expect(readFileSync(referenceFile(root), "utf8")).toBe(reference);
 });
 
 it("describes every key of every section", async () => {
-	const lacking = (await sectionsIn(root)).flatMap(({ rows }) =>
+	const lacking = (await sectionsIn(packages)).flatMap(({ rows }) =>
 		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);
 });
 
 it("describes every key of every client metadata section", async () => {
-	const lacking = (await clientSectionsOf(root)).flatMap(({ rows }) =>
+	const lacking = (await clientSectionsOf(root, packages)).flatMap(({ rows }) =>
 		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);
 });
 
 it("describes every key of every IdP type's settings", async () => {
-	const lacking = (await idpTypesOf(root)).flatMap(({ rows }) =>
+	const lacking = (await idpTypesOf(root, packages)).flatMap(({ rows }) =>
 		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);
+});
+
+it("lists the keys inside a list of objects under its `<i>`, lists within it too, never required", () => {
+	const issuer: JsonSchema = {
+		type: "object",
+		required: ["iss"],
+		properties: {
+			iss: { type: "string" },
+			"accept-any-subject": { type: "boolean", default: false },
+			keys: {
+				type: "array",
+				items: { type: "object", required: ["kid"], properties: { kid: { type: "string" } } },
+			},
+		},
+	};
+	const schema: JsonSchema = {
+		type: "object",
+		properties: {
+			issuers: { type: "array", items: issuer },
+			plain: { type: "array", items: { type: "string" } },
+		},
+	};
+	expect(itemRowsOf(schema, ["j"]).map((r) => [r.key, r.required, r.default])).toEqual([
+		["j.issuers.<i>.iss", false, undefined],
+		["j.issuers.<i>.accept-any-subject", false, false],
+		["j.issuers.<i>.keys", false, undefined],
+		["j.issuers.<i>.keys.<i>.kid", false, undefined],
+	]);
+	expect(rowsOf(schema, ["j"], () => ({})).map((r) => r.key)).toEqual(["j.issuers", "j.plain"]);
 });

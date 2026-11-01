@@ -6,7 +6,7 @@ import {
 	declarationsIn,
 	unlikeKinds,
 } from "../src/audit-events.ts";
-import { root } from "./root.ts";
+import { packages, root } from "./root.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
@@ -28,7 +28,7 @@ it("lists each module's declared events in code point order, with their attribut
 
 it("holds, committed, the reference generated from the workspace as it is now", async () => {
 	expect(readFileSync(auditReferenceFile(root), "utf8")).toBe(
-		auditReferenceOf(await declarationsIn(root)),
+		auditReferenceOf(await declarationsIn(packages)),
 	);
 });
 
@@ -45,5 +45,5 @@ it("lets two modules declare one kind only alike, so a kind holds one meaning", 
 			declaring("@mod/b", { ...made, attributes: ["other"] }),
 		]),
 	).toEqual(["thing.made: @mod/a and @mod/b declare it differently"]);
-	expect(unlikeKinds(await declarationsIn(root))).toEqual([]);
+	expect(unlikeKinds(await declarationsIn(packages))).toEqual([]);
 });

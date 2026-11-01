@@ -1,10 +1,11 @@
 /** The route reference: every route the full template with every opt-in serves, as one document. */
 import { join } from "node:path";
+import type { Pkg } from "@mod/guard-imports";
 import { assembledIn, type Kept, type RouteSeen } from "./assembled.ts";
 
 /** Every route full with every opt-in serves, by path, then method. */
-export async function routesIn(root: string): Promise<RouteSeen[]> {
-	return [...(await assembledIn(root)).routes].sort((a, b) =>
+export async function routesIn(root: string, packages: readonly Pkg[]): Promise<RouteSeen[]> {
+	return [...(await assembledIn(root, packages)).routes].sort((a, b) =>
 		a.path === b.path ? (a.method < b.method ? -1 : 1) : a.path < b.path ? -1 : 1,
 	);
 }

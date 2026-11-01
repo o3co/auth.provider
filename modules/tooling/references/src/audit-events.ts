@@ -1,7 +1,6 @@
 /** The audit event reference: every module's declared events, as one document. */
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { workspacePackages } from "./workspace.ts";
+import type { Pkg } from "@mod/guard-imports";
 
 /** One declared event, as `audit`'s `auditEvents` takes it. */
 export interface Declared {
@@ -11,12 +10,10 @@ export interface Declared {
 
 /** Each package exporting `./audit-events`, with its declarations, by package name. */
 export async function declarationsIn(
-	root: string,
+	packages: readonly Pkg[],
 ): Promise<{ readonly owner: string; readonly events: Readonly<Record<string, Declared>> }[]> {
 	const found = [];
-	for (const [name, dir] of workspacePackages(root)) {
-		if (dir === root) continue;
-		const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+	for (const { name, dir, manifest } of packages) {
 		const entry: string | undefined = manifest.exports?.["./audit-events"];
 		if (!entry) continue;
 		const events = (await import(join(dir, entry))).default as Record<string, Declared>;

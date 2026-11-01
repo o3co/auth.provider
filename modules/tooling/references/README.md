@@ -1,7 +1,7 @@
 # references
 
 ## Responsibilities
-- Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, and the route reference.
+- Generates the workspace's references from what each module declares: the configuration reference, each package's `reference.conf`, the audit event reference, the route reference, the attack surface reference (internal module `attack-surface`), and the audit index's generated parts, the cards and the dependencies (internal module `audit-index`).
 - Holds each section's schema to the rules its defaults, time and size keys follow.
 
 ## Not here
@@ -10,11 +10,11 @@
 - Generating the app the references compose: `create-app`'s.
 
 ## Offers
-- `pnpm --filter @mod/references run configuration`: writes the configuration reference, the audit event reference, the route reference, and a `reference.conf` beside each package's manifest whose module has a section.
-- The configuration reference: each section's keys from its schema (type, bounds, default, whether required, description) and its fragment (example, variable).
+- `pnpm --filter @mod/references run configuration`: writes the configuration reference, the audit event reference, the route reference, the attack surface reference, the audit index's cards and dependencies, and a `reference.conf` beside each package's manifest whose module has a section.
+- The configuration reference: each section's keys from its schema (type, bounds, default, whether required, description) and its fragment (example, variable); a key inside an optional object has its default and requiredness marked as holding only once that object is set.
 - The configuration reference's client metadata sections: each section modules add to client records, by the package that adds it, as the full template with every opt-in composes it on the trial's settings.
 - The configuration reference's IdP type settings: what one IdP under `federation`'s `idps` holds for each type, by the package that adds the type, composed alike.
-- `reference.conf`: the section's keys as HOCON, each with its description as a comment; a key with a default as `key = value` (a time or size bare, `5m`), one without as a comment saying whether it is required. The module applies its defaults itself; no app loads the file.
+- `reference.conf`: the section's keys as HOCON, each with its description as a comment; a key with a default as `key = value` (a time or size bare, `5m`), one without as a comment saying whether it is required; a key inside an optional object only as a comment, its default or requiredness said to hold once that object is set. The module applies its defaults itself; no app loads the file.
 - The audit event reference: each module's events as its `./audit-events` declares them through `audit`.
 - The route reference: each route the full template with every opt-in serves, composed alike: its method, path, the package it is from, the bodies it takes, its policies in order, whether it changes state, what keeps other sites' requests out and what limits it by source (a marked policy or its reason), and whether it takes cross-origin requests. What a route answers stays in its package's card, as do the paths under a `*`.
 
@@ -30,5 +30,7 @@
 - The full template is assembled with the memory store in place of Redis, which is asked at assembly, and never started.
 
 ## Depends on
-- The workspace's package list; `app-output`'s fragments and the variables they read; `create-app`'s generation of the full template; `trial`'s layer; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes and marks, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.
+- `app-output`'s fragments and the variables they read; `create-app`'s generation of the full template; `trial`'s layer; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes and marks, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.
+- `app-entries`, for the kernel's package name its section is read under.
 - `config-files`, to read the assembled template's configuration files.
+- `guard-imports`, to read the workspace's packages, their manifests and cards (`readWorkspace`), once for every reference.
