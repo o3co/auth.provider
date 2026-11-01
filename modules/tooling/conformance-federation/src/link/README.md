@@ -7,6 +7,7 @@ Internal module of `conformance-federation`: the scenes of linking an upstream i
 - Checks the refusals: no session, a start from another site, an identity another account holds, a callback after the browser logged in as another account or out, and a login started without asking to link.
 - Checks the audit events of a link, where the target lets a scene read them: one linked for the account it started for, and one refused with its reason, neither telling the upstream subject.
 - Checks that a link asks a sign-in within the recent-authentication window, at its callback and again at a start, where the target lets a scene set the window (`conformance-identity`'s `recentAuthenticationWindow`).
+- Checks that a start short of the window names the step-up page set for it, with the start alone to come back to, which a login takes and refuses on another origin, port or scheme, where the target sets that page (`linkStepUpPage`).
 
 ## Depends on
-- The package's scene builder, browser and fake upstream; `conformance-identity`'s need for the window
+- The package's scene builder, browser and fake upstream; `conformance-identity`'s need for the window; the package's need for the step-up page

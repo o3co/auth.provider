@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { areaTarget, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { federationScene, type IdpScene } from "../src/main.ts";
+import { federationScene, type IdpScene, landedStatus } from "../src/main.ts";
 import { type AppleAuthorized, fakeApple } from "./apple.ts";
 import { type Browser, browser as openBrowser, probeClient } from "./browser.ts";
 
@@ -93,13 +93,13 @@ const posted = (b: Browser, form: URLSearchParams, idp = "apple", kept?: string)
 	b.post(`${startOf(idp)}/callback`, form, appleSite, kept);
 
 describe("federation through Apple", () => {
-	it("logs a browser in by the answer Apple posts, paying with the fixed secret", async () => {
+	it("logs a browser in by the answer Apple posts, paying with the fixed secret [oidc-core-3.1.2.1-y]", async () => {
 		const b = browser();
 		const { form, asked } = await authorized(b, { subject: "000123.alice" });
 		expect(asked.get("response_mode")).toBe("form_post");
 		expect(asked.get("nonce")).toMatch(/./);
 		const back = await posted(b, form);
-		expect([back.status, back.location]).toEqual([302, landing]);
+		expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 		expect(await b.session()).toBe(true);
 		expect(apple.secrets.at(-1)).toBe("fixed");
 	});
@@ -108,7 +108,7 @@ describe("federation through Apple", () => {
 		const b = browser();
 		const { form } = await authorized(b, { subject: "000456.bob" }, "apple-signed");
 		const back = await posted(b, form, "apple-signed");
-		expect([back.status, back.location]).toEqual([302, landing]);
+		expect([back.status, back.location]).toEqual([landedStatus(), landing]);
 		expect(await b.session()).toBe(true);
 		expect(apple.secrets.at(-1)).toBe("signed");
 	});
@@ -121,10 +121,10 @@ describe("federation through Apple", () => {
 		// What another site posts carries no answer: no state, no code.
 		const empty = await posted(b, new URLSearchParams());
 		expect(empty.status).toBe(400);
-		expect((await posted(b, form)).status).toBe(302);
+		expect((await posted(b, form)).status).toBe(landedStatus());
 	});
 
-	it("refuses an answer naming another issuer before its code is used", async () => {
+	it("refuses an answer naming another issuer before its code is used [rfc9700-4.4.2.1-a] [rfc9700-2.1-e] [rfc9700-2.1-f]", async () => {
 		const b = browser();
 		const { form } = await authorized(b, { subject: "000123.alice" });
 		form.set("iss", "https://evil.example");
@@ -133,7 +133,7 @@ describe("federation through Apple", () => {
 		expect(await b.session()).toBe(false);
 	});
 
-	it("refuses an id_token Apple did not sign, and one for another login", async () => {
+	it("refuses an id_token Apple did not sign, and one for another login [oidc-core-3.1.3.7-i] [oidc-core-3.1.3.7-j] [oidc-core-16.3-a] [oidc-core-3.1.3.7-k] [oidc-core-2-v] [rfc9700-4.5.3.2-a]", async () => {
 		const cases: Record<string, AppleAuthorized> = {
 			forged: { subject: "000123.alice", forged: true },
 			"another nonce": { subject: "000123.alice", nonce: "not-this-login" },
@@ -154,7 +154,7 @@ describe("federation through Apple", () => {
 		]) {
 			const b = browser();
 			const { form } = await authorized(b, { subject: "000123.alice", user });
-			expect((await posted(b, form)).status).toBe(302);
+			expect((await posted(b, form)).status).toBe(landedStatus());
 			expect(await b.session()).toBe(true);
 		}
 	});
@@ -186,7 +186,7 @@ describe("federation through Apple: its key set", () => {
 		await new Promise((done) => setTimeout(done, 61_000));
 		const b = browser();
 		const { form } = await authorized(b, { subject: "000123.alice" });
-		expect((await posted(b, form)).status).toBe(302);
+		expect((await posted(b, form)).status).toBe(landedStatus());
 		expect(await b.session()).toBe(true);
 	});
 });

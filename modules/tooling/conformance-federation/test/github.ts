@@ -50,7 +50,10 @@ export async function fakeGithub(client: { id: string; secret: string }) {
 					json: { message: "Request forbidden: a User-Agent header is required" },
 				};
 			}
-			const id = tokens.get((asked.headers.authorization ?? "").replace(/^Bearer /, ""));
+			// Only in the Authorization header, under the Bearer scheme (RFC 6750 §2.1): any other way of
+			// presenting it is no credential here.
+			const bearer = /^Bearer (\S+)$/.exec(asked.headers.authorization ?? "");
+			const id = bearer ? tokens.get(bearer[1] as string) : undefined;
 			return id === undefined
 				? { status: 401, json: { message: "Bad credentials" } }
 				: { json: { id, login: `user-${id}` } };
