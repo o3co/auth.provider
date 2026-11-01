@@ -75,6 +75,8 @@ export interface GrantInput {
 	target(audience: readonly string[], within: (audience: string) => boolean): TargetVerdict;
 	/** The binding every token issued for this request carries. */
 	readonly binding?: Binding;
+	/** What the grant's own `identify` answered with the client, handed back unread; none for a client that authenticated. */
+	readonly identified?: unknown;
 	/** Whether `issue` would allow the grant now; asked before anything is used up. */
 	admits(
 		grant: AccessGrant,
@@ -99,7 +101,23 @@ export interface Grant {
 	 * which then checks the request's origin itself; `none` otherwise. A declaration, never a proof.
 	 */
 	readonly readsAmbient: "none" | "cookie";
+	/**
+	 * For a request that names no client and carries nothing a client authenticates with: the client
+	 * the grant's own credential identifies, with what it checked to tell (`identified`), or its
+	 * refusal. Only a grant that can tell has it. The client it names is one the operator registered
+	 * with no credentials (public, method `none`); the endpoint refuses any other.
+	 */
+	identify?(
+		input: Pick<GrantInput, "request" | "param" | "value">,
+	): Promise<IdentifiedClient | Extract<GrantOutcome, { readonly kind: "error" }>>;
 	handle(input: GrantInput): Promise<GrantOutcome | Refused>;
+}
+
+/** The client a grant's own credential identifies, and what the grant checked to tell, for its `handle`. */
+export interface IdentifiedClient {
+	readonly kind: "client";
+	readonly client: string;
+	readonly identified?: unknown;
 }
 
 export const grants = extensionPoint<Grant>("grants", {
@@ -109,6 +127,26 @@ export const grants = extensionPoint<Grant>("grants", {
 
 /** The grant types composed at boot, as the token endpoint dispatches to them. */
 export const composedGrants = contract<ReadonlySet<string>>("grants.composed");
+
+/**
+ * The index of first-party grants: each grant type a module of this release serves, by that
+ * module's name (its package's, without the scope), as each module's manifest declares it
+ * (`grantTypes`). Words as strings alone: it reads no module's contract or behaviour, so a module
+ * named here need not be composed. It has no prototype, so a name every object has (`constructor`,
+ * `__proto__`) is a type it does not list.
+ */
+export const grantServers: Readonly<Record<string, string>> = Object.freeze(
+	Object.assign(Object.create(null) as Record<string, string>, {
+		authorization_code: "code-grant",
+		client_credentials: "client-credentials",
+		refresh_token: "refresh",
+		session: "session-grant",
+		"urn:ietf:params:oauth:grant-type:device_code": "device-grant",
+		"urn:ietf:params:oauth:grant-type:jwt-bearer": "jwt-bearer",
+		"urn:ietf:params:oauth:grant-type:token-exchange": "token-exchange",
+		"urn:o3co:oauth:grant-type:webauthn": "webauthn-login",
+	}),
+);
 
 /** Told of each access token `issue` makes from a session, before the grant answers it. */
 export interface SessionIssuance {

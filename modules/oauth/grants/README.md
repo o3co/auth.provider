@@ -8,10 +8,12 @@
 ## Not here
 - Each grant's own decisions (the contributing side owns them). The token format (`tokens`).
 - The token endpoint, its checks before a grant runs, and its audit (`token-endpoint`, which keeps this contract).
+- What a grant listed in `grantServers` does: the index holds its grant type and module as words alone, never its contract.
 
 ## Offers
 - Extension point `grants`: grant type → handler, one for each grant type (two refuse boot).
-- A grant runs only for an authenticated client it is allowed to, once the request's binding is read.
+- A grant runs only for a client it is allowed to, once the request's binding is read: one that authenticated, or one the grant identified itself.
+- A grant may `identify` the client of a request that names none and carries nothing a client authenticates with: the client its own credential identifies, which must be one registered with no credentials (public, method `none`), or its refusal. It then runs for that client as for an authenticated one, given back what it identified (`identified`) unread. A grant without `identify` never sees such a request.
 - A grant names the bodies it takes (a form when it names none). It reads a parameter as one string, or as sent (a JSON member of any type); a repeated parameter, or an OAuth parameter sent in JSON as neither a string nor `null`, never reaches it.
 - A grant's refusal is an OAuth error code (`OAuthError`) or one the grant owns, answered `400`, or `401` for `invalid_client` or when the grant names it; any other status is ignored.
 - A grant's `401` carries the `WWW-Authenticate` challenge of the client's authentication method, or every method's when it declares none; a grant sets no header.
@@ -30,9 +32,10 @@
 - A rule may answer `untargeted` (the request's parameters, for a grant or endpoint that takes no audience) and `repeated` (a parameter's name, sent more than once) with `invalid_target`, which is then the answer.
 - `targets`: the composed rule, provided by `token-endpoint`. With none composed, the default audience, the request unread.
 - `composedGrants`: the grant types composed, answered by `token-endpoint`'s module.
+- `grantServers`: the index of first-party grants, each grant type by the module that serves it, as that module's manifest declares (`grantTypes`); a test holds the two alike. A type it does not list, a name every object has included, answers none.
 
 ## Depends on
-- `kernel`, `http`, `clients`, `sender-binding`, `tokens`; kept by `token-endpoint`.
+- `kernel`, `http`, `clients`, `sender-binding`, `tokens`
 
 ## Vocabulary
 - grant: a procedure that issues tokens, chosen by grant type name.
