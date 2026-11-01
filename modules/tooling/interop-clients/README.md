@@ -4,6 +4,7 @@
 - Runs the provider against independent client libraries, each through an adapter of its own, and checks what each library gave back: a run per library.
 - Starts the provider the libraries meet, behind an https front whose origin is the issuer: the full template with every feature that opts in, and the services' (`a2a`) for the grants that need no user, such as jwt-bearer, which the full template's ledger of users cannot hold; there an issuer's entry names a client too, for a jwt-bearer request naming none (RFC 7523 §3.1), and an enterprise IdP the harness plays issues ID-JAGs, which an issuer taking the profile is written for.
 - Plays the browser in each flow: the driver logs in and follows the authorization URL a library built, only where it is the provider's authorization endpoint at the issuer, and hands the library the redirect, accepting the consent page on the way for a client that is not first-party.
+- Holds the back-channel receiver the `backchannel` client is registered with, its port bound from the world's build to its stop, and relays each post to the receiver an adapter names with its logout ask: plain http at `127.0.0.1`, on the path it was told.
 - Serves a client's metadata document over https by its host's name, on a certificate the app is told to trust, and reaches it for the app through a tunnel set as its outbound proxy.
 - Holds the differences accepted between a library and the provider, each written narrowly and held to the checklist's exception rules.
 
@@ -24,7 +25,7 @@
 - The front tells the app the libraries send from `198.51.100.30`: on loopback the sender would be the app's trusted proxy, and its source undetermined.
 - A check that fails is skipped as excused only where a known difference names its library, flow and title; a difference no check met fails the run.
 - A flow test runs only for a library that runs the flow first-class; the others skip it. Spring runs no ID-JAG flow: it has no step to get one, as it reads no `token_type` but Bearer and DPoP, and an ID-JAG's is `N_A`.
-- The world keeps no file but its front's and the metadata document's, under `under` where given: the client certificate's are removed once read back. Where the app does not start, the front, the document's server and the tunnel are closed and the run's files removed before the failure is told.
+- The world keeps no file but its front's and the metadata document's, under `under` where given: the client certificate's are removed once read back. Where the app does not start, the front, the back-channel relay, the document's server and the tunnel are closed and the run's files removed before the failure is told.
 
 ## Depends on
 - `conformance`, `conformance-code`, `conformance-device`, `conformance-exchange`, `conformance-oauth`, `conformance-front`, `conformance-tunnel`, `spec-checklist`, `openid-client`, `undici`; a JDK and Maven for the Nimbus adapter, Go for the Go adapter, Python for the Authlib adapter.
