@@ -22,8 +22,10 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
+import { tlsOptionsForTests } from "@mod/tls-options/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
+import { section } from "../src/section.ts";
 
 const credential = randomBytes(32).toString("hex");
 const now = 1_800_000_000_000;
@@ -43,18 +45,28 @@ interface Answer {
 	readonly afterMs?: number;
 }
 
-/** A ledger keeping the witness's promises: one mark per subject, set if absent, at once. */
+/** A ledger keeping the witness's promises: one mark per subject, set if absent, at once, read with its token. */
 function keepingLedger() {
 	const marks = new Map<string, string>();
 	return (asked: Asked): Answer => {
 		const { subject, token } = JSON.parse(asked.body);
-		if (asked.path === "/w/read") return { status: 200, json: { enrolled: marks.has(subject) } };
+		if (asked.path === "/w/read") {
+			const held = marks.get(subject);
+			return {
+				status: 200,
+				json: held === undefined ? { enrolled: false } : { enrolled: true, token: held },
+			};
+		}
 		if (asked.path === "/w/enroll") {
 			if (!marks.has(subject)) marks.set(subject, token);
 			return { status: 200, json: { owner: marks.get(subject) === token } };
 		}
 		if (asked.path === "/w/clear") {
 			marks.delete(subject);
+			return { status: 204 };
+		}
+		if (asked.path === "/w/withdraw") {
+			if (marks.get(subject) === token) marks.delete(subject);
 			return { status: 204 };
 		}
 		return { status: 404 };
@@ -117,13 +129,14 @@ const settings = (more: Record<string, unknown> = {}) => ({
 	...more,
 });
 const collected = contract<readonly EnrollmentWitness[]>("test.witnesses");
-const collector = defineModule({ name: "test-collector" }, (m) => [
-	m.provide(collected).by((c) => c.collect(enrollmentWitnesses)),
-]);
+const collector = defineModule(
+	{ name: "test-collector", replicaSafe: true, takes: [enrollmentWitnesses] },
+	(m) => [m.provide(collected).by((c) => c.collect(enrollmentWitnesses))],
+);
 async function open(section: unknown = settings(), outbound: Record<string, unknown> = {}) {
 	const logged = recordingLog();
 	const app = await assemble({
-		modules: [outboundModule, witnessHttp, collector],
+		modules: [outboundModule, tlsOptionsForTests, witnessHttp, collector],
 		config: {
 			...kernelConfig(),
 			outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair, otherPair], ...outbound },
@@ -140,6 +153,191 @@ enrollmentWitnessContract("mfa-witness-http over a ledger keeping its promises",
 	script = keepingLedger();
 	return (await open()).witness;
 });
+enrollmentWitnessContract(
+	"mfa-witness-http over a ledger keeping its promises, withdraw included",
+	async () => {
+		script = keepingLedger();
+		return (await open(settings({ "withdraw-url": at("/w/withdraw") }))).witness;
+	},
+);
+
+describe("mfa-witness-http's withdraw", () => {
+	it("posts a withdraw to its URL with the subject, the token and a deadline", async () => {
+		const { witness, logged } = await open(settings({ "withdraw-url": at("/w/withdraw") }));
+		await witness.enroll("alice", "t1");
+		await witness.withdraw?.("alice", "t1");
+		const sent = received.find((r) => r.path === "/w/withdraw");
+		expect([sent?.method, JSON.parse(sent?.body ?? "{}")]).toEqual([
+			"POST",
+			{ subject: "alice", token: "t1", deadline: now + 5000 },
+		]);
+		expect(await witness.read("alice")).toBe(false);
+		expect(logged.lines().map((line) => line.event)).not.toContain(
+			"mfa-witness-http.withdraw_missing",
+		);
+	});
+
+	it("offers no withdraw without its URL, and warns so once at each boot, naming no value", async () => {
+		const { witness, logged } = await open();
+		expect(typeof witness.withdraw).toBe("undefined");
+		const warned = logged
+			.lines()
+			.filter((line) => line.event === "mfa-witness-http.withdraw_missing");
+		expect(warned.map((line) => [line.level, line.fields])).toEqual([["warn", {}]]);
+	});
+
+	it("answers unavailable to a withdraw answered anything but 204, a 404 included, and never clears instead", async () => {
+		const { witness, logged } = await open(settings({ "withdraw-url": at("/w/withdraw") }));
+		for (const status of [404, 200, 500]) {
+			script = (asked) => (asked.path === "/w/withdraw" ? { status } : keepingLedger()(asked));
+			await expect(witness.withdraw?.("alice", "t1"), String(status)).rejects.toSatisfy(
+				isUnavailable,
+			);
+		}
+		expect(received.filter((r) => r.path === "/w/clear")).toEqual([]);
+		expect(
+			logged
+				.lines()
+				.filter((line) => line.event === "mfa-witness-http.ledger_failed")
+				.map((line) => line.fields),
+		).toEqual([
+			{ call: "withdraw", status: 404 },
+			{ call: "withdraw", status: 200 },
+			{ call: "withdraw", status: 500 },
+		]);
+	});
+
+	it("refuses, at withdraw-url, the spellings of clear's target that url-setting never takes", () => {
+		const base = {
+			"read-url": "https://ledger.example/w/read",
+			"enroll-url": "https://ledger.example/w/enroll",
+			"clear-url": "https://ledger.example/w/clear",
+			credential,
+		};
+		for (const withdraw of [
+			"https://LEDGER.example/w/clear",
+			"https://ledger.example:443/w/clear",
+			"https://ledger.example/w/clear#x",
+			"https://ledger.example/w/./clear",
+		]) {
+			const parsed = section.safeParse({ ...base, "withdraw-url": withdraw });
+			expect(
+				parsed.error?.issues.map((issue) => issue.path.join(".")),
+				withdraw,
+			).toEqual(["withdraw-url"]);
+		}
+	});
+
+	it("takes a withdraw-url whose target differs from clear's, a reserved character encoded among them", async () => {
+		for (const [clear, withdraw] of [
+			["/w/clear", "/w/withdraw"],
+			["/w/a/clear", "/w/a%2Fclear"],
+			["/w/clear", "/w/clear?x=1"],
+		] as const) {
+			const { witness } = await open(
+				settings({ "clear-url": at(clear), "withdraw-url": at(withdraw) }),
+			);
+			expect(typeof witness.withdraw, withdraw).toBe("function");
+		}
+	});
+
+	it("refuses to start with its URL the same as clear-url, or at another origin", async () => {
+		const refusedAt = async (more: Record<string, unknown>) => {
+			const error = await open(settings(more)).catch((e: unknown) => e);
+			expect(error).toBeInstanceOf(BootRefused);
+			return (error as BootRefused).refusals.map((r) => r.where);
+		};
+		expect(await refusedAt({ "withdraw-url": at("/w/clear") })).toEqual([
+			"mfa-witness-http.withdraw-url",
+		]);
+		// Spelled otherwise, outbound still sends it to clear's target: an empty query, or a character
+		// RFC 3986 holds equivalent encoded or not, or the hex of an encoding in either case.
+		for (const [clear, withdraw] of [
+			["/w/clear", "/w/clear?"],
+			["/w/clear", "/w/%63%6C%65%61%72"],
+			["/w/~clear", "/w/%7Eclear"],
+			["/w/a%3Aclear", "/w/a%3aclear"],
+			["/w/clear?x=%7E", "/w/clear?x=~"],
+			// An empty path is sent as the root's slash.
+			["", "/"],
+		] as const) {
+			expect(
+				await refusedAt({ "clear-url": at(clear), "withdraw-url": at(withdraw) }),
+				withdraw,
+			).toEqual(["mfa-witness-http.withdraw-url"]);
+		}
+		expect(await refusedAt({ "withdraw-url": at("/w/withdraw", otherPair) })).toEqual([
+			"mfa-witness-http.credential",
+		]);
+	});
+});
+
+describe("mfa-witness-http's markedWith", () => {
+	const withWithdraw = (more: Record<string, unknown> = {}) =>
+		settings({ "withdraw-url": at("/w/withdraw"), ...more });
+
+	it("reads the mark's token from the read answer where withdraw-url is set, none where unmarked", async () => {
+		const { witness } = await open(withWithdraw());
+		expect(await witness.markedWith?.("alice")).toBeUndefined();
+		await witness.enroll("alice", "t-1");
+		await witness.enroll("alice", "t-2");
+		expect(await witness.markedWith?.("alice")).toBe("t-1");
+		const reads = received.filter((r) => r.path === "/w/read").map((r) => JSON.parse(r.body));
+		expect(reads).toEqual([{ subject: "alice" }, { subject: "alice" }]);
+	});
+
+	it("offers no markedWith without withdraw-url, reading a marked answer with no token as marked", async () => {
+		const { witness } = await open();
+		expect("markedWith" in witness).toBe(false);
+		script = () => ({ status: 200, json: { enrolled: true } });
+		expect(await witness.read("alice")).toBe(true);
+	});
+
+	it("answers unavailable where withdraw-url is set and a marked answer names no token, never clearing instead", async () => {
+		const { witness, logged } = await open(withWithdraw());
+		for (const json of [
+			{ enrolled: true },
+			{ enrolled: true, token: "" },
+			{ enrolled: true, token: 5 },
+		]) {
+			script = (asked) => (asked.path === "/w/read" ? { status: 200, json } : { status: 204 });
+			await expect(witness.markedWith?.("alice-secret"), JSON.stringify(json)).rejects.toSatisfy(
+				isUnavailable,
+			);
+			await expect(witness.read("alice-secret"), JSON.stringify(json)).rejects.toSatisfy(
+				isUnavailable,
+			);
+		}
+		expect(received.map((r) => r.path).every((path) => path === "/w/read")).toBe(true);
+		const failures = logged
+			.lines()
+			.filter((line) => line.event === "mfa-witness-http.ledger_failed")
+			.map((line) => line.fields);
+		expect(failures).toEqual(Array(6).fill({ call: "read", reason: "malformed" }));
+		expect(JSON.stringify(logged.lines())).not.toContain("alice-secret");
+	});
+
+	it("answers unavailable to a read whose token makes it larger than max-response-size, for read and markedWith alike", async () => {
+		const { witness, logged } = await open(withWithdraw({ "max-response-size": "64B" }));
+		const token = "t".repeat(200);
+		script = () => ({ status: 200, json: { enrolled: true, token } });
+		await expect(witness.read("alice")).rejects.toSatisfy(isUnavailable);
+		await expect(witness.markedWith?.("alice")).rejects.toSatisfy(isUnavailable);
+		const failures = logged
+			.lines()
+			.filter((line) => line.event === "mfa-witness-http.ledger_failed")
+			.map((line) => line.fields);
+		expect(failures).toEqual(Array(2).fill({ call: "read", reason: "too-large" }));
+		expect(JSON.stringify(logged.lines())).not.toContain(token);
+	});
+
+	it("reads an unmarked answer as no token, whatever else it names", async () => {
+		const { witness } = await open(withWithdraw());
+		script = () => ({ status: 200, json: { enrolled: false, token: "stale" } });
+		expect(await witness.markedWith?.("alice")).toBeUndefined();
+		expect(await witness.read("alice")).toBe(false);
+	});
+});
 
 describe("mfa-witness-http at a private address", () => {
 	it("names the operator's URL as internal on each of its three calls, so each reaches a ledger at a private address", async () => {
@@ -149,7 +347,7 @@ describe("mfa-witness-http at a private address", () => {
 			"/w/enroll": { status: 200, body: { owner: true } },
 			"/w/clear": { status: 204 },
 		};
-		const recording = defineModule({ name: "outbound" }, (m) => [
+		const recording = defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 			m.provide(outbound).by(() => ({
 				fetch: async (url, _request, narrower) => {
 					asked.push({ url, narrower });
@@ -370,7 +568,7 @@ describe("mfa-witness-http", () => {
 
 	it("says why its credential may not go in outbound-policy's words, for the scheme and for its URLs' one origin", async () => {
 		const refusedFor = async (refusal: "origins" | "scheme") => {
-			const standIn = defineModule({ name: "outbound" }, (m) => [
+			const standIn = defineModule({ name: "outbound", replicaSafe: false, takes: [] }, (m) => [
 				m.provide(outbound).by(() => ({
 					fetch: async () => {
 						throw new Error("never sent");
