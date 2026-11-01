@@ -1,7 +1,13 @@
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { commands } from "../src/recipes.ts";
 import { composedBy } from "../src/selection.ts";
+
+// It generates a recipe's app, which lists the workspace's packages through pnpm twice
+// (`pnpm ls -r`, in create-app's project and in the combinations it reads): pnpm's own start takes
+// 2.5 to 4 seconds on a busy machine, the most of the default five, so its tests are given the
+// time that listing takes.
+vi.setConfig({ testTimeout: 30_000 });
 
 const workspace = join(import.meta.dirname, "..", "..", "..", "..");
 
