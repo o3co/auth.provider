@@ -21,7 +21,7 @@ import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach } from "vitest";
@@ -208,7 +208,7 @@ export async function serve(settings: Settings = {}) {
 		jar = new Map();
 		const amr = proved ? ["pwd", "otp", "mfa"] : ["pwd"];
 		const facts = { subject, amr, authenticatedAt: runtime.clock.now() };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
+		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		for (const c of cookies) {
 			const [name = "", value = ""] = (c.split(";")[0] ?? "").split("=");
 			jar.set(name, value);
