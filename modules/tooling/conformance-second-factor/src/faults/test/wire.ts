@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { type Command, keysOf, type Match, storeRead, storeWrite } from "@mod/conformance/testing";
+import {
+	type Command,
+	keysOf,
+	type Match,
+	storeRead,
+	storeWrite,
+	writtenValues,
+} from "@mod/conformance/testing";
 
 // The store's own names a scene matches its writes by: the space, its records' fields, the
 // operations, and how a recovery code is kept, as mfa-store, mfa and mfa-recovery keep them. Nothing
@@ -59,4 +66,28 @@ export const boundaryRead = (subject: string): Match => {
 			read.request(command) && keysOf(command).some((k) => k.partition === subject),
 		succeeded: read.succeeded,
 	};
+};
+
+/**
+ * The writes of a subject's revocation boundary: its record created, or written from what it holds; not
+ * the mark that confirms, before the first, that the subject holds none.
+ */
+export const boundaryOf = (subject: string): Match =>
+	storeWrite({
+		prefix,
+		space: "subject-revocation-store.boundaries",
+		partition: subject,
+		operations: ["putIfAbsent", "replaceIf"],
+	});
+
+/** The boundaries a write of a subject's boundary puts, each a time: its sessions' and its delegations'. */
+export const boundariesPut = (command: Command): number[] => {
+	const put = writtenValues(command).find(
+		(w) => w.key.space === "subject-revocation-store.boundaries" && w.key.name === "record",
+	)?.value;
+	const value = put && typeof put === "object" && "value" in put ? put.value : put;
+	if (typeof value === "number") return [value];
+	return value && typeof value === "object"
+		? Object.values(value).filter((v): v is number => typeof v === "number")
+		: [];
 };
