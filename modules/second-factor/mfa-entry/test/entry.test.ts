@@ -15,7 +15,7 @@ import { type Enforcer, enforcers } from "@mod/mfa";
 import { type FactorKind, factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
 import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { sessionRules, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -86,7 +86,9 @@ async function serve(
 		amr: string[],
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const { cookies } = await opened.complete(testRequest(), { subject, amr, authenticatedAt });
+		const { cookies } = openedOf(
+			await opened.open(testRequest(), { subject, amr, authenticatedAt }),
+		);
 		return withCookie(cookies[0] ?? "");
 	};
 	return { app, input, opened, signedIn, asked: stand.asked };
