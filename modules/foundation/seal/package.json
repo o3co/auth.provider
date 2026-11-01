@@ -4,6 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "foundation",
+	"asks": [
+		"What the composed modules keep sealed uses the `seal` key ring: `seal.current` seals; only while one rotates, `seal.next` opens before every host seals with it, and `seal.previous` opens what an older key sealed."
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
