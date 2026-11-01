@@ -1,4 +1,5 @@
-import { factors } from "@mod/mfa";
+import { takesUnused } from "@mod/kernel/testing";
+import { factorReading } from "@mod/mfa-reading";
 import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
 import {
@@ -179,7 +180,7 @@ describe("a revocation while factors are managed", () => {
 			clock.shift += 1000;
 		};
 		const answer = await s.call("POST", `/session/mfa/${path}`, { factor_id: id, ...body });
-		return { answer, held: await s.app.get(factors).held(subject) };
+		return { answer, held: await s.app.get(factorReading).held(subject) };
 	};
 
 	it("reissues no codes once the subject was revoked while they were written", async () => {
@@ -286,4 +287,9 @@ describe("management bodies", () => {
 		const stale = await rename({ factor_id: id });
 		expect([stale[0], (stale[1] as { error: string }).error]).toEqual([403, "step_up_required"]);
 	});
+});
+
+it("takes all it names", async () => {
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused((await serve()).input))["mfa-management"]).toBeUndefined();
 });

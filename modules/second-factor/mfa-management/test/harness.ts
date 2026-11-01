@@ -8,18 +8,20 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
-import { type FactorStore, factorStore, factors, proofSteps, type StoredFactors } from "@mod/mfa";
+import { type FactorStore, factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { type MfaSettings, mfaConfig, updatingTogether } from "@mod/mfa/testing";
+import { factorBinding } from "@mod/mfa-binding";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
+import { factorManaging } from "@mod/mfa-managing";
 import mfaRevocation from "@mod/mfa-revocation/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach } from "vitest";
@@ -52,7 +54,7 @@ afterEach(async () => {
 });
 
 /** A guessable, counting kind: the proof is the secret and a counter that must go up. */
-const code = defineModule({ name: "kind-code" }, (m) => [
+const code = defineModule({ name: "kind-code", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "code",
 		amr: ["otp"],
@@ -74,7 +76,7 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 	})),
 ]);
 /** A way back that does not count and cannot be guessed: single-use codes. */
-const backup = defineModule({ name: "kind-backup" }, (m) => [
+const backup = defineModule({ name: "kind-backup", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "backup",
 		amr: [],
@@ -89,14 +91,14 @@ const backup = defineModule({ name: "kind-backup" }, (m) => [
 	})),
 ]);
 /** The step that proves factors at login, which `mfa` asks for; these routes prove none. */
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 
 /** mfa's factor lists on the records stand-in, kept without end. */
 const factorStand = () => {
 	const stand = memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
-	return defineModule({ name: "factor-store" }, (m) => [
+	return defineModule({ name: "factor-store", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(factorStore).by(() =>
 			factorsDown.wrap({
 				save: (key: string, record: StoredFactors) => stand.records.create(key, record, "endless"),
@@ -120,6 +122,7 @@ const factorStand = () => {
 					return changed;
 				},
 				scan: stand.records.scan,
+				updateTogether: updatingTogether(stand.records),
 			}),
 		),
 	]);
@@ -138,7 +141,7 @@ const ownKeys = Object.keys(section.shape);
 export async function serve(settings: Settings = {}) {
 	const pick = (own: boolean) =>
 		Object.fromEntries(Object.entries(settings).filter(([k]) => ownKeys.includes(k) === own));
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			auditStandIn().module,
@@ -167,7 +170,8 @@ export async function serve(settings: Settings = {}) {
 			"mfa-management": pick(true),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -203,8 +207,13 @@ export async function serve(settings: Settings = {}) {
 	const signIn = async (subject = "alice", { proved = false } = {}) => {
 		jar = new Map();
 		const amr = proved ? ["pwd", "otp", "mfa"] : ["pwd"];
-		const facts = { subject, amr, authenticatedAt: runtime.clock.now() };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
+		const facts = {
+			subject,
+			amr,
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
+		const { cookies } = openedOf(await app.get(sessions).open(testRequest(), facts));
 		for (const c of cookies) {
 			const [name = "", value = ""] = (c.split(";")[0] ?? "").split("=");
 			jar.set(name, value);
@@ -212,7 +221,7 @@ export async function serve(settings: Settings = {}) {
 	};
 	/** Binds a code factor for the subject through mfa, and answers its id. */
 	const bindCode = async (subject = "alice") => {
-		const decided = app.get(factors);
+		const decided = app.get(factorBinding);
 		const begun = await decided.begin(subject, "code");
 		if (begun.kind !== "begun") throw new Error(begun.kind);
 		const secret = String((begun.show as { secret: string }).secret);
@@ -221,8 +230,16 @@ export async function serve(settings: Settings = {}) {
 		const bound = await decided.bind(subject, begun.pending, proved.state);
 		if (bound.kind !== "bound") throw new Error(bound.kind);
 		// The codes are written by the reissue, as an enrollment writes them.
-		if (bound.codesDue) await decided.reissue(subject, bound.fence);
+		if (bound.codesDue) await app.get(factorManaging).reissue(subject, bound.fence);
 		return bound.factor.id;
 	};
-	return { app, call, signIn, bindCode, jar: () => jar, port: () => app.get(listening).port() };
+	return {
+		app,
+		input,
+		call,
+		signIn,
+		bindCode,
+		jar: () => jar,
+		port: () => app.get(listening).port(),
+	};
 }
