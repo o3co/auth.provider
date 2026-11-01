@@ -363,6 +363,7 @@ While the ledger cannot answer, every password login outside the exempt group an
 - **`auth_dependency_up` is 0** for a probe: that dependency is down, and `/readyz` answers `503`. The probe's name says which.
 - **`auth_rate_limit_uncounted_total` rises**, by `limit` (`requests` or `attempts`): a rate limit could not count, usually because the store is down. Attempt limits then refuse with `503`; request limits refuse too, or let requests through uncounted where `rate-limit.fail-mode = open`.
 - **`auth_audit_events_lost_total` rises**, by `receiver`: a receiver is not taking events, so the audit trail has a gap. The warning `audit.receiver_losing` says why.
+- **The log goes silent** while the process serves, or `auth_audit_events_lost_total` rises for `stdout`: standard output's reader has gone. Its lines are dropped, uncounted, and the process keeps serving; it no longer exits for a supervisor to restart it. Restart the instance, or mend what reads its output.
 - **`http_request_duration_seconds`**: the rate of `5xx` answers and the latency, by method and route. A `499` is a client that closed before the answer.
 - **The process**: the Node defaults, prefixed `auth_provider_` (event loop lag, memory, handles).
 - **Warnings in the log**: a failed periodic run, probe or stop hook is one warn line naming it. `outbound.resolver_restarts` and `outbound.resolver_stuck` mean names do not resolve; see [Name resolution](#name-resolution).
