@@ -74,7 +74,11 @@ afterEach(() => stop());
 
 const origin = "https://as.example";
 const base = "/session/oauth/federation";
-const alice: UpstreamLogin = { subject: "u-alice", amr: ["mfa"], authenticatedAt: start };
+const alice: UpstreamLogin = {
+	subject: "u-alice",
+	amr: ["mfa"],
+	authenticatedAt: start,
+};
 /** How far behind ours the test IdP type lets an upstream's clock be. */
 const skewMs = 30_000;
 /** Headers as the trusted proxy forwards a request over https. */
@@ -250,7 +254,12 @@ async function serve(setup: Setup = {}) {
 		(await app.get(logins)).resume(testRequest(), facts, "second", held.done, held.from);
 	/** Logs in through the gates for another caller, as a different way of logging in would. */
 	const login = async (from: LoginFrom) => {
-		const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+		const facts = {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: runtime.clock.now(),
+			provenSince: runtime.clock.now(),
+		};
 		return (await app.get(logins)).login(testRequest(), facts, {}, from);
 	};
 	return {
