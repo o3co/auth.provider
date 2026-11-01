@@ -15,25 +15,6 @@ export interface Section<T> {
 	 * configuration value.
 	 */
 	checkAtBoot?(value: T, client: Client): string | undefined;
-	/**
-	 * The section's value from a client's metadata document, before the schema checks it: nothing
-	 * when the section takes nothing from it, or `refused` naming the field (RFC 7591's word) that
-	 * refuses the client, never its text. The value holds the section's own keys alone, never the
-	 * document's, so where a check fails holds no document text. A section that widens what a
-	 * client may do takes from a document only what a document may say.
-	 */
-	fromDocument?(
-		document: Readonly<Record<string, unknown>>,
-		from: DocumentSource,
-	): { readonly value: unknown } | { readonly refused: string } | undefined;
-	/** The document's fields (RFC 7591's words) `fromDocument` reads. */
-	readonly reads?: readonly string[];
-}
-
-/** Where a client's metadata document came from: its client id, and the host its source checked. */
-export interface DocumentSource {
-	readonly id: string;
-	readonly host: string;
 }
 
 export interface Client {
@@ -65,10 +46,19 @@ export interface ClientSource {
 
 export interface AuthMethod {
 	readonly name: string;
-	/** The JWS algorithms its credentials may be signed with, for a method whose credentials are signed. */
+	/**
+	 * The JWS algorithms its credentials may be signed with, for a method whose credentials are signed:
+	 * at least one, never `none`, and set by every method that authenticates by an assertion.
+	 */
 	readonly signingAlgorithms?: readonly string[];
 	/** The WWW-Authenticate challenge to send when this method's credentials are refused. */
 	readonly challenge?: string;
+	/**
+	 * Set for a method that authenticates by an assertion (RFC 7521): a refusal for two methods or
+	 * malformed credentials of a request it claims is marked. It claims any request carrying a part of
+	 * its assertion.
+	 */
+	readonly assertion?: true;
 	/** The client id the request claims through this method, if it uses this method at all. */
 	claimed(request: HttpRequest): string | undefined;
 	/** Whether the request carries this method's credentials only in part, or in a form it does not take. */
@@ -95,8 +85,18 @@ export type Authentication =
 				| "wrong_method"
 				| "bad_credentials"
 				| "invalid_record";
-			/** Challenges for the response: the tried method's, or every method's when none was tried. */
+			/**
+			 * Challenges for the response: the tried method's, or every method's when none was tried; for
+			 * `multiple_methods` and `malformed_credentials`, where an assertion method claims the request,
+			 * those of the methods claiming it or finding it malformed, else none, answered as malformed
+			 * requests.
+			 */
 			readonly challenges: readonly string[];
+			/**
+			 * Set on `multiple_methods` and `malformed_credentials` where an assertion method claims the
+			 * request, so the request uses an assertion: RFC 7521 §4.2.1 answers it `invalid_client`.
+			 */
+			readonly assertion?: true;
 	  };
 
 export interface Clients {
@@ -108,6 +108,19 @@ export interface Clients {
 	 */
 	checkRecord(record: ClientRecord): Promise<readonly RecordRefusal[] | undefined>;
 	authenticate(request: HttpRequest): Promise<Authentication>;
+	/**
+	 * Whether the request carries nothing a client authenticates with, whichever methods are
+	 * composed: no `authorization` header, no client certificate (malformed included), none of the
+	 * credential parameters (`client_id`, `client_secret`, `client_assertion`,
+	 * `client_assertion_type`) sent at all, and nothing a composed method claims or finds malformed.
+	 * `no_credentials` from `authenticate` says only that no composed method claimed it.
+	 */
+	bare(request: HttpRequest): boolean;
+	/**
+	 * The clients the operator registered, in the settings' order: the `i`th is at
+	 * `clients.registered.<i>`, where a boot check names it by its place, never its id.
+	 */
+	registered(): readonly Client[];
 	/** The names of the ways a client can authenticate here, built in and contributed. */
 	methods(): readonly string[];
 	/** The algorithms those methods take signed credentials in, each once. */

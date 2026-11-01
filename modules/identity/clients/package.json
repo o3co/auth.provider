@@ -4,6 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"asks": [
+		"`clients.registered`: written in the local layer; a confidential client carries `sections.client-secret.hash`, a bcrypt or scrypt hash of its secret, never the secret itself."
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",

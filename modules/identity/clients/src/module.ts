@@ -18,7 +18,7 @@ import {
 	secretPost,
 	secretSection,
 } from "./methods.ts";
-import { clientRecord, readRecord, registry } from "./registry.ts";
+import { clientRecord, methodIssues, readRecord, registry } from "./registry.ts";
 
 const section = z
 	.strictObject({
@@ -72,51 +72,74 @@ const byName = (sections: readonly Section<unknown>[]) => new Map(sections.map((
 const registered = contract<ReadonlyMap<string, Client>>("clients.registered");
 const secrets = contract<SecretChecker>("clients.secrets");
 
-export default defineModule({ name: "clients", section }, (m) => [
-	// This assembly's checkers, which share its limit on checks under way.
-	m
-		.provide(secrets)
-		.by(async (c) => (await c.get(secretCheckers)).checkerOf(hashesOf(c.section.registered))),
-	m.contribute(authMethods).by(async (c) => secretBasic(await c.get(secrets))),
-	m.contribute(authMethods).by(async (c) => secretPost(await c.get(secrets))),
-	m.contribute(authMethods).by(() => none),
-	m.contribute(metadataSections).by(() => secretSection),
-	m.provide(registered).by(async (c) => {
-		const known = byName(await c.collect(metadataSections));
-		const methods = new Set((await c.collect(authMethods)).map((a) => a.name));
-		const found = new Map<string, Client>();
-		const issues: { where: string; reason: string }[] = [];
-		for (const [i, entry] of c.section.registered.entries()) {
-			if (!methods.has(entry.method)) {
-				issues.push({
-					where: `clients.registered.${i}.method`,
-					reason: "unknown authentication method",
-				});
-			}
-			const read = await readRecord(entry, known, "registered");
-			if ("client" in read) {
-				found.set(entry.id, read.client);
-				issues.push(...refusedAtBoot(entry, read.client, known, `clients.registered.${i}`));
-			} else {
-				issues.push(
-					...read.issues.map((issue) => ({
-						where: `clients.registered.${i}.sections.${issue.path}`,
-						reason: issue.message,
-					})),
-				);
-			}
+/** Each registered client read, by id, and every refusal of the entries, each at its place. */
+async function registeredOf(
+	entries: readonly ClientRecord[],
+	known: ReadonlyMap<string, Section<unknown>>,
+	methods: ReadonlySet<string>,
+) {
+	const found = new Map<string, Client>();
+	const issues: { where: string; reason: string }[] = [];
+	for (const [i, entry] of entries.entries()) {
+		if (!methods.has(entry.method)) {
+			issues.push({
+				where: `clients.registered.${i}.method`,
+				reason: "unknown authentication method",
+			});
 		}
-		if (issues.length > 0) return c.refuseAll(issues);
-		return found;
-	}),
-	m
-		.provide(clients)
-		.by(async (c) =>
-			registry(
+		const read = await readRecord(entry, known, "registered");
+		if ("client" in read) {
+			found.set(entry.id, read.client);
+			issues.push(...refusedAtBoot(entry, read.client, known, `clients.registered.${i}`));
+		} else {
+			issues.push(
+				...read.issues.map((issue) => ({
+					where: `clients.registered.${i}.sections.${issue.path}`,
+					reason: issue.message,
+				})),
+			);
+		}
+	}
+	return { found, issues };
+}
+
+export default defineModule(
+	{
+		name: "clients",
+		// Safe on many instances given the same registered clients on each (deployment-guarantees, Several
+		// instances).
+		replicaSafe: true,
+		section,
+		takes: [authMethods, metadataSections, clientSources, secretCheckers],
+	},
+	(m) => [
+		// This assembly's checkers, which share its limit on checks under way.
+		m
+			.provide(secrets)
+			.by(async (c) => (await c.get(secretCheckers)).checkerOf(hashesOf(c.section.registered))),
+		m.contribute(authMethods).by(async (c) => secretBasic(await c.get(secrets))),
+		m.contribute(authMethods).by(async (c) => secretPost(await c.get(secrets))),
+		m.contribute(authMethods).by(() => none),
+		m.contribute(metadataSections).by(() => secretSection),
+		m.provide(registered).by(async (c) => {
+			const known = byName(await c.collect(metadataSections));
+			const methods = new Set((await c.collect(authMethods)).map((a) => a.name));
+			const { found, issues } = await registeredOf(c.section.registered, known, methods);
+			if (issues.length > 0) return c.refuseAll(issues);
+			return found;
+		}),
+		m.provide(clients).by(async (c) => {
+			const methods = await c.collect(authMethods);
+			// Refused before the registered clients are read: assembly builds `registered` on its own all
+			// the same, so its refusals are reported with these in the one boot.
+			const issues = methodIssues(methods);
+			if (issues.length > 0) return c.refuseAll(issues);
+			return registry(
 				await c.get(registered),
 				await c.collect(clientSources),
-				await c.collect(authMethods),
+				methods,
 				byName(await c.collect(metadataSections)),
-			),
-		),
-]);
+			);
+		}),
+	],
+);

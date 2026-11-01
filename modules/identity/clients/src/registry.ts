@@ -12,7 +12,18 @@ import type {
 	RecordRefusal,
 	Section,
 } from "./contract.ts";
-import { none } from "./methods.ts";
+import { none, sends } from "./methods.ts";
+
+/**
+ * The parameters a client authenticates with (RFC 6749 §2.3.1, RFC 7521 §4.2), sent at all,
+ * whether or not their method is composed.
+ */
+const credentialParameters = [
+	"client_id",
+	"client_secret",
+	"client_assertion",
+	"client_assertion_type",
+];
 
 type Refused = Extract<Authentication, { kind: "refused" }>;
 
@@ -79,6 +90,48 @@ export async function readRecord(
 	return { client };
 }
 
+/** What the composed methods break of their contract, each where and why: boot refuses any. */
+export function methodIssues(methods: readonly AuthMethod[]): { where: string; reason: string }[] {
+	return methods.flatMap((method) => {
+		const where = `clients.methods.${method.name}`;
+		const algorithms = method.signingAlgorithms;
+		// The JWS algorithm none, not the method named none: discovery names every signing algorithm.
+		const unsigned = (algorithms ?? []).some((alg) => alg.toLowerCase() === "none")
+			? [{ where, reason: "names the JWS algorithm none among its signing algorithms" }]
+			: [];
+		// An assertion is signed or MACed (RFC 7521 §5.2), so a method taking one names how.
+		const unnamed =
+			method.assertion === true && (algorithms ?? []).length === 0
+				? [
+						{
+							where,
+							reason: "names no signing algorithms, though it authenticates by an assertion",
+						},
+					]
+				: algorithms?.length === 0
+					? [{ where, reason: "names an empty list of signing algorithms" }]
+					: [];
+		return [...unsigned, ...unnamed];
+	});
+}
+
+/**
+ * Which methods claim a request, each with the id it names, and which methods it is read by:
+ * `none` is what a request is when no other method claims it, and only then is it read.
+ */
+function claimedBy(request: HttpRequest, methods: readonly AuthMethod[]) {
+	const claim = (method: AuthMethod) => {
+		const id = method.claimed(request);
+		return id === undefined ? [] : [{ method, id }];
+	};
+	const others = methods.filter((m) => m.name !== none.name);
+	const claimed = others.flatMap(claim);
+	return {
+		tried: claimed.length > 0 ? claimed : claim(none),
+		read: claimed.length > 0 ? others : methods,
+	};
+}
+
 export function registry(
 	registered: ReadonlyMap<string, Client>,
 	sources: readonly ClientSource[],
@@ -130,26 +183,34 @@ export function registry(
 		},
 		methods: () => methods.map((m) => m.name),
 		signingAlgorithms: () => [...new Set(methods.flatMap((m) => m.signingAlgorithms ?? []))],
+		registered: () => [...registered.values()],
 		find: async (id) => {
 			const found = await lookup(id);
 			return found === "invalid" ? undefined : found;
 		},
+		bare: (request) =>
+			!request.headers.has("authorization") &&
+			request.source.clientCertificate === undefined &&
+			!credentialParameters.some((name) => sends(request, name)) &&
+			!methods.some((m) => m.claimed(request) !== undefined || m.malformed?.(request) === true),
 		authenticate: async (request: HttpRequest): Promise<Authentication> => {
-			const claim = (method: AuthMethod) => {
-				const id = method.claimed(request);
-				return id === undefined ? [] : [{ method, id }];
-			};
-			// `none` is what a request is when no other method claims it, and only then is it read.
-			const others = methods.filter((m) => m.name !== none.name);
-			const claimed = others.flatMap(claim);
-			const tried = claimed.length > 0 ? claimed : claim(none);
-			const read = claimed.length > 0 ? others : methods;
+			const { tried, read } = claimedBy(request, methods);
 			const [only, ...more] = tried;
-			const every = methods.flatMap((m) => (m.challenge ? [m.challenge] : []));
-			if (more.length > 0) return { kind: "refused", reason: "multiple_methods", challenges: [] };
-			if (read.some((method) => method.malformed?.(request))) {
-				return { kind: "refused", reason: "malformed_credentials", challenges: [] };
-			}
+			const challengesOf = (of: readonly AuthMethod[]) =>
+				of.flatMap((m) => (m.challenge ? [m.challenge] : []));
+			const every = challengesOf(methods);
+			const malformed = read.filter((method) => method.malformed?.(request));
+			// Where an assertion method claims the request, it uses an assertion: two methods or malformed
+			// credentials are then the assertion's, marked and challenged by every method part of the
+			// request, those claiming it and those finding it malformed, as RFC 7521 §4.2.1 answers it
+			// `invalid_client`. A method that only finds the request malformed marks nothing.
+			const involved = [...new Set([...tried.map((t) => t.method), ...malformed])];
+			const malformedRefusal = (reason: "multiple_methods" | "malformed_credentials"): Refused =>
+				tried.some((t) => t.method.assertion === true)
+					? { kind: "refused", reason, challenges: challengesOf(involved), assertion: true }
+					: { kind: "refused", reason, challenges: [] };
+			if (more.length > 0) return malformedRefusal("multiple_methods");
+			if (malformed.length > 0) return malformedRefusal("malformed_credentials");
 			if (!only) return { kind: "refused", reason: "no_credentials", challenges: every };
 			const challenges = only.method.challenge ? [only.method.challenge] : [];
 			const refused = (reason: Refused["reason"]) =>
