@@ -10,11 +10,12 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
-import { type Enforcer, enforcers, type Factors, factors } from "@mod/mfa";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { type Enforcer, enforcers } from "@mod/mfa";
 import { type FactorKind, factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { sessionRules, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { openedOf, sessionStandIn } from "@mod/session/testing";
 import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -39,8 +40,8 @@ const kind = (counts: boolean, addsSecondFactor: boolean) =>
 /** mfa's decisions as the entry judgments ask them: the subjects holding a counting factor, or one unreadable. */
 function decided(holding: Set<string>, required = false, unreadable = new Set<string>()) {
 	const asked: string[] = [];
-	const module = defineModule({ name: "factors-stand-in" }, (m) => [
-		m.provide(factors).by(
+	const module = defineModule({ name: "factors-stand-in", replicaSafe: false, takes: [] }, (m) => [
+		m.provide(factorReading).by(
 			() =>
 				({
 					countingHeld: async (subject: string, at: string) => {
@@ -49,7 +50,7 @@ function decided(holding: Set<string>, required = false, unreadable = new Set<st
 						return holding.has(subject);
 					},
 					secondFactorRequired: () => required,
-				}) as unknown as Factors,
+				}) as unknown as FactorReading,
 		),
 	]);
 	return { module, asked };
@@ -61,10 +62,10 @@ async function serve(
 	extra: Module[] = [],
 ) {
 	const stand = decided(holding, required, unreadable);
-	const kindsModule = defineModule({ name: "kinds" }, (m) =>
+	const kindsModule = defineModule({ name: "kinds", replicaSafe: true, takes: [] }, (m) =>
 		kinds.map((k) => m.contribute(factorKinds).by(() => k)),
 	);
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			sessionStandIn,
@@ -77,28 +78,45 @@ async function serve(
 		],
 		config: { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) },
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	const opened = app.get(sessions);
 	const signedIn = async (
 		subject: string,
 		amr: string[],
 		authenticatedAt: number | "unknown" = runtime.clock.now(),
 	) => {
-		const { cookies } = await opened.complete(testRequest(), { subject, amr, authenticatedAt });
+		const { cookies } = openedOf(
+			await opened.open(testRequest(), {
+				subject,
+				amr,
+				authenticatedAt,
+				provenSince: runtime.clock.now(),
+			}),
+		);
 		return withCookie(cookies[0] ?? "");
 	};
-	return { app, opened, signedIn, asked: stand.asked };
+	return { app, input, opened, signedIn, asked: stand.asked };
 }
 
 const withCookie = (set: string) =>
 	testRequest({ headers: new Map([["cookie", set.split(";")[0] ?? ""]]) });
 
+it("takes all it names, a second factor required or not", async () => {
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused((await serve()).input))["mfa-entry"]).toBeUndefined();
+	expect(
+		(await takesUnused((await serve(new Set(), { required: true })).input))["mfa-entry"],
+	).toBeUndefined();
+});
+
 describe("the entry requirements a second factor sets", () => {
 	it("judges using a session and changing credentials, under mfa's name", async () => {
 		const seen = contract<readonly EntryRequirement[]>("seen");
-		const reader = defineModule({ name: "reader" }, (m) => [
-			m.provide(seen).by((c) => c.collect(entryRequirements)),
-		]);
+		const reader = defineModule(
+			{ name: "reader", replicaSafe: true, takes: [entryRequirements] },
+			(m) => [m.provide(seen).by((c) => c.collect(entryRequirements))],
+		);
 		const { app } = await serve(new Set(), {}, [reader]);
 		const mfa = app.get(seen).find((requirement) => requirement.name === "mfa");
 		expect(mfa?.judges).toEqual(["use", "credentials"]);
@@ -173,9 +191,13 @@ it("takes only a second factor proven recently as proven, never a recent sign-in
 	const { app } = await serve();
 	const now = runtime.clock.now();
 	const at = (amr: string[], extra = {}) =>
-		app
-			.get(secondFactors)
-			.provenRecently({ subject: "s", amr, authenticatedAt: now, ...extra } as never);
+		app.get(secondFactors).provenRecently({
+			subject: "s",
+			amr,
+			authenticatedAt: now,
+			provenSince: now,
+			...extra,
+		} as never);
 	expect(at(["pwd"])).toBe(false);
 	expect(at(["pwd", secondFactorAmr])).toBe(true);
 	expect(at(["pwd"], { raisedAmr: ["otp", secondFactorAmr], raisedAt: now })).toBe(true);
@@ -184,7 +206,7 @@ it("takes only a second factor proven recently as proven, never a recent sign-in
 
 it("names itself among the modules holding sessions to the subject's factors", async () => {
 	const seen = contract<readonly Enforcer[]>("seen-enforcers");
-	const reader = defineModule({ name: "reader" }, (m) => [
+	const reader = defineModule({ name: "reader", replicaSafe: true, takes: [enforcers] }, (m) => [
 		m.provide(seen).by((c) => c.collect(enforcers)),
 	]);
 	const { app } = await serve(new Set(), {}, [reader]);
