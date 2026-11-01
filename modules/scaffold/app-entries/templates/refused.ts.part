@@ -1,0 +1,36 @@
+/**
+ * Writes `text` to the stream, waiting until it is handed on: a slow pipe holds the script there
+ * rather than leaving it buffered for an exit to drop.
+ */
+const written = (stream: NodeJS.WriteStream, text: string) =>
+	new Promise<void>((resolve, reject) =>
+		stream.write(text, (error) => (error ? reject(error) : resolve())),
+	);
+
+/**
+ * Where the operator writes each key the configuration reads from the environment, as written when
+ * the app was generated: its variable, and the keys whose values run to several lines, which go in
+ * the local layer alone. Names only. An app whose configuration files changed since may be told of
+ * a variable they no longer read.
+ */
+const keysRead: Readonly<Record<string, string>> = {{keysRead}};
+const severalLines: readonly string[] = {{severalLines}};
+/** Where to write the key a refusal names, or nothing for one the configuration does not read. */
+const writtenAt = (where: string) => {
+	const variable = Object.hasOwn(keysRead, where) ? keysRead[where] : undefined;
+	if (variable === undefined) return "";
+	if (severalLines.includes(where)) return ` (${where} in {{local}})`;
+	return ` (${variable} in .env, or ${where} in {{local}})`;
+};
+
+/** A refused boot: each refusal on its own line of standard error, where to write its key beside it, then exit 78. */
+const refused = async (error: unknown): Promise<never> => {
+	if (!BootRefused.is(error)) throw error;
+	for (const refusal of error.refusals) {
+		await written(
+			process.stderr,
+			`refused ${refusal.where}: ${refusal.reason}${writtenAt(refusal.where)}\n`,
+		);
+	}
+	process.exit(78);
+};
