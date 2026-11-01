@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { secretProblem } from "../secret/secret.ts";
 
+/** HS256's least secret, in bytes: as long as its hash's output (RFC 7518 §3.2). */
+const hs256SecretFloor = 32;
+
 const kid = z
 	.string()
 	.regex(/^[A-Za-z0-9._~-]{1,128}$/, "kid is 1 to 128 characters of letters, digits and . _ ~ -");
@@ -39,7 +42,7 @@ const signing = z.discriminatedUnion("alg", [
 		})
 		.superRefine((s, ctx) => {
 			const reading = { hex: true, encoding: s["secret-encoding"] };
-			const problem = secretProblem(s.secret, { atLeast: 32 }, reading);
+			const problem = secretProblem(s.secret, { atLeast: hs256SecretFloor }, reading);
 			if (problem) ctx.addIssue({ code: "custom", message: problem, path: ["secret"] });
 		}),
 ]);

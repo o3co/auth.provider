@@ -8,8 +8,8 @@
 - The meaning of what is signed. Which outside keys a module trusts, and where it gets them.
 
 ## Offers
-- `keys`: sign claims under a `typ` (adding the `kid`), and verify a token, answering valid with frozen claims or why not (`malformed`, `typ`, `kid_unknown`, `kid_expired`, `signature`). Either refuses the access token type (`at+jwt` in any case, `application/` and media type parameters too) as the caller's TypeError.
-- `accessTokenSigning`: sign claims as an access token (`at+jwt`, adding the `kid`) and verify one, under the ring and answers of `keys`: the one way to either, taken by the module `tokens` alone (any other taking it refuses boot; it binds the modules of a trusted composition, not code that imports `keys` itself).
+- `keys`: sign claims under a `typ` (adding the `kid`), and verify a token, answering valid with frozen claims or why not (`malformed`, `typ`, `kid_unknown`, `kid_expired`, `signature`). Either refuses the access token type (`at+jwt` in any case, `application/` and media type parameters too) as the caller's TypeError. It names the algorithm it signs with (`algorithm`) and the one its next key will (`nextAlgorithm`, none without a next key).
+- `accessTokenSigning`: sign claims as an access token (`at+jwt`, adding the `kid`) and verify one, under the ring and answers of `keys`: the one way to either, taken by the module `tokens` alone (any other taking it refuses boot; it binds the modules of a trusted composition, not code that imports `keys` itself), and imported by `tokens` alone, as the manifest's `takenBy` declares.
 - Whether signing is asymmetric, the `alg` it signs with, and the path of the public key set, a route contributed to `http` that answers its listed origins.
 - `publicJwk`: a JWK the platform reads as a public key, kept as given.
 - `publicPem`: a public key written as PEM.
@@ -19,11 +19,11 @@
 - `isCanonicalJws`: whether a compact JWS is written in its one form; `verify` answers any other as `malformed`. `secretBytes` (exactly or at least n): the setting of a secret's bytes every module takes, strict base64 of at least 8 byte values, never a `REPLACE-` sample; a refusal never names the value.
 - `bearerToken` (at least n): the setting of a bearer token sent to an outside party, an RFC 6750 b64token of at least n bytes and 8 byte values of key material however read (as written, hex or base64), never a `REPLACE-` sample; a refusal never names the value.
 - Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a `secret`, its bytes the HMAC key as `secret-encoding` reads them: `hex`, `base64` or `utf8`, the text's own; unset, hex where the value is whole bytes of hex, else base64), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`).
-- Test configuration builders (`./testing`), with a new Ed25519 signing key unless a test sets one.
+- Test configuration builders (`./testing`), with an RS256 signing key, one RSA key a process makes once, unless a test sets one.
 
 ## Invariants
 - Key material has no default; a missing or unreadable key, or one not of its `alg`'s kind, refuses boot.
-- A signing `private-key` not written as PEM is refused by the section, before it is read; so is the fragment's `REPLACE-` placeholder.
+- A signing `private-key` not written as PEM is refused by the section, before it is read; the fragment's `REPLACE-` placeholder, written as PEM, is refused when read, as no key, the refusal naming it.
 - EdDSA takes Ed25519, ES256 takes P-256, RS256 takes RSA of 2048 bits or more; an HMAC secret is 32 bytes or more.
 - A previous or next key is the provider's own: a private PEM is taken too, and only its public half is used. The next key is published and verifies, but never signs, so verifiers hold it before it signs.
 - A `kid` is 1–128 of letters, digits and `. _ ~ -`, unique in the ring.

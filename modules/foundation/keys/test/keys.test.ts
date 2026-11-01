@@ -39,6 +39,17 @@ async function boot(keysSection: unknown, http_: Record<string, unknown> = {}) {
 	return { app, base: `http://127.0.0.1:${app.get(listening).port()}` };
 }
 
+/** The refusals of a boot on the section, where and why. */
+async function refusalsAt(keysSection: unknown) {
+	try {
+		await boot(keysSection);
+	} catch (error) {
+		if (error instanceof BootRefused) return error.refusals;
+		throw error;
+	}
+	throw new Error("expected a refusal");
+}
+
 async function refusedAt(keysSection: unknown): Promise<string[]> {
 	try {
 		await boot(keysSection);
@@ -114,7 +125,7 @@ describe("keys", () => {
 		expect(await k.verify(byOld, "JWT")).toEqual({ kind: "invalid", reason: "kid_expired" });
 	});
 
-	it("publishes and verifies the next key, but never signs with it", async () => {
+	it("publishes and verifies the next key, but never signs with it, and has the set cached five minutes, the wait the runbook's rotation keeps before the key signs [oidc-core-10.1-d] [oidc-core-10.2.1-c]", async () => {
 		const coming = ed25519Pem();
 		const { app, base } = await boot({
 			...rotated(),
@@ -132,6 +143,28 @@ describe("keys", () => {
 		};
 		expect(published.keys.map((key) => key.kid)).toEqual(["now", "old", "next"]);
 		expect(published.keys.every((key) => !("d" in key))).toBe(true);
+		// The tools of the coordination; the wait between publishing and signing is the operator's, as
+		// docs/runbook.md's "Rotating the signing key" sets it: 300 seconds after the last restart.
+		expect((await fetch(`${base}/.well-known/jwks.json`)).headers.get("cache-control")).toBe(
+			"public, max-age=300",
+		);
+	});
+
+	it("names the algorithm the next key will sign with, and none where the ring has no next key", async () => {
+		const coming = generateKeyPairSync("rsa", { modulusLength: 2048 })
+			.privateKey.export({ format: "pem", type: "pkcs8" })
+			.toString();
+		const withNext = await boot({
+			...rotated(),
+			next: { kid: "next", alg: "RS256", "public-key": coming },
+		});
+		expect([withNext.app.get(keys).algorithm(), withNext.app.get(keys).nextAlgorithm()]).toEqual([
+			"EdDSA",
+			"RS256",
+		]);
+		await stop();
+		const without = await boot(rotated());
+		expect(without.app.get(keys).nextAlgorithm()).toBeUndefined();
 	});
 
 	it("takes a previous key written as a private PEM for its public half alone", async () => {
@@ -170,13 +203,14 @@ describe("keys", () => {
 		expect(await read("https://evil.example")).toBeNull();
 	});
 
-	it("publishes only public members of unexpired keys with a strong ETag", async () => {
+	it("publishes only public members of unexpired keys, each for signatures, with a strong ETag [oidc-core-10.1.1-a] [oidc-core-10.2.1-a] [oidc-core-10.1-e]", async () => {
 		const { base } = await boot(rotated());
 		const res = await fetch(`${base}/.well-known/jwks.json`);
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { keys: Record<string, unknown>[] };
 		expect(body.keys.map((k) => k.kid)).toEqual(["now", "old"]);
 		expect(body.keys.every((k) => !("d" in k))).toBe(true);
+		expect(body.keys.map((k) => k.use)).toEqual(["sig", "sig"]);
 		const etag = res.headers.get("etag") ?? "";
 		expect(etag).toMatch(/^"[A-Za-z0-9_-]+"$/);
 		expect(res.headers.get("cache-control")).toBe("public, max-age=300");
@@ -271,6 +305,19 @@ describe("keys", () => {
 		}
 	});
 
+	it("says of a key not of its alg's kind which alg it is to match, and to write a key of that kind", async () => {
+		const signing = { kid: "k", alg: "EdDSA", "private-key": current.priv };
+		const told = (alg: string) =>
+			`not readable as a key of the kind ${alg} names: write a PEM key of that kind (the example's REPLACE- placeholder is none)`;
+		expect(await refusalsAt({ signing: { ...signing, alg: "ES256" } })).toEqual([
+			{ where: "keys.signing.private-key", reason: told("keys.signing.alg") },
+		]);
+		const previous = { kid: "p", alg: "ES256", "expires-at": "2027-01-01T00:00:00Z" };
+		expect(
+			await refusalsAt({ signing, previous: [{ ...previous, "public-key": current.pub }] }),
+		).toEqual([{ where: "keys.previous.0.public-key", reason: told("keys.previous.0.alg") }]);
+	});
+
 	it("refuses in its section a signing key not written as PEM, as its fragment's placeholder is, and takes the test builder's", () => {
 		const signing = { kid: "k", alg: "EdDSA", "private-key": "REPLACE-PKCS8-PEM-PRIVATE-KEY" };
 		const refused = keysSection.safeParse({ signing });
@@ -291,6 +338,23 @@ describe("keys", () => {
 		expect(ed.app.get(keys).algorithm()).toBe("EdDSA");
 		expect(ed.app.get(keys).keySetPath()).toBe("/.well-known/jwks.json");
 		expect((await fetch(`${ed.base}${ed.app.get(keys).keySetPath()}`)).status).toBe(200);
+	});
+
+	it("names in alg the RSA or ECDSA algorithm it signs with, and verifies under it [oidc-core-10.1-b]", async () => {
+		const pems = {
+			ES256: generateKeyPairSync("ec", { namedCurve: "P-256" }),
+			RS256: generateKeyPairSync("rsa", { modulusLength: 2048 }),
+		};
+		for (const [alg, pair] of Object.entries(pems)) {
+			const priv = pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+			const k = (await boot({ signing: { kid: "k", alg, "private-key": priv } })).app.get(keys);
+			const token = await k.sign({ sub: "a" }, "JWT");
+			const header = JSON.parse(Buffer.from(token.split(".")[0] as string, "base64url").toString());
+			expect(header, alg).toMatchObject({ alg, kid: "k", typ: "JWT" });
+			expect(k.algorithm(), alg).toBe(alg);
+			expect((await k.verify(token, "JWT")).kind, alg).toBe("valid");
+			await stop();
+		}
 	});
 
 	it("signs with HMAC as needing a shared secret", async () => {
