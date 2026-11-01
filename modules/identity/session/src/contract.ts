@@ -27,7 +27,17 @@ export interface LoginFacts {
 	 */
 	readonly authenticatedAt: number | "opening" | "unknown";
 	readonly attributes?: SourcedAttributes;
+	/**
+	 * When the proof of this login began (epoch ms, 0 to 8.64e15), which only the login path knows:
+	 * `open` refuses the login where its subject was revoked since. Anything else is a TypeError.
+	 */
+	readonly provenSince?: number;
 }
+
+/** What `open` answers: the session opened behind its cookie, or none, its subject revoked since the proof began. */
+export type Opened =
+	| { readonly kind: "opened"; readonly session: Session; readonly cookies: readonly string[] }
+	| { readonly kind: "revoked" };
 
 export interface Session {
 	readonly id: string;
@@ -67,6 +77,12 @@ export interface Sessions {
 		request: HttpRequest,
 		facts: LoginFacts,
 	): Promise<{ readonly session: Session; readonly cookies: readonly string[] }>;
+	/**
+	 * As `complete`, telling it opened; where the facts give `provenSince`, the session is compared with
+	 * the subject's revocation boundary once saved and, revoked, closed before any cookie is made.
+	 * Optional until every implementation has it.
+	 */
+	open?(request: HttpRequest, facts: LoginFacts): Promise<Opened>;
 	/** Adds to the request's session what a further authentication proved, under a new cookie. */
 	raise(
 		request: HttpRequest,

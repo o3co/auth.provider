@@ -10,12 +10,27 @@ import {
 	type Entry,
 	type EntryLevel,
 	entryJudge,
+	type LoginFacts,
+	type Opened,
 	type Session,
 	type Sessions,
 	sessionRules,
 	sessions,
 } from "./contract.ts";
-import { authenticatedAtOf, checkAuthenticatedAt } from "./rules/authenticated.ts";
+import {
+	authenticatedAtOf,
+	checkAuthenticatedAt,
+	checkProvenSince,
+} from "./rules/authenticated.ts";
+
+/** The session and cookies an `open` answered, for a test that opens one: a refused one throws. */
+export function openedOf(answer: Opened): {
+	readonly session: Session;
+	readonly cookies: readonly string[];
+} {
+	if (answer.kind !== "opened") throw new Error(`session: the login was ${answer.kind}`);
+	return { session: answer.session, cookies: answer.cookies };
+}
 
 export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 	return {
@@ -23,6 +38,9 @@ export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 		enterFor: async () => ({ kind: "absent" }),
 		raise: async () => undefined,
 		complete: async () => {
+			throw new Error("not in this test");
+		},
+		open: async () => {
 			throw new Error("not in this test");
 		},
 		close: async () => ({ kind: "closed", cookies: [] }),
@@ -87,6 +105,37 @@ export function sessionsContract(
 			expect(await entering("unknown")).toBe("short");
 			expect(await entering(place.now() - 301_000)).toBe("short");
 			expect(await entering(place.now())).toBe("entered");
+		});
+
+		it("opens through open as through complete, telling it opened, and refuses a proof's start of no epoch milliseconds before anything", async (context) => {
+			const place = await open();
+			const opening = place.sessions.open;
+			if (!opening) return context.skip();
+			const done = await opening(place.request(), facts(place));
+			if (done.kind !== "opened") expect.unreachable("nothing is revoked");
+			expect((await place.sessions.enter(place.request(done.cookies)))?.id).toBe(done.session.id);
+			const over = { ...facts(place), provenSince: "then" } as never;
+			await expect(opening(place.request(done.cookies), over)).rejects.toThrow(TypeError);
+			expect((await place.sessions.enter(place.request(done.cookies)))?.id).toBe(done.session.id);
+		});
+
+		it("refuses a login whose proof began at or before its subject's revocation, closing its session before any cookie, and opens one whose proof began after it", async (context) => {
+			const place = await open();
+			const opening = place.sessions.open;
+			if (!opening) return context.skip();
+			const provenSince = place.now();
+			await place.revokeSubject("carol");
+			const refused = await opening(place.request(), { ...facts(place, "carol"), provenSince });
+			expect(refused).toEqual({ kind: "revoked" });
+			// Its record was saved, so it is closed as any session is, its participants called.
+			expect(place.closed).toContain("carol");
+			place.advance(60_000);
+			const later = { ...facts(place, "carol"), provenSince: place.now() };
+			const opened = await opening(place.request(), later);
+			if (opened.kind !== "opened") expect.unreachable("the proof began after the revocation");
+			expect((await place.sessions.enter(place.request(opened.cookies)))?.id).toBe(
+				opened.session.id,
+			);
 		});
 
 		it("tells whether a time is recent by one window, 300 seconds unless set otherwise", async () => {
@@ -768,37 +817,63 @@ export const sessionStandIn = defineModule(
 				listing.get(found.context.subject)?.delete(handle);
 				return { kind: "closed" as const, cookies: removed, session, from };
 			};
+			/**
+			 * A login's session, saved and listed behind a new cookie; `rechecked`, a proof begun at or before
+			 * its subject's revocation closes it, saved, before any cookie, as an implementation does.
+			 */
+			const opening = async (
+				request: HttpRequest,
+				facts: LoginFacts,
+				rechecked: boolean,
+			): Promise<Opened> => {
+				checkAuthenticatedAt(facts);
+				checkProvenSince(facts);
+				const carried = handleIn(request);
+				if (carried !== undefined) await close(carried);
+				const handle = random();
+				const secret = random();
+				const openedAt = c.clock.now();
+				const attributes = keptAtLogin(facts.attributes, c.log);
+				const context = Object.freeze({
+					subject: facts.subject,
+					amr: Object.freeze([...facts.amr]),
+					...authenticatedAtOf(facts, openedAt, () =>
+						c.log.warn("session.authentication_time_capped"),
+					),
+					...(attributes === undefined ? {} : { attributes }),
+				});
+				const until = openedAt + lifetimeMs;
+				kept.set(handle, { context, state: "open", openedAt, until });
+				// Compared once saved: a boundary whose write landed before this is seen, and one after it
+				// is later than the opening, which every entry compares.
+				const { provenSince } = facts;
+				if (rechecked && provenSince !== undefined) {
+					if ((await revocation.check(facts.subject, provenSince)) === "revoked") {
+						await close(handle);
+						return { kind: "revoked" };
+					}
+				}
+				// Listed before its cookie is made; a session pushed out is closed through `close`.
+				for (const pushed of list(facts.subject, handle, until)) await close(pushed);
+				handles.set(secret, { handle, until });
+				return {
+					kind: "opened",
+					session: Object.freeze({ id: handle, context }),
+					cookies: [jar.write("session", secret, lifetimeMs / 1000)],
+				};
+			};
 			const stand: Sessions = {
 				recent,
 				enter: async (request) => (await enteredAt(handleIn(request)))?.session,
 				enterFor: (request, level) => enterAt(handleIn(request), level),
 				entryOf: (handle, level = "use") => enterAt(handle, level),
 				complete: async (request, facts) => {
-					checkAuthenticatedAt(facts);
-					const carried = handleIn(request);
-					if (carried !== undefined) await close(carried);
-					const handle = random();
-					const secret = random();
-					const openedAt = c.clock.now();
-					const attributes = keptAtLogin(facts.attributes, c.log);
-					const context = Object.freeze({
-						subject: facts.subject,
-						amr: Object.freeze([...facts.amr]),
-						...authenticatedAtOf(facts, openedAt, () =>
-							c.log.warn("session.authentication_time_capped"),
-						),
-						...(attributes === undefined ? {} : { attributes }),
-					});
-					const until = openedAt + lifetimeMs;
-					kept.set(handle, { context, state: "open", openedAt, until });
-					// Listed before its cookie is made; a session pushed out is closed through `close`.
-					for (const pushed of list(facts.subject, handle, until)) await close(pushed);
-					handles.set(secret, { handle, until });
-					return {
-						session: Object.freeze({ id: handle, context }),
-						cookies: [jar.write("session", secret, lifetimeMs / 1000)],
-					};
+					const opened = await opening(request, facts, false);
+					if (opened.kind !== "opened")
+						throw new TypeError("session: complete never answers revoked");
+					return { session: opened.session, cookies: opened.cookies };
 				},
+				open: (request, facts) => opening(request, facts, true),
 				raise: async (request, amr) => {
 					const secret = secretIn(request);
 					const handle = handleOf(secret);
