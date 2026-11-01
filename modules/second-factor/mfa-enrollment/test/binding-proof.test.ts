@@ -290,7 +290,9 @@ describe("a binding proof before a first factor", () => {
 		const s = await serve({ mode: "required" }, [contactProof]);
 		const { tx } = await s.heldLogin("sam");
 		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
+		// Whichever way the login opens it, its session cannot be opened once.
 		sessionsDown.failNext("complete");
+		sessionsDown.failNext("open");
 		const done = await boundOnProof(s, tx);
 		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
 		const held = await s.app.get(factorReading).held("sam");

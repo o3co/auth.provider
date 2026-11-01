@@ -111,6 +111,7 @@ const entering = {
 				return change ? change(answer) : answer;
 			},
 			complete: (...args: Parameters<Sessions["complete"]>) => held(kept.complete(...args)),
+			open: (...args: Parameters<Sessions["open"]>) => held(kept.open(...args)),
 		});
 	},
 };
