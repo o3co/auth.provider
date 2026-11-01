@@ -8,6 +8,7 @@ import {
 	sameMark,
 	successes,
 } from "@mod/conformance/testing";
+import { pastBoundaries } from "@mod/conformance-identity";
 import { describe, expect, it } from "vitest";
 import {
 	type Answer,
@@ -19,7 +20,13 @@ import {
 	pollAt,
 	said,
 } from "../../faults/test/faults.ts";
-import { boundaryCreated, boundaryOf, closingAdded, takeOf } from "../../faults/test/wire.ts";
+import {
+	boundariesPut,
+	boundaryCreated,
+	boundaryOf,
+	closingAdded,
+	takeOf,
+} from "../../faults/test/wire.ts";
 
 // Each scene reads, at another instance, a device code alice approved before her boundary while the
 // revocation's followers are held at their first write, so her sessions are not closed: what refuses
@@ -83,11 +90,10 @@ async function control(d: Deployed) {
 async function healed(d: Deployed, i: Instance) {
 	await recovered(d);
 	await ready(i);
-	// A boundary is compared in seconds: a login within its second is revoked too, so the new one comes
-	// a second and more after the boundary's last write.
-	const written = d.instances.flatMap((x) => successes(x, boundaryOf(subject)).map((e) => e.at));
-	const after = Math.max(...written) + 1_100 - performance.now();
-	if (after > 0) await new Promise((resolve) => setTimeout(resolve, after));
+	// A boundary is its write's deadline, compared in seconds: the new login comes a second and more past
+	// every boundary written.
+	const written = d.instances.flatMap((x) => successes(x, boundaryOf(subject)));
+	await pastBoundaries(written.flatMap((e) => boundariesPut(e.command)));
 	expect(said(await pollAt(i, await approvedAt(i)))).toEqual([200, "Bearer"]);
 }
 

@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { type Command, keysOf, type Match, storeRead, storeWrite } from "@mod/conformance/testing";
+import {
+	type Command,
+	keysOf,
+	type Match,
+	storeRead,
+	storeWrite,
+	writtenValues,
+} from "@mod/conformance/testing";
 import type { Device } from "./faults.ts";
 
 // The store's own names a scene matches its writes by: the space, its records' names and fields, and
@@ -63,6 +70,18 @@ export const boundaryOf = (subject: string): Match =>
 		partition: subject,
 		operations: ["putIfAbsent", "replaceIf"],
 	});
+
+/** The boundaries a write of a subject's boundary puts, each a time: its sessions' and its delegations'. */
+export const boundariesPut = (command: Command): number[] => {
+	const put = writtenValues(command).find(
+		(w) => w.key.space === "subject-revocation-store.boundaries" && w.key.name === "record",
+	)?.value;
+	const value = put && typeof put === "object" && "value" in put ? put.value : put;
+	if (typeof value === "number") return [value];
+	return value && typeof value === "object"
+		? Object.values(value).filter((v): v is number => typeof v === "number")
+		: [];
+};
 
 /** The write that creates a subject's first boundary; a revocation that finds one held writes it from that instead. */
 export const boundaryCreated = (subject: string): Match =>
