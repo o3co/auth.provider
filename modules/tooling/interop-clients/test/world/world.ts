@@ -1,10 +1,11 @@
 import { createHash, generateKeyPairSync, randomBytes, X509Certificate } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AreaScene, freePort, type Started } from "@mod/conformance";
+import type { AreaScene, Started } from "@mod/conformance";
 import { codeScene } from "@mod/conformance-code";
 import { browserAt } from "@mod/conformance-code/testing";
 import { deviceArea } from "@mod/conformance-device";
@@ -52,8 +53,17 @@ export interface World {
 	};
 	/** The destinations the app opened through the tunnel, such as a client's metadata document's host. */
 	tunnelOpened(): readonly string[];
-	/** Where the `backchannel` client is told a session ended: the port and path its receiver listens at. */
-	readonly backchannel: { readonly port: number; readonly path: string };
+	/**
+	 * Where the provider posts a session's end for the `backchannel` client: the world's own receiver,
+	 * whose port it holds from its build to its stop, at `path`. It relays each post to the receiver an
+	 * adapter names, which listens on a port of its own at the same path.
+	 */
+	readonly backchannel: {
+		readonly port: number;
+		readonly path: string;
+		/** Relays what the provider posts from now on to `receiver`: plain http at 127.0.0.1, on `path`. */
+		relayTo(receiver: string): void;
+	};
 	readonly redirectUri: string;
 	/** Where a logout the code clients start may send the browser back. */
 	readonly postLogoutRedirectUri: string;
@@ -135,6 +145,43 @@ export function authorizationQuery(url: string, issuer: string): string {
  * file under `under`), reached through a tunnel the app takes as its outbound proxy (`proxy`). Its
  * files and listeners are gone once it stops, or where it does not start.
  */
+/**
+ * The back-channel receiver the `backchannel` client is registered with, bound before the app starts
+ * so no other listener takes its port, relaying each post to the adapter's receiver once one is named.
+ */
+async function startRelay(path: string) {
+	let target: string | undefined;
+	const server = createHttpServer(async (req, res) => {
+		const chunks: Buffer[] = [];
+		for await (const chunk of req) chunks.push(chunk as Buffer);
+		const to = target;
+		if (req.method !== "POST" || req.url !== path || !to) return void res.writeHead(404).end();
+		try {
+			const answer = await fetch(to, {
+				method: "POST",
+				headers: { "content-type": req.headers["content-type"] ?? "" },
+				body: Buffer.concat(chunks),
+			});
+			res.writeHead(answer.status).end();
+		} catch {
+			res.writeHead(502).end();
+		}
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	return {
+		port: (server.address() as AddressInfo).port,
+		path,
+		relayTo(receiver: string) {
+			const to = new URL(receiver);
+			const plain = to.protocol === "http:" && to.hostname === "127.0.0.1" && to.port !== "";
+			if (!plain || to.username || to.password || to.pathname !== path || to.search || to.hash)
+				throw new Error(`${receiver} is not a receiver at loopback on ${path}`);
+			target = to.href;
+		},
+		stop: () => new Promise<void>((resolve) => server.close(() => resolve())),
+	};
+}
+
 async function startDocuments(under: string | undefined) {
 	const dir = await mkdtemp(join(under ?? tmpdir(), "interop-documents-"));
 	let server: Server | undefined;
@@ -195,9 +242,12 @@ export async function startWorld(
 	const thumbprint = Buffer.from(
 		await crypto.subtle.digest("SHA-256", new X509Certificate(certificate.cert).raw),
 	).toString("base64url");
-	const backchannel = { port: await freePort(), path: "/backchannel" };
-	const documents = await startDocuments(given.under);
-	const receiver = `http://127.0.0.1:${backchannel.port}`;
+	const relay = await startRelay("/backchannel");
+	const documents = await startDocuments(given.under).catch(async (failure: unknown) => {
+		await relay.stop();
+		throw failure;
+	});
+	const receiver = `http://127.0.0.1:${relay.port}`;
 	const key = assertionKey();
 	const clients = {
 		basic: { id: "basic", method: "client_secret_basic", secret: awkward },
@@ -243,7 +293,7 @@ export async function startWorld(
 		...client(clients.backchannel.id, clients.backchannel.method, clients.backchannel.secret),
 		logout: {
 			postLogoutRedirectUris: [postLogoutRedirectUri],
-			backchannelLogoutUri: `${receiver}${backchannel.path}`,
+			backchannelLogoutUri: `${receiver}${relay.path}`,
 			backchannelLogoutSessionRequired: true,
 		},
 	};
@@ -327,6 +377,7 @@ export async function startWorld(
 		},
 	).catch(async (failure: unknown) => {
 		await documents.stop();
+		await relay.stop();
 		throw failure;
 	});
 	const base = app.base();
@@ -338,7 +389,7 @@ export async function startWorld(
 		redirectUri,
 		postLogoutRedirectUri,
 		clientCertificate: { cert: certificate.cert, key: certificate.key, thumbprint },
-		backchannel,
+		backchannel: { port: relay.port, path: relay.path, relayTo: relay.relayTo },
 		resource,
 		seen: { authorizations, tokenRequests: app.tokenRequests },
 		async introspect(token: string) {
@@ -483,6 +534,7 @@ export async function startWorld(
 		async stop() {
 			await app.stop();
 			await documents.stop();
+			await relay.stop();
 		},
 	};
 	return world;
