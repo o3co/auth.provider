@@ -1,8 +1,7 @@
 import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds, type Opened, type Verified } from "@mod/mfa-extensions";
 import { type AttributesAnswer, subjectAttributes } from "@mod/subject-attributes";
-import { challengeStore, passkeyStore } from "@mod/webauthn";
 import webauthnModule from "@mod/webauthn/module";
 import {
 	softwareAuthenticator,
@@ -15,13 +14,9 @@ import kindModule from "../src/module.ts";
 
 /** How far the kernel's clock runs ahead of the host's; it goes back after each test. */
 let shift = 0;
-const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => Date.now() + shift }, log: logged.log });
 const kinds = contract<readonly FactorKind[]>("kinds");
-/** webauthn's stores, which the ceremonies never reach. */
-const unused = defineModule({ name: "webauthn-stores" }, (m) => [
-	m.provide(passkeyStore).by(() => ({}) as never),
-	m.provide(challengeStore).by(() => ({}) as never),
-]);
 const browser = { origin: testOrigin };
 /** What subject-attributes answers, by subject; unknown for any other. */
 const attributes = new Map<string, AttributesAnswer>();
@@ -34,32 +29,63 @@ const known = (values: Record<string, unknown>): AttributesAnswer => ({
 	vouched: true,
 	attributes: values,
 });
-const attributesStandIn = defineModule({ name: "subject-attributes" }, (m) => [
-	m.provide(subjectAttributes).by(() => ({
-		of: async (subject) => attributes.get(subject) ?? { kind: "unknown" },
-	})),
-]);
+const attributesStandIn = defineModule(
+	{ name: "subject-attributes", replicaSafe: false, takes: [] },
+	(m) => [
+		m.provide(subjectAttributes).by(() => ({
+			of: async (subject) => attributes.get(subject) ?? { kind: "unknown" },
+		})),
+	],
+);
 const credentialIdOf = (factor: Opened) => (factor.state as { id: string }).id;
 const handleOf = (secret: string) => (JSON.parse(secret) as { handle: string }).handle;
 
+/** The kind's composition: the kind, webauthn, a stand-in for the attributes, a reader of the kinds. */
+const composition = (settings: Record<string, unknown> = {}) => ({
+	modules: [
+		attributesStandIn,
+		webauthnModule,
+		kindModule,
+		defineModule({ name: "reader", replicaSafe: true, takes: [factorKinds] }, (m) => [
+			m.provide(kinds).by((c) => c.collect(factorKinds)),
+		]),
+	],
+	config: {
+		...kernelConfig(),
+		...webauthnConfig(),
+		"mfa-webauthn": settings,
+	},
+	runtime,
+});
+
 async function boot(settings: Record<string, unknown> = {}) {
-	const app = await assemble({
-		modules: [
-			unused,
-			attributesStandIn,
-			webauthnModule,
-			kindModule,
-			defineModule({ name: "reader" }, (m) => [m.provide(kinds).by((c) => c.collect(factorKinds))]),
-		],
-		config: {
-			...kernelConfig(),
-			...webauthnConfig(),
-			"mfa-webauthn": settings,
-		},
-		runtime,
-	});
+	const app = await assemble(composition(settings));
 	return app.get(kinds)[0] as FactorKind;
 }
+
+it("warns at every start where the authenticator is not asked to verify its user", async () => {
+	const warned = async (settings: Record<string, unknown>) => {
+		const from = logged.lines().length;
+		await boot(settings);
+		return logged
+			.lines()
+			.slice(from)
+			.filter((line) => line.event === "mfa-webauthn.user_unverified");
+	};
+	expect(await warned({ "user-verification": "discouraged" })).toEqual([
+		{
+			level: "warn",
+			event: "mfa-webauthn.user_unverified",
+			fields: { reason: "the authenticator is not asked to verify its user" },
+		},
+	]);
+	expect(await warned({})).toEqual([]);
+});
+
+it("takes all it names", async () => {
+	// Its own entry alone: another module's takes this composition leaves unused are its owner's to check.
+	expect((await takesUnused(composition()))["mfa-webauthn"]).toBeUndefined();
+});
 
 /** Binds a credential of the authenticator as a binding's first proof does. */
 async function bound(
@@ -100,7 +126,7 @@ async function asserted(
 it("declares a counting second factor that guessing cannot beat", async () => {
 	expect(await boot()).toMatchObject({
 		kind: "webauthn",
-		amr: ["hwk", "swk"],
+		amr: ["pop"],
 		addsSecondFactor: true,
 		guessable: false,
 		counts: true,
@@ -115,14 +141,14 @@ it("binds a credential that need not be discoverable, under the name the operato
 		user: { name: "Example", displayName: "Example" },
 		authenticatorSelection: { residentKey: "discouraged", userVerification: "preferred" },
 	});
-	expect(amr).toEqual(["hwk"]);
+	expect(amr).toEqual(["pop"]);
 	const { proof, kept, show: request } = await asserted(kind, factor, authenticator);
 	expect(request).toMatchObject({
 		allowCredentials: [{ id: credentialIdOf(factor) }],
 	});
 	expect(await kind.verify(factor.secret, factor.state, proof, kept)).toMatchObject({
 		kind: "valid",
-		amr: ["hwk"],
+		amr: ["pop"],
 	});
 });
 
@@ -173,14 +199,14 @@ it("asks the user verification the operator sets", async () => {
 	expect(enrolled.show).toMatchObject({ authenticatorSelection: { userVerification: "required" } });
 });
 
-it("names a credential that may be backed up swk, at binding and at every assertion", async () => {
+it("names a credential that may be backed up pop too, at binding and at every assertion: nothing tells how a key is kept", async () => {
 	const kind = await boot();
 	const authenticator = softwareAuthenticator({ backupEligible: true });
 	const { factor, amr } = await bound(kind, authenticator);
-	expect(amr).toEqual(["swk"]);
+	expect(amr).toEqual(["pop"]);
 	const { proof, kept } = await asserted(kind, factor, authenticator);
 	expect(await kind.verify(factor.secret, factor.state, proof, kept)).toMatchObject({
-		amr: ["swk"],
+		amr: ["pop"],
 	});
 });
 
