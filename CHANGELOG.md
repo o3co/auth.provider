@@ -87,6 +87,7 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `audit`: audit receiver warnings are named as every other log event is ([U-0.19-118](docs/migration.md#u-0.19-118)).
 - `kernel`: in development, every value a production deployment refuses is warned of at every start ([U-0.19-119](docs/migration.md#u-0.19-119)).
 - `kernel`, `jwt-bearer`, `audit`, `mfa-witnessing`, `passkey-witnessing`: a warning names what it is about in a field a log line keeps ([U-0.19-120](docs/migration.md#u-0.19-120)).
+- `tokens`: an access token's lifetime counts from when it is asked for ([U-0.19-124](docs/migration.md#u-0.19-124)).
 
 ### Deprecated
 
@@ -110,6 +111,9 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `resource-indicators`, `token-exchange`: a `resource` that is not an absolute URI, or carries a fragment, is refused `invalid_target` ([U-0.19-69](docs/migration.md#u-0.19-69)).
 - `authorize`: a `request_uri` at the authorization endpoint is answered `request_uri_not_supported` ([U-0.19-82](docs/migration.md#u-0.19-82)).
 - A generated app waits for its stop when the same signal comes again ([U-0.19-100](docs/migration.md#u-0.19-100)).
+- `kernel`, `log-stdout`, `audit-stdout`: the provider no longer exits when its standard output's or error's reader goes away ([U-0.19-129](docs/migration.md#u-0.19-129)).
+- `audit`: an event recorded after stop that its receiver fails is counted as lost.
+- `log-stdout`: the lines it queued are written out at stop, within the stop's deadline.
 
 ### Security
 
@@ -147,6 +151,15 @@ Read the [migration guide](docs/migration.md) before upgrading from 0.18: each l
 - `dpop`: DPoP asks a nonce at the token endpoint by default ([U-0.19-115](docs/migration.md#u-0.19-115)).
 - `host-entries`, `outbound-policy`, `outbound`, `idp-oidc`, `mtls`: `outbound`'s hosts and pairs are read as written ([U-0.19-116](docs/migration.md#u-0.19-116)).
 - `mfa-flows`: the second-factor lockout's numbers are bounded ([U-0.19-117](docs/migration.md#u-0.19-117)).
+- `client-assertion`: each spent client assertion's record lasts longer, by no setting ([U-0.19-121](docs/migration.md#u-0.19-121)).
+- `dpop`: each spent DPoP proof's record lasts longer, by no setting ([U-0.19-122](docs/migration.md#u-0.19-122)).
+- `passkeys`, `webauthn-login`, `login-passkey`: a passkey challenge is made for the module that asks, beside its id, and guarantee 5-k states it ([U-0.19-123](docs/migration.md#u-0.19-123)).
+- `tokens`, `subject-tokens`, `webauthn-login`, `refresh`, `device-grant`, `jwt-bearer`, `jwt-bearer-id-tokens`, `token-exchange`, `exchange-id-tokens`: an access token tied to no session stands on the time its grant checked its subject ([U-0.19-125](docs/migration.md#u-0.19-125)).
+- `records`, `subject-revocation`, `subject-revocation-store`, `session`, `session-lifecycle`, `login-gates`, `login-passkey`, `login-password`, `federation`, `mfa-flows`: a revocation's boundary is the deadline of the write that records it, and a session checks when its login's proof began ([U-0.19-126](docs/migration.md#u-0.19-126)).
+- `redis`: a production boot is refused where `DEBUG` turns on the Redis client's own debug log ([U-0.19-127](docs/migration.md#u-0.19-127)).
+- `redis`: a durable space also needs `no-appendfsync-on-rewrite no` on the Redis server ([U-0.19-128](docs/migration.md#u-0.19-128)).
+- `redis`: a boot refused the store's keys names them by `redis.prefix`, never by its value.
+- `tokens`, `jwt-bearer`: a subject revocation recorded while an access token's issuance policies waited no longer leaves that token active.
 - Known gap: RFC 6750 §5.2's check that an upstream server's certificate has not been revoked is not done by `outbound`, which checks the chain and the name alone; it is left to the egress proxy or the platform ([#2519](https://github.com/o3co/auth.provider/issues/2519); [compliance report](docs/compliance/rfc6750.md)).
 
 ## [0.18.6] - 2026-10-25
