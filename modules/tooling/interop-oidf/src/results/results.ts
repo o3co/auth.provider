@@ -1,0 +1,178 @@
+import { isDeepStrictEqual } from "node:util";
+import type { Expected } from "../expected/expected.ts";
+
+/** One entry of a suite test's log, as its API answers it. */
+export interface LogEntry {
+	readonly src?: string;
+	readonly msg?: string;
+	readonly result?: string;
+	readonly blockId?: string;
+	readonly startBlock?: boolean;
+}
+
+/** One test of a plan as it ran in the suite: none where it never ran. */
+export interface ModuleRun {
+	readonly testModule: string;
+	readonly variant: Readonly<Record<string, string>>;
+	readonly instance?: string;
+	readonly info?: { readonly status: string; readonly result: string };
+	readonly log: readonly LogEntry[];
+}
+
+/** What a suite test proved: an excused result counts neither way, nor does one a person must review. */
+export type Outcome =
+	| { readonly kind: "passed" }
+	| { readonly kind: "failed"; readonly why: readonly string[] }
+	| { readonly kind: "excused"; readonly class: string }
+	| { readonly kind: "review" };
+
+const kinds: Readonly<Record<string, Expected["expected-result"]>> = {
+	FAILURE: "failure",
+	WARNING: "warning",
+};
+
+/**
+ * Each test's outcome, matching its failures and warnings to the expected entries as the suite's
+ * runner does, but exactly: the test, its variant and the configuration file, then the block and
+ * the condition. Entries no test used are named, as the runner fails them.
+ */
+export function outcomesOf(
+	runs: readonly ModuleRun[],
+	expected: {
+		readonly configuration: string;
+		readonly failures: readonly Expected[];
+		readonly skips: readonly Expected[];
+		/** The tests the driver declared it does not run, each its test and variant. */
+		readonly notRun?: readonly {
+			readonly testModule: string;
+			readonly variant: Readonly<Record<string, string>>;
+		}[];
+	},
+): {
+	readonly modules: readonly (ModuleRun & { readonly outcome: Outcome })[];
+	readonly unused: readonly Expected[];
+	/** The tests declared not run that no test of the plan answers: one removed or renamed in the suite, or a declaration mistyped. */
+	readonly strayNotRun: readonly {
+		readonly testModule: string;
+		readonly variant: Readonly<Record<string, string>>;
+	}[];
+} {
+	const used = new Set<Expected>();
+	const forTest = (run: ModuleRun, entries: readonly Expected[]) =>
+		entries.filter(
+			(e) =>
+				e["test-name"] === run.testModule &&
+				e["configuration-filename"] === expected.configuration &&
+				isDeepStrictEqual(e.variant, run.variant),
+		);
+	const declaredNotRun = (run: ModuleRun) =>
+		(expected.notRun ?? []).some(
+			(n) => n.testModule === run.testModule && isDeepStrictEqual(n.variant, run.variant),
+		);
+	const outcome = (run: ModuleRun): Outcome => {
+		// A test its driver declared not run is excused only by a skip entry naming it, and only if it did not run.
+		if (declaredNotRun(run)) {
+			if (run.instance !== undefined || run.info !== undefined)
+				return { kind: "failed", why: ["declared not run, but it ran"] };
+			const skip = forTest(run, expected.skips)[0];
+			if (skip === undefined)
+				return { kind: "failed", why: ["declared not run, and no entry excuses it"] };
+			used.add(skip);
+			return { kind: "excused", class: skip.class };
+		}
+		if (run.info === undefined) return { kind: "failed", why: ["it never ran"] };
+		if (run.info.status !== "FINISHED")
+			return { kind: "failed", why: [`it ended ${run.info.status}`] };
+		const failures = forTest(run, expected.failures);
+		const blocks = new Map(
+			run.log.flatMap((e) =>
+				e.startBlock && e.blockId ? [[e.blockId, e.msg ?? ""] as const] : [],
+			),
+		);
+		const unexpected: string[] = [];
+		const excusedBy: Expected[] = [];
+		for (const e of run.log) {
+			const kind = kinds[e.result ?? ""];
+			if (kind === undefined) continue;
+			const blockName = e.blockId === undefined ? "" : (blocks.get(e.blockId) ?? "");
+			const match = failures.find(
+				(x) =>
+					x["current-block"] === blockName &&
+					x.condition === e.src &&
+					x["expected-result"] === kind,
+			);
+			if (match === undefined) unexpected.push(`${e.result} ${blockName}: ${e.src}`);
+			else excusedBy.push(match);
+		}
+		for (const x of excusedBy) used.add(x);
+		if (unexpected.length > 0) return { kind: "failed", why: unexpected };
+		if (run.info.result === "SKIPPED") {
+			const skip = forTest(run, expected.skips)[0];
+			if (skip === undefined) return { kind: "failed", why: ["skipped, and no entry expects it"] };
+			used.add(skip);
+			return { kind: "excused", class: skip.class };
+		}
+		// A person's review the suite asks for stands, whatever the expected warnings excuse.
+		if (run.info.result === "REVIEW") return { kind: "review" };
+		if (excusedBy.length > 0) return { kind: "excused", class: excusedBy[0]?.class ?? "" };
+		if (run.info.result === "PASSED" || run.info.result === "WARNING") return { kind: "passed" };
+		return { kind: "failed", why: [`its result is ${run.info.result}`] };
+	};
+	const modules = runs.map((run) => ({ ...run, outcome: outcome(run) }));
+	const strayNotRun = (expected.notRun ?? []).filter(
+		(n) =>
+			!runs.some(
+				(run) => run.testModule === n.testModule && isDeepStrictEqual(run.variant, n.variant),
+			),
+	);
+	return {
+		modules,
+		unused: [...expected.failures, ...expected.skips].filter((e) => !used.has(e)),
+		strayNotRun,
+	};
+}
+
+/**
+ * Each test of the plan the suite ran, read back from its API: its latest instance's result and log,
+ * none for one that never ran. The plan is the one `id` names, which must bear `planName`; without
+ * an id, the one plan of that name, two of it refused.
+ */
+export async function testsOf(
+	api: (path: string) => Promise<unknown>,
+	planName: string,
+	id?: string,
+): Promise<ModuleRun[]> {
+	const listed = (await api("api/plan?length=100")) as {
+		readonly data: readonly {
+			readonly _id?: string;
+			readonly planName: string;
+			readonly modules: readonly {
+				readonly testModule: string;
+				readonly variant?: Record<string, string>;
+				readonly instances: readonly string[];
+			}[];
+		}[];
+	};
+	const named =
+		id === undefined
+			? listed.data.filter((p) => p.planName === planName)
+			: listed.data.filter((p) => p._id === id);
+	if (named.length > 1)
+		throw new Error(
+			`the suite holds ${named.length} plans named ${planName}: name the one to read by its id`,
+		);
+	const [plan] = named;
+	if (plan === undefined) throw new Error(`the suite holds no plan ${id ?? planName}`);
+	if (plan.planName !== planName)
+		throw new Error(`the suite's plan ${id} is ${plan.planName}, not ${planName}`);
+	return Promise.all(
+		plan.modules.map(async (m) => {
+			const instance = m.instances.at(-1);
+			const variant = m.variant ?? {};
+			if (instance === undefined) return { testModule: m.testModule, variant, log: [] };
+			const info = (await api(`api/info/${instance}`)) as { status: string; result: string };
+			const log = (await api(`api/log/${instance}`)) as ModuleRun["log"];
+			return { testModule: m.testModule, variant, instance, info, log };
+		}),
+	);
+}
