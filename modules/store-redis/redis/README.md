@@ -17,7 +17,7 @@
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
   - `replication`: `replicas` or `none`, required when a space needs replicated or confirmed reads.
   - `durability`: `none`, or unset.
-  - `server-settings`: the server's `maxmemory-policy`, `appendonly`, `appendfsync`, `min-replicas-to-write` and `min-replicas-max-lag`, as the operator declares them.
+  - `server-settings`: the server's `maxmemory-policy`, `appendonly`, `appendfsync`, `no-appendfsync-on-rewrite`, `min-replicas-to-write` and `min-replicas-max-lag`, as the operator declares them.
 
 ## Invariants
 - Connects to Redis itself, through its client, apart from `outbound`, which carries HTTP alone (`network`: `redis`).
@@ -31,7 +31,7 @@
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable; every boot warns `redis.replication_none` naming the replicated spaces.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
 - Internal module `round` (the confirmation round).
-- Internal module `client` (the client's options; what the URL and environment tell of the connection): boot warns `redis.plaintext` where the URL is in the clear, `redis.client_debug_log` where the client's own log is on. Another floor refuses boot.
+- Internal module `client` (the client's options; what the URL and environment tell of the connection): boot warns `redis.plaintext` where the URL is in the clear. Production refuses `url` while `DEBUG` covers ioredis. Another floor refuses boot.
 - Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - Nothing a connection does ends the process.
@@ -42,7 +42,7 @@
 - With `rediss`, a certificate for the URL's host, trusted by the platform.
 - Redis 7.0 or later, answering as a primary: no cluster, and no proxy splitting keys across nodes (boot runs `batchAcross` over two partitions, and refuses, named, a server that answers it `CROSSSLOT`).
 - `maxmemory-policy noeviction`, where a composed module keeps a space that must not be evicted.
-- `appendonly yes` and `appendfsync always`, where a composed module keeps a durable space, unless `durability` is `none`.
+- `appendonly yes`, `appendfsync always` and `no-appendfsync-on-rewrite no`, where a composed module keeps a durable space, unless `durability` is `none`.
 - With `replication` `replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of 1 or more. With `none`: no replica connected.
 - `CONFIG GET` allowed, or the settings it would read declared in `server-settings`.
 - Allowed: `EVAL`, `PING` (the probe's), the commands the scripts call (`TIME`, `INFO`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`), `SCAN`, `ROLE` and the keys under the prefix; with `replication`, `SET` of `<prefix>:#confirm`, and with `replicas` `WAIT`.

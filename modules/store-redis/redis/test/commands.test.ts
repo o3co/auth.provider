@@ -6,6 +6,7 @@ import {
 	contract,
 	defineModule,
 	kernelConfig,
+	type Module,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces } from "@mod/store";
@@ -26,6 +27,11 @@ const replicated = defineModule({ name: "replicated-owner", replicaSafe: true, t
 	m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
 ]);
 
+/** A space whose writes must survive a crash, so the server's fsyncs are checked. */
+const durable = defineModule({ name: "durable-owner", replicaSafe: true, takes: [] }, (m) => [
+	m.contribute(spaces).by(() => ({ name: "durable", guarantees: ["durable"] })),
+]);
+
 /** A primary that refuses writes without a replica, as `replicas` needs. */
 function primary() {
 	const redis = fakeRedis();
@@ -34,7 +40,12 @@ function primary() {
 	return redis;
 }
 
-async function boot(port: number, replication?: "replicas" | "none", prefix?: string) {
+async function boot(
+	port: number,
+	replication?: "replicas" | "none",
+	prefix?: string,
+	extra: Module[] = [],
+) {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
 	const asker = defineModule({ name: "asker", replicaSafe: false, takes: [] }, (m) => [
@@ -45,7 +56,13 @@ async function boot(port: number, replication?: "replicas" | "none", prefix?: st
 	]);
 	const url = `redis://:s3cret@127.0.0.1:${port}`;
 	app = await assemble({
-		modules: [redisModule, tlsOptionsForTests, asker, ...(replication ? [replicated] : [])],
+		modules: [
+			redisModule,
+			tlsOptionsForTests,
+			asker,
+			...(replication ? [replicated] : []),
+			...extra,
+		],
 		config: {
 			...kernelConfig(),
 			redis: { url, ...(replication ? { replication } : {}), ...(prefix ? { prefix } : {}) },
@@ -131,6 +148,22 @@ describe("the commands the store needs", () => {
 		expect(reasons).toContain("the confirmation key (<redis.prefix>:#confirm)");
 		expect(reasons).toContain("the store's keys (<redis.prefix>:{…})");
 		expect(reasons).not.toContain("private-tenant");
+		redis.down();
+	});
+
+	it("refuse boot for a durable space where the server skips its fsyncs while it rewrites, and boot where it does not", async () => {
+		const redis = primary();
+		Object.assign(redis.settings, { appendonly: "yes", appendfsync: "always" });
+		redis.settings["no-appendfsync-on-rewrite"] = "yes";
+		const port = await redis.listen();
+		const error = await boot(port, undefined, undefined, [durable]).catch((e) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect(String((error as BootRefused).refusals.map((r) => r.reason))).toContain(
+			"no-appendfsync-on-rewrite no",
+		);
+		await app?.stop(1000);
+		redis.settings["no-appendfsync-on-rewrite"] = "no";
+		await boot(port, undefined, undefined, [durable]);
 		redis.down();
 	});
 
