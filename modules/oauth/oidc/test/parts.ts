@@ -1,4 +1,8 @@
-import { type IdTokenMaker, idTokens } from "@mod/code-grant";
+import { type HintReader, hintReaders } from "@mod/authorize";
+import { selectionConsents } from "@mod/claims-selection";
+import claimsSelection from "@mod/claims-selection/module";
+import { claimsSelectionInMemory } from "@mod/claims-selection/testing";
+import { type IdTokenMaker, idTokens, type RedemptionHook, redemptionHooks } from "@mod/code-grant";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
@@ -25,7 +29,7 @@ import oidc from "../src/module.ts";
 
 /** Sessions known by handle, entered as given. */
 export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
-	defineModule({ name: "sessions" }, (m) => [
+	defineModule({ name: "sessions", replicaSafe: false, takes: [] }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
 				entryOf: async (handle) => {
@@ -39,7 +43,7 @@ export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
 	]);
 
 /** A ledger that cannot look users up by subject. */
-export const unanswering = defineModule({ name: "ledger" }, (m) => [
+export const unanswering = defineModule({ name: "ledger", replicaSafe: false, takes: [] }, (m) => [
 	m.contribute(ledgers).by(() => ({
 		verify: async () => ({ kind: "none" }),
 		bySubject: async () => ({ kind: "unanswerable" }),
@@ -58,41 +62,71 @@ export const loginOf = (subject: string, source: string): AuthContext => ({
 });
 
 export const makers = contract<readonly IdTokenMaker[]>("makers");
+export const hooks = contract<readonly RedemptionHook[]>("hooks");
+export const readers = contract<readonly HintReader[]>("readers");
+/** A judge of consent that agrees to every scope, so a test selects by the client's allowance alone. */
+const agreeing = defineModule({ name: "agreeing", replicaSafe: true, takes: [] }, (m) => [
+	m.contribute(selectionConsents).by(() => ({ consented: async () => true })),
+]);
 export const published = contract<readonly MetadataItem[]>("published");
 
 /**
  * oidc with its dependencies. `config` is written over the defaults section by section;
- * `usersAs` stands in for users' modules, `sessionsAs` for the sessions subject-attributes reads.
+ * `usersAs` stands in for users' modules, `sessionsAs` for the sessions subject-attributes reads;
+ * `more` are composed beside them.
  */
-export const booted = (p: {
+export const composed = (p: {
 	readonly runtime: Runtime;
 	readonly config?: Record<string, unknown>;
 	readonly usersAs?: readonly Module[];
 	readonly sessionsAs?: Module;
-}) =>
-	assemble({
-		modules: [
-			http,
-			keysModule,
-			issuerModule,
-			memoryUsersStores().module,
-			...(p.usersAs ?? [usersModule]),
-			secretHashModule,
-			p.sessionsAs ?? sessionsOf(),
-			subjectAttributes,
-			oidc,
-			defineModule({ name: "reader" }, (m) => [
+	readonly more?: readonly Module[];
+}) => ({
+	modules: [
+		...(p.more ?? []),
+		http,
+		keysModule,
+		issuerModule,
+		memoryUsersStores().module,
+		...(p.usersAs ?? [usersModule]),
+		secretHashModule,
+		p.sessionsAs ?? sessionsOf(),
+		subjectAttributes,
+		claimsSelection,
+		claimsSelectionInMemory().module,
+		agreeing,
+		oidc,
+		defineModule(
+			{
+				name: "reader",
+				replicaSafe: true,
+				takes: [idTokens, metadata, redemptionHooks, hintReaders],
+			},
+			(m) => [
 				m.provide(makers).by((c) => c.collect(idTokens)),
+				m.provide(hooks).by((c) => c.collect(redemptionHooks)),
+				m.provide(readers).by((c) => c.collect(hintReaders)),
 				m.provide(published).by((c) => c.collect(metadata)),
-			]),
-		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...keysConfig(),
-			...issuerConfig({ url: "https://as.example" }),
-			...usersConfig([]),
-			...p.config,
-		},
-		runtime: p.runtime,
-	});
+			],
+		),
+	],
+	config: {
+		...kernelConfig(),
+		...httpConfig(),
+		...keysConfig(),
+		...issuerConfig({ url: "https://as.example" }),
+		...usersConfig([]),
+		...p.config,
+	},
+	runtime: p.runtime,
+});
+
+/**
+ * The composition of `composed`, assembled, with the tests' default redemption (`r-test`) pinned, as
+ * code-grant pins each redemption before an ID token is made for it.
+ */
+export async function booted(p: Parameters<typeof composed>[0]) {
+	const app = await assemble(composed(p));
+	for (const hook of app.get(hooks)) await hook.pin("r-test");
+	return app;
+}

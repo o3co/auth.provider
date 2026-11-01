@@ -9,6 +9,10 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/authorize": "workspace:*",
+		"@mod/claims-selection": "workspace:*",
+		"@mod/client-documents": "workspace:*",
+		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
