@@ -1,12 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patterns } from "@mod/create-app";
-import { buildBundles } from "./build.ts";
-import { readBundles } from "./contract.ts";
+import { buildBundles } from "../build.ts";
+import { readBundles } from "../contract.ts";
+import { outsideScene } from "../outside-scene/contract.ts";
+import { packedOf, packRelease, zodOf } from "../release/contract.ts";
+import { releaseOf } from "../workspace.ts";
+import { sweptRun } from "./containers/container.ts";
+import { packBuilt, tarballsToCheck } from "./given/given.ts";
+import { helperScene } from "./helpers/helpers.ts";
 import { dockerMissing, images, overridesFile } from "./image.ts";
-import { releaseOf } from "./workspace.ts";
 
 /**
  * Checks the release as an operator meets it: every bundle packed, an app of each pattern made by
@@ -21,7 +27,7 @@ const say = (text: string) => process.stdout.write(`${text}\n`);
 const problems: string[] = [];
 
 // No boot is skipped: without Docker the release is not checked as it is deployed.
-const missing = dockerMissing();
+const missing = await dockerMissing();
 if (missing) {
 	console.error(
 		`release:check boots each app in its image, and Docker is not reachable: ${missing}`,
@@ -29,32 +35,30 @@ if (missing) {
 	process.exit(1);
 }
 
-const { problems: unbuilt } = buildBundles({
-	bundles: readBundles(root),
-	release: releaseOf(root) ?? { version: workspace.version },
-	out,
-	licenseFile: join(root, "LICENSE"),
-});
-if (unbuilt.length > 0) {
-	for (const problem of unbuilt) console.error(problem);
+const scratch = mkdtempSync(join(tmpdir(), "release-check-"));
+// The tarballs named, as the release publishes them; else built and packed as the release packs them, the index sealed in between.
+const packed = tarballsToCheck(
+	process.argv[2],
+	packBuilt(
+		() =>
+			buildBundles({
+				bundles: readBundles(root),
+				release: releaseOf(root) ?? { version: workspace.version },
+				out,
+				licenseFile: join(root, "LICENSE"),
+			}),
+		(into) => packRelease(root, into),
+	),
+	scratch,
+);
+if ("problems" in packed) {
+	for (const problem of packed.problems) console.error(problem);
 	process.exit(1);
 }
-
-const scratch = mkdtempSync(join(tmpdir(), "release-check-"));
-const tarballs = join(scratch, "tarballs");
-mkdirSync(tarballs);
+const tarballs = packed.dir;
 const overrides: Record<string, string> = {};
-for (const dir of readdirSync(out)) {
-	const { name } = JSON.parse(readFileSync(join(out, dir, "package.json"), "utf8"));
-	const packed = execFileSync("pnpm", ["pack", "--pack-destination", tarballs], {
-		cwd: join(out, dir),
-		encoding: "utf8",
-	})
-		.trim()
-		.split("\n")
-		.findLast((line) => line.endsWith(".tgz"));
-	if (!packed) throw new Error(`${name}: pnpm pack named no tarball`);
-	const tarball = packed.startsWith("/") ? packed : join(tarballs, packed);
+for (const tarball of packed.tarballs) {
+	const { name } = packedOf(tarball);
 	// npm and pnpm alike ship what the tarball holds: the license must be in it.
 	const held = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" }).split("\n");
 	if (!held.includes("package/LICENSE")) problems.push(`${name}: its tarball holds no LICENSE`);
@@ -130,7 +134,9 @@ throw new Error("booted with no configuration");
 	say("by hand: failed");
 }
 
-const run = images(`release-check-${process.pid}`, { dir: tarballs, byName: overrides }, scratch);
+// Each launch its own: no name, nor label, of an earlier check's is ever this one's.
+const runName = `release-check-${randomUUID()}`;
+const run = images(runName, { dir: tarballs, byName: overrides }, scratch);
 
 const tsc = join(root, "node_modules", ".bin", "tsc");
 for (const name of patterns().map((pattern) => pattern.name)) {
@@ -165,7 +171,20 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 			],
 			{ cwd: app, stdio: "pipe" },
 		);
-		say(`${name}: ${await run.booted(app, run.build(app, name))}`);
+		const image = await run.build(app, name);
+		const tools = await run.carriedBy(image);
+		if (tools.length > 0)
+			problems.push(`${name}: its image holds a package manager: ${tools.join(", ")}`);
+		say(`${name}: ${await run.booted(app, image)}`);
+		// The resolver's helpers as a deployment constrains them, on one pattern's image.
+		if (name === "simple-web") {
+			try {
+				say(`helpers: ${await helperScene(run, app, image)}`);
+			} catch (error) {
+				problems.push(`helpers: ${error instanceof Error ? error.message : String(error)}`);
+				say("helpers: failed");
+			}
+		}
 	} catch (error) {
 		const told = error as { stdout?: Buffer; stderr?: Buffer; message: string };
 		problems.push(`${name}: ${told.stdout ?? ""}${told.stderr ?? ""}${told.message}`);
@@ -173,7 +192,23 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 	}
 }
 
-run.remove();
+// The cleanup the check stands by: every container of this run, one whose making showed late too.
+try {
+	await sweptRun(runName);
+} catch (error) {
+	problems.push(`containers: ${error instanceof Error ? error.message : String(error)}`);
+}
+await run.remove();
+
+const zod = zodOf(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"));
+try {
+	if (typeof zod === "string") throw new Error(zod);
+	const scene = { tarballs, scratch, version: packedOf(overrides[entrance] as string).version };
+	say(`outside: ${await outsideScene({ ...scene, zod: zod.version, pattern: "simple-web" })}`);
+} catch (error) {
+	problems.push(`outside: ${error instanceof Error ? error.message : String(error)}`);
+	say("outside: failed");
+}
 
 for (const problem of problems) console.error(problem);
 say(problems.length === 0 ? `release: ok (${scratch})` : `release: ${problems.length}`);
