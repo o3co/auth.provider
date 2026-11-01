@@ -15,18 +15,11 @@ function text(line: LogLine): string {
 	return `${JSON.stringify(object)}\n`;
 }
 
-/** The streams this sink has listened to, so however many compositions start, each gets one listener. */
-const heard = new WeakSet<NodeJS.WritableStream>();
-
 export default defineModule({ name: "log-stdout", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(logSinks).by((c) => {
 		const out = process.stdout;
-		// Once its reader has gone, a write fails and the stream emits 'error', which unheard would end
-		// the process. Heard, the line is dropped, and every later write fails as quietly.
-		if (!heard.has(out)) {
-			heard.add(out);
-			out.on("error", () => {});
-		}
+		// Once its reader has gone, a write fails and the stream's 'error' is heard by kernel: the line is
+		// dropped, and every later write fails as quietly.
 		// A sink's hook runs after every other module's: the lines they logged as they stopped are out.
 		c.onStop((signal) => drained(out, signal));
 		return {
