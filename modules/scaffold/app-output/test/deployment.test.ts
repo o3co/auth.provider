@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -7,7 +8,7 @@ import { fakePackages } from "./fake.ts";
 
 const readme = {
 	template: "pattern-readme.md",
-	fill: { name: "simple-web", use: "A test.", card: "", chosen: "", receivers: "", deployment: "" },
+	fill: { name: "simple-web", use: "A test.", card: "" },
 };
 
 const read = (target: string, path: string) => readFile(join(target, path), "utf8");
@@ -44,8 +45,8 @@ it("writes the deployment of the modules from the packages given", async () => {
 	expect(manifest.scripts).toEqual({ start: "node --env-file-if-exists=.env src/main.ts" });
 	const main = await read(target, "src/main.ts");
 	expect(main).toContain('from "@o3co/x-kernel"');
-	// It names, once as it boots, the variables 0.17 read that its configuration never reads.
-	expect(main).toContain("unreadLegacyVariables");
+	// It checks, as it boots, the variables 0.17 read that its configuration never reads.
+	expect(main).toContain("legacyVariablesCheck");
 	expect(main).toContain("warn config-files: ");
 	expect(main).toContain('import m0 from "@o3co/x-http/module";');
 	expect(main).toContain('import m1 from "@o3co/x-clients/module";');
@@ -71,6 +72,33 @@ it("writes the deployment of the modules from the packages given", async () => {
 	expect(guide).not.toContain("A first login");
 });
 
+it("writes a composed type's entry sample in the local layer's example alone, never in the configuration file or the env example", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	const sample = {
+		from: "@c/type/entry.example",
+		text: 'type = "t"\nurl = "https://t.example.invalid"\n',
+	};
+	await writeDeployment(
+		target,
+		["@mod/http", "@c/owner", "@c/type"],
+		{
+			...fakePackages(),
+			samples: (names) =>
+				[
+					{ name: "@c/owner", takes: [{ map: "owner.entries", of: "@c/contract" }] },
+					{ name: "@c/type", sampleOf: "@c/contract", sample },
+				].filter((s) => names.includes(s.name)),
+		},
+		readme,
+	);
+	expect(await read(target, "config/local.conf.example")).toContain(
+		'# owner.entries.t {\n# \ttype = "t"\n# \turl = "https://t.example.invalid"\n# }',
+	);
+	for (const file of ["config/application.conf", ".env.example"]) {
+		expect(await read(target, file)).not.toMatch(/owner|t\.example\.invalid|OWNER_/);
+	}
+});
+
 it("points at the release's documents and the cards that ask of the deployment", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	const release = { version: "1.2.3", repository: "https://example.invalid/auth" };
@@ -84,6 +112,17 @@ it("points at the release's documents and the cards that ask of the deployment",
 	expect(guide).toContain("https://example.invalid/auth/blob/v1.2.3/docs/recipe-first-login.md");
 });
 
+it("checks 0.17's variables in every entry through config-files' check alone, choosing nothing itself", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/seal", "@mod/mfa-witnessing"], fakePackages(), readme);
+	for (const entry of ["src/main.ts", "src/reseal.ts", "src/witness-backfill.ts"]) {
+		const source = await read(target, entry);
+		expect(source, entry).toContain("await legacyVariablesCheck(source)");
+		expect(source, entry).not.toContain("unreadLegacyVariables");
+		expect(source, entry).not.toContain("APP_LEGACY_VARIABLES");
+	}
+});
+
 it("tells a refused boot in its entries by the kernel's mark, never by its class", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeDeployment(target, ["@mod/seal", "@mod/mfa-witnessing"], fakePackages(), readme);
@@ -92,6 +131,107 @@ it("tells a refused boot in its entries by the kernel's mark, never by its class
 		expect(source, entry).toContain("BootRefused.is(error)");
 		expect(source, entry).not.toContain("instanceof");
 	}
+});
+
+/** Each key application.conf reads from the environment, by its path, and the variable it reads. */
+function readByConf(conf: string): Record<string, string> {
+	const path: string[] = [];
+	const read: Record<string, string> = {};
+	for (const line of conf.split("\n").map((l) => l.trim())) {
+		const opened = /^(\S+) \{$/.exec(line);
+		if (opened?.[1]) path.push(opened[1]);
+		else if (line === "}") path.pop();
+		const set = /^(\S+) = \$\{\?([A-Z0-9_]+)\}$/.exec(line);
+		if (set?.[1] && set[2]) read[[...path, set[1]].join(".")] = set[2];
+	}
+	return read;
+}
+
+it("writes in each entry where its keys are written: the very keys and variables application.conf reads, a value of several lines in the local layer", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http", "@mod/keys", "@mod/seal"], fakePackages(), readme);
+	const conf = readByConf(await read(target, "config/application.conf"));
+	expect(conf["keys.signing.private-key"]).toBe("KEYS_SIGNING_PRIVATE_KEY");
+	for (const entry of ["src/main.ts", "src/reseal.ts"]) {
+		const source = await read(target, entry);
+		const table = /const keysRead: [^=]+= (\{.*\});/.exec(source)?.[1] ?? "{}";
+		const several = /const severalLines: [^=]+= (\[.*\]);/.exec(source)?.[1] ?? "[]";
+		// Both ways: no key the configuration reads is missing, and none it does not read is named.
+		expect(JSON.parse(table), entry).toEqual(conf);
+		expect(JSON.parse(several), entry).toEqual(["keys.signing.private-key"]);
+		// Names alone: no placeholder or value.
+		expect(source, entry).not.toContain("REPLACE");
+	}
+});
+
+it("adds to a refusal of a key it reads where to write it, and to none of a section or a key it does not read", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http", "@mod/keys"], fakePackages(), readme);
+	// Stand-ins for what the entry imports: a kernel refusing as told, and config-files reading nothing.
+	const fake = async (name: string, index: string) => {
+		const dir = join(target, "node_modules", name);
+		await mkdir(dir, { recursive: true });
+		const exports = { ".": "./index.js", "./module": "./index.js" };
+		await writeFile(join(dir, "package.json"), JSON.stringify({ name, type: "module", exports }));
+		await writeFile(join(dir, "index.js"), index);
+	};
+	await fake(
+		"@o3co/x-kernel",
+		`const mark = Symbol.for("test.refused");
+export class BootRefused extends Error {
+	constructor(refusals) { super("refused"); this.refusals = refusals; this[mark] = true; }
+	static is(error) { return Boolean(error?.[mark]); }
+}
+export const assemble = async () => { throw new BootRefused(JSON.parse(process.env.REFUSALS)); };
+export default {};`,
+	);
+	await fake(
+		"@o3co/x-config-files",
+		"export const loadConfig = async () => ({});\nexport const legacyVariablesCheck = async () => undefined;\nexport default {};",
+	);
+	for (const name of ["@o3co/x-http", "@o3co/x-keys"]) await fake(name, "export default {};");
+	const refusals = [
+		{ where: "http.port", reason: "required, and not set" },
+		{ where: "keys.signing.private-key", reason: "not readable as a key" },
+		{ where: "keys", reason: "a section refused whole" },
+		{ where: "http.unknown", reason: "unrecognized key" },
+	];
+	const run = spawnSync(process.execPath, ["src/main.ts"], {
+		cwd: target,
+		env: { ...process.env, REFUSALS: JSON.stringify(refusals) },
+		encoding: "utf8",
+	});
+	expect([run.status, run.stderr]).toEqual([
+		78,
+		[
+			"refused http.port: required, and not set (HTTP_PORT in .env, or http.port in config/local.conf)",
+			"refused keys.signing.private-key: not readable as a key (keys.signing.private-key in config/local.conf)",
+			"refused keys: a section refused whole",
+			"refused http.unknown: unrecognized key",
+			"",
+		].join("\n"),
+	]);
+});
+
+it("tells in each guide how to make a random secret, what tokens.revocation = unsupported does, and that a value of several lines is never in .env", async () => {
+	for (const template of ["pattern-readme.md", "full-readme.md", "listed-readme.md"]) {
+		const target = await mkdtemp(join(tmpdir(), "app-output-"));
+		await writeDeployment(target, ["@mod/http", "@mod/keys"], fakePackages(), {
+			...readme,
+			template,
+		});
+		const guide = await read(target, "README.md");
+		expect(guide, template).toContain("with `openssl rand -base64 32`");
+		expect(guide, template).toContain(
+			"| `keys.signing.private-key` | `KEYS_SIGNING_PRIVATE_KEY` (process environment only, never .env) |",
+		);
+	}
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http", "@mod/tokens"], fakePackages(), readme);
+	// Which modules refuse `unsupported` is theirs to say at boot; the line is tokens' own.
+	expect(await read(target, "README.md")).toContain(
+		"With `unsupported`, a composed module that needs access tokens revocable refuses boot and says why.",
+	);
 });
 
 it("adds the reseal entry when seal is composed", async () => {
@@ -112,7 +252,37 @@ it("adds the witness-backfill entry when mfa-witnessing is composed", async () =
 		"node --env-file-if-exists=.env src/witness-backfill.ts",
 	);
 	expect(manifest.scripts.reseal).toBeUndefined();
-	expect(await read(target, "src/witness-backfill.ts")).toContain('from "@o3co/x-mfa-witnessing"');
+	expect(await read(target, "src/witness-backfill.ts")).toContain(
+		'import("@o3co/x-mfa-witnessing")',
+	);
+});
+
+it("adds the passkey-backfill entry when passkey-witnessing is composed, settling through passkeyBackfill", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/passkey-witnessing"], fakePackages(), readme);
+
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts["passkey-backfill"]).toBe(
+		"node --env-file-if-exists=.env src/passkey-backfill.ts",
+	);
+	expect(manifest.scripts["witness-backfill"]).toBeUndefined();
+	const entry = await read(target, "src/passkey-backfill.ts");
+	expect(entry).toContain("{ passkeyBackfill }");
+	expect(entry).toContain('import("@o3co/x-passkey-witnessing")');
+	expect(entry).toContain('["marked", "held", "none", "pending", "inconsistent"]');
+});
+
+it("adds the unclaimed-factors entry where mfa-reset is composed, asking resetCandidates", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/mfa-reset"], fakePackages(), readme);
+
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts["unclaimed-factors"]).toBe(
+		"node --env-file-if-exists=.env src/unclaimed-factors.ts",
+	);
+	const entry = await read(target, "src/unclaimed-factors.ts");
+	expect(entry).toContain("{ resetCandidates }");
+	expect(entry).toContain('import("@o3co/x-mfa-reset")');
 });
 
 it("refuses a target that holds anything, and writes nothing", async () => {
@@ -124,27 +294,23 @@ it("refuses a target that holds anything, and writes nothing", async () => {
 	expect(await readdir(target)).toEqual(["kept"]);
 });
 
-it("fills a listed app's guide with the modules listed and the caller's lines", async () => {
+it("fills a listed app's guide with the modules listed, and kernel's decided line though it is not listed", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/http"], fakePackages(), {
-		template: "listed-readme.md",
-		fill: {
-			listed: "`@mod/http`",
-			chosen: "",
-			decided: "- `kernel.deployment`: `single` for one instance, `multi` for several.",
-		},
-	});
+	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
 
 	const guide = await read(target, "README.md");
 	expect(guide).toContain("from the modules listed: `@mod/http`.");
-	expect(guide).toContain("- `kernel.deployment`: `single` for one instance, `multi` for several.");
+	// kernel is in every app: its own declaration gives the line.
+	expect(guide).toContain(
+		"## Values the operator decides\n\n- `kernel.deployment`: `single` for one instance, `multi` for several.\n",
+	);
 	expect(guide).toContain("| `http.port` | `HTTP_PORT` | `8080` |");
 	expect(guide).not.toContain("{{");
 });
 
 const listedReadme = (listed: string) => ({
 	template: "listed-readme.md",
-	fill: { listed, chosen: "", decided: "" },
+	fill: { listed },
 });
 
 it("promises no http, port or health check to an app that composes no http", async () => {
@@ -160,6 +326,9 @@ it("promises no http, port or health check to an app that composes no http", asy
 		expect(guide).not.toContain(http);
 	}
 	expect(guide).toContain("docker run --env-file .env -e APP_CONFIG=");
+	expect(guide).toContain(
+		"set `APP_LEGACY_VARIABLES=refuse` to refuse boot on one instead, or `ignore`",
+	);
 	expect(guide).not.toContain("{{");
 });
 
@@ -186,10 +355,71 @@ it("listens and exposes the port where http is composed, and checks liveness whe
 	expect(await read(live, "README.md")).toContain("Its health check asks `/_healthcheck`");
 });
 
-it("builds on Node 24's latest, so a build takes its security fixes", async () => {
+it("installs the dependencies in a stage of their own, with pnpm through a pinned corepack the image the app runs in leaves behind", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
 	const docker = await read(target, "Dockerfile");
-	expect(docker).toMatch(/^FROM node:24-alpine AS base$/m);
+	const image = docker.match(/^FROM (\S+) AS base$/m)?.[1];
+	// The image the app runs in starts from Node's own, not from the stage holding the tools that install.
+	expect(docker.match(/^FROM .*$/gm)).toEqual([
+		`FROM ${image} AS base`,
+		"FROM base AS deps",
+		`FROM ${image} AS runtime`,
+	]);
+	expect(docker).toMatch(/^RUN npm install --global corepack@\d+\.\d+\.\d+ && corepack enable$/m);
+	const runtime = docker.slice(docker.indexOf(`FROM ${image} AS runtime`));
+	// An init as process 1 passes signals on and reaps what node leaves behind; the corepack and the
+	// yarn Node's image bundles are taken out, and none put in, nor pnpm.
+	expect(runtime).toMatch(
+		/^RUN apk add --no-cache tini && npm uninstall --global corepack && rm -rf \/opt\/yarn-v\* \/usr\/local\/bin\/yarn \/usr\/local\/bin\/yarnpkg$/m,
+	);
+	expect(runtime).not.toMatch(/corepack@|corepack enable|pnpm/);
+	expect(runtime).toMatch(/^COPY --from=deps \/app\/node_modules \.\/node_modules$/m);
+	expect(runtime).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
+});
+
+it("builds on one minor of Node 24, so a build takes its patches and never a new minor", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
+	const docker = await read(target, "Dockerfile");
+	expect(docker).toMatch(/^FROM node:24\.22-alpine AS base$/m);
 	expect(docker).not.toContain("@sha256:");
+});
+
+it("records the packages outside the release and checks the lockfile against them, where the app composes one", async () => {
+	const grant = {
+		name: "@x/grant",
+		version: "1.2.0",
+		integrity: "sha512-AAAA",
+		dependencies: {},
+		optionalDependencies: {},
+		peerDependencies: { zod: "^4.6.0" },
+		peerDependenciesMeta: {},
+	};
+	const outside = { modules: [grant], registries: { default: "https://registry.npmjs.org" } };
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	const release = { version: "1.2.3", integrity: { zod: "sha512-ZOD" } };
+	await writeDeployment(target, ["@mod/http"], fakePackages(release, [], outside), readme);
+	const files = await readdir(target, { recursive: true });
+	expect(files).toEqual(
+		expect.arrayContaining([
+			"outside-modules.json",
+			"pnpm-workspace.yaml",
+			"scripts/check-outside.mjs",
+		]),
+	);
+	// What the release recorded of the packages held to one copy reaches the record.
+	expect(JSON.parse(await read(target, "outside-modules.json")).held).toEqual({
+		zod: "sha512-ZOD",
+	});
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts["check:outside"]).toBe("node scripts/check-outside.mjs");
+	// The check holds what it uses: the app depends on nothing for it.
+	expect(manifest.dependencies).not.toHaveProperty("semver");
+	expect(manifest.dependencies).not.toHaveProperty("yaml");
+	const docker = await read(target, "Dockerfile");
+	expect(docker).toContain("COPY outside-modules.json ./outside-modules.json");
+	expect(docker).toContain("RUN pnpm install --frozen-lockfile --prod && pnpm check:outside");
+	expect(await read(target, "README.md")).toContain("## Packages outside this release");
+	expect(await read(target, "AGENTS.md")).toContain("`outside-modules.json`");
 });

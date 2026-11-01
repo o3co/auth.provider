@@ -1,24 +1,21 @@
 /** A deployment's project from a list of modules: configuration from their fragments, the image and a guide. */
+
+import { entriesOf, mainSource } from "@mod/app-entries";
+import { askedOf } from "./asked/asked.ts";
 import {
 	applicationConf,
 	envExample,
 	envName,
 	localConfExample,
 	type Setting,
+	sampleLines,
 	settingsOf,
 	type Written,
 	writtenOf,
-} from "./fragments.ts";
+} from "./fragments/contract.ts";
+import { type Beside, besideRelease } from "./outside/contract.ts";
 import type { Card, Packages, Release } from "./packages.ts";
-import {
-	entriesOf,
-	filled,
-	mainSource,
-	manifestOf,
-	vacant,
-	withKernel,
-	writeProject,
-} from "./project.ts";
+import { filled, manifestOf, vacant, withKernel, writeProject, zod } from "./project.ts";
 
 /** The files the generated project names in its guide, each written where the guide says. */
 const paths = {
@@ -29,10 +26,10 @@ const paths = {
 };
 
 /**
- * Node 24's latest, neither patch nor digest pinned: each build takes Node's security fixes, at the
- * cost of a build that may differ from the last.
+ * One minor of Node 24: each build takes its patches and never a new minor. A minor gets no fixes once a
+ * newer one is out, so the operator moves to the latest 24.x minor at each Node security release.
  */
-const nodeImage = "node:24-alpine";
+const nodeImage = "node:24.22-alpine";
 /** The corepack that gives the image the manifest's pnpm; pinned, so a build never takes the latest. */
 const corepack = "0.36.0";
 /** http's default port: the image changes only the interface it listens on. */
@@ -81,38 +78,75 @@ export async function writeDeployment(
 	const names = withKernel(modules);
 	const fragments = await packages.fragments(names);
 	const settings = settingsOf(fragments);
+	// From what writes application.conf, so the refusals name only the variables it reads.
+	const keys = {
+		read: Object.fromEntries(settings.map((s) => [s.key, s.env])),
+		severalLines: writtenOf(fragments)
+			.filter((w) => w.severalLines)
+			.map((w) => w.key),
+		local: paths.local,
+	};
 	const http = { serves: names.includes(httpPackage), live: names.includes(opsPackage) };
 	const run = (file: string) => `node --env-file-if-exists=.env ${file}`;
-	const entries = await entriesOf(modules, packages.importOf, run);
+	const entries = await entriesOf(modules, packages.importOf, run, keys);
+	const dependencies = packages.dependencies(names);
+	// The one place a caller without packages outside the release is read as having none.
+	const release = packages.release();
+	const beside = besideRelease(packages.outside?.(names), {
+		dependencies,
+		version: release.version,
+		zod,
+		...(release.integrity ? { integrity: release.integrity } : {}),
+	});
 	await writeProject(target, {
-		"package.json": manifestOf(
-			"node --env-file-if-exists=.env src/main.ts",
-			packages.dependencies(names),
-			entries.scripts,
-		),
-		[paths.main]: await mainSource(modules, packages.importOf),
+		"package.json": manifestOf("node --env-file-if-exists=.env src/main.ts", dependencies, {
+			...entries.scripts,
+			...beside.scripts,
+		}),
+		...beside.files,
+		[paths.main]: await mainSource(modules, packages.importOf, keys),
 		...entries.files,
 		[paths.application]: applicationConf(fragments),
-		[paths.localExample]: localConfExample(fragments),
+		[paths.localExample]: localConfExample(fragments, sampleLines(packages.samples?.(names) ?? [])),
 		".env.example": envExample(settings),
-		"AGENTS.md": agentsIndex(packages.cards(names), packages.release()),
-		Dockerfile: dockerfile(http),
+		"AGENTS.md": agentsIndex(packages.cards(names), packages.release()) + beside.index,
+		Dockerfile: dockerfile(http, beside.image),
 		".dockerignore": lines(dockerIgnored),
 		".gitignore": lines(gitIgnored),
-		"README.md": await filled(readme.template, {
-			...paths,
-			...guideLists(settings, writtenOf(fragments)),
-			cards: cardLines(packages.cards(names)),
-			askedOfDeployment: deploymentLines(packages.cards(names)),
-			firstLogin: http.serves ? firstLoginLine(packages.release()) : "",
-			port: String(httpPort),
-			hostEnv: envName("http.host"),
-			portEnv: envName("http.port"),
-			...httpLines(http),
-			...readme.fill,
-		}),
+		"README.md":
+			(await filled(readme.template, {
+				...paths,
+				...guideLists(settings, writtenOf(fragments)),
+				cards: cardLines(packages.cards(names)),
+				askedOfDeployment: deploymentLines(packages.cards(names)),
+				...guideAsked(askedOf(names, packages.asks?.(names) ?? [])),
+				firstLogin: http.serves ? firstLoginLine(packages.release()) : "",
+				port: String(httpPort),
+				hostEnv: envName("http.host"),
+				portEnv: envName("http.port"),
+				...httpLines(http),
+				...readme.fill,
+			})) + beside.guide,
 	});
 }
+
+/** The guide's marks for what the modules ask: the lines, the lines under their heading, and the values decided. */
+const guideAsked = ({ chosen, decides }: { chosen: string[]; decides: string[] }) => ({
+	asked: chosen.join("\n"),
+	askedSection:
+		chosen.length === 0
+			? ""
+			: ["## Settings the composed modules ask for", "", ...chosen, "", ""].join("\n"),
+	decides: decides.join("\n"),
+});
+
+/** The install stage's install: with packages outside the release, what it checks against copied, and checked after. */
+const installed = (beside: Beside["image"]) =>
+	beside === undefined
+		? "RUN pnpm install --frozen-lockfile --prod"
+		: `# The lockfile is held to what was recorded of the packages outside the release.
+${beside.copy.map((file) => `COPY ${file} ./${file}`).join("\n")}
+RUN pnpm install --frozen-lockfile --prod && ${beside.after}`;
 
 /** Each composed module's card, where the app installs it. */
 const cardLines = (cards: readonly Card[]) =>
@@ -181,8 +215,11 @@ const guideLists = (settings: readonly Setting[], written: readonly Written[]) =
 	settings: settings
 		.map((s) => {
 			// On one line of its table: a placeholder of several lines as JSON writes it.
-			const shown = s.placeholder.includes("\n") ? JSON.stringify(s.placeholder) : s.placeholder;
-			return `| \`${s.key}\` | \`${s.env}\` | \`${shown}\` |`;
+			const several = s.placeholder.includes("\n");
+			const shown = several ? JSON.stringify(s.placeholder) : s.placeholder;
+			// Docker reads one line per variable from an env file, so a value of several lines is never in .env.
+			const env = several ? `\`${s.env}\` (process environment only, never .env)` : `\`${s.env}\``;
+			return `| \`${s.key}\` | ${env} | \`${shown}\` |`;
 		})
 		.join("\n"),
 	written: written
@@ -200,7 +237,7 @@ function httpLines(http: { readonly serves: boolean; readonly live: boolean }) {
 	const port = envName("http.port");
 	return {
 		tryHttp: http.serves
-			? `To try it on this machine over plain http, set \`http.public-origin\` to \`http://localhost:${httpPort}\` and \`http.insecure-origin\` to \`true\`: an http public origin boots only with it, and its cookies cannot be made secure. A deployment keeps an https origin and leaves it \`false\`.\n`
+			? `To try it on this machine over plain http, set \`http.public-origin\` and \`issuer.url\` to \`http://localhost:${httpPort}\`, \`http.insecure-origin\` to \`true\`, and \`kernel.environment\` to \`development\`: an http public origin boots only with both, and its cookies cannot be made secure. A deployment keeps an https origin, leaves \`http.insecure-origin\` \`false\` and \`kernel.environment\` \`production\`.\n`
 			: "",
 		dockerRun: http.serves
 			? `docker run --env-file .env -e ${host}=0.0.0.0 -e ${port}=${httpPort} ${config} -p ${httpPort}:${httpPort} auth-provider`
@@ -214,7 +251,10 @@ function httpLines(http: { readonly serves: boolean; readonly live: boolean }) {
 	};
 }
 
-function dockerfile(http: { readonly serves: boolean; readonly live: boolean }): string {
+function dockerfile(
+	http: { readonly serves: boolean; readonly live: boolean },
+	beside: Beside["image"],
+): string {
 	const port = envName("http.port");
 	const listening = http.serves
 		? `# Listens on every interface inside the container; the port is http's, which the health check follows.
@@ -229,17 +269,21 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["nod
 `
 		: "";
 	return `# syntax=docker/dockerfile:1
-# Node 24's latest, so a build takes its security fixes; corepack pinned; pnpm is the manifest's packageManager.
+# One Node 24 minor, which gets no fixes once a newer one is out: at each Node security release, move both FROM lines to the latest 24.x minor. corepack pinned; pnpm is the manifest's packageManager.
 FROM ${nodeImage} AS base
-# An init as process 1 passes signals on and reaps what node leaves behind.
-RUN apk add --no-cache tini && npm install --global corepack@${corepack} && corepack enable
+RUN npm install --global corepack@${corepack} && corepack enable
 WORKDIR /app
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yam[l] ./
-RUN pnpm install --frozen-lockfile --prod
+${installed(beside)}
 
-FROM base AS runtime
+# The image the app runs in starts from Node's own: the tools that install stay in the stages before.
+FROM ${nodeImage} AS runtime
+# An init as process 1 passes signals on and reaps what node leaves behind; the corepack and the yarn
+# Node's image bundles go, as the app runs neither.
+RUN apk add --no-cache tini && npm uninstall --global corepack && rm -rf /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
+WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./

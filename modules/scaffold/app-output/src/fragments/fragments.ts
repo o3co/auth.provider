@@ -2,12 +2,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "@o3co/ts.hocon";
-import { missingAs } from "./project.ts";
 
 /** The file beside a package's manifest that holds its section's example. */
 export const fragmentFile = "config.example";
 
-type Tree = { readonly [key: string]: unknown };
+export type Tree = { readonly [key: string]: unknown };
 
 /** One section's example, as its owner wrote it: placeholders only. */
 export interface Fragment {
@@ -40,25 +39,73 @@ const spanningSections: ReadonlyMap<string, string> = new Map([
 	["audit.receivers", "[REPLACE-RECEIVER-NAMES]"],
 ]);
 
-const isTree = (value: unknown): value is Tree =>
+export const isTree = (value: unknown): value is Tree =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** The most a fragment's text may hold, and its keys and values together (what reaches the examples). */
+const textBytes = 64 * 1024;
+const treeBytes = 32 * 1024;
+
+/** An include, refused in words no missing file's error has: the library skips a missing include unsaid. */
+const noInclude = (): never => {
+	throw new Error("an include, which a section example never holds");
+};
+
+/** A backtick or a control character but a line break: either would reach the guide's tables or the env example as more than text. */
+const unwritten = (text: string) =>
+	[...text].some((c) => c === "`" || c === "\u007f" || (c < " " && c !== "\n"));
+const written = (value: unknown): boolean =>
+	Array.isArray(value)
+		? value.every(written)
+		: isTree(value)
+			? Object.entries(value).every(([key, inner]) => !unwritten(key) && written(inner))
+			: typeof value !== "string" || !unwritten(value);
+
+/** One fragment's tree, read as data: no substitution resolved or kept, no file included, nothing over its bounds. */
+export function treeOf(from: string, text: string): unknown {
+	if (Buffer.byteLength(text) > textBytes) throw new Error(`${from}: over ${textBytes} bytes`);
+	const refuse = {
+		readFileSync: noInclude,
+		readFile: async () => noInclude(),
+		packageResolver: noInclude,
+	};
+	let config: ReturnType<typeof parse>;
+	try {
+		config = parse(text, { resolveSubstitutions: false, env: {}, ...refuse });
+	} catch (error) {
+		throw new Error(`${from}: ${(error as Error).message}`);
+	}
+	if (!config.isResolved()) {
+		throw new Error(`${from}: a substitution, which a section example never holds`);
+	}
+	const tree = config.toObject();
+	if (!written(tree))
+		throw new Error(`${from}: a backtick or a control character in a key or a value`);
+	if (Buffer.byteLength(JSON.stringify(tree)) > treeBytes) {
+		throw new Error(`${from}: its keys and values come to over ${treeBytes} bytes`);
+	}
+	return tree;
+}
 
 /** The fragments beside the packages in `dirs`, in that order; a package without one is skipped. */
 export async function fragmentsIn(dirs: readonly string[]): Promise<Fragment[]> {
 	const read: { from: string; text: string }[] = [];
 	for (const dir of dirs) {
 		const file = join(dir, fragmentFile);
-		const text = await readFile(file, "utf8").catch(missingAs(undefined));
+		const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT") return undefined;
+			throw error;
+		});
 		if (text !== undefined) read.push({ from: file, text });
 	}
 	return fragmentsOf(read);
 }
 
-/** Fragments from their texts, each of exactly one section, no section twice; `from` names it in a refusal. */
+/** Fragments from their texts, each of exactly one section, no section twice, each read as `treeOf` reads it; `from` names it in a refusal. */
 export function fragmentsOf(texts: readonly { readonly from: string; readonly text: string }[]) {
 	const fragments: Fragment[] = [];
 	for (const { from, text } of texts) {
-		const tree = parse(text).toObject();
+		const tree = treeOf(from, text);
 		const roots = isTree(tree) ? Object.entries(tree) : [];
 		const [root] = roots;
 		if (roots.length !== 1 || root === undefined || !isTree(root[1])) {
@@ -111,8 +158,9 @@ export function settingsOf(fragments: readonly Fragment[]): Setting[] {
 export function writtenOf(fragments: readonly Fragment[]): Written[] {
 	return fragments.flatMap((f) =>
 		leaves(f.tree, [f.section]).flatMap(([path, value]): Written[] => {
-			const key = path.join(".");
-			const noted = spanningSections.get(key);
+			// Each element quoted where HOCON would read it otherwise, so a key with a dot stays one key.
+			const key = path.map(hoconKey).join(".");
+			const noted = spanningSections.get(path.join("."));
 			if (noted !== undefined) return [{ key, example: noted, spansSections: true }];
 			if (severalLines(value)) {
 				return [{ key, example: `"""${value}"""`, spansSections: false, severalLines: true }];
@@ -124,7 +172,7 @@ export function writtenOf(fragments: readonly Fragment[]): Written[] {
 	);
 }
 
-const hoconKey = (key: string) => (/^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key));
+export const hoconKey = (key: string) => (/^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key));
 
 /** HOCON for the fragments, nested as they nest: `line` writes each leaf it keeps; a block keeping none is left out. */
 function render(
@@ -159,11 +207,14 @@ const commented = (text: string) => text.replace(/^/gm, "# ");
 const example = (header: string, values: readonly string[]) =>
 	`${[`${prose}${header}`, ...values.map(commented)].join("\n")}\n`;
 
-/** Each list with its placeholders, and each value that spans sections, by its dotted key. */
-export function localConfExample(fragments: readonly Fragment[]): string {
+/** Each list with its placeholders, each value that spans sections, by its dotted key, then each entry sample under its map. */
+export function localConfExample(
+	fragments: readonly Fragment[],
+	samples: readonly string[] = [],
+): string {
 	return example(
 		"Copy to config/local.conf, uncomment each key and replace its placeholders; git and the image leave that file out.",
-		writtenOf(fragments).map((w) => `${w.key.split(".").map(hoconKey).join(".")} = ${w.example}`),
+		[...writtenOf(fragments).map((w) => `${w.key} = ${w.example}`), ...samples],
 	);
 }
 
