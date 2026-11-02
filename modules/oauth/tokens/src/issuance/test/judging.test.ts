@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import type { IssuancePolicy, IssuanceRequest } from "../src/contract.ts";
-import { judging } from "../src/issuance/issuance.ts";
+import type { IssuancePolicy, IssuanceRequest } from "../../contract.ts";
+import { judging } from "../issuance.ts";
 
 const request = (): IssuanceRequest => ({
 	grant: { subject: "alice", issuedTo: "app", audience: ["https://api.example"], scope: ["read"] },
