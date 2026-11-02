@@ -6,6 +6,8 @@ export type Pending = Asked & {
 	readonly subject: string;
 	readonly deadline: number;
 	readonly answer?: "accept" | "deny";
+	/** What the client's section said when it was asked; a client from another source that differs now is another. */
+	readonly under?: string;
 };
 
 /** The challenge has a fixed length and no dot, so the pair reads back one way. */

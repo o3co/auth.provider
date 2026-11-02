@@ -7,7 +7,7 @@ import { determinedSource } from "@mod/request-source";
 import { sessions } from "@mod/session";
 import { askKey, pendingOf, storedOf } from "../ask.ts";
 import events from "../audit-events.ts";
-import { shownOf } from "../client-section.ts";
+import { shownOf, underOf } from "../client-section.ts";
 import { grantsOver } from "../grants/grants.ts";
 import { askStore } from "../store.ts";
 
@@ -47,6 +47,9 @@ export async function showOver(c: BuildContext<unknown>): Promise<Pick<Route, "h
 				return jsonAnswer(400, { error: "unknown_challenge" });
 			const client = await listed.find(pending.clientId);
 			if (!client) return jsonAnswer(400, { error: "unknown_challenge" });
+			// Asked of what the client was: what it says now was not what this challenge asks about.
+			if (!client.registered && pending.under !== underOf(client))
+				return jsonAnswer(400, { error: "unknown_challenge" });
 			const { name, uri, host } = shownOf(client);
 			return jsonAnswer(200, {
 				client_id: pending.clientId,
@@ -54,7 +57,7 @@ export async function showOver(c: BuildContext<unknown>): Promise<Pick<Route, "h
 				...(name === undefined ? {} : { client_name: name }),
 				...(uri === undefined ? {} : { client_uri: uri }),
 				scopes: pending.range,
-				granted_scopes: await grants.rangeFor(pending.clientId, pending.subject),
+				granted_scopes: await grants.rangeFor(client, pending.subject),
 				expires_in: Math.ceil((pending.deadline - now) / 1000),
 			});
 		}),
@@ -89,7 +92,7 @@ export async function answerOver(c: BuildContext<unknown>): Promise<Pick<Route, 
 			if (!pending || pending.answer !== decision || pending.deadline <= now)
 				return jsonAnswer(400, { error: "unknown_challenge" });
 			if (decision === "accept")
-				await grants.widen(pending.clientId, pending.subject, pending.range);
+				await grants.keep(pending.clientId, pending.subject, pending.range, pending.under);
 			// A resend that completes the same decision again is recorded again.
 			const source = determinedSource(request);
 			declaredAudit(recorded, events).record(

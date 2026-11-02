@@ -1,7 +1,7 @@
 # consent
 
 ## Responsibilities
-- Keeps each subject's grants, per client, as the union of the ranges agreed to.
+- Keeps each subject's grants, per client, as the union of the ranges agreed to; for a client from another source, as the ranges agreed to under what its source says of it now.
 - Keeps pending consents as one-time challenges tied to the session that asked.
 - Its internal modules: `grants` reads and writes the grant records; `page` answers the consent page's two routes.
 
@@ -14,6 +14,8 @@
 - `granted`: the range a subject agreed to for a client, from a confirmed read.
 - `covers`: whether a grant holds the range; an empty range still needs a grant.
 - `grant`: widens the grant to the union, answering after a confirmed write.
+- `grantedFor`, `coversFor` and `grantFor`: the same by the client itself: for a client from another source only a grant held under its section's `under` counts, and `grantFor` replaces one that does not (`grants`' card).
+- `askFor`: as `ask`, by the client itself, the pending consent holding its `under`.
 - `ask`: parks a request for the session's subject and answers the consent page URL with a `challenge` query parameter; only while `asking`, which a set page makes true.
 - `ask` refuses with `TypeError` a destination that is not an https URL on the `http` public origin, or holds whitespace or a control character.
 - `ask` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character.

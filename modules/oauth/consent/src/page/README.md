@@ -23,7 +23,8 @@ Internal module of `consent`: the two routes the deployment's consent page calls
 - The other decision, an expired challenge or an answered one (on the page) gets `unknown_challenge`.
 - A CSRF failure or an invalid decision leaves the challenge usable.
 - After a `503`, resending the same POST is the only way to recover, as the page may no longer show the challenge.
-- The page shows a pending consent only while its client exists.
+- The page shows a pending consent only while its client exists and, for a client from another source, only while its section says the `under` the pending consent holds.
+- An acceptance writes under the `under` the pending consent holds, whatever the client's section says by then.
 - An event is recorded for every completed answer, resends included.
 - An acceptance is recorded only after its grant is written.
 

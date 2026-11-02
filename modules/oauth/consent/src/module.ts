@@ -4,11 +4,11 @@ import { clients, metadataSections } from "@mod/clients";
 import { csrfChecked } from "@mod/csrf";
 import { routes, site, use } from "@mod/http";
 import { defineModule, Unavailable } from "@mod/kernel";
-import { sessions } from "@mod/session";
+import { type Session, sessions } from "@mod/session";
 import { loopbackPagesRefused } from "@mod/url-setting";
 import { askKey, storedOf } from "./ask.ts";
-import { clientCopy, clientSection, isFirstParty } from "./client-section.ts";
-import { consents } from "./contract.ts";
+import { clientCopy, clientSection, isFirstParty, underOf } from "./client-section.ts";
+import { type Asked, consents } from "./contract.ts";
 import { grantsOver } from "./grants/grants.ts";
 import { answerOver, path, showOver } from "./page/page.ts";
 import { section } from "./section.ts";
@@ -46,33 +46,40 @@ export default defineModule(
 			/** Destinations are https URLs on this deployment's own origin; the caller made them. */
 			const onOrigin = (url: string) => httpsUrl(url)?.origin === origin;
 			const { page } = c.section;
+			const parked = async (session: Session, asked: Asked, under: string | undefined) => {
+				if (page === undefined) throw new TypeError("consent: no consent page is set to ask on");
+				if (!onOrigin(asked.onAccept) || !onOrigin(asked.onDeny)) {
+					throw new TypeError("consent: destinations must be https URLs on the public origin");
+				}
+				if (!isRange(asked.range)) {
+					throw new TypeError("consent: a range is distinct strings without spaces or controls");
+				}
+				const challenge = Buffer.from(c.random.bytes(32)).toString("base64url");
+				const lifetimeMs = c.section["challenge-lifetime"] * 1000;
+				const record = storedOf({
+					...asked,
+					range: [...asked.range],
+					subject: session.context.subject,
+					deadline: c.clock.now() + lifetimeMs,
+					...(under === undefined ? {} : { under }),
+				});
+				const saved = await asks.save(askKey(session.id, challenge), record, lifetimeMs);
+				if (saved !== "created") throw new Unavailable("consent");
+				const sent = new URL(page);
+				sent.searchParams.set("challenge", challenge);
+				return sent.href;
+			};
 			return {
-				granted: grants.rangeFor,
-				covers: grants.covers,
-				grant: grants.widen,
+				granted: grants.rangeById,
+				covers: grants.coversById,
+				grant: (clientId, subject, range) => grants.keep(clientId, subject, range, undefined),
+				grantedFor: grants.rangeFor,
+				coversFor: grants.covers,
+				grantFor: grants.grant,
 				asking: page !== undefined,
-				ask: async (session, asked) => {
-					if (page === undefined) throw new TypeError("consent: no consent page is set to ask on");
-					if (!onOrigin(asked.onAccept) || !onOrigin(asked.onDeny)) {
-						throw new TypeError("consent: destinations must be https URLs on the public origin");
-					}
-					if (!isRange(asked.range)) {
-						throw new TypeError("consent: a range is distinct strings without spaces or controls");
-					}
-					const challenge = Buffer.from(c.random.bytes(32)).toString("base64url");
-					const lifetimeMs = c.section["challenge-lifetime"] * 1000;
-					const record = storedOf({
-						...asked,
-						range: [...asked.range],
-						subject: session.context.subject,
-						deadline: c.clock.now() + lifetimeMs,
-					});
-					const saved = await asks.save(askKey(session.id, challenge), record, lifetimeMs);
-					if (saved !== "created") throw new Unavailable("consent");
-					const sent = new URL(page);
-					sent.searchParams.set("challenge", challenge);
-					return sent.href;
-				},
+				ask: (session, asked) => parked(session, asked, undefined),
+				askFor: (session, client, asked) =>
+					parked(session, { ...asked, clientId: client.id }, underOf(client)),
 			};
 		}),
 		m.contribute(routes).by(async (c) => ({
