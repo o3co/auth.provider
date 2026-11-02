@@ -28,6 +28,8 @@ export function registrable(uri: string): boolean {
 		(loopbackLiteral.test(uri) || /^http:\/\/localhost(:\d{1,5})?(\/|\?|$)/.test(uri));
 	const native = reverseDomain.test(scheme) && !scheme.startsWith("javascript.");
 	if (scheme !== "https:" && !local && !native) return false;
+	// An answer goes out as written, so a URI says its host the one way every reader of it takes.
+	if (scheme === "https:" && !/^https:\/\//i.test(uri)) return false;
 	return !answerNames.some((name) => parsed.searchParams.has(name));
 }
 

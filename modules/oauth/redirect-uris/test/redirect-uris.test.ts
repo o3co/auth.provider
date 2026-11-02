@@ -130,10 +130,15 @@ it("registers https, http to localhost or loopback literals, and reverse-domain 
 		"http://[::1]:9000/cb",
 		"com.example.app:/cb",
 		"com.example.app://cb",
+		"HTTPS://app.example/cb",
 	]) {
 		expect(registrable(ok)).toBe(true);
 	}
 	for (const bad of [
+		"https:app.example/cb",
+		"https:/app.example/cb",
+		"https:\\\\app.example/cb",
+		"HTTPS:app.example/cb",
 		"http://app.example/cb",
 		"http://localhost.example/cb",
 		"myapp:/cb",
