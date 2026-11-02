@@ -3,6 +3,7 @@ import type { StoredAsk } from "./store.ts";
 
 /** A pending consent as consent keeps it: past its deadline on the composition's clock it is gone, answered it is spent. */
 export type Pending = Asked & {
+	readonly clientId: string;
 	readonly subject: string;
 	readonly deadline: number;
 	readonly answer?: "accept" | "deny";

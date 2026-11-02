@@ -11,14 +11,13 @@
 - Normalizing a range, such as Unicode forms (the caller does it).
 
 ## Offers
-- `granted`: the range a subject agreed to for a client, from a confirmed read.
-- `covers`: whether a grant holds the range; an empty range still needs a grant.
-- `grant`: widens the grant to the union, answering after a confirmed write.
-- `grantedFor`, `coversFor` and `grantFor`: the same by the client itself: for a client from another source only a grant held under its section's `under` counts, and `grantFor` replaces one that does not (`grants`' card).
-- `askFor`: as `ask`, by the client itself, the pending consent holding its `under`.
-- `ask`: parks a request for the session's subject and answers the consent page URL with a `challenge` query parameter; only while `asking`, which a set page makes true.
-- `ask` refuses with `TypeError` a destination that is not an https URL on the `http` public origin, or holds whitespace or a control character.
-- `ask` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character.
+- `grantedFor`: the range a subject agreed to that counts for a client now, from a confirmed read.
+- `coversFor`: whether a grant that counts holds the range; an empty range still needs one.
+- `grantFor`: widens the grant to the union, or replaces one that does not count, answering after a confirmed write.
+- A grant counts for a client the operator registered whatever it holds under, and for a client from another source only under its section's `under` now (`grants`' card).
+- `askFor`: parks a request for the session's subject and a client and answers the consent page URL with a `challenge` query parameter; only while `asking`, which a set page makes true. The pending consent holds a client's `under`.
+- `askFor` refuses with `TypeError` a destination that is not an https URL on the `http` public origin, or holds whitespace or a control character.
+- `askFor` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character.
 - Routes `GET` and `POST /oauth/consent`, answering the consent page (`page`'s card).
 - Audit events, with the subject: declared in `./audit-events`, listed in the audit event reference.
 - Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL), `host` and `under`.

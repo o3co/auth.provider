@@ -82,13 +82,6 @@ export function grantsWith({ store }: GrantsParts) {
 		keep,
 		grant: (client: Client, subject: string, range: readonly string[]) =>
 			keep(client.id, subject, range, underOf(client)),
-		/** By the client's id alone: the range held, whatever it is under. */
-		rangeById: async (clientId: string, subject: string) =>
-			(await heldBy(clientId, subject))?.range ?? [],
-		coversById: async (clientId: string, subject: string, range: readonly string[]) => {
-			const held = await heldBy(clientId, subject);
-			return held !== undefined && range.every((r) => held.range.includes(r));
-		},
 	};
 }
 
