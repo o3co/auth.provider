@@ -62,7 +62,8 @@ function packOutside(dir: string, into: string, version: string, zod: string) {
  * Serves the release's tarballs, as just published, and a package outside it, from a registry of
  * its own; installs
  * `create-auth-provider` and, into a project of its own, the package from it; generates an app of
- * the pattern adding it; installs the app as published, by version; and runs its `check:outside`,
+ * the pattern adding it; installs the app as published, by version, through the `.npmrc` it was
+ * given; and runs its `check:outside`,
  * which must pass. Then points the lockfile's zod at another package's tarball on zod's registry,
  * and the check must refuse it for the integrity the release recorded, and for that alone.
  */
@@ -109,7 +110,7 @@ export async function outsideScene(options: {
 			[app, "--pattern", options.pattern, "--add", `npm:${grant}`, "--outside-from", staging],
 			options.scratch,
 		);
-		writeFileSync(join(app, ".npmrc"), npmrc);
+		// Installed by the `.npmrc` the app was given, from what the project recorded.
 		must("pnpm", ["install"], app);
 		must("pnpm", ["check:outside"], app);
 
