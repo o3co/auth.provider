@@ -3,6 +3,7 @@
 ## Responsibilities
 - Keeps each subject's grants, per client, as the union of the ranges agreed to.
 - Keeps pending consents as one-time challenges tied to the session that asked.
+- Its internal module `grants` reads and writes the grant records.
 
 ## Not here
 - When to ask for consent, and what the destinations do next (the caller decides).
@@ -42,8 +43,7 @@
 - Without a public origin, the module refuses to start.
 
 ## Data
-- Grants: one record per subject and client, distinct and sorted, kept without end.
-- A client registered again under the same id keeps its grants.
+- Grants: as `grants` keeps them.
 - Pending consents: one record per session and challenge, holding the request, subject, deadline and any answer, for the challenge's lifetime.
 - The grant store must never evict, survive crashes and failovers, and confirm reads.
 - The ask store needs the same except confirmed reads, and must not keep the key in clear.
