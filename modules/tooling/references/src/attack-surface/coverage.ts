@@ -132,6 +132,11 @@ export const coverage: Coverage = {
 			weakens: "the proxy, not `outbound`, resolves names and checks where they lead",
 		},
 		{
+			key: "users.issuer-moved",
+			weakens:
+				"a listed move carries an IdP name's links over to another issuer, whose accounts then reach them by the same upstream subject",
+		},
+		{
 			key: "federation-grants.keep-on-subject-revocation",
 			weakens:
 				"an established grant answers only to the `delegations` boundary when a revocation asks to keep delegations",
@@ -396,6 +401,10 @@ export const coverage: Coverage = {
 		},
 	],
 	notDestinations: [
+		{
+			key: "users.issuer-moved",
+			why: "issuers compared with what is kept and declared, none reached",
+		},
 		{
 			key: "jwt-bearer.issuers.<i>.issuer",
 			why: "the issuer an assertion's `iss` is matched with, never fetched; its keys come from `jwks-uri`",
