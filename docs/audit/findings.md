@@ -13,7 +13,7 @@ A finding not yet fixed shows nowhere public: not its text, nor the pull request
 
 A pull request's description holds a change record in public only for a finding already fixed, or for a change that fixes no finding.
 
-One exception: a finding in no published version, or only in a published release candidate, which gets no fix of its own (`SECURITY.md`), is fixed in `develop`, by a pull request that names no hole. The exception reaches only what a public pull request cannot hide: its diff, the modules and contracts it changes, and its tests, which can tell where the hole is. The rest above still holds: its title, description and commits, and any public issue, changelog line or record, state no hole until it is fixed.
+One exception: a finding in no published version, or only in a published release candidate, which gets no fix of its own (`SECURITY.md`), is fixed in `develop`, by a pull request that names no hole. The exception reaches only what a public pull request cannot hide: its diff, the modules and contracts it changes, and its tests, which can tell where the hole is. The rest above still holds: its title, description and commits, and any public issue, changelog line or record, state no hole until the fix is merged or, where a published release candidate holds the hole, until the next version carrying the fix is published. Once fixed, it has its ledger line as any finding does, and no advisory, as no supported version holds it. Where a published release candidate held it, the next version's changelog names the kind of hole.
 
 ## The ledger
 
