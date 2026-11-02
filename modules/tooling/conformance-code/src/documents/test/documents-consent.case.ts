@@ -217,7 +217,7 @@ describe.runIf(areaTarget().can("outbound-proxy"))(
 				expect(shown.body.redirect_hosts).toEqual([
 					{ host: "app.example", kind: "web" },
 					{ host: "xn--bcher-kva.example:8443", kind: "web" },
-					{ host: "127.0.0.1:8080", kind: "loopback" },
+					{ host: "127.0.0.1", kind: "loopback" },
 					{ host: "com.example.app", kind: "app" },
 				]);
 			});
