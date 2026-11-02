@@ -14,7 +14,7 @@
 - Client routes, for an operator's confidential client (else `401 invalid_client`), JSON or form:
   - `POST /oauth/federation-grants` (`connection`, `sub`, `redirect_uri`, `state`, `scope?`, `expires_in?`, `upstream_sub?`): `201` with `grant_id`, `status`, `connect_uri`, `connect_expires_in`, `expires_in`.
   - `POST …/<id>/reauthorize` (the same, `connection` optional): `201` alike.
-  - `POST …/<id>/token` (`sub`, `scope?`, `min_ttl?`, `connection?`, `resource?`): `200` with `access_token`, `token_type`, `expires_in`, `scope`.
+  - `POST …/<id>/token` (`sub`, `scope?`, `min_ttl?`, `connection?`, `resource?`): `200` with `access_token`, `token_type`, `expires_in`, `scope`. `min_ttl` is advisory, capped by the grant's end, so `expires_in` may be less.
   - `POST …/<id>/status` (`sub`): `200`, with `last_used_at` once a token was handed, to a client still allowed the connection. `…/<id>/revoke` (`sub`): `204`.
   - Errors: `grant_not_found` (404), `authorization_pending`, `invalid_request`, `invalid_scope`, `invalid_target` (400), `access_denied` (403), `grant_revoked`, `grant_expired`, `reauthorization_required` (410), `rate_limited` (429), `upstream_token_ineligible`, `upstream_rejected` (502, `retry-after: 300`), `temporarily_unavailable` (503).
 - Browser routes: `GET …/session/federation-grants/connect?request=`, `GET` and `POST …/consent` (`challenge`, `decision`; the POST under `csrf`), `GET …/callback/<connection>`, which returns to the intent's URI with `grant_id`, `state` and any `error`; answered by the one browser half at `grantsBrowsers`. Their connect path is a `login-gates` return path, so a browser sent to log in or raise its session comes back to it.

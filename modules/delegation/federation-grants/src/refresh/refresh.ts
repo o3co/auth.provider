@@ -100,7 +100,7 @@ export function refreshWith(parts: Parts) {
 		const now = records.grantOf(await grants.read(id));
 		return now && (await serves(now)) ? handed(held, asked, false) : { kind: "gone" };
 	};
-	/** Due near its end once half its life is spent, or when it lacks what is asked. */
+	/** Due only past half its life or under a second left: then near its end, below `min_ttl`, or lacking what is asked. */
 	const due = (held: Credentials, asked: Asked) => {
 		const left = leftOf(held);
 		const half =
