@@ -36,6 +36,29 @@ it("serves its own packages, answers 502 where the upstream fails, and stays up"
 	}
 });
 
+it("stamps the versions of a directory named as just published with its start, and any other two days before", async () => {
+	const fresh = tarballs();
+	const other = tarballs();
+	const ageOf = async (dirs: string[], justPublished?: string) => {
+		const registry = await served(
+			"http://127.0.0.1:9/",
+			dirs,
+			justPublished ? { justPublished } : {},
+		);
+		try {
+			const answer = await fetch(`${registry.origin}/@x%2fheld`);
+			const { time } = (await answer.json()) as { time: Record<string, string> };
+			return Date.now() - Date.parse(time["1.0.0"] ?? "");
+		} finally {
+			await registry.stop();
+		}
+	};
+	expect(await ageOf([fresh], fresh)).toBeLessThan(60_000);
+	const twoDays = 2 * 24 * 60 * 60 * 1000;
+	expect(await ageOf([other], fresh)).toBeGreaterThan(twoDays - 60_000);
+	expect(await ageOf([other])).toBeGreaterThan(twoDays - 60_000);
+});
+
 /** An upstream of the test's own, listening on a free port: its origin and how to close it. */
 async function upstreamOf(handle: Parameters<typeof createServer>[1]) {
 	const server: Server = createServer(handle);
