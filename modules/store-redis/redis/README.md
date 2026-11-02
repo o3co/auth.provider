@@ -41,6 +41,7 @@
 ## Deployment
 - With `rediss`, a certificate for the URL's host, trusted by the platform.
 - Redis 7.0 or later, answering as a primary: no cluster, and no proxy splitting keys across nodes (boot runs `batchAcross` over two partitions, and refuses, named, a server that answers it `CROSSSLOT`; a key answered `MOVED`, `ASK` or `CLUSTERDOWN` is refused as a cluster).
+- One primary holding every key, whatever is composed, with no setting to loosen it: a scan sees one server's keys, so on a server holding part of them a sweep or a reseal would silently miss records.
 - `maxmemory-policy noeviction`, where a composed module keeps a space that must not be evicted.
 - `appendonly yes`, `appendfsync always` and `no-appendfsync-on-rewrite no`, where a composed module keeps a durable space, unless `durability` is `none`.
 - With `replication` `replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of 1 or more. With `none`: no replica connected.
