@@ -41,7 +41,7 @@
 - After `prompt=login` or a max age, a login counts only when the upstream says when the user logged in.
 - Fresh enough, after `prompt=login` or with a max age: by the IdP's `fresh-login-allowance` (its type's clock allowance by default), as `round-trip`'s card says.
 - The fresh login allowance narrows only how far back a login time reaches: a time ahead of ours that the type's clock allowance passes, or any time the upstream says, is taken as the upstream says it.
-- The local user is found only by the IdP's name and the upstream subject.
+- The local user is found only by the IdP's name, which `users` holds to one issuer, and the upstream subject.
 - An unknown identity is refused, and nothing is created.
 - The login proves `fed` plus only the upstream amr values the operator maps (declared as provable).
 - An upstream's text and tokens never reach the browser or the logs.
@@ -51,7 +51,7 @@
 - A login's upstream tokens go to their receivers through `upstream-handoff`, which keeps a held login's for `transaction-lifetime`, its resume's deadline; if they cannot be kept, the callback is unavailable.
 - An IdP's redirect URI is the public origin plus its callback path.
 - Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them) or cannot be reached, told apart, no public origin, or a `held-page` off it (the page reads the held login with this deployment's cookies), one reason per issue, all at once; in production, also a `held-page` on a loopback host.
-- An IdP that answers in a posted form refuses boot where cookies cannot be secure, as its round trip's cookie is cross-site.
+- An IdP that answers in a posted form refuses boot where cookies cannot be secure.
 
 ## Depends on
 - `kernel`, `upstreams`, `upstream-round-trip`, `upstream-handoff`, `audit`, `csrf` (origin evidence), `http`, `request-source`, `url-setting`, `login-attributes`, `login-gates`, `users`, `rate-limit`
