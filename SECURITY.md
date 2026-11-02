@@ -49,3 +49,5 @@ A fix is made and checked in private, and made public with the version that carr
 4. After the release, CI runs again on the published commits, and the change record is reviewed and published with that run added to it.
 
 The advisory and the changelog name the kind of hole closed, the versions affected and the version that fixes it.
+
+One exception: a hole in no published version, or only in a published release candidate, is fixed in `develop`, by a pull request that names no hole. Its diff, the modules it changes and its tests are public as any change's, and can tell where the hole is; nothing else states the hole until it is fixed ([findings and fixes](docs/audit/findings.md#nothing-public-before-the-fix-is-released)). A report stays private all the same.

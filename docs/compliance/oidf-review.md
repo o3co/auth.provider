@@ -11,7 +11,7 @@ Add a section for each release, newest first, in this form:
 ```markdown
 ## <version>
 
-- Commit: <the release's commit>
+- Commit: <the release branch's head, which the run tested>
 - Run: <where the pages came from: the CI run's link, or "local" with the records directory>
 - Reviewed by: <name>, <date, YYYY-MM-DD>
 
@@ -25,5 +25,7 @@ Add a section for each release, newest first, in this form:
 - "The text judged by" quotes what the page showed: the error, its description, or the page's heading.
 - Issue names the issue a `ng` was opened as; it is empty for `ok`.
 - Each section lists all twelve tests. A test the run did not reach is `ng`, with "not reached" as the text.
+- A section is of the run the tag takes. A `ng` that sent the release back through a new run stays in its issue, not here.
+- A `ng` that is a security hole holds its whole section out of a pull request until the hole is fixed, as a test's name can tell where the hole is; its Issue then names the fix.
 
 No release has been reviewed yet.
