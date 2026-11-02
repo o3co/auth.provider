@@ -706,6 +706,19 @@ describe("consent's sections", () => {
 		});
 	});
 
+	it("maps the digest a document's source gives into its own word, never reading the document's", async () => {
+		const copied = clientCopy.copy(
+			{ client_name: "Acme", under: "from-the-document", digest: "from-the-document" },
+			{ id: "https://acme.example/client.json", host: "acme.example", digest: "d1" },
+		);
+		expect(copied).toEqual({ value: { name: "Acme", host: "acme.example", under: "d1" } });
+		const check = async (under: unknown) =>
+			(await clientSection.schema["~standard"].validate({ under })).issues === undefined;
+		expect(await check("d1")).toBe(true);
+		expect(await check("")).toBe(false);
+		expect(await check("d 1")).toBe(false);
+	});
+
 	it("warns at every start for each client the operator registered as first-party, by its id", async () => {
 		const from = logged.lines().length;
 		await serve();

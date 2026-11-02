@@ -19,7 +19,8 @@
 - `ask` refuses with `TypeError` a range entry that is empty, repeated, or holds whitespace or a control character.
 - Routes `GET` and `POST /oauth/consent`, answering the consent page (`page`'s card).
 - Audit events, with the subject: declared in `./audit-events`, listed in the audit event reference.
-- Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL) and `host`; from a document, `client_name` (refused absent, not a string or blank), `client_uri` as written, and the host its source checked, never `first-party`, by `clientCopy`, contributed to `client-documents`' `documentCopies`.
+- Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL), `host` and `under`.
+- `clientCopy`, contributed to `client-documents`' `documentCopies`: from a document, `client_name` (refused absent, not a string or blank), `client_uri` as written, the host its source checked, and its source's digest as `under`, never `first-party`.
 - `isFirstParty`: true only for a client the operator registered with `first-party` set; every start warns `consent.first_party` for each such client.
 - Operator section: `page` (an https URL without userinfo or fragment, or plain http on a loopback host outside production, as `authorize`'s login page; unset by default, so nobody is asked) and `challenge-lifetime` (written with its unit, `1m` to `1h` in whole seconds, default `10m`).
 - Store interfaces for grants and asks: save once, read, and update from what the record holds.
