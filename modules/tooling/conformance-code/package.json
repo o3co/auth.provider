@@ -15,12 +15,14 @@
 	},
 	"dependencies": {
 		"@mod/conformance": "workspace:*",
+		"@mod/conformance-front": "workspace:*",
 		"@mod/conformance-identity": "workspace:*",
 		"@mod/conformance-keys": "workspace:*",
 		"@mod/conformance-legacy": "workspace:*",
 		"@mod/conformance-mtls": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
-		"@mod/conformance-second-factor": "workspace:*"
+		"@mod/conformance-second-factor": "workspace:*",
+		"@mod/conformance-tunnel": "workspace:*"
 	},
 	"devDependencies": {
 		"@mod/spec-checklist": "workspace:*",

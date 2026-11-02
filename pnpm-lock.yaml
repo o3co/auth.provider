@@ -4155,6 +4155,9 @@ importers:
       '@mod/conformance':
         specifier: workspace:*
         version: link:../conformance
+      '@mod/conformance-front':
+        specifier: workspace:*
+        version: link:../conformance-front
       '@mod/conformance-identity':
         specifier: workspace:*
         version: link:../conformance-identity
@@ -4173,6 +4176,9 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/conformance-tunnel':
+        specifier: workspace:*
+        version: link:../conformance-tunnel
     devDependencies:
       '@mod/spec-checklist':
         specifier: workspace:*
