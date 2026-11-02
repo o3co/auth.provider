@@ -43,7 +43,7 @@
 - A revocation is the end: no refresh or activation writes over it, and an ordinary logout leaves grants.
 - A subject's boundary ends a grant when read, in whole seconds with nothing allowed for hosts' clocks; with `keep-on-subject-revocation`, only `delegations` does, which every start warns of (`federation-grants.kept_on_subject_revocation`).
 - A failed listing is logged and passed: the boundary still refuses what the follower misses.
-- Credentials are sealed to the grant's id, subject, client and connection, and erased once revoked, sent to reauthorization, or read past the end.
+- Credentials are sealed to the grant's id, subject, client and connection, and erased once revoked, sent to reauthorization, or read past the end. Refreshed only at the issuer the grant was connected at.
 - Tokens, secrets and upstream text reach neither answers, logs nor audit.
 
 ## Depends on

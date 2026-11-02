@@ -30,6 +30,39 @@ describe("a grant's token renewed through the token route", () => {
 		expect((await h.grantCall(id, "status")).json).not.toHaveProperty("reason");
 	});
 
+	it("ends the credential only on a structured invalid_grant, answering 410 from then on", async () => {
+		const { h, id } = await due();
+		h.script.refreshes.push({ kind: "invalid_grant" });
+		const refused = {
+			status: 410,
+			json: { error: "reauthorization_required", error_description: "upstream_invalid_grant" },
+		};
+		expect(await h.grantCall(id, "token")).toMatchObject(refused);
+		expect(await h.grantCall(id, "token")).toMatchObject(refused);
+		expect((await h.grantCall(id, "status")).json).toMatchObject({
+			status: "reauthorization_required",
+		});
+		expect(h.asked.refreshes.length).toBe(1);
+		expect(h.stores.peek(id)).not.toHaveProperty("sealed");
+	});
+
+	it("asks nothing of another issuer behind the connection, answering reauthorization_required and erasing the credential", async () => {
+		const { h, id } = await due();
+		h.script.issuer = "https://another.example";
+		expect(said(await h.grantCall(id, "token"))).toBe(
+			"410 reauthorization_required upstream_issuer_changed",
+		);
+		expect(h.asked.refreshes).toEqual([]);
+		expect((await h.grantCall(id, "status")).json).toMatchObject({
+			status: "reauthorization_required",
+			reason: "upstream_issuer_changed",
+		});
+		expect(said(await h.grantCall(id, "token"))).toBe(
+			"410 reauthorization_required upstream_issuer_changed",
+		);
+		expect(h.asked.refreshes).toEqual([]);
+	});
+
 	it("lets a revocation win over a refresh that raced it", async () => {
 		const { h, id } = await due();
 		h.stores.raceNext(

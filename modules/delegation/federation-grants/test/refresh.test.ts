@@ -19,22 +19,6 @@ describe("refreshing a grant's token", () => {
 		expect(h.asked.refreshes.length).toBe(1);
 	});
 
-	it("ends the credential only on a structured invalid_grant, answering 410 from then on", async () => {
-		const { h, id } = await due();
-		h.script.refreshes.push({ kind: "invalid_grant" });
-		const refused = {
-			status: 410,
-			json: { error: "reauthorization_required", error_description: "upstream_invalid_grant" },
-		};
-		expect(await h.grantCall(id, "token")).toMatchObject(refused);
-		expect(await h.grantCall(id, "token")).toMatchObject(refused);
-		expect((await h.grantCall(id, "status")).json).toMatchObject({
-			status: "reauthorization_required",
-		});
-		expect(h.asked.refreshes.length).toBe(1);
-		expect(h.stores.peek(id)).not.toHaveProperty("sealed");
-	});
-
 	it("judges the subject's boundary before it hands a held token or refreshes one", async () => {
 		for (const [life, wait] of [
 			[300, 1000],

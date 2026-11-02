@@ -53,6 +53,8 @@ export interface Scripted {
 	startRefused: boolean;
 	/** The IdP no longer offers its delegation, as after the operator took it away. */
 	withdrawn: boolean;
+	/** The issuer behind the connection, where a test moves it. */
+	issuer: string;
 }
 
 /** Tokens an upstream gives, bearer with a refresh token and five minutes, unless a test says. */
@@ -150,12 +152,16 @@ export async function harness(
 		startThrows: false,
 		startRefused: false,
 		withdrawn: false,
+		issuer: "https://up.example",
 	};
 	const asked = {
 		starts: [] as DelegationStart[],
 		refreshes: [] as [string, readonly string[], string | undefined][],
 	};
 	const delegation: Delegation = {
+		get issuer() {
+			return script.issuer;
+		},
 		authorizationUrl: (start) => {
 			if (script.startThrows) throw new Error("cannot build");
 			if (script.startRefused) return { kind: "refused" };
