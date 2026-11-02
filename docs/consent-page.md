@@ -21,6 +21,11 @@ The browser sends the session's cookie with it. `200`, never cached:
   "client_id": "app",
   "client_name": "Acme",
   "client_uri": "https://acme.example/about",
+  "redirect_hosts": [
+    { "host": "app.acme.example", "kind": "web" },
+    { "host": "localhost:3000", "kind": "loopback" },
+    { "host": "com.example.acme", "kind": "app" }
+  ],
   "scopes": ["read", "write"],
   "granted_scopes": [],
   "expires_in": 600
@@ -29,6 +34,10 @@ The browser sends the session's cookie with it. `200`, never cached:
 
 - `scopes`: what the client asks now. `granted_scopes`: what the user already agreed to for this client, which the page may show as kept.
 - `client_name` and `client_uri` are there when the client's registration sets them (its `consent` section's `name` and `uri`). A client whose registration is a document it published (`clients-cimd`) also has `client_id_host`, the host its document was read from: show it, since the name is the client's own word.
+- `redirect_hosts`: every place the client may send the user back to, not only the one this request names, since what the user agrees to holds for all of them. Show them all.
+  - `host` is a host as the URL parser writes it, in lower case with a port other than the default. Show it as it comes: a name beyond ASCII comes as its A-label (`xn--…`). Do not decode it, as a decoded name can look like another.
+  - `kind` `web` is a host on the network. `loopback` is the user's own machine: whatever listens there on that machine is who gets the answer. `app` is an installed app's private-use scheme, in `host` alone: nothing but the operating system says which app that is.
+  - Warn the user where every entry is `loopback`: the client runs on their own machine, or something on it claims to be that client.
 - `expires_in`: seconds left to answer (`consent.challenge-lifetime`, 10 minutes unless set).
 - Write every value into the page as text, never as markup: the name and the URI are the client's.
 
@@ -36,7 +45,7 @@ The browser sends the session's cookie with it. `200`, never cached:
 |---|---|
 | `200` | Show the client and the scopes, and ask the user. |
 | `401 {"error": "no_session"}` | The browser holds no session: the user signed out or it expired. Say so; the client can start again. |
-| `400 {"error": "unknown_challenge"}` | The challenge is unknown, expired, already answered, or another session's. Say so; the client can start again. |
+| `400 {"error": "unknown_challenge"}` | The challenge is unknown, expired, already answered, or another session's, or the client's document changed since it was asked. Say so; the client can start again. |
 | `503 {"error": "temporarily_unavailable"}` | Try again later. |
 
 ## 2. Post the decision
@@ -62,6 +71,8 @@ challenge=<the challenge>&decision=accept&csrf_token=<csrf_token>
 
 An accepted consent is kept for the user and client, so the client is not asked again for the same scopes. A denial keeps nothing.
 
+A client whose registration is a document it published is held to that document: once anything in it changes, the user is asked again, with `granted_scopes` empty, and a request under `prompt=none` is refused `consent_required`. A document that comes back as it was counts again. What the [security model](security-model.md#browsers-sessions-cookies-and-csrf) says of how long a consent lasts and which audiences it holds for applies to every client: the page is not told the audiences.
+
 ## An example page
 
 A whole page, served at `consent.page` on the public origin. It asks nothing of a framework and writes the client's words as text only.
@@ -76,6 +87,9 @@ A whole page, served at `consent.page` on the public origin. It asks nothing of 
   <form id="decide" method="post" action="/oauth/consent" hidden>
     <p><strong id="client"></strong> asks to:</p>
     <ul id="scopes"></ul>
+    <p>It may send you back to:</p>
+    <ul id="hosts"></ul>
+    <p id="own-machine" hidden>This client runs only on your own machine. Allow it only if you started it yourself.</p>
     <input type="hidden" name="challenge">
     <input type="hidden" name="csrf_token">
     <button name="decision" value="accept">Allow</button>
@@ -102,6 +116,13 @@ A whole page, served at `consent.page` on the public origin. It asks nothing of 
       item.textContent = scope; // Describe each scope in your own words here.
       document.getElementById("scopes").append(item);
     }
+    for (const { host, kind } of body.redirect_hosts) {
+      const item = document.createElement("li");
+      item.textContent = `${host} (${kind})`; // As it comes: never decode an A-label.
+      document.getElementById("hosts").append(item);
+    }
+    document.getElementById("own-machine").hidden =
+      !body.redirect_hosts.every(({ kind }) => kind === "loopback");
     form.elements.challenge.value = challenge;
     form.elements[csrf.body_field].value = csrf.csrf_token;
     message.hidden = true;
