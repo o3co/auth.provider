@@ -143,7 +143,7 @@ What each module contains is described by that module's contract card (each modu
 | Allowed grants, allowed scopes and audiences (client metadata fields), and what a client may be issued and may see | vocabulary / setting / contract | client-allowance |
 | The audience a request asks for: the one rule (none reads nothing), asked with each issuance's default and ceiling | extension point kind / contract | grants |
 | Resource indicators (RFC 8707): reading `resource` and narrowing the audience issued to it | contribution | resource-indicators |
-| Redirect URIs (a client metadata field), the rule for URIs a client may register to be sent back to, and how a given one matches | vocabulary / setting / contract | redirect-uris |
+| Redirect URIs (a client metadata field), the rule for URIs a client may register to be sent back to, how a given one matches, and how each is shown to a user | vocabulary / setting / contract | redirect-uris |
 | PKCE required of every client by S256 | contract | authorize |
 | Paths to return to after login | extension point kind | login-gates |
 | Where a login may return (listed targets, the check) | contract / setting | login-gates |
