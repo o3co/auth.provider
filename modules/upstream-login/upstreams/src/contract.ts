@@ -105,7 +105,7 @@ export interface DelegationRefused {
 /** Offline access an upstream grants, to be delegated; `exchange` and `refresh` throw as the upstream's own. */
 export interface Delegation {
 	/** The issuer that grants it, the one its exchanges name: what is held from them is refreshed there alone. */
-	readonly issuer?: string;
+	readonly issuer: string;
 	/** Never throws: a start the upstream does not take is refused as a value. */
 	authorizationUrl(start: DelegationStart): string | DelegationRefused;
 	exchange(
