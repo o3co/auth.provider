@@ -23,7 +23,7 @@
   - A fake's script that fails fails the scene when the fake stops
 - Test tools (`./testing`): a fake SMTP relay for a scene's mail (plain SMTP at loopback, on a free port each run; keeps every message, decoded, and finds the latest to an address)
 - A fault run (`CONFORMANCE_FAULTS=1`, `./testing`): `faultRun` tells a scene it is in one, and `faultRunReporter` fails the run where a fault scene (`*.faults.case.ts`) did not run
-- Fault tools (`./testing`), as their modules' cards say: `startDeployment` and its instances (`deployment`), `startTopology` and its nodes (`faults`), the relay's match, command, answer and records (`relay`), the store's writes, reads, roles and refusals as it matches them (`store-wire`), whether this host can move an instance's clock (`hostLibfaketime`), and a scene's own deployment with the waits and repointing around a fault (`fault-scene`)
+- Fault tools (`./testing`), as their modules' cards say: `startDeployment` and its instances, their output among what they tell (`deployment`), `startTopology` and its nodes (`faults`), the relay's match, command, answer and records (`relay`), the store's writes, reads, roles and refusals as it matches them (`store-wire`), whether this host can move an instance's clock (`hostLibfaketime`), and a scene's own deployment with the waits and repointing around a fault (`fault-scene`)
 
 ## Invariants
 - Holds neither feature vocabulary nor legacy-system names.

@@ -55,6 +55,7 @@ export interface Instance {
 	readonly relay: Relay;
 	readonly audit: AuditTrail;
 	requests(): readonly Traced[];
+	output(): string;
 	running(): boolean;
 	/** Ends it with SIGKILL, what it started with it, answering when it ended on the relay's clock. */
 	kill(): Promise<{ readonly signal: string | null; readonly endedAt: number }>;
@@ -173,6 +174,7 @@ export async function startDeployment(spec: DeploymentSpec) {
 				relay,
 				audit: sink.trail,
 				requests: () => trace.requests(),
+				output: () => current.written?.() ?? "",
 				running: () => alive,
 				async kill() {
 					if (!current.kill) throw new Error("the instance was not launched as a group");

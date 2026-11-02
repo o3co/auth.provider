@@ -7,11 +7,12 @@ Internal module of `conformance`: a fault scene's app as a deployment runs it, o
 
 ## Offers
 - `startDeployment` (a scene, its name, a topology, a number of instances, the Redis section's other keys, where its record goes, and the start's options: the certificates its instances trust), giving its instances, its record and `stop`.
-- An instance: its URL (its trace's), its relay, its audit trail (`audit`), the requests it was sent (`requests`), whether it runs, `kill` (SIGKILL, what it started with it; how and when it ended, on the relay's clock), `restart` (from the same settings and options, its trusted certificates among them, behind the same URL and relay, on the clock it had) and `clock` (started again on a clock moved by an offset such as `+2h`).
+- An instance: its URL (its trace's), its relay, its audit trail (`audit`), the requests it was sent (`requests`), what its latest start wrote to its standard streams (`output`), whether it runs, `kill` (SIGKILL, what it started with it; how and when it ended, on the relay's clock), `restart` (from the same settings and options, its trusted certificates among them, behind the same URL and relay, on the clock it had) and `clock` (started again on a clock moved by an offset such as `+2h`).
 - `startTrace`: a plain HTTP proxy in front of one instance, recording each request's method and path, pointed at the instance started again.
 
 ## Invariants
 - Every instance starts from the same generated app and settings, but for its port and its relay's URL; more than one runs as `kernel.deployment = multi`.
+- A deployment started again on a topology a stopped one ran on finds the store as that one left it, whatever settings it starts from; a start an instance refuses rejects with what the instance wrote.
 - Each instance talks to the topology's primary through its own relay, so a fault on one leaves the others' connections alone.
 - Apps and relays start fresh for each scene; nothing in an app's process or a relay's rules crosses from one scene to the next.
 - A scene's record names the Redis image, the replicas, the instances, the deployment, the issuer and keys the instances share, their clocks, the Redis section without its URL, a hash of each instance's settings, the commit it ran on as the evidence names it (`SPEC_EVIDENCE_COMMIT`, else the checkout's HEAD, never the event's), and the run where CI gives one; it goes to `CONFORMANCE_FAULTS_DIR` where set.
