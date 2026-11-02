@@ -29,7 +29,8 @@ Export the module the app imports at `./module`, as every module of the provider
 	"peerDependencies": {
 		"@o3co/auth-provider-foundation": "<version>",
 		"@o3co/auth-provider-identity": "<version>",
-		"@o3co/auth-provider-oauth": "<version>"
+		"@o3co/auth-provider-oauth": "<version>",
+		"zod": "^4.6.0"
 	}
 }
 ```
@@ -37,17 +38,27 @@ Export the module the app imports at `./module`, as every module of the provider
 
 ## The grant
 
-A grant is a contribution to the `grants` extension point (the `grants` card). This one gives a confidential client a token for itself, within what its allowance lets it ask, as the client credentials grant does (the `client-credentials` card). `readsAmbient` says the grant reads nothing the request carries beside its parameters; a grant that reads the session's cookie must say `cookie` and check the request's origin itself. The module's head declares `takes`, the handles its factories take from other modules: here `issuer`, the one contract its factory gets (the `kernel` card). Boot refuses a module that declares none; one that takes nothing declares `[]`.
+A grant is a contribution to the `grants` extension point (the `grants` card). This one gives a confidential client a token for itself, within what its allowance lets it ask, as the client credentials grant does (the `client-credentials` card). `readsAmbient` says the grant reads nothing the request carries beside its parameters; a grant that reads the session's cookie must say `cookie` and check the request's origin itself. The module's head declares `takes`, the handles its factories take from other modules: here `issuer` and `tokens`, the contracts its factory gets (the `kernel` card). A module with a section declares it there too, and takes `zod` as a peer ([packages outside the release](outside-modules.md#take-the-release-and-zod-as-peers)). Boot refuses a module that declares none; one that takes nothing declares `[]`.
 
 <!-- generated:module -->
 ```ts
-import { defineModule } from "@o3co/auth-provider-foundation/kernel";
+import { defineModule, setting } from "@o3co/auth-provider-foundation/kernel";
 import { clientAllowance } from "@o3co/auth-provider-oauth/client-allowance";
 import { type Grant, grants } from "@o3co/auth-provider-oauth/grants";
 import { issuer } from "@o3co/auth-provider-oauth/issuer";
+import { lifetimeSecondsRange, tokens } from "@o3co/auth-provider-oauth/tokens";
+import { z } from "zod";
 
 /** The grant type a client names; a URI, as RFC 6749 asks of an extension grant. */
 const grantType = "urn:example:params:oauth:grant-type:example";
+
+/** The longest an access token of this grant may live, the operator's to lower. */
+const section = z.strictObject({
+	"access-token-ceiling": setting
+		.duration("s")
+		.pipe(z.number().int().min(lifetimeSecondsRange.min).max(lifetimeSecondsRange.max))
+		.prefault("1h"),
+});
 
 /** A confidential client's token for itself, within what its allowance lets it ask. */
 const example = (issuerUrl: string): Grant => ({
@@ -74,11 +85,27 @@ const example = (issuerUrl: string): Grant => ({
 });
 
 // Safe on many instances: it keeps nothing across requests.
-export default defineModule({ name: "example-grant", replicaSafe: true, takes: [issuer] }, (m) => [
-	m.contribute(grants).by(async (c) => example((await c.get(issuer)).url)),
-]);
+export default defineModule(
+	{ name: "example-grant", section, replicaSafe: true, takes: [issuer, tokens] },
+	(m) => [
+		m.contribute(grants).by(async (c) => {
+			// Read at build time: the lifetime `issue` applies where this grant gives none is fixed by now.
+			const lifetime = (await c.get(tokens)).accessTokenLifetimeSeconds();
+			if (lifetime > c.section["access-token-ceiling"]) {
+				// Settings by their keys, never their values.
+				return c.refuse(
+					"example-grant.access-token-ceiling",
+					"tokens.access-token-lifetime is over it: lower that, or raise this",
+				);
+			}
+			return example((await c.get(issuer)).url);
+		}),
+	],
+);
 ```
 <!-- end generated -->
+
+This grant holds its tokens to a lifetime ceiling, a setting of its own. `tokens` tells the lifetime `issue` applies where a grant gives none, `accessTokenLifetimeSeconds()`, fixed when `tokens` is built, so a check at build time stays true: read it there, and refuse boot above your ceiling with `c.refuse`, naming both settings by their keys, never their values. That is not the longest life any token may have, and the check does not reach tokens already issued, or instances still on other settings. A lifetime your grant gives at one issuance, `lifetimeSeconds` in `issue`'s limits, is your grant's own to hold to its ceiling: `tokens` does not check it against one. It runs from 2 to 86400 whole seconds, and anything else, 1 among it, throws at the request: check at boot a value you will give against `lifetimeSecondsRange`, which `tokens` exports, as this grant's ceiling does.
 
 If your grant calls another server, take `outbound`'s contract and send the request through it (the `outbound` card), so the operator's destination policy and limits apply. The guard's rule that holds the provider's own packages to that (G26, and the `network` declaration in a package manifest) reads only the provider's repository: in your package, nothing checks it but you.
 

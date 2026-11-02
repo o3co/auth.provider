@@ -1,10 +1,20 @@
-import { defineModule } from "@o3co/auth-provider-foundation/kernel";
+import { defineModule, setting } from "@o3co/auth-provider-foundation/kernel";
 import { clientAllowance } from "@o3co/auth-provider-oauth/client-allowance";
 import { type Grant, grants } from "@o3co/auth-provider-oauth/grants";
 import { issuer } from "@o3co/auth-provider-oauth/issuer";
+import { lifetimeSecondsRange, tokens } from "@o3co/auth-provider-oauth/tokens";
+import { z } from "zod";
 
 /** The grant type a client names; a URI, as RFC 6749 asks of an extension grant. */
 const grantType = "urn:example:params:oauth:grant-type:example";
+
+/** The longest an access token of this grant may live, the operator's to lower. */
+const section = z.strictObject({
+	"access-token-ceiling": setting
+		.duration("s")
+		.pipe(z.number().int().min(lifetimeSecondsRange.min).max(lifetimeSecondsRange.max))
+		.prefault("1h"),
+});
 
 /** A confidential client's token for itself, within what its allowance lets it ask. */
 const example = (issuerUrl: string): Grant => ({
@@ -31,6 +41,20 @@ const example = (issuerUrl: string): Grant => ({
 });
 
 // Safe on many instances: it keeps nothing across requests.
-export default defineModule({ name: "example-grant", replicaSafe: true, takes: [issuer] }, (m) => [
-	m.contribute(grants).by(async (c) => example((await c.get(issuer)).url)),
-]);
+export default defineModule(
+	{ name: "example-grant", section, replicaSafe: true, takes: [issuer, tokens] },
+	(m) => [
+		m.contribute(grants).by(async (c) => {
+			// Read at build time: the lifetime `issue` applies where this grant gives none is fixed by now.
+			const lifetime = (await c.get(tokens)).accessTokenLifetimeSeconds();
+			if (lifetime > c.section["access-token-ceiling"]) {
+				// Settings by their keys, never their values.
+				return c.refuse(
+					"example-grant.access-token-ceiling",
+					"tokens.access-token-lifetime is over it: lower that, or raise this",
+				);
+			}
+			return example((await c.get(issuer)).url);
+		}),
+	],
+);
