@@ -775,6 +775,7 @@ From `@mod/users`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `users.registered` | list of map | `[]` |  |  |  | The users the settings register, each with its identifier and password hash. |
+| `users.issuer-moved` | list of map | `[]` |  |  |  | The moves of an IdP name to another issuer the operator states, its links going with it; every start warns while one is listed. |
 
 ## users-http
 

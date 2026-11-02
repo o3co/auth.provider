@@ -108,6 +108,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
 - `@mod/users` (feature, `modules/identity/users`): Owns who a user is and how they are known to be the same person: verification, links with upstream identities, and verified contacts.
   - `ledger` (`src/ledger`): Reads a contributed user ledger's answers into users' own: verification, a user by subject or unanswerable, and a user by upstream identity where the ledger looks users up so.
   - `links` (`src/links`): Answers by upstream identity, and links and unlinks, in one of two ways users chooses at boot: through users' link store, or as a ledger that looks users up by upstream identity holds them.
+  - `names` (`src/names`): what an IdP name stands for, within one boot and across boots.
 
 ## log-sinks
 
@@ -378,6 +379,7 @@ Each workspace package, by the directory under `modules` it lies in, with its ki
   - `grants` (`src/grants`): the scenes of federation grants.
   - `held` (`src/held`): the scenes of a federation login that a gate holds.
   - `link` (`src/link`): the scenes of linking an upstream identity to the account logged in.
+  - `names` (`src/names`): the fault scenes of an IdP name's issuer across starts, each start a deployment of its own on one Redis.
   - `revocation-boundary` (`src/revocation-boundary`): the fault scenes of a subject's revocation boundary refusing, from any instance, a federation grant established before it, and of the exception where grants keep on subject revocation (`guarantee-4-c`), the boundary written through the ledger's route.
 - `@mod/conformance-front` (verification, `modules/tooling/conformance-front`): Puts an https front before a running app, as a deployment's proxy is, for a harness whose outside party (a conformance suite, a client library) reaches the app over https.
 - `@mod/conformance-identity` (verification, `modules/tooling/conformance-identity`): Owns the conformance scenes of the identity area: password login (a form or JSON body), missing credentials, return destination, attempt limits, logout, login during a store failure, the audit events of password login, the attempt limit (over it, and unable to count) and logout.
