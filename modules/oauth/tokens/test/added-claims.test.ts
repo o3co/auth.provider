@@ -120,6 +120,28 @@ describe("claims a grant adds to its access token", () => {
 		expect(await membersOf({ a: 1 })).toEqual([...before, "a"].sort());
 	});
 
+	it("refuses a grant's null as a TypeError naming its path, before any policy runs, at admits as at issue", async () => {
+		let judged = 0;
+		const watching: IssuancePolicy = {
+			name: "watching",
+			judge: async () => {
+				judged += 1;
+				return { kind: "allowed" };
+			},
+		};
+		const policy = defineModule({ name: "watching", replicaSafe: true, takes: [] }, (m) => [
+			m.contribute(issuancePolicies).by(() => watching),
+		]);
+		const { t } = await boot([policy]);
+		const request = { grant: { ...grant, claims: { c: { a: null } } }, grantType: "test" };
+		for (const asked of [() => t.issue(request), () => t.admits(request)]) {
+			const refused = await asked().catch((error: unknown) => error);
+			expect(refused).toBeInstanceOf(TypeError);
+			expect((refused as TypeError).message).toContain("null at c.a");
+		}
+		expect(judged).toBe(0);
+	});
+
 	it("shows the policies the claims as copied, frozen, at admits as at issue", async () => {
 		const seen: IssuanceRequest[] = [];
 		const watching: IssuancePolicy = {
