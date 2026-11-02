@@ -21,7 +21,7 @@
 - An upstream may also offer a refresh, an end-session URL and an offline delegation
 - A refresh answers new tokens, `invalid_grant` (the grant is gone), `interaction_required` (the grant stands, but the user must act at the upstream first) or `limited` (with when to ask again, where said).
 - `refreshedExpiry` (the answer's access token and end, what was held): where the upstream hands the same access token again, the earlier of the two ends, so a refresh never lengthens a token; else the answer's end. Every holder of refreshed tokens reads them by it.
-- An offline delegation: its authorization URL, or a refusal of the start as a value; its code exchange given the scopes and resource its start asked for; and its refresh
+- An offline delegation: the issuer that grants it, the one its exchanges name; its authorization URL, or a refusal of the start as a value; its code exchange given the scopes and resource its start asked for; and its refresh
 - `upstreams.of` (IdP name → its upstream's refresh, end-session URL and delegation, where the type offers them / nothing)
 - Extension point `upstreamLoginReceivers` (name → `received` (session, IdP, upstream tokens) once the session opens, or once a link joins it to the session, answering a receipt of what it kept or none; `withdrawn` (session, IdP, the receipt) when a later step fails)
   - A receipt is the receiver's alone to read; a caller holds it and hands it back. `withdrawn` deletes only what that `received` kept, and nothing written since; with none, nothing.
