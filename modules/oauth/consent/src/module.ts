@@ -1,7 +1,8 @@
 import { audit } from "@mod/audit";
 import { documentCopies } from "@mod/client-documents";
 import { clients, metadataSections } from "@mod/clients";
-import { routes, site } from "@mod/http";
+import { csrfChecked } from "@mod/csrf";
+import { routes, site, use } from "@mod/http";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { sessions } from "@mod/session";
 import { loopbackPagesRefused } from "@mod/url-setting";
@@ -9,7 +10,7 @@ import { askKey, storedOf } from "./ask.ts";
 import { clientCopy, clientSection, isFirstParty } from "./client-section.ts";
 import { consents } from "./contract.ts";
 import { grantsOver } from "./grants/grants.ts";
-import { answerRoute, showRoute } from "./routes.ts";
+import { answerOver, path, showOver } from "./page/page.ts";
 import { section } from "./section.ts";
 import { httpsUrl, spaceOrControl } from "./shapes.ts";
 import { askStore, grantStore } from "./store.ts";
@@ -74,7 +75,20 @@ export default defineModule(
 				},
 			};
 		}),
-		m.contribute(routes).by(showRoute),
-		m.contribute(routes).by(answerRoute),
+		m.contribute(routes).by(async (c) => ({
+			method: "GET",
+			path,
+			changesState: false,
+			...(await showOver(c)),
+		})),
+		m.contribute(routes).by(async (c) => ({
+			method: "POST",
+			path,
+			uses: [use(csrfChecked)],
+			unlimited:
+				"The user's session is authenticated; a per-source limit belongs to unauthenticated entries.",
+			takes: ["form", "json"],
+			...(await answerOver(c)),
+		})),
 	],
 );
