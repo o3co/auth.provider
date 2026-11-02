@@ -1221,6 +1221,7 @@ describe("federation", () => {
 		const refresh = async () => ({ kind: "invalid_grant" as const });
 		const endSession = () => "https://idp.example/logout";
 		const delegation: Delegation = {
+			issuer: "https://idp.example",
 			authorizationUrl: (start) => `https://idp.example/offline?scope=${start.scopes.join("+")}`,
 			exchange: async () => ({ ...alice, issuer: "https://idp.example", tokens: bearer }),
 			refresh,
