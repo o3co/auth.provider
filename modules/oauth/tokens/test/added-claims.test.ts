@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { httpConfig } from "@mod/http/testing";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
@@ -55,7 +55,33 @@ const signedWith = async (signer: Awaited<ReturnType<typeof boot>>["signer"], ex
 	return signer.sign(payload);
 };
 
+/** A token as 0.18 signed one, before signing refused a null. */
+const signedBefore = (extra: object) => {
+	const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+	const iat = Math.floor(runtime.clock.now() / 1000);
+	const signing = `${part({ alg: "EdDSA", typ: "at+jwt", kid: "k" })}.${part({
+		iss: "https://issuer.example",
+		sub: "s",
+		aud: "api",
+		client_id: "c",
+		iat,
+		exp: iat + 60,
+		jti: "j",
+		...extra,
+	})}`;
+	const signature = sign(null, Buffer.from(signing), createPrivateKey(privateKey));
+	return `${signing}.${signature.toString("base64url")}`;
+};
+
 describe("claims a grant adds to its access token", () => {
+	it("reads back a token an earlier release signed with a null added claim, as signed", async () => {
+		const { t } = await boot();
+		const claims = { "https://example.com/c": null, nested: { a: null, b: [null, 1] } };
+		const checked = await t.verifyAccess(signedBefore(claims));
+		if (checked.kind !== "valid") throw new Error(checked.reason);
+		expect(checked.grant.claims).toEqual(claims);
+	});
+
 	it("signs them into the payload and reads them back frozen, naming them in name order", async () => {
 		const { t } = await boot();
 		const claims = { "https://example.com/b": [1, { c: false }], a: "x" };
