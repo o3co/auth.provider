@@ -20,6 +20,7 @@
 - It sets `minimumReleaseAge` to a day, excluding the release's packages by name, and each name let through as fresh at its recorded version alone; a name let through but not recorded is refused.
 - The image's install stage copies the record and the script and runs `check:outside` after installing.
 - Only the packages named are read, so the guide's opening says each wiring and adapter outside the release must be listed by name, and that boot otherwise refuses, naming the contract no module provides; an app with no package outside says what comes with the release's modules.
+- Where a scope records a registry of its own, `.npmrc` names each by the origin the record holds, never a credential, a record of anything else refusing the output; the install stage copies it and takes credentials as the build secret `npmrc`, and the guide says so. Without one, none of these is written.
 
 ## Depends on
 - `lockfile` (the script and the record's shape), `yaml` (to write the settings); nothing in the workspace.

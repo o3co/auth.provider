@@ -148,7 +148,7 @@ const installed = (beside: Beside["image"]) =>
 		? "RUN pnpm install --frozen-lockfile --prod"
 		: `# The lockfile is held to what was recorded of the packages outside the release.
 ${beside.copy.map((file) => `COPY ${file} ./${file}`).join("\n")}
-RUN pnpm install --frozen-lockfile --prod && ${beside.after}`;
+${beside.mount ? "# A registry's credentials come as a build secret, and stay in no layer.\n" : ""}RUN ${beside.mount ? `${beside.mount} ` : ""}pnpm install --frozen-lockfile --prod && ${beside.after}`;
 
 /** Each composed module's card, where the app installs it. */
 const cardLines = (cards: readonly Card[]) =>

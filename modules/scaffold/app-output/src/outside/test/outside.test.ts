@@ -126,6 +126,59 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(index).toContain("`outside-modules.json`");
 	});
 
+	describe("a scope recorded with a registry of its own", () => {
+		const scoped: OutsideModules = {
+			...outside,
+			registries: {
+				default: "https://registry.npmjs.org",
+				scopes: { "@x": "https://registry.x.example", "@a": "http://127.0.0.1:4873" },
+			},
+		};
+
+		it("names each in the app's .npmrc, by its origin, and takes credentials in the image as a build secret", () => {
+			const { files, image, guide } = besideRelease(scoped, app);
+			expect(files[".npmrc"]).toBe(
+				"@a:registry=http://127.0.0.1:4873/\n@x:registry=https://registry.x.example/\n",
+			);
+			expect(image).toEqual({
+				copy: ["outside-modules.json", "scripts/check-outside.mjs", ".npmrc"],
+				after: "pnpm check:outside",
+				mount: "--mount=type=secret,id=npmrc,target=/root/.npmrc",
+			});
+			expect(guide).toContain("`.npmrc` names the registry of each scope recorded");
+			expect(guide).toContain("docker build --secret id=npmrc,src=$HOME/.npmrc");
+		});
+
+		it("gives an app with no such record none of it", () => {
+			for (const none of [
+				outside,
+				{ ...outside, registries: { default: "https://r.example", scopes: {} } },
+			]) {
+				const { files, image, guide } = besideRelease(none, app);
+				expect(files).not.toHaveProperty([".npmrc"]);
+				expect(image).toEqual({
+					copy: ["outside-modules.json", "scripts/check-outside.mjs"],
+					after: "pnpm check:outside",
+				});
+				expect(guide).not.toContain(".npmrc");
+			}
+		});
+
+		it("refuses a record that is no scope and origin, telling neither, as an address may hold a secret", () => {
+			for (const scopes of [
+				{ "@x": "https://user:s3cret@registry.x.example" },
+				{ "@x": "https://registry.x.example/path" },
+				{ "@x": "file:///etc" },
+				{ "@x\nregistry=https://evil.example": "https://registry.x.example" },
+			]) {
+				const given = { ...outside, registries: { default: "https://r.example", scopes } };
+				expect(() => besideRelease(given, app)).toThrow(
+					"a scoped registry's record is not a scope and an origin",
+				);
+			}
+		});
+	});
+
 	it("says of the app's guide that only a package named comes, and says it for no other app", () => {
 		const release =
 			"What they need to run comes with them, and so do the wirings and bridges they come with.";

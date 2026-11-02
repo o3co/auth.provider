@@ -448,3 +448,38 @@ it("tells of what comes with the modules as it holds for the app: the release's,
 	expect(guide).not.toContain("{{comesWith}}");
 	expect(guide).toContain("each wiring and adapter outside it must be listed by name");
 });
+
+it("takes a registry's credentials as a build secret, only where a scope records a registry of its own", async () => {
+	const grant = {
+		name: "@x/grant",
+		version: "1.2.0",
+		integrity: "sha512-AAAA",
+		dependencies: {},
+		optionalDependencies: {},
+		peerDependencies: { zod: "^4.6.0" },
+		peerDependenciesMeta: {},
+	};
+	const release = { version: "1.2.3", integrity: { zod: "sha512-ZOD" } };
+	const written = async (registries: { default: string; scopes?: Record<string, string> }) => {
+		const target = await mkdtemp(join(tmpdir(), "app-output-"));
+		const packages = fakePackages(release, [], { modules: [grant], registries });
+		await writeDeployment(target, ["@mod/http"], packages, readme);
+		return target;
+	};
+	const scoped = await written({
+		default: "https://registry.npmjs.org",
+		scopes: { "@x": "https://registry.x.example" },
+	});
+	expect(await read(scoped, ".npmrc")).toBe("@x:registry=https://registry.x.example/\n");
+	const docker = await read(scoped, "Dockerfile");
+	expect(docker).toContain("COPY .npmrc ./.npmrc");
+	expect(docker).toContain(
+		"RUN --mount=type=secret,id=npmrc,target=/root/.npmrc pnpm install --frozen-lockfile --prod && pnpm check:outside",
+	);
+	// The image the app runs in takes neither.
+	expect(docker.slice(docker.indexOf("AS runtime"))).not.toContain("npmrc");
+	const plain = await written({ default: "https://registry.npmjs.org" });
+	expect(await readdir(plain)).not.toContain(".npmrc");
+	expect(await read(plain, "Dockerfile")).not.toContain("npmrc");
+	expect(await read(plain, "README.md")).not.toContain("npmrc");
+});
