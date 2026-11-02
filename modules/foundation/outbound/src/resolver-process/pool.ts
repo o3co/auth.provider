@@ -53,22 +53,8 @@ export const poolLimits = {
 	maxBackoffMs: 5_000,
 };
 
-/** The codes a lookup's error is answered with; any other is a helper's fault. */
-const codes = new Set([
-	"ENOTFOUND",
-	"ENODATA",
-	"EAI_AGAIN",
-	"EAI_FAIL",
-	"EAI_NONAME",
-	"EAI_NODATA",
-	"EAI_FAMILY",
-	"EAI_ADDRFAMILY",
-	"EAI_SERVICE",
-	"EAI_MEMORY",
-	"EAI_SYSTEM",
-	"EAI_BADFLAGS",
-	"EAI_OVERFLOW",
-]);
+/** The shape of a lookup's error code, whichever errno it reports; any other is a helper's fault. */
+const lookupCode = /^E[A-Z0-9_]+$/;
 
 type Settle = (outcome: { addresses: readonly string[] } | { failure: ResolutionFailure }) => void;
 
@@ -247,7 +233,7 @@ export function resolverPool(options: {
 		const { addresses, code } = message;
 		if ((addresses === undefined) === (code === undefined)) return undefined;
 		if (code !== undefined) {
-			return typeof code === "string" && codes.has(code)
+			return typeof code === "string" && lookupCode.test(code)
 				? { failure: "not-found" as const }
 				: undefined;
 		}
