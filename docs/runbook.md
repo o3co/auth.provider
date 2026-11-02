@@ -86,11 +86,11 @@ Where the service keeps these in a parameter group whose defaults are 0 or anoth
 - `replicas`: writes that must survive a failover wait until every replica has them. While no replica is seen, or replicas lag, those writes are unavailable and the requests that need them answer 503. The system denies rather than allows.
 - `none`: you state there is no failover. A failover then loses even confirmed writes, and a replica seen at boot or at runtime is refused or unavailable.
 
-Keeping a detached or lagging replica from being promoted is the operator's job, and so are the replicas' own disk settings. A `CONFIG SET` after boot is not seen.
+Keeping a detached or lagging replica from being promoted is the operator's job, and so are the replicas' own disk settings. A `CONFIG SET` after boot that takes away what boot checked shows within about a second: `/readyz` answers 503, warning `redis.settings_unmet`, until it holds again.
 
 ### Outages
 
-Nothing is queued or retried. A dropped connection fails at once, and the request that needed Redis answers 503 with `Cache-Control: no-store`; nothing ends the process. `/readyz` answers 503 while the `redis` probe (a `PING` on both connections) fails, and the gauge `auth_dependency_up{dependency="redis"}` shows which dependency is down.
+Nothing is queued or retried. A dropped connection fails at once, and the request that needed Redis answers 503 with `Cache-Control: no-store`; nothing ends the process. `/readyz` answers 503 while the `redis` probe fails, and the gauge `auth_dependency_up{dependency="redis"}` shows which dependency is down. Each run of the probe sends a `PING` on both connections, and at most once a second, counted from its start, it repeats what boot checked of the server (a write of the confirmation key with `redis.replication`, the check scripts, `ROLE`, `INFO` and `CONFIG GET`); a run within that second reads its answer. `/readyz` and `/metrics` are for the orchestrator: do not expose them publicly.
 
 When an outage hits a login whose subject already holds as many sessions as the listing keeps, the sessions the login pushed out cannot be closed through their participants. Each is listed again for what it has left; one that cannot be, or that taking one back pushes out, is ended in its record without its participants. Access tokens issued in such a session stay valid until they expire (`tokens.access-token-lifetime`), and its relying parties get no logout notice, not even from a later revocation. Watch `session-lifecycle.listing_ended` and `session-lifecycle.listing_put_back_failed` (counts). To end those tokens at once, revoke the subject: that ends them only where `subject-tokens` is composed (`tokens.subject-check` is not `none`).
 

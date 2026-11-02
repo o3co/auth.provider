@@ -1348,7 +1348,7 @@ Every decision about time uses the host's clock, so keep hosts synchronized. All
 
 ### Upstream links in settings
 
-A link from an upstream identity to a user written in `users.registered[].upstream` wins over one written at runtime for the same upstream identity; the runtime one is hidden and cannot be unlinked. Taking the upstream identity out of the settings lets the earlier runtime link take effect again, so check which user that link names before you remove it. Links match by IdP name and upstream subject only, never by email.
+A link from an upstream identity to a user written in `users.registered[].upstream` wins over one written at runtime for the same upstream identity; the runtime one is hidden and cannot be unlinked. Taking the upstream identity out of the settings lets the earlier runtime link take effect again, so check which user that link names before you remove it. Links match by IdP name and upstream subject only, never by email. So a name keeps its issuer: the first start with it keeps the issuer in the store, and a later start that declares another for that name is refused, naming the declaring module. For another issuer use a new name, under which no earlier link is found; to carry the links over, state the move in `users.issuer-moved` (`{ idp, from, to }`), which every start warns of until you take it out.
 
 ### Upstream amr
 
