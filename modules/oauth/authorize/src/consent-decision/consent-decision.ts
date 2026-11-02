@@ -23,7 +23,7 @@ export interface ConsentDecision {
 }
 
 export interface ConsentDecisionParts {
-	readonly consents: Pick<Consents, "covers" | "ask" | "asking">;
+	readonly consents: Pick<Consents, "coversFor" | "askFor" | "asking">;
 }
 
 const notServed = "client is not authorized for the authorization endpoint";
@@ -37,15 +37,14 @@ export function consentDecisionWith({ consents: kept }: ConsentDecisionParts): C
 				? undefined
 				: recorded("unauthorized_client", "client_not_first_party", notServed),
 		consented: async (client, subject, scope) =>
-			isFirstParty(client) || (await kept.covers(client.id, subject, [scope])),
+			isFirstParty(client) || (await kept.coversFor(client, subject, [scope])),
 		async decide(client, session, scope, prompt, again) {
 			if (isFirstParty(client)) return undefined;
 			const asked =
-				prompt.has("consent") || !(await kept.covers(client.id, session.context.subject, scope));
+				prompt.has("consent") || !(await kept.coversFor(client, session.context.subject, scope));
 			if (!asked) return undefined;
 			if (prompt.has("none")) return recorded("consent_required", "consent_required");
-			const page = await kept.ask(session, {
-				clientId: client.id,
+			const page = await kept.askFor(session, client, {
 				range: scope,
 				onAccept: again(["reauth", "prompt:login", "prompt:consent"]),
 				onDeny: again(["reauth"], [["consent_denied", "1"]]),
