@@ -1,7 +1,7 @@
 import { clientCopy } from "@mod/consent";
 import { redirectsCopy } from "@mod/redirect-uris";
 import { describe, expect, it } from "vitest";
-import { documentUrl, recordOf } from "../src/document/document.ts";
+import { digestOf, documentUrl, recordOf } from "../src/document/document.ts";
 
 const id = "https://app.example/client.json";
 const doc = {
@@ -78,9 +78,52 @@ describe("document record", () => {
 					scopes: ["openid", "read"],
 					audiences: ["https://api.example"],
 				},
-				consent: { name: "App", uri: "https://app.example/", host: "app.example" },
+				consent: {
+					name: "App",
+					uri: "https://app.example/",
+					host: "app.example",
+					under: digestOf({ ...doc, client_uri: "https://app.example/" }),
+				},
 			},
 		});
+	});
+
+	it("gives each copy a digest of the whole document, in one order at every depth", () => {
+		const seen: (string | undefined)[] = [];
+		const noting = {
+			...clientCopy,
+			copy: (...args: Parameters<typeof clientCopy.copy>) => {
+				seen.push(args[1].digest);
+				return undefined;
+			},
+		};
+		const given = { ...doc, a: { y: [{ q: 1, p: 2 }], x: 1 }, __proto__: null };
+		recordOf(new URL(id), given, ceiling, [noting]);
+		expect(seen).toEqual([digestOf(given)]);
+		expect(digestOf(given)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(digestOf({ a: 1, b: { c: 2, d: [3] } })).toBe(digestOf({ b: { d: [3], c: 2 }, a: 1 }));
+		const read = JSON.parse('{ "b" : 1, "\u0061" : 2 }');
+		expect(digestOf(read)).toBe(digestOf({ a: 2, b: 1 }));
+	});
+
+	it.each([
+		["a field no copy reads", { tos_uri: "https://app.example/terms" }],
+		["a field no copy reads, nested", { jwks: { keys: [] } }],
+		["a member named as an object's own prototype", JSON.parse('{ "__proto__": { "a": 1 } }')],
+		["a value's type", { client_name: 1 }],
+		["null beside absent", { client_uri: null }],
+		["a list's order", { redirect_uris: ["https://b.example/cb", "https://a.example/cb"] }],
+	])("tells a document apart by %s", (_, fields) => {
+		expect(digestOf({ ...doc, ...fields })).not.toBe(digestOf(doc));
+	});
+
+	it("tells apart member values a list's order or an object's nesting would otherwise run together", () => {
+		const pair = (first: unknown, second: unknown) =>
+			expect(digestOf({ a: first })).not.toBe(digestOf({ a: second }));
+		pair(["x", "y"], ["y", "x"]);
+		pair({ b: "c" }, ["b", "c"]);
+		pair("1", 1);
+		pair(null, "null");
 	});
 
 	it("shows the id's host without its port", () => {

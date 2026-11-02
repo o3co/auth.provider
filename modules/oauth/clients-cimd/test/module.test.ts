@@ -195,7 +195,18 @@ describe("clients-cimd: a document client", () => {
 			name: "n".repeat(200),
 			uri: "https://app.example/",
 			host: "app.example",
+			under: expect.any(String),
 		});
+	});
+
+	it("says of a client what its document holds, for every field, whether read or not", async () => {
+		const under = async () => (await documentClient()).section(clientSection).under;
+		const first = await under();
+		expect(first).toEqual(expect.any(String));
+		answer = () => json({ ...document, tos_uri: "https://app.example/terms" });
+		const changed = await under();
+		expect(changed).toEqual(expect.any(String));
+		expect(changed).not.toBe(first);
 	});
 
 	it("is said in the metadata, only with the code grant composed", async () => {
