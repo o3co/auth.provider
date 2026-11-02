@@ -38,7 +38,7 @@
 - The ask store needs the same except confirmed reads, and must not keep the key in clear.
 
 ## Depends on
-- `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `client-documents`, `audit`
+- `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `client-documents`, `redirect-uris`, `audit`
 
 ## Vocabulary
 - Consent range: a set of strings from the caller; consent only takes unions of it.

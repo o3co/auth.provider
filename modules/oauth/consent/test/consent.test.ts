@@ -1,6 +1,6 @@
 import { auditStandIn } from "@mod/audit/testing";
 import { type DocumentCopy, documentCopies } from "@mod/client-documents";
-import { type Client, clientSources, clients } from "@mod/clients";
+import { type Client, clientSources, clients, metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
 import cookiesModule from "@mod/cookies/module";
@@ -11,6 +11,7 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
+import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
 import { openedOf, sessionStandIn } from "@mod/session/testing";
@@ -88,6 +89,12 @@ function faulty<T extends StoredGrant | StoredAsk>() {
 	};
 }
 
+/** The section of a client's redirect URIs, as the module that reads them contributes it. */
+const redirectSection = defineModule(
+	{ name: "redirect-section", replicaSafe: true, takes: [] },
+	(m) => [m.contribute(metadataSections).by(() => redirects)],
+);
+
 /** A client a source other than the operator's settings shows, as a metadata document would. */
 const documentId = "https://docs.example/client.json";
 const documents = defineModule({ name: "documents", replicaSafe: true, takes: [] }, (m) => [
@@ -104,6 +111,7 @@ const documents = defineModule({ name: "documents", replicaSafe: true, takes: []
 								host: "docs.example",
 								...(described.under === undefined ? {} : { under: described.under }),
 							},
+							[redirects.name]: { "redirect-uris": ["http://localhost:3000/cb"] },
 						},
 					}
 				: undefined,
@@ -142,6 +150,7 @@ async function serve(
 			http,
 			clientsModule,
 			secretHashModule,
+			redirectSection,
 			documents,
 			recorded.module,
 			csrfStandIn,
@@ -161,6 +170,20 @@ async function serve(
 			...clientsConfig([
 				publicClient({ id: "app" }),
 				publicClient({ id: "own", sections: { [clientSection.name]: { "first-party": true } } }),
+				publicClient({
+					id: "sent",
+					sections: {
+						[redirects.name]: {
+							"redirect-uris": [
+								"https://app.example/cb",
+								"https://APP.example/other",
+								"https://bücher.example:8443/cb",
+								"http://127.0.0.1:8080/cb",
+								"com.example.app://authority.example/cb",
+							],
+						},
+					},
+				}),
 				publicClient({
 					id: "named",
 					sections: {
@@ -353,7 +376,13 @@ describe("consent: the page", () => {
 		const shown = await call("GET", alice.cookie, { challenge });
 		expect([shown.status, shown.body]).toEqual([
 			200,
-			{ client_id: "app", scopes: ["read", "write"], granted_scopes: [], expires_in: 60 },
+			{
+				client_id: "app",
+				redirect_hosts: [],
+				scopes: ["read", "write"],
+				granted_scopes: [],
+				expires_in: 60,
+			},
 		]);
 		const other = await sessionFor("alice");
 		expect((await call("GET", other.cookie, { challenge })).status).toBe(400);
@@ -380,6 +409,22 @@ describe("consent: the page", () => {
 			client_name: "Docs",
 			client_id_host: "docs.example",
 		});
+	});
+
+	it("names each of a client's destinations, for a registered client and one from another source alike", async () => {
+		const { clientOf, sessionFor, given, call } = await serve();
+		const { cookie, session } = await sessionFor("alice");
+		const hostsOf = async (id: string) => {
+			const challenge = challengeOf(await given.askFor(session, await clientOf(id), asked));
+			return (await call("GET", cookie, { challenge })).body.redirect_hosts;
+		};
+		expect(await hostsOf("sent")).toEqual([
+			{ host: "app.example", kind: "web" },
+			{ host: "xn--bcher-kva.example:8443", kind: "web" },
+			{ host: "127.0.0.1:8080", kind: "loopback" },
+			{ host: "com.example.app", kind: "app" },
+		]);
+		expect(await hostsOf(documentId)).toEqual([{ host: "localhost:3000", kind: "loopback" }]);
 	});
 
 	it("knows no challenge that is missing or not of the shape it hands out", async () => {

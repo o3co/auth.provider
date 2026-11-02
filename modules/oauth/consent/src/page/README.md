@@ -9,7 +9,8 @@ Internal module of `consent`: the two routes the deployment's consent page calls
 - The page itself (the deployment runs it). Grant records (`grants`). Parking a pending consent (the package).
 
 ## Offers
-- `GET /oauth/consent?challenge=`: the client id, the asked `scopes`, the `granted_scopes` and `expires_in`.
+- `GET /oauth/consent?challenge=`: the client id, the `redirect_hosts`, the asked `scopes`, the `granted_scopes` and `expires_in`.
+- `redirect_hosts`: every destination of the client's redirect URIs, for every client, as `redirect-uris`' `redirectsShown` says: `host` and `kind` (`web`, `loopback` or `app`), so the user sees all of what the agreement holds for, not the one a request names.
 - The GET answer adds `client_name` and `client_uri` when set, and `client_id_host` only for a client from another source.
 - `POST /oauth/consent`: takes `challenge` and `decision` (`accept` or `deny`) as a form or a JSON object.
 - The POST answers `303` to the destination for the decision; a JSON member that is not a string counts as absent.
@@ -29,4 +30,4 @@ Internal module of `consent`: the two routes the deployment's consent page calls
 - An acceptance is recorded only after its grant is written.
 
 ## Depends on
-- `http` (answers, the route's type), `session`, `clients`, `audit`, `request-source`, `kernel` (the build context, the clock, `Unavailable`); `grants`; the package's ask store, pending consents and audit events
+- `http` (answers, the route's type), `session`, `clients`, `redirect-uris` (the section `authorize` composes, read through `redirectsShown`), `audit`, `request-source`, `kernel` (the build context, the clock, `Unavailable`); `grants`; the package's ask store, pending consents and audit events

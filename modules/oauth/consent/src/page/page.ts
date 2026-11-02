@@ -3,6 +3,7 @@ import { clients } from "@mod/clients";
 import type { HttpRequest, HttpResponse, Route } from "@mod/http";
 import { jsonAnswer, noStore } from "@mod/http";
 import { type BuildContext, isUnavailable } from "@mod/kernel";
+import { redirectsShown } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
 import { sessions } from "@mod/session";
 import { askKey, pendingOf, storedOf } from "../ask.ts";
@@ -56,6 +57,7 @@ export async function showOver(c: BuildContext<unknown>): Promise<Pick<Route, "h
 				...(host === undefined ? {} : { client_id_host: host }),
 				...(name === undefined ? {} : { client_name: name }),
 				...(uri === undefined ? {} : { client_uri: uri }),
+				redirect_hosts: redirectsShown(client).map(({ host, kind }) => ({ host, kind })),
 				scopes: pending.range,
 				granted_scopes: await grants.rangeFor(client, pending.subject),
 				expires_in: Math.ceil((pending.deadline - now) / 1000),
