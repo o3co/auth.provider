@@ -10,8 +10,8 @@
 - Space names and meanings, and the shapes of values. Which feature uses it.
 
 ## Offers
-- Composition definition only: the `store` contract's implementation.
-- The probe `redis` at `kernel`'s `probes`, which PINGs both connections and checks again what boot checked of the server, answering unready and logging `redis.settings_unmet` with what no longer holds when that changes.
+- Composition definition only: implements `store`.
+- The probe `redis` at `kernel`'s `probes`: each run PINGs both connections and, at most once a second, checks again what boot checked of the server, answering unready and logging `redis.settings_unmet` with what no longer holds when that changes.
 - Operator section:
   - `url` (`redis` or `rediss`, with no query), `address-family` (`ipv4`, `ipv6`, or either unset), `prefix` (lower-case letters, digits and `-`; default `store`).
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
@@ -47,7 +47,7 @@
 - With `replication` `replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of 1 or more. With `none`: no replica connected.
 - `CONFIG GET` allowed, or the settings it would read declared in `server-settings`.
 - Allowed: `EVAL`, `PING` (the probe's), the commands the scripts call (`TIME`, `INFO`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`), `SCAN`, `ROLE` and the keys under the prefix; with `replication`, `SET` of `<prefix>:#confirm`, and with `replicas` `WAIT`.
-- The operator's, outside these checks: keeping a detached or lagging replica from promotion, replicas' disk writes, and what a `CONFIG SET` or a failover after boot lets through until the next probe answers unready.
+- The operator's, outside these checks: keeping a detached or lagging replica from promotion, replicas' disk writes, and what a `CONFIG SET` or a failover after boot lets through until a probe answers unready.
 
 ## Data
 - Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.

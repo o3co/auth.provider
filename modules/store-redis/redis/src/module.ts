@@ -414,7 +414,7 @@ export default defineModule(
 		m.contribute(probes).by(async (c) => {
 			const { client, confirmer, declared } = await c.get(connections);
 			const recheck = async () => (await unmet(client, confirmer, declared, c.section)).problems;
-			return redisProbe([client, confirmer], recheck, c.log);
+			return redisProbe([client, confirmer], recheck, c.log, c.clock);
 		}),
 	],
 );

@@ -56,6 +56,7 @@ async function boot(
 		}),
 	]);
 	const url = `redis://:s3cret@127.0.0.1:${port}`;
+	let now = 0;
 	app = await assemble({
 		modules: [
 			redisModule,
@@ -74,7 +75,7 @@ async function boot(
 			},
 		},
 		runtime: quietRuntime({
-			clock: { now: () => 0 },
+			clock: { now: () => now },
 			random: { bytes: (n) => new Uint8Array(n) },
 			log: recorded.log,
 		}),
@@ -84,7 +85,14 @@ async function boot(
 			.lines()
 			.filter((line) => line.level === "warn")
 			.map((line) => [line.event, line.fields]);
-	return { warned, ready: () => context?.readinessReport(1000).then((r) => r.answer) };
+	return {
+		warned,
+		/** A probe past the second a check of the server serves. */
+		ready: () => {
+			now += 1000;
+			return context?.readinessReport(1000).then((r) => r.answer);
+		},
+	};
 }
 
 /** Why boot was refused, at `redis`; the refusal never names the URL or its password. */
