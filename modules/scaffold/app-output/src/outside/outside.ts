@@ -39,9 +39,10 @@ const nothing: Beside = {
 
 /**
  * What an app composing packages outside the release is given: their record and the script that
- * holds the lockfile to it, the release's packages (those it depends on, and those an outside
- * package takes as a peer) and zod held to one version each, no version from the last day but the
- * release's and those let through, and the check in its image. Nothing where it composes none.
+ * holds the lockfile to it, the release's packages (those it depends on, those an outside package
+ * takes as a peer, and each of their bundles' dependencies on other bundles, all the way) and zod
+ * held to one version each, no version from the last day but the release's and those let through,
+ * and the check in its image. Nothing where it composes none.
  */
 export function besideRelease(
 	outside: OutsideModules | undefined,
@@ -51,6 +52,8 @@ export function besideRelease(
 		readonly zod: string;
 		/** The integrity the release recorded of each bundle and of zod: each package held is held to it. */
 		readonly integrity?: Readonly<Record<string, string>>;
+		/** Each bundle's dependencies on other bundles: every one installed is held, not those named alone. */
+		readonly bundles?: Readonly<Record<string, readonly string[]>>;
 	},
 ): Beside {
 	if (outside === undefined || outside.modules.length === 0) return nothing;
@@ -75,6 +78,9 @@ export function besideRelease(
 		for (const peer of Object.keys(peerDependencies).filter(releasePackage)) {
 			if (!release.has(peer)) release.set(peer, app.version);
 		}
+	}
+	for (const bundle of closureOf([...release.keys()], app.bundles ?? {})) {
+		if (!release.has(bundle)) release.set(bundle, app.version);
 	}
 	const held = [...release.keys()].sort();
 	const fresh = (outside.fresh ?? []).map(
@@ -105,6 +111,17 @@ export function besideRelease(
 		guide: guideOf(outside.modules),
 		index: `\nPackages outside the release, not part of it: \`${recordFile}\` records each one as the app was generated.\n`,
 	};
+}
+
+/** The bundles reached from those named, through each one's dependencies on other bundles; those named among them. */
+function closureOf(
+	named: readonly string[],
+	bundles: Readonly<Record<string, readonly string[]>>,
+): ReadonlySet<string> {
+	const reached = new Set(named);
+	// A set walked as it grows reaches each bundle's own dependencies, and a cycle ends.
+	for (const bundle of reached) for (const next of bundles[bundle] ?? []) reached.add(next);
+	return reached;
 }
 
 /** The integrity of each package the app holds to one copy, as the release records it; refuses one it does not. */

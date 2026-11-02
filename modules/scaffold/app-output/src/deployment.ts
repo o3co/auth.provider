@@ -97,6 +97,7 @@ export async function writeDeployment(
 		version: release.version,
 		zod,
 		...(release.integrity ? { integrity: release.integrity } : {}),
+		...(release.bundles ? { bundles: release.bundles } : {}),
 	});
 	await writeProject(target, {
 		"package.json": manifestOf("node --env-file-if-exists=.env src/main.ts", dependencies, {

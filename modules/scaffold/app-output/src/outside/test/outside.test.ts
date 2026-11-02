@@ -134,6 +134,51 @@ describe("what an app beside packages outside the release is given", () => {
 		});
 	});
 
+	it("holds the closure of the release's packages it depends on, each bundle's bundles too, to one copy", () => {
+		const closing = {
+			...app,
+			integrity: {
+				...integrity,
+				"@o3co/auth-provider-foundation": "sha512-FOUNDATION",
+				"@o3co/auth-provider-second-factor": "sha512-SECOND",
+			},
+			bundles: {
+				// From a dependency and from a peer alone, and through another; a cycle ends.
+				"@o3co/auth-provider-oauth": ["@o3co/auth-provider-second-factor"],
+				"@o3co/auth-provider-identity": ["@o3co/auth-provider-foundation"],
+				"@o3co/auth-provider-second-factor": [
+					"@o3co/auth-provider-foundation",
+					"@o3co/auth-provider-oauth",
+				],
+				"@o3co/auth-provider-other": ["@o3co/auth-provider-other-still"],
+			},
+		};
+		const closed = [
+			"@o3co/auth-provider-foundation",
+			"@o3co/auth-provider-identity",
+			"@o3co/auth-provider-oauth",
+			"@o3co/auth-provider-second-factor",
+		];
+		const { files } = besideRelease(outside, closing);
+		const settings = parse(files["pnpm-workspace.yaml"] as string);
+		expect(Object.keys(settings.overrides).sort()).toEqual([...closed, "zod"]);
+		expect(settings.overrides["@o3co/auth-provider-second-factor"]).toBe("0.19.0");
+		expect(settings.minimumReleaseAgeExclude).toEqual(closed);
+		const { held } = JSON.parse(files["outside-modules.json"] as string);
+		expect(Object.keys(held)).toEqual([...closed, "zod"]);
+		expect(held["@o3co/auth-provider-second-factor"]).toBe("sha512-SECOND");
+	});
+
+	it("refuses a bundle of the closure the release records no integrity of", () => {
+		const closing = {
+			...app,
+			bundles: { "@o3co/auth-provider-oauth": ["@o3co/auth-provider-unsealed"] },
+		};
+		expect(() => besideRelease(outside, closing)).toThrow(
+			"@o3co/auth-provider-unsealed: held to one copy, but the release records no integrity of it",
+		);
+	});
+
 	it("refuses a held package the release records no integrity of, and a release recording none", () => {
 		const { integrity: _, ...unrecorded } = app;
 		expect(() => besideRelease(outside, unrecorded)).toThrow(
