@@ -12,7 +12,7 @@
 
 ## Offers
 - Composition definition only: a contribution to `clientSources`, and the metadata item `client_id_metadata_document_supported` (`true`).
-- Operator section: `allow` and `deny` (host names, read as `host-entries` reads a list entry; `.name` also takes the names under it), `allow-any-host` (default false), `scopes` and `audiences` (the ceiling; default empty), `max-size` (default `5KiB`), `timeout` (default `5s`), `cache-lifetime` (default `10m`), `cache-entries` (default 256), `refused-lifetime` (default `1m`), `max-concurrent` (default 8). Times and sizes are written with a unit.
+- Operator section: `allow` and `deny` (host names, read as `host-entries` reads a list entry; `.name` also takes the names under it), `allow-any-host` (default false), `scopes` and `audiences` (the ceiling; default empty), `max-size` (default `5KiB`), `timeout` (default `5s`), `cache-lifetime` (default `10m`), `cache-entries` (default 256), `refused-lifetime` (default `1m`), `max-concurrent` (default 8), `digest-algorithm` (`sha-256` alone, its default). Times and sizes are written with a unit.
 - `offline_access` among the ceiling's `scopes` refuses boot at that entry: offline access is not offered, so it would allow nothing.
 
 ## Invariants
@@ -28,6 +28,7 @@
 - `redirect_uris` is a non-empty list of strings, CIMD's rule for a client with the code flow alone: its section takes an empty list, and checks each URI's form. `grant_types` (default the code) holds the code; `response_types`, if present, holds `code`.
 - Its allowances come from `client-allowance` within the ceiling: the code, refresh only when the document names it, the scopes it asks (all the ceiling's when it asks none), the operator's audiences. An empty answer refuses the record.
 - Each other section is as its owner copies it from the document, with the id, its host and a digest of the whole document as read, every field whether read or not (`document`'s card); a field a copy refuses refuses the document. The client is public, by `none`, and never registered.
+- The digest names its algorithm (`sha-256:<base64url>`), so a value kept in a long-lived record says what it was made under. Its owners compare it as a word. Changing `digest-algorithm` makes every document's value differ, so it only asks each user of such a client once more.
 - A failed fetch or a refused document is no client (not unavailable). Other fields (keys, logo) are not read.
 - A document whose record `clients`' `checkRecord` refuses (a redirect URI `redirect-uris` refuses, say) is refused before it is kept, logged with where the record fails (`record at sections.authorize.redirect-uris.0`), never a value; a check that throws is a failed fetch.
 - A refused document, destination or outbound failure is remembered for `refused-lifetime`; running out of time or of `outbound`'s places is not.

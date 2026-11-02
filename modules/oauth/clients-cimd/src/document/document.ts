@@ -6,6 +6,7 @@ import type { ClientRecord } from "@mod/clients";
 import { codeGrantType } from "@mod/code-grant";
 import { refreshGrantType } from "@mod/refresh";
 import { isLoopbackName } from "@mod/url-setting";
+import type { Settings } from "../section.ts";
 
 /** The grants a document client may hold: the code, and refresh when its document names it. */
 const documentGrants = [codeGrantType, refreshGrantType];
@@ -77,9 +78,14 @@ const inOneOrder = (_: string, value: unknown) => {
 	);
 };
 
-/** SHA-256 of the whole document as read, serialized in one order; base64url. */
-export const digestOf = (doc: Readonly<Record<string, unknown>>) =>
-	createHash("sha256").update(JSON.stringify(doc, inOneOrder)).digest("base64url");
+type DigestAlgorithm = Settings["digest-algorithm"];
+const hashNames: Readonly<Record<DigestAlgorithm, string>> = { "sha-256": "sha256" };
+
+/** The whole document as read, serialized in one order, hashed: `<algorithm>:<base64url>`. */
+export const digestOf = (doc: Readonly<Record<string, unknown>>, algorithm: DigestAlgorithm) => {
+	const hash = createHash(hashNames[algorithm]).update(JSON.stringify(doc, inOneOrder));
+	return `${algorithm}:${hash.digest("base64url")}`;
+};
 
 /**
  * The public client a document describes, each section as its owner copies it, or why it is
@@ -90,6 +96,7 @@ export function recordOf(
 	doc: Readonly<Record<string, unknown>>,
 	ceiling: Omit<AllowanceLists, "grants">,
 	copies: readonly DocumentCopy[],
+	digestAlgorithm: DigestAlgorithm,
 ): ClientRecord | Refused {
 	const refused = refusalOf(url, doc);
 	if (refused) return refused;
@@ -102,7 +109,7 @@ export function recordOf(
 	// A document never asks audiences, so this guards only the contract's undefined.
 	if (allowances === undefined) return { refused: "audiences" };
 	const copied: Record<string, unknown> = {};
-	const from = { id: url.href, host: url.hostname, digest: digestOf(doc) };
+	const from = { id: url.href, host: url.hostname, digest: digestOf(doc, digestAlgorithm) };
 	for (const one of copies) {
 		const copy = one.copy(doc, from);
 		if (copy === undefined) continue;
